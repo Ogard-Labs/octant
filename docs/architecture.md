@@ -946,6 +946,20 @@ native harness in `apps/server/src/harness`:
   refuse private destinations, and connect through a `lookup` that checks
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
+- **Goals.** A thread goal may carry up to twelve acceptance criteria
+  (`ThreadGoalCriterion`), each with an optional check command; one without a
+  command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
+  goal — objective, each criterion's status, budget left — in front of every
+  harness turn as per-turn content after the stable instructions. The `goal`
+  tool reads it and lets the lead write criteria once, only while the goal has
+  none; a person revises them afterwards. `goal-check` (Code, policed exactly
+  as `bash`, approval naming the command) runs a criterion's own check — the
+  command comes from the goal, never the call — and records the observed
+  outcome with `record-thread-goal-check` as `test` evidence, met only on a
+  zero exit. When the last criterion is met the goal completes on that
+  evidence (0025); a model saying it is done completes nothing. A goal loop
+  treats a goal with criteria as complete only when all are met, and a round
+  whose own checks completed the goal takes no further spend.
 - **Routing.** `NativeHarnessRoutingStore` journals a host default and
   Project overrides of slot tables; `resolveNativeHarnessRoute` in
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns

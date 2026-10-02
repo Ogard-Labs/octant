@@ -18,7 +18,12 @@
 import { Schema } from "effect";
 import { ContextConfidence } from "./context";
 import { AggregateVersion, UtcTimestamp } from "./events";
-import { ThreadGoalEvidenceRef } from "./goal";
+import {
+  MAX_THREAD_GOAL_CRITERIA,
+  ThreadGoalCriterionDraft,
+  ThreadGoalCriterionId,
+  ThreadGoalEvidenceRef,
+} from "./goal";
 import { OctantMode } from "./modes";
 import {
   NativeHarnessJob,
@@ -62,6 +67,8 @@ export const NATIVE_HARNESS_TOOL_NAMES = [
   "second-opinion",
   "delegate",
   "ask-user",
+  "goal",
+  "goal-check",
 ] as const;
 export const NativeHarnessToolName = Schema.Literal(...NATIVE_HARNESS_TOOL_NAMES);
 export type NativeHarnessToolName = typeof NativeHarnessToolName.Type;
@@ -332,6 +339,34 @@ export const NativeHarnessSecondOpinionArguments = Schema.Struct({
 }).annotations(strict);
 export type NativeHarnessSecondOpinionArguments = typeof NativeHarnessSecondOpinionArguments.Type;
 
+/**
+ * The thread's goal as the lead works it. `read` shows the objective, each
+ * criterion with its status, and the budget left; `set-criteria` writes the
+ * criteria once, only while the goal has none, so a lead cannot quietly swap
+ * a criterion it failed for an easier one.
+ */
+export const NativeHarnessGoalArguments = Schema.Union(
+  Schema.Struct({ operation: Schema.Literal("read") }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("set-criteria"),
+    criteria: Schema.Array(ThreadGoalCriterionDraft).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_THREAD_GOAL_CRITERIA),
+    ),
+  }).annotations(strict),
+);
+export type NativeHarnessGoalArguments = typeof NativeHarnessGoalArguments.Type;
+
+/**
+ * Runs one criterion's own check command. The command comes from the goal,
+ * never from the call, so a lead cannot pass a criterion with a check it
+ * chose on the spot.
+ */
+export const NativeHarnessGoalCheckArguments = Schema.Struct({
+  criterionId: ThreadGoalCriterionId,
+}).annotations(strict);
+export type NativeHarnessGoalCheckArguments = typeof NativeHarnessGoalCheckArguments.Type;
+
 const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unknown) => unknown>> = {
   read: Schema.decodeUnknownSync(NativeHarnessReadArguments),
   grep: Schema.decodeUnknownSync(NativeHarnessGrepArguments),
@@ -347,6 +382,8 @@ const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unkno
   "second-opinion": Schema.decodeUnknownSync(NativeHarnessSecondOpinionArguments),
   delegate: Schema.decodeUnknownSync(NativeHarnessDelegateArguments),
   "ask-user": Schema.decodeUnknownSync(NativeHarnessAskUserArguments),
+  goal: Schema.decodeUnknownSync(NativeHarnessGoalArguments),
+  "goal-check": Schema.decodeUnknownSync(NativeHarnessGoalCheckArguments),
 };
 
 /** Throws on a malformed argument object; the catalog's argument-schema step relies on it. */
@@ -550,6 +587,37 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
         },
       },
       required: ["prompt"],
+    },
+  },
+  {
+    name: "goal",
+    description:
+      "Read this thread's goal: its objective, each acceptance criterion with its status, and the budget left. When the goal has no criteria yet, write them once with set-criteria: each a concrete, checkable statement, with a check command whose zero exit proves it where one exists.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        operation: { type: "string", enum: ["read", "set-criteria"] },
+        criteria: {
+          type: "array",
+          maxItems: MAX_THREAD_GOAL_CRITERIA,
+          items: {
+            type: "object",
+            properties: { text: { type: "string" }, check: { type: "string" } },
+            required: ["text"],
+          },
+        },
+      },
+      required: ["operation"],
+    },
+  },
+  {
+    name: "goal-check",
+    description:
+      "Run one criterion's own check command and record what it showed. A criterion is met only when its check exits zero. When every criterion is met the goal completes; that is when to stop.",
+    inputSchema: {
+      type: "object",
+      properties: { criterionId: { type: "string", description: "c1, c2, ..." } },
+      required: ["criterionId"],
     },
   },
 ];

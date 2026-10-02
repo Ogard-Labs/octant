@@ -17,6 +17,7 @@ const CORE = [
   "Keep todo-write short and current; the user sees it.",
   "Ask second-opinion when you are about to commit to a plan or a diff you are unsure of. Its answer is advice.",
   "When a task is separable and bounded, delegate it: start a child with a standalone brief (objective, output format, boundaries), continue your own work, then collect its reply. Children run on the model configured for their role.",
+  "When the thread has a goal, work toward its criteria, run goal-check on each one you believe holds, and stop when the goal completes or its budget is spent. Saying the goal is done does not complete it; only passing checks do.",
 ].join("\n");
 
 const MODE: Readonly<Record<OctantMode, string>> = {

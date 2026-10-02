@@ -37,6 +37,37 @@ export const ThreadGoalEvidenceRef = Schema.Struct({
 }).annotations(strict);
 export type ThreadGoalEvidenceRef = typeof ThreadGoalEvidenceRef.Type;
 
+/**
+ * One acceptance criterion and how it is verified. A criterion is met only by
+ * a check the host ran and observed — a command that exited zero, a person's
+ * confirmation — never by a model saying so.
+ */
+export const MAX_THREAD_GOAL_CRITERIA = 12;
+export const ThreadGoalCriterionId = Schema.String.pipe(Schema.pattern(/^c[1-9][0-9]?$/));
+export type ThreadGoalCriterionId = typeof ThreadGoalCriterionId.Type;
+
+export const ThreadGoalCriterionDraft = Schema.Struct({
+  text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
+  /** A command whose zero exit shows the criterion holds; absent means a person confirms it. */
+  check: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048))),
+}).annotations(strict);
+export type ThreadGoalCriterionDraft = typeof ThreadGoalCriterionDraft.Type;
+
+export const ThreadGoalCriterion = Schema.Struct({
+  id: ThreadGoalCriterionId,
+  text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
+  check: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048))),
+  status: Schema.Literal("unmet", "met"),
+  /** What the last check observed, met or not. */
+  evidence: Schema.optional(ThreadGoalEvidenceRef),
+}).annotations(strict);
+export type ThreadGoalCriterion = typeof ThreadGoalCriterion.Type;
+
+const ThreadGoalCriterionDrafts = Schema.Array(ThreadGoalCriterionDraft).pipe(
+  Schema.minItems(1),
+  Schema.maxItems(MAX_THREAD_GOAL_CRITERIA),
+);
+
 export const ThreadGoal = Schema.Struct({
   id: ThreadGoalId,
   threadId: Schema.UUID,
@@ -46,6 +77,10 @@ export const ThreadGoal = Schema.Struct({
   budget: ThreadGoalBudget,
   usage: ThreadGoalUsage,
   evidence: Schema.Array(ThreadGoalEvidenceRef).pipe(Schema.maxItems(64)),
+  /** Optional so goals journaled before criteria existed replay unchanged. */
+  criteria: Schema.optional(
+    Schema.Array(ThreadGoalCriterion).pipe(Schema.maxItems(MAX_THREAD_GOAL_CRITERIA)),
+  ),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
   completedAt: Schema.optional(UtcTimestamp),
@@ -75,6 +110,7 @@ export const CreateThreadGoalCommand = Schema.Struct({
   revisionId: ThreadGoalRevisionId,
   objective: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
   budget: ThreadGoalBudget,
+  criteria: Schema.optional(ThreadGoalCriterionDrafts),
 }).annotations(strict);
 export type CreateThreadGoalCommand = typeof CreateThreadGoalCommand.Type;
 
@@ -99,6 +135,8 @@ export const ReviseThreadGoalCommand = Schema.Struct({
   revisionId: ThreadGoalRevisionId,
   objective: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
   budget: Schema.optional(ThreadGoalBudget),
+  /** Replaces the criteria; one whose text and check are unchanged keeps its status. */
+  criteria: Schema.optional(ThreadGoalCriterionDrafts),
 }).annotations(strict);
 export type ReviseThreadGoalCommand = typeof ReviseThreadGoalCommand.Type;
 
@@ -120,6 +158,17 @@ export const RecordThreadGoalUsageCommand = Schema.Struct({
 }).annotations(strict);
 export type RecordThreadGoalUsageCommand = typeof RecordThreadGoalUsageCommand.Type;
 
+/** The observed outcome of one criterion's check, with what the host saw. */
+export const RecordThreadGoalCheckCommand = Schema.Struct({
+  kind: Schema.Literal("record-thread-goal-check"),
+  ...ThreadGoalCommandFields,
+  goalId: ThreadGoalId,
+  criterionId: ThreadGoalCriterionId,
+  outcome: Schema.Literal("met", "unmet"),
+  evidence: ThreadGoalEvidenceRef,
+}).annotations(strict);
+export type RecordThreadGoalCheckCommand = typeof RecordThreadGoalCheckCommand.Type;
+
 export const ThreadGoalCommand = Schema.Union(
   CreateThreadGoalCommand,
   PauseThreadGoalCommand,
@@ -127,6 +176,7 @@ export const ThreadGoalCommand = Schema.Union(
   ReviseThreadGoalCommand,
   CompleteThreadGoalCommand,
   RecordThreadGoalUsageCommand,
+  RecordThreadGoalCheckCommand,
 );
 export type ThreadGoalCommand = typeof ThreadGoalCommand.Type;
 
@@ -158,3 +208,4 @@ export const decodeThreadGoalEvidenceRef = Schema.decodeUnknownSync(ThreadGoalEv
 export const decodeThreadGoal = Schema.decodeUnknownSync(ThreadGoal);
 export const decodeThreadGoalCommand = Schema.decodeUnknownSync(ThreadGoalCommand);
 export const decodeThreadGoalUpdated = Schema.decodeUnknownSync(ThreadGoalUpdated);
+export const decodeThreadGoalCriterionDraft = Schema.decodeUnknownSync(ThreadGoalCriterionDraft);

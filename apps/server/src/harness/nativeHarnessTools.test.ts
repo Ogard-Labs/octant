@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { decodeNativeHarnessContextRemaining, type ToolActionAuthority } from "@octant/contracts";
 import { ToolCallAuthorityService, type ToolCallLiveFacts } from "../toolCallAuthorityService";
+import { GoalService } from "../goal/goalService";
+import { InMemoryGoalStore } from "../goal/goalService.test-support";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
+import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
 import { createNativeHarnessTools, type NativeHarnessToolPorts } from "./nativeHarnessTools";
 
 const uuid = (() => {
@@ -257,5 +260,123 @@ describe("native harness tools", () => {
     expect((await call(steered.tools, "read", { path: "a.ts" })).result).not.toHaveProperty(
       "note_from_person",
     );
+  });
+
+  describe("goals", () => {
+    const threadId = "00000000-0000-4000-8000-000000000301";
+    async function goalFixture(input: {
+      readonly criteria?: ReadonlyArray<{ readonly text: string; readonly check?: string }>;
+      readonly exitCodes: Record<string, number>;
+      readonly facts?: Partial<ToolCallLiveFacts>;
+      readonly approvals?: NativeHarnessToolPorts["approvals"];
+    }) {
+      const goals = new GoalService({ store: new InMemoryGoalStore() });
+      await goals.execute({
+        kind: "create-thread-goal",
+        threadId,
+        expectedVersion: 0,
+        goalId: "00000000-0000-4000-8000-000000000302",
+        revisionId: "00000000-0000-4000-8000-000000000303",
+        objective: "Make the parser accept trailing commas",
+        budget: { turnBudget: 20 },
+        ...(input.criteria === undefined ? {} : { criteria: input.criteria }),
+      });
+      const commands: string[] = [];
+      const { tools } = await fixture(input.facts ?? {}, {
+        goal: createNativeHarnessGoalPort({ goals, threadId, uuid }),
+        shell: {
+          run: async ({ command }) => {
+            commands.push(command);
+            return {
+              status: "ran",
+              exitCode: input.exitCodes[command] ?? 1,
+              output: "ok",
+              truncated: false,
+            };
+          },
+        },
+        ...(input.approvals === undefined ? {} : { approvals: input.approvals }),
+      });
+      return { goals, tools, commands };
+    }
+
+    it("completes the goal when the last criterion's own check passes, and not before", async () => {
+      const { goals, tools, commands } = await goalFixture({
+        criteria: [
+          { text: "Parser tests pass", check: "bun run test parser" },
+          { text: "Lint is clean", check: "bun run lint" },
+        ],
+        exitCodes: { "bun run test parser": 0, "bun run lint": 0 },
+      });
+      const first = await call(tools, "goal-check", { criterionId: "c1" });
+      expect(first.result).toMatchObject({
+        outcome: "met",
+        goal: { status: "active", allCriteriaMet: false },
+      });
+      const second = await call(tools, "goal-check", { criterionId: "c2" });
+      expect(second.result).toMatchObject({ outcome: "met", goal: { status: "complete" } });
+      expect(commands).toEqual(["bun run test parser", "bun run lint"]);
+      expect(goals.read(threadId).goal?.evidence.map((entry) => entry.kind)).toEqual([
+        "test",
+        "test",
+      ]);
+    });
+
+    it("records a failing check as unmet evidence and leaves the goal open", async () => {
+      const { goals, tools } = await goalFixture({
+        criteria: [{ text: "Parser tests pass", check: "bun run test parser" }],
+        exitCodes: { "bun run test parser": 3 },
+      });
+      const checked = await call(tools, "goal-check", { criterionId: "c1" });
+      expect(checked.result).toMatchObject({ outcome: "unmet", exitCode: 3 });
+      const goal = goals.read(threadId).goal;
+      expect(goal?.status).toBe("active");
+      expect(goal?.criteria?.[0]?.evidence?.summary).toBe("bun run test parser exited 3");
+    });
+
+    it("refuses to self-check a criterion a person must confirm", async () => {
+      const { tools, commands } = await goalFixture({
+        criteria: [{ text: "The release notes read well" }],
+        exitCodes: {},
+      });
+      expect((await call(tools, "goal-check", { criterionId: "c1" })).result).toMatchObject({
+        error: "needs-person",
+      });
+      expect(commands).toEqual([]);
+    });
+
+    it("lets the lead write criteria once and refuses to replace them", async () => {
+      const { tools } = await goalFixture({ exitCodes: {} });
+      const written = await call(tools, "goal", {
+        operation: "set-criteria",
+        criteria: [{ text: "Parser tests pass", check: "bun run test parser" }],
+      });
+      expect(written.result).toMatchObject({
+        criteria: [{ id: "c1", check: "bun run test parser", status: "unmet" }],
+      });
+      const replaced = await call(tools, "goal", {
+        operation: "set-criteria",
+        criteria: [{ text: "Anything", check: "true" }],
+      });
+      expect(replaced.result).toMatchObject({ error: "criteria-already-set" });
+    });
+
+    it("asks before a check exactly as before a shell command, naming the command it will run", async () => {
+      const asked: string[] = [];
+      const { tools, commands } = await goalFixture({
+        criteria: [{ text: "Parser tests pass", check: "bun run test parser" }],
+        exitCodes: { "bun run test parser": 0 },
+        facts: { executionPolicy: "approval-gated", approvalSatisfied: false },
+        approvals: async (input) => {
+          asked.push(`${input.approvalClass}|${input.summary}`);
+          return "denied";
+        },
+      });
+      expect((await call(tools, "goal-check", { criterionId: "c1" })).result).toMatchObject({
+        error: "approval-denied",
+      });
+      expect(asked).toEqual(["shell-commands|goal-check: bun run test parser"]);
+      expect(commands).toEqual([]);
+    });
   });
 });
