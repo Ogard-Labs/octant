@@ -5,7 +5,7 @@ import type {
 } from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup, PickerModel } from "@octant/domain";
 import { findPickerModel, pickerCatalogs } from "@octant/domain";
-import { ChevronDown, Clock, Plus, RotateCcw, Search, Star } from "lucide-react";
+import { Check, ChevronDown, Clock, Plus, RotateCcw, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   modelFavoriteKey,
@@ -327,23 +327,29 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           type="button"
           variant="ghost"
         >
+          {/* A list mixed from several providers (Favorites, Recent, a search)
+              leads each row with its provider's mark; one provider's own list
+              would only repeat the same mark down the column. */}
+          {searching || favoritesActive || recentActive ? (
+            <ProviderGlyph
+              className="composer-model-picker__model-glyph"
+              displayName={group.instance.displayName}
+              driverKind={group.instance.driverKind}
+              size={16}
+            />
+          ) : null}
           <span className="composer-model-picker__model-copy">
             <span className="composer-model-picker__model-name">{picker.model.displayName}</span>
             {detail === "" ? null : (
-              <span className="composer-model-picker__model-detail">
-                <ProviderGlyph
-                  displayName={group.instance.displayName}
-                  driverKind={group.instance.driverKind}
-                  size={12}
-                />
-                {detail}
-              </span>
+              <span className="composer-model-picker__model-detail">{detail}</span>
             )}
           </span>
           {unavailable ? (
             <OctantBadge className="composer-model-picker__model-badge" variant="secondary">
               {compactUnavailableLabel(picker.unavailableReason)}
             </OctantBadge>
+          ) : selected ? (
+            <Check aria-hidden="true" className="composer-model-picker__model-check" size={16} />
           ) : null}
         </OctantButton>
         <OctantButton
