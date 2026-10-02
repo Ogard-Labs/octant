@@ -236,6 +236,19 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
     approvalClass: "thread-local",
     irreversibleUnderTaint: false,
   },
+  goal: {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "instructions",
+    approvalClass: "thread-local",
+    irreversibleUnderTaint: false,
+  },
+  // A check runs a command, so it is policed exactly as the shell is.
+  "goal-check": {
+    modes: ["code"],
+    requiredCapabilityClass: "shell",
+    approvalClass: "shell-commands",
+    irreversibleUnderTaint: true,
+  },
 };
 
 const nativeHarnessCatalogEntries: ReadonlyArray<ClosedToolCatalogEntry> =

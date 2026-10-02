@@ -10,8 +10,28 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * Persisted through its own event-sourced aggregate so the effective posture
  * survives restart and is never trusted from a client request.
  */
+/**
+ * How many helper agents may run at once. A helper that is only waiting — for
+ * the runs it depends on, or for a free slot — holds no slot and does not
+ * count. The ceiling bounds what a person may choose, so a setting can raise
+ * parallelism but never remove the bound.
+ */
+export const MAX_AGENT_RUN_CONCURRENCY = 16;
+const AgentRunConcurrencyLimit = Schema.Int.pipe(Schema.between(1, MAX_AGENT_RUN_CONCURRENCY));
+export const AgentRunConcurrency = Schema.Struct({
+  /** Helpers of one thread running at once. */
+  perThread: AgentRunConcurrencyLimit,
+  /** Helpers running at once across the app. */
+  onHost: AgentRunConcurrencyLimit,
+}).annotations(strict);
+export type AgentRunConcurrency = typeof AgentRunConcurrency.Type;
+
+export const DEFAULT_AGENT_RUN_CONCURRENCY: AgentRunConcurrency = { perThread: 4, onHost: 8 };
+
 export const AgentRunPolicySettings = Schema.Struct({
   creationPosture: AgentRunCreationPosture,
+  /** Optional so settings journaled before it existed replay as the defaults. */
+  concurrency: Schema.optional(AgentRunConcurrency),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -33,9 +53,18 @@ export const DEFAULT_AGENT_RUN_POLICY_SETTINGS: Omit<AgentRunPolicySettings, "up
 
 export const UpdateAgentRunPolicySettings = Schema.Struct({
   creationPosture: AgentRunSelectableCreationPosture,
+  /** Absent keeps the current limits. */
+  concurrency: Schema.optional(AgentRunConcurrency),
   expectedVersion: AggregateVersion,
 }).annotations(strict);
 export type UpdateAgentRunPolicySettings = typeof UpdateAgentRunPolicySettings.Type;
+
+/** The limits in force: the stored ones, or the defaults for settings that predate them. */
+export function effectiveAgentRunConcurrency(
+  settings: Pick<AgentRunPolicySettings, "concurrency">,
+): AgentRunConcurrency {
+  return settings.concurrency ?? DEFAULT_AGENT_RUN_CONCURRENCY;
+}
 
 export const decodeAgentRunPolicySettings = Schema.decodeUnknownSync(AgentRunPolicySettings);
 export const decodeUpdateAgentRunPolicySettings = Schema.decodeUnknownSync(

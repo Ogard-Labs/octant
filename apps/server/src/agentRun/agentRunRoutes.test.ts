@@ -1,3 +1,4 @@
+import { AGENT_RUN_MAX_ACTIVE_GLOBAL } from "@octant/domain";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1375,19 +1376,17 @@ describe("agentRunRoutes", () => {
   it("returns a structured limit result once the global active-run ceiling is reached", async () => {
     const { create } = createHandler();
     const distinctThread = (n: number) =>
-      decodeAgentRunParentThreadId(`33333333-3333-4333-8333-33333333333${n}`);
-    for (let i = 0; i < 4; i++) {
-      await startedRun(create, {
-        ...creationBody(),
-        requestId: decodeAgentRunRequestId(`bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb${i}`),
-        parentThreadId: distinctThread(i),
-      });
+      decodeAgentRunParentThreadId(`33333333-3333-4333-8333-${String(n).padStart(12, "0")}`);
+    const request = (n: number) =>
+      decodeAgentRunRequestId(`bbbbbbbb-bbbb-4bbb-8bbb-${String(n).padStart(12, "0")}`);
+    for (let i = 0; i < AGENT_RUN_MAX_ACTIVE_GLOBAL; i++) {
+      await create({ ...creationBody(), requestId: request(i), parentThreadId: distinctThread(i) });
     }
     expect(
       await create({
         ...creationBody(),
-        requestId: decodeAgentRunRequestId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4"),
-        parentThreadId: distinctThread(4),
+        requestId: request(AGENT_RUN_MAX_ACTIVE_GLOBAL),
+        parentThreadId: distinctThread(AGENT_RUN_MAX_ACTIVE_GLOBAL),
       }),
     ).toMatchObject({ kind: "run-command-failed", reason: "limit-reached" });
   });

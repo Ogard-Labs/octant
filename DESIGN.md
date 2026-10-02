@@ -703,8 +703,8 @@ keyboard focus. Settings ›
 Sidebar › When collapsed can choose Hidden instead, which removes the sidebar
 completely and leaves Show sidebar and New thread in the native title rail.
 The rail never appears below the drawer breakpoint, where a collapsed sidebar
-is a closed drawer.
-The right dock defaults to 320px when open. A fresh window starts with it
+is a closed drawer. The right dock defaults to 420px when open. A fresh window
+starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is 38px in the native host and the status bar is 26px.
 While a route or tool is still loading, its state is one quiet line (spinner,
@@ -1211,6 +1211,12 @@ and Tooltip. Composition rules:
   Skeleton for loading, and the shared `.toast-stack` notification owner for
   transient acknowledgements. Do not add another toast package or recreate
   these with styled spans or animated divs.
+- App-owned inline notices use `OctantAlert` for the status mark, tone, live
+  region, message, optional title, and explicit actions. Warning and danger
+  announce as `alert`; neutral, accent, and success announce as `status`.
+  Placement belongs to the feature; the callout recipe owns its appearance.
+  Permission decisions and confirmation side effects stay with the host and
+  their existing dialog callers.
 - Product notices use `OctantToast`: a semantic icon, short title, supporting
   detail, and an explicit Dismiss button. An optional inline action can open the
   relevant destination without implicitly dismissing the notice. Success and
@@ -1302,6 +1308,13 @@ for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 
 ### Confirmation and dialog behavior
 
+Inline provider, extension, and Browser permission requests use
+`OctantApprovalCard` in the thread column. It owns the neutral card material,
+pending icon, readable summary and detail, wrapping action row, and inline
+failure announcement. The requesting feature supplies the scope, choices, and
+callbacks; the existing host or server still decides whether an action may
+proceed. Native Code approvals keep their isolated host-owned document.
+
 Ordinary usage reset/retention, Git discard, and remote administration
 confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The
 remote listener confirmation shows the address, origin, network reach, and
@@ -1313,6 +1326,9 @@ focus to the opener. Git confirmations consistently offer **Keep changes** and
 ordinary confirmations use the standard action treatment. Long paths in the
 description wrap within the shared dialog. Their existing host approvals,
 receipts, and observed-state checks remain separate and mandatory.
+
+Settings connection removal uses the same confirmation while retaining its
+host command and GitHub's explicit local-logout confirmation.
 
 Remote device-key rotation uses the same confirmation. It remains limited to
 the paired browser and requires its own explicit choice after opening the

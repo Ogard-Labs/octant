@@ -5,6 +5,7 @@ import {
   createRemoteSessionBridge,
 } from "@octant/client-runtime";
 import type { RemotePairingClient, RemoteSessionBridge } from "@octant/client-runtime";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ShellState } from "../shell/ShellState";
@@ -149,9 +150,7 @@ function RemotePairingEntry(props: RemotePairingEntryProps) {
         Paste a pairing link from the host, or type a pairing code.
       </p>
       {props.warning === undefined ? null : (
-        <p aria-live="assertive" className="remote-shell__status" role="alert">
-          {props.warning}
-        </p>
+        <OctantAlert tone="warning">{props.warning}</OctantAlert>
       )}
       <form
         ref={formRef}

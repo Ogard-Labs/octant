@@ -1,4 +1,4 @@
-import { useId, useRef, type ReactNode, type RefObject } from "react";
+import { useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { OctantButton } from "./OctantButton";
 import { OctantDialog } from "./OctantDialog";
 
@@ -18,6 +18,9 @@ export function OctantConfirmDialog(props: {
   const titleId = useId();
   const descriptionId = useId();
   const cancel = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    cancel.current?.focus();
+  }, []);
   return (
     <OctantDialog
       open

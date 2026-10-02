@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  effectiveAgentRunConcurrency,
   type ChatThreadId,
   type DiscoveryCandidate,
   LOCAL_TOOL_HOST_ID,
@@ -1987,7 +1988,9 @@ export function startOctantServer(
       options.agentRunProcessSupervisor ?? agentRunSessionSupervisor;
     const agentRunOrchestration = new AgentRunOrchestrationService({
       persistence: agentRunPersistence,
-      capacity: createInMemoryCapacityPort(),
+      capacity: createInMemoryCapacityPort(() =>
+        effectiveAgentRunConcurrency(agentRunSettingsStore.current()),
+      ),
       worktree: {
         isVerifiedIsolation: (workspace) =>
           workspace.verified && workspace.worktreeRoot !== workspace.checkoutRoot,
@@ -2890,18 +2893,38 @@ export function startOctantServer(
     const goalService = new GoalService({
       store: new JournalGoalStore({ journal: persistence.journal, uuid: randomUUID }),
     });
+    // A Code thread's plan or goal is reached only from a window currently in
+    // Code on the Project that owns the thread: read the window's own
+    // workspace, never a scope the caller supplied.
+    const authorizeCodeThreadForWindow = ({
+      threadId,
+      windowId,
+    }: {
+      readonly threadId: string;
+      readonly windowId: WindowId;
+    }): boolean => {
+      const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+      if (workspace === undefined) return false;
+      const context = workspace.contextByMode.code;
+      if (context.mode !== "code") return false;
+      let thread;
+      try {
+        thread = persistence.readCodeThread(threadId as never);
+      } catch {
+        return false;
+      }
+      if (thread === undefined || thread.lifecycle !== "active") return false;
+      return String(context.projectId) === String(thread.projectId);
+    };
     const goalRoutes = createGoalRouteHandler({
       service: goalService,
       windowAuthorityStore,
-      // A Goal belongs to a Work thread, so the window must currently be in
-      // Work on the Project that owns the thread. Same shape as the AgentRun
-      // cancellation check below: read the window's own workspace, never a
-      // scope the caller supplied.
-      authorizeThread: authorizeWorkThreadForWindow,
+      // A Goal belongs to a Work or Code thread, so the window must currently
+      // be in that mode on the Project that owns the thread. A Code thread's
+      // goal is the one a harness lead can verify with goal-check.
+      authorizeThread: (input) =>
+        authorizeWorkThreadForWindow(input) || authorizeCodeThreadForWindow(input),
     });
-    // A plan belongs to a Code thread, so the window must currently be in Code
-    // on the Project that owns it. Same shape as the Goal check above: read the
-    // window's own workspace, never a scope the caller supplied.
     // Hoisted so the Code board can read the same durable state (0051) instead
     // of standing up a second plan store.
     const planService = new PlanService({
@@ -2911,20 +2934,7 @@ export function startOctantServer(
     const planRoutes = createPlanRouteHandler({
       service: planService,
       windowAuthorityStore,
-      authorizeThread: ({ threadId, windowId }) => {
-        const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
-        if (workspace === undefined) return false;
-        const context = workspace.contextByMode.code;
-        if (context.mode !== "code") return false;
-        let thread;
-        try {
-          thread = persistence.readCodeThread(threadId as never);
-        } catch {
-          return false;
-        }
-        if (thread === undefined || thread.lifecycle !== "active") return false;
-        return String(context.projectId) === String(thread.projectId);
-      },
+      authorizeThread: authorizeCodeThreadForWindow,
     });
     const agentMessageRoutes = createAgentMessageRouteHandler({
       windowAuthorityStore,
@@ -5314,10 +5324,12 @@ export function startOctantServer(
       hostId: String(LOCAL_HOST_ID),
       scratchRoot: harnessWorkDirectory,
       contextHarness,
+      readGoal: (threadId) => goalService.read(threadId).goal ?? undefined,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
     nativeHarnessComposition = createNativeHarnessComposition({
+      goals: goalService,
       questions: nativeHarnessQuestionsLive,
       approvals: nativeHarnessApprovals,
       activity: nativeHarnessSessionsLive,
@@ -6374,10 +6386,16 @@ export function startOctantServer(
     const goalLoopService = new GoalLoopService({
       readGoal: (threadId) => goalService.read(threadId).goal,
       recordUsage: async ({ threadId, goal, tokensSpent, elapsedMs, evidence, complete }) => {
+        // The round's own turn may have moved the goal — a harness lead runs
+        // goal checks, and the last passing one completes it. Charge the round
+        // against the goal as it is now; a goal its own checks completed is
+        // finished and takes no further spend.
+        const current = goalService.read(threadId).goal ?? goal;
+        if (current.status === "complete") return;
         const recorded = await goalService.execute({
           kind: "record-thread-goal-usage",
           threadId,
-          expectedVersion: goal.version,
+          expectedVersion: current.version,
           goalId: goal.id,
           deltaTokens: tokensSpent,
           deltaElapsedMs: elapsedMs,

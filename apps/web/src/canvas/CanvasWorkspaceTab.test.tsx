@@ -346,7 +346,8 @@ describe("CanvasWorkspaceTab", () => {
       canvasId: quarterlyCanvasId,
       blockId: "diagram-1",
       expectedSequence: quarterlyInventoryEntry.currentSequence,
-      actor: canvasFixture.provenance.actor,
+      // The person's drag, never the creating agent's provenance.
+      actor: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
       positions: [expect.objectContaining({ nodeId: "b" })],
     });
     // Reloaded: the board the host now holds, plus its history.

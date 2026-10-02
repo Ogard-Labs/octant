@@ -5,6 +5,7 @@ import type {
   IntegrationAuthenticationState,
 } from "@octant/contracts/integration";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { SettingRow, SettingsFactList, SettingsSection, SettingsState } from "./primitives";
 
@@ -172,6 +173,20 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
             </div>
           </SettingRow>
         </div>
+        {connected && disconnectArmed ? (
+          <OctantConfirmDialog
+            confirmLabel="Confirm disconnect"
+            destructive
+            onCancel={() => setDisconnectArmed(false)}
+            onConfirm={() => {
+              setDisconnectArmed(false);
+              void runCommand("logout");
+            }}
+            title="Disconnect Linear?"
+          >
+            Remove this host&apos;s Linear connection? You can reconnect later.
+          </OctantConfirmDialog>
+        ) : null}
         <div className="settings-feedback-slot" aria-live="polite">
           {commandError === undefined ? null : (
             <SettingsState kind="error">{commandError}</SettingsState>
@@ -265,25 +280,16 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
               scope="host"
               settingId="linear-disconnect"
             >
-              {disconnectArmed ? (
-                <OctantButton
-                  disabled={commandBusy || refreshing}
-                  onClick={() => void runCommand("logout")}
-                  type="button"
-                  variant="destructive"
-                >
-                  Confirm disconnect
-                </OctantButton>
-              ) : (
-                <OctantButton
-                  disabled={commandBusy || refreshing}
-                  onClick={() => setDisconnectArmed(true)}
-                  type="button"
-                  variant="secondary"
-                >
-                  Disconnect
-                </OctantButton>
-              )}
+              <OctantButton
+                aria-expanded={disconnectArmed}
+                aria-haspopup="dialog"
+                disabled={commandBusy || refreshing}
+                onClick={() => setDisconnectArmed(true)}
+                type="button"
+                variant="secondary"
+              >
+                Disconnect
+              </OctantButton>
             </SettingRow>
           </div>
         </SettingsSection>

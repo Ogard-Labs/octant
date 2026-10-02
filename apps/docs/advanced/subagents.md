@@ -79,11 +79,16 @@ chosen the retired **Only when I start them** reads as off, because nothing else
 could start a subagent under it. Provider-native subagents are not governed by this posture: Octant
 keeps them off where the provider allows it. The server enforces hard clamps:
 
-- At most **4 concurrently running children** globally.
-- At most **3 children per parent**.
+- How many children **run at once** is yours to set in **Settings → Octant
+  Harness → Helper agents**: per thread (default 4) and across the app
+  (default 8), each up to 16. A child that is only waiting — for the children
+  it depends on, or for a free slot — does not take a slot.
+- At most **16 unfinished children per parent** and **32 across the app**,
+  waiting ones included, so a runaway agent cannot pile up work.
 - At most **2 levels of hierarchy depth**.
 
-Saturation queues visibly or returns a structured limit result. Authority is
+A child with no free slot waits visibly and starts when one frees up; past the
+unfinished cap, the start is refused with a structured limit result. Authority is
 an immutable ceiling set at start — a child can narrow it, never widen it.
 
 ## Isolation by mode

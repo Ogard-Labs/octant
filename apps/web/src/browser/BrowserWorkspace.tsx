@@ -29,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { MiddleTruncatedText } from "../lib/MiddleTruncatedText";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ShellState } from "../shell/ShellState";
@@ -515,13 +516,20 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               <Globe2 aria-hidden="true" size={12} />
             )}
           </span>
-          <OctantInput
-            aria-label="Browser URL"
-            onChange={(event) => setUrl(event.target.value)}
-            spellCheck={false}
-            type="text"
-            value={url}
-          />
+          <span className="browser-workspace__address">
+            <OctantInput
+              aria-label="Browser URL"
+              onChange={(event) => setUrl(event.target.value)}
+              spellCheck={false}
+              type="text"
+              value={url}
+            />
+            <MiddleTruncatedText
+              ariaHidden
+              className="browser-workspace__address-preview"
+              value={url}
+            />
+          </span>
         </form>
         <span
           className="browser-workspace__control-state"

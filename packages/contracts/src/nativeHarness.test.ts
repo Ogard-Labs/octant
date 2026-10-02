@@ -10,6 +10,7 @@ import {
   decodeNativeHarnessFollowUpPreview,
   decodeNativeHarnessFollowUpSet,
   decodeNativeHarnessJournalLookupResult,
+  decodeNativeHarnessToolArguments,
   decodeNativeHarnessSession,
   decodeNativeHarnessToolResultBounds,
   decodeNativeHarnessTurnRecord,
@@ -26,8 +27,16 @@ const lead = {
 };
 
 describe("native harness tools", () => {
-  it("offers the nine working tools, the three harness reads, and delegation", () => {
-    expect(NATIVE_HARNESS_TOOL_NAMES.length).toBe(14);
+  it("offers the nine working tools, the three harness reads, delegation, and the goal tools", () => {
+    expect(NATIVE_HARNESS_TOOL_NAMES.length).toBe(16);
+    expect(NATIVE_HARNESS_TOOL_NAMES).toContain("goal-check");
+    // A check command must fit whole in the approval a person reads.
+    expect(() =>
+      decodeNativeHarnessToolArguments("goal", {
+        operation: "set-criteria",
+        criteria: [{ text: "Long", check: "x".repeat(201) }],
+      }),
+    ).toThrow();
     expect(NATIVE_HARNESS_TOOL_NAMES).toContain("edit");
     expect(NATIVE_HARNESS_TOOL_NAMES).toContain("context-remaining");
   });

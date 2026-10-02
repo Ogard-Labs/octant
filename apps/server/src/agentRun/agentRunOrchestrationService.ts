@@ -1,13 +1,14 @@
 import type {
   AgentRun,
   AgentRunAuthority,
+  AgentRunConcurrency,
   AgentRunCommand,
   AgentRunCommandResult,
   AgentRunId,
   AgentRunParentThreadId,
   AgentRunWorkspaceReceipt,
 } from "@octant/contracts";
-import { MAX_AGENT_RUN_RESULT_CHARACTERS } from "@octant/contracts";
+import { DEFAULT_AGENT_RUN_CONCURRENCY, MAX_AGENT_RUN_RESULT_CHARACTERS } from "@octant/contracts";
 import {
   agentRunPoolRouteWaitingReason,
   agentRunResultReference,
@@ -42,9 +43,15 @@ export interface AgentRunCapacityPort {
   readonly tryReserve: (input: {
     readonly runId: AgentRunId;
     readonly providerInstanceId: string;
+    readonly parentThreadId: AgentRunParentThreadId;
   }) =>
     | { readonly status: "reserved"; readonly reservationId: string }
-    | { readonly status: "queued"; readonly reason: string };
+    | {
+        readonly status: "queued";
+        readonly reason: string;
+        /** Which limit is full: the whole app's, or only this thread's. */
+        readonly scope: "host" | "thread";
+      };
   readonly release: (reservationId: string) => void;
 }
 
@@ -212,6 +219,7 @@ export class AgentRunOrchestrationService {
 
     const reservation = this.#capacity.tryReserve({
       runId: accepted.run.id,
+      parentThreadId: accepted.run.parentThreadId,
       // Reserve on the candidate that actually executes: the explicit pool
       // fallback when one was selected, otherwise the primary selection.
       providerInstanceId: String(
@@ -686,14 +694,17 @@ export class AgentRunOrchestrationService {
   }
 
   /** Reserve a slot and start the run; false when no slot is free. */
-  #startReserved(run: AgentRun): boolean {
+  #startReserved(run: AgentRun): "started" | "host-full" | "thread-full" {
     const reservation = this.#capacity.tryReserve({
       runId: run.id,
+      parentThreadId: run.parentThreadId,
       providerInstanceId: String(
         effectiveAgentRunExecutionTarget(run.routingReceipt).providerInstanceId,
       ),
     });
-    if (reservation.status === "queued") return false;
+    if (reservation.status === "queued") {
+      return reservation.scope === "host" ? "host-full" : "thread-full";
+    }
     this.#reservations.set(run.id, reservation.reservationId);
     let started: AgentRunCommandResult;
     try {
@@ -701,13 +712,13 @@ export class AgentRunOrchestrationService {
     } catch {
       this.#capacity.release(reservation.reservationId);
       this.#reservations.delete(run.id);
-      return true;
+      return "started";
     }
     if (started.kind === "run-command-failed") {
       this.#capacity.release(reservation.reservationId);
       this.#reservations.delete(run.id);
     }
-    return true;
+    return "started";
   }
 
   /**
@@ -729,7 +740,9 @@ export class AgentRunOrchestrationService {
       ) {
         continue;
       }
-      this.#startReserved(run);
+      // A thread at its own limit holds back only its own waiters; the next
+      // thread's waiter may still take the slot that just freed.
+      if (this.#startReserved(run) === "thread-full") continue;
       return;
     }
   }
@@ -867,27 +880,41 @@ function boundedRecoveryReason(reason: string): string {
     : trimmed.slice(0, MAX_RECOVERY_REASON_CHARACTERS);
 }
 
-export function createInMemoryCapacityPort(): AgentRunCapacityPort & {
+/**
+ * Run slots, counted for the whole app and for each thread. The limits are
+ * read on every reservation, so a person changing them in Settings takes
+ * effect at the next start; runs already holding a slot keep it.
+ */
+export function createInMemoryCapacityPort(
+  limits: () => AgentRunConcurrency = () => DEFAULT_AGENT_RUN_CONCURRENCY,
+): AgentRunCapacityPort & {
   readonly queued: string[];
 } {
-  const reserved = new Map<string, string>();
+  const reserved = new Map<string, { readonly runId: string; readonly parentThreadId: string }>();
   const queued: string[] = [];
   let next = 1;
-  let available = 4;
   return {
     queued,
-    tryReserve: ({ runId }) => {
-      if (available <= 0) {
+    tryReserve: ({ runId, parentThreadId }) => {
+      const { perThread, onHost } = limits();
+      const forThread = [...reserved.values()].filter(
+        (entry) => entry.parentThreadId === String(parentThreadId),
+      ).length;
+      const scope =
+        reserved.size >= onHost ? "host" : forThread >= perThread ? "thread" : undefined;
+      if (scope !== undefined) {
         queued.push(String(runId));
-        return { status: "queued", reason: "provider-capacity-saturated" };
+        return { status: "queued", reason: "provider-capacity-saturated", scope };
       }
-      available -= 1;
       const reservationId = `res-${next++}`;
-      reserved.set(reservationId, String(runId));
+      reserved.set(reservationId, {
+        runId: String(runId),
+        parentThreadId: String(parentThreadId),
+      });
       return { status: "reserved", reservationId };
     },
     release: (reservationId) => {
-      if (reserved.delete(reservationId)) available += 1;
+      reserved.delete(reservationId);
     },
   };
 }

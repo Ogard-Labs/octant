@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import {
   NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
   NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH,
@@ -174,6 +175,43 @@ describe("ShellFrame", () => {
     expect(screen.queryByText("Chrome")).not.toBeInTheDocument();
     expect(screen.queryByText("Sidebar")).not.toBeInTheDocument();
     expect(screen.queryByText("Workspace")).not.toBeInTheDocument();
+  });
+
+  it("returns to the same first-run draft after Settings closes", () => {
+    function FirstRunDraft({ concealed }: { readonly concealed: boolean }) {
+      const [step, setStep] = useState(1);
+      return concealed ? null : (
+        <button onClick={() => setStep(4)} type="button">
+          Step {step}
+        </button>
+      );
+    }
+    function frame(settingsOpen: boolean) {
+      return (
+        <ShellFrame
+          chrome={<header>Chrome</header>}
+          contextSidebarWidth={360}
+          material="opaque"
+          onCommitSidebarWidth={vi.fn()}
+          onPreviewSidebarWidth={vi.fn()}
+          sidebar={<aside>Sidebar</aside>}
+          sidebarResizable={false}
+          sidebarWidth={232}
+          {...(settingsOpen ? { standaloneSurface: <main>Settings</main> } : {})}
+          wideContextOpen={false}
+          workspace={<main>Workspace</main>}
+        >
+          <FirstRunDraft concealed={settingsOpen} />
+        </ShellFrame>
+      );
+    }
+
+    const { rerender } = render(frame(false));
+    fireEvent.click(screen.getByRole("button", { name: "Step 1" }));
+    rerender(frame(true));
+    expect(screen.queryByRole("button", { name: "Step 4" })).not.toBeInTheDocument();
+    rerender(frame(false));
+    expect(screen.getByRole("button", { name: "Step 4" })).toBeInTheDocument();
   });
 
   it("keeps selected typography applied when entering a standalone surface", () => {

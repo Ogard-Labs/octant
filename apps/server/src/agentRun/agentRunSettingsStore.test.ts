@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
-import { AgentRunPolicySettings, CorrelationId, EventId } from "@octant/contracts";
+import {
+  AgentRunPolicySettings,
+  CorrelationId,
+  EventId,
+  effectiveAgentRunConcurrency,
+} from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -113,6 +118,34 @@ describe("AgentRunSettingsStore", () => {
     );
     // the earlier accepted value is untouched
     expect(store.current().creationPosture).toBe("automatic");
+  });
+
+  it("keeps the run-at-once limits a person chose across a posture change and a restart", () => {
+    const journal = createJournal();
+    const store = createStore(journal);
+    expect(effectiveAgentRunConcurrency(store.current())).toEqual({ perThread: 4, onHost: 8 });
+    store.update({
+      creationPosture: "automatic",
+      concurrency: { perThread: 6, onHost: 12 },
+      expectedVersion: 0,
+    });
+    // Turning subagents off and on again leaves the limits alone.
+    store.update({ creationPosture: "off", expectedVersion: 1 });
+    expect(createStore(journal).current()).toMatchObject({
+      creationPosture: "off",
+      concurrency: { perThread: 6, onHost: 12 },
+    });
+  });
+
+  it("refuses limits above the ceiling", () => {
+    const store = createStore();
+    expect(() =>
+      store.update({
+        creationPosture: "automatic",
+        concurrency: { perThread: 17, onHost: 17 },
+        expectedVersion: 0,
+      }),
+    ).toThrow(AgentRunSettingsStoreError);
   });
 
   it("rehydrates the latest posture from the journal after restart", () => {

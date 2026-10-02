@@ -470,7 +470,9 @@ export class CanvasService {
   ): CanvasDiagramLayoutReviseResult {
     let command: CanvasDiagramLayoutReviseCommand;
     try {
-      command = decodeCanvasDiagramLayoutReviseCommand(requestInput);
+      // A drag comes from the person's own window, so the host records it as
+      // that person; the renderer used to send the creating agent's identity.
+      command = { ...decodeCanvasDiagramLayoutReviseCommand(requestInput), actor: this.#actor };
     } catch {
       return {
         kind: "denied",

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applyThreadGoalCommand, GoalPolicyRejection, type GoalAggregate } from "./goalPolicy";
+import {
+  applyThreadGoalCommand,
+  GoalPolicyRejection,
+  threadGoalCriteriaMet,
+  type GoalAggregate,
+} from "./goalPolicy";
+import { mayCompleteGoalLoop } from "./goalLoopPolicy";
 import {
   decodeThreadGoalUpdated,
   MAX_THREAD_GOAL_HISTORY_ENTRIES,
@@ -215,5 +221,143 @@ describe("thread goal policy", () => {
       later,
     );
     expect(aggregate.goal?.status).toBe("active");
+  });
+
+  describe("criteria", () => {
+    const evidence = (summary: string) => ({
+      kind: "test" as const,
+      referenceId: "check-run",
+      summary,
+      observedAt: later,
+    });
+    const created = () =>
+      applyThreadGoalCommand(
+        empty(),
+        {
+          kind: "create-thread-goal",
+          threadId: ids.thread,
+          expectedVersion: 0 as AggregateVersion,
+          goalId: ids.goal,
+          revisionId: ids.revision,
+          objective: "Ship the parser",
+          budget: { turnBudget: 10 },
+          criteria: [{ text: "Tests pass", check: "bun run test" }, { text: "Docs updated" }],
+        },
+        now,
+      );
+    const check = (aggregate: GoalAggregate, criterionId: string, outcome: "met" | "unmet") =>
+      applyThreadGoalCommand(
+        aggregate,
+        {
+          kind: "record-thread-goal-check",
+          threadId: ids.thread,
+          expectedVersion: (aggregate.goal?.version ?? 0) as AggregateVersion,
+          goalId: ids.goal,
+          criterionId,
+          outcome,
+          evidence: evidence(`${criterionId} ${outcome}`),
+        },
+        later,
+      );
+
+    it("numbers new criteria and starts every one unmet", () => {
+      const goal = created().goal;
+      expect(goal?.criteria?.map((criterion) => [criterion.id, criterion.status])).toEqual([
+        ["c1", "unmet"],
+        ["c2", "unmet"],
+      ]);
+      expect(goal === null ? true : threadGoalCriteriaMet(goal)).toBe(false);
+    });
+
+    it("records a failed check without completing the goal", () => {
+      const goal = check(created(), "c1", "unmet").goal;
+      expect(goal?.status).toBe("active");
+      expect(goal?.criteria?.[0]?.evidence?.summary).toBe("c1 unmet");
+      expect(goal?.evidence.at(-1)?.summary).toBe("c1 unmet");
+    });
+
+    it("counts the criteria met only when every check has passed", () => {
+      const once = check(created(), "c1", "met");
+      expect(once.goal === null ? true : threadGoalCriteriaMet(once.goal)).toBe(false);
+      const both = check(once, "c2", "met");
+      expect(both.goal === null ? false : threadGoalCriteriaMet(both.goal)).toBe(true);
+      // Meeting the criteria is a fact about the goal, not a transition: only
+      // a completion command moves it to complete.
+      expect(both.goal?.status).toBe("active");
+    });
+
+    it("keeps a passed check when a revision only adds a criterion", () => {
+      const passed = check(created(), "c1", "met");
+      const revised = applyThreadGoalCommand(
+        passed,
+        {
+          kind: "revise-thread-goal",
+          threadId: ids.thread,
+          expectedVersion: (passed.goal?.version ?? 0) as AggregateVersion,
+          goalId: ids.goal,
+          revisionId: ids.revision2,
+          objective: "Ship the parser",
+          criteria: [
+            { text: "Tests pass", check: "bun run test" },
+            { text: "Docs updated" },
+            { text: "Lint is clean", check: "bun run lint" },
+          ],
+        },
+        later,
+      );
+      expect(revised.goal?.criteria?.map((criterion) => criterion.status)).toEqual([
+        "met",
+        "unmet",
+        "unmet",
+      ]);
+      expect(() => decodeThreadGoalUpdated(revised)).not.toThrow();
+    });
+
+    it("lends one passed check to only one of two identical revised criteria", () => {
+      const passed = check(created(), "c1", "met");
+      const revised = applyThreadGoalCommand(
+        passed,
+        {
+          kind: "revise-thread-goal",
+          threadId: ids.thread,
+          expectedVersion: (passed.goal?.version ?? 0) as AggregateVersion,
+          goalId: ids.goal,
+          revisionId: ids.revision2,
+          objective: "Ship the parser",
+          criteria: [
+            { text: "Tests pass", check: "bun run test" },
+            { text: "Tests pass", check: "bun run test" },
+          ],
+        },
+        later,
+      );
+      expect(revised.goal?.criteria?.map((criterion) => criterion.status)).toEqual([
+        "met",
+        "unmet",
+      ]);
+    });
+
+    it("refuses a check for a criterion the goal does not have", () => {
+      expect(() => check(created(), "c9", "met")).toThrow(GoalPolicyRejection);
+    });
+
+    it("lets a loop complete a goal with criteria only when every criterion is met", () => {
+      const partly = check(created(), "c1", "met").goal;
+      expect(
+        mayCompleteGoalLoop({
+          evidence: partly?.evidence ?? [],
+          providerReportsComplete: true,
+          criteria: partly?.criteria,
+        }),
+      ).toBe(false);
+      const fully = check(check(created(), "c1", "met"), "c2", "met").goal;
+      expect(
+        mayCompleteGoalLoop({
+          evidence: fully?.evidence ?? [],
+          providerReportsComplete: true,
+          criteria: fully?.criteria,
+        }),
+      ).toBe(true);
+    });
   });
 });

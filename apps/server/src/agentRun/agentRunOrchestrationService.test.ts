@@ -65,6 +65,7 @@ const ids = {
 };
 
 const actor = Schema.decodeUnknownSync(EventActor)({ kind: "local-user", actorId: ids.actor });
+const otherThread = decodeAgentRunParentThreadId("34343434-3434-4343-8343-343434343434");
 
 const authority: AgentRunAuthority = {
   filesystem: false,
@@ -435,10 +436,14 @@ describe("AgentRunOrchestrationService", () => {
   });
 
   it("durably waits when capacity is saturated, including on an idempotent retry", () => {
-    const capacity = createInMemoryCapacityPort();
-    // saturate default capacity (4)
+    const capacity = createInMemoryCapacityPort(() => ({ perThread: 4, onHost: 4 }));
+    // saturate the app's four slots with another thread's runs
     for (let i = 0; i < 4; i += 1) {
-      capacity.tryReserve({ runId: ids.run, providerInstanceId: ids.provider });
+      capacity.tryReserve({
+        runId: ids.run,
+        providerInstanceId: ids.provider,
+        parentThreadId: otherThread,
+      });
     }
     const reserve = vi.spyOn(capacity, "tryReserve");
     const { orchestration, persistence } = createHarness(capacity);
@@ -468,7 +473,7 @@ describe("AgentRunOrchestrationService", () => {
   });
 
   it("reserves and starts the next capacity waiter when a reservation is released", () => {
-    const capacity = createInMemoryCapacityPort();
+    const capacity = createInMemoryCapacityPort(() => ({ perThread: 4, onHost: 4 }));
     const starts: string[] = [];
     const { orchestration, persistence } = createHarness(capacity, true, {
       start: (run) => {
@@ -491,6 +496,7 @@ describe("AgentRunOrchestrationService", () => {
       capacity.tryReserve({
         runId: decodeAgentRunId(`aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${i}`),
         providerInstanceId: ids.provider,
+        parentThreadId: otherThread,
       });
     }
     const waitingRun = orchestration.admit({
@@ -1179,5 +1185,47 @@ describe("AgentRun dependency graphs", () => {
       lifecycleStatus: "waiting",
       recoveryReason: AGENT_RUN_DEPENDENCY_WAITING_REASON,
     });
+  });
+});
+
+describe("AgentRun run slots", () => {
+  const thread = (n: number) =>
+    decodeAgentRunParentThreadId(`35353535-3535-4353-8353-${String(n).padStart(12, "0")}`);
+  const run = (n: number) =>
+    decodeAgentRunId(`36363636-3636-4363-8363-${String(n).padStart(12, "0")}`);
+
+  it("holds one thread to its own limit while another thread still gets a slot", () => {
+    const capacity = createInMemoryCapacityPort(() => ({ perThread: 2, onHost: 3 }));
+    const reserve = (runNumber: number, threadNumber: number) =>
+      capacity.tryReserve({
+        runId: run(runNumber),
+        providerInstanceId: ids.provider,
+        parentThreadId: thread(threadNumber),
+      });
+    expect(reserve(1, 1).status).toBe("reserved");
+    expect(reserve(2, 1).status).toBe("reserved");
+    expect(reserve(3, 1)).toMatchObject({ status: "queued", scope: "thread" });
+    expect(reserve(4, 2).status).toBe("reserved");
+    expect(reserve(5, 2)).toMatchObject({ status: "queued", scope: "host" });
+  });
+
+  it("applies a changed limit at the next reservation without touching held slots", () => {
+    let limits = { perThread: 1, onHost: 1 };
+    const capacity = createInMemoryCapacityPort(() => limits);
+    const first = capacity.tryReserve({
+      runId: run(1),
+      providerInstanceId: ids.provider,
+      parentThreadId: thread(1),
+    });
+    expect(first.status).toBe("reserved");
+    const second = () =>
+      capacity.tryReserve({
+        runId: run(2),
+        providerInstanceId: ids.provider,
+        parentThreadId: thread(1),
+      });
+    expect(second().status).toBe("queued");
+    limits = { perThread: 4, onHost: 8 };
+    expect(second().status).toBe("reserved");
   });
 });

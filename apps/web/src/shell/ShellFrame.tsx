@@ -125,91 +125,86 @@ function usePrimaryCardHole(layer: HTMLDivElement | null, active: boolean): void
 export function ShellFrame(props: ShellFrameProps) {
   const [workspaceLayer, setWorkspaceLayer] = useState<HTMLDivElement | null>(null);
   usePrimaryCardHole(workspaceLayer, props.backdrop !== undefined);
-  if (props.standaloneSurface !== undefined) {
-    return (
-      <ShellThemeRoot
-        {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
-        {...(props.typography === undefined ? {} : { typography: props.typography })}
-        {...(props.theme === undefined ? {} : { theme: props.theme })}
-      >
-        <div
-          className={`shell shell-frame--standalone shell--material-${props.material}`}
-          data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
-          style={{ "--octant-sidebar-width": `${props.sidebarWidth}px` } as CSSProperties}
-        >
-          {props.standaloneSurface}
-        </div>
-      </ShellThemeRoot>
-    );
-  }
-
   return (
-    <ThemeSettingsProvider {...(props.theme === undefined ? {} : { settings: props.theme })}>
-      <ThemeTypographyProvider
-        {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
-        {...(props.typography === undefined ? {} : { typography: props.typography })}
+    <ShellThemeRoot
+      {...(props.theme === undefined ? {} : { theme: props.theme })}
+      {...(props.typography === undefined ? {} : { typography: props.typography })}
+      {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
+    >
+      <div
+        className={
+          props.standaloneSurface !== undefined
+            ? `shell shell-frame--standalone shell--material-${props.material}`
+            : `shell shell-frame shell--material-${props.material}${
+                props.workspaceMaterial === "translucent"
+                  ? " shell--workspace-material-translucent"
+                  : ""
+              }${props.wideContextOpen ? " shell--wide-context-open" : ""}${
+                props.sidebarCollapsed ? " shell--sidebar-collapsed" : ""
+              }${props.projectsSidebarOpen ? " shell--projects-sidebar-open" : ""}${
+                props.backdrop === undefined ? "" : " shell--app-backdrop"
+              }${
+                props.backdrop !== undefined && props.backdropCoversSidebar === true
+                  ? " shell--app-backdrop-sidebar"
+                  : ""
+              }`
+        }
+        data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
+        data-thread-provider-icons={props.showThreadProviderIcons === false ? "false" : "true"}
+        data-transcript-text-size={props.transcriptTextSize ?? "small"}
+        data-transcript-width={props.transcriptWidth ?? "narrow"}
+        style={
+          {
+            ...(props.standaloneSurface === undefined
+              ? {
+                  ...(props.bottomPanelHeight === undefined
+                    ? {}
+                    : { "--octant-bottom-panel-height": `${props.bottomPanelHeight}px` }),
+                  "--octant-context-sidebar-width": `${props.contextSidebarWidth}px`,
+                  "--octant-native-hidden-inset-titlebar-height": `${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px`,
+                  "--octant-native-traffic-light-leading-width": `${NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH}px`,
+                }
+              : {}),
+            "--octant-sidebar-width": `${props.sidebarWidth}px`,
+          } as CSSProperties
+        }
       >
-        <div
-          className={`shell shell-frame shell--material-${props.material}${
-            props.workspaceMaterial === "translucent"
-              ? " shell--workspace-material-translucent"
-              : ""
-          }${props.wideContextOpen ? " shell--wide-context-open" : ""}${
-            props.sidebarCollapsed ? " shell--sidebar-collapsed" : ""
-          }${props.sidebarCollapsed && props.sidebarRail === true ? " shell--sidebar-rail" : ""}${props.projectsSidebarOpen ? " shell--projects-sidebar-open" : ""}${
-            props.backdrop === undefined ? "" : " shell--app-backdrop"
-          }${
-            props.backdrop !== undefined && props.backdropCoversSidebar === true
-              ? " shell--app-backdrop-sidebar"
-              : ""
-          }`}
-          data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
-          data-thread-provider-icons={props.showThreadProviderIcons === false ? "false" : "true"}
-          data-transcript-text-size={props.transcriptTextSize ?? "small"}
-          data-transcript-width={props.transcriptWidth ?? "narrow"}
-          style={
-            {
-              ...(props.bottomPanelHeight === undefined
-                ? {}
-                : { "--octant-bottom-panel-height": `${props.bottomPanelHeight}px` }),
-              "--octant-context-sidebar-width": `${props.contextSidebarWidth}px`,
-              "--octant-native-hidden-inset-titlebar-height": `${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px`,
-              "--octant-native-traffic-light-leading-width": `${NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH}px`,
-              "--octant-sidebar-width": `${props.sidebarWidth}px`,
-            } as CSSProperties
-          }
-        >
-          {props.backdrop}
-          {props.chrome}
-          {props.sidebarCollapsed && props.sidebarRail !== true ? null : props.sidebar}
-          {props.sidebarResizable && !props.sidebarCollapsed ? (
-            <ShellResizeHandle
-              accessibleName="Resize navigation sidebar"
-              className="shell-frame__sidebar-resize window-no-drag"
-              edge="trailing"
-              maximum={MAX_SIDEBAR_WIDTH}
-              minimum={MIN_SIDEBAR_WIDTH}
-              onCommit={props.onCommitSidebarWidth}
-              onPreview={props.onPreviewSidebarWidth}
-              value={props.sidebarWidth}
+        {props.standaloneSurface !== undefined ? (
+          <>{props.standaloneSurface}</>
+        ) : (
+          <>
+            {props.backdrop}
+            {props.chrome}
+            {props.sidebarCollapsed && props.sidebarRail !== true ? null : props.sidebar}
+            {props.sidebarResizable && !props.sidebarCollapsed ? (
+              <ShellResizeHandle
+                accessibleName="Resize navigation sidebar"
+                className="shell-frame__sidebar-resize window-no-drag"
+                edge="trailing"
+                maximum={MAX_SIDEBAR_WIDTH}
+                minimum={MIN_SIDEBAR_WIDTH}
+                onCommit={props.onCommitSidebarWidth}
+                onPreview={props.onPreviewSidebarWidth}
+                value={props.sidebarWidth}
+              />
+            ) : null}
+            <div
+              ref={setWorkspaceLayer}
+              className={`workspace-layer${
+                props.wideContextOpen ? " workspace-layer--wide-context-open" : ""
+              }${props.bottomPanelOpen ? " workspace-layer--bottom-panel-open" : ""}`}
+            >
+              {props.workspace}
+            </div>
+            <div
+              aria-hidden="true"
+              className="shell-frame__native-drag-strip window-drag-region"
+              data-native-window-drag-strip
             />
-          ) : null}
-          <div
-            ref={setWorkspaceLayer}
-            className={`workspace-layer${
-              props.wideContextOpen ? " workspace-layer--wide-context-open" : ""
-            }${props.bottomPanelOpen ? " workspace-layer--bottom-panel-open" : ""}`}
-          >
-            {props.workspace}
-          </div>
-          <div
-            aria-hidden="true"
-            className="shell-frame__native-drag-strip window-drag-region"
-            data-native-window-drag-strip
-          />
-          {props.children}
-        </div>
-      </ThemeTypographyProvider>
-    </ThemeSettingsProvider>
+          </>
+        )}
+        {props.children}
+      </div>
+    </ShellThemeRoot>
   );
 }

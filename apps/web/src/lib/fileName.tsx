@@ -1,7 +1,7 @@
 /**
  * File-name presentation shared by the Files dock tools.
  *
- * A dock 320px wide cannot show a whole nested file name, and an end ellipsis
+ * A narrow dock cannot show a whole nested file name, and an end ellipsis
  * cuts off the extension — the one part of a file name a person reads first.
  * The name is split into a head and a tail so CSS can let the head yield to an
  * ellipsis while the tail stays whole.

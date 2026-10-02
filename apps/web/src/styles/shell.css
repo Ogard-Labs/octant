@@ -3298,11 +3298,61 @@ form > .work-composer-adapter__attachments {
   place-items: center;
 }
 
+.middle-truncated-text {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.middle-truncated-text__head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.middle-truncated-text__tail {
+  flex: none;
+  max-width: 55%;
+  direction: rtl;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.browser-workspace__address {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+}
+
+.browser-workspace__address-preview {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.browser-workspace__address:not(:focus-within) input {
+  color: transparent;
+}
+
+.browser-workspace__address:focus-within .browser-workspace__address-preview {
+  display: none;
+}
+
 /* The field's frame is the omnibox itself. The input recipe ships its own
    border, radius and shadow, which drew a second rounded box inside the pill —
    `border: 0` alone left the recipe's shadow painting that inner edge. */
 .browser-workspace__omnibox input {
   flex: 1;
+  width: 100%;
   min-width: 0;
   height: 100%;
   padding: 0;
