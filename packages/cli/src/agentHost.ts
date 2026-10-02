@@ -17,6 +17,12 @@ import {
   type ChatNavigationThread,
   type NativeHarnessApprovalDecisionResult,
   type SteerNativeHarnessSession,
+  decodeNativeHarnessSteeringTaken,
+  decodeThreadGoal,
+  decodeThreadMentionCommandResult,
+  type NativeHarnessSteeringNote,
+  type SideChatSidecar,
+  type ThreadGoal,
 } from "@octant/contracts";
 import { isNativeHarnessDriverKind } from "@octant/domain";
 import type { OpenedLocalControlSession } from "./localControl";
@@ -36,6 +42,8 @@ export function refusalMessage(
   if (typeof body === "object" && body !== null) {
     const record = body as Record<string, unknown>;
     if (typeof record.message === "string" && record.message.length > 0) return record.message;
+    // The harness session and goal routes name their refusal `error`.
+    if (typeof record.error === "string" && record.error.length > 0) return record.error;
     const failure = record.failure;
     if (typeof failure === "object" && failure !== null) {
       const message = (failure as Record<string, unknown>).message;
@@ -249,6 +257,105 @@ export async function steerAgent(
     return { kind: "refused", message: refusalMessage(response, "The note was not queued.") };
   }
   return { kind: "steered" };
+}
+
+/**
+ * Takes every queued note for this client to send as the next prompt. The
+ * host empties the queue in the same step, so another client watching the
+ * same turn end gets none of them and cannot send them twice.
+ */
+export async function takeAgentSteering(
+  session: OpenedLocalControlSession,
+  threadId: string,
+): Promise<
+  HostRefusal | { readonly kind: "taken"; readonly notes: ReadonlyArray<NativeHarnessSteeringNote> }
+> {
+  const response = await session.send({
+    path: `${sessionsPath(threadId)}/steering`,
+    method: "POST",
+    body: { kind: "take" },
+  });
+  if (response.status !== 200) {
+    return { kind: "refused", message: refusalMessage(response, "The notes could not be taken.") };
+  }
+  return { kind: "taken", notes: decodeNativeHarnessSteeringTaken(response.body).taken };
+}
+
+/**
+ * The thread's Side Chat, opened by the host: one read-only Chat thread about
+ * this thread, the same one the app's Side Chat panel shows. It can read the
+ * source but never message, steer, or approve it.
+ */
+export async function openAgentSideChat(
+  session: OpenedLocalControlSession,
+  sourceThreadId: string,
+): Promise<HostRefusal | { readonly kind: "opened"; readonly sidecar: SideChatSidecar }> {
+  const requestId = randomUUID();
+  const response = await session.send({
+    path: "/api/thread-mentions/commands",
+    method: "POST",
+    body: { kind: "open-side-chat", requestId, sourceThreadId },
+  });
+  if (response.status !== 200) {
+    return { kind: "refused", message: refusalMessage(response, "Side Chat could not open.") };
+  }
+  const result = decodeThreadMentionCommandResult(response.body);
+  if (result.kind === "side-chat-opened") return { kind: "opened", sidecar: result.sidecar };
+  return {
+    kind: "refused",
+    message:
+      result.kind === "failed" && result.reason === "unsupported-mode"
+        ? "This thread has no Side Chat."
+        : result.kind === "failed" && result.reason === "unavailable"
+          ? "Side Chat is unavailable on this host right now."
+          : "Side Chat could not open for this thread.",
+  };
+}
+
+export async function readAgentGoal(
+  session: OpenedLocalControlSession,
+  threadId: string,
+): Promise<HostRefusal | { readonly kind: "goal"; readonly goal: ThreadGoal | null }> {
+  const response = await session.send({
+    path: `/api/goals?threadId=${encodeURIComponent(threadId)}`,
+    method: "GET",
+  });
+  if (response.status !== 200) {
+    return { kind: "refused", message: refusalMessage(response, "The goal could not be read.") };
+  }
+  const goal = (response.body as { readonly goal?: unknown } | undefined)?.goal;
+  return {
+    kind: "goal",
+    goal: goal === null || goal === undefined ? null : decodeThreadGoal(goal),
+  };
+}
+
+/**
+ * Revises the goal's objective against the version this client read. A goal
+ * another client changed first is refused as `stale`, never overwritten, so
+ * the person sees the newer goal before deciding again.
+ */
+export async function reviseAgentGoal(
+  session: OpenedLocalControlSession,
+  goal: ThreadGoal,
+  objective: string,
+): Promise<HostRefusal | { readonly kind: "stale" } | { readonly kind: "revised" }> {
+  const response = await session.send({
+    path: "/api/goals/commands",
+    method: "POST",
+    body: {
+      kind: "revise-thread-goal",
+      threadId: String(goal.threadId),
+      expectedVersion: goal.version,
+      goalId: String(goal.id),
+      revisionId: randomUUID(),
+      objective,
+    },
+  });
+  if (response.status === 200) return { kind: "revised" };
+  const category = (response.body as { readonly category?: unknown } | undefined)?.category;
+  if (response.status === 409 && category === "stale") return { kind: "stale" };
+  return { kind: "refused", message: refusalMessage(response, "The goal was not revised.") };
 }
 
 export function isAgentTurnRunning(thread: ChatThreadView | undefined): boolean {

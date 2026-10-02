@@ -1092,21 +1092,53 @@ export const NativeHarnessSteeringDelivered = Schema.Struct({
 }).annotations(strict);
 export type NativeHarnessSteeringDelivered = typeof NativeHarnessSteeringDelivered.Type;
 
-/** Delivered notes dropped at a turn's end, or every note dropped by the person. */
-export const NativeHarnessSteeringCleared = Schema.Struct({
-  sessionId: NativeHarnessSessionId,
-  which: Schema.Literal("delivered", "all"),
-}).annotations(strict);
+/**
+ * Notes leaving the queue: the delivered ones at a turn's end, every note
+ * when the person drops them all, or the queued notes one client took to
+ * send as the next prompt. A take names its notes so replay removes exactly
+ * those, not whatever else was queued by then.
+ */
+export const NativeHarnessSteeringCleared = Schema.Union(
+  Schema.Struct({
+    sessionId: NativeHarnessSessionId,
+    which: Schema.Literal("delivered", "all"),
+  }).annotations(strict),
+  Schema.Struct({
+    sessionId: NativeHarnessSessionId,
+    which: Schema.Literal("taken"),
+    noteIds: Schema.Array(Schema.UUID).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_NATIVE_HARNESS_STEERING_NOTES),
+    ),
+  }).annotations(strict),
+);
 export type NativeHarnessSteeringCleared = typeof NativeHarnessSteeringCleared.Type;
 
+/**
+ * What a person does with the steering queue. `noteId` makes a retried queue
+ * land once: the client mints it, and a note the queue already holds is not
+ * queued again. `take` hands every queued note to exactly one caller, so two
+ * clients watching the same turn end cannot both send them as the next
+ * prompt.
+ */
 export const SteerNativeHarnessSession = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("queue"),
     text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
+    noteId: Schema.optional(Schema.UUID),
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("clear") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("take") }).annotations(strict),
 );
 export type SteerNativeHarnessSession = typeof SteerNativeHarnessSession.Type;
+
+/** The notes a `take` removed from the queue, oldest first, for the caller to send. */
+export const NativeHarnessSteeringTaken = Schema.Struct({
+  taken: Schema.Array(NativeHarnessSteeringNote).pipe(
+    Schema.maxItems(MAX_NATIVE_HARNESS_STEERING_NOTES),
+  ),
+});
+export type NativeHarnessSteeringTaken = typeof NativeHarnessSteeringTaken.Type;
 
 export const AnswerNativeHarnessQuestion = Schema.Struct({
   questionId: NativeHarnessQuestionId,
@@ -1335,6 +1367,9 @@ export const decodeNativeHarnessApprovalDecisionResult = Schema.decodeUnknownSyn
   NativeHarnessApprovalDecisionResult,
 );
 export const decodeSteerNativeHarnessSession = Schema.decodeUnknownSync(SteerNativeHarnessSession);
+export const decodeNativeHarnessSteeringTaken = Schema.decodeUnknownSync(
+  NativeHarnessSteeringTaken,
+);
 export const decodeNativeHarnessQuestion = Schema.decodeUnknownSync(NativeHarnessQuestion);
 export const decodeAnswerNativeHarnessQuestion = Schema.decodeUnknownSync(
   AnswerNativeHarnessQuestion,

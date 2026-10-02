@@ -3,6 +3,7 @@ import {
   decodeDecideNativeHarnessApproval,
   decodeSteerNativeHarnessSession,
   type NativeHarnessApprovalDecisionResult,
+  type NativeHarnessSteeringNote,
   type SteerNativeHarnessSession,
   decodeNativeHarnessSessionCommand,
   type NativeHarnessQuestionAnswerResult,
@@ -43,7 +44,12 @@ export interface NativeHarnessSessionRouteDependencies {
   readonly steer?: (input: {
     readonly threadId: string;
     readonly command: SteerNativeHarnessSession;
-  }) => "queued" | "cleared" | "full" | "no-session";
+  }) =>
+    | "queued"
+    | "cleared"
+    | "full"
+    | "no-session"
+    | { readonly taken: ReadonlyArray<NativeHarnessSteeringNote> };
   /** Settles a pending question from any surface; the outcome says why it could not. */
   readonly answerQuestion?: (input: {
     readonly threadId: string;
@@ -195,6 +201,13 @@ export function createNativeHarnessSessionRouteHandler(
         return failure("Native harness steering note is invalid.", 400, origin);
       }
       const outcome = dependencies.steer?.({ threadId, command }) ?? "no-session";
+      if (typeof outcome === "object") {
+        return json(
+          { view: dependencies.store.read(threadId) ?? null, taken: outcome.taken },
+          200,
+          origin,
+        );
+      }
       if (outcome === "full") return failure("The steering queue is full.", 409, origin);
       if (outcome === "no-session") {
         return failure(

@@ -5296,8 +5296,11 @@ export function startOctantServer(
           nativeHarnessSessionsLive.clearSteering(threadId, "all");
           return "cleared";
         }
+        if (command.kind === "take") {
+          return { taken: nativeHarnessSessionsLive.takeSteering(threadId) };
+        }
         return nativeHarnessSessionsLive.queueSteering(threadId, {
-          id: randomUUID(),
+          id: command.noteId ?? randomUUID(),
           text: command.text,
           status: "queued",
           at: new Date().toISOString() as never,

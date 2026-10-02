@@ -408,6 +408,49 @@ describe("native harness session store", () => {
     expect(open().read(threadId)?.steering).toEqual([]);
   });
 
+  it("queues a retried note once and hands the leftover notes to only one of two clients, across a restart", () => {
+    const threadId = "00000000-0000-4000-8000-000000000028";
+    const connection = openConnection();
+    const uuid = uuidFactory();
+    const open = () =>
+      new NativeHarnessSessionStore({
+        journal: journalFor(connection),
+        uuid,
+        actor,
+        clock: () => now,
+      });
+    const note = (n: number, text: string) =>
+      ({
+        id: `00000000-0000-4000-8000-00000000008${n}`,
+        text,
+        status: "queued",
+        at: now,
+      }) as never;
+    const before = open();
+    before.ensure({
+      threadId,
+      mode: "code",
+      leadSlotId: "default" as never,
+      lead: candidate("big") as never,
+    });
+    expect(before.queueSteering(threadId, note(1, "Use sqlite."))).toBe("queued");
+    // The client did not hear back and sent the same note again.
+    expect(before.queueSteering(threadId, note(1, "Use sqlite."))).toBe("queued");
+    before.queueSteering(threadId, note(2, "Skip the docs."));
+
+    const after = open();
+    expect(after.read(threadId)?.steering).toHaveLength(2);
+    // Two terminals see the turn end together; only the first one sends the notes.
+    expect(after.takeSteering(threadId).map((entry) => entry.text)).toEqual([
+      "Use sqlite.",
+      "Skip the docs.",
+    ]);
+    expect(after.takeSteering(threadId)).toEqual([]);
+    // A retry that arrives after the note was taken is still the same note.
+    expect(after.queueSteering(threadId, note(1, "Use sqlite."))).toBe("queued");
+    expect(open().read(threadId)?.steering).toEqual([]);
+  });
+
   it("refuses a steering note for a thread with no harness run yet", () => {
     const store = new NativeHarnessSessionStore({
       journal: journalFor(openConnection()),

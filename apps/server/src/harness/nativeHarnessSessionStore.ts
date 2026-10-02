@@ -47,6 +47,8 @@ const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
+/** Enough to catch a client's retries of its recent notes; older ids are long settled. */
+const MAX_REMEMBERED_STEERING_IDS = 64;
 
 type JournalPort = Pick<Journal, "append" | "replay">;
 
@@ -84,6 +86,12 @@ export class NativeHarnessSessionStore {
   readonly #activeTools = new Map<string, NativeHarnessToolCall[]>();
   /** Notes typed while the lead works, per thread, rebuilt from the journal; delivered at the next tool step. */
   readonly #steering = new Map<string, NativeHarnessSteeringNote[]>();
+  /**
+   * Ids of notes this thread has ever queued, newest last, so a retried queue
+   * whose first attempt already landed is not queued twice — even after the
+   * note was delivered or taken. Rebuilt from the queued events on replay.
+   */
+  readonly #steeringIds = new Map<string, string[]>();
 
   constructor(options: NativeHarnessSessionStoreOptions) {
     this.#journal = options.journal;
@@ -280,6 +288,7 @@ export class NativeHarnessSessionStore {
   ): "queued" | "full" | "no-session" {
     const record = this.#records.get(threadId);
     if (record === undefined) return "no-session";
+    if ((this.#steeringIds.get(threadId) ?? []).includes(String(note.id))) return "queued";
     const queued = (this.#steering.get(threadId) ?? []).filter(
       (entry) => entry.status === "queued",
     );
@@ -308,6 +317,27 @@ export class NativeHarnessSessionStore {
     return queued.map((entry) => entry.text);
   }
 
+  /**
+   * Every queued note, removed from the queue for one caller to send as the
+   * next prompt. The queue is emptied in the same step, so a second client
+   * taking at the same turn end gets nothing rather than a duplicate prompt.
+   */
+  takeSteering(threadId: string): ReadonlyArray<NativeHarnessSteeringNote> {
+    const record = this.#records.get(threadId);
+    const queued = (this.#steering.get(threadId) ?? []).filter(
+      (entry) => entry.status === "queued",
+    );
+    if (record === undefined || queued.length === 0) return [];
+    const noteIds = queued.map((entry) => entry.id);
+    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringCleared, {
+      sessionId: record.session.id,
+      which: "taken",
+      noteIds,
+    });
+    this.#applySteeringCleared(threadId, { which: "taken", noteIds });
+    return queued;
+  }
+
   clearSteering(threadId: string, which: "delivered" | "all"): void {
     const record = this.#records.get(threadId);
     const notes = this.#steering.get(threadId) ?? [];
@@ -320,7 +350,7 @@ export class NativeHarnessSessionStore {
       sessionId: record.session.id,
       which,
     });
-    this.#applySteeringCleared(threadId, which);
+    this.#applySteeringCleared(threadId, { which });
   }
 
   #applySteeringQueued(threadId: string, note: NativeHarnessSteeringNote): void {
@@ -328,6 +358,10 @@ export class NativeHarnessSessionStore {
     notes.push(note);
     while (notes.length > MAX_NATIVE_HARNESS_STEERING_NOTES) notes.shift();
     this.#steering.set(threadId, notes);
+    const ids = this.#steeringIds.get(threadId) ?? [];
+    ids.push(String(note.id));
+    while (ids.length > MAX_REMEMBERED_STEERING_IDS) ids.shift();
+    this.#steeringIds.set(threadId, ids);
   }
 
   #applySteeringDelivered(threadId: string, noteIds: ReadonlyArray<string>): void {
@@ -342,13 +376,21 @@ export class NativeHarnessSessionStore {
     );
   }
 
-  #applySteeringCleared(threadId: string, which: "delivered" | "all"): void {
-    const remaining =
-      which === "all"
-        ? []
-        : (this.#steering.get(threadId) ?? []).filter((entry) => entry.status === "queued");
+  #applySteeringCleared(
+    threadId: string,
+    cleared:
+      | { readonly which: "delivered" | "all" }
+      | { readonly which: "taken"; readonly noteIds: ReadonlyArray<string> },
+  ): void {
+    const notes = this.#steering.get(threadId) ?? [];
+    let remaining: ReadonlyArray<NativeHarnessSteeringNote>;
+    if (cleared.which === "taken") {
+      const taken = new Set(cleared.noteIds.map(String));
+      remaining = notes.filter((entry) => !taken.has(String(entry.id)));
+    } else if (cleared.which === "all") remaining = [];
+    else remaining = notes.filter((entry) => entry.status === "queued");
     if (remaining.length === 0) this.#steering.delete(threadId);
-    else this.#steering.set(threadId, remaining);
+    else this.#steering.set(threadId, [...remaining]);
   }
 
   askQuestion(threadId: string, question: NativeHarnessQuestion): void {
@@ -557,7 +599,7 @@ export class NativeHarnessSessionStore {
     } else if (eventName === names.steeringDelivered) {
       this.#applySteeringDelivered(threadId, decodeNativeHarnessSteeringDelivered(payload).noteIds);
     } else if (eventName === names.steeringCleared) {
-      this.#applySteeringCleared(threadId, decodeNativeHarnessSteeringCleared(payload).which);
+      this.#applySteeringCleared(threadId, decodeNativeHarnessSteeringCleared(payload));
     }
   }
 }

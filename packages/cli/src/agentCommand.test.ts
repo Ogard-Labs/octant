@@ -194,4 +194,70 @@ describe("octant agent command line", () => {
     expect(stdout.text()).toContain("Left as a suggestion.");
     expect(stdout.text()).toContain("Created chat thread 00000000-0000-4000-8000-000000000077");
   });
+
+  it("refuses to overwrite a goal another screen revised first and shows the newer one", async () => {
+    const stdout = sink();
+    const stderr = sink();
+    const threadId = "00000000-0000-4000-8000-000000000020";
+    const goal = (version: number, objective: string) => ({
+      id: "00000000-0000-4000-8000-000000000051",
+      threadId,
+      revisionId: "00000000-0000-4000-8000-000000000052",
+      objective,
+      status: "active",
+      budget: {},
+      usage: { tokensUsed: 0, elapsedMs: 0, turnsUsed: 0 },
+      evidence: [],
+      criteria: [
+        { id: "c1", text: "Tests pass", status: "met" },
+        { id: "c2", text: "Docs updated", status: "unmet" },
+      ],
+      createdAt: "2026-10-02T12:00:00.000Z",
+      updatedAt: "2026-10-02T12:00:00.000Z",
+      version,
+    });
+    let reads = 0;
+    const revisions: unknown[] = [];
+    const code = await runAgentCliCommand({
+      command: {
+        action: "agent",
+        threadId,
+        json: false,
+        plain: true,
+        last: false,
+        quiet: false,
+        mode: "chat",
+      },
+      session: session((request) => {
+        if (request.path.startsWith("/api/goals?")) {
+          reads += 1;
+          // The second read is after another screen revised the goal.
+          return {
+            status: 200,
+            body: {
+              goal: reads === 1 ? goal(3, "Ship the parser") : goal(4, "Ship the lexer"),
+              history: [],
+            },
+          };
+        }
+        if (request.path === "/api/goals/commands") {
+          revisions.push(request.body);
+          return {
+            status: 409,
+            body: { error: "Goal version conflict; reload and retry.", category: "stale" },
+          };
+        }
+        return { status: 404, body: {} };
+      }),
+      stdin: Readable.from(["/goal revise Ship the parser and its docs\n", "/quit\n"]),
+      stdout,
+      stderr,
+    });
+    expect(code).toBe(0);
+    expect(revisions).toMatchObject([
+      { kind: "revise-thread-goal", expectedVersion: 3, objective: "Ship the parser and its docs" },
+    ]);
+    expect(stderr.text()).toContain("nothing was revised");
+    expect(stderr.text()).toContain("Goal (active): Ship the lexer · 1 of 2 criteria met");
+  });
 });
