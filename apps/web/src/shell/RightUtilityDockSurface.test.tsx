@@ -113,14 +113,14 @@ describe("the right sidebar surface", () => {
       />,
     );
 
-    const thread = screen.getByRole("group", { name: "This thread" });
+    const thread = screen.getByRole("group", { name: "Thread tools" });
     const workspace = screen.getByRole("group", { name: "Workspace" });
     const devices = screen.getByRole("group", { name: "Devices" });
     expect(within(thread).getByRole("button", { name: "Environment" })).toBeVisible();
     expect(within(workspace).getByRole("button", { name: "Browser" })).toBeVisible();
     expect(within(workspace).getByRole("button", { name: "Terminal" })).toBeVisible();
     expect(within(devices).getByRole("button", { name: "Android emulator" })).toBeVisible();
-    expect(screen.getAllByText(/^(This thread|Workspace|Devices)$/)).toHaveLength(3);
+    expect(screen.getAllByText(/^(Thread tools|Workspace|Devices)$/)).toHaveLength(3);
   });
 
   it("selects and hides open tools without stopping their strip", async () => {

@@ -1058,7 +1058,7 @@ only, from the board's observed changed files, never a stale observation) gives
 the file count with +/- totals and an Open review button for the Review tool.
 Every row is a fact the window already holds; an unknown value is left out, not
 shown as a placeholder. Below it, the launcher shows only capability-valid
-tool rows, grouped under This thread, Workspace, and Devices when more than
+tool rows, grouped under Thread tools, Workspace, and Devices when more than
 one group has a tool; the head's Add tool action appears once a tab is open, since with
 none open the body is already the list of tools to add. The bottom panel uses
 the same compact tool-tab and Add tool model for Review, Terminal, Browser,

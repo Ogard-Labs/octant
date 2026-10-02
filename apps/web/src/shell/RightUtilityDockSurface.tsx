@@ -166,7 +166,7 @@ function DockWorkMap(props: {
   return (
     <section aria-labelledby="dock-work-map-title" className="dock-work-map">
       {/* The panel is plainly the list of tools, and the groups plainly go
-          together; a visible "Tools" over "This thread" said both again. The
+          together; a visible "Tools" over the facts block said both again. The
           names stay for readers who navigate by heading and group. */}
       <h2 className="visually-hidden" id="dock-work-map-title">
         Tools
