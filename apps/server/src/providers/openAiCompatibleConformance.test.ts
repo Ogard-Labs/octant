@@ -90,7 +90,7 @@ describe("OpenAI-compatible provider conformance", () => {
       },
       resume: {
         sessionId: interruptedSessionId,
-        resumeCursor: { driverKind: "openai-compatible", value: "unsupported" },
+        resumeCursor: { driverKind: "openai-compatible", value: interruptedSessionId },
         executionPolicy: "approval-gated",
       },
       staleResume: {
@@ -106,7 +106,7 @@ describe("OpenAI-compatible provider conformance", () => {
       },
       expectedEventKinds: ["interrupted"],
       expectedFailureCategories: {
-        staleResume: "unsupported",
+        staleResume: "stale-resume",
         unknownApproval: "unsupported",
         unknownUserInput: "unsupported",
       },

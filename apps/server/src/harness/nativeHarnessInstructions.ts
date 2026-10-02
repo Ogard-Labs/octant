@@ -33,3 +33,38 @@ export const NATIVE_HARNESS_INSTRUCTIONS_BLOCK: ProviderContextBlock = {
 export function nativeHarnessInstructions(mode: OctantMode): ReadonlyArray<ProviderContextBlock> {
   return [NATIVE_HARNESS_INSTRUCTIONS_BLOCK, { kind: "instructions", text: MODE[mode] }];
 }
+
+/**
+ * What each Octant tool is for, in one line. A tool's own schema says how to
+ * call it; this says when to reach for it, which a model meeting `octant_apple`
+ * for the first time cannot infer from a parameter list.
+ */
+const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
+  octant_agents: "start, watch, and stop helper agents that work beside you",
+  octant_agent_message: "send a short message to another thread or helper agent",
+  octant_android: "drive an Android emulator: boot, install, launch, tap, type, screenshot",
+  octant_apple: "build, test, and run Apple apps and drive the iOS Simulator",
+  octant_board: "read this Project's work board",
+  octant_browser: "drive the built-in browser: open pages, read them, click, type, screenshot",
+  octant_canvas: "write substantial deliverables as a Canvas document the user can open",
+  octant_computer: "operate macOS apps on the user's desktop",
+  octant_create_image: "generate an image; it costs money, so only when asked",
+  octant_github: "read the repository's issues, pull requests, and projects",
+  octant_offer_side_task: "offer the user a separate task for work outside this request",
+  octant_propose_thread: "propose a new thread on the Project board",
+  octant_terminal: "run long-lived processes such as dev servers and read their output",
+  octant_thread_message: "ask a mentioned thread something and wait for its reply",
+};
+
+/**
+ * A guide to the Octant tools this turn offers, or undefined when it offers
+ * none. Names are sorted so the same tool set always yields the same bytes and
+ * the provider's prefix cache survives.
+ */
+export function nativeHarnessToolGuide(toolNames: ReadonlyArray<string>): string | undefined {
+  const lines = [...new Set(toolNames)]
+    .filter((name) => OCTANT_TOOL_PURPOSE[name] !== undefined)
+    .sort()
+    .map((name) => `- ${name}: ${OCTANT_TOOL_PURPOSE[name]}`);
+  return lines.length === 0 ? undefined : ["Octant tools in this session:", ...lines].join("\n");
+}
