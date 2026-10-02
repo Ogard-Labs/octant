@@ -1151,9 +1151,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         computer.consume(computerUseSelection);
         textareaRef.current?.focus();
         return true;
-      } catch {
+      } catch (error) {
         await discardUploadedAttachments();
-        setErrorMessage("The Work turn could not be started.");
+        setErrorMessage(
+          error instanceof WorkTurnClientFailure
+            ? error.message
+            : "The Work turn could not be started.",
+        );
         return false;
       } finally {
         setCreating(false);

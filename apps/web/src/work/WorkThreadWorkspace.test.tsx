@@ -1628,6 +1628,41 @@ describe("WorkThreadWorkspace", () => {
     expect(await screen.findByAltText("second.png")).toBeInTheDocument();
   });
 
+  it("shows the host's reason when it refuses to start a Work turn", async () => {
+    const user = userEvent.setup();
+    const reason =
+      "This thread has used all 2 of its turns. Raise or clear its spend ceiling in Usage to continue.";
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns: [workTurn({ status: "completed" })] })),
+      startFirstTurn: vi.fn(async () => {
+        throw new WorkTurnClientFailure(reason, 409);
+      }),
+      putAttachment: vi.fn(),
+      discardAttachment: vi.fn(async () => undefined),
+    };
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    const composer = await screen.findByLabelText("Work prompt");
+    await user.type(composer, "one more pass");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+    expect(screen.queryByText("The Work turn could not be started.")).not.toBeInTheDocument();
+  });
+
   it("restores the captured Work context when the deferred send is refused", async () => {
     const user = userEvent.setup();
     const mentionedThreadId = "90000000-0000-4000-8000-000000000001" as MentionableThreadId;
