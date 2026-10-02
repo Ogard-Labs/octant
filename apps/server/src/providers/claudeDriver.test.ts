@@ -3967,6 +3967,39 @@ describe("Claude exact resume", () => {
     await recreated.close();
   });
 
+  it("resumes a session on the model its thread was switched to and records that model", async () => {
+    const f = harness();
+    const observed = f.runtimeRegistry.observedState(instanceId);
+    const firstModel = observed?.models[0];
+    if (observed === undefined || firstModel === undefined) throw new Error("no observed model");
+    const switchedModelId = "claude-opus" as ProviderModelId;
+    f.runtimeRegistry.setObservedState({
+      ...observed,
+      models: [...observed.models, { ...firstModel, id: switchedModelId, displayName: "Opus" }],
+    });
+    const acquired = await acquire(f.driver);
+    const started = await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: started.resumeCursor!,
+        executionPolicy: "approval-gated",
+        modelId: switchedModelId,
+      }),
+    );
+
+    expect(f.opens.at(-1)).toMatchObject({
+      model: switchedModelId,
+      resumeSessionId: "sdk-session-1",
+    });
+    expect(f.resumeIdentities.get("sdk-session-1")?.modelId).toBe(switchedModelId);
+    await acquired.close();
+  });
+
   it("fails closed for missing identity/history and mismatched root or auth source", async () => {
     const f = harness("subscription");
     const acquired = await acquire(f.driver);

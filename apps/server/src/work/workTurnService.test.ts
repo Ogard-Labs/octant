@@ -1369,6 +1369,47 @@ describe("WorkTurnService", () => {
     },
   );
 
+  it.each([true, false])(
+    "keeps a native Work conversation after a switch to another model of the same provider only when it can: %s",
+    async (canSwitch) => {
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        input.onSessionReady?.({
+          sessionId: input.providerSessionId,
+          resumeCursor: { driverKind: "pi" as const, value: "native-work" },
+        });
+        return { kind: "completed" as const, response: "Earlier response" };
+      });
+      const fixture = serviceFixture({
+        nativeConversation: true,
+        turnRuntime: { run },
+        supportsModelSwitch: () => canSwitch,
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      const switchedModel = decodeProviderModelId("model-b");
+      const previousThread = await fixture.threads.read();
+      fixture.threads.read.mockResolvedValue({ ...previousThread, modelId: switchedModel });
+      const followUp = fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+        turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+        authority: { ...startCommand().authority, modelId: switchedModel },
+        prompt: "Continue",
+      });
+      if (!canSwitch) {
+        await expect(followUp).rejects.toThrow("native session cannot be recovered");
+        expect(run).toHaveBeenCalledTimes(1);
+        return;
+      }
+      await expect(followUp).resolves.toMatchObject({ kind: "accepted" });
+      await fixture.waitForIdle();
+      expect(run.mock.calls[1]?.[0]).toMatchObject({
+        providerSessionId: run.mock.calls[0]?.[0].providerSessionId,
+        resumeCursor: { driverKind: "pi", value: "native-work" },
+      });
+    },
+  );
+
   it.each([
     { nativeFirst: true, retirePrevious: false },
     { nativeFirst: false, retirePrevious: false },
@@ -1539,6 +1580,7 @@ function serviceFixture(
     readonly turnRuntime?: WorkTurnRuntimePort;
     readonly attachments?: WorkAttachmentStore;
     readonly supportsAttachments?: () => boolean;
+    readonly supportsModelSwitch?: () => boolean;
     readonly contextHarness?: ContextHarnessService;
     readonly contextFacts?: ProviderDriver["contextFacts"];
     readonly safeInputBudgetTokens?: number;
@@ -1692,6 +1734,9 @@ function serviceFixture(
     ...(options.supportsAttachments === undefined
       ? {}
       : { supportsAttachments: options.supportsAttachments }),
+    ...(options.supportsModelSwitch === undefined
+      ? {}
+      : { supportsModelSwitch: options.supportsModelSwitch }),
     turnRuntime: options.turnRuntime ?? defaultRuntime,
     ...(options.safeInputBudgetTokens === undefined
       ? {}
