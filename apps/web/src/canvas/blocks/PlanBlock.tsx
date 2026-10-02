@@ -6,7 +6,8 @@ import type {
   CanvasStatusTone,
 } from "@octant/contracts/canvas";
 import { Circle, CircleCheck, CircleDot, CircleSlash, type LucideIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { OctantMenu } from "../../ui/base/OctantMenu";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../../ui/base/OctantToggleGroup";
 import { TimelineList, type TimelineEntry } from "./StructuredBlocks";
 
@@ -40,12 +41,70 @@ const VIEW_LABEL: Record<CanvasPlanView, string> = {
 };
 
 /**
+ * Lets a person change a task's status on a surface that can journal it. The
+ * host records each change as a new Canvas version and the agent reads it on
+ * its next turn; absent, the plan is read-only.
+ */
+export interface PlanTaskRuntime {
+  readonly onSetStatus: (
+    blockId: string,
+    taskId: string,
+    status: CanvasPlanTaskStatus,
+  ) => Promise<
+    { readonly kind: "accepted" } | { readonly kind: "denied"; readonly message: string }
+  >;
+}
+
+type SetStatus = (task: CanvasPlanTask, status: CanvasPlanTaskStatus) => void;
+
+/**
  * A plan the person and the agent both work in. The block's `view` is the
  * author's preference; switching here is a reading choice and never revises
- * the Canvas.
+ * the Canvas. A status change shows at once and is undone with a reason if
+ * the host refuses it.
  */
-export function PlanBlock({ block }: { readonly block: CanvasPlanBlock }) {
-  const [view, setView] = useState<CanvasPlanView>(block.view ?? "checklist");
+export function PlanBlock({
+  block: authored,
+  runtime,
+}: {
+  readonly block: CanvasPlanBlock;
+  readonly runtime?: PlanTaskRuntime;
+}) {
+  const [view, setView] = useState<CanvasPlanView>(authored.view ?? "checklist");
+  const [chosen, setChosen] = useState<ReadonlyMap<string, CanvasPlanTaskStatus>>(new Map());
+  const [notice, setNotice] = useState<string>();
+  // A reloaded block carries the host's statuses; local choices give way.
+  useEffect(() => setChosen(new Map()), [authored]);
+  const block: CanvasPlanBlock = {
+    ...authored,
+    tasks: authored.tasks.map((task) => {
+      const status = chosen.get(String(task.taskId));
+      return status === undefined ? task : { ...task, status };
+    }),
+  };
+  const setStatus: SetStatus | undefined =
+    runtime === undefined
+      ? undefined
+      : (task, status) => {
+          if (task.status === status) return;
+          setNotice(undefined);
+          setChosen((current) => new Map(current).set(String(task.taskId), status));
+          void runtime
+            .onSetStatus(String(authored.blockId), String(task.taskId), status)
+            // A save that throws (a dropped connection, a failed reload) is
+            // a refusal too: the mark goes back and the person is told.
+            .catch(() => ({
+              kind: "denied" as const,
+              message: "The status could not be saved. Try again.",
+            }))
+            .then((result) => {
+              if (result.kind === "accepted") return;
+              // Back to what the person saw before this change, which may be
+              // an accepted change the reload has not delivered yet.
+              setChosen((current) => new Map(current).set(String(task.taskId), task.status));
+              setNotice(result.message);
+            });
+        };
   const done = block.tasks.filter((task) => task.status === "done").length;
   return (
     <div className="canvas-plan">
@@ -70,14 +129,25 @@ export function PlanBlock({ block }: { readonly block: CanvasPlanBlock }) {
           ))}
         </OctantToggleGroup>
       </div>
-      {view === "checklist" ? <PlanChecklist block={block} /> : null}
-      {view === "kanban" ? <PlanBoard block={block} /> : null}
-      {view === "timeline" ? <PlanTimeline block={block} /> : null}
+      {notice === undefined ? null : (
+        <p className="canvas-plan__notice" role="status">
+          {notice}
+        </p>
+      )}
+      {view === "checklist" ? <PlanChecklist block={block} setStatus={setStatus} /> : null}
+      {view === "kanban" ? <PlanBoard block={block} setStatus={setStatus} /> : null}
+      {view === "timeline" ? <PlanTimeline block={block} setStatus={setStatus} /> : null}
     </div>
   );
 }
 
-function PlanChecklist({ block }: { readonly block: CanvasPlanBlock }) {
+function PlanChecklist({
+  block,
+  setStatus,
+}: {
+  readonly block: CanvasPlanBlock;
+  readonly setStatus: SetStatus | undefined;
+}) {
   const titles = taskTitles(block);
   return (
     <div className="canvas-plan__phases">
@@ -97,7 +167,12 @@ function PlanChecklist({ block }: { readonly block: CanvasPlanBlock }) {
             ) : (
               <ul className="canvas-plan__tasks">
                 {tasks.map((task) => (
-                  <PlanTaskRow key={task.taskId} task={task} titles={titles} />
+                  <PlanTaskRow
+                    key={task.taskId}
+                    setStatus={setStatus}
+                    task={task}
+                    titles={titles}
+                  />
                 ))}
               </ul>
             )}
@@ -109,17 +184,18 @@ function PlanChecklist({ block }: { readonly block: CanvasPlanBlock }) {
 }
 
 function PlanTaskRow({
+  setStatus,
   task,
   titles,
 }: {
+  readonly setStatus: SetStatus | undefined;
   readonly task: CanvasPlanTask;
   readonly titles: ReadonlyMap<string, string>;
 }) {
-  const Icon = STATUS_ICON[task.status];
   const waitsOn = (task.dependsOn ?? []).map((taskId) => titles.get(taskId) ?? taskId);
   return (
     <li className="canvas-plan__task" data-status={task.status}>
-      <Icon aria-hidden="true" className="canvas-plan__task-mark" size={16} strokeWidth={1.8} />
+      <PlanStatusMark setStatus={setStatus} task={task} />
       <div className="canvas-plan__task-body">
         <span className="canvas-plan__task-title">
           {task.title}
@@ -131,6 +207,44 @@ function PlanTaskRow({
         )}
       </div>
     </li>
+  );
+}
+
+/**
+ * The task's status mark. Where the host can journal a change it opens the
+ * four statuses; otherwise it is only a picture of the status.
+ */
+function PlanStatusMark({
+  setStatus,
+  task,
+}: {
+  readonly setStatus: SetStatus | undefined;
+  readonly task: CanvasPlanTask;
+}) {
+  const Icon = STATUS_ICON[task.status];
+  const mark = (
+    <Icon aria-hidden="true" className="canvas-plan__task-mark" size={16} strokeWidth={1.8} />
+  );
+  if (setStatus === undefined) return mark;
+  return (
+    <OctantMenu
+      items={STATUS_ORDER.map((status) => {
+        const StatusIcon = STATUS_ICON[status];
+        return {
+          value: status,
+          label: STATUS_LABEL[status],
+          icon: <StatusIcon aria-hidden="true" size={16} strokeWidth={1.8} />,
+        };
+      })}
+      onValueChange={(value) => {
+        const status = STATUS_ORDER.find((candidate) => candidate === value);
+        if (status !== undefined) setStatus(task, status);
+      }}
+      trigger={mark}
+      triggerClassName="canvas-plan__status-trigger"
+      triggerLabel={`${task.title}: ${STATUS_LABEL[task.status]}. Change status`}
+      value={task.status}
+    />
   );
 }
 
@@ -153,7 +267,13 @@ function PlanTaskFacts({
   return <span className="canvas-plan__task-facts">{facts.join(" · ")}</span>;
 }
 
-function PlanBoard({ block }: { readonly block: CanvasPlanBlock }) {
+function PlanBoard({
+  block,
+  setStatus,
+}: {
+  readonly block: CanvasPlanBlock;
+  readonly setStatus: SetStatus | undefined;
+}) {
   const phaseTitles = new Map(block.phases.map((phase) => [phase.phaseId, phase.title]));
   return (
     <div className="canvas-plan__board">
@@ -168,7 +288,10 @@ function PlanBoard({ block }: { readonly block: CanvasPlanBlock }) {
             <ul className="canvas-plan__cards">
               {tasks.map((task) => (
                 <li className="canvas-plan__card" data-status={task.status} key={task.taskId}>
-                  <span className="canvas-plan__task-title">{task.title}</span>
+                  <span className="canvas-plan__card-head">
+                    <PlanStatusMark setStatus={setStatus} task={task} />
+                    <span className="canvas-plan__task-title">{task.title}</span>
+                  </span>
                   <span className="canvas-plan__task-facts">
                     {[phaseTitles.get(task.phaseId), task.owner?.label, task.estimate]
                       .filter((fact): fact is string => fact !== undefined)
@@ -188,7 +311,13 @@ function PlanBoard({ block }: { readonly block: CanvasPlanBlock }) {
  * Dated tasks reuse the timeline renderer; tasks without a date follow in
  * dependency order, so what can start first is read first.
  */
-function PlanTimeline({ block }: { readonly block: CanvasPlanBlock }) {
+function PlanTimeline({
+  block,
+  setStatus,
+}: {
+  readonly block: CanvasPlanBlock;
+  readonly setStatus: SetStatus | undefined;
+}) {
   const phaseTitles = new Map(block.phases.map((phase) => [phase.phaseId, phase.title]));
   const dated = block.tasks
     .map((task) => ({ task, startAt: task.startAt ?? task.dueAt }))
@@ -216,7 +345,7 @@ function PlanTimeline({ block }: { readonly block: CanvasPlanBlock }) {
           <h4 className="canvas-plan__phase-title">Not scheduled</h4>
           <ul className="canvas-plan__tasks">
             {undated.map((task) => (
-              <PlanTaskRow key={task.taskId} task={task} titles={titles} />
+              <PlanTaskRow key={task.taskId} setStatus={setStatus} task={task} titles={titles} />
             ))}
           </ul>
         </section>

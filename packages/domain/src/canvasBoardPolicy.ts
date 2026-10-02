@@ -21,10 +21,12 @@ import {
   CanvasCommentResolved,
   CanvasDiagramLayoutReviseCommand,
   CanvasDiagramNodePosition,
+  CanvasPlanTaskReviseCommand,
   decodeCanvasComment,
   decodeCanvasCommentCommand,
   decodeCanvasCommentReply,
   decodeCanvasDiagramLayoutReviseCommand,
+  decodeCanvasPlanTaskReviseCommand,
 } from "@octant/contracts/canvas-board";
 import { decodeCanvasVersionId } from "@octant/contracts/canvas";
 import type { UtcTimestamp } from "@octant/contracts/events";
@@ -43,7 +45,9 @@ export type CanvasBoardRejectionCode =
   | "unknown-reply-target"
   | "not-a-diagram"
   | "unknown-node"
-  | "missing-position";
+  | "missing-position"
+  | "not-a-plan"
+  | "unknown-task";
 
 export interface CanvasBoardRejected {
   readonly kind: "rejected";
@@ -439,5 +443,88 @@ export function admitCanvasDiagramLayoutRevision(
     );
   }
 
+  return { kind: "accepted", next };
+}
+
+// ── Plan task revision ───────────────────────────────────────────────────────
+
+/**
+ * Record a person's change to one plan task's status as a new immutable
+ * version. Only that task's status changes; the agent sees it when it next
+ * reads the Canvas, because every revision shares one history.
+ */
+export function admitCanvasPlanTaskRevision(
+  input: unknown,
+  current: CanvasVersion,
+  nextVersionId: unknown,
+  now: UtcTimestamp,
+): CanvasDiagramLayoutRevisionAdmitResult {
+  let command: CanvasPlanTaskReviseCommand;
+  try {
+    command = decodeCanvasPlanTaskReviseCommand(input);
+  } catch {
+    return reject("malformed-request", "Canvas plan task revision command is malformed.");
+  }
+  if (!isUserOrAgent(command.actor)) {
+    return reject("unauthorized", "Canvas plan task revision must be authored by a user or agent.");
+  }
+  if (command.expectedSequence !== current.sequence) {
+    return reject("stale-version", "Canvas plan task revision targets a stale Canvas sequence.");
+  }
+  let decodedNextVersionId: ReturnType<typeof decodeCanvasVersionId>;
+  try {
+    decodedNextVersionId = decodeCanvasVersionId(nextVersionId);
+  } catch {
+    return reject("malformed-request", "Canvas plan task revision version id is invalid.");
+  }
+  if (
+    String(command.canvasId) !== String(current.canvasId) ||
+    String(command.versionId) !== String(decodedNextVersionId) ||
+    String(decodedNextVersionId) === String(current.versionId)
+  ) {
+    return reject("malformed-request", "Canvas plan task revision targets the wrong version.");
+  }
+
+  const block = current.definition.blocks.find(
+    (candidate) => String(candidate.blockId) === String(command.blockId),
+  );
+  if (block?.kind !== "plan") {
+    return reject("not-a-plan", "Canvas plan task revision target is not a plan block.");
+  }
+  if (!block.tasks.some((task) => String(task.taskId) === String(command.taskId))) {
+    return reject("unknown-task", "Canvas plan task revision names a task the plan does not hold.");
+  }
+  const revisedBlock: CanvasBlock = {
+    ...block,
+    tasks: block.tasks.map((task) =>
+      String(task.taskId) === String(command.taskId) ? { ...task, status: command.status } : task,
+    ),
+  };
+
+  let validatedDefinition: typeof current.definition;
+  try {
+    validatedDefinition = validateCanvasDefinition({
+      ...current.definition,
+      blocks: replaceBlock(current.definition.blocks, String(command.blockId), revisedBlock),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Canvas definition validation failed.";
+    return reject("oversized-payload", message);
+  }
+
+  const next: CanvasVersion = {
+    schemaVersion: current.schemaVersion,
+    canvasId: current.canvasId,
+    versionId: decodedNextVersionId,
+    sequence: current.sequence + 1,
+    definition: validatedDefinition,
+    createdBy: command.actor,
+    createdAt: now,
+  };
+  try {
+    decodeCanvasVersion(next);
+  } catch {
+    return reject("malformed-request", "Canvas plan task revision produced an invalid version.");
+  }
   return { kind: "accepted", next };
 }

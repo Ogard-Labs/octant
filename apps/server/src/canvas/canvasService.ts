@@ -5,6 +5,7 @@ import {
   decodeCanvasActor,
   decodeCanvasCreateResult,
   decodeCanvasDiagramLayoutReviseCommand,
+  decodeCanvasPlanTaskReviseCommand,
   decodeCanvasId,
   decodeCanvasReviseRequest,
   decodeCanvasReviseResult,
@@ -20,10 +21,12 @@ import {
   type CanvasActionResult,
   type CanvasActor,
   type CanvasVersion,
+  type CanvasVersionId,
   type CanvasBoardDenialCode,
   type CanvasCreateResult,
   type CanvasDiagramLayoutReviseCommand,
   type CanvasDiagramLayoutReviseResult,
+  type CanvasPlanTaskReviseCommand,
   type CanvasThreadReferenceCard,
   type CanvasGetOutcome,
   type CanvasHistoryOutcome,
@@ -46,6 +49,7 @@ import {
   CanvasRevisionPolicyRejected,
   admitCanvasCreate,
   admitCanvasDiagramLayoutRevision,
+  admitCanvasPlanTaskRevision,
   admitCanvasRevise,
   authorizeCanvasCreateRequest,
   buildCreateVersion,
@@ -476,6 +480,57 @@ export class CanvasService {
         message: "Canvas layout revision is malformed.",
       };
     }
+    return this.#appendBoardRevision(
+      command,
+      context,
+      project,
+      "Canvas layout revision is not authorized in this workspace.",
+      (current) =>
+        admitCanvasDiagramLayoutRevision(command, current, command.versionId, this.#clock()),
+    );
+  }
+
+  /**
+   * Record a person's change to one plan task's status as a new version. Like
+   * a drag, it comes from the person's own window, so the host records it as
+   * that person whatever actor the request names.
+   */
+  revisePlanTask(
+    requestInput: unknown,
+    context: CanvasAuthorizationContext,
+    project: CanvasProjectRecord | undefined,
+  ): CanvasDiagramLayoutReviseResult {
+    let command: CanvasPlanTaskReviseCommand;
+    try {
+      command = { ...decodeCanvasPlanTaskReviseCommand(requestInput), actor: this.#actor };
+    } catch {
+      return {
+        kind: "denied",
+        denialCode: "malformed-request",
+        message: "Canvas plan task revision is malformed.",
+      };
+    }
+    return this.#appendBoardRevision(
+      command,
+      context,
+      project,
+      "Canvas plan revision is not authorized in this workspace.",
+      (current) => admitCanvasPlanTaskRevision(command, current, command.versionId, this.#clock()),
+    );
+  }
+
+  /**
+   * The shared tail of a person's board revision: authorize against the
+   * Canvas, answer a retried version id with the version already journaled,
+   * then admit and append.
+   */
+  #appendBoardRevision(
+    command: Readonly<{ canvasId: CanvasId; versionId: CanvasVersionId }>,
+    context: CanvasAuthorizationContext,
+    project: CanvasProjectRecord | undefined,
+    unauthorizedMessage: string,
+    admit: (current: CanvasVersion) => ReturnType<typeof admitCanvasPlanTaskRevision>,
+  ): CanvasDiagramLayoutReviseResult {
     const canvasId = decodeCanvasId(command.canvasId);
     const entry = this.#projection.getById(canvasId);
     if (entry === undefined) {
@@ -486,11 +541,7 @@ export class CanvasService {
       };
     }
     if (!this.#authorize(entry, context, project)) {
-      return {
-        kind: "denied",
-        denialCode: "unauthorized",
-        message: "Canvas layout revision is not authorized in this workspace.",
-      };
+      return { kind: "denied", denialCode: "unauthorized", message: unauthorizedMessage };
     }
     const already = entry.versions.find(
       (version) => String(version.versionId) === String(command.versionId),
@@ -503,12 +554,7 @@ export class CanvasService {
         sequence: already.sequence,
       };
     }
-    const admitted = admitCanvasDiagramLayoutRevision(
-      command,
-      entry.currentVersion,
-      command.versionId,
-      this.#clock(),
-    );
+    const admitted = admit(entry.currentVersion);
     if (admitted.kind === "rejected") {
       return {
         kind: "denied",
@@ -1487,6 +1533,8 @@ function layoutDenialCode(code: CanvasBoardRejectionCode): CanvasBoardDenialCode
     case "not-a-diagram":
     case "unknown-node":
     case "missing-position":
+    case "not-a-plan":
+    case "unknown-task":
       return code;
     case "comment-budget-exceeded":
     case "unknown-comment":

@@ -3,6 +3,8 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import {
   CANVAS_SCHEMA_VERSION,
   decodeCanvasActor,
+  decodeCanvasBlockId,
+  decodeCanvasPlanTaskId,
   decodeCanvasVersionId,
   type CanvasDefinition,
   type CanvasId,
@@ -46,6 +48,7 @@ import {
 } from "./CanvasRefreshPanel";
 import { CanvasVersionHistoryPanel, ReviseCanvasDraft } from "./CanvasRevisionPanel";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
+import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { createCanvasActionRuntime } from "./canvasActionRuntime";
 import { CanvasView } from "./CanvasView";
 import { CanvasVersionCompare } from "./CanvasVersionCompare";
@@ -270,6 +273,55 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           };
         }
         return { kind: "denied", message: result.message };
+      },
+    };
+  }, [
+    expectedSequence,
+    loadCanvas,
+    loadHistory,
+    props.client,
+    props.tab.canvasId,
+    reviseBase,
+    selectedVersionId,
+    tipVersionId,
+  ]);
+
+  // A plan task's status is a version of the selected head only, for the same
+  // reasons as a drag: the host refuses an older version as stale.
+  const planRuntime = useMemo<PlanTaskRuntime | undefined>(() => {
+    const revisePlanTask = props.client?.revisePlanTask;
+    if (
+      revisePlanTask === undefined ||
+      reviseBase === null ||
+      selectedVersionId === undefined ||
+      String(selectedVersionId) !== tipVersionId
+    ) {
+      return undefined;
+    }
+    return {
+      onSetStatus: async (blockId, taskId, status) => {
+        const result = await revisePlanTask({
+          kind: "canvas-plan-task-revise",
+          canvasId: props.tab.canvasId,
+          versionId: decodeCanvasVersionId(globalThis.crypto.randomUUID()),
+          blockId: decodeCanvasBlockId(blockId),
+          taskId: decodeCanvasPlanTaskId(taskId),
+          status,
+          actor: LOCAL_PERSON,
+          expectedSequence,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          issuedAt: decodeUtcTimestamp(new Date().toISOString()),
+        });
+        await loadCanvas();
+        await loadHistory();
+        if (result.kind === "accepted") return { kind: "accepted" };
+        return {
+          kind: "denied",
+          message:
+            result.denialCode === "stale-version"
+              ? "The plan changed on the host and was reloaded. Set the status again to keep it."
+              : result.message,
+        };
       },
     };
   }, [
@@ -605,6 +657,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           input={definition}
           {...(actionRuntime === undefined ? {} : { actionRuntime })}
           {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+          {...(planRuntime === undefined ? {} : { planRuntime })}
           {...(commentsAvailable ? { comments: { openCounts, onOpen: openCommentsOn } } : {})}
         />
         {commentsClient !== undefined && reviseBase !== null ? (

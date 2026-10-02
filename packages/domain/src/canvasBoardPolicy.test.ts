@@ -16,6 +16,7 @@ import {
   EMPTY_CANVAS_COMMENT_STATE,
   admitCanvasCommentCommand,
   admitCanvasDiagramLayoutRevision,
+  admitCanvasPlanTaskRevision,
   applyCanvasCommentEvent,
   type CanvasCommentState,
 } from "./canvasBoardPolicy";
@@ -634,5 +635,81 @@ describe("Canvas comment replay", () => {
     if (!("deletedBy" in deleted)) throw new Error("expected deletion");
     const gone = applyCanvasCommentEvent(once, { kind: "deleted", event: deleted });
     expect(gone).toEqual({ sequence: 4, comments: [], replies: [] });
+  });
+});
+
+function planVersion(): CanvasVersion {
+  return decodeCanvasVersion({
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    canvasId: ids.canvas,
+    versionId: ids.version,
+    sequence: 1,
+    definition: {
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      title: "Plan",
+      provenance,
+      sourceManifest: [],
+      blocks: [
+        {
+          blockId: "plan-block",
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "plan",
+          title: "Launch plan",
+          phases: [{ phaseId: "build", title: "Build" }],
+          tasks: [
+            { taskId: "api", phaseId: "build", title: "Ship the API", status: "doing" },
+            { taskId: "docs", phaseId: "build", title: "Write the docs", status: "todo" },
+          ],
+        },
+      ],
+    },
+    createdBy: agent,
+    createdAt: now,
+  });
+}
+
+function planTaskCommand(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: "canvas-plan-task-revise",
+    canvasId: ids.canvas,
+    versionId: ids.nextVersion,
+    blockId: "plan-block",
+    taskId: "api",
+    status: "done",
+    actor,
+    expectedSequence: 1,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    issuedAt: now,
+    ...overrides,
+  };
+}
+
+describe("Canvas plan task revision policy", () => {
+  it("records a person checking a task off as a new version that changes only that task", () => {
+    const result = admitCanvasPlanTaskRevision(
+      planTaskCommand(),
+      planVersion(),
+      ids.nextVersion,
+      "2026-08-01T21:00:01.000Z" as never,
+    );
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    expect(result.next.sequence).toBe(2);
+    expect(result.next.createdBy).toEqual(actor);
+    const block = result.next.definition.blocks[0];
+    if (block?.kind !== "plan") throw new Error("expected a plan");
+    expect(block.tasks.map((task) => [task.taskId, task.status])).toEqual([
+      ["api", "done"],
+      ["docs", "todo"],
+    ]);
+  });
+
+  it("refuses a stale sequence, a block that is not a plan, and a task the plan does not hold", () => {
+    const current = planVersion();
+    const admit = (overrides: Record<string, unknown>) =>
+      admitCanvasPlanTaskRevision(planTaskCommand(overrides), current, ids.nextVersion, now);
+    expect(admit({ expectedSequence: 2 })).toMatchObject({ code: "stale-version" });
+    expect(admit({ blockId: "missing" })).toMatchObject({ code: "not-a-plan" });
+    expect(admit({ taskId: "ghost" })).toMatchObject({ code: "unknown-task" });
   });
 });

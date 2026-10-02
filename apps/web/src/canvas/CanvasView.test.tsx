@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CANVAS_SCHEMA_VERSION, decodeCanvasDefinition } from "@octant/contracts/canvas";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CanvasDocument } from "./CanvasDocument";
 import { CanvasView } from "./CanvasView";
 import { canvasFixture, unsafeLinkFixture } from "./test-fixtures";
@@ -160,6 +160,44 @@ describe("Canvas accessibility basics", () => {
     expect(
       within(screen.getByRole("region", { name: "Not scheduled" })).getByText("Write the docs"),
     ).toBeVisible();
+  });
+
+  it("lets a person set a plan task's status and puts it back with the host's reason when refused", async () => {
+    const user = userEvent.setup();
+    const definition = decodeCanvasDefinition({
+      ...canvasFixture,
+      blocks: [
+        {
+          blockId: "plan-1",
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "plan",
+          title: "Launch plan",
+          phases: [{ phaseId: "build", title: "Build" }],
+          tasks: [{ taskId: "api", phaseId: "build", title: "Ship the API", status: "doing" }],
+        },
+      ],
+    });
+    const onSetStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "accepted" })
+      .mockResolvedValueOnce({ kind: "denied", message: "The plan changed on the host." })
+      .mockRejectedValueOnce(new Error("connection dropped"));
+    render(<CanvasDocument definition={definition} planRuntime={{ onSetStatus }} />);
+
+    await user.click(screen.getByRole("button", { name: "Ship the API: Doing. Change status" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Done" }));
+    expect(onSetStatus).toHaveBeenLastCalledWith("plan-1", "api", "done");
+    expect(await screen.findByText("1 of 1 done")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Ship the API: Done. Change status" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Blocked" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("The plan changed on the host.");
+    expect(screen.getByRole("button", { name: "Ship the API: Done. Change status" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Ship the API: Done. Change status" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "To do" }));
+    expect(await screen.findByText("The status could not be saved. Try again.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Ship the API: Done. Change status" })).toBeVisible();
   });
 
   it("says a diagram in words for a reader who cannot see the drawing", () => {
