@@ -833,10 +833,6 @@
   white-space: nowrap;
 }
 
-.projects-directory__status[data-status="Available"] {
-  color: var(--octant-success-text);
-}
-
 .projects-directory__status[data-status="Relink required"] {
   color: var(--octant-warning-text);
 }
@@ -963,7 +959,7 @@
 
 .project-overview__availability {
   flex: none;
-  color: var(--octant-success-text);
+  color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
 

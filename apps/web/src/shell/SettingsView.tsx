@@ -2,12 +2,14 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
   type RefObject,
 } from "react";
+import { settleSettingsRail } from "./settingsRailScroll";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
@@ -431,6 +433,10 @@ export function SettingsView(props: SettingsViewProps) {
   const currentSectionLabel = hasQuery
     ? "Search settings"
     : (SECTION_LABELS[route.activeSection] ?? "Settings");
+  const navigationScroll = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (navigationScroll.current !== null) settleSettingsRail(navigationScroll.current);
+  }, [route.activeSection]);
   const navigation = (
     <SettingsNavigation
       activeSection={route.activeSection}
@@ -475,7 +481,9 @@ export function SettingsView(props: SettingsViewProps) {
               onChange={props.onSearchChange}
               value={props.search}
             />
-            <div className="settings-view__navigation-scroll">{navigation}</div>
+            <div className="settings-view__navigation-scroll" ref={navigationScroll}>
+              {navigation}
+            </div>
             {props.onBack === undefined ? null : (
               <footer className="settings-view__sidebar-footer">
                 <OctantButton

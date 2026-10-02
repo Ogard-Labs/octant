@@ -1508,8 +1508,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .workspace-pane__title {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 8 auto;
+  min-width: 12ch;
   overflow: hidden;
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
@@ -1517,14 +1517,18 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   white-space: nowrap;
 }
 
-/* The Project the thread works in. Chips are short, so they keep their own
-   width and the title gives up room instead; a chip truncates only past 30%
-   of the handle. Shrinking the chips first, or in proportion to a long
-   title, left "octant…" and "m…", two chips that no longer named anything. */
+/* The Project the thread works in. Chips are short, so the title gives up
+   room first (it shrinks eight times as fast and stops at 12ch); a chip
+   truncates only once the title is down to that, or past its own cap. The
+   cap is in ch, not a share of the handle: the handle shrink-wraps its
+   content, so 30% of it clipped "octant-qa-code-repo" to "octant-qa-code-re…"
+   beside a short title with most of the header empty. Shrinking the chips
+   first, or in proportion to a long title, left "octant…" and "m…", two chips
+   that no longer named anything. */
 .workspace-pane__context {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: 30%;
+  max-width: 32ch;
   overflow: hidden;
   padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
@@ -1539,11 +1543,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 /* The branch is its own chip beside the Project's, in the identifier face so
    a branch name never reads as prose. It keeps its width like the Project
-   chip, under the same 30% cap. */
+   chip, under the same title-first shrinking and a cap of its own. */
 .workspace-pane__branch {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: 30%;
+  max-width: 28ch;
   overflow: hidden;
   padding: 0 var(--oct-space-2);
   color: var(--oct-meta);

@@ -77,7 +77,7 @@ import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
-import { providerModelLabel } from "../providers/providerModelLabel";
+import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
 import {
   TurnHeader,
   TurnTime,
@@ -1270,9 +1270,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           renderItem={(message, index) => {
             const previousAssistant = previousAssistantMessage(messages, index);
             const handoff =
-              message.role === "assistant" &&
-              previousAssistant !== undefined &&
-              providerIdentityChanged(previousAssistant, message);
+              message.role === "assistant" && previousAssistant !== undefined
+                ? providerIdentityChange(previousAssistant, message)
+                : undefined;
             const activity =
               message.role === "assistant" && message.operationId !== undefined
                 ? props.controller.turnActivity.get(String(message.operationId))
@@ -1300,10 +1300,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 : undefined;
             return (
               <div className="code-thread-workspace__row">
-                {handoff ? (
+                {handoff === "provider" ? (
                   <OctantSeparatorWithLabel aria-label="Provider handoff">
                     Provider handoff ·{" "}
                     {providerModelLabel(providerGroups, {
+                      providerInstanceId: message.providerInstanceId,
+                      modelId: message.modelId,
+                    })}
+                  </OctantSeparatorWithLabel>
+                ) : handoff === "model" ? (
+                  <OctantSeparatorWithLabel aria-label="Model switch">
+                    Switched to{" "}
+                    {modelDisplayName(providerGroups, {
                       providerInstanceId: message.providerInstanceId,
                       modelId: message.modelId,
                     })}
@@ -2070,22 +2078,22 @@ function codeTurnSettlement(status: CodeTurnStatus): TurnSettlement | "idle" {
   return "completed";
 }
 
-function providerIdentityChanged(
+function providerIdentityChange(
   previous: CodeController["conversation"][number],
   current: CodeController["conversation"][number],
-): boolean {
+): "provider" | "model" | undefined {
   if (
     previous.providerInstanceId === undefined ||
     previous.modelId === undefined ||
     current.providerInstanceId === undefined ||
     current.modelId === undefined
   ) {
-    return false;
+    return undefined;
   }
-  return (
-    previous.providerInstanceId !== current.providerInstanceId ||
-    previous.modelId !== current.modelId
-  );
+  // Same provider with a new model is a model switch; calling it a provider
+  // handoff read as if the provider had changed.
+  if (previous.providerInstanceId !== current.providerInstanceId) return "provider";
+  return previous.modelId !== current.modelId ? "model" : undefined;
 }
 
 /**
