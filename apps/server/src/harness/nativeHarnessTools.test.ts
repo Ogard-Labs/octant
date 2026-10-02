@@ -269,6 +269,8 @@ describe("native harness tools", () => {
       readonly exitCodes: Record<string, number>;
       readonly facts?: Partial<ToolCallLiveFacts>;
       readonly approvals?: NativeHarnessToolPorts["approvals"];
+      /** Runs while the check command runs, as a concurrent change would. */
+      readonly duringRun?: (goals: GoalService) => Promise<void>;
     }) {
       const goals = new GoalService({ store: new InMemoryGoalStore() });
       await goals.execute({
@@ -287,6 +289,7 @@ describe("native harness tools", () => {
         shell: {
           run: async ({ command }) => {
             commands.push(command);
+            await input.duringRun?.(goals);
             return {
               status: "ran",
               exitCode: input.exitCodes[command] ?? 1,
@@ -393,6 +396,33 @@ describe("native harness tools", () => {
         error: "criterion-changed",
       });
       expect(commands).toEqual([]);
+    });
+
+    it("records nothing when the criterion was reworded while its check ran", async () => {
+      const { goals, tools } = await goalFixture({
+        criteria: [{ text: "Parser tests pass", check: "bun run test parser" }],
+        exitCodes: { "bun run test parser": 0 },
+        duringRun: async (live) => {
+          const goal = live.read(threadId).goal;
+          if (goal === null) return;
+          await live.execute({
+            kind: "revise-thread-goal",
+            threadId,
+            expectedVersion: goal.version,
+            goalId: goal.id,
+            revisionId: "00000000-0000-4000-8000-000000000398",
+            objective: goal.objective,
+            criteria: [{ text: "Parser and lexer tests pass", check: "bun run test parser" }],
+          });
+        },
+      });
+      expect((await call(tools, "goal-check", { criterionId: "c1" })).result).toMatchObject({
+        error: "criterion-changed",
+      });
+      const goal = goals.read(threadId).goal;
+      expect(goal?.status).toBe("active");
+      expect(goal?.criteria?.[0]).toMatchObject({ status: "unmet" });
+      expect(goal?.evidence).toEqual([]);
     });
 
     it("completes the goal on a second try when the first completion lost a race", async () => {

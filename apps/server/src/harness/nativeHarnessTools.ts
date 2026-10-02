@@ -615,6 +615,7 @@ async function checkGoalCriterion(
   const met = run.status === "ran" && run.exitCode === 0;
   const changed = await port.recordCheck({
     criterionId,
+    checked: { text: criterion.text, check: criterion.check },
     outcome: met ? "met" : "unmet",
     evidence: {
       kind: "test",

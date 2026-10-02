@@ -20,6 +20,8 @@ export interface NativeHarnessGoalPort {
   /** Records one criterion's observed check, and completes the goal when that was the last one. */
   readonly recordCheck: (input: {
     readonly criterionId: string;
+    /** The criterion exactly as it was when its check ran; a different one takes no result. */
+    readonly checked: { readonly text: string; readonly check: string };
     readonly outcome: "met" | "unmet";
     readonly evidence: ThreadGoalEvidenceRef;
   }) => Promise<NativeHarnessGoalChange>;
@@ -70,10 +72,22 @@ export function createNativeHarnessGoalPort(options: {
         criteria,
       });
     },
-    recordCheck: async ({ criterionId, outcome, evidence }) => {
+    recordCheck: async ({ criterionId, checked: ran, outcome, evidence }) => {
       const goal = read();
       if (goal === undefined) return noGoal();
       if (goal.status === "complete") return completed();
+      // The goal may have moved while the command ran — spend recorded, other
+      // criteria checked — and that is fine. What may not move is this
+      // criterion: a result proves the statement and command that ran, never
+      // a revised one that happens to keep the same id.
+      const live = (goal.criteria ?? []).find((criterion) => criterion.id === criterionId);
+      if (live === undefined || live.text !== ran.text || live.check !== ran.check) {
+        return {
+          status: "refused",
+          reason: "criterion-changed",
+          message: `${criterionId} changed while its check ran, so the result was not recorded. Read the goal and check it again.`,
+        };
+      }
       const checked = await run({
         kind: "record-thread-goal-check",
         expectedVersion: goal.version,
