@@ -225,6 +225,12 @@ export interface DraftThreadWorkspaceProps {
    * continue, the Linear loader for Up next, names for cards, and the openers
    * the sections hand off to. Absent on hosts that have none of it.
    */
+  /**
+   * Text handed over from elsewhere, such as a Canvas plan task, to start the
+   * composer with. Nothing is created until the person sends it.
+   */
+  readonly pendingPrompt?: string;
+  readonly onPendingPromptConsumed?: () => void;
   readonly codeHome?: Pick<
     CodeHomeProps,
     | "loadAssignedLinearIssues"
@@ -339,6 +345,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       revision: (current?.revision ?? 0) + 1,
     }));
   };
+  const pendingPrompt = props.pendingPrompt;
+  const onPendingPromptConsumed = props.onPendingPromptConsumed;
+  useEffect(() => {
+    if (pendingPrompt === undefined) return;
+    setPromptRequest((current) => ({
+      text: pendingPrompt,
+      revision: (current?.revision ?? 0) + 1,
+    }));
+    onPendingPromptConsumed?.();
+  }, [pendingPrompt]);
   const pendingIssue = props.codeHome?.pendingIssue;
   const onPendingIssueConsumed = props.codeHome?.onPendingIssueConsumed;
   useEffect(() => {
@@ -831,6 +847,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       <>
         <WorkComposerAdapter
           greetingName={props.greetingName}
+          {...(promptRequest === undefined ? {} : { promptRequest })}
           reviewCount={props.homeStart?.reviewCount}
           runningCount={props.homeStart?.runningCount}
           {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}

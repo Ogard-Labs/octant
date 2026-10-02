@@ -896,6 +896,9 @@ function LaunchedShell(
   const [projectsListOpen, setProjectsListOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
   const [pendingIssue, setPendingIssue] = useState<RepositoryIssueRow>();
+  // A Canvas plan task handed to a new thread: the draft opens with it written
+  // in, and the person sends it like any new thread.
+  const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
   const [linearIssuesRead, setLinearIssuesRead] = useState(false);
@@ -6539,6 +6542,18 @@ function LaunchedShell(
                     {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
                     onPinTerminal={(request) => void zen.pinTerminal(request)}
                     onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
+                    onStartPlanTask={(request) => {
+                      closeWorkspaceReaders();
+                      setDraftError(undefined);
+                      setDraftPendingMessage(undefined);
+                      resetNewTaskDraft(request.mode);
+                      setPendingDraftPrompt(request.prompt);
+                      void controller.openDraftThread(request.mode, request.projectId);
+                    }}
+                    {...(pendingDraftPrompt === undefined
+                      ? {}
+                      : { draftPendingPrompt: pendingDraftPrompt })}
+                    onDraftPendingPromptConsumed={() => setPendingDraftPrompt(undefined)}
                     onDockResearch={(request) =>
                       void zen.dockResearch({
                         thread: {

@@ -5,8 +5,9 @@ import type {
   CanvasPlanView,
   CanvasStatusTone,
 } from "@octant/contracts/canvas";
-import { Circle, CircleCheck, CircleDot, CircleSlash, type LucideIcon } from "lucide-react";
+import { Circle, CircleCheck, CircleDot, CircleSlash, Play, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantMenu } from "../../ui/base/OctantMenu";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../../ui/base/OctantToggleGroup";
 import { TimelineList, type TimelineEntry } from "./StructuredBlocks";
@@ -46,16 +47,28 @@ const VIEW_LABEL: Record<CanvasPlanView, string> = {
  * its next turn; absent, the plan is read-only.
  */
 export interface PlanTaskRuntime {
-  readonly onSetStatus: (
+  readonly onSetStatus?: (
     blockId: string,
     taskId: string,
     status: CanvasPlanTaskStatus,
   ) => Promise<
     { readonly kind: "accepted" } | { readonly kind: "denied"; readonly message: string }
   >;
+  /**
+   * Opens a new-thread draft with the task written into it. It never creates
+   * a thread: the person sends the draft, as with any new thread.
+   */
+  readonly onStartTask?: (planTitle: string, task: CanvasPlanTask) => void;
 }
 
 type SetStatus = (task: CanvasPlanTask, status: CanvasPlanTaskStatus) => void;
+type StartTask = (task: CanvasPlanTask) => void;
+
+/** What the task rows and cards may do; each is absent where the host cannot. */
+interface PlanTaskActions {
+  readonly setStatus: SetStatus | undefined;
+  readonly startTask: StartTask | undefined;
+}
 
 /**
  * A plan the person and the agent both work in. The block's `view` is the
@@ -82,15 +95,15 @@ export function PlanBlock({
       return status === undefined ? task : { ...task, status };
     }),
   };
+  const onSetStatus = runtime?.onSetStatus;
   const setStatus: SetStatus | undefined =
-    runtime === undefined
+    onSetStatus === undefined
       ? undefined
       : (task, status) => {
           if (task.status === status) return;
           setNotice(undefined);
           setChosen((current) => new Map(current).set(String(task.taskId), status));
-          void runtime
-            .onSetStatus(String(authored.blockId), String(task.taskId), status)
+          void onSetStatus(String(authored.blockId), String(task.taskId), status)
             // A save that throws (a dropped connection, a failed reload) is
             // a refusal too: the mark goes back and the person is told.
             .catch(() => ({
@@ -105,6 +118,11 @@ export function PlanBlock({
               setNotice(result.message);
             });
         };
+  const onStartTask = runtime?.onStartTask;
+  const actions: PlanTaskActions = {
+    setStatus,
+    startTask: onStartTask === undefined ? undefined : (task) => onStartTask(authored.title, task),
+  };
   const done = block.tasks.filter((task) => task.status === "done").length;
   return (
     <div className="canvas-plan">
@@ -134,19 +152,19 @@ export function PlanBlock({
           {notice}
         </p>
       )}
-      {view === "checklist" ? <PlanChecklist block={block} setStatus={setStatus} /> : null}
-      {view === "kanban" ? <PlanBoard block={block} setStatus={setStatus} /> : null}
-      {view === "timeline" ? <PlanTimeline block={block} setStatus={setStatus} /> : null}
+      {view === "checklist" ? <PlanChecklist actions={actions} block={block} /> : null}
+      {view === "kanban" ? <PlanBoard actions={actions} block={block} /> : null}
+      {view === "timeline" ? <PlanTimeline actions={actions} block={block} /> : null}
     </div>
   );
 }
 
 function PlanChecklist({
+  actions,
   block,
-  setStatus,
 }: {
+  readonly actions: PlanTaskActions;
   readonly block: CanvasPlanBlock;
-  readonly setStatus: SetStatus | undefined;
 }) {
   const titles = taskTitles(block);
   return (
@@ -167,12 +185,7 @@ function PlanChecklist({
             ) : (
               <ul className="canvas-plan__tasks">
                 {tasks.map((task) => (
-                  <PlanTaskRow
-                    key={task.taskId}
-                    setStatus={setStatus}
-                    task={task}
-                    titles={titles}
-                  />
+                  <PlanTaskRow actions={actions} key={task.taskId} task={task} titles={titles} />
                 ))}
               </ul>
             )}
@@ -184,18 +197,18 @@ function PlanChecklist({
 }
 
 function PlanTaskRow({
-  setStatus,
+  actions,
   task,
   titles,
 }: {
-  readonly setStatus: SetStatus | undefined;
+  readonly actions: PlanTaskActions;
   readonly task: CanvasPlanTask;
   readonly titles: ReadonlyMap<string, string>;
 }) {
   const waitsOn = (task.dependsOn ?? []).map((taskId) => titles.get(taskId) ?? taskId);
   return (
     <li className="canvas-plan__task" data-status={task.status}>
-      <PlanStatusMark setStatus={setStatus} task={task} />
+      <PlanStatusMark setStatus={actions.setStatus} task={task} />
       <div className="canvas-plan__task-body">
         <span className="canvas-plan__task-title">
           {task.title}
@@ -206,6 +219,7 @@ function PlanTaskRow({
           <p className="canvas-plan__task-notes">{task.notes}</p>
         )}
       </div>
+      <PlanStartTask startTask={actions.startTask} task={task} />
     </li>
   );
 }
@@ -248,6 +262,34 @@ function PlanStatusMark({
   );
 }
 
+/**
+ * Hands an open task to a new thread. It only opens a draft with the task
+ * written in; the person sends it like any new thread, so starting a task
+ * never creates a thread or grants authority by itself.
+ */
+function PlanStartTask({
+  startTask,
+  task,
+}: {
+  readonly startTask: StartTask | undefined;
+  readonly task: CanvasPlanTask;
+}) {
+  if (startTask === undefined || task.status === "done") return null;
+  return (
+    <OctantButton
+      aria-label={`Start ${task.title} in a new thread`}
+      className="canvas-plan__start"
+      onClick={() => startTask(task)}
+      size="sm"
+      type="button"
+      variant="ghost"
+    >
+      <Play aria-hidden="true" size={12} strokeWidth={1.8} />
+      Start
+    </OctantButton>
+  );
+}
+
 function PlanTaskFacts({
   task,
   waitsOn,
@@ -268,11 +310,11 @@ function PlanTaskFacts({
 }
 
 function PlanBoard({
+  actions,
   block,
-  setStatus,
 }: {
+  readonly actions: PlanTaskActions;
   readonly block: CanvasPlanBlock;
-  readonly setStatus: SetStatus | undefined;
 }) {
   const phaseTitles = new Map(block.phases.map((phase) => [phase.phaseId, phase.title]));
   return (
@@ -289,7 +331,7 @@ function PlanBoard({
               {tasks.map((task) => (
                 <li className="canvas-plan__card" data-status={task.status} key={task.taskId}>
                   <span className="canvas-plan__card-head">
-                    <PlanStatusMark setStatus={setStatus} task={task} />
+                    <PlanStatusMark setStatus={actions.setStatus} task={task} />
                     <span className="canvas-plan__task-title">{task.title}</span>
                   </span>
                   <span className="canvas-plan__task-facts">
@@ -312,11 +354,11 @@ function PlanBoard({
  * dependency order, so what can start first is read first.
  */
 function PlanTimeline({
+  actions,
   block,
-  setStatus,
 }: {
+  readonly actions: PlanTaskActions;
   readonly block: CanvasPlanBlock;
-  readonly setStatus: SetStatus | undefined;
 }) {
   const phaseTitles = new Map(block.phases.map((phase) => [phase.phaseId, phase.title]));
   const dated = block.tasks
@@ -345,7 +387,7 @@ function PlanTimeline({
           <h4 className="canvas-plan__phase-title">Not scheduled</h4>
           <ul className="canvas-plan__tasks">
             {undated.map((task) => (
-              <PlanTaskRow key={task.taskId} setStatus={setStatus} task={task} titles={titles} />
+              <PlanTaskRow actions={actions} key={task.taskId} task={task} titles={titles} />
             ))}
           </ul>
         </section>

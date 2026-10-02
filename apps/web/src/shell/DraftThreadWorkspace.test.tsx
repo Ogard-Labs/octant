@@ -277,6 +277,25 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.queryByText("Octant Work")).not.toBeInTheDocument();
   });
 
+  it("opens a Work draft with a handed-over task already written and creates nothing until it is sent", async () => {
+    const onCreateThread = vi.fn();
+    const onPendingPromptConsumed = vi.fn();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="work"
+        onCreateThread={onCreateThread}
+        onPendingPromptConsumed={onPendingPromptConsumed}
+        pendingPrompt="Work on the task Write the docs from the plan Launch."
+      />,
+    );
+    expect(
+      await screen.findByDisplayValue("Work on the task Write the docs from the plan Launch."),
+    ).toBeVisible();
+    expect(onPendingPromptConsumed).toHaveBeenCalledTimes(1);
+    expect(onCreateThread).not.toHaveBeenCalled();
+  });
+
   it("offers Open terminal on Code's start screen but never on Work's", async () => {
     const user = userEvent.setup();
     const onOpenTerminal = vi.fn();

@@ -208,7 +208,7 @@
 
 .canvas-plan__task {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: start;
   gap: var(--oct-space-2);
   padding: var(--oct-space-1) 0;
@@ -240,6 +240,10 @@
 
 .canvas-plan__status-trigger .canvas-plan__task-mark {
   margin-top: 0;
+}
+
+.canvas-plan__start {
+  align-self: start;
 }
 
 .canvas-plan__card-head {

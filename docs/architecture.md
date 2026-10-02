@@ -264,7 +264,12 @@ must be a plan, the task must exist, the sequence must be the head). As with a
 drag, the host stamps its own `local-user` actor and the renderer shows the
 change at once, putting it back with the host's reason when refused. Agent
 revisions and person changes share one history, so the agent reads the change
-when it next reads the Canvas.
+when it next reads the Canvas. In a Work or Code Canvas, an open task offers
+Start, which opens a new-thread draft in the Canvas's own Project with the task
+(and its acceptance notes) written in. It creates nothing and grants nothing: the
+person sends the draft like any new thread, and the thread gets that mode's
+ordinary authority. A Chat Canvas offers no Start, because a Chat Project has no
+folder to bind.
 Descriptions explain the existing presentation flows and distinguish creation,
 queued jobs, and work proposals from opened previews or completed work.
 Work also includes a short, budgeted artifact instruction in its required

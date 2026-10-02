@@ -261,6 +261,67 @@ describe("CanvasWorkspaceTab", () => {
     );
   });
 
+  it("starts a plan task as a prefilled draft in the Canvas's Project, never as a created thread", async () => {
+    const user = userEvent.setup();
+    const planVersion = {
+      ...readyVersion,
+      version: {
+        ...readyVersion.version,
+        definition: {
+          ...canvasFixture,
+          blocks: [
+            {
+              blockId: "plan-1",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "plan" as const,
+              title: "Launch plan",
+              phases: [{ phaseId: "build", title: "Build" }],
+              tasks: [
+                {
+                  taskId: "docs",
+                  phaseId: "build",
+                  title: "Write the docs",
+                  status: "todo" as const,
+                  notes: "The setup guide covers sync.",
+                },
+                { taskId: "api", phaseId: "build", title: "Ship the API", status: "done" as const },
+              ],
+            },
+          ],
+        },
+      },
+    } as unknown as Awaited<ReturnType<CanvasClient["get"]>>;
+    const onStartPlanTask = vi.fn();
+    const client = createCanvasClient(planVersion);
+    const { unmount } = render(
+      <CanvasWorkspaceTab
+        client={client}
+        onStartPlanTask={onStartPlanTask}
+        tab={{ ...canvasTab, mode: "work" }}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Start Write the docs in a new thread" }),
+    );
+    expect(onStartPlanTask).toHaveBeenCalledWith({
+      mode: "work",
+      projectId: canvasInventoryProjectId,
+      prompt:
+        'Work on this task from the plan "Launch plan": Write the docs\nDone when: The setup guide covers sync.',
+    });
+    // A done task has nothing to start, and starting writes nothing to the Canvas.
+    expect(screen.queryByRole("button", { name: "Start Ship the API in a new thread" })).toBeNull();
+    expect(client.revise).not.toHaveBeenCalled();
+    unmount();
+
+    render(
+      <CanvasWorkspaceTab client={client} onStartPlanTask={onStartPlanTask} tab={canvasTab} />,
+    );
+    await screen.findByText("Write the docs");
+    expect(screen.queryByRole("button", { name: /in a new thread$/ })).toBeNull();
+  });
+
   it("journals a node drag as a new version and reloads the board it produced", async () => {
     const reviseDiagramLayout = vi.fn<NonNullable<CanvasClient["reviseDiagramLayout"]>>(
       async () => ({
