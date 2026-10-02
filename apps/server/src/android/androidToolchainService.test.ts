@@ -20,7 +20,11 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
     context: ExecutionContext,
     signal: AbortSignal,
   ): Promise<
-    | { kind: "watching"; frames: ReadableStream<Uint8Array> }
+    | {
+        kind: "watching";
+        screen: { width: number; height: number };
+        frames: ReadableStream<Uint8Array>;
+      }
     | { kind: "unavailable"; message: string }
   >;
   close(): Promise<void>;
@@ -112,14 +116,14 @@ function discoveryExecutor() {
         "List of devices attached\nemulator-5554          device product:sdk_gphone64_arm64\n",
       );
     }
-    if (argv.includes("emu avd name") || argv.includes("avd name")) {
-      return processResult("Pixel_8_API_34\r\nOK\r\n");
+    if (argv.includes("ro.boot.qemu.avd_name")) {
+      return processResult("Pixel_8_API_34\n");
     }
     if (argv.includes("sys.boot_completed")) return processResult("1\n");
     if (argv.includes("input tap") || argv.includes("input swipe") || argv.includes("input text")) {
       return processResult("");
     }
-    if (argv.includes("emu kill")) return processResult("");
+    if (argv.includes("root") || argv.includes("reboot")) return processResult("");
     return processResult("");
   });
 }
@@ -491,7 +495,7 @@ describe("AndroidToolchainService", () => {
             : "List of devices attached\n",
         );
       }
-      if (argv.includes("avd name")) return processResult("Pixel_8_API_34\r\nOK\r\n");
+      if (argv.includes("ro.boot.qemu.avd_name")) return processResult("Pixel_8_API_34\n");
       if (argv.includes("sys.boot_completed")) return processResult("1\n");
       return processResult("");
     });
@@ -789,5 +793,199 @@ describe("AndroidToolchainService", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("shows a managed JPEG stream for a booted emulator and does not screencap", async () => {
+    const execute = discoveryExecutor();
+    const jpeg = Uint8Array.of(0xff, 0xd8, 0x11, 0xff, 0xd9);
+    const service = new AndroidToolchainService({
+      execute,
+      access: async () => undefined,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      readArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-09-20T20:00:00.000Z",
+      newId: () => ids.action,
+      serveAvd: {
+        open: async () => ({
+          origin: "http://127.0.0.1:9",
+          streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+        }),
+      },
+      fetchImpl: async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/config")) {
+          return new Response(JSON.stringify({ width: 1080, height: 1920 }));
+        }
+        if (url.endsWith("/stream.mjpeg")) return new Response(jpeg);
+        return new Response("no", { status: 404 });
+      },
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockClear();
+    const watch = await service.watchScreen(
+      "Pixel_8_API_34",
+      context,
+      new AbortController().signal,
+    );
+    if (watch.kind !== "watching") throw new Error("expected a managed stream");
+    expect(watch.screen).toEqual({ width: 1080, height: 1920 });
+    const reader = watch.frames.getReader();
+    const chunk = await reader.read();
+    expect(chunk.done).toBe(false);
+    if (chunk.done) return;
+    const length = new DataView(chunk.value.buffer, chunk.value.byteOffset, 4).getUint32(0);
+    expect(chunk.value.slice(4, 4 + length)).toEqual(jpeg);
+    expect(execute).not.toHaveBeenCalled();
+    await reader.cancel();
+    await service.close();
+  });
+
+  it("falls back to screencap when the managed stream is absent", async () => {
+    const discovery = discoveryExecutor();
+    let captures = 0;
+    const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      if (!input.argv.includes("screencap")) return discovery(input);
+      captures += 1;
+      const png = new Uint8Array(24);
+      png.set([0x89, 0x50, 0x4e, 0x47]);
+      new DataView(png.buffer).setUint32(16, 100);
+      new DataView(png.buffer).setUint32(20, 200);
+      return { ...processResult(""), stdout: png };
+    });
+    const service = new AndroidToolchainService({
+      execute,
+      access: async () => undefined,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      readArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-09-20T20:00:00.000Z",
+      newId: () => ids.action,
+      serveAvd: { open: async () => undefined },
+    });
+    await service.discover(discoveryRequest, context);
+    const watch = await service.watchScreen(
+      "Pixel_8_API_34",
+      context,
+      new AbortController().signal,
+    );
+    expect(watch.kind).toBe("watching");
+    expect(captures).toBe(1);
+    if (watch.kind === "watching") await watch.frames.cancel();
+    await service.close();
+  });
+
+  it("sends a tap through the managed emulator and does not also send adb", async () => {
+    const execute = discoveryExecutor();
+    const actions: unknown[] = [];
+    const service = new AndroidToolchainService({
+      execute,
+      access: async () => undefined,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      readArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-09-20T20:00:00.000Z",
+      newId: () => ids.action,
+      serveAvd: {
+        open: async () => ({
+          origin: "http://127.0.0.1:9",
+          streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+        }),
+      },
+      fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/config")) {
+          return new Response(JSON.stringify({ width: 1080, height: 1920 }));
+        }
+        if (url.endsWith("/action")) {
+          actions.push(JSON.parse(String(init?.body)));
+          return new Response(JSON.stringify({ ok: true }));
+        }
+        return new Response("no", { status: 404 });
+      },
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockClear();
+    const evidence = await service.execute(
+      action("tap", { point: { x: 540, y: 960 }, requestedBy: actor }),
+      context,
+    );
+    expect(evidence.outcome).toBe("succeeded");
+    expect(actions).toEqual([{ action: "tap", x: 0.5, y: 0.5 }]);
+    expect(execute).not.toHaveBeenCalled();
+    await service.close();
+  });
+
+  it("does not send adb when the managed emulator refuses the tap", async () => {
+    const execute = discoveryExecutor();
+    const service = new AndroidToolchainService({
+      execute,
+      access: async () => undefined,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      readArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-09-20T20:00:00.000Z",
+      newId: () => ids.action,
+      serveAvd: {
+        open: async () => ({
+          origin: "http://127.0.0.1:9",
+          streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+        }),
+      },
+      fetchImpl: async (input: RequestInfo | URL) => {
+        if (String(input).endsWith("/config")) {
+          return new Response(JSON.stringify({ width: 100, height: 200 }));
+        }
+        return new Response(JSON.stringify({ ok: false, error: "failed" }), { status: 500 });
+      },
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockClear();
+    const evidence = await service.execute(
+      action("tap", { point: { x: 1, y: 1 }, requestedBy: actor }),
+      context,
+    );
+    expect(evidence.outcome).toBe("failed");
+    expect(execute).not.toHaveBeenCalled();
+    await service.close();
+  });
+
+  it("sends an unmapped key through adb once", async () => {
+    const execute = discoveryExecutor();
+    const opened: string[] = [];
+    const service = new AndroidToolchainService({
+      execute,
+      access: async () => undefined,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      readArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-09-20T20:00:00.000Z",
+      newId: () => ids.action,
+      serveAvd: {
+        open: async (serial: string) => {
+          opened.push(serial);
+          return {
+            origin: "http://127.0.0.1:9",
+            streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+          };
+        },
+      },
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockClear();
+    const evidence = await service.execute(
+      action("key-press", { key: "space", requestedBy: actor }),
+      context,
+    );
+    expect(evidence.outcome).toBe("succeeded");
+    expect(opened).toEqual([]);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[0].argv).toContain("KEYCODE_SPACE");
+    await service.close();
   });
 });

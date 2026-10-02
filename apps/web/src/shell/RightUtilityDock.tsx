@@ -32,6 +32,7 @@ export interface RightUtilityDockProps {
   readonly onPreviewWidth: (width: number) => void;
   readonly onSelectSurface: (tabId: string) => void;
   readonly open: boolean;
+  readonly overview?: ReactNode;
   readonly plan?: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly renderTab?: (tab: RightUtilityDockTabDescriptor) => ReactNode;
@@ -71,6 +72,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       onCloseTab={props.onCloseTab}
       onOpenTab={props.onOpenTab}
       onSelectSurface={props.onSelectSurface}
+      {...(props.overview === undefined ? {} : { overview: props.overview })}
       {...(props.plan === undefined ? {} : { plan: props.plan })}
       resolution={props.resolution}
       {...(props.renderTab === undefined ? {} : { renderTab: props.renderTab })}

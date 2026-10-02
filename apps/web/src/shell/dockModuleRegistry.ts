@@ -97,7 +97,10 @@ export const dockModules: Readonly<
   plan: (props) => createElement(PlanModule, inputs(props, ["planClient", "subject"])),
   delivery: (props) => createElement(DeliveryModule, inputs(props, ["shipClient", "subject"])),
   canvas: (props) =>
-    createElement(CanvasModule, inputs(props, ["canvasClient", "subject", "writtenCanvasId"])),
+    createElement(
+      CanvasModule,
+      inputs(props, ["canvasClient", "canvasRevision", "subject", "writtenCanvasId"]),
+    ),
   review: (props) =>
     createElement(
       ReviewModule,

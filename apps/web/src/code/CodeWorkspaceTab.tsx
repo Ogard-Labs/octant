@@ -49,6 +49,7 @@ export default function CodeWorkspaceTab(props: {
   readonly onOpenSettings?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  readonly onCanvasReferencesObserved?: CodeWorkspaceProps["onCanvasReferencesObserved"];
   /**
    * Opens a Code thread this workspace started, such as a fork of the one in
    * view. Absent on a surface with no tab of its own.
@@ -166,6 +167,9 @@ export default function CodeWorkspaceTab(props: {
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
+        {...(props.onCanvasReferencesObserved === undefined
+          ? {}
+          : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
         {...(props.onOpenCodeThread === undefined
           ? {}
           : { onOpenCodeThread: props.onOpenCodeThread })}

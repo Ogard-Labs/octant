@@ -1,17 +1,24 @@
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
-import type { ProjectProviderPolicy } from "@octant/contracts/projects";
+import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
 import { ChevronDown, SquarePen } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantMenu } from "../ui/base/OctantMenu";
 import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
+import {
+  PROJECT_COLOR_MENU_ITEMS,
+  ProjectTile,
+  projectColorFromMenuValue,
+  projectColorMenuValue,
+} from "./ProjectTile";
 import { ProjectSpendCeilingSection } from "../usage/ProjectSpendCeilingSection";
 
 export interface ProjectOverviewProps {
@@ -32,6 +39,8 @@ export interface ProjectOverviewProps {
   readonly onNewThread?: () => void;
   readonly onRelink: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRename: (projectId: ProjectId, name: string) => Promise<boolean>;
+  /** Absent when the host cannot accept a colour change; the tile is then only a mark. */
+  readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => Promise<boolean>;
   readonly onProviderPolicyChange?: (
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
@@ -140,6 +149,21 @@ export function ProjectOverview(props: ProjectOverviewProps) {
         ) : null}
         <header className="project-overview__toolbar">
           <div className="project-overview__identity">
+            {props.onColorChange === undefined || archived || connectionStale ? (
+              <ProjectTile project={props.project} />
+            ) : (
+              <OctantMenu
+                items={PROJECT_COLOR_MENU_ITEMS}
+                onValueChange={(value) => {
+                  const color = projectColorFromMenuValue(value);
+                  if (color !== undefined) void props.onColorChange?.(props.project.id, color);
+                }}
+                trigger={<ProjectTile project={props.project} />}
+                triggerClassName="project-overview__color"
+                triggerLabel={`Project colour for ${props.project.name}`}
+                value={projectColorMenuValue(props.project.color)}
+              />
+            )}
             <form
               noValidate
               onSubmit={(event) => {
@@ -316,7 +340,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
             <ProjectOverviewInspector
               key={`${String(props.project.id)}-ceiling`}
               label="Spend ceiling"
-              summary="Optional Project token budget for this calendar month"
+              summary="Optional Project limits on tokens, turns, and agent run time"
             >
               <ProjectSpendCeilingSection
                 client={props.spendCeilingClient}

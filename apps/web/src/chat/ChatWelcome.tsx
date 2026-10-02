@@ -33,6 +33,7 @@ import {
   unattachedCapabilityMentionCopy,
   unattachedCapabilityMentions,
 } from "@octant/plugin-host/capability-mentions";
+import { WorkKindSwitch } from "../shell/WorkKindSwitch";
 
 export interface ChatWelcomeProps {
   /** The threads this mode already has, shown under the starter ideas. */
@@ -136,29 +137,34 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     <section aria-label="Chat welcome" className="draft-thread chat-welcome">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading greetingName={props.greetingName} question={presentation.heading} />
+          <WelcomeHeading greetingName={props.greetingName} />
         </div>
 
         <div className="composer-stack">
-          <div className="composer-tray composer-tray--above" aria-label="Thread context">
-            <div className="composer-tray__leading">
-              <HostSelector
-                presentation="environment"
-                {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-                {...(props.selectedHostId === undefined
-                  ? {}
-                  : { selectedHostId: props.selectedHostId })}
-                {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-                {...(props.lastSelectedHealthyHostId === undefined
-                  ? {}
-                  : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-                {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-                {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
-                requiredCapability="chat"
-              />
-            </div>
-          </div>
           <ThreadComposer
+            startContext={
+              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                <div className="composer-tray__leading">
+                  <WorkKindSwitch />
+                  <HostSelector
+                    presentation="environment"
+                    {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                    {...(props.selectedHostId === undefined
+                      ? {}
+                      : { selectedHostId: props.selectedHostId })}
+                    {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+                    {...(props.lastSelectedHealthyHostId === undefined
+                      ? {}
+                      : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+                    {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+                    {...(props.onSelectHost === undefined
+                      ? {}
+                      : { onSelectHost: props.onSelectHost })}
+                    requiredCapability="chat"
+                  />
+                </div>
+              </div>
+            }
             input={
               <OctantTextarea
                 aria-activedescendant={

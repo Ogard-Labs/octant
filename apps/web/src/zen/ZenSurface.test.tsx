@@ -53,6 +53,7 @@ const APP_GROUND: ResolvedAppBackground = {
   backgroundId: "perspective-dot-plane-animated",
   backgroundUrl: "zen-backgrounds/perspective-dot-plane-dark.webp",
   backgroundStillUrl: "zen-backgrounds/perspective-dot-plane.jpg",
+  backgroundLightUrl: null,
   backgroundAnimated: true,
   effect: { kind: "none", cell: 3, levels: 8 },
   photoOpacity: 0.42,
@@ -339,9 +340,11 @@ describe("ZenSurface", () => {
       />,
     );
     // A moving built-in shows its still frame instead.
-    expect(container.querySelector(".app-backdrop__builtin")).toHaveStyle({
-      backgroundImage: 'url("zen-backgrounds/perspective-dot-plane.jpg")',
-    });
+    expect(
+      container
+        .querySelector<HTMLElement>(".app-backdrop__builtin")
+        ?.style.getPropertyValue("--app-backdrop-image"),
+    ).toBe('url("zen-backgrounds/perspective-dot-plane.jpg")');
     vi.restoreAllMocks();
   });
 

@@ -29,6 +29,7 @@
 @import "./styles/project-threads.css";
 @import "./styles/surface.css";
 @import "./styles/board.css";
+@import "./styles/vivid.css";
 
 :root {
   color-scheme: dark;
@@ -1513,17 +1514,14 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   white-space: nowrap;
 }
 
-/* The Project (and branch) the thread works in. Capped at 45% of the handle
-   so it can never crowd out the title, and given a much higher flex-shrink
-   than the title (docs/design/workspace.md: "The chip truncates before the
-   title does") so it absorbs the pane narrowing first; the title only gives
-   up room once the chip has already shrunk to its own floor. No min-width
-   floor on the chip itself — that widened a short chip past its own name and
-   cut into a title that had room. */
+/* The Project the thread works in. Chips are short, so they keep their own
+   width and the title gives up room instead; a chip truncates only past 30%
+   of the handle. Shrinking the chips first, or in proportion to a long
+   title, left "octant…" and "m…", two chips that no longer named anything. */
 .workspace-pane__context {
-  flex: 0 20 auto;
+  flex: 0 0 auto;
   min-width: 0;
-  max-width: 45%;
+  max-width: 30%;
   overflow: hidden;
   padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
@@ -1534,6 +1532,50 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The branch is its own chip beside the Project's, in the identifier face so
+   a branch name never reads as prose. It keeps its width like the Project
+   chip, under the same 30% cap. */
+.workspace-pane__branch {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 30%;
+  overflow: hidden;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-pill);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A turn is executing. The pill keeps its width while the chips shrink, so
+   the state stays readable in a narrow pane. */
+.workspace-pane__status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-fg-2);
+  background: var(--octant-selection);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.workspace-pane__status .spinner {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+  vertical-align: 0;
 }
 
 .workspace-drop-overlay {
@@ -2099,14 +2141,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 /* The provider list is an open section of .provrow items (octant.css). The
    rules below are the app-side residue that vocabulary does not cover. */
-
-/* The shell is open (0072): rows over hairlines at the section edge. The
-   first row draws the rule under the label the way Appearance's first row
-   does; octant.css's card version cleared it. */
-.settings-card-section--open > .provlist > .provrow {
-  padding-inline: 0;
-  border-top: 1px solid var(--oct-hairline);
-}
 
 .provider-settings__summary {
   margin: 0;

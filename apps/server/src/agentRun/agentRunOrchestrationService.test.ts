@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AGENT_RUN_DEPENDENCY_WAITING_REASON } from "@octant/domain";
 import { Schema } from "effect";
 import {
   AgentRunRequested,
@@ -38,6 +39,7 @@ import {
   createInMemoryCapacityPort,
 } from "./agentRunOrchestrationService";
 import { AgentRunProcessSupervisor } from "./agentRunProcessSupervisor";
+import { AgentRunDependencyScheduler } from "./agentRunDependencyScheduler";
 import type { AgentRunSessionOutcome } from "./agentRunSessionPort";
 
 const directories: string[] = [];
@@ -276,7 +278,7 @@ function createHarness(
     approvals,
     ...(processes === undefined ? {} : { processes }),
   });
-  return { orchestration, persistence, capacity, approvals, store, connection };
+  return { orchestration, persistence, capacity, approvals, store, connection, journal };
 }
 
 describe("AgentRunOrchestrationService", () => {
@@ -1063,5 +1065,119 @@ describe("AgentRunOrchestrationService", () => {
       }),
     ).toBeUndefined();
     expect(interruptedHarness.persistence.getById(other.run.id)).toEqual(recovered);
+  });
+});
+
+describe("AgentRun dependency graphs", () => {
+  const requestIds = [
+    decodeAgentRunRequestId("24242424-2424-4242-8242-242424242424"),
+    decodeAgentRunRequestId("25252525-2525-4252-8252-252525252525"),
+    decodeAgentRunRequestId("26262626-2626-4262-8262-262626262626"),
+  ] as const;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  function graphHarness() {
+    const starts: string[] = [];
+    const harness = createHarness(createInMemoryCapacityPort(), true, {
+      start: (run) => {
+        starts.push(String(run.id));
+      },
+      stop: async () => undefined,
+    });
+    const scheduler = new AgentRunDependencyScheduler({
+      agentRuns: harness.persistence,
+      orchestration: harness.orchestration,
+    });
+    harness.journal.subscribeCommitted((append) => scheduler.onCommittedAppend(append));
+    const admit = (requestId: (typeof requestIds)[number], dependsOn?: ReadonlyArray<string>) => {
+      const admitted = harness.orchestration.admit({
+        command: {
+          ...requestCommand(requestId),
+          ...(dependsOn === undefined ? {} : { dependsOn: dependsOn as never }),
+        },
+        parentAuthority: authority,
+        confirmed: true,
+        liveAuthority: authority,
+      });
+      if (admitted.kind === "run-command-failed") throw new Error(admitted.message);
+      return admitted.run;
+    };
+    const run = (requestId: (typeof requestIds)[number]) => {
+      const admitted = admit(requestId);
+      harness.orchestration.start(admitted.id, admitted.version, authority);
+      return admitted.id;
+    };
+    return { ...harness, starts, scheduler, admit, run };
+  }
+
+  it("parks a run that waits on siblings without starting it, and starts it once all completed", async () => {
+    const { persistence, orchestration, starts, admit, run } = graphHarness();
+    const first = run(requestIds[0]);
+    const second = run(requestIds[1]);
+    const joined = admit(requestIds[2], [String(first), String(second)]);
+    expect(joined).toMatchObject({
+      lifecycleStatus: "waiting",
+      recoveryReason: AGENT_RUN_DEPENDENCY_WAITING_REASON,
+    });
+
+    orchestration.onSessionSettled({
+      runId: first,
+      outcome: { kind: "completed", responseText: "first finding" },
+    });
+    await settle();
+    expect(persistence.getById(joined.id)?.lifecycleStatus).toBe("waiting");
+    expect(starts).not.toContain(String(joined.id));
+
+    orchestration.onSessionSettled({
+      runId: second,
+      outcome: { kind: "completed", responseText: "second finding" },
+    });
+    await settle();
+    expect(persistence.getById(joined.id)?.lifecycleStatus).toBe("starting");
+    expect(starts).toContain(String(joined.id));
+  });
+
+  it("fails a waiting run without ever starting it when a dependency fails", async () => {
+    const { persistence, orchestration, starts, admit, run } = graphHarness();
+    const first = run(requestIds[0]);
+    const dependent = admit(requestIds[1], [String(first)]);
+
+    orchestration.onSessionSettled({
+      runId: first,
+      outcome: { kind: "failed", failure: { category: "provider-failed", message: "refused" } },
+    });
+    await settle();
+
+    expect(persistence.getById(dependent.id)).toMatchObject({
+      lifecycleStatus: "failed",
+      recoveryReason: `dependency-failed: ${String(first)}`,
+    });
+    expect(starts).not.toContain(String(dependent.id));
+  });
+
+  it("refuses to admit a run that waits on a sibling that already failed", async () => {
+    const { orchestration, admit, run } = graphHarness();
+    const first = run(requestIds[0]);
+    orchestration.onSessionSettled({
+      runId: first,
+      outcome: { kind: "failed", failure: { category: "provider-failed", message: "refused" } },
+    });
+    expect(() => admit(requestIds[1], [String(first)])).toThrow(/could never start/);
+  });
+
+  it("keeps a run parked on its dependencies across a restart", () => {
+    const { persistence, admit, run } = graphHarness();
+    const first = run(requestIds[0]);
+    const dependent = admit(requestIds[1], [String(first)]);
+
+    persistence.reconcileAfterRestart();
+
+    // The running dependency is interrupted like any child a restart catches;
+    // the parked run never held execution, so it keeps waiting for a retry.
+    expect(persistence.getById(first)?.lifecycleStatus).toBe("interrupted");
+    expect(persistence.getById(dependent.id)).toMatchObject({
+      lifecycleStatus: "waiting",
+      recoveryReason: AGENT_RUN_DEPENDENCY_WAITING_REASON,
+    });
   });
 });

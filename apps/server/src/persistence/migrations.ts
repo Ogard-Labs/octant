@@ -6,6 +6,7 @@ import {
   MigrationHistoryMismatch,
 } from "./migrationErrors";
 import type { SqliteConnection } from "./sqlitePort";
+import { SPEND_TURN_PROJECTION_SQL } from "./spendCeilingPersistenceSchema";
 
 export interface Migration {
   readonly version: number;
@@ -1917,6 +1918,11 @@ ALTER TABLE code_runtime_projection
       last_sequence INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (aggregate_type, aggregate_id)
     );`,
+  },
+  {
+    version: 66,
+    name: "create_spend_turn_projection",
+    sql: SPEND_TURN_PROJECTION_SQL,
   },
 ];
 

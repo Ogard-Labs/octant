@@ -1,4 +1,13 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
@@ -36,7 +45,12 @@ import {
   resolveSettingsSectionContribution,
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
-import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
+import {
+  SettingsNavigation,
+  settingsSectionIcon,
+  type SettingsNavigationItem,
+} from "./SettingsNavigation";
+import { useSettingsSaved, type SettingsWriteResult } from "./useSettingsSaved";
 import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
 import { PluginSettingsSection } from "./PluginSettingsSection";
 import { ChatSettingsView } from "../chat/ChatSettingsView";
@@ -79,12 +93,12 @@ import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import {
   ScopeIndicator,
-  SettingGroup,
   SettingRow,
+  SettingsOutlineRegistration,
   SettingsPageScope,
-  SettingsPanel,
   SettingsSection,
   SettingsState,
+  type SettingsOutlineEntry,
 } from "../settings/primitives";
 import { SidebarRowDetailsSettings } from "../settings/SidebarRowDetailsSettings";
 import { WorkSettingsView } from "../work/WorkSettingsView";
@@ -285,6 +299,78 @@ export function SettingsView(props: SettingsViewProps) {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationTrigger = useRef<HTMLButtonElement>(null);
   const navigationClose = useRef<HTMLButtonElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const resetAppearanceButton = useRef<HTMLButtonElement>(null);
+  const [outline, setOutline] = useState<ReadonlyArray<SettingsOutlineEntry>>([]);
+  const registerSection = useCallback((entry: SettingsOutlineEntry) => {
+    setOutline((current) =>
+      [...current.filter((other) => other.element !== entry.element), entry].sort((left, right) =>
+        left.element.compareDocumentPosition(right.element) & Node.DOCUMENT_POSITION_FOLLOWING
+          ? -1
+          : 1,
+      ),
+    );
+    return () =>
+      setOutline((current) => current.filter((other) => other.element !== entry.element));
+  }, []);
+  const { saved, acknowledge } = useSettingsSaved();
+  // Handlers keep one identity across renders so a section that lists
+  // `onSettingsChange` as an effect dependency does not re-run on every save.
+  const latestSettingsChange = useRef(props.onSettingsChange);
+  useEffect(() => {
+    latestSettingsChange.current = props.onSettingsChange;
+  }, [props.onSettingsChange]);
+  const onSettingsChange = useCallback(
+    (patch: Partial<ShellSettings>): SettingsWriteResult =>
+      acknowledge(latestSettingsChange.current(patch)),
+    [acknowledge],
+  );
+  const sourceThemeController = props.themeController;
+  const themeController = useMemo(
+    () =>
+      sourceThemeController === undefined
+        ? undefined
+        : {
+            ...sourceThemeController,
+            apply: () => acknowledge(sourceThemeController.apply()),
+            applyPatch: (patch: Parameters<ThemeController["applyPatch"]>[0]) =>
+              acknowledge(sourceThemeController.applyPatch(patch)),
+            reset: () => {
+              sourceThemeController.reset();
+              acknowledge(undefined);
+            },
+          },
+    [acknowledge, sourceThemeController],
+  );
+  const savingProps: SettingsViewProps = {
+    ...props,
+    onSettingsChange,
+    ...(themeController === undefined ? {} : { themeController }),
+  };
+
+  const focusSearch = useCallback(() => {
+    setSearchOpen(true);
+    // The field is unhidden by the state above, so focusing waits a frame.
+    requestAnimationFrame(() => searchInput.current?.focus());
+  }, []);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "f" || event.shiftKey || event.altKey) return;
+      if (!event.metaKey && !event.ctrlKey) return;
+      event.preventDefault();
+      focusSearch();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [focusSearch]);
+
+  const focusedSettingId = route.focusedSetting;
+  useEffect(() => {
+    if (route.activeSection !== "appearance") return;
+    if (focusedSettingId !== settingId("reset-appearance")) return;
+    resetAppearanceButton.current?.focus();
+  }, [route.activeSection, focusedSettingId, themeController === undefined]);
 
   useEffect(() => {
     const sectionChanged = previousSection.current !== route.activeSection;
@@ -333,6 +419,10 @@ export function SettingsView(props: SettingsViewProps) {
   const activeSectionScope = availableSections.find(
     (section) => section.id === route.activeSection,
   )?.scope;
+  // The rail's search is an icon until someone asks for it; a query that is
+  // already typed keeps the field open so the results never lose their input.
+  const searchVisible = searchOpen || hasQuery;
+  const PageIcon = hasQuery ? Search : settingsSectionIcon(route.activeSection);
   const currentSectionLabel = hasQuery
     ? "Search settings"
     : (SECTION_LABELS[route.activeSection] ?? "Settings");
@@ -359,7 +449,25 @@ export function SettingsView(props: SettingsViewProps) {
             <span className="settings-view__drag-space" />
           </div>
           <div className="settings-view__sidebar-content">
-            <SettingsSearchField onChange={props.onSearchChange} value={props.search} />
+            <div className="settings-view__rail-head">
+              <h2 className="settings-view__rail-title">Settings</h2>
+              <OctantIconButton
+                aria-expanded={searchVisible}
+                aria-keyshortcuts="Meta+F Control+F"
+                label="Search settings"
+                onClick={focusSearch}
+                type="button"
+              >
+                <Search aria-hidden="true" size={16} strokeWidth={1.5} />
+              </OctantIconButton>
+            </div>
+            <SettingsSearchField
+              collapsed={!searchVisible}
+              inputRef={searchInput}
+              onBlurEmpty={() => setSearchOpen(false)}
+              onChange={props.onSearchChange}
+              value={props.search}
+            />
             <div className="settings-view__navigation-scroll">{navigation}</div>
             {props.onBack === undefined ? null : (
               <footer className="settings-view__sidebar-footer">
@@ -423,30 +531,85 @@ export function SettingsView(props: SettingsViewProps) {
               <span aria-hidden="true">/</span>
               <strong>{currentSectionLabel}</strong>
             </nav>
+            {/* A slot of fixed size, so the mark arriving and leaving moves
+                nothing around it. The status is inserted only while the mark
+                shows, which is what makes a screen reader announce it. */}
+            <span className="settings-view__saved window-no-drag">
+              {saved ? (
+                <span role="status">
+                  <Check aria-hidden="true" size={14} strokeWidth={1.5} />
+                  Saved
+                </span>
+              ) : null}
+            </span>
           </div>
         )}
         <main className="settings-view__content" ref={contentRef}>
           <div className="settings-view__content-inner">
-            <header className="settings-view__header">
-              <h1 className="oct-title" id="settings-heading">
-                {currentSectionLabel}
-              </h1>
-              {/* The page scope stands in for every matching row's own mark, so
-                  it shows whether or not the page has a subtitle: Remote access
-                  has none, and its host-scoped rows had no scope at all. */}
-              {!hasQuery &&
-              (SECTION_DESCRIPTIONS[route.activeSection] !== undefined ||
-                activeSectionScope !== undefined) ? (
-                <p className="oct-subtitle">
-                  {SECTION_DESCRIPTIONS[route.activeSection] === undefined
-                    ? null
-                    : `${SECTION_DESCRIPTIONS[route.activeSection]} `}
-                  {activeSectionScope === undefined ? null : (
-                    <ScopeIndicator scope={activeSectionScope} />
-                  )}
-                </p>
+            <div className="settings-view__page-head">
+              <header className="settings-view__header">
+                <span aria-hidden="true" className="settings-view__header-tile">
+                  <PageIcon size={20} strokeWidth={1.5} />
+                </span>
+                <div className="settings-view__header-text">
+                  <h1 className="oct-title" id="settings-heading">
+                    {currentSectionLabel}
+                  </h1>
+                  {/* The page scope stands in for every matching row's own mark,
+                      so it shows whether or not the page has a subtitle: Remote
+                      access has none, and its host-scoped rows had no scope at
+                      all. */}
+                  {!hasQuery &&
+                  (SECTION_DESCRIPTIONS[route.activeSection] !== undefined ||
+                    activeSectionScope !== undefined) ? (
+                    <p className="oct-subtitle">
+                      {SECTION_DESCRIPTIONS[route.activeSection] === undefined
+                        ? null
+                        : `${SECTION_DESCRIPTIONS[route.activeSection]} `}
+                      {activeSectionScope === undefined ? null : (
+                        <ScopeIndicator scope={activeSectionScope} />
+                      )}
+                    </p>
+                  ) : null}
+                </div>
+                {!hasQuery &&
+                route.activeSection === "appearance" &&
+                themeController !== undefined ? (
+                  <OctantButton
+                    className="settings-view__header-action"
+                    onClick={() => themeController.reset()}
+                    ref={resetAppearanceButton}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Reset to default
+                  </OctantButton>
+                ) : null}
+              </header>
+              {/* Links, not headings: the page already has its h1 and one h2 per
+                  section, and this row only moves the reader between them. */}
+              {!hasQuery && outline.length >= 3 ? (
+                <nav aria-label="On this page" className="settings-view__outline">
+                  <ul>
+                    {outline.map((entry) => (
+                      <li key={entry.id}>
+                        <a
+                          className="settings-view__outline-link window-no-drag"
+                          href={`#${entry.id}`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            entry.element.scrollIntoView?.({ block: "start" });
+                          }}
+                        >
+                          {entry.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </nav>
               ) : null}
-            </header>
+            </div>
             {hasQuery ? (
               <SettingsSearchResults
                 query={props.search}
@@ -456,16 +619,18 @@ export function SettingsView(props: SettingsViewProps) {
                 onEscape={() => props.onSearchChange("")}
               />
             ) : (
-              <SettingsPageScope.Provider value={activeSectionScope}>
-                <ActiveSectionContent
-                  activeSection={route.activeSection}
-                  capabilities={capabilities}
-                  focusedSetting={route.focusedSetting}
-                  onOpenSection={route.openSection}
-                  pluginSettingsEntryPoints={pluginSettingsEntryPoints}
-                  props={props}
-                />
-              </SettingsPageScope.Provider>
+              <SettingsOutlineRegistration.Provider value={registerSection}>
+                <SettingsPageScope.Provider value={activeSectionScope}>
+                  <ActiveSectionContent
+                    activeSection={route.activeSection}
+                    capabilities={capabilities}
+                    focusedSetting={route.focusedSetting}
+                    onOpenSection={route.openSection}
+                    pluginSettingsEntryPoints={pluginSettingsEntryPoints}
+                    props={savingProps}
+                  />
+                </SettingsPageScope.Provider>
+              </SettingsOutlineRegistration.Provider>
             )}
             {!hasQuery && availableSections.length === 0 ? (
               <p className="settings-view__empty" role="status">
@@ -504,10 +669,16 @@ export function SettingsView(props: SettingsViewProps) {
 
 function SettingsSearchField(props: {
   readonly className?: string;
+  /** Hidden but mounted: the rail shows an icon until the field is asked for. */
+  readonly collapsed?: boolean;
+  readonly inputRef?: RefObject<HTMLInputElement | null>;
+  /** Focus left the field with nothing typed, so the rail can fold it away again. */
+  readonly onBlurEmpty?: () => void;
   readonly onChange: (value: string) => void;
   readonly value: string;
 }) {
-  const input = useRef<HTMLInputElement>(null);
+  const ownInput = useRef<HTMLInputElement>(null);
+  const input = props.inputRef ?? ownInput;
   const inputId = useId();
   return (
     <div
@@ -516,6 +687,7 @@ function SettingsSearchField(props: {
           ? "settings-view__field settings-view__field--search"
           : `settings-view__field settings-view__field--search ${props.className}`
       }
+      hidden={props.collapsed === true}
     >
       <label className="settings-view__search-label" htmlFor={inputId}>
         Search settings
@@ -524,7 +696,13 @@ function SettingsSearchField(props: {
       <OctantInput
         className="settings-view__text-input"
         id={inputId}
+        onBlur={() => {
+          if (props.value === "") props.onBlurEmpty?.();
+        }}
         onChange={(event) => props.onChange(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && props.value === "") props.onBlurEmpty?.();
+        }}
         placeholder="Search settings…"
         ref={input}
         type="search"
@@ -910,15 +1088,15 @@ function RememberedBrowserOriginsPanel(props: {
     }
   };
   return (
-    <SettingsPanel
+    <SettingsSection
       description="Granted with “Always allow” on a thread’s Browser approval; forgetting one makes the next open ask again."
       title="Remembered websites"
     >
-      <div className="settings-panel__stack">
-        {props.origins.length === 0 ? (
-          <SettingsState kind="empty">No remembered websites.</SettingsState>
-        ) : (
-          props.origins.map((origin, index) => (
+      {props.origins.length === 0 ? (
+        <SettingsState kind="empty">No remembered websites.</SettingsState>
+      ) : (
+        <div className="setgroup">
+          {props.origins.map((origin, index) => (
             <SettingRow
               description="Browser opens this site without asking."
               focused={props.focusedSetting === "browser-site-approvals" && index === 0}
@@ -937,10 +1115,10 @@ function RememberedBrowserOriginsPanel(props: {
                 Forget
               </OctantButton>
             </SettingRow>
-          ))
-        )}
-      </div>
-    </SettingsPanel>
+          ))}
+        </div>
+      )}
+    </SettingsSection>
   );
 }
 
@@ -1142,7 +1320,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Available modes">
         <div className="setgroup">
           <SettingRow
-            description="Show Chat in the mode switcher. Existing threads stay stored when hidden."
+            description="Offer Chat in Work's composer: answers without touching your files. Existing threads stay stored when hidden."
             focused={focusedSetting === settingId("enable-chat")}
             label="Chat"
             scope="app"
@@ -1155,9 +1333,9 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Show Work in the mode switcher. Existing threads stay stored when hidden."
+            description="Offer In a folder in Work's composer: reads and edits one folder you choose. Existing threads stay stored when hidden."
             focused={focusedSetting === settingId("enable-work")}
-            label="Work"
+            label="Work in a folder"
             scope="app"
             settingId="enable-work"
           >
@@ -1494,34 +1672,6 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           {readingSection}
         </>
       )}
-      {props.themeController === undefined ? null : (
-        <SettingsSection
-          description="Return every appearance setting to its default."
-          title="Reset"
-        >
-          <div className="setgroup">
-            {/* The section says Reset and its note says what returns to its
-                default, so the row and its button each said "Reset appearance"
-                a second and third time. */}
-            <SettingRow
-              focused={focusedSetting === settingId("reset-appearance")}
-              label="Appearance"
-              scope="app"
-              settingId="reset-appearance"
-            >
-              <OctantButton
-                className="settings-view__action"
-                onClick={() => void props.themeController?.reset()}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                Reset
-              </OctantButton>
-            </SettingRow>
-          </div>
-        </SettingsSection>
-      )}
     </section>
   );
 }
@@ -1596,6 +1746,70 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
                   props.onSettingsChange({ sidebarMoreEnabled: checked })
                 }
               />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-count-tiles") ? (
+            <SettingRow
+              description="Show Inbox, Running, To review, and Done today as count tiles. Off keeps the plain Inbox and Board rows."
+              focused={focusedSetting === settingId("sidebar-count-tiles")}
+              label="Count tiles"
+              scope="app"
+              settingId="sidebar-count-tiles"
+            >
+              <OctantSwitch
+                checked={props.settings.sidebarCountTiles}
+                describedBy="sidebar-count-tiles-description"
+                label="Count tiles"
+                onCheckedChange={(checked) =>
+                  props.onSettingsChange({ sidebarCountTiles: checked })
+                }
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-search") ? (
+            <SettingRow
+              description="An icon that opens a filter for the thread list, or a filter that is always shown."
+              focused={focusedSetting === settingId("sidebar-search")}
+              label="Thread filter"
+              scope="app"
+              settingId="sidebar-search"
+            >
+              <OctantToggleGroup<ShellSettings["sidebarSearchPresentation"]>
+                aria-label="Thread filter"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected !== undefined) {
+                    props.onSettingsChange({ sidebarSearchPresentation: selected });
+                  }
+                }}
+                value={[props.settings.sidebarSearchPresentation]}
+              >
+                <OctantToggleGroupItem value="icon">Icon</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="field">Always shown</OctantToggleGroupItem>
+              </OctantToggleGroup>
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-collapsed") ? (
+            <SettingRow
+              description="What Hide sidebar leaves: a narrow rail of icons, or nothing."
+              focused={focusedSetting === settingId("sidebar-collapsed")}
+              label="When collapsed"
+              scope="app"
+              settingId="sidebar-collapsed"
+            >
+              <OctantToggleGroup<ShellSettings["sidebarCollapsedPresentation"]>
+                aria-label="When collapsed"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected !== undefined) {
+                    props.onSettingsChange({ sidebarCollapsedPresentation: selected });
+                  }
+                }}
+                value={[props.settings.sidebarCollapsedPresentation]}
+              >
+                <OctantToggleGroupItem value="rail">Icon rail</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="hidden">Hidden</OctantToggleGroupItem>
+              </OctantToggleGroup>
             </SettingRow>
           ) : null}
           {isAvailable("mode-switcher") ? (
@@ -1676,11 +1890,13 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
         description="What a thread row in each sidebar list shows. A hidden detail is left out, not left as a gap."
         title="Thread rows"
       >
-        <SidebarRowDetailsSettings
-          focusedSetting={focusedSetting}
-          onChange={(sidebarRowProperties) => props.onSettingsChange({ sidebarRowProperties })}
-          value={props.settings.sidebarRowProperties}
-        />
+        <div className="settings-panel__body">
+          <SidebarRowDetailsSettings
+            focusedSetting={focusedSetting}
+            onChange={(sidebarRowProperties) => props.onSettingsChange({ sidebarRowProperties })}
+            value={props.settings.sidebarRowProperties}
+          />
+        </div>
       </SettingsSection>
     </section>
   );
@@ -1762,58 +1978,55 @@ function MaintenanceSection({
     capabilities,
   );
   return (
-    <section aria-label="Maintenance" id="settings-maintenance">
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Maintenance</h2>
-        <div className="setgroup">
+    <SettingsSection id="settings-maintenance" title="Maintenance">
+      <div className="setgroup">
+        <SettingRow
+          description="Restores the current mode's pane arrangement, sidebar, and dock to defaults. Threads and data are kept."
+          focused={focusedSetting === settingId("reset-layout")}
+          label="Reset active mode layout"
+          scope="app"
+          settingId="reset-layout"
+        >
+          <OctantButton
+            className="settings-view__action"
+            onClick={props.onResetLayout}
+            type="button"
+            variant="secondary"
+          >
+            Reset active mode layout
+          </OctantButton>
+        </SettingRow>
+        {resetBoundsAvailable ? (
           <SettingRow
-            description="Restores the current mode's pane arrangement, sidebar, and dock to defaults. Threads and data are kept."
-            focused={focusedSetting === settingId("reset-layout")}
-            label="Reset active mode layout"
+            description="Moves and resizes the native window to its default bounds. Workspace data is kept."
+            focused={focusedSetting === settingId("reset-window-bounds")}
+            label="Reset native window bounds"
             scope="app"
-            settingId="reset-layout"
+            settingId="reset-window-bounds"
           >
             <OctantButton
               className="settings-view__action"
-              onClick={props.onResetLayout}
+              onClick={props.onResetNativeBounds}
               type="button"
               variant="secondary"
             >
-              Reset active mode layout
+              Reset native window bounds
             </OctantButton>
           </SettingRow>
-          {resetBoundsAvailable ? (
-            <SettingRow
-              description="Moves and resizes the native window to its default bounds. Workspace data is kept."
-              focused={focusedSetting === settingId("reset-window-bounds")}
-              label="Reset native window bounds"
-              scope="app"
-              settingId="reset-window-bounds"
-            >
-              <OctantButton
-                className="settings-view__action"
-                onClick={props.onResetNativeBounds}
-                type="button"
-                variant="secondary"
-              >
-                Reset native window bounds
-              </OctantButton>
-            </SettingRow>
-          ) : null}
-          {diagnosticsExportClient !== undefined ? (
-            <SettingRow
-              description="Creates a local support bundle from the selected host. Review it before sharing."
-              focused={focusedSetting === settingId("export-diagnostics")}
-              label="Export diagnostics"
-              scope="host"
-              settingId="export-diagnostics"
-            >
-              <DiagnosticsExportControl client={diagnosticsExportClient} />
-            </SettingRow>
-          ) : null}
-        </div>
+        ) : null}
+        {diagnosticsExportClient !== undefined ? (
+          <SettingRow
+            description="Creates a local support bundle from the selected host. Review it before sharing."
+            focused={focusedSetting === settingId("export-diagnostics")}
+            label="Export diagnostics"
+            scope="host"
+            settingId="export-diagnostics"
+          >
+            <DiagnosticsExportControl client={diagnosticsExportClient} />
+          </SettingRow>
+        ) : null}
       </div>
-    </section>
+    </SettingsSection>
   );
 }
 

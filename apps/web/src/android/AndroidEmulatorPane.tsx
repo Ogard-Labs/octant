@@ -103,7 +103,7 @@ export function AndroidEmulatorPane(props: {
     let active = true;
     void Promise.resolve(props.hostBridge?.getHostCapabilities?.()).then((capabilities) => {
       if (!active) return;
-      setFrameAttach(capabilities?.liveSimulatorFrameSupported === true);
+      setFrameAttach(capabilities?.liveAndroidFrameSupported === true);
     });
     return () => {
       active = false;

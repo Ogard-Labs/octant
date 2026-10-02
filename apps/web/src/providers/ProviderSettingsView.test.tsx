@@ -2425,6 +2425,71 @@ describe("ProviderSettingsView", () => {
     expect(screen.getByRole("heading", { name: "Other providers" })).toBeVisible();
   });
 
+  it("sets each detection group in its own Settings section, in cards two to a row", () => {
+    const absent = {
+      ...kiloProvider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000095"),
+    };
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          discoverySnapshot: discoverySnapshot({
+            candidates: [codexCandidate()],
+            searchedDirectories: [
+              ...searchedDirectoriesFor("codex", "/opt/homebrew/bin"),
+              ...searchedDirectoriesFor("kilo", "/opt/homebrew/bin"),
+            ],
+          }),
+        })}
+        instances={[absent, codexProvider()]}
+      />,
+    );
+
+    const detected = screen.getByRole("region", { name: "Detected on this host" });
+    expect(detected).toHaveClass("settings-card-section--open");
+    expect(within(detected).getByRole("article", { name: "Codex local" })).toBeVisible();
+    expect(
+      within(screen.getByRole("region", { name: "Supported, not detected" })).getByRole("article", {
+        name: "Kilo local",
+      }),
+    ).toBeVisible();
+
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8").replace(
+      /\s+/g,
+      " ",
+    );
+    expect(styles).toMatch(
+      /\.settings-view \.provlist \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width: 900px\) \{ \.settings-view \.provlist \{ grid-template-columns: minmax\(0, 1fr\); \}/,
+    );
+    expect(styles).toMatch(/> \.icon-mark \{ grid-area: tile; width: 48px; height: 48px;/);
+  });
+
+  it("keeps the state dot neutral by default and lets only Vivid colour it", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8").replace(
+      /\s+/g,
+      " ",
+    );
+    const vivid = readFileSync(resolve(process.cwd(), "src/styles/vivid.css"), "utf8");
+
+    // Ready is a filled dot in ink; a ring in ink needs setup; a muted ring is off.
+    expect(styles).toMatch(
+      /\.prov-state\[data-tone="ok"\]::before \{ background: var\(--oct-provider-ready, var\(--octant-text-primary\)\);/,
+    );
+    expect(styles).toMatch(
+      /\.prov-state\[data-tone="warn"\]::before \{ background: transparent; border-color: var\(--oct-provider-setup, var\(--octant-text-primary\)\);/,
+    );
+    expect(styles).toMatch(
+      /\.prov-state::before \{[^}]*border: 1\.5px solid var\(--octant-text-muted\)/,
+    );
+    // The ready and setup colours exist only under the Vivid style.
+    expect(vivid).toMatch(
+      /:root\[data-octant-style="vivid"\] \{[^}]*--oct-provider-ready: var\(--octant-palette-green[^}]*--oct-provider-setup: var\(--octant-palette-orange/,
+    );
+  });
+
   it("separates providers the scan found from supported providers it did not find", () => {
     const absent = {
       ...kiloProvider(),

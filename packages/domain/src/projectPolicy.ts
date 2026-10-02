@@ -11,6 +11,7 @@ import {
   type WorkProject,
   type Project,
   type ProjectActor,
+  type ProjectColor,
   type ProjectId,
   type ProjectLifecycle,
   type ProjectOrigin,
@@ -173,6 +174,33 @@ export function renameProject(project: Project, name: string, updatedAt: UtcTime
   return {
     ...project,
     name: normalizeName(name),
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Set or clear (`null`) the Project's identity colour. Rejects an archived
+ * Project and a no-op change so the journal never carries an event that
+ * changed nothing.
+ */
+export function changeProjectColor(
+  project: Project,
+  color: ProjectColor | null,
+  updatedAt: UtcTimestamp,
+): Project {
+  if (project.lifecycle === "archived") {
+    reject("invalid-lifecycle", "Archived Projects are read-only");
+  }
+  if ((project.color ?? null) === color) {
+    reject("invalid-lifecycle", "Project colour is already selected");
+  }
+  // Cleared means absent, not null, so the stored record matches one that never
+  // had a colour.
+  const { color: _previous, ...uncoloured } = project;
+  return {
+    ...uncoloured,
+    ...(color === null ? {} : { color }),
     version: nextVersion(project),
     updatedAt,
   };

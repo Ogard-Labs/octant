@@ -16,6 +16,7 @@ import {
   decodeProjectBindingRelinked,
   decodeCodeProjectAccessChanged,
   decodeProjectBootstrap,
+  decodeProjectColorChanged,
   decodeProjectCommand,
   decodeProjectCommandResult,
   decodeProjectCreated,
@@ -149,6 +150,22 @@ describe("Project read contracts", () => {
     expect(() => decodeProject({ ...project, privateValue: true })).toThrow();
   });
 
+  it.each([chatProject, workProject, codeProject])(
+    "decodes a $type Project with and without a colour",
+    (project) => {
+      expect(decodeProject(project).color).toBeUndefined();
+      expect(decodeProject({ ...project, color: "teal" }).color).toBe("teal");
+      expect(() => decodeProject({ ...project, color: "#ff0000" })).toThrow();
+    },
+  );
+
+  it("carries a Project colour into the compact summary", () => {
+    const { bindingHistory: _history, ...summary } = codeProject;
+    expect(
+      decodeProjectSummary({ ...summary, bindingRevisionId: ids.revision, color: "pink" }),
+    ).toMatchObject({ color: "pink" });
+  });
+
   it("separates virtual Chat Projects from bound Projects", () => {
     expect(() => decodeProject({ ...chatProject, binding, bindingHistory: [] })).toThrow();
     expect(() => decodeProject({ ...workProject, bindingHistory: [] })).toThrow();
@@ -265,6 +282,8 @@ describe("Project command contracts", () => {
       hostId: "local",
     },
     { kind: "rename-project", projectId: ids.project, name: "Atlas", expectedVersion: 1 },
+    { kind: "change-project-color", projectId: ids.project, color: "blue", expectedVersion: 1 },
+    { kind: "change-project-color", projectId: ids.project, color: null, expectedVersion: 1 },
     {
       kind: "move-project",
       projectId: ids.project,
@@ -302,6 +321,17 @@ describe("Project command contracts", () => {
 
   it.each(commands)("decodes $kind", (command) => {
     expect(decodeProjectCommand(command)).toMatchObject(command);
+  });
+
+  it("rejects a colour outside the theme palette roles", () => {
+    expect(() =>
+      decodeProjectCommand({
+        kind: "change-project-color",
+        projectId: ids.project,
+        color: "chartreuse",
+        expectedVersion: 1,
+      }),
+    ).toThrow();
   });
 
   it("accepts receipts rather than renderer paths or window identities", () => {
@@ -471,6 +501,7 @@ describe("Project and memory event payload contracts", () => {
     expect(PROJECT_EVENT_NAMES).toEqual([
       "project.created@1",
       "project.renamed@1",
+      "project.color-changed@1",
       "project.order-changed@1",
       "project.lifecycle-changed@1",
       "project.binding-relinked@1",
@@ -488,6 +519,9 @@ describe("Project and memory event payload contracts", () => {
   it("decodes complete Project snapshots for every Project event payload", () => {
     expect(decodeProjectCreated({ project: chatProject })).toMatchObject({ project: chatProject });
     expect(decodeProjectRenamed({ project: chatProject })).toMatchObject({ project: chatProject });
+    expect(decodeProjectColorChanged({ project: { ...chatProject, color: "red" } })).toMatchObject({
+      project: { color: "red" },
+    });
     expect(decodeProjectOrderChanged({ project: chatProject })).toMatchObject({
       project: chatProject,
     });

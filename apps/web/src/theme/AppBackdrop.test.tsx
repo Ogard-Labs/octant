@@ -11,6 +11,7 @@ const dials = {
   coversSidebar: false,
   backgroundUrl: null,
   backgroundStillUrl: null,
+  backgroundLightUrl: null,
   backgroundAnimated: false,
 } as const;
 
@@ -67,6 +68,7 @@ describe("AppBackdrop", () => {
           backgroundId: "perspective-dot-plane-animated",
           backgroundUrl: "zen-backgrounds/perspective-dot-plane-dark.webp",
           backgroundStillUrl: "zen-backgrounds/perspective-dot-plane.jpg",
+          backgroundLightUrl: null,
           backgroundAnimated: true,
           // Plain, so the animated preset stays a moving CSS image.
           effect: { kind: "none", cell: 3, levels: 8 },
@@ -75,10 +77,38 @@ describe("AppBackdrop", () => {
     );
     const ground = container.querySelector("[data-octant-app-backdrop]");
     expect(ground).toHaveAttribute("data-octant-app-backdrop", "builtin");
-    expect(container.querySelector(".app-backdrop__builtin")).toHaveStyle({
-      backgroundImage: 'url("zen-backgrounds/perspective-dot-plane-dark.webp")',
-    });
+    const builtin = container.querySelector<HTMLElement>(".app-backdrop__builtin");
+    expect(builtin?.style.getPropertyValue("--app-backdrop-image")).toBe(
+      'url("zen-backgrounds/perspective-dot-plane-dark.webp")',
+    );
+    expect(builtin?.style.getPropertyValue("--app-backdrop-image-light")).toBe("");
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("carries a light-theme picture so the ground follows the window's scheme", () => {
+    const { container } = render(
+      <AppBackdrop
+        fetcher={vi.fn()}
+        placement="welcome"
+        resolved={{
+          ...dials,
+          kind: "builtin",
+          backgroundId: "soft-glow",
+          backgroundUrl: "zen-backgrounds/soft-glow.jpg",
+          backgroundStillUrl: "zen-backgrounds/soft-glow.jpg",
+          backgroundLightUrl: "zen-backgrounds/soft-glow-light.jpg",
+          backgroundAnimated: false,
+          effect: { kind: "none", cell: 3, levels: 8 },
+        }}
+      />,
+    );
+    const builtin = container.querySelector<HTMLElement>(".app-backdrop__builtin");
+    expect(builtin?.style.getPropertyValue("--app-backdrop-image")).toBe(
+      'url("zen-backgrounds/soft-glow.jpg")',
+    );
+    expect(builtin?.style.getPropertyValue("--app-backdrop-image-light")).toBe(
+      'url("zen-backgrounds/soft-glow-light.jpg")',
+    );
   });
 
   it("prints a built-in through its effect from the still frame, with no pattern over it", async () => {
@@ -95,6 +125,7 @@ describe("AppBackdrop", () => {
             backgroundId: "perspective-dot-plane-animated",
             backgroundUrl: "zen-backgrounds/perspective-dot-plane-dark.webp",
             backgroundStillUrl: "zen-backgrounds/perspective-dot-plane.jpg",
+            backgroundLightUrl: null,
             backgroundAnimated: true,
             effect: { kind: "pixelate", cell: 6, levels: 8 },
           }}

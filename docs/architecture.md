@@ -339,6 +339,16 @@ Modes are server-enforced domain policy, not renderer flags. Chat and Work can
 be disabled in settings; Code is always available; disabling a mode never
 deletes its data.
 
+The shell shows two modes, **Work** and **Code**. Work presents the Chat and
+Work domains together: one sidebar lists both kinds of thread and Project, and
+a new-thread composer chooses **Chat** (creates a Chat thread, no folder) or
+**In a folder** (creates a Work thread bound to a Project root). The choice is
+only which create command the composer sends; the active server mode still
+follows the thread or draft on screen, each row opens in its own mode and
+reaches its own kind's commands, and nothing in the renderer can turn a Chat
+into Work or a Work thread into Chat. Settings' Chat and Work switches still
+gate their domains: with one off, the composer offers only the other kind.
+
 | Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                              |
@@ -361,11 +371,51 @@ and `other` also covers Octant's own managed MCP tools, so an agent that labels
 a command `other` still reaches a person's approval rather than running unasked.
 Because a provider's in-process shell can emit no protocol request at all —
 observed on Linux where a Vibe Work turn ran real commands inside its jail —
-every Work-mode provider launch also confines with process exec and fork
-denied, so the OS itself refuses a shell the protocol never sees. Octant's
-own harness gives Work no shell port. File writes inside the Project
+the ACP, OpenCode, and Pi runtimes also launch confined in Work with process
+exec and fork denied, so the OS itself refuses a shell the protocol never
+sees. An ACP profile whose entrypoint spawns its own stdio server keeps fork,
+which reaches no shell without a second exec target. Work never runs at Full
+access, so these launches are always wrapped. The Codex app-server and the
+Claude postures Work uses are not wrapped (see
+[security and authority](#security-and-authority)); they withhold the shell
+through the thread config and tool list above instead. Octant's own harness
+gives Work no shell port. File writes inside the Project
 remain approval-gated in every driver. Work that needs a shell or Git is
 promoted to Code (below).
+
+Chat's missing filesystem and shell authority is withheld the same way, and
+more completely: a Chat session is acquired on its per-thread scratch
+directory, and nothing a provider asks for in Chat is anyone's to approve, so
+every approval request is declined at the agent. A provider sandbox that only
+blocks writes is not enough, because reads never escalate. Pi starts with no
+built-in tools. OpenCode and ACP agents launch confined with process exec and
+fork denied and the scratch directory read-only. Claude's gate keeps its reads
+inside the scratch directory, and its shell and edits ask and are declined.
+Codex threads get no execution environment (`environments: []` on the thread
+and on every turn), which removes its shell, `apply_patch`, and `view_image`;
+they also start and resume with the shell, image, plugin, and app features
+off, so a CLI that ignores `environments` still has no shell, and the user's
+own Codex plugins do not load. MCP servers from the user's Codex config run
+outside any environment (a `node_repl` server read another repository with
+none), and no setting turns them all off, so the driver reads the effective
+config and switches each named server off for the thread; a Chat thread whose
+servers cannot be listed does not start. Octant-managed tools (research,
+Canvas) are unaffected; they run on the host, not in the provider's
+environment.
+
+Provider-owned memory stays off in every mode. Octant's memory is scoped to a
+Project, and a provider's global memory reaches across all of them: Codex runs
+with `features.memories` off, which also keeps its memory folder out of its
+sandbox's readable roots, and Claude runs with no setting sources.
+
+Withholding the shell does not cut Work off from a person's integrations.
+Work is for files, browsers, and documents, and what separates it from Code
+is Git and the developer environment, not the tools a person plugs in. An MCP
+server the person installed and enabled as an Octant plugin is selectable in
+Work and Code exactly as in Chat (see
+[Extensions and skills](#extensions-and-skills)). It runs in Octant's own
+supervised session rather than inside the provider, so the Work-mode launch
+confinement does not stop it, and every call it answers waits for a person.
 
 A Work or Code thread started without a chosen Project lands in the mode's
 **default Project**: the host provisions `<default folder>/Work` or
@@ -380,6 +430,16 @@ feature reports itself unavailable there rather than inventing a revision. Code
 threads without a Project need the further `allowDefaultFolderThreads` switch,
 which the host accepts only while Git is not required. See
 [decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md).
+
+Every Project, in any mode, may carry one optional **colour**: a theme palette
+role (red, orange, yellow, green, teal, blue, purple, or pink) the person picks
+as the Project's identity. It lives on the Project record and is journaled as
+`project.color-changed@1`, so every client sees the same colour. Absent means no
+colour was picked and reads as a neutral mark; older Projects and events replay
+without it. `change-project-color` carries the role, or `null` to clear it, and
+follows the same rules as a rename: an archived Project refuses it, and a change
+that would leave the colour as it is journals nothing. The colour grants no
+authority and carries no status.
 
 A Work Project folder carries `AGENTS.md` (the person's standing brief, seeded
 once and never rewritten) and `STATUS.md` (where the work stands, with dated
@@ -422,6 +482,22 @@ stale, expired, foreign-thread, foreign-Project, parent-checkout, unavailable,
 or wider-than-parent grants. Whether the agent may delegate is one host
 setting, on by default; a stored Ask from the retired "only when I start them"
 choice reads as off.
+
+Children can form a dependency graph. A run admitted with `dependsOn` (up to
+eight existing sibling runs of the same parent thread) parks as Waiting under
+`waiting-on-dependencies`: it holds no capacity slot, the capacity queue never
+starts it, and a restart leaves it parked. `AgentRunDependencyScheduler` asks
+the orchestration service to settle it on every committed status change and
+once at boot, through the pure `decideAgentRunDependencies`. When every
+dependency completed, the run starts (or joins the capacity queue if no slot is
+free) and receives each dependency's reply as a context block; a reply that is
+gone fails the start closed. A dependency that failed or was cancelled fails
+the dependent without running it (`dependency-failed: <id>`); an interrupted
+dependency does not, because a retry can still complete it. A run cannot be
+admitted on a sibling that already failed or was cancelled, and since only
+existing runs can be named, a cycle cannot be expressed. A
+parked run still counts toward the active-run limits (three per parent, four
+per host), which keeps graphs small.
 
 Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /
@@ -704,21 +780,14 @@ flowchart LR
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
 
-- **Composer feature tips.** An empty follow-up composer in a Chat, Work, or
-  Code thread shows a short tip about a built-in feature instead of a fixed
-  placeholder. A start screen's composer asks in plain words instead ("Ask
-  anything…", "Describe the work…", "Describe the change…"): a first-time
-  person meeting "Tip: Press Enter to send" where a prompt belongs could not
-  tell what the box was for. A session-local
-  sequence advances when a composer mounts or its thread identity changes,
-  including returning to a thread and creating another draft. It stays steady
-  through typing and routine updates. Callers offer only mounted capabilities:
-  file and thread mentions, commands, Browser, Computer, and Code Plan mode.
-  Command-specific tips cover thread search, new threads, Settings, Zen mode,
-  and skills only when their commands are offered by the current composer.
-  Removing a capability replaces an ineligible tip. Active responses retain
-  their send-next-message placeholder. Tips use no timers, persisted history,
-  network calls, or live announcements; accessible input labels remain stable.
+- **Composer placeholder.** An empty follow-up composer in a Chat, Work, or
+  Code thread says "Reply…" and nothing else: a rotating feature tip in the
+  place of a prompt read as noise to someone who already knew the feature and
+  said nothing to someone who did not. A start screen's composer asks in plain
+  words instead ("Ask anything…", "Describe the work…", "Describe the change…"),
+  because a first-time person has not started a conversation to reply to.
+  Active responses retain their send-next-message placeholder. Accessible input
+  labels remain stable.
 
 ## Providers
 
@@ -817,7 +886,7 @@ modelId }`, and the model picker is provider-first. Discovery can find
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
   never receive raw token material. Broker URLs and tokens are stripped from
-  every child environment. Linear is the first bundled-off Integration plugin:
+  every child environment. Linear is the first bundled Integration plugin, enabled by default:
   it contributes a Settings card through `settings.section`, connects with
   authorization-code + PKCE, and stores access and refresh tokens only in that
   host credential service. Connect opens a short-lived loopback listener on
@@ -870,11 +939,18 @@ Work also refuses when the previous driver is unavailable and its conversation
 ownership cannot be established.
 
 Optional Project and
-thread token spend ceilings (0060) are host owner policy: the server refuses a
-provider-consuming turn at admission when remaining reserved capacity cannot
-cover a declared per-turn bound, and the composer and Environment name a
-recovery. Spend is the existing `UsageRecord` ledger, never imported provider
-history.
+thread spend ceilings (0060) are host owner policy over three dimensions:
+tokens, turns, and total agent run time per window (for example two hours a
+day for a Project). The server refuses a provider-consuming turn at admission
+when remaining reserved token capacity cannot cover a declared per-turn bound,
+when the turn count is used up, or when settled plus in-flight run time has
+reached the budget, and the composer and Environment name the exhausted
+dimension and a recovery. Token spend is the existing `UsageRecord` ledger,
+never imported provider history. Turns and run time come from journaled
+`spend.turn-recorded@1` facts, one per admitted turn or child run, charged its
+actual admitted-to-settled time; a turn still in flight counts its elapsed time,
+and a turn a host exit interrupted records nothing. Monetary ceilings stay
+unenforced until pricing metadata exists.
 
 ### Native harness
 
@@ -882,6 +958,30 @@ Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
 `azure-foundry`; `ollama` joins once its driver runs the tool loop) run under the
 native harness in `apps/server/src/harness`:
 
+- **Loop.** `createNativeHarnessConnection` is the harness's agent loop and
+  the `ProviderConnection` every direct-endpoint driver hands out. Each driver
+  supplies only a `NativeHarnessTransport` (one request over its wire
+  protocol, its size bounds, and what a response teaches the registry); the
+  loop owns the conversation. Instructions blocks become the system prompt
+  (plus one sorted line per Octant tool on offer), so the prefix stays
+  byte-stable. A step's calls go out as `tool-request` events and the turn
+  runner executes them through its tool set; once every call is answered the
+  results return in one message in call order. A request that outgrows the
+  endpoint is shrunk in the request only — older tool results first, then
+  whole earlier exchanges behind a note — and refused if the latest message
+  alone does not fit.
+- **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
+  each step as it happens (`native-harness-transcript`, one aggregate per
+  session): the user message once the request is known to fit, each reply,
+  and each tool call the moment it settles. Sessions therefore report
+  `resume: supported` and return a resume cursor, which is how a Code thread
+  continues the same conversation on its next turn. `start` under an existing
+  id begins a new generation. A resume first closes any call the process
+  stopped in the middle of with a journaled interrupted result that says
+  whether the tool only reads (`replay: "safe"`, call it again) or may have
+  taken effect (`replay: "unsafe"`, check before repeating); nothing is
+  silently re-run. Chat and Work still rebuild their history on the host and
+  start a fresh session each turn.
 - **Tools.** `createNativeHarnessTools` composes the nine working tools and
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
   closed tool catalog (`harness-*` capability ids). Every call decodes its
@@ -918,7 +1018,11 @@ native harness in `apps/server/src/harness`:
   the harness calls, `agentTuiModel.ts` the pure presentation (transcript,
   footer, palette projected from `@octant/theme` tokens), and `agentTui.ts`
   the OpenTUI screen, loaded only when stdout is a terminal and `--plain` or
-  `--json` was not asked for.
+  `--json` was not asked for. The terminal registers a window authority with
+  a renderer identity, like the desktop renderer, and `agentWindow.ts` opens
+  the Project and then the thread in that window before driving it, because
+  Code checkouts, goals, and harness approvals are authorized against what a
+  window has open.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
@@ -990,6 +1094,13 @@ prompt, schema, tool, route, model, or capability.
 - Executable components are quarantined until explicitly reviewed and then run
   in supervised, sandboxed processes with a ready handshake, bounded output,
   durable process receipts, and drain-then-stop on disable.
+  On macOS the deny-default Seatbelt profile reads the system roots, the
+  component's own roots, and its runtime's install: the executable's folder
+  and, for a Homebrew runtime, `<prefix>/Cellar`, `<prefix>/opt`, and
+  `<prefix>/etc/openssl@3`, never the rest of the prefix. It also grants
+  `/` and metadata of every parent folder of those roots, because a runtime
+  such as node will not start without them. Metadata names a folder; it does
+  not read its contents.
 - Skills are discovered only from valid `.agents/skills/` packages between the
   working directory and the Project or repository root, plus the user-global
   `~/.agents/skills/`.
@@ -1003,6 +1114,15 @@ prompt, schema, tool, route, model, or capability.
   cache. A candidate that fails validation is not listed. Opening Settings does
   not fetch a catalog.
 - A structured mention cannot install, trust, enable, or elevate anything.
+- A selected MCP server component reaches Chat, Work, and Code turns through
+  the provider's app-managed tool transport. The host resolves the selection
+  against the thread's own mode scope, connects the supervised session for
+  that scope, offers only the selected tools, and refuses the turn when the
+  provider or model cannot carry Octant's tools. Every call waits for a
+  one-time approval in the turn's window, shown in the open thread. An MCP
+  server's launch command starts the server, not a shell the model holds, so
+  a stdio server is declared `mcp`, not `shell`, whichever package format
+  carried it.
 - Core capabilities (browser/computer use, tests, Apple validation, approvals,
   memory, subagents) are app-managed and provider-neutral; no core capability
   depends on an optional extension. Computer use is destination-shaped: the
@@ -1051,6 +1171,16 @@ no per-package signature — so the design pins URL plus hash and reports
 honestly when they disagree. See
 [decisions/0162-managed-npm-device-tools-share-one-release-channel.md](decisions/0162-managed-npm-device-tools-share-one-release-channel.md).
 
+The Simulator pane attaches `serve-sim` for an already booted Simulator and
+keeps the desktop device helper when that stream is missing or produces no
+frame. The Android pane attaches `serve-avd` for an already booted
+`emulator-<port>` serial and keeps `adb` screencap and `adb shell input`
+otherwise. Boot still uses the emulator binary. The tools run in Electron
+main. The server reaches Android streaming through a loopback broker
+(`OCTANT_SERVE_AVD_BROKER_URL`, `OCTANT_SERVE_AVD_BROKER_TOKEN`) the same way
+it reaches the Simulator device helper. An agent must not launch
+Simulator.app, `serve-sim`, or `serve-avd`.
+
 ### Plugin boundaries and remaining extraction
 
 The approved design bounds a feature's reach through public, provider-neutral
@@ -1079,7 +1209,7 @@ The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
 curated re-export of contracts, preserving the contracts package's dependency
 direction. Some Settings rows remain host-compiled. Linear uses the Integration
-port as a bundled-off plugin; extracting the remaining GitHub and board packages
+port as a bundled plugin; extracting the remaining GitHub and board packages
 and packaging remaining appearance/viewer assets is unfinished work, tracked in
 Linear rather than inferred from archive status.
 

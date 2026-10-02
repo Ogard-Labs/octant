@@ -37,3 +37,22 @@ export function spendCeilingScopeKey(input: {
 }): string {
   return input.id;
 }
+
+/**
+ * Settled provider turns counted by turn and run-time ceilings. Rebuilt from
+ * `spend.turn-recorded@1` by the spend-ceilings projection.
+ */
+export const SPEND_TURN_PROJECTION_SQL = `
+CREATE TABLE spend_turn_projection (
+  reservation_id TEXT PRIMARY KEY NOT NULL,
+  thread_type TEXT NOT NULL CHECK(thread_type IN ('chat-thread', 'work-thread', 'code-thread')),
+  thread_id TEXT NOT NULL,
+  project_id TEXT,
+  started_at TEXT NOT NULL,
+  settled_at TEXT NOT NULL,
+  run_time_ms INTEGER NOT NULL CHECK(run_time_ms >= 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+CREATE INDEX spend_turn_thread_idx ON spend_turn_projection (thread_id, settled_at);
+CREATE INDEX spend_turn_project_idx ON spend_turn_projection (project_id, settled_at);
+`;

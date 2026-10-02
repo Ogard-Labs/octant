@@ -16,7 +16,7 @@ function cssRule(selector: string): string {
 }
 
 describe("ModeSwitcher", () => {
-  it("renders ordered compact buttons, omits unavailable modes, and avoids redundant commands", async () => {
+  it("shows Chat as part of Work beside Code, and avoids redundant commands", async () => {
     const user = userEvent.setup();
     const onSelectMode = vi.fn();
     render(
@@ -32,11 +32,12 @@ describe("ModeSwitcher", () => {
     const buttons = screen.getAllByRole("button");
     expect(group).toHaveClass("modeswitch", "window-no-drag");
     expect(group).toHaveAttribute("data-oct-modeswitch", "icons");
-    expect(buttons.map((button) => button.textContent)).toEqual(["Chat", "Code"]);
-    expect(screen.queryByRole("button", { name: "Work" })).not.toBeInTheDocument();
+    // Chat and Work are one visible mode: enabling only Chat still offers Work.
+    expect(buttons.map((button) => button.textContent)).toEqual(["Work", "Code"]);
+    expect(screen.queryByRole("button", { name: "Chat" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("Octant")).toHaveClass("mode-switcher__brand");
-    expect(screen.getByRole("button", { name: "Chat" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "Work" })).not.toHaveAttribute("aria-current");
     const iconFrames = group.querySelectorAll(".mode__icon-frame");
     expect(iconFrames).toHaveLength(2);
     for (const frame of iconFrames) {
@@ -50,9 +51,9 @@ describe("ModeSwitcher", () => {
 
     await user.click(screen.getByRole("button", { name: "Code" }));
     expect(onSelectMode).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Chat" }));
+    await user.click(screen.getByRole("button", { name: "Work" }));
     expect(onSelectMode).toHaveBeenCalledOnce();
-    expect(onSelectMode).toHaveBeenCalledWith("chat");
+    expect(onSelectMode).toHaveBeenCalledWith("work");
   });
 
   it("renders the active mode trigger and truthful ordered radio items", async () => {
@@ -76,8 +77,7 @@ describe("ModeSwitcher", () => {
 
     const items = screen.getAllByRole("menuitemradio");
     expect(items.map((item) => item.textContent)).toEqual([
-      expect.stringMatching(/Chat.*Talk through questions with your models/),
-      expect.stringMatching(/Work.*Work with local files and documents/),
+      expect.stringMatching(/Work.*Chat, or work with the files in a folder/),
       expect.stringMatching(/Code.*Build, debug, and ship software/),
     ]);
     expect(screen.getByRole("menuitemradio", { name: "Code" })).toHaveAttribute(
@@ -86,7 +86,7 @@ describe("ModeSwitcher", () => {
     );
     // The name is the visible label alone; the one-line help is a description.
     expect(screen.getByRole("menuitemradio", { name: "Work" })).toHaveAccessibleDescription(
-      "Work with local files and documents",
+      "Chat, or work with the files in a folder",
     );
     expect(
       screen.getByRole("menuitemradio", { name: "Code" }).querySelector(".octant-menu__indicator"),
@@ -97,9 +97,9 @@ describe("ModeSwitcher", () => {
     await waitFor(() => expect(trigger).toHaveFocus());
 
     await user.keyboard("{Enter}");
-    await user.click(screen.getByRole("menuitemradio", { name: "Chat" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Work" }));
     expect(onSelectMode).toHaveBeenCalledOnce();
-    expect(onSelectMode).toHaveBeenCalledWith("chat");
+    expect(onSelectMode).toHaveBeenCalledWith("work");
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
