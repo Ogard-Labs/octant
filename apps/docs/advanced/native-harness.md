@@ -61,6 +61,14 @@ Whether one may start at all is **Let the agent start subagents** under
 **Settings → Octant Harness → Helper agents**: on by default, and when it is
 off the lead is told subagents are turned off and does the work itself.
 
+Children can wait on each other, so the lead can run a small graph. It starts
+independent tasks side by side, then starts a task that needs their output with
+`after`. That task begins only once all of them have finished, with their
+replies in front of it; if one of them fails or is cancelled, it never runs.
+`delegate wait` blocks until the children finish, and `status` shows what each
+one is waiting on. At most three children of a thread are active at once,
+waiting ones included.
+
 This is how a frontier model plans and reviews while cheaper models read and
 implement: put the strong model on `default` and `slow`, the cheap one on
 `task`, and let the lead delegate.
