@@ -170,7 +170,8 @@ whole window and one frost lies over it with the card's rectangle cut out, so
 the sidebar and gutters frost as one piece with no seam where they meet; the
 dither stays inside the card either way. A pane header and the dock head share the 38px
 title rail, and the card draws the one hairline under both. Below 681px the
-workspace sidebar is an overlay drawer and the frame stays flat. The drawer
+workspace sidebar is an overlay drawer and the frame stays flat, with a scrim
+(`--octant-scrim`) dimming the page behind it. The drawer
 starts closed on every load, closes on Escape, on a tap outside it, and on
 choosing somewhere to go, and never changes the saved wide-window choice.
 Settings keeps its own narrow layout, a drawer with a flat page, below 960px.

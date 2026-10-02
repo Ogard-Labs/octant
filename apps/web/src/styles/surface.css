@@ -505,6 +505,41 @@
   }
 }
 
+/* At phone width the chip row wrapped and left "This computer" alone on a
+   second line, which read as a second row of settings. It stays on one line
+   and the leading chips scroll sideways when a longer host name does not fit;
+   the pickers open in a portal, so the scroll box clips nothing. */
+@media (max-width: 680px) {
+  .composer-tray--inside {
+    flex-wrap: nowrap;
+  }
+
+  .composer-tray--inside .composer-tray__leading {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .composer-tray--inside .composer-tray__leading::-webkit-scrollbar {
+    display: none;
+  }
+
+  .composer-tray--inside .composer-tray__leading > * {
+    flex: 0 0 auto;
+  }
+
+  /* The two labels name the choice on their own; their icons cost about 40px,
+     which is what pushed "This computer" off the end of a 390px card. */
+  .composer-tray--inside .work-kind-switch svg {
+    display: none;
+  }
+
+  /* The 36px hero wrapped "Good evening, Henrik" onto two lines on a phone. */
+  .welcome__heading > .oct-title--hero {
+    font-size: var(--oct-text-2xl);
+  }
+}
+
 /* ── Welcome ground ───────────────────────────────────────────────────
    The start screen sits on the theme's ground: an ordered-dither cloud in
    the accent, or a person's photo under it. The stage paints the page once
