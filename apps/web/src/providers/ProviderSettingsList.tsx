@@ -170,15 +170,25 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     void props.onProviderOrderChange(reordered.map((instance) => instance.id));
   }
 
-  // Only the current scan is evidence that a runtime is installed; the group a
-  // row lands in follows that. A binary the scan never searched for is not
-  // claimed absent, and a manual endpoint has no local binary to detect at all.
+  // Switched-on providers are the configured ones: they stay listed directly
+  // under the "Configured providers" heading whatever the scan found. Grouping
+  // an enabled, ready provider by detection put Codex under "Other providers"
+  // beside providers that were off whenever the scan had not covered its binary.
+  // Only providers that are off are sorted by detection below, and the group a
+  // row lands in follows the current scan alone: it is the only evidence that a
+  // runtime is installed. A binary the scan never searched for is not claimed
+  // absent, and a manual endpoint has no local binary to detect at all.
   const groups = useMemo(() => {
+    const configured: Array<{ readonly instance: ProviderInstance; readonly index: number }> = [];
     const detected: Array<{ readonly instance: ProviderInstance; readonly index: number }> = [];
     const notFound: Array<{ readonly instance: ProviderInstance; readonly index: number }> = [];
     const other: Array<{ readonly instance: ProviderInstance; readonly index: number }> = [];
     ordered.forEach((instance, index) => {
       const row = { instance, index };
+      if (instance.enabled) {
+        configured.push(row);
+        return;
+      }
       const binaryPath = providerBinaryPath(instance);
       if (isDetectedLocally(instance, props.discoverySnapshot)) {
         detected.push(row);
@@ -193,7 +203,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         notFound.push(row);
       }
     });
-    return { detected, notFound, other };
+    return { configured, detected, notFound, other };
   }, [ordered, props.discoverySnapshot]);
 
   const busy = props.busy || props.status !== "ready";
@@ -314,6 +324,13 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           </div>
         ) : (
           <div className="provider-list__groups">
+            {groups.configured.length === 0 ? (
+              <p className="settings-section-line">No providers are switched on yet.</p>
+            ) : (
+              <div className="provlist">
+                {groups.configured.map(({ instance, index }) => renderProviderRow(instance, index))}
+              </div>
+            )}
             {groups.detected.length === 0 ? null : (
               <SettingsSection title="Detected on this host">
                 <div className="provlist">

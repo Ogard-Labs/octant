@@ -86,8 +86,9 @@ was cancelled is not treated as proof that a runtime is gone, so the switch
 stays off until a scan completes. A scan proves absence only for the
 directories it actually searched: a binary configured outside every searched
 location can still be enabled, and the host then checks that it exists. Once a
-scan completes, the provider list separates the providers detected on this host
-from supported providers it did not find. Each provider is a card with its logo,
+scan completes, providers that are switched on are listed first under
+**Configured providers**, and the ones that are off are separated into those
+detected on this host and supported providers it did not find. Each provider is a card with its logo,
 name, maker, and a state line (a filled dot for ready, a ring for needs setup, a
 muted ring for off), two to a row on a wide window. A manual endpoint addition has no local
 binary, is not described as undetected, and can be enabled without detection.

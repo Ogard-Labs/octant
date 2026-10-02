@@ -2428,6 +2428,7 @@ describe("ProviderSettingsView", () => {
   it("sets each detection group in its own Settings section, in cards two to a row", () => {
     const absent = {
       ...kiloProvider(),
+      enabled: false,
       id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000095"),
     };
     renderProviderSettings(
@@ -2441,7 +2442,7 @@ describe("ProviderSettingsView", () => {
             ],
           }),
         })}
-        instances={[absent, codexProvider()]}
+        instances={[absent, { ...codexProvider(), enabled: false }]}
       />,
     );
 
@@ -2490,9 +2491,47 @@ describe("ProviderSettingsView", () => {
     );
   });
 
+  it("lists a switched-on provider under Configured providers even when the scan did not cover its binary", () => {
+    const off = {
+      ...kiloProvider(),
+      enabled: false,
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000095"),
+    };
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          // The scan finished without ever visiting the Codex binary's directory.
+          discoverySnapshot: discoverySnapshot({ candidates: [] }),
+        })}
+        instances={[codexProvider(), off]}
+      />,
+    );
+
+    const configuredHeading = screen.getByRole("heading", { name: "Configured providers" });
+    const otherHeading = screen.getByRole("heading", { name: "Other providers" });
+    const codexCard = screen.getByRole("article", { name: "Codex local" });
+    const offCard = screen.getByRole("article", { name: "Kilo local" });
+
+    expect(
+      configuredHeading.compareDocumentPosition(codexCard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      codexCard.compareDocumentPosition(otherHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      otherHeading.compareDocumentPosition(offCard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      within(screen.getByRole("region", { name: "Other providers" })).queryByRole("article", {
+        name: "Codex local",
+      }),
+    ).toBeNull();
+  });
+
   it("separates providers the scan found from supported providers it did not find", () => {
     const absent = {
       ...kiloProvider(),
+      enabled: false,
       id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000095"),
     };
     renderProviderSettings(
@@ -2506,7 +2545,7 @@ describe("ProviderSettingsView", () => {
             ],
           }),
         })}
-        instances={[absent, codexProvider()]}
+        instances={[absent, { ...codexProvider(), enabled: false }]}
       />,
     );
 
