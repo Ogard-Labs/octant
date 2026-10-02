@@ -40,7 +40,9 @@ import {
   type CodeCheckoutId,
   type CodeCheckoutHead,
   type CodeCheckoutIdentity,
+  type CodeCommand,
   type CodeCommandResult,
+  type ForkCodeThreadCommand,
   type CodeThreadCheckoutRebindRefusal,
   type CodeRepositoryId,
   type CodeWorktreeSourcePreview,
@@ -95,6 +97,7 @@ import {
   type ProfileThreadContextSnapshot,
 } from "@octant/domain/agent-profile-policy";
 import { ACCESS_POSTURE_RANK, authorizeCodeOperation } from "@octant/domain/code-policy";
+import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
 import {
   completedThreadArchiveDue,
@@ -183,6 +186,8 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
   "branch-collision":
     "The delivery branch already exists. Choose a different delivery branch and retry.",
   "path-collision": "A managed worktree already exists for this thread.",
+  "source-files-unavailable":
+    "The forked files could not be laid down in the new worktree, so nothing was created.",
   "ref-ambiguous": "The source ref is ambiguous. Choose an exact source branch and retry.",
   "ref-unavailable": "The source branch does not exist. Choose another source branch and retry.",
   "remote-unavailable":
@@ -434,6 +439,41 @@ export interface ManagedCodeThreadCreationInput {
   readonly remoteName?: string;
   /** An exact revision to start from, in place of the tip of `sourceBranch`. */
   readonly sourceRevision?: string;
+  /**
+   * The files to lay over `sourceRevision` once the worktree exists: a fork's
+   * work as it stood, including what was never committed. Host-resolved only;
+   * no command carries it.
+   */
+  readonly sourceFiles?: CodeForkFiles;
+}
+
+/** The files a fork starts from, as Git trees the source's checkpoints already hold. */
+export interface CodeForkFiles {
+  readonly worktree: string;
+  readonly index: string;
+}
+
+/**
+ * Where a fork starts: the files as they stood when the named turn finished.
+ * Refused rather than guessed when the host never recorded that state.
+ */
+export type CodeForkPoint =
+  | {
+      readonly status: "resolved";
+      readonly head: string;
+      readonly files: CodeForkFiles;
+    }
+  | {
+      readonly status: "refused";
+      readonly reason: "not-found" | "not-settled" | "unrecorded" | "no-commits" | "unavailable";
+    };
+
+export interface CodeForkPointPort {
+  readonly resolve: (
+    windowId: WindowId,
+    source: CodeThread,
+    throughOperationId: string,
+  ) => Promise<CodeForkPoint>;
 }
 
 /**
@@ -562,6 +602,8 @@ export interface CodeServiceOptions {
   readonly worktreeSourcePreview?: CodeWorktreeSourcePreviewPort;
   readonly worktreeRefs?: CodeWorktreeRefsPort;
   readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
+  /** Where a fork starts; without it a fork refuses as unavailable. */
+  readonly forkPoints?: CodeForkPointPort;
   readonly probeProvider?: (
     providerInstanceId: CodeThread["providerInstanceId"],
   ) => Promise<ProviderProbeResult>;
@@ -744,6 +786,7 @@ export class CodeService {
   readonly #worktreeSourcePreview: CodeWorktreeSourcePreviewPort | undefined;
   readonly #worktreeRefs: CodeWorktreeRefsPort | undefined;
   readonly #managedThreadCreation: ManagedCodeThreadCreationPort | undefined;
+  readonly #forkPoints: CodeForkPointPort | undefined;
   readonly #probeProvider: CodeServiceOptions["probeProvider"];
   readonly #isProviderModelAllowed: CodeServiceOptions["isProviderModelAllowed"];
   readonly #workingDirectories: CodeServiceOptions["workingDirectories"];
@@ -789,6 +832,7 @@ export class CodeService {
     this.#worktreeSourcePreview = options.worktreeSourcePreview;
     this.#worktreeRefs = options.worktreeRefs;
     this.#managedThreadCreation = options.managedThreadCreation;
+    this.#forkPoints = options.forkPoints;
     this.#probeProvider = options.probeProvider;
     this.#isProviderModelAllowed = options.isProviderModelAllowed;
     this.#workingDirectories = options.workingDirectories;
@@ -1047,6 +1091,14 @@ export class CodeService {
       } catch {
         throw this.#failure("invalid", "Code command is invalid.");
       }
+      // A fork is a managed creation whose start the host resolves itself, so
+      // it runs every gate that creation runs, plus laying the files down.
+      let sourceFiles: CodeForkFiles | undefined;
+      if (command.kind === "fork-code-thread") {
+        const fork = await this.#forkCreation(authenticatedWindowId, command);
+        command = fork.command;
+        sourceFiles = fork.files;
+      }
       if (command.kind === "preview-code-worktree-source") {
         if (this.#worktreeSourcePreview === undefined) {
           throw this.#failure(
@@ -1081,6 +1133,7 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.threadId) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
+        this.#requireForkOrigin(command.projectId, command.threadId, command.forkedFrom);
         if (Object.keys(command.modelOptionValues ?? {}).length > 0) {
           await this.#requireProviderModel(
             command.providerInstanceId,
@@ -1136,6 +1189,7 @@ export class CodeService {
           ...(command.sourceRevision === undefined
             ? {}
             : { sourceRevision: command.sourceRevision }),
+          ...(sourceFiles === undefined ? {} : { sourceFiles }),
         };
         const creationSignal = signal ?? new AbortController().signal;
         // Prepare resolves the exact source without mutating the user's checkout.
@@ -1481,6 +1535,11 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.thread.id) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
+        this.#requireForkOrigin(
+          command.thread.projectId,
+          command.thread.id,
+          command.thread.forkedFrom,
+        );
         if (Object.keys(command.thread.modelOptionValues ?? {}).length > 0) {
           await this.#requireProviderModel(
             command.thread.providerInstanceId,
@@ -3338,6 +3397,96 @@ export class CodeService {
     }
   }
 
+  /**
+   * The managed creation a fork stands for. It carries the source's provider,
+   * model, and delivery outcome on a branch of its own, starts approval-gated
+   * whatever the source holds — a new thread has no approval receipt — and
+   * inherits no profile, running turn, or pending outcome proposal.
+   */
+  async #forkCreation(
+    authenticatedWindowId: WindowId,
+    command: ForkCodeThreadCommand,
+  ): Promise<{
+    readonly command: Extract<CodeCommand, { readonly kind: "create-managed-code-thread" }>;
+    readonly files: CodeForkFiles;
+  }> {
+    if (this.#forkPoints === undefined) {
+      throw this.#failure("unavailable", "Forking a Code thread is unavailable.");
+    }
+    const source = this.#persistence.readCodeThread(command.sourceThreadId);
+    if (source === undefined) throw this.#failure("invalid", "The thread to fork was not found.");
+    await this.#authorizeThread(authenticatedWindowId, source);
+    const point = await this.#forkPoints.resolve(
+      authenticatedWindowId,
+      source,
+      command.throughOperationId,
+    );
+    if (point.status === "refused") {
+      throw this.#failure(
+        point.reason === "unavailable" ? "unavailable" : "conflict",
+        FORK_REFUSALS[point.reason],
+      );
+    }
+    const { proposedOutcome: _pending, ...deliveryTarget } = source.deliveryTarget;
+    let managed: CodeCommand;
+    try {
+      managed = decodeCodeCommand({
+        kind: "create-managed-code-thread",
+        threadId: command.threadId,
+        projectId: source.projectId,
+        bindingRevisionId: source.bindingRevisionId,
+        title: command.title,
+        providerInstanceId: source.providerInstanceId,
+        modelId: source.modelId,
+        ...(source.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: source.modelOptionValues }),
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        deliveryTarget: {
+          ...deliveryTarget,
+          branchIntent: defaultDeliveryBranchIntent(
+            deliveryTarget.branchIntent,
+            String(command.threadId).replace(/-/g, "").slice(0, 12),
+          ),
+        },
+        sourceBranch: deliveryTarget.branchIntent,
+        startFromOrigin: false,
+        sourceRevision: point.head,
+        forkedFrom: {
+          threadId: command.sourceThreadId,
+          throughOperationId: command.throughOperationId,
+        },
+      });
+    } catch {
+      throw this.#failure("invalid", "This thread cannot be forked.");
+    }
+    if (managed.kind !== "create-managed-code-thread") {
+      throw this.#failure("invalid", "This thread cannot be forked.");
+    }
+    return { command: managed, files: point.files };
+  }
+
+  /**
+   * A fork origin names a thread the host holds, in the same Project, other
+   * than the new thread itself. The renderer supplies it; the host must not
+   * take it on trust, because the first turn reads the named thread's history.
+   */
+  #requireForkOrigin(
+    projectId: string,
+    threadId: string,
+    forkedFrom: { readonly threadId: CodeThreadId } | undefined,
+  ): void {
+    if (forkedFrom === undefined) return;
+    if (String(forkedFrom.threadId) === String(threadId)) {
+      throw this.#failure("invalid", "A thread cannot be forked from itself.");
+    }
+    const parent = this.#persistence.readCodeThread(forkedFrom.threadId);
+    if (parent === undefined || String(parent.projectId) !== String(projectId)) {
+      throw this.#failure("invalid", "A fork must come from a thread in the same Project.");
+    }
+  }
+
   #failure(category: CodeFailure["category"], message: string): CodeServiceError {
     return new CodeServiceError(decodeCodeFailure({ category, message }));
   }
@@ -3370,3 +3519,14 @@ function nextModelOptionValues(
   const values = command.modelOptionValues ?? (sameModel ? current.modelOptionValues : undefined);
   return values === undefined ? {} : { modelOptionValues: values };
 }
+
+const FORK_REFUSALS: Readonly<
+  Record<Exclude<CodeForkPoint, { readonly status: "resolved" }>["reason"], string>
+> = {
+  "not-found": "That reply is not part of this thread.",
+  "not-settled": "Fork from a reply that has finished.",
+  unrecorded:
+    "Octant did not record the files at that point, so it cannot fork there. Fork from a later reply.",
+  "no-commits": "This repository has no commits yet, so a fork has nowhere to start.",
+  unavailable: "The thread's checkout is unavailable right now, so it cannot be forked.",
+};

@@ -516,6 +516,24 @@ export const CreateCodeThreadCommand = Schema.Struct({
 }).annotations(strict);
 export type CreateCodeThreadCommand = typeof CreateCodeThreadCommand.Type;
 
+/**
+ * Fork a thread at one of its finished turns onto its own managed worktree.
+ *
+ * The caller names only the point; the host reads which files stood there
+ * from its own record of the source — the checkout as the next turn found it,
+ * or as it stands now when the named turn is the newest — so a client cannot
+ * point a fork at a tree it chose. The fork starts from that state, including
+ * work never committed, on a new branch, and the source is never touched.
+ */
+export const ForkCodeThreadCommand = Schema.Struct({
+  kind: Schema.Literal("fork-code-thread"),
+  threadId: CodeThreadId,
+  sourceThreadId: CodeThreadId,
+  throughOperationId: Schema.UUID,
+  title: Schema.NonEmptyTrimmedString,
+}).annotations(strict);
+export type ForkCodeThreadCommand = typeof ForkCodeThreadCommand.Type;
+
 export const CodeCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("prepare-code-project-checkout"),
@@ -539,6 +557,7 @@ export const CodeCommand = Schema.Union(
     remoteName: Schema.optional(WorktreeSourceRemote),
   }).annotations(strict),
   CreateManagedCodeThreadCommand,
+  ForkCodeThreadCommand,
   Schema.Struct({
     kind: Schema.Literal("update-code-settings"),
     expectedVersion: AggregateVersion,

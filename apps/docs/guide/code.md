@@ -102,6 +102,14 @@ Fork, checkpoint, copy, and restoring files to a recorded point live in each
 turn's **More actions** menu (the ⋯ control that appears when the turn is
 hovered or focused). The same items are on the turn's context menu.
 
+**Fork from here** starts a second thread on its own worktree and branch,
+with the files exactly as they were when that reply finished — including
+changes nobody committed — so the fork and this thread never write to the same
+files. The fork starts approval-gated and carries this thread's provider,
+model, and delivery outcome, not its access. Octant refuses a fork from a
+reply that is still running, or from a point where it did not record the
+files, and says which.
+
 **Restore from here** starts a second thread at the marked checkpoint and
 leaves this one untouched. The restored thread's sidebar row — and the Project
 Overview list, which shares those rows — carries a fork mark, as does the

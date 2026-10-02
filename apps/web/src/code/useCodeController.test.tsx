@@ -413,80 +413,28 @@ describe("useCodeController", () => {
     expect(result.current.bootstrap?.checkouts).toContainEqual(prepared);
   });
 
-  it("forks a thread onto a freshly prepared checkout and records where it branched from", async () => {
-    const prepared = { ...checkout(), id: "40000000-0000-4000-8000-000000000009" as never };
+  it("asks the host to fork a thread at the chosen answer and returns the fork it created", async () => {
+    const fork = { ...thread(1), id: "30000000-0000-4000-8000-000000000099" as never };
     const execute = vi.fn(async (command: CodeCommand) =>
-      command.kind === "prepare-code-project-checkout"
+      command.kind === "fork-code-thread"
         ? ({
-            kind: "checkout-prepared",
-            bindingRevisionId: ids.bindingRevision,
-            checkout: prepared,
+            kind: "managed-thread-created",
+            thread: { ...fork, id: command.threadId },
+            checkout: { ...checkout(), id: "40000000-0000-4000-8000-000000000009" },
+            provenance: {
+              receiptId: "receipt",
+              mode: "local",
+              branch: "main",
+              resolvedHead: "a".repeat(40),
+            },
           } as never)
         : ({ kind: "unhandled" } as never),
     );
-    // The identity this renderer holds is stale: bootstrap no longer knows the
-    // checkout it names at all, which is the case re-observing exists for.
-    const client = fakeClient({
-      execute,
-      bootstrap: vi.fn(async () => ({ ...bootstrap(), checkouts: [] })),
-    });
-    const { result } = renderHook(() => useCodeController({ client }));
-    await waitFor(() => expect(result.current.status).toBe("ready"));
-
-    await act(async () => {
-      await result.current.forkThread({
-        threadId: ids.thread,
-        throughOperationId: "70000000-0000-4000-8000-000000000001",
-        title: "Controller foundation (fork)",
-      });
-    });
-
-    const created = execute.mock.calls
-      .map(([command]) => command)
-      .find((command) => command.kind === "create-code-thread");
-    expect(created).toMatchObject({
-      thread: {
-        title: "Controller foundation (fork)",
-        // The fork binds the checkout the server just prepared, not the
-        // identity this renderer happened to be holding.
-        checkoutId: prepared.id,
-        version: 1,
-        forkedFrom: {
-          threadId: ids.thread,
-          throughOperationId: "70000000-0000-4000-8000-000000000001",
-        },
-      },
-    });
-    expect(String((created as never as { thread: { id: string } }).thread.id)).not.toBe(
-      String(ids.thread),
-    );
-    // Forking is additive: the source thread is never commanded.
-    expect(
-      execute.mock.calls.every(
-        ([command]) => !("threadId" in command) || command.threadId !== ids.thread,
-      ),
-    ).toBe(true);
-  });
-
-  it("refuses to fork a thread that lives on its own worktree", async () => {
-    const prepared = { ...checkout(), id: "40000000-0000-4000-8000-000000000009" as never };
-    const execute = vi.fn(async (command: CodeCommand) =>
-      command.kind === "prepare-code-project-checkout"
-        ? ({
-            kind: "checkout-prepared",
-            bindingRevisionId: ids.bindingRevision,
-            checkout: prepared,
-          } as never)
-        : ({ kind: "unhandled" } as never),
-    );
-    // The source's own checkout is still there and is not the one the Project
-    // is bound to, so a fork could only be created against a different branch
-    // and working tree than the conversation it inherits.
     const client = fakeClient({ execute });
     const { result } = renderHook(() => useCodeController({ client }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    let forked: unknown = "unset";
+    let forked: unknown;
     await act(async () => {
       forked = await result.current.forkThread({
         threadId: ids.thread,
@@ -495,50 +443,23 @@ describe("useCodeController", () => {
       });
     });
 
-    expect(forked).toBeUndefined();
-    expect(execute.mock.calls.some(([command]) => command.kind === "create-code-thread")).toBe(
-      false,
-    );
-  });
-
-  it("refuses that fork even while the source worktree is out of reach", async () => {
-    const prepared = { ...checkout(), id: "40000000-0000-4000-8000-000000000009" as never };
-    const execute = vi.fn(async (command: CodeCommand) =>
-      command.kind === "prepare-code-project-checkout"
-        ? ({
-            kind: "checkout-prepared",
-            bindingRevisionId: ids.bindingRevision,
-            checkout: prepared,
-          } as never)
-        : ({ kind: "unhandled" } as never),
-    );
-    // A managed worktree that is waiting or unrecovered is the same tree the
-    // conversation describes, temporarily out of reach. Treating that as a
-    // stale identity would bind the fork to the Project's checkout instead and
-    // silently move the work to another branch.
-    const client = fakeClient({
-      execute,
-      bootstrap: vi.fn(async () => ({
-        ...bootstrap(),
-        checkouts: [{ ...checkout(), availability: "waiting" as never }],
-      })),
-    });
-    const { result } = renderHook(() => useCodeController({ client }));
-    await waitFor(() => expect(result.current.status).toBe("ready"));
-
-    let forked: unknown = "unset";
-    await act(async () => {
-      forked = await result.current.forkThread({
-        threadId: ids.thread,
+    const sent = execute.mock.calls.map(([command]) => command);
+    // The renderer names only the point; the host picks the files and worktree.
+    expect(sent).toContainEqual(
+      expect.objectContaining({
+        kind: "fork-code-thread",
+        sourceThreadId: ids.thread,
         throughOperationId: "70000000-0000-4000-8000-000000000001",
         title: "Controller foundation (fork)",
-      });
-    });
-
-    expect(forked).toBeUndefined();
-    expect(execute.mock.calls.some(([command]) => command.kind === "create-code-thread")).toBe(
-      false,
+      }),
     );
+    const command = sent.find((entry) => entry.kind === "fork-code-thread") as never as {
+      threadId: string;
+    };
+    expect(String(command.threadId)).not.toBe(String(ids.thread));
+    expect(String((forked as { id: string }).id)).toBe(String(command.threadId));
+    // Forking is additive: nothing creates a thread on the source's checkout.
+    expect(sent.some((entry) => entry.kind === "create-code-thread")).toBe(false);
   });
 
   it("bootstraps authoritative navigation and activates a thread through codeClient only", async () => {

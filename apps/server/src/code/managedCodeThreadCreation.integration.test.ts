@@ -1,16 +1,19 @@
 import {
   decodeBindingRevisionId,
   decodeCodeRepositoryId,
+  decodeCodeThread,
   decodeCodeThreadId,
   decodeProjectId,
   decodeWindowId,
+  type CodeThread,
   type Project,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { CodeService, type CodePersistencePort } from "./codeService";
+import { CodeService, type CodeForkPoint, type CodePersistencePort } from "./codeService";
 import {
   createManagedCodeThreadCreationPort,
   deriveManagedWorktreeCheckoutId,
+  type ManagedCodeThreadCreationDeps,
 } from "./managedCodeThreadCreation";
 import { ManagedRootGrantStore } from "./managedRootGrantStore";
 import type {
@@ -55,7 +58,11 @@ const project = {
 
 const deliveryBranch = "feature/managed";
 
-function observation(withManagedWorktree: boolean, managedHead: string = fetchedHead) {
+function observation(
+  withManagedWorktree: boolean,
+  managedHead: string = fetchedHead,
+  managedBranch: string = deliveryBranch,
+) {
   const checkout = {
     status: "present" as const,
     reportedPath: repositoryRoot,
@@ -69,7 +76,7 @@ function observation(withManagedWorktree: boolean, managedHead: string = fetched
     reportedPath: targetPath,
     canonicalPath: targetPath,
     head: managedHead,
-    branch: `refs/heads/${deliveryBranch}`,
+    branch: `refs/heads/${managedBranch}`,
     detached: false,
   };
   return {
@@ -108,7 +115,14 @@ class MemoryReceipts {
   });
 }
 
-function harness(options: { readonly fetch?: "fetched" | "failed" | "interrupted" } = {}) {
+function harness(
+  options: {
+    readonly fetch?: "fetched" | "failed" | "interrupted";
+    readonly threads?: ReadonlyArray<CodeThread>;
+    readonly forkPoint?: CodeForkPoint;
+    readonly applySourceFiles?: ManagedCodeThreadCreationDeps["applySourceFiles"];
+  } = {},
+) {
   // Observations: prepare repo-id lookup, prepare resolve fresh-state, commit plan fresh-state,
   // commit create fresh-state, commit create confirmation (managed worktree present).
   const observations = [
@@ -167,7 +181,7 @@ function harness(options: { readonly fetch?: "fetched" | "failed" | "interrupted
   const persistence: CodePersistencePort = {
     journal,
     readCodeSettings: () => undefined,
-    readCodeThread: () => undefined,
+    readCodeThread: (id) => options.threads?.find((entry) => String(entry.id) === String(id)),
     readCodeThreads: () => [],
     readCodeThreadActivity: () => [],
     readCodeRuntimeWorks: () => [],
@@ -206,9 +220,45 @@ function harness(options: { readonly fetch?: "fetched" | "failed" | "interrupted
       service,
       repository,
       clock: () => now,
+      ...(options.applySourceFiles === undefined
+        ? {}
+        : { applySourceFiles: options.applySourceFiles }),
     }),
+    ...(options.forkPoint === undefined
+      ? {}
+      : { forkPoints: { resolve: vi.fn(async () => options.forkPoint as CodeForkPoint) } }),
   });
   return { codeService, git, receipts, journal, repository };
+}
+
+const sourceThreadId = decodeCodeThreadId("60000000-0000-4000-8000-000000000070");
+
+/** The thread a fork comes from, as the host holds it. */
+function sourceThread(): CodeThread {
+  return decodeCodeThread({
+    id: sourceThreadId,
+    projectId,
+    bindingRevisionId,
+    repositoryId,
+    checkoutId: "60000000-0000-4000-8000-000000000072",
+    title: "Source",
+    lifecycle: "active",
+    providerInstanceId: "60000000-0000-4000-8000-000000000060",
+    modelId: "model-a",
+    executionPolicy: "full-access",
+    permissionPersistence: "project-default",
+    deliveryTarget: {
+      branchIntent: "feature/source",
+      remoteName: "origin",
+      proposedBaseRepository: "octant/octant",
+      proposedBaseBranch: "development",
+      outcomeKind: "opened-pr",
+      confirmedAt: now,
+    },
+    version: 3,
+    createdAt: now,
+    updatedAt: now,
+  });
 }
 
 const managedCommand = {
@@ -235,6 +285,127 @@ const managedCommand = {
 } as const;
 
 describe("managed Code thread creation (composer submit -> worktree -> thread binding)", () => {
+  it("forks a thread onto its own worktree at the files the chosen turn left, uncommitted work included", async () => {
+    const recordedRevision = "e".repeat(40);
+    const files = { worktree: "f".repeat(40), index: "d".repeat(40) };
+    const applySourceFiles = vi.fn(async () => "applied" as const);
+    const { codeService, git, repository } = harness({
+      threads: [sourceThread()],
+      forkPoint: { status: "resolved", head: recordedRevision, files },
+      applySourceFiles,
+    });
+    (git.resolveRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: "resolved",
+      oid: recordedRevision,
+    });
+    const calls: ReturnType<typeof observation>[] = [
+      observation(false),
+      observation(false),
+      observation(false),
+      observation(false),
+      observation(true, recordedRevision),
+    ];
+    // The fork's branch is the host's to name, so the worktree reports
+    // whichever one it was created on.
+    const forkBranch = () =>
+      (git.addWorktree as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.branchIntent as string;
+    (repository.observe as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      const next = calls.shift();
+      return next === undefined || next.worktrees.length > 1
+        ? observation(true, recordedRevision, forkBranch())
+        : next;
+    });
+
+    const result = await codeService.execute(windowId, {
+      kind: "fork-code-thread",
+      threadId,
+      sourceThreadId,
+      throughOperationId: "60000000-0000-4000-8000-000000000071",
+      title: "Source (fork)",
+    });
+    if (result?.kind !== "managed-thread-created")
+      throw new Error("expected managed-thread-created");
+
+    // Its own worktree, on its own branch, from the commit the source was on...
+    expect(git.addWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({ targetPath, startPoint: recordedRevision }),
+      expect.any(AbortSignal),
+    );
+    expect(result.thread.deliveryTarget.branchIntent).not.toBe("feature/source");
+    // ...with the files the source had then, committed or not, laid on top.
+    expect(applySourceFiles).toHaveBeenCalledWith(
+      { worktreeRoot: targetPath, files },
+      expect.any(AbortSignal),
+    );
+    expect(result.thread.forkedFrom).toEqual({
+      threadId: sourceThreadId,
+      throughOperationId: "60000000-0000-4000-8000-000000000071",
+    });
+    // A new thread holds no approval receipt, whatever the source was allowed.
+    expect(result.thread.executionPolicy).toBe("approval-gated");
+    expect(result.thread.permissionPersistence).toBe("current-session");
+  });
+
+  it("removes the new worktree and creates nothing when the forked files cannot be laid down", async () => {
+    const recordedRevision = "e".repeat(40);
+    const { codeService, git, receipts, journal, repository } = harness({
+      threads: [sourceThread()],
+      forkPoint: {
+        status: "resolved",
+        head: recordedRevision,
+        files: { worktree: "f".repeat(40), index: "d".repeat(40) },
+      },
+      applySourceFiles: vi.fn(async () => "failed" as const),
+    });
+    (git.resolveRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: "resolved",
+      oid: recordedRevision,
+    });
+    const calls: ReturnType<typeof observation>[] = [
+      observation(false),
+      observation(false),
+      observation(false),
+      observation(false),
+      observation(true, recordedRevision),
+    ];
+    const forkBranch = () =>
+      (git.addWorktree as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.branchIntent as string;
+    (repository.observe as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      const next = calls.shift();
+      return next === undefined || next.worktrees.length > 1
+        ? observation(true, recordedRevision, forkBranch())
+        : next;
+    });
+
+    await expect(
+      codeService.execute(windowId, {
+        kind: "fork-code-thread",
+        threadId,
+        sourceThreadId,
+        throughOperationId: "60000000-0000-4000-8000-000000000071",
+        title: "Source (fork)",
+      }),
+    ).rejects.toMatchObject({ failure: { message: expect.stringContaining("forked files") } });
+    expect(git.addWorktree).toHaveBeenCalled();
+    expect([...receipts.records.values()].some((receipt) => receipt.state === "ready")).toBe(false);
+    expect(journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses a fork whose origin is not a thread of the same Project", async () => {
+    const { codeService, git } = harness();
+
+    await expect(
+      codeService.execute(windowId, {
+        ...managedCommand,
+        forkedFrom: {
+          threadId: sourceThreadId,
+          throughOperationId: "60000000-0000-4000-8000-000000000071",
+        },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(git.addWorktree).not.toHaveBeenCalled();
+  });
+
   it("creates the managed worktree from the fetched remote tip and binds the thread to it", async () => {
     const { codeService, git, receipts, journal } = harness();
 
@@ -433,7 +604,7 @@ describe("managed Code thread creation (composer submit -> worktree -> thread bi
   });
   it("starts a thread at a recorded revision without fetching, and says where it came from", async () => {
     const recordedRevision = "e".repeat(40);
-    const { codeService, receipts, git, repository } = harness();
+    const { codeService, receipts, git, repository } = harness({ threads: [sourceThread()] });
     (git.resolveRef as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "resolved",
       oid: recordedRevision,

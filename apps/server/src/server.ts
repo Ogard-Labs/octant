@@ -3145,6 +3145,14 @@ export function startOctantServer(
         worktreeRefs: {
           list: (input, signal) => managedWorktreeRefsList(input, signal),
         },
+        // Late-bound: the operation runtime that reads a thread's turns and
+        // checkout is constructed after this service.
+        forkPoints: {
+          resolve: async (windowId, source, throughOperationId) =>
+            codeOperationRuntime === undefined
+              ? { status: "refused", reason: "unavailable" }
+              : codeOperationRuntime.forkPoint(windowId, source, throughOperationId),
+        },
         managedThreadCreation: {
           prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
           commit: (input, preparation, signal) =>
@@ -3639,11 +3647,21 @@ export function startOctantServer(
       }
       return { kind: "failed", reason: result.reason };
     };
+    // Its own mutation port: laying a fork's files down happens once, in a
+    // worktree no thread is bound to yet, so nothing else is serialized on it.
+    const forkFileWriter = new GitMutationPort();
     managedCodeThreadCreation = createManagedCodeThreadCreationPort({
       readProject: (projectId) => persistence.readProject(projectId),
       service: managedWorktreeService,
       repository: managedWorktreePorts.repository,
       clock: () => new Date().toISOString(),
+      applySourceFiles: async ({ worktreeRoot, files }, signal) => {
+        const applied = await forkFileWriter.restoreWorkingTree(
+          { checkoutRoot: worktreeRoot, snapshot: files, executionPolicy: "approval-gated" },
+          signal,
+        );
+        return applied.status === "applied" ? "applied" : "failed";
+      },
     });
     const acpHome =
       options.acpHome ??

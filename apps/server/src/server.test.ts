@@ -1052,6 +1052,10 @@ describe("startOctantServer", () => {
         threadId,
         checkoutId,
       })),
+      forkPoint: vi.fn(async () => ({
+        status: "refused" as const,
+        reason: "unavailable" as const,
+      })),
       close: vi.fn(async () => undefined),
     };
 
