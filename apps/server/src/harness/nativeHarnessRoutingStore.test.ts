@@ -356,7 +356,7 @@ describe("native harness session store", () => {
       status: "queued",
       at: now,
     };
-    expect(store.queueSteering(threadId, note as never)).toBe(true);
+    expect(store.queueSteering(threadId, note as never)).toBe("queued");
     expect(store.read(threadId)?.steering).toMatchObject([
       { text: "Use sqlite.", status: "queued" },
     ]);
@@ -365,5 +365,63 @@ describe("native harness session store", () => {
     expect(store.read(threadId)?.steering).toMatchObject([{ status: "delivered" }]);
     store.clearSteering(threadId, "delivered");
     expect(store.read(threadId)?.steering).toEqual([]);
+  });
+
+  it("keeps a steering note typed before a restart and hands it to the lead on the next turn", () => {
+    const threadId = "00000000-0000-4000-8000-000000000026";
+    const connection = openConnection();
+    const uuid = uuidFactory();
+    const open = () =>
+      new NativeHarnessSessionStore({
+        journal: journalFor(connection),
+        uuid,
+        actor,
+        clock: () => now,
+      });
+    const note = (n: number, text: string) =>
+      ({
+        id: `00000000-0000-4000-8000-00000000009${n}`,
+        text,
+        status: "queued",
+        at: now,
+      }) as never;
+    const before = open();
+    before.ensure({
+      threadId,
+      mode: "code",
+      leadSlotId: "default" as never,
+      lead: candidate("big") as never,
+    });
+    before.queueSteering(threadId, note(1, "Use sqlite."));
+    expect(before.deliverSteering(threadId)).toEqual(["Use sqlite."]);
+    // Typed after the last tool step of a turn the process never finished.
+    before.queueSteering(threadId, note(2, "Skip the docs."));
+
+    const after = open();
+    expect(after.read(threadId)?.steering).toMatchObject([
+      { text: "Use sqlite.", status: "delivered" },
+      { text: "Skip the docs.", status: "queued" },
+    ]);
+    after.clearSteering(threadId, "delivered");
+    expect(after.deliverSteering(threadId)).toEqual(["Skip the docs."]);
+    after.clearSteering(threadId, "delivered");
+    expect(open().read(threadId)?.steering).toEqual([]);
+  });
+
+  it("refuses a steering note for a thread with no harness run yet", () => {
+    const store = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid: uuidFactory(),
+      actor,
+      clock: () => now,
+    });
+    expect(
+      store.queueSteering("00000000-0000-4000-8000-000000000027", {
+        id: "00000000-0000-4000-8000-000000000099",
+        text: "Hello",
+        status: "queued",
+        at: now,
+      } as never),
+    ).toBe("no-session");
   });
 });

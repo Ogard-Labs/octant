@@ -151,8 +151,9 @@ journaled with the session.
 In the terminal UI, typing while the lead works queues a note instead of a
 turn. The note reaches the lead inside its next tool result, so it lands
 mid-turn; a note the lead never reached before the turn ended is sent as the
-next prompt. `Esc` stops the running turn; `Ctrl+C` stops it too, and a
-second press right after quits.
+next prompt. Notes are saved as you send them, so one typed just before
+Octant restarts still reaches the lead on the next turn. `Esc` stops the
+running turn; `Ctrl+C` stops it too, and a second press right after quits.
 
 ## Questions
 

@@ -1,6 +1,9 @@
 import {
   NATIVE_HARNESS_ROUTING_EVENT_NAMES,
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
+  NativeHarnessSteeringCleared,
+  NativeHarnessSteeringDelivered,
+  NativeHarnessSteeringQueued,
   NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES,
   NativeHarnessTranscriptMessageAppended,
   NativeHarnessTranscriptOpened,
@@ -113,6 +116,13 @@ export function registerNativeHarnessEvents(registry: EventRegistry): EventRegis
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalSettled, 1, NativeHarnessApprovalSettled)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.paused, 1, NativeHarnessSessionPaused)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed, 1, NativeHarnessSessionResumed)
+    .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringQueued, 1, NativeHarnessSteeringQueued)
+    .register(
+      NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringDelivered,
+      1,
+      NativeHarnessSteeringDelivered,
+    )
+    .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringCleared, 1, NativeHarnessSteeringCleared)
     .register(NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.opened, 1, NativeHarnessTranscriptOpened)
     .register(
       NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.messageAppended,

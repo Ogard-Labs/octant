@@ -1075,6 +1075,30 @@ export const NativeHarnessSteeringNote = Schema.Struct({
 }).annotations(strict);
 export type NativeHarnessSteeringNote = typeof NativeHarnessSteeringNote.Type;
 
+/** A note typed while the lead works, journaled so a restart cannot lose it. */
+export const NativeHarnessSteeringQueued = Schema.Struct({
+  sessionId: NativeHarnessSessionId,
+  note: NativeHarnessSteeringNote,
+}).annotations(strict);
+export type NativeHarnessSteeringQueued = typeof NativeHarnessSteeringQueued.Type;
+
+/** The queued notes the lead was just handed, inside a tool result. */
+export const NativeHarnessSteeringDelivered = Schema.Struct({
+  sessionId: NativeHarnessSessionId,
+  noteIds: Schema.Array(Schema.UUID).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_NATIVE_HARNESS_STEERING_NOTES),
+  ),
+}).annotations(strict);
+export type NativeHarnessSteeringDelivered = typeof NativeHarnessSteeringDelivered.Type;
+
+/** Delivered notes dropped at a turn's end, or every note dropped by the person. */
+export const NativeHarnessSteeringCleared = Schema.Struct({
+  sessionId: NativeHarnessSessionId,
+  which: Schema.Literal("delivered", "all"),
+}).annotations(strict);
+export type NativeHarnessSteeringCleared = typeof NativeHarnessSteeringCleared.Type;
+
 export const SteerNativeHarnessSession = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("queue"),
@@ -1251,9 +1275,21 @@ export const NATIVE_HARNESS_SESSION_EVENT_NAMES = {
   approvalSettled: "native-harness-approval-settled@1",
   paused: "native-harness-session-paused@1",
   resumed: "native-harness-session-resumed@1",
+  steeringQueued: "native-harness-steering-queued@1",
+  steeringDelivered: "native-harness-steering-delivered@1",
+  steeringCleared: "native-harness-steering-cleared@1",
 } as const;
 
 export const decodeNativeHarnessSessionId = Schema.decodeUnknownSync(NativeHarnessSessionId);
+export const decodeNativeHarnessSteeringQueued = Schema.decodeUnknownSync(
+  NativeHarnessSteeringQueued,
+);
+export const decodeNativeHarnessSteeringDelivered = Schema.decodeUnknownSync(
+  NativeHarnessSteeringDelivered,
+);
+export const decodeNativeHarnessSteeringCleared = Schema.decodeUnknownSync(
+  NativeHarnessSteeringCleared,
+);
 export const decodeNativeHarnessTurnId = Schema.decodeUnknownSync(NativeHarnessTurnId);
 export const decodeNativeHarnessToolName = Schema.decodeUnknownSync(NativeHarnessToolName);
 export const decodeNativeHarnessToolResultBounds = Schema.decodeUnknownSync(
