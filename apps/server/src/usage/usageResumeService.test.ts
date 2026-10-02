@@ -33,6 +33,7 @@ const ids = {
   project: "82000000-0000-4000-8000-000000000027",
   provider: "82000000-0000-4000-8000-000000000028",
   request: "82000000-0000-4000-8000-000000000029",
+  run: "82000000-0000-4000-8000-00000000002e",
   session: "82000000-0000-4000-8000-00000000002a",
   thread: "82000000-0000-4000-8000-00000000002b",
   turn: "82000000-0000-4000-8000-00000000002c",
@@ -178,8 +179,9 @@ function portSpies(overrides: Partial<UsageResumeModePort> = {}): PortSpies {
 
 function serviceWith(
   connection: SqliteConnection,
-  spies: { chat: PortSpies; work: PortSpies; code: PortSpies },
+  spies: { chat: PortSpies; work: PortSpies; code: PortSpies; agentRun?: PortSpies },
 ) {
+  const agentRun = spies.agentRun ?? portSpies();
   const store = journal(connection);
   const service = new UsageResumeService({
     journal: store,
@@ -204,6 +206,12 @@ function serviceWith(
         dispatch: spies.code.dispatch,
         settleUpdate: spies.code.settleUpdate,
         settleApplied: spies.code.settleApplied,
+      },
+      agentRun: {
+        inspect: agentRun.inspect,
+        dispatch: agentRun.dispatch,
+        settleUpdate: agentRun.settleUpdate,
+        settleApplied: agentRun.settleApplied,
       },
     },
     schedule: (at, fire) => {
@@ -686,5 +694,135 @@ describe("UsageResumeService", () => {
     await vi.waitFor(() =>
       expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("dispatched"),
     );
+  });
+
+  function runRecord(overrides: Partial<UsageResumeRecord> = {}): UsageResumeRecord {
+    const { attemptId: _attempts, ...rest } = record({
+      threadId: ids.run,
+      turnId: ids.run,
+      ...overrides,
+    });
+    return rest;
+  }
+
+  function runStatusChanged(payload: Record<string, unknown>) {
+    return pending("agent.run-status-changed@1", {
+      runId: ids.run,
+      fromStatus: "waiting",
+      ...payload,
+    });
+  }
+
+  function appendRunStatusChanged(
+    store: ReturnType<typeof journal>,
+    expectedVersion: number,
+    payload: Record<string, unknown>,
+  ) {
+    store.append({
+      aggregate: { aggregateType: "agent-run", aggregateId: ids.run },
+      expectedVersion,
+      events: [runStatusChanged(payload)],
+    });
+  }
+
+  it("dispatches a limited child run's continuation when the reset arrives", async () => {
+    const connection = openConnection();
+    const agentRun = portSpies();
+    const spies = { chat: portSpies(), work: portSpies(), code: portSpies(), agentRun };
+    const { store } = serviceWith(connection, spies);
+    store.append({
+      aggregate: { aggregateType: "agent-run", aggregateId: ids.run },
+      expectedVersion: 0,
+      events: [pending(USAGE_RESUME_SCHEDULED, { resume: runRecord() })],
+    });
+
+    expect(listPendingUsageResumes(connection)).toHaveLength(1);
+    fireDue(Date.parse(RESET));
+    await vi.waitFor(() => expect(agentRun.dispatch).toHaveBeenCalledOnce());
+    expect(agentRun.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: ids.run, turnId: ids.run }),
+    );
+    await vi.waitFor(() =>
+      expect(resumeRow(connection, "agent-run", ids.run)?.status).toBe("dispatched"),
+    );
+    expect(agentRun.settleApplied).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "dispatched" }),
+      undefined,
+    );
+  });
+
+  it("settles invalidated when a limited child run leaves its wait", async () => {
+    const connection = openConnection();
+    const agentRun = portSpies();
+    const spies = { chat: portSpies(), work: portSpies(), code: portSpies(), agentRun };
+    const { store } = serviceWith(connection, spies);
+    store.append({
+      aggregate: { aggregateType: "agent-run", aggregateId: ids.run },
+      expectedVersion: 0,
+      events: [pending(USAGE_RESUME_SCHEDULED, { resume: runRecord() })],
+    });
+    expect(listPendingUsageResumes(connection)).toHaveLength(1);
+
+    // A cancelled child can never be resumed by the opt-in: the parent's
+    // subtree withdrawal ends the pending recovery instead of waking an
+    // orphan at the provider's reset.
+    appendRunStatusChanged(store, 1, { toStatus: "cancelled", version: 2 });
+
+    await vi.waitFor(() =>
+      expect(resumeRow(connection, "agent-run", ids.run)?.status).toBe("invalidated"),
+    );
+    expect(listPendingUsageResumes(connection)).toHaveLength(0);
+    expect(agentRun.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("settles invalidated when the wait's declared reset fact changes", async () => {
+    const connection = openConnection();
+    const agentRun = portSpies();
+    const spies = { chat: portSpies(), work: portSpies(), code: portSpies(), agentRun };
+    const { store } = serviceWith(connection, spies);
+    store.append({
+      aggregate: { aggregateType: "agent-run", aggregateId: ids.run },
+      expectedVersion: 0,
+      events: [pending(USAGE_RESUME_SCHEDULED, { resume: runRecord() })],
+    });
+
+    appendRunStatusChanged(store, 1, {
+      toStatus: "waiting",
+      version: 2,
+      usageLimit: { kind: "temporary", resetsAt: "2026-07-19T14:00:00.000Z" },
+    });
+
+    await vi.waitFor(() =>
+      expect(resumeRow(connection, "agent-run", ids.run)?.status).toBe("invalidated"),
+    );
+    expect(agentRun.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("stays armed while a child run keeps waiting on the same declared reset", async () => {
+    const connection = openConnection();
+    const agentRun = portSpies();
+    const spies = { chat: portSpies(), work: portSpies(), code: portSpies(), agentRun };
+    const { store } = serviceWith(connection, spies);
+    store.append({
+      aggregate: { aggregateType: "agent-run", aggregateId: ids.run },
+      expectedVersion: 0,
+      events: [pending(USAGE_RESUME_SCHEDULED, { resume: runRecord() })],
+    });
+
+    // The same wait renewing with the same declared reset is still the
+    // opt-in the person armed — the record binds the reset fact, not the
+    // wait's occurrence.
+    appendRunStatusChanged(store, 1, {
+      toStatus: "waiting",
+      version: 2,
+      usageLimit: { kind: "exhausted", resetsAt: RESET },
+    });
+
+    await Promise.resolve();
+    expect(resumeRow(connection, "agent-run", ids.run)?.status).toBe("scheduled");
+    expect(listPendingUsageResumes(connection)).toHaveLength(1);
+
+    fireDue(Date.parse(RESET));
+    await vi.waitFor(() => expect(agentRun.dispatch).toHaveBeenCalledOnce());
   });
 });

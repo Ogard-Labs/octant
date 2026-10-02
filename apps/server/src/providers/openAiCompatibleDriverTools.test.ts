@@ -654,6 +654,9 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     // The item immediately before the output must be a function_call, not an
     // empty assistant message.
     expect(preceding?.type).toBe("function_call");
+    // Each result is sent once: a second copy pairs one call with two outputs,
+    // which strict endpoints reject.
+    expect(inputItems.filter((item) => item.type === "function_call_output")).toHaveLength(1);
   });
 
   it("ignores duplicate answerTool calls for the same request", async () => {

@@ -1,9 +1,10 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useEffect, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
-import type { CommandSkill } from "./buildOctantCommands";
+import type { CommandPluginServer, CommandSkill } from "./buildOctantCommands";
 
 const NO_SKILLS: ReadonlyArray<CommandSkill> = [];
+const NO_PLUGIN_SERVERS: ReadonlyArray<CommandPluginServer> = [];
 
 /** How often the host is re-read for extension state it may have changed. */
 const DEFAULT_REFRESH_MS = 5_000;
@@ -40,7 +41,25 @@ export function useCommandSkills(
   client: ExtensionClient,
   options: CommandSkillsOptions = {},
 ): ReadonlyArray<CommandSkill> {
+  return useCommandExtensions(client, options).skills;
+}
+
+/**
+ * The skills, and the plugin MCP servers, this host says are installed and
+ * effective, read from one snapshot. A plugin's MCP server is offered in every
+ * composer the way a skill is; the host still decides at send whether the
+ * thread's mode, Project, and provider may use it.
+ */
+export function useCommandExtensions(
+  client: ExtensionClient,
+  options: CommandSkillsOptions = {},
+): {
+  readonly skills: ReadonlyArray<CommandSkill>;
+  readonly pluginServers: ReadonlyArray<CommandPluginServer>;
+} {
   const [skills, setSkills] = useState<ReadonlyArray<CommandSkill>>(NO_SKILLS);
+  const [pluginServers, setPluginServers] =
+    useState<ReadonlyArray<CommandPluginServer>>(NO_PLUGIN_SERVERS);
   const refreshMs = options.refreshMs ?? DEFAULT_REFRESH_MS;
 
   useEffect(() => {
@@ -65,8 +84,31 @@ export function useCommandSkills(
               })),
           ),
         );
+        setPluginServers((current) =>
+          samePluginServers(
+            current,
+            snapshot.packages.flatMap((packageState) => {
+              const slug = packageState.slug;
+              if (slug === undefined) return [];
+              return packageState.components
+                .filter(
+                  (component) =>
+                    component.component.kind === "mcp-server" &&
+                    component.effectiveState.kind === "effective",
+                )
+                .map((component) => ({
+                  reference: `@${slug}/${component.component.id}`,
+                  displayName: component.component.displayName,
+                  pluginName: packageState.displayName ?? slug,
+                }));
+            }),
+          ),
+        );
       } catch {
-        if (active) setSkills(NO_SKILLS);
+        if (active) {
+          setSkills(NO_SKILLS);
+          setPluginServers(NO_PLUGIN_SERVERS);
+        }
       } finally {
         inFlight = false;
       }
@@ -94,7 +136,7 @@ export function useCommandSkills(
     };
   }, [client, options.changeRevision, refreshMs]);
 
-  return skills;
+  return { skills, pluginServers };
 }
 
 /** Keep the previous array when the host reports the same skills. */
@@ -106,6 +148,22 @@ function sameSkills(
   return current.every(
     (skill, index) =>
       skill.skillId === next[index]?.skillId && skill.displayName === next[index]?.displayName,
+  )
+    ? current
+    : next;
+}
+
+/** Keep the previous array when the host reports the same plugin servers. */
+function samePluginServers(
+  current: ReadonlyArray<CommandPluginServer>,
+  next: ReadonlyArray<CommandPluginServer>,
+): ReadonlyArray<CommandPluginServer> {
+  if (current.length !== next.length) return next;
+  return current.every(
+    (server, index) =>
+      server.reference === next[index]?.reference &&
+      server.displayName === next[index]?.displayName &&
+      server.pluginName === next[index]?.pluginName,
   )
     ? current
     : next;

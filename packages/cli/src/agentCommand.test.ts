@@ -35,6 +35,9 @@ describe("octant agent command line", () => {
       theme: "octant",
       plain: true,
     });
+    expect(resolveAgentCliCommand("agent", [], { model: "lm studio/gemma" })).toMatchObject({
+      model: "lm studio/gemma",
+    });
     expect(resolveAgentCliCommand("agent", ["extra"], {})).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { bogus: true })).toBeUndefined();
     expect(resolveAgentCliCommand("harness", ["slots"], {})).toEqual({

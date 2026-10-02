@@ -22,6 +22,7 @@ import { CodexRpcClientFailure } from "./codexRpcClient";
 import type { CodexServerMessage } from "./codexProtocol";
 import type {
   CodexAccountReadResult,
+  CodexConfigReadResult,
   CodexRateLimitsReadResult,
   CodexThreadResult,
   RateLimitSnapshot,
@@ -124,6 +125,7 @@ function fixture(
       readonly data: ReadonlyArray<ReturnType<typeof model>>;
       readonly nextCursor: string | null;
     }>;
+    readonly configRead?: () => Promise<CodexConfigReadResult>;
     readonly threadResume?: (input: CodexThreadResumeInput) => Promise<CodexThreadResult>;
     readonly threadStart?: (input: CodexThreadStartInput) => Promise<CodexThreadResult>;
     readonly respondApproval?: (input: unknown) => Promise<void>;
@@ -161,6 +163,10 @@ function fixture(
     modelList: async (cursor) => {
       calls.push({ method: "model/list", input: cursor });
       return pages[Math.min(page++, pages.length - 1)]!;
+    },
+    configRead: async (value) => {
+      calls.push({ method: "config/read", input: value });
+      return input.configRead === undefined ? { config: {} } : input.configRead();
     },
     threadStart: async (value) => {
       calls.push({ method: "thread/start", input: value });
@@ -791,6 +797,30 @@ describe("Codex driver probe and runtime lifecycle", () => {
       );
       expect(emptyBearerProbe.readiness).toBe("unauthenticated");
       expect(emptyBearerProbe.message).toContain("AWS profile");
+
+      const staticKeys = fixture({
+        account: {
+          account: { type: "apiKey" as const },
+          requiresOpenaiAuth: false,
+        },
+      });
+      const staticKeysProbe = await Effect.runPromise(
+        Effect.scoped(
+          makeCodexDriver(
+            staticKeys.options({
+              environment: {
+                CODEX_HOME: codexHome,
+                AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+                AWS_SECRET_ACCESS_KEY: "secret",
+                AWS_REGION: "us-east-1",
+              },
+            }),
+          ).probe({ instanceId }),
+        ),
+      );
+      expect(staticKeysProbe.readiness).toBe("unauthenticated");
+      expect(staticKeysProbe.message).toContain("does not pass static AWS IAM keys");
+      expect(staticKeysProbe.message).not.toContain("secret");
     } finally {
       rmSync(codexHome, { recursive: true, force: true });
     }
@@ -1270,6 +1300,74 @@ describe("Codex thread and turn lifecycle", () => {
       "config",
     );
     await coding.close();
+  });
+
+  it("gives a Chat thread no environment, shell, image reads, plugins, or MCP servers on start, resume, and every turn", async () => {
+    const chatOff = {
+      "features.shell_tool": false,
+      "features.unified_exec": false,
+      "features.view_image": false,
+      "features.plugins": false,
+      "features.apps": false,
+      mcp_servers: { node_repl: { enabled: false }, "docs.local": { enabled: false } },
+    };
+    const f = fixture({
+      configRead: async () => ({
+        config: { mcp_servers: { node_repl: { command: "node_repl" }, "docs.local": {} } },
+      }),
+    });
+    const chat = await acquireConnection(makeCodexDriver(f.options()), "chat");
+    await startSession(chat.connection);
+    await Effect.runPromise(
+      chat.connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+    );
+    await Effect.runPromise(
+      chat.connection.resume({
+        sessionId: "session-resumed" as never,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "approval-gated",
+      }),
+    );
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+      environments: [],
+      config: chatOff,
+    });
+    expect(f.calls.find(({ method }) => method === "thread/resume")?.input).toEqual({
+      threadId: "thread-existing",
+      config: chatOff,
+    });
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      environments: [],
+    });
+    expect(f.calls.find(({ method }) => method === "config/read")?.input).toEqual({
+      cwd: projectRoot,
+    });
+    await chat.close();
+
+    const code = fixture();
+    const coding = await acquireConnection(makeCodexDriver(code.options()), "code");
+    await startSession(coding.connection);
+    await Effect.runPromise(
+      coding.connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+    );
+    for (const method of ["thread/start", "turn/start"]) {
+      expect(code.calls.find((call) => call.method === method)?.input).not.toHaveProperty(
+        "environments",
+      );
+    }
+    await coding.close();
+  });
+
+  it("refuses to start a Chat thread when Codex cannot list its MCP servers", async () => {
+    const f = fixture({
+      configRead: async () => {
+        throw new Error("config unreadable");
+      },
+    });
+    const chat = await acquireConnection(makeCodexDriver(f.options()), "chat");
+    await expect(startSession(chat.connection)).rejects.toThrow();
+    expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
+    await chat.close();
   });
 
   it("resumes only Codex cursors that exist under the exact Project root", async () => {
@@ -2177,6 +2275,28 @@ describe("Codex execution authority and approvals", () => {
         ),
       );
       expect(String(answer)).toContain("protocol");
+      await acquired.close();
+    },
+  );
+
+  it.each([
+    [commandApproval(), { decision: "decline" }],
+    [fileApproval(), { decision: "decline" }],
+    [permissionsApproval(), { permissions: {}, scope: "turn" }],
+  ] as const)(
+    "declines every provider approval in a Chat session without asking anyone",
+    async (requestMessage, result) => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), "chat");
+      await startSession(acquired.connection);
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "chat", attachments: [], tools: [] }),
+      );
+      f.emit(requestMessage);
+      await vi.waitFor(() =>
+        expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(1),
+      );
+      expect(f.calls.at(-1)?.input).toMatchObject({ result });
       await acquired.close();
     },
   );

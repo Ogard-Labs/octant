@@ -1,7 +1,10 @@
 import {
   decodeChatThreadId,
   decodeCodeThreadId,
+  type AgentRun,
+  type AgentRunAuthority,
   type AgentRunParentThreadId,
+  type CodeThread,
   type WindowId,
   type WorkspaceLayoutNode,
 } from "@octant/contracts";
@@ -13,6 +16,55 @@ import type { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStor
 import type { PersistenceService } from "../persistence/persistenceService";
 import type { WorkThreadProjection } from "../work/workThreadProjection";
 import type { AgentRunControlParentFacts } from "./agentRunControlService";
+
+/**
+ * The live parent grant a Chat thread gives its children. Chat parents carry
+ * no filesystem or shell, so this is a constant — the shape a window-free
+ * scheduled resume may claim as well.
+ */
+const chatParentLiveGrant = (): AgentRunAuthority =>
+  resolveAgentRunLiveParentGrant({
+    mode: "chat",
+    filesystem: false,
+    shell: false,
+    git: false,
+    network: false,
+    tools: true,
+    subagents: true,
+    executionPolicy: "plan",
+    permissionPersistence: "current-session",
+  });
+
+const workParentLiveGrant = (): AgentRunAuthority =>
+  resolveAgentRunLiveParentGrant({
+    mode: "work",
+    filesystem: true,
+    shell: false,
+    git: false,
+    network: false,
+    tools: true,
+    subagents: true,
+    executionPolicy: "approval-gated",
+    permissionPersistence: "current-session",
+  });
+
+const codeParentLiveGrant = (
+  executionPolicy: CodeThread["executionPolicy"],
+  permissionPersistence: CodeThread["permissionPersistence"],
+): AgentRunAuthority => {
+  const planOnly = executionPolicy === "plan";
+  return resolveAgentRunLiveParentGrant({
+    mode: "code",
+    filesystem: true,
+    shell: !planOnly,
+    git: !planOnly,
+    network: !planOnly,
+    tools: true,
+    subagents: true,
+    executionPolicy,
+    permissionPersistence,
+  });
+};
 
 export function authorizeAgentRunCreation(input: {
   readonly persistence: PersistenceService;
@@ -43,17 +95,7 @@ export function authorizeAgentRunCreation(input: {
     )
   ) {
     const parentAuthority = defaultAgentRunAuthorityCeilingForMode("chat");
-    const liveAuthority = resolveAgentRunLiveParentGrant({
-      mode: "chat",
-      filesystem: false,
-      shell: false,
-      git: false,
-      network: false,
-      tools: true,
-      subagents: true,
-      executionPolicy: "plan",
-      permissionPersistence: "current-session",
-    });
+    const liveAuthority = chatParentLiveGrant();
     return {
       parentMode: "chat",
       parentAuthority,
@@ -91,17 +133,7 @@ export function authorizeAgentRunCreation(input: {
     const revision = project.bindingHistory.at(-1);
     if (revision === undefined) return undefined;
     const parentAuthority = defaultAgentRunAuthorityCeilingForMode("work");
-    const liveAuthority = resolveAgentRunLiveParentGrant({
-      mode: "work",
-      filesystem: true,
-      shell: false,
-      git: false,
-      network: false,
-      tools: true,
-      subagents: true,
-      executionPolicy: "approval-gated",
-      permissionPersistence: "current-session",
-    });
+    const liveAuthority = workParentLiveGrant();
     return {
       parentMode: "work",
       parentAuthority,
@@ -144,18 +176,10 @@ export function authorizeAgentRunCreation(input: {
       codeThread,
     );
     const parentAuthority = defaultAgentRunAuthorityCeilingForMode("code");
-    const planOnly = effectiveThread.executionPolicy === "plan";
-    const liveAuthority = resolveAgentRunLiveParentGrant({
-      mode: "code",
-      filesystem: true,
-      shell: !planOnly,
-      git: !planOnly,
-      network: !planOnly,
-      tools: true,
-      subagents: true,
-      executionPolicy: effectiveThread.executionPolicy,
-      permissionPersistence: effectiveThread.permissionPersistence,
-    });
+    const liveAuthority = codeParentLiveGrant(
+      effectiveThread.executionPolicy,
+      effectiveThread.permissionPersistence,
+    );
     return {
       parentMode: "code",
       parentAuthority,
@@ -175,6 +199,44 @@ export function authorizeAgentRunCreation(input: {
   }
 
   return undefined;
+}
+
+/**
+ * The live grant a host-scheduled usage resume may claim when no window
+ * carries the parent thread — the same shape the window-bound path derives,
+ * sourced only from durable state: the run's journaled mode and, for Code,
+ * the parent thread's persisted posture. A window-scoped full-access grant
+ * cannot be proven without the window, so a run admitted wider than the
+ * persisted posture hits the resume's ordinary authority check and settles
+ * honestly rather than inheriting a grant nobody can prove.
+ *
+ * Returns `undefined` when the parent thread the grant derives from can no
+ * longer be read; the dispatch then reports a refusal instead of guessing.
+ */
+export function scheduledAgentRunLiveAuthority(input: {
+  readonly persistence: PersistenceService;
+  readonly run: AgentRun;
+}): AgentRunAuthority | undefined {
+  switch (input.run.routingReceipt.mode) {
+    case "chat":
+      return chatParentLiveGrant();
+    case "work":
+      return workParentLiveGrant();
+    case "code": {
+      let codeThread;
+      try {
+        codeThread = input.persistence.readCodeThread(
+          decodeCodeThreadId(String(input.run.parentThreadId)),
+        );
+      } catch {
+        return undefined;
+      }
+      if (codeThread === undefined || codeThread.lifecycle !== "active") return undefined;
+      return codeParentLiveGrant(codeThread.executionPolicy, codeThread.permissionPersistence);
+    }
+    default:
+      return undefined;
+  }
 }
 
 export function layoutContainsAgentRunThread(

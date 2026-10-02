@@ -142,7 +142,11 @@ describe("LinkedThreadPreviewDialog", () => {
         skillName="review-in-parallel"
       />,
     );
-    expect(screen.getByRole("dialog", { name: "Confirm parallel review" })).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Confirm parallel review" });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveAccessibleDescription(
+      "Read-only plan authority applies to every peer thread. No approvals, credentials, or authority are transferred.",
+    );
     expect(screen.getByText("Reviewer 1")).toBeInTheDocument();
     expect(screen.getAllByText(/Read-only/).length).toBeGreaterThan(0);
     expect(screen.getByText(/review-in-parallel/)).toBeInTheDocument();

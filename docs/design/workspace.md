@@ -12,8 +12,10 @@ Unfinished plugin extraction and other proposals are separate from these rules.
 
 ## Navigation and Projects
 
-The window is mode-first: a persistent left sidebar with the Chat, Work, and
-Code selector, mode-aware destinations, Projects and threads, and settings; an
+The window is mode-first: a persistent left sidebar with the Work and Code
+selector (Work presents the Chat and Work domains together; see
+[architecture](../architecture.md#modes-chat-work-and-code)), optional count tiles, mode-aware destinations, Projects and
+threads, and settings (the sidebar's anatomy is in [DESIGN.md](../../DESIGN.md#shell-and-layout)); an
 integrated borderless top chrome; a central workspace; and an optional right
 dock. Mode changes alter content, authority, default composition, and density,
 never the navigation grammar. See [decisions/0015-workspace-shell-model.md](../decisions/0015-workspace-shell-model.md).
@@ -77,9 +79,13 @@ remain in the thread draft store; approval requests keep their explicit controls
 Thread titles appear once in the title row. A thread pane's title row is its
 drag handle: an environment mark (a small neutral tile holding a laptop glyph
 when the thread runs on this computer, a cloud glyph and the host's name when
-it runs on another host), the title, and a quiet chip naming the Project, with
-the branch for Code. The chip truncates before the title does and is omitted
-without a Project. A surface that is not a thread shows no environment mark.
+it runs on another host), the title, a quiet chip naming the Project, and for
+Code a second chip naming the branch. The chips keep their width (each capped at 30% of the header) and the title truncates instead, so a long title never squeezes a chip to one letter;
+the Project chip is omitted without a Project and the branch chip without a
+branch. While the host projects the thread as executing, a "Running" pill with
+a spinner follows them; it carries no elapsed time because the host does not
+report when the turn began. A surface that is not a thread shows no
+environment mark.
 The model stays in the composer, not the title row. The tile holds its glyph
 so a later per-environment icon can replace it in place. Tab
 geometry and close-control presentation are shared with dock tools under
@@ -105,8 +111,9 @@ its Git subprocesses are network-denied and its data is an ephemeral read,
 not a second journal. Pages anchor to immutable Git tips, and commit details
 compare immutable object IDs with an explicit parent for merges.
 The top-right control reveals the dock only when the active pane has a bound thread
-or a valid launchable tool. An available empty dock shows a compact launcher;
-an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
+or a valid launchable tool. An available empty dock opens on a thread overview (running threads, this
+thread's facts, and its changes; see [DESIGN.md](../../DESIGN.md#shell-and-layout))
+above a compact launcher; an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
 Tests, iOS Simulator, and Android emulator, as mode and capability allow. Side
 Chat is a Chat conversation about the pane's thread: it reads that thread's
@@ -115,8 +122,12 @@ them ([authority](../architecture.md#security-and-authority)). Its notice says
 what the source offers once the host names the source's mode. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
 the host-authorized file open; the renderer offers a written document (or a
-Chat-authored Canvas) in the dock once per document, never after the person
-closed its tab, and never by moving focus. Hand off (`POST
+Canvas the thread's agent authored in Chat, Work, or Code) in the dock once per
+document, never after the person closed its tab, and never by moving focus. An
+agent-authored Canvas belongs to the thread's own scope as the host resolves
+it: the active Chat Project, the Work thread's confined root, or the Code
+thread's checkout; a thread whose binding the host cannot resolve is refused
+rather than given an assumed scope. Hand off (`POST
 /api/threads/hand-off`) starts from the thread export cut, asks the thread's
 own provider for a six-section hand-off document in one tool-free request,
 keeps it as a Canvas of the thread, and opens that Canvas in the dock; a
@@ -154,7 +165,11 @@ the brief, then the replies as rendered Markdown and status events as quiet
 lines, live while it runs. When the live read is unavailable or gone after
 completion, the retained final reply stands in; when neither exists the page
 says so. Mark reviewed, Steer, Retry, Resume, and Cancel sit in one bar pinned
-under the transcript. A thread with none says subagents appear when the agent
+under the transcript. A run parked on a provider usage limit that disclosed
+its reset additionally shows the limit and offers Resume at reset — the same
+journaled per-record opt-in a thread's own limit stop takes — and Stop
+scheduled resume while it is armed; the row never presents that wait as a
+finished or failed run. A thread with none says subagents appear when the agent
 hands off part of its work, or that they are turned off in Settings. The workspace-rail Agents Center is that same
 hierarchy across modes; on a wide window it can draw the current query as a
 forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. The Agents dock shows the host's bounded, process-local child conversation read: entries are
@@ -170,8 +185,9 @@ Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
 Chat has no board. Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
-Projects. The same cached read backs the right dock's Pull requests tool,
-scoped to the active Code thread's Project. The list is a cached read of a
+Projects. The same cached read backs the right dock's Pull requests tool and
+each Code thread's Environment group, scoped to the active Code thread's
+Project. The list is a cached read of a
 private host-local snapshot: opening it, navigating, and ordinary board
 queries do not call GitHub. GitHub is reached
 only by an explicit Refresh all or per-Project refresh, or — for Projects that
@@ -225,7 +241,7 @@ Project is created from; everything is journaled, cancels cleanly, quarantines i
 deleting, and reconciles after restart without re-running work.
 
 Code also has a host-scoped Linear issues workspace contributed by the
-bundled-off Linear plugin as `sidebar.destination` `linear-issues`, Code mode
+bundled Linear plugin (enabled by default) as `sidebar.destination` `linear-issues`, Code mode
 only. The sidebar row is shown only when that contribution is effective, its
 action is wired, and the Linear authentication snapshot reports `list-issues`
 available. Browse goes through the Integration port (`list-issues`,

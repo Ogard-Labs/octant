@@ -7,7 +7,7 @@ import type {
 import type { HostId } from "@octant/contracts/host";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import { ChevronRight, FolderOpen, GitBranch, Home, Search } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -38,6 +38,8 @@ type PickerStatus = "loading" | "ready" | "error";
  * selected in either mode; Git status is shown as information only.
  */
 export function FolderPicker(props: FolderPickerProps) {
+  const titleId = useId();
+  const hintId = useId();
   const [status, setStatus] = useState<PickerStatus>("loading");
   const [result, setResult] = useState<FolderBrowseResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>();
@@ -147,11 +149,18 @@ export function FolderPicker(props: FolderPickerProps) {
       : "Navigate into a folder, then Select the confined project root.");
 
   return (
-    <OctantDialog className="folder-picker" label="Add folder" onClose={requestClose} open>
+    <OctantDialog
+      className="folder-picker"
+      describedBy={hintId}
+      label={title}
+      labelledBy={titleId}
+      onClose={requestClose}
+      open
+    >
       <div className="folder-picker__header">
         <div>
           <span>{props.mode === "code" ? "Code" : "Work"}</span>
-          <h2 id="folder-picker-title">{title}</h2>
+          <h2 id={titleId}>{title}</h2>
         </div>
         <OctantButton
           aria-label="Cancel"
@@ -164,7 +173,9 @@ export function FolderPicker(props: FolderPickerProps) {
           ×
         </OctantButton>
       </div>
-      <p className="folder-picker__hint">{hint}</p>
+      <p className="folder-picker__hint" id={hintId}>
+        {hint}
+      </p>
       <div className="folder-picker__search">
         <Search aria-hidden="true" size={14} strokeWidth={1.8} />
         <OctantInput

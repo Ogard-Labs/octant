@@ -28,6 +28,21 @@ describe("SpendCeilingPolicy", () => {
   });
 });
 
+describe("SpendCeilingPolicy turn and run-time budgets", () => {
+  it("decodes turn and run-time budgets without a token budget and refuses an empty policy", () => {
+    expect(decodeSpendCeilingPolicy({ runTimeBudgetSeconds: 7_200 })).toEqual({
+      runTimeBudgetSeconds: 7_200,
+    });
+    expect(decodeSpendCeilingPolicy({ turnBudget: 40, runTimeBudgetSeconds: 7_200 })).toEqual({
+      turnBudget: 40,
+      runTimeBudgetSeconds: 7_200,
+    });
+    expect(() => decodeSpendCeilingPolicy({})).toThrow();
+    expect(() => decodeSpendCeilingPolicy({ maxTokensPerTurn: 2_000 })).toThrow();
+    expect(() => decodeSpendCeilingPolicy({ turnBudget: 0 })).toThrow();
+  });
+});
+
 describe("SpendCeilingWindow", () => {
   it("decodes lifetime and calendar windows and rejects an unknown time zone", () => {
     expect(decodeSpendCeilingWindow({ kind: "lifetime" })).toEqual({ kind: "lifetime" });
@@ -117,12 +132,13 @@ describe("SpendCeilingSnapshot", () => {
 });
 
 describe("SPEND_CEILING_EVENT_NAMES", () => {
-  it("names the journaled set, raise, clear, and overrun events", () => {
+  it("names the journaled set, raise, clear, overrun, and turn-recorded events", () => {
     expect(SPEND_CEILING_EVENT_NAMES).toEqual({
       set: "spend.ceiling-set@1",
       raised: "spend.ceiling-raised@1",
       cleared: "spend.ceiling-cleared@1",
       overrunRecorded: "spend.overrun-recorded@1",
+      turnRecorded: "spend.turn-recorded@1",
     });
   });
 });

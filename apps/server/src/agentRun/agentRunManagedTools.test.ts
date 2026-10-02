@@ -302,6 +302,76 @@ describe("agents managed tools", () => {
     });
   });
 
+  it("reports a child's provider-limit wait on status instead of a pending result", async () => {
+    const usageLimit = {
+      kind: "exhausted",
+      resetsAt: "2026-07-20T00:00:00.000Z",
+    } as never;
+    const { set } = tool({
+      summary: [
+        {
+          runId: ids.run as never,
+          requestId: "req-1" as never,
+          parentThreadId: ids.thread as never,
+          role: "research",
+          task: "Look",
+          lifecycleStatus: "waiting",
+          executionKind: "octant-managed",
+          usageQuality: "provider-reported",
+          route: {
+            requestedProviderInstanceId: ids.provider,
+            requestedModelId: decodeProviderModelId("gpt-4o"),
+            executionProviderInstanceId: ids.provider,
+            executionModelId: decodeProviderModelId("gpt-4o"),
+            poolDerived: false,
+          },
+          resultAcknowledgement: "pending" as never,
+          usageLimit,
+          usageResume: { status: "scheduled" } as never,
+          version: 3 as never,
+          updatedAt: "2026-07-19T22:10:00.000Z" as never,
+        } as AgentRunParentSummaryEntry,
+      ],
+    });
+    const outcome = await call(set, { operation: "status" });
+    expect(outcome.result).toMatchObject({
+      status: "ok",
+      children: [
+        {
+          runId: ids.run,
+          lifecycleStatus: "waiting",
+          usageLimit,
+          usageResume: { status: "scheduled" },
+        },
+      ],
+    });
+    expect(
+      (outcome.result as { children: Array<{ resultText?: string }> }).children[0],
+    ).not.toHaveProperty("resultText");
+  });
+
+  it("answers a provider-limit wait immediately instead of blocking to the deadline", async () => {
+    const { set } = tool({
+      runs: [
+        queuedRun({
+          lifecycleStatus: "waiting",
+          usageLimit: { kind: "exhausted", resetsAt: "2026-07-20T00:00:00.000Z" } as never,
+          usageResume: { status: "scheduled" } as never,
+        }),
+      ],
+    });
+    const started = Date.now();
+    const outcome = await call(set, { operation: "wait", runId: ids.run, timeoutMs: 120_000 });
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(outcome.result).toMatchObject({
+      status: "waiting",
+      lifecycleStatus: "waiting",
+      usageLimit: { kind: "exhausted" },
+      usageResume: { status: "scheduled" },
+    });
+    expect(outcome.result).not.toHaveProperty("text");
+  });
+
   it("refuses to wait on a child belonging to another parent", async () => {
     const { set } = tool({
       runs: [queuedRun({ parentThreadId: "00000000-0000-4000-8000-000000000099" as never })],

@@ -41,13 +41,16 @@ import {
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ChatTranscript } from "./ChatTranscript";
 import { formatOutgoingMessageWithQuotes, type TranscriptQuoteChip } from "./quoteSelection";
+import {
+  unattachedCapabilityMentionCopy,
+  unattachedCapabilityMentions,
+} from "@octant/plugin-host/capability-mentions";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
 import type { ChatController } from "./useChatController";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
-import type { ExtensionToolApproval } from "@octant/contracts/extension-rpc";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import { useExtensionDraftSelections } from "./useExtensionDraftSelections";
 import { LinkedThreadParallelReviewFlow } from "../linkedThread/LinkedThreadParallelReviewFlow";
@@ -65,8 +68,8 @@ import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
 import { OctantButton } from "../ui/base/OctantButton";
+import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { ShellState } from "../shell/ShellState";
-import { samePollingData } from "../polling/samePollingData";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export interface ChatWorkspaceProps {
@@ -195,7 +198,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           );
         }).length;
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false);
-  const [toolApprovals, setToolApprovals] = useState<ReadonlyArray<ExtensionToolApproval>>([]);
   const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
   const [toolApprovalBusy, setToolApprovalBusy] = useState(false);
   const [browserApprovalMessage, setBrowserApprovalMessage] = useState<string | undefined>(
@@ -206,6 +208,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const [branchPending, setBranchPending] = useState(false);
   const pendingCanvasSelections = props.pendingCanvasSelections ?? localCanvasSelections;
   const [attachmentStatus, setAttachmentStatus] = useState<AttachmentStatus>({ kind: "idle" });
+  // A send refused before the host saw it explains itself beside the composer,
+  // since no turn exists to carry a reason.
+  const [sendNotice, setSendNotice] = useState<string>();
   // Every upload still in flight, so the composer's busy state describes the
   // whole batch a multi-image paste starts. Releasing Send when the first one
   // lands would let a later arrival join the pending list after the turn was
@@ -364,42 +369,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ...(activeThread === undefined ? {} : { thread: activeThread }),
   });
   useEffect(() => {
-    if (props.extensionClient === undefined || activeThreadId === undefined) {
-      setToolApprovals([]);
-      return;
-    }
-    const controller = new AbortController();
-    let inFlight = false;
-    const refresh = async () => {
-      if (!documentIsVisible() || inFlight) return;
-      inFlight = true;
-      try {
-        const approvals = await props.extensionClient!.listToolApprovals(controller.signal);
-        if (!controller.signal.aborted) {
-          const next = approvals.filter(
-            (approval) => String(approval.threadId) === String(activeThreadId),
-          );
-          setToolApprovals((current) => (samePollingData(current, next) ? current : next));
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          setToolApprovals((current) => (current.length === 0 ? current : []));
-        }
-      } finally {
-        inFlight = false;
-      }
-    };
-    const stop = scheduleVisibleInterval(
-      () => void refresh(),
-      turnActive ? ACTIVE_TOOL_APPROVAL_POLL_MS : IDLE_TOOL_APPROVAL_POLL_MS,
-      { runImmediately: true },
-    );
-    return () => {
-      controller.abort();
-      stop();
-    };
-  }, [activeThreadId, props.extensionClient, turnActive]);
-  useEffect(() => {
     const client = props.browserAutomationClient;
     const listApprovals = client?.listApprovals;
     if (listApprovals === undefined || activeThreadId === undefined) {
@@ -482,30 +451,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const canvasPanelId = `chat-canvas-panel-${thread.id}`;
   const pendingExtensionSelections = props.pendingExtensionSelections ?? extensionDraft.receipts;
   const removeExtensionSelection = props.onRemoveExtensionSelection ?? extensionDraft.remove;
-  const pendingToolApproval = toolApprovals[0];
   const pendingBrowserApproval = browserApprovals[0];
-
-  async function decideToolApproval(decision: "approved" | "denied") {
-    if (
-      pendingToolApproval === undefined ||
-      props.extensionClient === undefined ||
-      toolApprovalBusy
-    ) {
-      return;
-    }
-    setToolApprovalBusy(true);
-    try {
-      await props.extensionClient.decideToolApproval({
-        approvalId: pendingToolApproval.approvalId,
-        decision,
-      });
-      setToolApprovals((current) =>
-        current.filter((approval) => approval.approvalId !== pendingToolApproval.approvalId),
-      );
-    } finally {
-      setToolApprovalBusy(false);
-    }
-  }
 
   async function decideBrowserApproval(decision: "approved" | "denied") {
     if (
@@ -814,6 +760,22 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     steeredMessage?: ChatSteeredMessage,
   ): Promise<boolean> => {
     const deferred = steeredMessage !== undefined;
+    const extensionReceiptsForSend = deferred
+      ? steeredMessage.extensionReceipts
+      : pendingExtensionRef.current;
+    // Refusing before anything is claimed keeps the staged attachments and
+    // context with the draft the user fixes.
+    const unattachedMentions = unattachedCapabilityMentions(
+      draft,
+      extensionReceiptsForSend.flatMap((receipt) =>
+        receipt.selection === undefined ? [] : [receipt.selection],
+      ),
+    );
+    if (unattachedMentions.length > 0) {
+      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions));
+      return false;
+    }
+    setSendNotice(undefined);
     const claimedAttachments = deferred ? [] : pendingAttachmentsRef.current;
     if (!deferred) pendingAttachmentsRef.current = [];
     const quotesForSend = deferred ? steeredMessage.quotes : pendingQuotesRef.current;
@@ -823,9 +785,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     const canvasSelectionsForSend = deferred
       ? steeredMessage.canvasSelections
       : pendingCanvasSelections;
-    const extensionReceiptsForSend = deferred
-      ? steeredMessage.extensionReceipts
-      : pendingExtensionRef.current;
     const threadMentionChipsForSend = deferred
       ? steeredMessage.threadMentionChips
       : [...threadMentions.chips];
@@ -1189,41 +1148,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           onEdit={(command) => void props.controller.execute(command)}
         />
       )}
-      {pendingToolApproval === undefined ? null : (
-        <section
-          aria-label="Extension tool approval"
-          className="approval-row approval-row--request chat-workspace__tool-approval thread-column"
-          role="group"
-        >
-          <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span className="approval-row__text">
-            Allow {pendingToolApproval.mcpToolName}?
-            <span className="approval-row__detail">One-time extension tool request</span>
-          </span>
-          <div className="approval-row__actions">
-            <OctantButton
-              disabled={toolApprovalBusy}
-              onClick={() => void decideToolApproval("approved")}
-              size="sm"
-              type="button"
-            >
-              Approve once
-            </OctantButton>
-            <OctantButton
-              disabled={toolApprovalBusy}
-              onClick={() => void decideToolApproval("denied")}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Deny
-            </OctantButton>
-          </div>
-          <code className="approval-row__code">
-            {pendingToolApproval.inputJson === "" ? "(empty input)" : pendingToolApproval.inputJson}
-          </code>
-        </section>
-      )}
+      <ExtensionToolApprovalPrompt
+        className="chat-workspace__tool-approval thread-column"
+        client={props.extensionClient}
+        threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
+        turnActive={turnActive}
+      />
       {pendingBrowserApproval === undefined ? null : (
         <section
           aria-label="Browser origin approval"
@@ -1552,10 +1482,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             ? { sendDisabledReason: uploadingMessage }
             : attachmentStatus.kind === "removing"
               ? { sendDisabledReason: `Removing ${attachmentStatus.fileName}.` }
-              : attachmentStatus.kind === "failed"
+              : attachmentStatus.kind === "failed" || sendNotice !== undefined
                 ? {
                     statusMessage: composeComposerNotice(
-                      attachmentStatus.message,
+                      attachmentStatus.kind === "failed" ? attachmentStatus.message : sendNotice,
                       props.controller.draftStagedDropped,
                       props.controller.draftPersistError,
                     ),

@@ -157,21 +157,36 @@ describe("RemoteAccessSettingsSection", () => {
     await user.type(screen.getByLabelText("Hostname"), "192.168.1.20");
     await user.type(screen.getByLabelText("Certificate (PEM)"), "-----BEGIN CERTIFICATE-----");
     await user.type(screen.getByLabelText("Private key (PEM)"), "-----BEGIN PRIVATE KEY-----");
-    await user.click(screen.getByRole("button", { name: "Enable listener…" }));
-
-    const confirm = screen.getByRole("group", { name: "Confirm remote listener" });
+    const opener = screen.getByRole("button", { name: "Enable listener…" });
+    await user.click(opener);
+    const confirm = screen.getByRole("dialog", { name: "Enable remote listener?" });
     expect(within(confirm).getByText("192.168.1.20:13774")).toBeInTheDocument();
     expect(within(confirm).getByText("https://192.168.1.20:13774")).toBeInTheDocument();
     expect(within(confirm).getByText("Private LAN")).toBeInTheDocument();
     expect(confirm.textContent).not.toContain("PRIVATE KEY");
-
-    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
-    expect(
-      screen.queryByRole("group", { name: "Confirm remote listener" }),
-    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus(),
+    );
     expect(host.enablePrivateListener).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Enable listener…" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+    expect(host.enablePrivateListener).not.toHaveBeenCalled();
+
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+    expect(host.enablePrivateListener).not.toHaveBeenCalled();
+
+    await user.click(opener);
+    await user.click(screen.getByTestId("octant-dialog-backdrop"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(opener).toHaveFocus());
+    expect(host.enablePrivateListener).not.toHaveBeenCalled();
+
+    await user.click(opener);
     await user.click(screen.getByRole("button", { name: "Confirm enable" }));
     await waitFor(() => expect(host.enablePrivateListener).toHaveBeenCalledTimes(1));
     expect(host.enablePrivateListener).toHaveBeenCalledWith({
@@ -184,6 +199,93 @@ describe("RemoteAccessSettingsSection", () => {
     });
     expect(await screen.findByText("Listening")).toBeInTheDocument();
     expect(screen.getByLabelText("Private key (PEM)")).toHaveValue("");
+  });
+
+  it("confirms a listener move with the same host confirmation payload", async () => {
+    const user = userEvent.setup();
+    const host = bridge(listening);
+    render(<RemoteAccessSettingsSection bridge={host} />);
+
+    expect(await screen.findByText("Listening")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Hostname"), "mac.tailnet.ts.net");
+    await user.type(screen.getByLabelText("Certificate (PEM)"), "certificate");
+    await user.type(screen.getByLabelText("Private key (PEM)"), "private-key");
+    await user.click(screen.getByRole("button", { name: "Move listener…" }));
+
+    const confirm = screen.getByRole("dialog", { name: "Move remote listener?" });
+    expect(within(confirm).getByText("Tailscale")).toBeInTheDocument();
+    expect(confirm.textContent).not.toContain("private-key");
+    await waitFor(() =>
+      expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus(),
+    );
+
+    await user.click(within(confirm).getByRole("button", { name: "Confirm move" }));
+    await waitFor(() =>
+      expect(host.restartPrivateListener).toHaveBeenCalledWith({
+        hostname: "mac.tailnet.ts.net",
+        port: 13774,
+        origin: "https://mac.tailnet.ts.net:13774",
+        certificatePem: "certificate",
+        privateKeyPem: "private-key",
+        localConfirmation: true,
+      }),
+    );
+    expect(host.enablePrivateListener).not.toHaveBeenCalled();
+  });
+
+  it("keeps a listener confirmation open while its host command is pending", async () => {
+    const user = userEvent.setup();
+    const { promise, resolve } = Promise.withResolvers<PrivateListenerPublicStatus>();
+    const host = bridge(off, { enablePrivateListener: vi.fn(() => promise) });
+    render(<RemoteAccessSettingsSection bridge={host} />);
+
+    expect(await screen.findByText("Off")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Hostname"), "192.168.1.20");
+    await user.type(screen.getByLabelText("Certificate (PEM)"), "certificate");
+    await user.type(screen.getByLabelText("Private key (PEM)"), "private-key");
+    await user.click(screen.getByRole("button", { name: "Enable listener…" }));
+    await user.click(screen.getByRole("button", { name: "Confirm enable" }));
+
+    const confirm = screen.getByRole("dialog", { name: "Enable remote listener?" });
+    expect(within(confirm).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(within(confirm).getByRole("button", { name: "Confirm enable" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByTestId("octant-dialog-backdrop"));
+    expect(screen.getByRole("dialog", { name: "Enable remote listener?" })).toBeInTheDocument();
+    expect(host.enablePrivateListener).toHaveBeenCalledTimes(1);
+
+    resolve(listening);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("keeps paired devices after dismissal and revokes all only on explicit confirmation", async () => {
+    const user = userEvent.setup();
+    const host = bridge(listening);
+    render(<RemoteAccessSettingsSection bridge={host} />);
+
+    const opener = await screen.findByRole("button", { name: "Revoke all…" });
+    await user.click(opener);
+    const confirm = screen.getByRole("dialog", { name: "Revoke every paired device?" });
+    await waitFor(() =>
+      expect(within(confirm).getByRole("button", { name: "Keep them" })).toHaveFocus(),
+    );
+    expect(host.revokeAllRemoteDevices).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId("octant-dialog-backdrop"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(opener).toHaveFocus());
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Keep them" }));
+    expect(opener).toHaveFocus();
+    await user.click(opener);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+    expect(host.revokeAllRemoteDevices).not.toHaveBeenCalled();
+
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Revoke all devices" }));
+    await waitFor(() => expect(host.revokeAllRemoteDevices).toHaveBeenCalledTimes(1));
   });
 
   it("refuses a loopback or public address before it reaches the host", async () => {

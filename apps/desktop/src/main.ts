@@ -3,6 +3,11 @@ import { startComputerUseBroker, type ComputerUseBroker } from "./computerUseBro
 import { startSimulatorDeviceBroker, type SimulatorDeviceBroker } from "./simulatorDeviceBroker";
 import { createSimulatorDeviceHelpers } from "./simulatorDeviceHelper";
 import {
+  createManagedSimulatorHelpers,
+  createUnavailableSimulatorHelpers,
+} from "./managedSimulatorHelpers";
+import { startServeAvdBroker, type ServeAvdBroker } from "./serveAvdBroker";
+import {
   createComputerUseDesktopService,
   type ComputerUseDesktopService,
 } from "./computerUseDesktopService";
@@ -397,11 +402,15 @@ export function resolveDesktopHostCapabilities(
   readonly sidebarVibrancySupported: boolean;
   readonly liveBrowserSupported: boolean;
   readonly liveSimulatorFrameSupported: boolean;
+  readonly liveAndroidFrameSupported: boolean;
 } {
   return {
     sidebarVibrancySupported: platform === "darwin",
     liveBrowserSupported,
     liveSimulatorFrameSupported: platform === "darwin",
+    // The Android emulator is reached over adb on every desktop host, unlike
+    // the Simulator frame, which needs the macOS native helper.
+    liveAndroidFrameSupported: true,
   };
 }
 
@@ -1000,6 +1009,7 @@ let credentialBroker: CredentialBroker | undefined;
 let browserRuntimeBroker: BrowserRuntimeBroker | undefined;
 let computerUseBroker: ComputerUseBroker | undefined;
 let simulatorDeviceBroker: SimulatorDeviceBroker | undefined;
+let serveAvdBroker: ServeAvdBroker | undefined;
 let computerUseService: ComputerUseDesktopService | undefined;
 let managedToolService: ManagedToolService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
@@ -1470,6 +1480,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   let startingBrowserBroker: BrowserRuntimeBroker | undefined;
   let startingComputerBroker: ComputerUseBroker | undefined;
   let startingDeviceBroker: SimulatorDeviceBroker | undefined;
+  let startingServeAvdBroker: ServeAvdBroker | undefined;
   let startingManagedToolService: ManagedToolService | undefined;
   try {
     const instanceId = randomUUID();
@@ -1513,16 +1524,23 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       },
       DEVICE_HELPER_FILENAME,
     );
-    // Simulators exist on macOS only, and a development build may not have
-    // compiled the helper; without a broker the server reports input as
-    // unavailable instead of pointing at a helper that is not there.
+    // Simulators exist on macOS only. The broker still starts when the native
+    // helper binary is missing, so a managed serve-sim stream can drive the
+    // pane. Without either, input is reported unavailable.
     const nextDeviceBroker =
-      process.platform === "darwin" && existsSync(deviceHelperPath)
+      process.platform === "darwin"
         ? await startSimulatorDeviceBroker(
-            createSimulatorDeviceHelpers({ helperPath: deviceHelperPath }),
+            createManagedSimulatorHelpers(
+              existsSync(deviceHelperPath)
+                ? createSimulatorDeviceHelpers({ helperPath: deviceHelperPath })
+                : createUnavailableSimulatorHelpers(),
+              startingManagedToolService,
+            ),
           )
         : undefined;
     startingDeviceBroker = nextDeviceBroker;
+    const nextServeAvdBroker = await startServeAvdBroker(startingManagedToolService);
+    startingServeAvdBroker = nextServeAvdBroker;
     const resources = await startManagedServerResources({
       startBroker: () => startDesktopCredentialBroker(),
       startServer: (broker) => {
@@ -1542,6 +1560,8 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
                 simulatorDeviceBrokerUrl: nextDeviceBroker.url,
                 simulatorDeviceBrokerToken: nextDeviceBroker.token,
               }),
+          serveAvdBrokerUrl: nextServeAvdBroker.url,
+          serveAvdBrokerToken: nextServeAvdBroker.token,
           ...(process.platform === "darwin" && existsSync(codeFileHelperPath)
             ? { codeFileHelperPath }
             : {}),
@@ -1570,6 +1590,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     computerUseBroker = nextComputerBroker;
     computerUseService = nextComputerService;
     simulatorDeviceBroker = nextDeviceBroker;
+    serveAvdBroker = nextServeAvdBroker;
     managedToolService = startingManagedToolService;
     server = resources.server;
     serverInstanceId = instanceId;
@@ -1604,10 +1625,12 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       await nextBrowserRuntimeBroker.close();
       await nextComputerBroker.close();
       await nextDeviceBroker?.close();
+      await nextServeAvdBroker.close();
       await startingManagedToolService?.close();
       computerUseBroker = undefined;
       computerUseService = undefined;
       simulatorDeviceBroker = undefined;
+      serveAvdBroker = undefined;
       managedToolService = undefined;
       desktopBridgeSecret = winningAttachment.bridgeSecret;
       serverInstanceId = attached.instanceId;
@@ -1625,10 +1648,12 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     const browserBroker = browserRuntimeBroker ?? startingBrowserBroker;
     const computerBroker = computerUseBroker ?? startingComputerBroker;
     const deviceBroker = simulatorDeviceBroker ?? startingDeviceBroker;
+    const avdBroker = serveAvdBroker ?? startingServeAvdBroker;
     const managedTools = managedToolService ?? startingManagedToolService;
     computerUseBroker = undefined;
     computerUseService = undefined;
     simulatorDeviceBroker = undefined;
+    serveAvdBroker = undefined;
     managedToolService = undefined;
     server = undefined;
     credentialBroker = undefined;
@@ -1643,6 +1668,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     await browserBroker?.close().catch(() => undefined);
     await computerBroker?.close().catch(() => undefined);
     await deviceBroker?.close().catch(() => undefined);
+    await avdBroker?.close().catch(() => undefined);
     await managedTools?.close().catch(() => undefined);
     throw error;
   }
@@ -1660,10 +1686,12 @@ async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
   const browserBroker = browserRuntimeBroker;
   const computerBroker = computerUseBroker;
   const deviceBroker = simulatorDeviceBroker;
+  const avdBroker = serveAvdBroker;
   const managedTools = managedToolService;
   computerUseBroker = undefined;
   computerUseService = undefined;
   simulatorDeviceBroker = undefined;
+  serveAvdBroker = undefined;
   managedToolService = undefined;
   server = undefined;
   credentialBroker = undefined;
@@ -1678,6 +1706,7 @@ async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
   await browserBroker?.close();
   await computerBroker?.close();
   await deviceBroker?.close();
+  await avdBroker?.close();
   await managedTools?.close();
 }
 

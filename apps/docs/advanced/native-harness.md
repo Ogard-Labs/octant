@@ -28,6 +28,27 @@ before writing. An edit needs a prior read of the same file and refuses when
 the file changed since. A truncated result says how much was left out and
 where to continue.
 
+When a turn offers Octant's own tools — the built-in browser, Canvas, computer
+use, the terminal, the Apple and Android simulators, helper agents — the model
+also gets one line per tool saying what it is for.
+
+## Conversations that survive a restart
+
+The harness saves its conversation step by step as it works: your message,
+each reply, and each tool call the moment it finishes. A Code thread on a
+harness model therefore continues the same conversation on your next message,
+tool calls included, and picks it up again after Octant restarts.
+
+If Octant stops while a tool is running, the model is told on its next turn
+that the call was interrupted. A tool that only reads, such as `read` or
+`grep`, is marked safe to call again. Anything else is marked as possibly
+done, and the model is told to check before repeating it. Octant never
+re-runs an interrupted call by itself.
+
+When a long conversation no longer fits the model's window, older tool
+results are left out of the request first, then whole earlier exchanges, with
+a note to the model. The saved conversation keeps everything.
+
 ## Model slots
 
 Routing is configured by slot, in **Settings → Octant Harness → Model slots**. A slot
@@ -60,6 +81,14 @@ returns a reply the lead collects. This is the only way a subagent starts.
 Whether one may start at all is **Let the agent start subagents** under
 **Settings → Octant Harness → Helper agents**: on by default, and when it is
 off the lead is told subagents are turned off and does the work itself.
+
+Children can wait on each other, so the lead can run a small graph. It starts
+independent tasks side by side, then starts a task that needs their output with
+`after`. That task begins only once all of them have finished, with their
+replies in front of it; if one of them fails or is cancelled, it never runs.
+`delegate wait` blocks until the children finish, and `status` shows what each
+one is waiting on. At most three children of a thread are active at once,
+waiting ones included.
 
 This is how a frontier model plans and reviews while cheaper models read and
 implement: put the strong model on `default` and `slow`, the cheap one on
@@ -144,8 +173,15 @@ refused with the exact `octant project add` command to run. If the host is not
 running, `octant agent` starts it the way `octant server start` does and
 waits for it before opening the thread. `--plain` keeps the line-by-line mode, which is also what a pipe or
 `--json` (one JSON object per line) gets. `--thread <id>` attaches to an
-existing thread, `--last` to the one you used most recently, and
-`--project <name>` files a new thread in a Project. Inside the screen,
+existing thread in whatever mode it is, and `--last` continues the latest
+Code or Work thread of the Project you are in (anywhere else, your latest
+Chat thread). A Code thread keeps its conversation from one run of
+`octant agent` to the next, tool calls included. `--model <model>` picks the
+harness model for a new Work or Code thread — `endpoint/model` when two
+endpoints offer the same id — and an unknown name lists the ones on offer.
+`--project <name>` files a new thread in a Project. The terminal opens the
+Project and the thread in its own window on the host, exactly as the app
+does, so the same checkout, goal, and approval rules apply to it. Inside the screen,
 `/threads` lists your threads and `/open N` switches; `/model` lists every
 model a harness endpoint offers and `/model N` switches the thread to it,
 with the header showing how much of that model's window the last turn used.

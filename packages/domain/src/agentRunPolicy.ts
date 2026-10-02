@@ -476,6 +476,8 @@ export function applyAgentRunLifecycleTransition(
     readonly resultText?: string;
     /** Provider-reported token counts for this completion; omit when unknown. */
     readonly usage?: AgentRun["usage"];
+    /** The provider's own limit signal; carried only by a usage-limit wait. */
+    readonly usageLimit?: AgentRun["usageLimit"];
   },
 ): AgentRun {
   assertExpectedVersion(run, options.expectedVersion);
@@ -511,6 +513,9 @@ export function applyAgentRunLifecycleTransition(
     // a capacity waiter starts again, retaining "capacity saturated" would
     // incorrectly report that the active child is still blocked.
     recoveryReason: options.recoveryReason,
+    // A limit fact belongs to the wait that produced it; a transition that
+    // does not carry one drops it like the recovery reason.
+    usageLimit: options.usageLimit,
     ...(toStatus === "completed" && options.result !== undefined ? { result: options.result } : {}),
     ...(toStatus === "completed" && options.usage !== undefined ? { usage: options.usage } : {}),
     resultAcknowledgement:
@@ -614,7 +619,9 @@ export function evaluateAgentRunCommand(
     case "cancel-agent-run":
     case "interrupt-agent-run":
     case "retry-agent-run":
-    case "resume-agent-run": {
+    case "resume-agent-run":
+    case "schedule-agent-run-usage-resume":
+    case "cancel-agent-run-usage-resume": {
       if (run === undefined) {
         reject("unsupported-transition", "AgentRun does not exist.");
       }
@@ -659,6 +666,7 @@ export function evaluateAgentRunCommand(
       return applyAgentRunLifecycleTransition(current, "waiting", now, {
         expectedVersion: command.expectedVersion,
         recoveryReason: command.recoveryReason,
+        ...(command.usageLimit === undefined ? {} : { usageLimit: command.usageLimit }),
       });
     case "complete-agent-run":
       return applyAgentRunLifecycleTransition(current, "completed", now, {
@@ -750,6 +758,7 @@ export function createAgentRunFromRequest(input: {
     requestId: input.command.requestId,
     parentThreadId: input.command.parentThreadId,
     parentRunId: input.command.parentRunId,
+    ...(input.command.dependsOn === undefined ? {} : { dependsOn: input.command.dependsOn }),
     depth,
     role: input.command.role,
     task: input.command.task,

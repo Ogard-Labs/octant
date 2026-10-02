@@ -179,3 +179,37 @@ export function assertAgentRunResumeAllowed(
     );
   }
 }
+
+/**
+ * The opt-in binds to the limit fact the run itself journaled, so only a run
+ * still waiting on a disclosed reset can accept it — never a run that merely
+ * mentions a limit somewhere in its history.
+ */
+export function assertAgentRunUsageResumeSchedulable(
+  run: AgentRun,
+  expectedVersion: AggregateVersion,
+): void {
+  assertExpectedVersion(run, expectedVersion);
+  if (run.lifecycleStatus !== "waiting") {
+    reject("unsupported-transition", "Only a waiting child can resume at reset.");
+  }
+  if (run.usageLimit === undefined) {
+    reject("unsupported-transition", "This child is not waiting on a usage limit.");
+  }
+  if (run.usageLimit.resetsAt === undefined) {
+    reject("unsupported-transition", "The provider did not disclose when the limit resets.");
+  }
+  if (run.usageResume?.status === "scheduled") {
+    reject("unsupported-transition", "This child already has a scheduled reset resume.");
+  }
+}
+
+export function assertAgentRunUsageResumeCancellable(
+  run: AgentRun,
+  expectedVersion: AggregateVersion,
+): void {
+  assertExpectedVersion(run, expectedVersion);
+  if (run.usageResume?.status !== "scheduled") {
+    reject("unsupported-transition", "This child has no scheduled reset resume to cancel.");
+  }
+}

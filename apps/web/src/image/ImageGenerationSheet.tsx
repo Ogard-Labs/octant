@@ -7,7 +7,7 @@ import type {
   OpenAiImageSize,
 } from "@octant/contracts";
 import { honoredImageGenerationOptions, imageGenerationConfigurationKind } from "@octant/domain";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -44,6 +44,8 @@ export interface ImageGenerationSheetProps {
 const OPTION_DEFAULT = "(profile default)";
 
 export function ImageGenerationSheet(props: ImageGenerationSheetProps) {
+  const titleId = useId();
+  const title = props.parentArtifactRef === undefined ? "Create image" : "Revise image";
   const profiles = props.profiles;
   const first = profiles[0];
   const [profileId, setProfileId] = useState(first === undefined ? "" : String(first.instanceId));
@@ -139,8 +141,8 @@ export function ImageGenerationSheet(props: ImageGenerationSheetProps) {
         void submit();
       }}
     >
-      <h2 className="h4">
-        {props.parentArtifactRef === undefined ? "Create image" : "Revise image"}
+      <h2 className="h4" id={titleId}>
+        {title}
       </h2>
       {profiles.length === 0 ? (
         <p role="status">
@@ -289,7 +291,7 @@ export function ImageGenerationSheet(props: ImageGenerationSheetProps) {
   );
   if (props.presentation === "workspace") return props.open ? form : null;
   return (
-    <OctantDialog label="Create image" onClose={props.onClose} open={props.open}>
+    <OctantDialog label={title} labelledBy={titleId} onClose={props.onClose} open={props.open}>
       {form}
     </OctantDialog>
   );

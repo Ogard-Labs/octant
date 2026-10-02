@@ -1,6 +1,6 @@
 import { createLocalUsageHistoryCheckpointStore } from "./persistence/localUsageHistoryCheckpointStore";
 import { createLocalUsageHistoryLastReadStore } from "./persistence/localUsageHistoryLastReadStore";
-import { createSelectedSkillContextResolver } from "./extensions/selectedSkillContext";
+import { createSelectedExtensionResolver } from "./extensions/selectedExtensions";
 import {
   createDesktopComputerUsePort,
   type DesktopComputerUsePort,
@@ -70,6 +70,7 @@ import type { ProviderDriver, ProviderLocalUsageHistorySource } from "@octant/pr
 import {
   authorizeAgentRunCreation,
   layoutContainsAgentRunThread,
+  scheduledAgentRunLiveAuthority,
 } from "./agentRun/authorizeAgentRunCreation";
 import { Data, Effect, Schema, Scope } from "effect";
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
@@ -346,6 +347,7 @@ import {
   createInMemoryCapacityPort,
 } from "./agentRun/agentRunOrchestrationService";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
+import { AgentRunDependencyScheduler } from "./agentRun/agentRunDependencyScheduler";
 import { AgentResultDeliveryService } from "./agentRun/agentResultDeliveryService";
 import { agentResultDeliveryPrompt } from "./agentRun/agentResultDeliveryPrompt";
 import { createAgentMessageRouteHandler } from "./agentMessage/agentMessageRoutes";
@@ -447,6 +449,10 @@ import {
   ProviderDriverConfigurationError,
 } from "./providers/providerDriverFactory";
 import { JournalOllamaHistoryStore, type OllamaHistoryStore } from "./providers/ollamaHistoryStore";
+import {
+  JournalNativeHarnessTranscriptStore,
+  type NativeHarnessTranscriptStore,
+} from "./harness/nativeHarnessTranscriptStore";
 import { makeOpenCodeProcessLive } from "./providers/openCodeProcess";
 import type { OpenCodeProcessPort } from "./providers/openCodeProcess";
 import { makeOhMyPiProcessLive, type OhMyPiProcessPort } from "./providers/ohMyPiProcess";
@@ -672,6 +678,7 @@ import {
 } from "./android/androidToolchainService";
 import { AndroidRuntimeStore } from "./android/androidRuntimeStore";
 import { spawnDetachedProcess } from "./android/spawnDetachedProcess";
+import { serveAvdFromEnvironment } from "./android/serveAvdBrokerClient";
 import { createAndroidToolchainRouteHandler } from "./androidToolchainRoutes";
 import { composeAppleValidationEvents } from "./apple/appleValidationEvidence";
 import { ZenEventStore } from "./zen/zenEventStore";
@@ -865,6 +872,8 @@ interface ConfiguredProviderDriverOptions {
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
   readonly ollamaHistoryStore?: OllamaHistoryStore;
+  /** Shared by every harness driver built from these options, so a later turn can resume an earlier one. */
+  readonly nativeHarnessTranscripts?: NativeHarnessTranscriptStore;
   readonly onRuntimeEvent?: (event: ProviderRuntimeEvent) => void;
   readonly admittedDriverKinds?: ReadonlySet<ProviderDriverKind>;
   readonly localUsageHistorySourceForInstance?: (
@@ -892,6 +901,9 @@ export function makeConfiguredProviderDriver(
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
+      ...(options.nativeHarnessTranscripts === undefined
+        ? {}
+        : { transcripts: options.nativeHarnessTranscripts }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -902,6 +914,9 @@ export function makeConfiguredProviderDriver(
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
+      ...(options.nativeHarnessTranscripts === undefined
+        ? {}
+        : { transcripts: options.nativeHarnessTranscripts }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -912,6 +927,9 @@ export function makeConfiguredProviderDriver(
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
+      ...(options.nativeHarnessTranscripts === undefined
+        ? {}
+        : { transcripts: options.nativeHarnessTranscripts }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -1924,6 +1942,7 @@ export function startOctantServer(
           getById: (childRunId) => agentRunPersistence.getById(childRunId),
           readAdmittedContext: (input) =>
             readAgentRunAdmittedContext(persistence.connection, input),
+          readResultText: (dependencyId) => agentRunPersistence.resultText(dependencyId),
         }),
         uuid: randomUUID,
         scratchRoot: (run) => {
@@ -3486,7 +3505,7 @@ export function startOctantServer(
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
       },
     });
-    const resolveSelectedSkillContext = createSelectedSkillContextResolver({
+    const resolveSelectedExtensions = createSelectedExtensionResolver({
       snapshot: async () => {
         await standaloneSkillService.reconcile();
         return extensionApiService.snapshot();
@@ -3499,7 +3518,25 @@ export function startOctantServer(
           ? undefined
           : Schema.decodeUnknownSync(ExtensionProviderFamily)(instance.driverKind);
       },
-      materialLoader: createStoredExtensionMaterialLoader(extensionPackageStore),
+      reconcileEffectiveState: async (effective) => {
+        await agentPluginMcpSessionManager.reconcile(effective);
+        return agentPluginMcpSessionManager.projectEffectiveState(effective);
+      },
+      materialLoader: createStoredExtensionMaterialLoader(extensionPackageStore, {
+        mcpToolsForComponent: ({ packageId, componentId, scope }) =>
+          agentPluginMcpSessionManager.toolDefinitionsFor(packageId, componentId, scope),
+      }),
+      toolExecution:
+        options.extensionToolExecution ?? agentPluginMcpSessionManager.createToolExecutionPort(),
+      carriesAppManagedTools: (thread) => {
+        const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+        return (
+          observed?.capabilities.appManagedTools === "supported" ||
+          observed?.verifiedToolModelIds?.some(
+            (candidate) => String(candidate) === String(thread.modelId),
+          ) === true
+        );
+      },
     });
     githubExtensionSnapshot.read = () => extensionApiService.snapshot();
     const extensionRoutes = createExtensionRouteHandler({
@@ -3628,6 +3665,12 @@ export function startOctantServer(
         uuid: randomUUID,
         clock: () => new Date().toISOString(),
       });
+    const nativeHarnessTranscripts = new JournalNativeHarnessTranscriptStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
     const isProjectConfinedPath = options.isProjectConfinedPath ?? pathIsProjectConfined;
     const credentialResolver =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
@@ -3657,6 +3700,7 @@ export function startOctantServer(
             ohMyPiProcess,
             ohMyPiHome,
             ollamaHistoryStore,
+            nativeHarnessTranscripts,
             claudeProcess,
             claudeSdk,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
@@ -3732,6 +3776,7 @@ export function startOctantServer(
       ohMyPiProcess,
       ohMyPiHome,
       ollamaHistoryStore,
+      nativeHarnessTranscripts,
       claudeProcess,
       claudeSdk,
       claudeResumeIdentityPort: claudeResumeIdentityStore,
@@ -4050,7 +4095,7 @@ export function startOctantServer(
       codeOperationRuntime = createCodeOperationRuntime({
         gitMutationPort,
         agentRuns: agentRunPersistence,
-        resolveSelectedSkillContext,
+        resolveSelectedExtensions,
         computerUseTools: ({ windowId, thread, selection }) =>
           computerToolsFor(
             decodeComputerUseOwner({
@@ -4393,6 +4438,20 @@ export function startOctantServer(
             uuid: randomUUID,
             clock: () => new Date().toISOString(),
           }),
+        canvas: ({ windowId, thread }) =>
+          canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId,
+                mode: "code",
+                thread: {
+                  id: String(thread.id),
+                  projectId: String(thread.projectId),
+                  providerInstanceId: thread.providerInstanceId,
+                  modelId: thread.modelId,
+                },
+                port: canvasAgentToolPort,
+              }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
@@ -4785,9 +4844,11 @@ export function startOctantServer(
       allowSimulatorControl: true,
     });
     yield* Effect.promise(() => androidProcess.reconcile());
+    const serveAvd = serveAvdFromEnvironment(process.env);
     const androidToolchainService = new AndroidToolchainService({
       execute: (input, signal) => androidProcess.execute(input, signal),
       spawnDetached: spawnDetachedProcess,
+      ...(serveAvd === undefined ? {} : { serveAvd }),
       observeEmulators: (emulators) =>
         androidInputGrants.closeUnlessBooted(
           emulators.map((emulator) => ({
@@ -5941,7 +6002,7 @@ export function startOctantServer(
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
       contextHarness,
-      resolveSelectedSkillContext,
+      resolveSelectedExtensions,
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
       onRequestSettled: (input, release) =>
@@ -6005,6 +6066,20 @@ export function startOctantServer(
               mode: "work",
               projectId: input.thread.projectId,
             });
+        const canvasTools =
+          !browserSupported || canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId: input.windowId,
+                mode: "work",
+                thread: {
+                  id: String(input.thread.id),
+                  projectId: String(input.thread.projectId),
+                  providerInstanceId: input.thread.providerInstanceId,
+                  modelId: input.thread.modelId,
+                },
+                port: canvasAgentToolPort,
+              });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
@@ -6024,10 +6099,18 @@ export function startOctantServer(
           browser === undefined &&
           sideTaskTools === undefined &&
           agentsTools === undefined &&
-          computer === undefined
+          computer === undefined &&
+          canvasTools === undefined
         )
           return undefined;
-        return combineAppManagedToolSets(native, browser, computer, sideTaskTools, agentsTools);
+        return combineAppManagedToolSets(
+          native,
+          browser,
+          computer,
+          sideTaskTools,
+          agentsTools,
+          canvasTools,
+        );
       },
       nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),
@@ -6526,6 +6609,13 @@ export function startOctantServer(
             ? {}
             : { executeOperation: routeCodeService.executeOperation }),
         },
+        agentRun: {
+          readRun: (runId) => agentRunPersistence.getById(runId),
+          liveAuthority: (run) => scheduledAgentRunLiveAuthority({ persistence, run }),
+          resume: (runId, expectedVersion, liveAuthority) =>
+            agentRunOrchestration.resume(runId, expectedVersion, liveAuthority),
+          applySettled: (settled) => agentRunPersistence.applyUsageResumeSettled(settled),
+        },
       }),
       onError: (message, error) => console.error(`[usage-resume] ${message}`, error),
     });
@@ -6706,6 +6796,16 @@ export function startOctantServer(
       }),
     );
     agentResultDeliveryService.start();
+    const agentRunDependencyScheduler = new AgentRunDependencyScheduler({
+      agentRuns: agentRunPersistence,
+      orchestration: agentRunOrchestration,
+      onError: (message, error) => console.error(`[agent-run-dependencies] ${message}`, error),
+    });
+    const unsubscribeAgentRunDependencies = persistence.journal.subscribeCommitted((append) =>
+      agentRunDependencyScheduler.onCommittedAppend(append),
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeAgentRunDependencies()));
+    agentRunDependencyScheduler.start();
     const zenThreadCatalog = new ZenThreadCatalog({
       localHostId: LOCAL_HOST_ID,
       localHostDisplayName: localHostDisplayName(),
@@ -7799,6 +7899,7 @@ export function startOctantServer(
       canvas: canvasService,
       uuid: randomUUID,
       hostId: LOCAL_HOST_ID,
+      resolveWorkspace: resolveCanvasWorkspace,
     };
     // Canvas sharing is local-only: a snapshot is served over the loopback
     // Canvas API to a principal this host authenticates, never uploaded or

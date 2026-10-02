@@ -470,7 +470,7 @@ function ProjectGroup(props: {
   );
 }
 
-function StatusChip(props: {
+export function StatusChip(props: {
   readonly label: string;
   readonly status: "positive" | "warning" | "negative" | "neutral";
 }) {
@@ -506,7 +506,7 @@ function pullRequestMatches(row: CodeProjectPullRequestRow, query: string): bool
   ].some((value) => value.toLocaleLowerCase().includes(query));
 }
 
-function projectFreshnessFor(
+export function projectFreshnessFor(
   view: CodeProjectPullRequestView,
   projectId: CodeProjectPullRequestConnection["projectId"],
 ): CodeProjectPullRequestFreshness {
@@ -561,7 +561,7 @@ function blockingFact(
   return undefined;
 }
 
-function checksStatus(
+export function checksStatus(
   row: CodeProjectPullRequestRow,
 ): "positive" | "warning" | "negative" | "neutral" {
   if (blockingFact(row) !== "checks") return "neutral";
@@ -570,7 +570,7 @@ function checksStatus(
   return "neutral";
 }
 
-function reviewStatus(
+export function reviewStatus(
   row: CodeProjectPullRequestRow,
 ): "positive" | "warning" | "negative" | "neutral" {
   if (blockingFact(row) !== "review") return "neutral";
@@ -579,13 +579,15 @@ function reviewStatus(
   return "neutral";
 }
 
-function mergeabilityCopy(value: CodeProjectPullRequestRow["mergeability"]): string {
+export function mergeabilityCopy(value: CodeProjectPullRequestRow["mergeability"]): string {
   if (value === "mergeable") return "Mergeable";
   if (value === "conflicting") return "Conflicts";
   return "Mergeability unknown";
 }
 
-function mergeabilityStatus(row: CodeProjectPullRequestRow): "positive" | "negative" | "neutral" {
+export function mergeabilityStatus(
+  row: CodeProjectPullRequestRow,
+): "positive" | "negative" | "neutral" {
   if (row.mergeability === "conflicting") return "negative";
   // Nothing blocks it, so this is the one row that may say so in colour.
   if (row.mergeability === "mergeable" && blockingFact(row) === undefined) return "positive";
@@ -615,7 +617,7 @@ function groupByRepository(rows: ReadonlyArray<CodeProjectPullRequestRow>): Read
   return groups;
 }
 
-function truncationCopy(view: CodeProjectPullRequestView, dock: boolean): string {
+export function truncationCopy(view: CodeProjectPullRequestView, dock: boolean): string {
   // The truncation bounds apply to the whole cached snapshot, but the dock
   // shows one Project. An unqualified "some pull requests were omitted" beside
   // that Project's rows reads as its own rows having been dropped from a list
@@ -633,9 +635,11 @@ function truncationCopy(view: CodeProjectPullRequestView, dock: boolean): string
   return `${repositories}${pullRequests}`;
 }
 
-function freshnessCopy(freshness: CodeProjectPullRequestFreshness): string {
+export function freshnessCopy(freshness: CodeProjectPullRequestFreshness): string {
   if (freshness.status === "empty") {
-    return "No GitHub snapshot yet. Refresh a connected Project to load active pull requests.";
+    return freshness.lastSuccessfulRefreshAt === undefined
+      ? "No GitHub snapshot yet. Refresh a connected Project to load active pull requests."
+      : `Last successful refresh ${relativeTimeLabel(freshness.lastSuccessfulRefreshAt)}.`;
   }
   if (freshness.status === "fresh") {
     return freshness.lastSuccessfulRefreshAt === undefined
@@ -668,8 +672,13 @@ function freshnessCopy(freshness: CodeProjectPullRequestFreshness): string {
   return `${reason}.${last}${retry} Cached results remain visible until a refresh succeeds.`;
 }
 
-function pullRequestCountCopy(freshness: CodeProjectPullRequestFreshness, count: number): string {
-  if (freshness.status === "empty") return "Refresh to load pull requests";
+export function pullRequestCountCopy(
+  freshness: CodeProjectPullRequestFreshness,
+  count: number,
+): string {
+  if (freshness.status === "empty" && freshness.lastSuccessfulRefreshAt === undefined) {
+    return "Refresh to load pull requests";
+  }
   if (freshness.status === "stale") {
     if (count === 0) return "No cached pull requests";
     return count === 1 ? "1 cached pull request" : `${String(count)} cached pull requests`;
@@ -677,7 +686,7 @@ function pullRequestCountCopy(freshness: CodeProjectPullRequestFreshness, count:
   return count === 1 ? "1 pull request" : `${String(count)} pull requests`;
 }
 
-function projectEmptyCopy(freshness: CodeProjectPullRequestFreshness): string {
+export function projectEmptyCopy(freshness: CodeProjectPullRequestFreshness): string {
   if (freshness.status === "empty") {
     return freshness.lastSuccessfulRefreshAt === undefined
       ? "Not refreshed yet. Refresh this Project to load pull requests."
@@ -687,7 +696,7 @@ function projectEmptyCopy(freshness: CodeProjectPullRequestFreshness): string {
   return "No open or draft pull requests.";
 }
 
-function reviewCopy(review: CodeProjectPullRequestRow["review"]): string {
+export function reviewCopy(review: CodeProjectPullRequestRow["review"]): string {
   if (review === "changes-requested") return "changes requested";
   // The raw value reads as "Review none", which is not a sentence about a
   // pull request nobody has looked at yet.

@@ -431,7 +431,7 @@ describe("ProjectOverview", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Project root could not be relinked. Review the Project status and retry.",
     );
-    expect(screen.getByRole("dialog", { name: "Add folder" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Add Work folder" })).toBeVisible();
   });
 
   it("labels a stale remote snapshot read-only and hides root relink affordances", () => {

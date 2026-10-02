@@ -267,6 +267,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
               title="Discard changes?"
               confirmLabel="Discard changes"
               cancelLabel="Keep changes"
+              destructive
               onCancel={() => setConfirmingDiscard(false)}
               onConfirm={() => {
                 setConfirmingDiscard(false);

@@ -52,7 +52,9 @@ export function MemoryEntryDialog(props: MemoryEntryDialogProps) {
   return (
     <OctantDialog
       className="project-dialog memory-entry-dialog"
+      describedBy={descriptionId}
       label={title}
+      labelledBy={titleId}
       onClose={requestClose}
       open
       popupId="memory-entry-dialog"

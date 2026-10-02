@@ -51,6 +51,7 @@ function createClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
     steer: vi.fn(),
     retry: vi.fn(),
     resume: vi.fn(),
+    usageResume: vi.fn(),
     ...overrides,
   };
 }

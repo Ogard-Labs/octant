@@ -20,17 +20,19 @@ spend without a host-owned cap.
 People need Project- and thread-level spend ceilings so concurrent or
 unattended work cannot burn provider quota unnoticed. Vendor billing portals
 and account APIs differ by provider and are not a local-first core dependency.
-Token ceilings are enforced at turn admission. Monetary, time, and turn
-ceilings remain unenforced until pricing or those dimensions are actually
-configured on a host.
+Token, turn, and total agent run-time ceilings are enforced at turn admission.
+Monetary ceilings remain unenforced until pricing is actually configured on a
+host.
 
 ## Decision
 
 - A **spend ceiling** is an optional host policy on a Project, a thread, or
   both. When both exist, a turn must satisfy the intersection: Project spend
   and thread spend each stay under their own ceiling.
-- Ceiling fields reuse the goal-budget shape: optional positive
-  `tokenBudget`, `timeBudgetMs`, and `turnBudget`. An optional monetary field
+- Ceiling fields follow the goal-budget shape: optional positive
+  `tokenBudget`, `turnBudget`, and `runTimeBudgetSeconds`, at least one set.
+  Run time is the cumulative agent run time of every admitted turn and child
+  run inside the window, not a per-turn timeout. An optional monetary field
   is allowed only when the host can price the scoped usage from reviewed or
   user-supplied pricing metadata, or from provider-reported `costUsd` on the
   same turn facts. Absent pricing, monetary ceilings cannot be set; token,
@@ -40,6 +42,12 @@ configured on a host.
   not invent a second ledger or call vendor billing APIs as a core path.
   Optional provider cost facts may feed monetary totals the same way they
   already feed turn UI; they never become required for token ceilings.
+  Turns and run time are the exception: usage rows carry no turn identity or
+  wall time, so settling each admitted turn journals one turn fact with its
+  admitted and settled times. In-flight turns count their elapsed time, so
+  concurrent turns cannot together start past the run-time budget. A turn a
+  host exit interrupted never settles and records no fact; its run time is
+  unknowable after the fact, and admission does not invent a figure for it.
 - The window is explicit on the ceiling: lifetime for a thread by default, and
   a calendar period (day, week, or month in the host viewing time zone) for a
   Project. Clearing or raising a ceiling is a journaled owner command; spend
@@ -83,9 +91,8 @@ configured on a host.
   `ThreadGoalBudget` without a parallel budget vocabulary, and can aggregate
   from the usage projection the Usage dashboard already reads.
 - Projects without ceilings stay unbounded on spend; setting a ceiling is
-  opt-in. Token ceilings are the first enforced dimension. Monetary ceilings
-  wait until scoped pricing metadata is actually configured on a host; time
-  and turn ceilings remain schema-optional and unused.
+  opt-in. Token, turn, and run-time ceilings are enforced. Monetary ceilings
+  wait until scoped pricing metadata is actually configured on a host.
 
 ## Related
 

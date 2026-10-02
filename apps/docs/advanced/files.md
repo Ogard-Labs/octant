@@ -72,8 +72,13 @@ deep links, and recent items.
 ## Agent-authored documents and canvases
 
 Agents receive usage instructions with the tools available to their current
-task. In a Chat Project, `octant_canvas` creates and revises structured reports,
-diagrams, tables, and dashboards. Its read-only `describe` operation lists the
+task. In Chat, Work, and Code, `octant_canvas` creates and revises structured
+plans, designs, reports, reviews, diagrams, tables, and dashboards. When you ask
+for something substantial, the agent builds it as a Canvas and replies with a
+short pointer; brief answers stay in the conversation. A follow-up such as "add
+a risks section" revises the existing Canvas: the read-only `list` operation
+returns the thread's Canvases and `read` returns one's current blocks and
+sequence. Its read-only `describe` operation lists the
 supported block kinds and a creation example. Requesting up to three
 `blockKinds` returns their exact schemas from the host's block contracts:
 
@@ -87,7 +92,7 @@ last observed version sequence; creation starts at sequence 1. Raw HTML,
 JavaScript, CSS, and invented file or artifact references are not Canvas
 content.
 
-A created Canvas appears as a card in its Chat with **Open Canvas**. Octant
+A created Canvas appears as a card in its thread with **Open Canvas**. Octant
 can also offer newly authored documents beside the conversation.
 
 ### Diagrams as boards
@@ -101,7 +106,15 @@ agent's revisions. Older versions stay intact and can still be opened; a board
 opened at an older version is read-only. If the host has moved on since you
 opened the board, the drag is refused, the board reloads, and you drag again on
 the current version. Boards keep the diagram budgets (512 nodes, 1,024 edges).
-**Comments** live beside the Canvas in the sidebar. A comment is anchored to a
+The document fills the Canvas tab and the dock. Its header holds the version
+picker (choose an earlier version, or **Compare with** the previous one to see
+which blocks were added, changed, or removed), **Comments** with the number of
+open threads, and a `⋯` menu for **Share**, **Refresh**, and **Refine**.
+
+**Comments** open in a panel over the document rather than beside it. Hover a
+block and select its comment marker to read or add comments on that block;
+blocks with open threads always show their marker and count. The panel filters
+open, resolved, or all threads. A comment is anchored to a
 block or to a board node; replies, resolving, and deleting are journaled by
 the host, so they survive restart and reload. Every comment is authored as you,
 with the device it came through noted ("paired device" when it arrived from a
@@ -110,8 +123,9 @@ kept and marked rather than dropped. Shared snapshots never include comments.
 Board templates are not available yet. Revisions
 do not force a document the user closed to reopen. Agents should identify the
 created document rather than invent a download URL or claim a preview opened
-without evidence. Canvas authoring through this tool currently requires a
-Chat Project; it does not grant Work or Code authoring authority.
+without evidence. Canvas authoring through this tool is bound to the thread's Chat Project,
+Work folder, or Code checkout; it grants no file, shell, Git, or network
+authority.
 
 In Work and Code, permitted file tools can create documents within the bound
 folder or checkout. The agent should report their real relative paths so the

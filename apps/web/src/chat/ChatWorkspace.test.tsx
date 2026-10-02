@@ -614,6 +614,46 @@ describe("ChatWorkspace", () => {
     expect(sendTurn).toHaveBeenCalledWith("Next step", [], [], [], [], []);
   });
 
+  it("refuses to send a draft whose @computer token was never picked, and explains why", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi.fn(async () => true);
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({
+          activeView: viewWithAttempt("completed"),
+          pendingDraft: "@computer describe my screen",
+          sendTurn,
+        })}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(sendTurn).not.toHaveBeenCalled();
+    expect(screen.getByText(/@Computer is not attached to this message/)).toBeVisible();
+    // The draft stays put so the token can be picked or removed.
+    expect(screen.getByLabelText("Message")).toHaveValue("@computer describe my screen");
+  });
+
+  it("sends a draft that only spells a word starting like a capability token", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi.fn(async () => true);
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({
+          activeView: viewWithAttempt("completed"),
+          pendingDraft: "Compare @computers and @browsers",
+          sendTurn,
+        })}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    expect(sendTurn).toHaveBeenCalledWith("Compare @computers and @browsers", [], [], [], [], []);
+  });
+
   it("keeps a steered Chat message pending while the provider waits", async () => {
     const user = userEvent.setup();
     const sendTurn = vi.fn(async () => true);

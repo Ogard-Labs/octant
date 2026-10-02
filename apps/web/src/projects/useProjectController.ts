@@ -13,6 +13,7 @@ import {
   type CodeAccessPersistence,
   type CodeNewThreadWorkspace,
   type CodeProjectPullRequestBackgroundRefresh,
+  type ProjectColor,
   type ProjectProviderPolicy,
 } from "@octant/contracts/projects";
 import type { AggregateVersion } from "@octant/contracts/events";
@@ -364,6 +365,17 @@ export function useProjectController(options: ProjectControllerOptions) {
     );
   }
 
+  /** Set or clear (`null`) the Project's identity colour. */
+  async function setColor(projectId: ProjectId, color: ProjectColor | null): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project === undefined) return false;
+    if ((project.color ?? null) === color) return true;
+    return execute(
+      { kind: "change-project-color", projectId, expectedVersion: project.version, color },
+      color === null ? "Project colour cleared." : "Project colour updated.",
+    );
+  }
+
   async function move(
     projectId: ProjectId,
     pinned: boolean,
@@ -608,6 +620,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     searchResults,
     searchStatus,
     setCodeAccessPersistence,
+    setColor,
     setCodeNewThreadWorkspace,
     setCodePullRequestBackgroundRefresh,
     setProviderPolicy,

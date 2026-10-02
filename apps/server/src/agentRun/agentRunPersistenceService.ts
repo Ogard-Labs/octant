@@ -1,10 +1,14 @@
 import {
+  USAGE_RESUME_CANCELLED,
+  USAGE_RESUME_SCHEDULED,
+  USAGE_RESUME_SETTLED,
   decodeAgentRun,
   decodeAgentRunId,
   decodeAgentRunParentThreadId,
   decodeAgentRunRequestId,
   decodeAgentRunRequested,
   decodeAgentRunResultAcknowledged,
+  decodeAgentRunResultDeliverySettled,
   decodeAgentRunStatusChanged,
   type AgentRun,
   type AgentRunAuthority,
@@ -12,21 +16,31 @@ import {
   type AgentRunCommandResult,
   type AgentRunId,
   type AgentRunParentThreadId,
+  type EventEnvelope,
   type UtcTimestamp,
+  type UsageResumeRecord,
+  type UsageResumeSettled,
 } from "@octant/contracts";
 import {
+  AGENT_RUN_DEPENDENCY_WAITING_REASON,
   AgentRunPolicyRejected,
   agentRunPoolRouteWaitingReason,
+  assertAgentRunUsageResumeCancellable,
+  assertAgentRunUsageResumeSchedulable,
   createAgentRunFromRequest,
+  effectiveAgentRunExecutionTarget,
   evaluateAgentRunCommand,
   isAgentRunActiveStatus,
   isAgentRunTerminalStatus,
 } from "@octant/domain";
 import { readAgentRunResultText } from "../persistence/agentRunContentStore";
+import { readAggregateVersion } from "../persistence/chatProjection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
+  AGENT_RUN_AGGREGATE_TYPE,
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
+  AGENT_RUN_RESULT_DELIVERY_SETTLED,
   AGENT_RUN_STATUS_CHANGED,
   AgentRunEventStore,
   AgentRunEventStoreError,
@@ -80,6 +94,34 @@ export class AgentRunPersistenceService {
     this.#connection = options.connection;
   }
 
+  /**
+   * A run may wait only on siblings that exist under the same parent thread
+   * and can still complete. Waiting on a run that already failed would admit
+   * work that is certain never to start.
+   */
+  #refuseDependencies(command: RequestAgentRunInput["command"]): AgentRunCommandResult | undefined {
+    for (const dependencyId of command.dependsOn ?? []) {
+      const dependency = this.#projection.getById(dependencyId);
+      if (dependency === undefined || dependency.parentThreadId !== command.parentThreadId) {
+        return {
+          kind: "run-command-failed",
+          reason: "invalid",
+          message: `AgentRun dependency ${String(dependencyId)} is not a run of this thread.`,
+        };
+      }
+      // An interrupted sibling can still be retried, so it is waited on like
+      // a running one; failed and cancelled siblings are where waiting ends.
+      if (dependency.lifecycleStatus === "failed" || dependency.lifecycleStatus === "cancelled") {
+        return {
+          kind: "run-command-failed",
+          reason: "invalid",
+          message: `AgentRun dependency ${String(dependencyId)} already ${dependency.lifecycleStatus}; this run could never start.`,
+        };
+      }
+    }
+    return undefined;
+  }
+
   requestRun(input: RequestAgentRunInput): AgentRunCommandResult {
     const existing = this.#projection.getByRequestId(input.command.requestId);
     if (existing !== undefined) {
@@ -99,6 +141,8 @@ export class AgentRunPersistenceService {
         message: "AgentRun parent does not exist.",
       };
     }
+    const dependencyRefusal = this.#refuseDependencies(input.command);
+    if (dependencyRefusal !== undefined) return dependencyRefusal;
     if (parent !== undefined && parent.parentThreadId !== input.command.parentThreadId) {
       return {
         kind: "run-command-failed",
@@ -204,6 +248,13 @@ export class AgentRunPersistenceService {
       return { kind: "run-updated", run: next };
     }
 
+    if (
+      command.kind === "schedule-agent-run-usage-resume" ||
+      command.kind === "cancel-agent-run-usage-resume"
+    ) {
+      return this.#applyUsageResumeCommand(current, command);
+    }
+
     if (command.kind === "settle-agent-run-result-delivery") {
       const delivery = next.resultDelivery;
       if (delivery === undefined) {
@@ -249,6 +300,7 @@ export class AgentRunPersistenceService {
         expectedVersion: command.expectedVersion,
         occurredAt: next.updatedAt,
         ...(next.recoveryReason === undefined ? {} : { recoveryReason: next.recoveryReason }),
+        ...(next.usageLimit === undefined ? {} : { usageLimit: next.usageLimit }),
         // The reply's identity is journaled and its text stored by the same
         // append as the completion, so a rejected append leaves no Completed
         // run claiming a result nobody has.
@@ -274,9 +326,110 @@ export class AgentRunPersistenceService {
       ...(next.recoveryReason === undefined ? {} : { recoveryReason: next.recoveryReason }),
       ...(next.result === undefined ? {} : { result: next.result }),
       ...(next.usage === undefined ? {} : { usage: next.usage }),
+      ...(next.usageLimit === undefined ? {} : { usageLimit: next.usageLimit }),
       resultAcknowledgement: next.resultAcknowledgement,
     });
     return { kind: "run-updated", run: next };
+  }
+
+  /**
+   * The person's own usage-resume opt-in for a run still waiting on a
+   * disclosed reset. The journaled record derives only from facts the run
+   * already holds — the client supplies no resume fields — and the append
+   * bumps the aggregate head, which the projection fold then reports as the
+   * run's new version.
+   */
+  #applyUsageResumeCommand(
+    current: AgentRun | undefined,
+    command: Extract<
+      AgentRunCommand,
+      { kind: "schedule-agent-run-usage-resume" | "cancel-agent-run-usage-resume" }
+    >,
+  ): AgentRunCommandResult {
+    if (current === undefined) {
+      return {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: "AgentRun does not exist.",
+      };
+    }
+    try {
+      if (command.kind === "schedule-agent-run-usage-resume") {
+        assertAgentRunUsageResumeSchedulable(current, command.expectedVersion);
+      } else {
+        assertAgentRunUsageResumeCancellable(current, command.expectedVersion);
+      }
+    } catch (error) {
+      return policyFailure(error);
+    }
+
+    const resume: UsageResumeRecord | undefined =
+      command.kind === "schedule-agent-run-usage-resume"
+        ? current.usageLimit?.resetsAt === undefined
+          ? undefined
+          : {
+              threadId: String(current.id),
+              turnId: String(current.id),
+              providerInstanceId: effectiveAgentRunExecutionTarget(current.routingReceipt)
+                .providerInstanceId,
+              usageLimit: current.usageLimit,
+              resetsAt: current.usageLimit.resetsAt,
+              scheduledAt: this.#now(),
+            }
+        : current.usageResume?.record;
+    if (resume === undefined) {
+      return {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: "AgentRun has no usage-limit resume to apply.",
+      };
+    }
+
+    let committed;
+    try {
+      committed = this.#store.appendUsageResume({
+        runId: current.id,
+        expectedVersion: command.expectedVersion,
+        occurredAt: this.#now(),
+        eventName:
+          command.kind === "schedule-agent-run-usage-resume"
+            ? USAGE_RESUME_SCHEDULED
+            : USAGE_RESUME_CANCELLED,
+        resume,
+      });
+    } catch (error) {
+      return storeFailure(error);
+    }
+    this.#projection.applyUsageResume(committed);
+    const updated = this.#projection.getById(current.id);
+    if (updated === undefined) {
+      return {
+        kind: "run-command-failed",
+        reason: "invalid",
+        message: "AgentRun usage-resume fold produced no run.",
+      };
+    }
+    return { kind: "run-updated", run: updated };
+  }
+
+  /**
+   * Folds a settle the usage-resume scheduler committed straight to the
+   * journal into the live projection — this projection is not journal-fed, so
+   * without the fold the run would keep reporting `scheduled` after its
+   * recovery resolved.
+   */
+  applyUsageResumeSettled(settled: UsageResumeSettled): void {
+    const runId = decodeAgentRunId(settled.resume.threadId);
+    this.#projection.applyUsageResumeState({
+      runId,
+      version: readAggregateVersion(this.#connection, AGENT_RUN_AGGREGATE_TYPE, String(runId)),
+      updatedAt: this.#now(),
+      usageResume: {
+        record: settled.resume,
+        status: settled.outcome,
+        ...(settled.detail === undefined ? {} : { detail: settled.detail }),
+      },
+    });
   }
 
   /**
@@ -350,10 +503,17 @@ export class AgentRunPersistenceService {
       }
       // A run Waiting on its immutable pool decision never held execution
       // state; restart preserves the original decision and routing reason
-      // instead of rewriting it to a restart interruption.
+      // instead of rewriting it to a restart interruption. A run parked on a
+      // journaled usage limit holds no live execution either — its session
+      // already ended on the limit and the reset fact rides the aggregate —
+      // so the wait, and any recovery opt-in bound to it, survives restart.
+      // A run parked on its dependencies never started either; the dependency
+      // scheduler re-evaluates it at boot.
       if (
         run.lifecycleStatus === "waiting" &&
-        agentRunPoolRouteWaitingReason(run.routingReceipt) !== undefined
+        (agentRunPoolRouteWaitingReason(run.routingReceipt) !== undefined ||
+          run.usageLimit !== undefined ||
+          run.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON)
       ) {
         continue;
       }
@@ -370,12 +530,7 @@ export class AgentRunPersistenceService {
     return interrupted;
   }
 
-  #applyEnvelope(envelope: {
-    readonly eventName: string;
-    readonly eventVersion: number;
-    readonly payload: unknown;
-    readonly occurredAt: string;
-  }): void {
+  #applyEnvelope(envelope: EventEnvelope): void {
     if (envelope.eventVersion !== 1) return;
     if (envelope.eventName === AGENT_RUN_REQUESTED) {
       const payload = decodeAgentRunRequested(envelope.payload);
@@ -402,6 +557,7 @@ export class AgentRunPersistenceService {
         ...(payload.recoveryReason === undefined ? {} : { recoveryReason: payload.recoveryReason }),
         ...(payload.result === undefined ? {} : { result: payload.result }),
         ...(payload.usage === undefined ? {} : { usage: payload.usage }),
+        ...(payload.usageLimit === undefined ? {} : { usageLimit: payload.usageLimit }),
         ...(resultAcknowledgement === undefined ? {} : { resultAcknowledgement }),
       });
       return;
@@ -413,6 +569,26 @@ export class AgentRunPersistenceService {
         version: payload.version,
         acknowledgedAt: payload.acknowledgedAt,
       });
+      return;
+    }
+    if (envelope.eventName === AGENT_RUN_RESULT_DELIVERY_SETTLED) {
+      // Every committed event moves the aggregate head, and the fold carries
+      // that head into run.version — skipping it here would leave a rebuilt
+      // run stale-versioned against its own journal.
+      const payload = decodeAgentRunResultDeliverySettled(envelope.payload);
+      this.#projection.applyResultDeliverySettled({
+        runId: payload.runId,
+        version: payload.version,
+        delivery: payload.delivery,
+      });
+      return;
+    }
+    if (
+      envelope.eventName === USAGE_RESUME_SCHEDULED ||
+      envelope.eventName === USAGE_RESUME_CANCELLED ||
+      envelope.eventName === USAGE_RESUME_SETTLED
+    ) {
+      this.#projection.applyUsageResume(envelope);
     }
   }
 

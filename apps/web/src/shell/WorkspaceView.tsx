@@ -16,10 +16,15 @@ import type {
   WorkspaceTab,
 } from "@octant/contracts/shell";
 import { decodeWorkMutationRequestId } from "@octant/contracts";
-import type { CodeOperationId, ThreadBoardPullRequestIdentity } from "@octant/contracts";
+import type {
+  CodeOperationId,
+  CodeProjectPullRequestRow,
+  ThreadBoardPullRequestIdentity,
+} from "@octant/contracts";
 import type {
   ProjectAvailability,
   ProjectId,
+  ProjectColor,
   ProjectProviderPolicy,
   ProjectSummary,
 } from "@octant/contracts/projects";
@@ -246,6 +251,8 @@ export interface WorkspaceViewProps {
   readonly onOpenReview?: (threadId: CodeThreadId) => void;
   /** Selects a pull request named on a pane tab for the dock's Review pane. */
   readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
+  /** Opens the rail's complete Pull requests overview across Projects. */
+  readonly onOpenPullRequests?: () => void;
   readonly onOpenCodeSurface: (
     kind: CodeOverviewSurfaceKind,
     threadId: CodeThreadId,
@@ -346,6 +353,10 @@ export interface WorkspaceViewProps {
   readonly onArchiveProject: (projectId: ProjectId) => void;
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
+  readonly onProjectColorChange?: (
+    projectId: ProjectId,
+    color: ProjectColor | null,
+  ) => Promise<boolean>;
   readonly onProviderPolicyChange?: (
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
@@ -367,6 +378,7 @@ export interface WorkspaceViewProps {
   readonly onOpenCanvas?: (entry: CanvasInventoryEntry) => void;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
   readonly onCanvasReferencesObserved?: (
+    mode: OctantMode,
     threadId: string,
     cards: ReadonlyArray<CanvasThreadReferenceCard>,
   ) => void;
@@ -376,6 +388,8 @@ export interface WorkspaceViewProps {
   readonly workProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   /** Resolved provider marks for thread-owned pane tabs. */
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
+  /** Threads the host projects as executing, read from the same rows the sidebar draws. */
+  readonly runningThreadIds?: ReadonlySet<string>;
   /** Mirrors the sidebar preference for the compact pane tab mark. */
   readonly showProviderIcons?: boolean;
   /** Host names by host id, for the pane title's environment mark. */
@@ -415,6 +429,7 @@ export interface WorkspaceViewProps {
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
   readonly linearPluginEnabled?: boolean;
   readonly codeHome?: import("./DraftThreadWorkspace").DraftThreadWorkspaceProps["codeHome"];
+  readonly homeStart?: import("./DraftThreadWorkspace").DraftThreadWorkspaceProps["homeStart"];
   readonly draftCodeExecute?: (
     command: import("@octant/contracts/code").CodeCommand,
     signal?: AbortSignal,
@@ -576,16 +591,14 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         (candidate) => String(candidate.id) === String(item.projectId),
       );
       const summary = item.pullRequestSummaries?.items[0];
-      const path =
-        project === undefined
-          ? undefined
-          : branch === undefined
-            ? project.name
-            : `${project.name}/${branch}`;
-      if (summary === undefined && path === undefined) continue;
+      // A branch is only named beside the Project it belongs to.
+      const projectName = project?.name;
+      const chipBranch = projectName === undefined ? undefined : branch;
+      if (summary === undefined && projectName === undefined) continue;
       facts.set(String(item.threadId), {
         ...(summary === undefined ? {} : { pullRequest: summary }),
-        ...(path === undefined ? {} : { path }),
+        ...(projectName === undefined ? {} : { projectName }),
+        ...(chipBranch === undefined ? {} : { branch: chipBranch }),
       });
     }
     return facts;
@@ -660,6 +673,9 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           {...(props.providerByThreadId === undefined
             ? {}
             : { providerByThreadId: props.providerByThreadId })}
+          {...(props.runningThreadIds === undefined
+            ? {}
+            : { runningThreadIds: props.runningThreadIds })}
           {...(props.showProviderIcons === undefined
             ? {}
             : { showProviderIcons: props.showProviderIcons })}
@@ -922,13 +938,6 @@ function renderCodeTab(
             .harnessAutoReview === "supported"
         ? true
         : undefined;
-  const pullRequestRepository =
-    codeController.activeView !== undefined &&
-    String(codeController.activeView.thread.id) === String(tab.threadId)
-      ? codeController.activeView.thread.deliveryTarget.proposedBaseRepository
-      : codeController.bootstrap?.threads.find(
-          (thread) => String(thread.id) === String(tab.threadId),
-        )?.deliveryTarget.proposedBaseRepository;
   const content = (
     <Suspense
       fallback={
@@ -1003,6 +1012,14 @@ function renderCodeTab(
         {...(props.onOpenCanvasReference === undefined
           ? {}
           : { onOpenCanvas: props.onOpenCanvasReference })}
+        {...(props.onCanvasReferencesObserved === undefined
+          ? {}
+          : {
+              onCanvasReferencesObserved: (
+                threadId: string,
+                cards: ReadonlyArray<CanvasThreadReferenceCard>,
+              ) => props.onCanvasReferencesObserved?.("code", threadId, cards),
+            })}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
       />
     </Suspense>
@@ -1072,7 +1089,21 @@ function renderCodeTab(
               ? {}
               : { localServerClient: props.localServerClient })}
             {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
-            {...(pullRequestRepository === undefined ? {} : { pullRequestRepository })}
+            pullRequestClient={codeController.client}
+            {...(props.onOpenPullRequests === undefined
+              ? {}
+              : { onOpenPullRequests: props.onOpenPullRequests })}
+            {...(props.onSelectPullRequest === undefined
+              ? {}
+              : {
+                  onSelectPullRequest: (row: CodeProjectPullRequestRow) =>
+                    props.onSelectPullRequest?.({
+                      projectId: row.projectId,
+                      repositoryOwner: row.repositoryOwner,
+                      repositoryName: row.repositoryName,
+                      number: row.number,
+                    }),
+                })}
             {...(browserAutomationClient === undefined || onOpenSurface === undefined
               ? {}
               : {
@@ -1274,6 +1305,7 @@ function renderNonCodeTab(
             ? {}
             : { linearPluginEnabled: props.linearPluginEnabled })}
           {...(props.codeHome === undefined ? {} : { codeHome: props.codeHome })}
+          {...(props.homeStart === undefined ? {} : { homeStart: props.homeStart })}
           {...(draftProjectId === undefined ? {} : { projectId: draftProjectId })}
           {...(props.onDraftSelectProject === undefined
             ? {}
@@ -1427,7 +1459,10 @@ function renderNonCodeTab(
           : { onOpenCanvasReference: props.onOpenCanvasReference })}
         {...(props.onCanvasReferencesObserved === undefined
           ? {}
-          : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
+          : {
+              onCanvasReferencesObserved: (threadId, cards) =>
+                props.onCanvasReferencesObserved?.("chat", threadId, cards),
+            })}
         {...(props.onThreadHandedOff === undefined
           ? {}
           : { onThreadHandedOff: props.onThreadHandedOff })}
@@ -1526,6 +1561,12 @@ function renderNonCodeTab(
                 title={tab.title}
                 providerGroups={props.workProviderGroups ?? []}
                 {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+                {...(props.onCanvasReferencesObserved === undefined
+                  ? {}
+                  : {
+                      onCanvasReferencesObserved: (threadId, cards) =>
+                        props.onCanvasReferencesObserved?.("work", threadId, cards),
+                    })}
                 {...(props.imageGenerationClient === undefined
                   ? {}
                   : { imageGenerationClient: props.imageGenerationClient })}
@@ -1893,6 +1934,9 @@ function renderNonCodeTab(
         providerInstances={props.providerController.instances ?? []}
         onRelink={props.onRelinkProject}
         onRename={props.onRenameProject}
+        {...(props.onProjectColorChange === undefined
+          ? {}
+          : { onColorChange: props.onProjectColorChange })}
         project={project}
         canvasInventory={
           props.canvasClient !== undefined && props.onOpenCanvas !== undefined ? (
@@ -1956,6 +2000,9 @@ function renderNonCodeTab(
         (project) => project.type === tab.mode && project.lifecycle === "active",
       )}
       mode={tab.mode === "code" ? "code" : "work"}
+      greetingName={props.greetingName}
+      reviewCount={props.homeStart?.reviewCount}
+      runningCount={props.homeStart?.runningCount}
       onAddFolder={props.onAttachFolder ?? (() => {})}
       {...(props.onOpenDraftThread === undefined
         ? {}

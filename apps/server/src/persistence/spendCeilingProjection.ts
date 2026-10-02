@@ -1,11 +1,13 @@
 import {
   SPEND_CEILING_AGGREGATE_TYPE,
   SPEND_CEILING_EVENT_NAMES,
+  SPEND_TURN_AGGREGATE_TYPE,
   decodeSpendCeilingCleared,
   decodeSpendCeilingOverrunRecorded,
   decodeSpendCeilingRaised,
   decodeSpendCeilingSet,
   decodeSpendCeilingState,
+  decodeSpendTurnRecorded,
   type EventEnvelope,
   type SpendCeilingScope,
   type SpendCeilingState,
@@ -22,13 +24,37 @@ export class SpendCeilingProjection implements Projection {
   readonly dependencies: ReadonlyArray<string> = ["aggregate-heads"];
 
   reset(connection: SqliteConnection): void {
-    connection.exec("DELETE FROM spend_ceiling_projection;");
+    connection.exec("DELETE FROM spend_ceiling_projection; DELETE FROM spend_turn_projection;");
   }
 
   apply(connection: SqliteConnection, event: EventEnvelope): void {
-    if (event.eventVersion !== 1 || event.aggregateType !== SPEND_CEILING_AGGREGATE_TYPE) {
+    if (event.eventVersion !== 1) return;
+    if (
+      event.aggregateType === SPEND_TURN_AGGREGATE_TYPE &&
+      event.eventName === SPEND_CEILING_EVENT_NAMES.turnRecorded
+    ) {
+      const turn = decodeSpendTurnRecorded(event.payload);
+      connection
+        .prepare(
+          `INSERT INTO spend_turn_projection (
+            reservation_id, thread_type, thread_id, project_id, started_at, settled_at,
+            run_time_ms, last_sequence
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (reservation_id) DO NOTHING`,
+        )
+        .run(
+          String(turn.reservationId),
+          turn.threadType,
+          turn.threadId,
+          turn.projectId === undefined ? null : String(turn.projectId),
+          turn.startedAt,
+          turn.settledAt,
+          turn.runTimeMs,
+          event.globalSequence,
+        );
       return;
     }
+    if (event.aggregateType !== SPEND_CEILING_AGGREGATE_TYPE) return;
     if (event.eventName === SPEND_CEILING_EVENT_NAMES.set) {
       this.#upsert(connection, event, decodeSpendCeilingSet(event.payload).ceiling);
       return;

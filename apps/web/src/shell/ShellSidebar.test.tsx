@@ -1,8 +1,8 @@
-import { decodeWindowId } from "@octant/contracts/shell";
+import { decodeWindowId, type ShellSettings } from "@octant/contracts/shell";
 import { defaultShellSettings, defaultWindowWorkspace } from "@octant/domain/shell-policy";
 import { ALL_ENVIRONMENTS } from "@octant/client-runtime/environment-selection";
 import type { FederatedHostState } from "@octant/client-runtime";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
@@ -188,6 +188,7 @@ describe("ShellSidebar", () => {
       <ShellSidebar
         automationsEnabled={false}
         codeNavigation={{ actions: { "linear-issues": vi.fn() } }}
+        firstPartyPluginsEffective={new Map([["linear-integration", false]])}
         onAddFolder={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
@@ -370,7 +371,8 @@ describe("ShellSidebar", () => {
       const onOpenSearch = vi.fn();
       const onOpenSettings = vi.fn();
       const workspace = { ...defaultWindowWorkspace(windowId), activeMode: mode };
-      const modeLabel = mode === "chat" ? "Chat" : mode === "work" ? "Work" : "Code";
+      // Chat and Work are one visible mode, so a Chat thread's sidebar reads Work.
+      const modeLabel = mode === "code" ? "Code" : "Work";
       const { container } = render(
         <ShellSidebar
           {...(mode === "work"
@@ -480,11 +482,12 @@ describe("ShellSidebar", () => {
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 
-  it("places Search and activity view in the mode-switcher chrome", () => {
+  it("puts Search and New chat in the header and the Projects/Activity switch over the list", () => {
     window.localStorage.clear();
+    const newChat = vi.fn();
     const { container } = render(
       <ShellSidebar
-        chatNavigation={{ actions: { "new-chat": vi.fn() } }}
+        chatNavigation={{ actions: { "new-chat": newChat } }}
         onAddFolder={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
@@ -510,18 +513,97 @@ describe("ShellSidebar", () => {
 
     const chrome = container.querySelector(".sidebar__chrome");
     const search = screen.getByRole("button", { name: "Search" });
-    const activity = screen.getByRole("button", { name: "Turn on activity view" });
-    expect(chrome).not.toBeNull();
+    const create = screen.getByRole("button", { name: "New chat" });
     expect(chrome).toContainElement(search);
-    expect(chrome).toContainElement(activity);
-    expect(activity.compareDocumentPosition(search)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(chrome).toContainElement(create);
     expect(search).toHaveClass("shell-icon-button");
-    expect(search).not.toHaveTextContent("Search");
     expect(search.querySelector("svg")).toHaveAttribute("width", "16");
-    expect(activity).toHaveClass("shell-icon-button");
-    expect(activity.querySelector("svg")).toHaveAttribute("width", "16");
-    expect(activity).not.toHaveTextContent("Turn on activity view");
-    expect(screen.getByRole("button", { name: "New chat" })).toHaveClass("sidebar-item");
+    // The header button replaces the row; the same destination is not offered twice.
+    expect(screen.getAllByRole("button", { name: "New chat" })).toHaveLength(1);
+    fireEvent.click(create);
+    expect(newChat).toHaveBeenCalledOnce();
+    const listSwitch = screen.getByRole("group", { name: "Thread list" });
+    expect(chrome).not.toContainElement(listSwitch);
+    expect(within(listSwitch).getByRole("button", { name: "Activity feed" })).toBeVisible();
+  });
+
+  it("moves Inbox and Board into count tiles, and brings the rows back when tiles are off", async () => {
+    const user = userEvent.setup();
+    const actions = { "new-code-thread": vi.fn(), inbox: vi.fn(), "thread-board": vi.fn() };
+    const onOpenReview = vi.fn();
+    const onOpenDone = vi.fn();
+    const sidebar = (settings: ShellSettings) => (
+      <ShellSidebar
+        codeNavigation={{ actions }}
+        countTiles={{ running: 2, toReview: 1, doneToday: 4, onOpenReview, onOpenDone }}
+        inboxCount={3}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        settings={settings}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />
+    );
+    const { rerender } = render(sidebar(defaultShellSettings()));
+
+    const tiles = screen.getByRole("group", { name: "Thread counts" });
+    for (const name of ["Inbox, 3", "Running, 2", "To review, 1", "Done today, 4"]) {
+      expect(within(tiles).getByRole("button", { name })).toBeVisible();
+    }
+    expect(screen.getAllByRole("button", { name: /^Inbox/ })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Board" })).not.toBeInTheDocument();
+    await user.click(within(tiles).getByRole("button", { name: "Inbox, 3" }));
+    await user.click(within(tiles).getByRole("button", { name: "Running, 2" }));
+    await user.click(within(tiles).getByRole("button", { name: "To review, 1" }));
+    await user.click(within(tiles).getByRole("button", { name: "Done today, 4" }));
+    expect(actions.inbox).toHaveBeenCalledOnce();
+    expect(actions["thread-board"]).toHaveBeenCalledOnce();
+    expect(onOpenReview).toHaveBeenCalledOnce();
+    expect(onOpenDone).toHaveBeenCalledOnce();
+
+    rerender(sidebar({ ...defaultShellSettings(), sidebarCountTiles: false }));
+    expect(screen.queryByRole("group", { name: "Thread counts" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Inbox, 3 waiting" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Board" })).toBeVisible();
+  });
+
+  it("opens the thread filter from Search, and keeps it shown when Settings asks", async () => {
+    const user = userEvent.setup();
+    const onQueryChange = vi.fn();
+    const onOpenSearch = vi.fn();
+    const sidebar = (settings: ShellSettings, query = "") => (
+      <ShellSidebar
+        chatNavigation={{ actions: { "new-chat": vi.fn() } }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSearch={onOpenSearch}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        settings={settings}
+        threadFilter={{ query, onQueryChange }}
+        workspace={defaultWindowWorkspace(windowId)}
+      />
+    );
+    const { rerender } = render(sidebar(defaultShellSettings()));
+
+    expect(screen.queryByRole("searchbox", { name: "Filter threads" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    const field = screen.getByRole("searchbox", { name: "Filter threads" });
+    expect(field).toHaveFocus();
+    await user.type(field, "p");
+    expect(onQueryChange).toHaveBeenLastCalledWith("p");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("searchbox", { name: "Filter threads" })).not.toBeInTheDocument();
+    expect(onQueryChange).toHaveBeenLastCalledWith("");
+    // The command overlay stays on its own shortcut; the icon now filters in place.
+    expect(onOpenSearch).not.toHaveBeenCalled();
+
+    rerender(sidebar({ ...defaultShellSettings(), sidebarSearchPresentation: "field" }, "plan"));
+    expect(screen.getByRole("searchbox", { name: "Filter threads" })).toHaveValue("plan");
+    expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
   });
 
   it("offers the environments filter once at least two hosts are known", async () => {
@@ -835,10 +917,58 @@ describe("ShellSidebar", () => {
     expect(screen.queryByRole("button", { name: "More destinations" })).not.toBeInTheDocument();
   });
 
+  it("collapses to an icon rail that keeps the modes, counts, and Projects in reach", async () => {
+    const user = userEvent.setup();
+    const onExpand = vi.fn();
+    const onSelectMode = vi.fn();
+    const openProject = vi.fn();
+    const actions = { "new-code-thread": vi.fn(), inbox: vi.fn(), "thread-board": vi.fn() };
+    render(
+      <ShellSidebar
+        codeNavigation={{ actions }}
+        countTiles={{ running: 2, toReview: 0, doneToday: 1 }}
+        inboxCount={3}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={onSelectMode}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        rail={{
+          onExpand,
+          projects: [{ id: "p1", name: "octant", active: true, onOpen: openProject }],
+        }}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    const rail = screen.getByRole("complementary", { name: "Octant sidebar, collapsed" });
+    expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).toBeNull();
+    expect(within(rail).getByRole("button", { name: "Code" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await user.click(within(rail).getByRole("button", { name: "Work" }));
+    expect(onSelectMode).toHaveBeenCalledWith("work");
+    await user.click(within(rail).getByRole("button", { name: "Running, 2" }));
+    expect(actions["thread-board"]).toHaveBeenCalledOnce();
+    expect(within(rail).getByRole("button", { name: "Inbox, 3" })).toHaveTextContent("3");
+    await user.click(within(rail).getByRole("button", { name: "octant" }));
+    expect(openProject).toHaveBeenCalledOnce();
+    await user.click(within(rail).getByRole("button", { name: "Show sidebar" }));
+    expect(onExpand).toHaveBeenCalledOnce();
+  });
+
   it("renders the rows in the customized order", () => {
     render(
       <ShellSidebar
-        codeNavigation={{ actions: { "new-code-thread": vi.fn(), "thread-board": vi.fn() } }}
+        codeNavigation={{
+          actions: {
+            "new-code-thread": vi.fn(),
+            "thread-board": vi.fn(),
+            "pull-requests": vi.fn(),
+          },
+        }}
         onAddFolder={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
@@ -847,7 +977,7 @@ describe("ShellSidebar", () => {
         settings={{
           ...defaultShellSettings(),
           sidebarDestinations: {
-            order: ["board", "new-thread"],
+            order: ["pull-requests", "board"],
             visibility: [],
           },
         }}
@@ -855,8 +985,8 @@ describe("ShellSidebar", () => {
       />,
     );
 
+    const pullRequests = screen.getByRole("button", { name: "Pull requests" });
     const board = screen.getByRole("button", { name: "Board" });
-    const newTask = screen.getByRole("button", { name: "New task" });
-    expect(board.compareDocumentPosition(newTask)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(pullRequests.compareDocumentPosition(board)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 });

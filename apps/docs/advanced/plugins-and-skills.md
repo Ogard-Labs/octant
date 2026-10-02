@@ -181,6 +181,12 @@ only select installed, trusted, enabled, policy-allowed components. They
 **never install, trust, enable, elevate, or grant credentials**. Stale or
 revoked references block with an actionable explanation at send or resume.
 
+The palette works the same in Chat, Work, and Code. Selecting a plugin's MCP
+server offers its tools to that turn only. Each call shows an approval card
+above the composer of the thread that asked; nothing runs until you approve
+it. A model that cannot use Octant's tools refuses the turn instead of quietly
+dropping the server.
+
 ## Skills
 
 Skills are prompt-only, non-executable instruction content that still

@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import type { BundledWhatsNewView } from "../shell/hostBridge";
@@ -13,14 +14,18 @@ export interface WhatsNewDialogProps {
  * document is an empty state.
  */
 export function WhatsNewDialog(props: WhatsNewDialogProps) {
+  const titleId = useId();
   return (
     <OctantDialog
       className="whats-new__dialog"
       label="What's new"
+      labelledBy={titleId}
       onClose={props.onClose}
       open={props.open}
     >
-      <h2 className="h4">What's new</h2>
+      <h2 className="h4" id={titleId}>
+        What's new
+      </h2>
       {props.document === undefined ? (
         <p className="whats-new__empty" role="status">
           Loading…

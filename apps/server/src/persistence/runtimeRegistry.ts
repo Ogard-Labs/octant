@@ -63,6 +63,7 @@ import {
   ProjectLifecycleChanged,
   ProjectOrderChanged,
   ProjectProviderPolicyChanged,
+  ProjectColorChanged,
   ProjectRenamed,
   ProviderDefaultsUpdated,
   ProviderCatalogUpdated,
@@ -95,6 +96,7 @@ import {
   AgentRunPolicySettings,
   AgentRunRequested,
   AgentRunResultAcknowledged,
+  AgentRunResultDeliverySettled,
   AgentRunStatusChanged,
   AutomationNotificationDeliveryRecorded,
   AutomationNotificationPreferences,
@@ -131,6 +133,7 @@ import {
   SpendCeilingRaised,
   SpendCeilingCleared,
   SpendCeilingOverrunRecorded,
+  SpendTurnRecorded,
   AGENT_MESSAGE_EVENT_NAMES,
   AgentMessageSent,
   AgentMessageDelivered,
@@ -199,6 +202,7 @@ import { AgentRunProjection } from "../agentRun/agentRunProjection";
 import {
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
+  AGENT_RUN_RESULT_DELIVERY_SETTLED,
   AGENT_RUN_STATUS_CHANGED,
 } from "../agentRun/agentRunEventStore";
 import { registerAutomationEvents } from "../automation/automationEventStore";
@@ -253,6 +257,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     })
     .register("project.created@1", 1, ProjectCreated)
     .register("project.renamed@1", 1, ProjectRenamed)
+    .register("project.color-changed@1", 1, ProjectColorChanged)
     .register("project.order-changed@1", 1, ProjectOrderChanged)
     .register("project.lifecycle-changed@1", 1, ProjectLifecycleChanged)
     .register("project.binding-relinked@1", 1, ProjectBindingRelinked)
@@ -328,6 +333,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
+    .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
     .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings)
     .register(AGENT_MESSAGE_EVENT_NAMES.sent, 1, AgentMessageSent)
     .register(AGENT_MESSAGE_EVENT_NAMES.delivered, 1, AgentMessageDelivered)
@@ -395,7 +401,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(SPEND_CEILING_EVENT_NAMES.set, 1, SpendCeilingSet)
     .register(SPEND_CEILING_EVENT_NAMES.raised, 1, SpendCeilingRaised)
     .register(SPEND_CEILING_EVENT_NAMES.cleared, 1, SpendCeilingCleared)
-    .register(SPEND_CEILING_EVENT_NAMES.overrunRecorded, 1, SpendCeilingOverrunRecorded);
+    .register(SPEND_CEILING_EVENT_NAMES.overrunRecorded, 1, SpendCeilingOverrunRecorded)
+    .register(SPEND_CEILING_EVENT_NAMES.turnRecorded, 1, SpendTurnRecorded);
   for (const eventName of RETIRED_EVENT_NAMES) {
     events.register(eventName, 1, RetiredEventPayload);
   }

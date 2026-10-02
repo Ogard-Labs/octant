@@ -57,17 +57,31 @@ export const SpendCeilingWindow = Schema.Union(
 export type SpendCeilingWindow = typeof SpendCeilingWindow.Type;
 
 /**
- * Optional host token ceiling. Time, turn, and monetary fields stay off this
- * first slice: token enforcement is the only dimension that has a ledger.
+ * Optional host ceiling over one window. Each budget is its own dimension and
+ * a turn must fit every configured one: tokens from the usage ledger, provider
+ * turns started, and total agent run time (seconds summed across settled and
+ * in-flight turns). Monetary budgets stay off until pricing is configured.
  */
 export const SpendCeilingPolicy = Schema.Struct({
-  tokenBudget: PositiveInt,
+  tokenBudget: Schema.optional(PositiveInt),
   /**
    * Configured per-turn maximum used when a turn has no scheduler estimate.
    * Absent means the caller must supply a bound or admission refuses.
    */
   maxTokensPerTurn: Schema.optional(PositiveInt),
-}).annotations(strict);
+  turnBudget: Schema.optional(PositiveInt),
+  runTimeBudgetSeconds: Schema.optional(PositiveInt),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (policy) =>
+        policy.tokenBudget !== undefined ||
+        policy.turnBudget !== undefined ||
+        policy.runTimeBudgetSeconds !== undefined ||
+        "A spend ceiling needs a token, turn, or run-time budget.",
+    ),
+  );
 export type SpendCeilingPolicy = typeof SpendCeilingPolicy.Type;
 
 export const SpendCeilingOverrun = Schema.Struct({
@@ -104,8 +118,20 @@ export type SetSpendCeilingCommand = typeof SetSpendCeilingCommand.Type;
 export const RaiseSpendCeilingCommand = Schema.Struct({
   kind: Schema.Literal("raise-spend-ceiling"),
   ...SpendCeilingCommandFields,
-  tokenBudget: PositiveInt,
-}).annotations(strict);
+  tokenBudget: Schema.optional(PositiveInt),
+  turnBudget: Schema.optional(PositiveInt),
+  runTimeBudgetSeconds: Schema.optional(PositiveInt),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (command) =>
+        command.tokenBudget !== undefined ||
+        command.turnBudget !== undefined ||
+        command.runTimeBudgetSeconds !== undefined ||
+        "Raising a spend ceiling needs a new token, turn, or run-time budget.",
+    ),
+  );
 export type RaiseSpendCeilingCommand = typeof RaiseSpendCeilingCommand.Type;
 
 export const ClearSpendCeilingCommand = Schema.Struct({
@@ -128,7 +154,9 @@ export type SpendCeilingSet = typeof SpendCeilingSet.Type;
 
 export const SpendCeilingRaised = Schema.Struct({
   ceiling: SpendCeilingState,
-  previousTokenBudget: PositiveInt,
+  previousTokenBudget: Schema.optional(PositiveInt),
+  previousTurnBudget: Schema.optional(PositiveInt),
+  previousRunTimeBudgetSeconds: Schema.optional(PositiveInt),
 }).annotations(strict);
 export type SpendCeilingRaised = typeof SpendCeilingRaised.Type;
 
@@ -147,12 +175,30 @@ export const SpendCeilingOverrunRecorded = Schema.Struct({
 export type SpendCeilingOverrunRecorded = typeof SpendCeilingOverrunRecorded.Type;
 
 export const SPEND_CEILING_AGGREGATE_TYPE = "spend-ceiling";
+export const SPEND_TURN_AGGREGATE_TYPE = "spend-turn";
+
+/**
+ * One admitted provider turn, journaled when it settles so turn and run-time
+ * ceilings survive restart. A turn the host never settled (crash, quit) is not
+ * recorded: its elapsed time is unknown rather than guessed.
+ */
+export const SpendTurnRecorded = Schema.Struct({
+  reservationId: SpendCeilingReservationId,
+  threadType: SpendCeilingThreadType,
+  threadId: Schema.UUID,
+  projectId: Schema.optional(ProjectId),
+  startedAt: UtcTimestamp,
+  settledAt: UtcTimestamp,
+  runTimeMs: NonNegativeInt,
+}).annotations(strict);
+export type SpendTurnRecorded = typeof SpendTurnRecorded.Type;
 
 export const SPEND_CEILING_EVENT_NAMES = {
   set: "spend.ceiling-set@1",
   raised: "spend.ceiling-raised@1",
   cleared: "spend.ceiling-cleared@1",
   overrunRecorded: "spend.overrun-recorded@1",
+  turnRecorded: "spend.turn-recorded@1",
 } as const;
 
 export const SpendCeilingRefusalKind = Schema.Literal(
@@ -173,26 +219,40 @@ export type SpendCeilingRecovery = typeof SpendCeilingRecovery.Type;
 
 /**
  * Hard-ceiling refuse a person can act on. Names the scope, the exhausted
- * token dimension, remaining or overrun when known, and the recovery.
+ * dimension, remaining or overrun when known, and the recovery.
  */
 export const SpendCeilingRefusal = Schema.Struct({
   kind: SpendCeilingRefusalKind,
   scopeKind: Schema.Literal("project", "thread"),
   scopeId: Schema.UUID,
-  dimension: Schema.Literal("tokens"),
+  dimension: Schema.Literal("tokens", "turns", "run-time"),
   remainingTokens: Schema.optional(NonNegativeInt),
   overrunTokens: Schema.optional(PositiveInt),
   ceilingTokens: Schema.optional(PositiveInt),
+  remainingTurns: Schema.optional(NonNegativeInt),
+  ceilingTurns: Schema.optional(PositiveInt),
+  remainingRunTimeSeconds: Schema.optional(NonNegativeInt),
+  ceilingRunTimeSeconds: Schema.optional(PositiveInt),
   recovery: Schema.Array(SpendCeilingRecovery).pipe(Schema.minItems(1), Schema.maxItems(4)),
   message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
 }).annotations(strict);
 export type SpendCeilingRefusal = typeof SpendCeilingRefusal.Type;
 
+/**
+ * Remaining capacity per configured dimension. Token fields are absent when the
+ * ceiling has no token budget or recent usage cannot be measured.
+ */
 export const SpendCeilingRemaining = Schema.Struct({
-  ceilingTokens: PositiveInt,
-  committedTokens: NonNegativeInt,
-  reservedTokens: NonNegativeInt,
-  remainingTokens: NonNegativeInt,
+  ceilingTokens: Schema.optional(PositiveInt),
+  committedTokens: Schema.optional(NonNegativeInt),
+  reservedTokens: Schema.optional(NonNegativeInt),
+  remainingTokens: Schema.optional(NonNegativeInt),
+  ceilingTurns: Schema.optional(PositiveInt),
+  usedTurns: Schema.optional(NonNegativeInt),
+  remainingTurns: Schema.optional(NonNegativeInt),
+  ceilingRunTimeSeconds: Schema.optional(PositiveInt),
+  usedRunTimeSeconds: Schema.optional(NonNegativeInt),
+  remainingRunTimeSeconds: Schema.optional(NonNegativeInt),
   window: SpendCeilingWindow,
   overrun: Schema.optional(SpendCeilingOverrun),
   version: AggregateVersion,
@@ -232,7 +292,9 @@ export const SpendCeilingCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("raised"),
     ceiling: SpendCeilingState,
-    previousTokenBudget: PositiveInt,
+    previousTokenBudget: Schema.optional(PositiveInt),
+    previousTurnBudget: Schema.optional(PositiveInt),
+    previousRunTimeBudgetSeconds: Schema.optional(PositiveInt),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("cleared"),
@@ -258,6 +320,7 @@ export const decodeSpendCeilingCleared = Schema.decodeUnknownSync(SpendCeilingCl
 export const decodeSpendCeilingOverrunRecorded = Schema.decodeUnknownSync(
   SpendCeilingOverrunRecorded,
 );
+export const decodeSpendTurnRecorded = Schema.decodeUnknownSync(SpendTurnRecorded);
 export const decodeSpendCeilingRefusal = Schema.decodeUnknownSync(SpendCeilingRefusal);
 export const decodeSpendCeilingSnapshot = Schema.decodeUnknownSync(SpendCeilingSnapshot);
 export const decodeSpendCeilingCommandRefusal = Schema.decodeUnknownSync(

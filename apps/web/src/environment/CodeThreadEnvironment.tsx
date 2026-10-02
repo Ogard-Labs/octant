@@ -5,14 +5,15 @@ import type {
   UsageDashboardClient,
   UsageQueryFilter,
 } from "@octant/client-runtime";
-import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import type { CodeClient } from "@octant/client-runtime/code-client";
 import type {
   CodeCheckoutIdentity,
   CodeCommand,
   CodeCommandResult,
   CodeDeliveryOutcomeKind,
   CodeOperationId,
+  CodeProjectPullRequestRow,
   LocalServerOpenTarget,
   ProjectSummary,
   WorkspaceTab,
@@ -96,8 +97,18 @@ export interface CodeThreadEnvironmentProps {
   readonly onCopyLocalServerUrl?: (url: string) => void | Promise<void>;
   /** Injected in tests; otherwise built from the server URL and capability. */
   readonly localServerClient?: LocalServerClient;
-  readonly githubClient?: GithubClient;
-  readonly pullRequestRepository?: string;
+  /**
+   * The journaled pull-request inventory: one manually refreshed snapshot per
+   * Project, so the Environment group never sends a GitHub read of its own.
+   */
+  readonly pullRequestClient?: Pick<
+    CodeClient,
+    "queryProjectPullRequests" | "refreshProjectPullRequests"
+  >;
+  /** Routes to the complete Pull requests overview across Projects. */
+  readonly onOpenPullRequests?: () => void;
+  /** Opens a pull request's Review surface; absent leaves rows inert. */
+  readonly onSelectPullRequest?: (row: CodeProjectPullRequestRow) => void;
   readonly hostBridge?: OctantHostBridge;
   readonly openInApplications?: ReadonlyArray<OpenInApplicationId>;
   readonly agentRunClient?: AgentRunClient;
@@ -137,6 +148,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
   const projectName = props.project?.name ?? "Code";
+  const pullRequestClient = props.pullRequestClient;
   const projection = deriveCodeEnvironmentProjection({
     observation: controller.observation,
     projectName,
@@ -279,14 +291,20 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             />
           )}
           <ThreadActivityEnvironment />
-          {props.githubClient === undefined || props.pullRequestRepository === undefined ? null : (
-            <EnvironmentGroup icon={GitPullRequest} title="Pull requests">
-              <EnvironmentPullRequests
-                client={props.githubClient}
-                enabled={environmentOpen}
-                repository={props.pullRequestRepository}
-              />
-            </EnvironmentGroup>
+          {pullRequestClient === undefined || props.project === undefined ? null : (
+            <EnvironmentPullRequests
+              enabled={environmentOpen}
+              load={(query) => pullRequestClient.queryProjectPullRequests(query)}
+              projectId={props.project.id}
+              refresh={(command) => pullRequestClient.refreshProjectPullRequests(command)}
+              {...(props.onOpenPullRequests === undefined
+                ? {}
+                : { onOpenAll: props.onOpenPullRequests })}
+              {...(props.onSelectPullRequest === undefined
+                ? {}
+                : { onSelectRow: props.onSelectPullRequest })}
+              threadId={String(props.tab.threadId)}
+            />
           )}
           {(props.sources?.length ?? 0) === 0 ? null : (
             <EnvironmentGroup

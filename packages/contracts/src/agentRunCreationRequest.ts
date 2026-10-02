@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import {
+  AgentRunDependencies,
   AgentRunAuthority,
   AgentRunCreationPosture,
   AgentRunExecutionKind,
@@ -110,6 +111,7 @@ export const AgentRunCreationRequest = Schema.Struct({
   requestId: AgentRunRequestId,
   parentThreadId: AgentRunParentThreadId,
   parentRunId: Schema.optional(AgentRunId),
+  dependsOn: Schema.optional(AgentRunDependencies),
   role: AgentRunRole,
   task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
   mode: OctantMode,
@@ -165,6 +167,8 @@ export const AgentRunControlRequest = Schema.Struct({
   role: AgentRunRole,
   task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
   includeParentContext: Schema.optional(Schema.Boolean),
+  /** Sibling runs this one waits for; see `AgentRun.dependsOn`. */
+  dependsOn: Schema.optional(AgentRunDependencies),
   /**
    * Optional one-off multi-model pool. The server still resolves the route;
    * the primary candidate is the parent thread's provider/model, never a

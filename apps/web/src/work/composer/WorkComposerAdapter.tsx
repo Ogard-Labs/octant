@@ -9,6 +9,10 @@ import {
   useComputerUseMention,
 } from "../../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
+import {
+  unattachedCapabilityMentionCopy,
+  unattachedCapabilityMentions,
+} from "@octant/plugin-host/capability-mentions";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -59,6 +63,7 @@ import {
 import { useThreadMentions } from "../../chat/useThreadMentions";
 import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type { MentionableThreadId } from "@octant/contracts";
+import { WorkKindSwitch } from "../../shell/WorkKindSwitch";
 
 export interface WorkComposerAdapterProps {
   /** The person's name from their profile, for the greeting on the hero. */
@@ -92,6 +97,11 @@ export interface WorkComposerAdapterProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly onAttachFolder?: () => void;
+  /** Threads executing now, and finished ones waiting for review, for the heading's line. */
+  readonly runningCount?: number | undefined;
+  readonly reviewCount?: number | undefined;
+  /** The start screen's action tiles and Running now strip, under the composer. */
+  readonly homeStart?: ReactNode;
   readonly folderControl?: ReactNode;
   readonly createFromControl?: ReactNode;
   /** Optional multi-model pool control slot rendered in the composer bar. */
@@ -184,6 +194,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
   });
   const [submitting, setSubmitting] = useState(false);
+  // A send refused before the host saw it explains itself beside the composer,
+  // since no thread exists to carry a reason.
+  const [sendNotice, setSendNotice] = useState<string>();
   const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !slash.resolving;
 
   useEffect(() => {
@@ -199,12 +212,21 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
       setProjectRequired(true);
       return;
     }
-    setSubmitting(true);
-    const staged = images.filesForSend();
     const computerUseSelection = computer.selection;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
+    const unattachedMentions = unattachedCapabilityMentions(trimmed, [
+      ...extensionSelections,
+      ...(computerUseSelection === undefined ? [] : [computerUseSelection]),
+    ]);
+    if (unattachedMentions.length > 0) {
+      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions));
+      return;
+    }
+    setSendNotice(undefined);
+    setSubmitting(true);
+    const staged = images.filesForSend();
     void threadMentions
       .resolveForSend()
       .then(async (threadMentionIds) => {
@@ -322,20 +344,27 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     <section aria-label="New task" className="work-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading greetingName={props.greetingName} question="What are we working on?" />
+          <WelcomeHeading
+            greetingName={props.greetingName}
+            reviewCount={props.reviewCount}
+            runningCount={props.runningCount}
+          />
         </div>
 
         <div className="composer-stack">
-          <div className="composer-tray composer-tray--above" aria-label="Thread context">
-            <div className="composer-tray__leading">
-              {projectControl}
-              {environmentControl}
-            </div>
-            {props.createFromControl === undefined ? null : (
-              <div className="composer-tray__trailing">{props.createFromControl}</div>
-            )}
-          </div>
           <ThreadComposer
+            startContext={
+              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                <div className="composer-tray__leading">
+                  <WorkKindSwitch />
+                  {projectControl}
+                  {environmentControl}
+                </div>
+                {props.createFromControl === undefined ? null : (
+                  <div className="composer-tray__trailing">{props.createFromControl}</div>
+                )}
+              </div>
+            }
             chips={
               <>
                 <ComputerUseMention controller={computer} surface="chips" />
@@ -504,9 +533,15 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
           />
         </div>
 
+        {props.homeStart}
+
         {props.errorMessage !== undefined ? (
           <p className="work-composer-adapter__error" role="alert">
             {props.errorMessage}
+          </p>
+        ) : sendNotice !== undefined ? (
+          <p className="work-composer-adapter__error" role="alert">
+            {sendNotice}
           </p>
         ) : projectRequired && !hasFolder ? (
           <p className="work-composer-adapter__error" role="alert">

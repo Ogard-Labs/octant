@@ -35,8 +35,8 @@ export interface AnthropicToolResult {
 export interface AnthropicHistoryMessage {
   readonly role: "user" | "assistant";
   readonly text: string;
-  readonly toolCalls?: readonly AnthropicToolCall[];
-  readonly toolResults?: readonly AnthropicToolResult[];
+  readonly toolCalls?: readonly AnthropicToolCall[] | undefined;
+  readonly toolResults?: readonly AnthropicToolResult[] | undefined;
 }
 
 export type AnthropicTurnEvent =

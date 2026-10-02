@@ -1,7 +1,13 @@
 import { classifyRemoteListenerAddress } from "@octant/domain";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
-import { SettingRow, SettingsFactList, SettingsPanel, SettingsState } from "../settings/primitives";
+import {
+  SettingRow,
+  SettingsFactList,
+  SettingsPanel,
+  SettingsSection,
+  SettingsState,
+} from "../settings/primitives";
 import type {
   PrivateListenerEnableRequest,
   PrivateListenerPublicStatus,
@@ -12,6 +18,7 @@ import type {
   RemotePendingPairingRequest,
 } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -87,6 +94,8 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
   const [pairingMessage, setPairingMessage] = useState<string>();
   const [renameDraft, setRenameDraft] = useState<{ deviceId: string; label: string }>();
   const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
+  const listenerOpener = useRef<HTMLButtonElement>(null);
+  const revokeAllOpener = useRef<HTMLButtonElement>(null);
   const hostnameId = useId();
   const portId = useId();
   const certificateId = useId();
@@ -256,12 +265,12 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
   const activeDevices = devices.filter((device) => device.state === "active");
 
   return (
-    <section aria-label="Remote access" className="settings-section" id="settings-remote-access">
-      <section
-        aria-label="Remote listener"
-        className="settings-card-section settings-card-section--open"
-      >
-        <h2>Remote listener</h2>
+    <section
+      aria-label="Remote access"
+      className="settings-section settings-section-stack"
+      id="settings-remote-access"
+    >
+      <SettingsSection title="Remote listener">
         {listener.kind === "loading" ? (
           <SettingsState kind="loading">Reading the remote listener…</SettingsState>
         ) : listener.kind === "error" ? (
@@ -376,8 +385,11 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
               ) : null}
               <div className="host-settings__controls">
                 <OctantButton
+                  aria-expanded={confirming !== undefined}
+                  aria-haspopup="dialog"
                   disabled={listenerBusy || !draftComplete || confirming !== undefined}
                   onClick={stageEnable}
+                  ref={listenerOpener}
                   size="sm"
                   type="button"
                   variant="default"
@@ -400,61 +412,41 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
           </SettingRow>
         </div>
         {confirming === undefined ? null : (
-          <div
-            aria-label="Confirm remote listener"
-            className="settings-panel settings-panel--danger"
-            role="group"
+          <OctantConfirmDialog
+            confirmLabel={status?.enabled === true ? "Confirm move" : "Confirm enable"}
+            destructive={false}
+            details={
+              <SettingsFactList
+                facts={[
+                  { label: "Address", value: `${confirming.hostname}:${confirming.port}` },
+                  { label: "Origin", value: confirming.origin },
+                  {
+                    label: "Reach",
+                    value:
+                      classifyRemoteListenerAddress(confirming.hostname) === "tailscale"
+                        ? "Tailscale"
+                        : "Private LAN",
+                  },
+                  { label: "Certificate", value: "Provided; fingerprint shown once it loads." },
+                ]}
+              />
+            }
+            onCancel={() => setConfirming(undefined)}
+            onConfirm={() => void applyListener(confirming)}
+            pending={listenerBusy}
+            restoreFocus={listenerOpener}
+            title={status?.enabled === true ? "Move remote listener?" : "Enable remote listener?"}
           >
-            <p>
-              Other devices on this network will be able to reach this host. Pairing still requires
-              your approval here for every device.
-            </p>
-            <SettingsFactList
-              facts={[
-                { label: "Address", value: `${confirming.hostname}:${confirming.port}` },
-                { label: "Origin", value: confirming.origin },
-                {
-                  label: "Reach",
-                  value:
-                    classifyRemoteListenerAddress(confirming.hostname) === "tailscale"
-                      ? "Tailscale"
-                      : "Private LAN",
-                },
-                { label: "Certificate", value: "Provided; fingerprint shown once it loads." },
-              ]}
-            />
-            <div className="host-settings__controls">
-              <OctantButton
-                disabled={listenerBusy}
-                onClick={() => void applyListener(confirming)}
-                size="sm"
-                type="button"
-                variant="default"
-              >
-                {status?.enabled === true ? "Confirm move" : "Confirm enable"}
-              </OctantButton>
-              <OctantButton
-                disabled={listenerBusy}
-                onClick={() => setConfirming(undefined)}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                Cancel
-              </OctantButton>
-            </div>
-          </div>
+            Other devices on this network will be able to reach this host. Pairing still requires
+            your approval here for every device.
+          </OctantConfirmDialog>
         )}
         {listenerMessage === undefined ? null : (
           <SettingsState kind="error">{listenerMessage}</SettingsState>
         )}
-      </section>
+      </SettingsSection>
 
-      <section
-        aria-label="Pair a device"
-        className="settings-card-section settings-card-section--open"
-      >
-        <h2>Pair a device</h2>
+      <SettingsSection title="Pair a device">
         <div className="setgroup">
           <SettingRow
             description="A pairing link is single-use and expires in five minutes. Open it on the other device, then approve the request that appears below."
@@ -520,7 +512,7 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
         {pending.length === 0 ? null : (
           <ul aria-label="Pairing requests" className="settings-panel__stack">
             {pending.map((request) => (
-              <li className="settings-panel" key={request.ticketId}>
+              <li className="settings-card" key={request.ticketId}>
                 <SettingsFactList
                   facts={[
                     { label: "Device", value: request.deviceLabel },
@@ -565,11 +557,13 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
             {pairingMessage}
           </SettingsState>
         )}
-      </section>
+      </SettingsSection>
 
+      {/* Revoking is this page's destructive group, so it sits last. */}
       <SettingsPanel
         title="Paired devices"
         description="Revoking a device ends its sessions and streams immediately; it must pair again to return."
+        tone="danger"
       >
         <div className="settings-panel__stack">
           {activeDevices.length === 0 ? (
@@ -636,30 +630,13 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
               ))}
             </ul>
           )}
-          {activeDevices.length === 0 ? null : confirmRevokeAll ? (
-            <div className="host-settings__controls" role="group" aria-label="Confirm revoke all">
-              <span>Revoke every paired device?</span>
-              <OctantButton
-                onClick={() => void revokeAll()}
-                size="sm"
-                type="button"
-                variant="default"
-              >
-                Revoke all devices
-              </OctantButton>
-              <OctantButton
-                onClick={() => setConfirmRevokeAll(false)}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                Keep them
-              </OctantButton>
-            </div>
-          ) : (
+          {activeDevices.length === 0 ? null : (
             <div className="host-settings__controls">
               <OctantButton
+                aria-expanded={confirmRevokeAll}
+                aria-haspopup="dialog"
                 onClick={() => setConfirmRevokeAll(true)}
+                ref={revokeAllOpener}
                 size="sm"
                 type="button"
                 variant="secondary"
@@ -668,6 +645,19 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
               </OctantButton>
             </div>
           )}
+          {activeDevices.length !== 0 && confirmRevokeAll ? (
+            <OctantConfirmDialog
+              cancelLabel="Keep them"
+              confirmLabel="Revoke all devices"
+              onCancel={() => setConfirmRevokeAll(false)}
+              onConfirm={() => void revokeAll()}
+              restoreFocus={revokeAllOpener}
+              title="Revoke every paired device?"
+            >
+              Every paired device will lose access to this host. You will need to pair each device
+              again.
+            </OctantConfirmDialog>
+          ) : null}
           {inventoryMessage === undefined || listenerNotEnabled ? null : (
             <SettingsState kind="error">{inventoryMessage}</SettingsState>
           )}

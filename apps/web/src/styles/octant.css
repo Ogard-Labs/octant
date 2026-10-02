@@ -158,6 +158,9 @@
   --oct-weight-medium: 500;
   --oct-weight-display: 500;
   --oct-weight-strong: 600;
+  /* The page title and the welcome greeting only (surface.css type roles);
+     the stylesheet check refuses it anywhere else. */
+  --oct-weight-title: 700;
 
   /* tracking: negative tightens display type as it grows, positive opens
      mono labels. Every letter-spacing in the system comes from here. */
@@ -186,6 +189,9 @@
   --oct-section-y-phone: 32px;
   --oct-radius-sm: 10px;
   --oct-radius-md: 16px;
+  /* An object resting inside a 16px well: a board card in its column. One
+     step under the well keeps the gap between the two corners even. */
+  --oct-radius-inset: 12px;
   --oct-radius-lg: 20px;
   --oct-radius-pill: 9999px;
 
@@ -2132,7 +2138,7 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   min-width: 0;
   padding: var(--oct-space-3);
-  border: 1px solid var(--octant-border-soft);
+  border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--octant-floating);
   box-shadow: var(--octant-shadow-overlay);
@@ -2160,7 +2166,7 @@ input.switch:checked::after {
 }
 .toast__dismiss {
   flex: none;
-  margin: -6px -6px 0 0;
+  margin: -10px -10px 0 0;
 }
 .toast .toast-title {
   display: block;
@@ -2173,6 +2179,19 @@ input.switch:checked::after {
   margin: 2px 0 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+.toast .toast__action {
+  display: inline-flex;
+  min-height: 24px;
+  height: auto;
+  gap: var(--oct-space-1);
+  padding: 0;
+  margin-inline-start: var(--oct-space-1);
+  font: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  white-space: normal;
+  vertical-align: baseline;
 }
 
 /* ─── breadcrumb ────────────────────────────────────────────────────── */
@@ -2933,16 +2952,17 @@ input.switch:checked::after {
 }
 
 /* ─── kanban ──────────────────────────────────────────────────────────
-   The four status columns are open groups, not boxes: a section label over
-   a hairline, then cards. They share the board's width equally, empty or
-   full, so a sparse board never accordions. Under ~1100px four readable
-   columns no longer fit; the board keeps its column width and the scroll
-   container around it scrolls sideways, never the page. Project grouping
-   stacks full-width sections instead. */
+   The four status columns are soft wells: a faint tint of the text ink over
+   the workspace colour inside a hairline, with the head and the cards
+   resting in it. They share the board's width equally, empty or full, so a
+   sparse board never accordions. Under ~1100px four readable columns no
+   longer fit; the board keeps its column width and the scroll container
+   around it scrolls sideways, never the page. Project grouping stacks
+   full-width sections instead. */
 .board {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--oct-space-5);
+  gap: var(--oct-space-3);
   align-items: start;
   overflow: visible;
 }
@@ -2955,32 +2975,39 @@ input.switch:checked::after {
   }
 }
 .board-col {
+  /* One definition of the well's paint, read by the head too so the sticky
+     head never shows as a patch of another colour. */
+  --board-well: color-mix(in oklab, var(--octant-text-primary) 3%, var(--octant-workspace));
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   max-height: 100%;
+  padding: var(--oct-space-2);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-md);
+  background: var(--board-well);
 }
 /* A lane is named once, quietly: mark, label, count, no rule underneath.
-   The cards below carry their own edges, so a hairline over each lane
-   drew a second grid across the board. */
+   The well and the cards carry the edges, so a rule under each head drew a
+   second grid inside every column. */
 .board-col-head {
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
   position: sticky;
   top: 0;
-  padding: 8px 2px;
-  background: var(--octant-app-background);
+  padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-2);
+  background: var(--board-well);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-display);
 }
-/* A lane's name is a quiet 12px label in the meta ink; the count ends the
-   line at the lane's trailing edge. */
+/* A lane's name is the section-label step in the secondary ink; the count
+   ends the line at the lane's trailing edge. */
 .board-col-head > .oct-section-label {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-detail);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
 }
 .board-col-head .count {
   margin-left: auto;
@@ -2995,7 +3022,7 @@ input.switch:checked::after {
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-2) 0;
+  padding: 0;
   scrollbar-width: thin;
 }
 /* An empty column still shows so the workflow stays legible, but four quiet
@@ -3017,9 +3044,9 @@ input.switch:checked::after {
   gap: 8px;
   width: 100%;
   min-width: 0;
-  padding: var(--oct-space-3) 14px;
+  padding: var(--oct-space-3);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-inset);
   background: var(--octant-card);
   color: inherit;
   text-align: left;
@@ -4009,6 +4036,45 @@ input.switch:checked::after {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+/* Work and Code: with Chat folded into Work the switcher has two choices,
+   and two icons alone asked a reader to learn which glyph meant which. With
+   two, the labels replace the icons in a faint tray, so the header reads
+   "Octant  [Work | Code]" as the approved sidebar does. Three or more keep
+   the bare icons above. */
+.modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode-switcher__brand {
+  flex: 1 0 auto;
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
+}
+.modeswitch__tray {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+}
+.modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode {
+  width: auto;
+  height: 26px;
+  gap: var(--oct-space-1);
+  padding-inline: var(--oct-space-2);
+}
+.modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode-label {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip-path: none;
+  font-size: var(--oct-text-xs);
+}
+/* Labels alone: the words already say which is which, and the icons cost
+   the brand its room in a sidebar at its default width. */
+.modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode__icon-frame {
+  display: none;
+}
+
 /* Three 30px buttons need 98px and a compact sidebar is 52. It is already
    a vertical icon rail, so the switcher turns to match rather than
    overflowing it. Keyed to data-compact rather than to a width, because

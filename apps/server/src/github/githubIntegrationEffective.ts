@@ -14,7 +14,7 @@ export type FirstPartyIntegrationMissingRow = "effective" | "ineffective";
 
 /**
  * First-party integrations share the activation ladder. A missing store row
- * is the bundled default: GitHub on, Linear off.
+ * is the bundled default: both are on.
  */
 export function isFirstPartyIntegrationEffective(
   snapshot: Pick<ExtensionSnapshot, "packages">,
@@ -51,14 +51,16 @@ export function isGithubIntegrationEffective(
 }
 
 /**
- * Bundled Linear is off until the store row is installed, trusted, and
- * desired. A missing row must not construct GraphQL, OAuth, or issue-context.
+ * Bundled Linear is enabled by default, like GitHub. Enabling only offers the
+ * Settings card and issue browse: nothing reaches Linear until the person
+ * connects an account, and a stored disable, untrusted, or not-desired row
+ * still constructs no GraphQL, OAuth, or issue-context.
  */
 export function isLinearIntegrationEffective(
   snapshot: Pick<ExtensionSnapshot, "packages">,
 ): boolean {
   return isFirstPartyIntegrationEffective(snapshot, LINEAR_INTEGRATION_COMPONENT_ID, {
-    missingRow: "ineffective",
+    missingRow: "effective",
   });
 }
 

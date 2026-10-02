@@ -1,5 +1,4 @@
 import type { ProviderModelOptionValues } from "@octant/contracts";
-import { useComposerTip } from "../composer/useComposerTip";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -59,6 +58,7 @@ import { useThreadPlan } from "../plan/ThreadPlanContext";
 import type { ThreadTaskChangedFiles } from "../plan/ThreadTaskViewer";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import type { HostId } from "@octant/contracts/host";
 import type { CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -77,9 +77,15 @@ import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { providerModelLabel } from "../providers/providerModelLabel";
-import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/TurnHeader";
+import {
+  TurnHeader,
+  TurnTime,
+  turnWorkedFor,
+  type TurnHeaderOutcome,
+} from "../transcript/TurnHeader";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
+import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
@@ -103,6 +109,10 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
+import {
+  unattachedCapabilityMentionCopy,
+  unattachedCapabilityMentions,
+} from "@octant/plugin-host/capability-mentions";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -165,6 +175,11 @@ export interface CodeThreadWorkspaceProps {
   readonly onCreatePullRequest?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /** The Canvas cards the host lists for this thread, each time they are read. */
+  readonly onCanvasReferencesObserved?: (
+    threadId: string,
+    cards: ReadonlyArray<CanvasThreadReferenceCard>,
+  ) => void;
   /**
    * Reach for the host's `#thread` mention surface. Absent on a host that does
    * not serve it, which keeps the picker closed rather than offering threads
@@ -412,6 +427,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const setRestoreUndo = props.controller.noteRestoreUndo;
   const [forking, setForking] = useState(false);
   const [forkMessage, setForkMessage] = useState<string>();
+  // A send refused before the host saw it explains itself beside the composer,
+  // since no turn exists to carry a reason.
+  const [sendNotice, setSendNotice] = useState<string>();
 
   useEffect(() => {
     setDraft(props.controller.pendingDraft);
@@ -464,15 +482,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft,
-  });
-  const tip = useComposerTip({
-    scopeKey: String(props.threadId),
-    files: true,
-    threads: threadMentions.composer !== undefined,
-    commands: slash.commandIds,
-    browser: browser.available,
-    computer: computer.available,
-    plan: true,
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -608,6 +617,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     trimmed.length > 0 && !attachments.busy && !slash.resolving && steered.pending === undefined;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
+  const settledReplyCount = messages.filter(
+    (message) =>
+      message.role === "assistant" &&
+      (message.status === "completed" ||
+        message.status === "interrupted" ||
+        message.status === "failed"),
+  ).length;
   const liveTasks = liveTaskProgress(
     messages.flatMap((message) => {
       if (message.role !== "assistant" || message.operationId === undefined) return [];
@@ -655,6 +671,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       receipt.selection === undefined ? [] : [receipt.selection],
     );
     const extensionReceipts = [...extensionDraft.receipts];
+    const unattachedMentions = unattachedCapabilityMentions(trimmed, [
+      ...extensionSelections,
+      ...(computerUseSelection === undefined ? [] : [computerUseSelection]),
+    ]);
+    if (unattachedMentions.length > 0) {
+      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions));
+      return;
+    }
+    setSendNotice(undefined);
     const originThreadKey = String(props.threadId);
     // The one-shot override is consumed when the message is sent, not when the
     // turn later finishes: a long running turn must not leave Plan selected for
@@ -764,6 +789,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }
   sendSteeredRef.current = async (message) => {
     try {
+      const unattached = unattachedCapabilityMentions(message.prompt, message.extensionSelections);
+      if (unattached.length > 0) {
+        setSendNotice(unattachedCapabilityMentionCopy(unattached));
+        return false;
+      }
       attachments.markDetachedInFlight(message.detachedAttachments);
       const sent = await props.controller.sendFollowUp(
         message.prompt,
@@ -1223,6 +1253,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   threadId={message.sourceThreadId ?? props.threadId}
                 />
               );
+            const workedFor =
+              message.role === "assistant" &&
+              message.status === "completed" &&
+              message.startedAt !== undefined &&
+              message.at !== undefined
+                ? turnWorkedFor("completed", message.startedAt, message.at)
+                : undefined;
             return (
               <div className="code-thread-workspace__row">
                 {handoff ? (
@@ -1311,6 +1348,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                           }
                           forkDisabled={forking}
                           outcome={turnHeaderOutcome(message.status)}
+                          {...(workedFor === undefined ? {} : { workedFor })}
                           provider={
                             message.providerInstanceId === undefined ||
                             message.modelId === undefined
@@ -1444,6 +1482,27 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         />
       )}
 
+      {props.canvasClient === undefined || view === undefined ? null : (
+        <div className="thread-column">
+          <CanvasThreadReferenceCardList
+            client={props.canvasClient}
+            mode="code"
+            {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
+            {...(props.onCanvasReferencesObserved === undefined
+              ? {}
+              : {
+                  onCardsObserved: (cards: ReadonlyArray<CanvasThreadReferenceCard>) =>
+                    props.onCanvasReferencesObserved?.(String(props.threadId), cards),
+                })}
+            projectId={view.thread.projectId}
+            // A settled reply may have authored a Canvas; re-read the cards so
+            // the document appears without reopening the thread.
+            refreshKey={settledReplyCount}
+            threadId={props.threadId}
+          />
+        </div>
+      )}
+
       {liveTasks === undefined ? null : <ThreadTasksPanel tasks={liveTasks} />}
 
       <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
@@ -1511,6 +1570,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           )}
         </div>
       )}
+      <ExtensionToolApprovalPrompt
+        className="thread-column"
+        client={props.extensionClient}
+        threadId={String(props.threadId)}
+        turnActive={busy}
+      />
       <ThreadComposer
         presentation="follow-up"
         context={
@@ -1681,7 +1746,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             onPaste={(event) => {
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
-            placeholder={busy ? "Send the next message…" : tip}
+            placeholder={busy ? "Send the next message…" : "Reply…"}
             ref={textareaRef}
             rows={2}
             value={draft}
@@ -1859,6 +1924,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             {forkMessage === undefined ? null : (
               <span className="code-thread-workspace__hint" role="alert" title={forkMessage}>
                 {forkMessage}
+              </span>
+            )}
+            {sendNotice === undefined ? null : (
+              <span className="code-thread-workspace__hint" role="alert" title={sendNotice}>
+                {sendNotice}
               </span>
             )}
           </div>
