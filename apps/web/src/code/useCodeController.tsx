@@ -58,7 +58,8 @@ import {
   acceptFrame,
   applyEvent,
   applyResult,
-  commandTargets,
+  commandReloadsThread,
+  withUpdatedThread,
   codeFailure,
   createCodeReadCursorStore,
   isActive,
@@ -1506,8 +1507,9 @@ export function useCodeController(options: CodeControllerOptions) {
             : await client.execute(command, signal);
         if (!mounted.current) return undefined;
         setBootstrap((current) => applyResult(current, result));
+        setActiveView((current) => withUpdatedThread(current, result));
         const currentThreadId = activeThreadId.current;
-        if (currentThreadId !== undefined && commandTargets(command, currentThreadId)) {
+        if (currentThreadId !== undefined && commandReloadsThread(command, currentThreadId)) {
           void activateThread(currentThreadId);
         }
         return result;

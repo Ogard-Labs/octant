@@ -1364,7 +1364,9 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     fireEvent.change(levels, { target: { value: "0" } });
-    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ modelOptionValues: {} }));
+    await waitFor(() =>
+      expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ modelOptionValues: {} })),
+    );
   });
 
   it("changes provider and model through the authoritative Code command", async () => {

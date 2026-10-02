@@ -350,6 +350,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);
   const [providerChanging, setProviderChanging] = useState(false);
+  const optionSave = useRef<{ saving: boolean; queued: ProviderModelOptionValues | undefined }>({
+    saving: false,
+    queued: undefined,
+  });
+  const threadVersionRef = useRef<CodeThread["version"] | undefined>(undefined);
   const [accessChanging, setAccessChanging] = useState(false);
   const [turnAccessOverride, setTurnAccessOverride] = useState<ProviderExecutionPolicy>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -572,6 +577,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }
 
   const { thread } = view;
+  threadVersionRef.current = thread.version;
   const nextTurnAccess = clampTurnAccessPosture({
     thread: thread.executionPolicy,
     ...(turnAccessOverride === undefined ? {} : { requested: turnAccessOverride }),
@@ -1036,15 +1042,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   }
 
-  async function changeProvider(
-    selection: {
-      readonly providerInstanceId: typeof thread.providerInstanceId;
-      readonly modelId: typeof thread.modelId;
-    },
-    modelOptionValues?: ProviderModelOptionValues,
-  ) {
+  async function changeProvider(selection: {
+    readonly providerInstanceId: typeof thread.providerInstanceId;
+    readonly modelId: typeof thread.modelId;
+  }) {
     if (
-      modelOptionValues === undefined &&
       selection.providerInstanceId === thread.providerInstanceId &&
       selection.modelId === thread.modelId
     ) {
@@ -1058,10 +1060,44 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         expectedVersion: thread.version,
         providerInstanceId: selection.providerInstanceId,
         modelId: selection.modelId,
-        ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
       });
     } finally {
       setProviderChanging(false);
+    }
+  }
+
+  // A reasoning change keeps the model, so it neither dims the picker nor
+  // announces a provider check; the picker already shows the new level.
+  // Clicks that land while one is saving collapse into the latest level, sent
+  // against the version the previous save returned, so a quick run of clicks
+  // never races itself into a stale-version refusal.
+  async function changeModelOptions(modelOptionValues: ProviderModelOptionValues) {
+    const save = optionSave.current;
+    save.queued = modelOptionValues;
+    if (save.saving) return;
+    save.saving = true;
+    let expectedVersion = thread.version;
+    try {
+      while (save.queued !== undefined) {
+        const next = save.queued;
+        save.queued = undefined;
+        const result = await props.controller.execute({
+          kind: "change-code-thread-provider",
+          threadId: thread.id,
+          expectedVersion,
+          providerInstanceId: thread.providerInstanceId,
+          modelId: thread.modelId,
+          modelOptionValues: next,
+        });
+        // A refused or stale save comes back without a thread; a queued level
+        // then goes out against the newest version this view has seen.
+        expectedVersion =
+          result?.kind === "thread-updated"
+            ? result.thread.version
+            : (threadVersionRef.current ?? expectedVersion);
+      }
+    } finally {
+      save.saving = false;
     }
   }
 
@@ -1821,7 +1857,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <span aria-hidden="true" className="composer-gap" />
               <ComposerModelPicker
                 ariaLabel="Provider and model"
-                disabled={busy || providerChanging}
+                disabled={busy}
                 groups={providerGroups}
                 {...(thread.modelOptionValues === undefined
                   ? {}
@@ -1830,8 +1866,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   const remaining = Object.fromEntries(
                     Object.entries(thread.modelOptionValues ?? {}).filter(([key]) => key !== id),
                   );
-                  void changeProvider(
-                    { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
+                  void changeModelOptions(
                     value === undefined ? remaining : { ...remaining, [id]: value },
                   );
                 }}
