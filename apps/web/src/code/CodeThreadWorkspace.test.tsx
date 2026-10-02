@@ -801,7 +801,7 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
-  it("says the fork failed instead of opening a thread that was never created", async () => {
+  it("says why the host refused the fork instead of opening a thread that was never created", async () => {
     const user = userEvent.setup();
     const onOpenCodeThread = vi.fn();
     render(
@@ -817,6 +817,9 @@ describe("CodeThreadWorkspace", () => {
             },
           ],
           forkThread: vi.fn(async () => undefined),
+          lastExecuteError: {
+            current: { category: "conflict", message: "Fork from a reply that has finished." },
+          },
         } as never)}
         onOpenCodeThread={onOpenCodeThread}
         threadId={threadId}
@@ -825,7 +828,7 @@ describe("CodeThreadWorkspace", () => {
 
     await chooseTurnAction(user, "Fork from here", "done");
     expect(
-      await screen.findByText("The thread could not be forked. This thread is unchanged."),
+      await screen.findByText("Fork from a reply that has finished. This thread is unchanged."),
     ).toBeVisible();
     expect(onOpenCodeThread).not.toHaveBeenCalled();
   });

@@ -16,7 +16,7 @@ import type {
   CodeThreadId,
   CodeThreadView,
 } from "@octant/contracts/code";
-import { decodeCodeThread } from "@octant/contracts/code";
+import { decodeCodeThreadId } from "@octant/contracts/code";
 import { decodeUtcTimestamp } from "@octant/contracts";
 import { waitForReconnect } from "../lib/waitForReconnect";
 import {
@@ -1698,10 +1698,11 @@ export function useCodeController(options: CodeControllerOptions) {
   /**
    * Start a new thread that continues an existing one from a chosen answer.
    *
-   * The fork binds the same checkout, provider, model, and posture as its
-   * source, and records where it branched from so the host — not this
-   * renderer — decides what history its first turn carries. Nothing about the
-   * source thread changes: a fork is a second direction, not a rewrite.
+   * The host builds the fork on its own managed worktree and branch, starting
+   * from the files as they stood after that answer — uncommitted work
+   * included — so the fork and its source never write to the same checkout.
+   * It also decides what history the fork's first turn carries. Nothing about
+   * the source thread changes: a fork is a second direction, not a rewrite.
    */
   const forkThread = useCallback(
     async (input: {
@@ -1709,67 +1710,14 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly throughOperationId: string;
       readonly title: string;
     }): Promise<CodeThread | undefined> => {
-      const source = bootstrapRef.current?.threads.find(
-        (candidate) => String(candidate.id) === String(input.threadId),
-      );
-      if (source === undefined) return undefined;
-      // The server refuses a thread whose checkout does not match the one it
-      // just prepared, so the fork binds a freshly observed checkout rather
-      // than the identity this renderer happens to be holding.
-      const prepared = await execute({
-        kind: "prepare-code-project-checkout",
-        projectId: source.projectId,
+      const created = await execute({
+        kind: "fork-code-thread",
+        threadId: decodeCodeThreadId(globalThis.crypto.randomUUID()),
+        sourceThreadId: input.threadId,
+        throughOperationId: input.throughOperationId,
+        title: input.title,
       });
-      if (prepared?.kind !== "checkout-prepared") return undefined;
-      // Re-observing is right only when the renderer's identity is stale enough
-      // that bootstrap no longer knows the checkout at all. A checkout bootstrap
-      // still lists is still real and still different, and only the Project's is
-      // accepted for a new thread, so forking would inherit the conversation
-      // while opening another branch and working tree. Availability does not
-      // soften that: a managed worktree that is waiting or unrecovered is the
-      // same tree, temporarily out of reach, and pointing the fork at the
-      // Project's checkout instead would silently rebind the work.
-      const sourceCheckout = bootstrapRef.current?.checkouts.find(
-        (candidate) => String(candidate.id) === String(source.checkoutId),
-      );
-      if (
-        sourceCheckout !== undefined &&
-        String(prepared.checkout.id) !== String(sourceCheckout.id)
-      ) {
-        return undefined;
-      }
-      const timestamp = new Date().toISOString();
-      // A fork is its own thread and does not inherit the source's profile. A
-      // one-off profile belongs to the source by definition, and one deleted
-      // since the source started would refuse the fork outright; either way the
-      // fork begins with no profile until someone picks one for it.
-      const { profileId: _inheritedProfileId, ...carried } = source;
-      let thread: CodeThread;
-      try {
-        thread = decodeCodeThread({
-          ...carried,
-          id: globalThis.crypto.randomUUID(),
-          bindingRevisionId: prepared.bindingRevisionId,
-          repositoryId: prepared.checkout.repositoryId,
-          checkoutId: prepared.checkout.id,
-          title: input.title,
-          lifecycle: "active",
-          pinned: false,
-          // A fork is a new thread, and the server requires a native approval
-          // bound to that thread before it may hold Full access. Inheriting the
-          // source's posture here would carry no receipt, so the fork starts
-          // approval-gated and is raised the same way any thread is.
-          executionPolicy: "approval-gated",
-          forkedFrom: { threadId: input.threadId, throughOperationId: input.throughOperationId },
-          version: 1,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        });
-      } catch {
-        return undefined;
-      }
-      const created = await execute({ kind: "create-code-thread", thread });
-      return created?.kind === "thread-created" ? created.thread : undefined;
+      return created?.kind === "managed-thread-created" ? created.thread : undefined;
     },
     [execute],
   );
