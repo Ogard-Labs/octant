@@ -24,8 +24,18 @@ export interface OpenedLocalControlSession {
   /** The identity the server issued this session's authority for. */
   readonly windowId: string;
   readonly send: (request: LocalControlRequest) => Promise<LocalControlResponse>;
+  /**
+   * Opens a held-open NDJSON response and yields its lines as they arrive.
+   * Optional so a session that cannot stream (a test double, an old host)
+   * leaves its callers on their fallback timer.
+   */
+  readonly stream?: (path: string, signal: AbortSignal) => Promise<LocalControlStream>;
   readonly close: () => Promise<void>;
 }
+
+export type LocalControlStream =
+  | { readonly kind: "open"; readonly lines: AsyncIterable<string> }
+  | { readonly kind: "refused"; readonly status: number };
 
 export type LocalControlSession =
   | OpenedLocalControlSession
@@ -100,6 +110,23 @@ export async function openLocalControlSession(
       }
       return { status: response.status, body: await readBody(response).catch(() => undefined) };
     },
+    stream: async (path, signal) => {
+      const response = await call(new URL(path, info.url).toString(), {
+        method: "GET",
+        headers: {
+          "x-octant-desktop-secret": secret,
+          "x-octant-window-capability": capability,
+          "x-octant-renderer-identity": rendererIdentity,
+        },
+        signal,
+      }).catch(() => undefined);
+      if (response === undefined) return { kind: "refused", status: 0 };
+      if (response.status !== 200 || response.body === null) {
+        await response.body?.cancel().catch(() => undefined);
+        return { kind: "refused", status: response.status };
+      }
+      return { kind: "open", lines: ndjsonLines(response.body) };
+    },
     close: async () => {
       try {
         await call(authorityUrl, {
@@ -113,6 +140,29 @@ export async function openLocalControlSession(
       }
     },
   };
+}
+
+/** The lines of an NDJSON body as they arrive; ends when the host closes the response. */
+async function* ndjsonLines(body: ReadableStream<Uint8Array>): AsyncIterable<string> {
+  const decoder = new TextDecoder();
+  let buffered = "";
+  try {
+    for await (const chunk of body) {
+      buffered += decoder.decode(chunk, { stream: true });
+      let newline = buffered.indexOf("\n");
+      while (newline !== -1) {
+        const line = buffered.slice(0, newline).trim();
+        buffered = buffered.slice(newline + 1);
+        if (line.length > 0) yield line;
+        newline = buffered.indexOf("\n");
+      }
+    }
+  } catch {
+    // An aborted or dropped connection simply ends the lines; the caller
+    // reopens from its own cursor.
+  }
+  const rest = (buffered + decoder.decode()).trim();
+  if (rest.length > 0) yield rest;
 }
 
 async function readBody(response: Response): Promise<unknown> {

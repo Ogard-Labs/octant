@@ -1,4 +1,4 @@
-import type { NativeHarnessSessionView } from "@octant/contracts";
+import type { NativeHarnessSessionView, OctantMode } from "@octant/contracts";
 import {
   agentThreadPort,
   isAgentSnapshotRunning,
@@ -23,6 +23,7 @@ import {
   uploadAgentAttachment,
   type AgentModelChoice,
 } from "./agentHost";
+import { AgentWake, followAgentThread } from "./agentLiveFeed";
 import { notifyDesktop } from "./agentNotify";
 import {
   paletteFor,
@@ -124,6 +125,9 @@ class AgentScreen {
   #threadId: string;
   #threads: ReadonlyArray<ChatNavigationThread> = [];
   #models: ReadonlyArray<AgentModelChoice> = [];
+  readonly #wake = new AgentWake();
+  /** Ends the live feed of the thread on screen; a switch starts a new one. */
+  #feed = new AbortController();
   #listing: "threads" | "models" | undefined;
   #suggestions:
     | { readonly kind: "file" | "thread"; readonly items: ReadonlyArray<string> }
@@ -287,12 +291,36 @@ class AgentScreen {
         this.#draw();
       });
       this.#input.signal?.addEventListener("abort", () => resolve(1), { once: true });
-      const interval = setInterval(() => void this.refresh(), this.#input.pollIntervalMs ?? 500);
-      void this.refresh();
-      void Promise.resolve().then(() => undefined);
-      const stop = () => clearInterval(interval);
+      const stopped = new AbortController();
+      const stop = () => {
+        stopped.abort();
+        this.#feed.abort();
+      };
+      this.#input.signal?.addEventListener("abort", stop, { once: true });
       this.#renderer.on("destroy", stop);
+      this.#follow(this.#input.mode ?? "chat");
+      void this.#redrawOnChange(stopped.signal);
     });
+  }
+
+  /**
+   * Redraws whenever the thread changes. One read at a time: changes that
+   * land during a read wake the next one rather than queueing more.
+   */
+  async #redrawOnChange(signal: AbortSignal): Promise<void> {
+    // Harness questions and approvals have no stream; this is how long one can
+    // wait unseen while the thread itself is quiet.
+    const fallback = this.#input.pollIntervalMs ?? 1_000;
+    while (!signal.aborted) {
+      await this.refresh().catch(() => undefined);
+      await this.#wake.next(fallback, signal);
+    }
+  }
+
+  #follow(mode: OctantMode): void {
+    this.#feed.abort();
+    this.#feed = new AbortController();
+    followAgentThread(this.#input.session, mode, this.#threadId, this.#wake, this.#feed.signal);
   }
 
   async refresh(): Promise<void> {
@@ -312,7 +340,9 @@ class AgentScreen {
     }
     this.#wasRunning = running;
     this.#draw();
-    await this.#flushSteering();
+    // Not awaited: a Chat send answers only when its turn ends, and the
+    // redraws that show the reply arriving are this same loop.
+    void this.#flushSteering();
   }
 
   /** Live matches for an `@file` or `#thread` token at the end of the composer. */
@@ -393,6 +423,7 @@ class AgentScreen {
   async #switchThread(threadId: string): Promise<void> {
     this.#threadId = threadId;
     this.#port = agentThreadPort(this.#input.session, "chat", threadId);
+    this.#follow("chat");
     this.#drawn = "";
     this.#listing = undefined;
     this.#pendingFollowUp = undefined;

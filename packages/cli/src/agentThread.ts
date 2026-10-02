@@ -8,6 +8,7 @@ import {
   decodeCodeCommandResult,
   decodeCodeConversationPage,
   decodeCodeEvidenceBatchResponse,
+  MAX_CODE_EVIDENCE_BATCH_ITEMS,
   decodeCodeEvidenceReference,
   decodeCodeThreadView,
   decodeProjectBootstrap,
@@ -293,6 +294,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
     });
     return response.status === 200 ? decodeCodeConversationPage(response.body) : undefined;
   };
+  const texts = new Map<string, string>();
   return {
     mode: "code",
     threadId,
@@ -307,17 +309,20 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
           contentId: String(ref.contentId),
         })),
       ]);
-      const texts = new Map<string, string>();
-      if (wanted.length > 0) {
+      // Evidence is content-addressed and never changes, so each piece is
+      // fetched once; a streaming reply then costs one batch per new piece
+      // rather than the whole thread on every read. The host refuses a batch
+      // over its item limit outright, which left a long reply blank.
+      const missing = wanted.filter((item) => !texts.has(`${item.operationId}:${item.contentId}`));
+      for (let start = 0; start < missing.length; start += MAX_CODE_EVIDENCE_BATCH_ITEMS) {
         const batch = await session.send({
           path: "/api/code/evidence/batch",
           method: "POST",
-          body: { threadId, items: wanted.slice(0, 200) },
+          body: { threadId, items: missing.slice(start, start + MAX_CODE_EVIDENCE_BATCH_ITEMS) },
         });
-        if (batch.status === 200) {
-          for (const item of decodeCodeEvidenceBatchResponse(batch.body).items) {
-            texts.set(`${String(item.operationId)}:${String(item.contentId)}`, item.text);
-          }
+        if (batch.status !== 200) break;
+        for (const item of decodeCodeEvidenceBatchResponse(batch.body).items) {
+          texts.set(`${String(item.operationId)}:${String(item.contentId)}`, item.text);
         }
       }
       return {

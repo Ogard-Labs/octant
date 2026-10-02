@@ -7,9 +7,11 @@ import {
   type NativeHarnessSessionView,
 } from "@octant/contracts";
 import { listAgentThreads } from "./agentHost";
+import { AgentWake, followAgentThread } from "./agentLiveFeed";
 import {
   attachAgentThread,
   agentThreadPort,
+  type AgentThreadPort,
   createAgentThread,
   isAgentSnapshotRunning,
 } from "./agentThread";
@@ -541,18 +543,57 @@ async function runTurn(
   prompt: string,
   lines: LineSource,
 ): Promise<boolean> {
-  const port = agentThreadPort(input.session, modeOf(input.command), threadId);
-  const sent = await port.send(prompt);
-  if (sent.kind === "refused") {
-    input.stderr.write(`${sent.message}\n`);
-    return false;
+  const mode = modeOf(input.command);
+  const port = agentThreadPort(input.session, mode, threadId);
+  // Follow the thread before sending so the first words of the reply wake
+  // the read that prints them.
+  const wake = new AgentWake();
+  const feed = new AbortController();
+  const stopFeed = () => feed.abort();
+  input.signal?.addEventListener("abort", stopFeed, { once: true });
+  followAgentThread(input.session, mode, threadId, wake, feed.signal);
+  try {
+    return await followTurn(input, threadId, prompt, lines, port, wake, feed.signal);
+  } finally {
+    input.signal?.removeEventListener("abort", stopFeed);
+    feed.abort();
   }
+}
+
+async function followTurn(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+  prompt: string,
+  lines: LineSource,
+  port: AgentThreadPort,
+  wake: AgentWake,
+  signal: AbortSignal,
+): Promise<boolean> {
+  // A Chat send answers only once its turn has ended, so waiting on it would
+  // hold the whole reply back. Send alongside the reads instead, and ignore
+  // the thread's earlier turn until this one shows up.
+  const before = (await port.read())?.turns.at(-1)?.id;
+  let sent: Awaited<ReturnType<AgentThreadPort["send"]>> | undefined;
+  void port
+    .send(prompt)
+    .catch(() => ({ kind: "refused" as const, message: "The host refused the turn." }))
+    .then((result) => {
+      sent = result;
+      wake.notify();
+    });
   let printed = "";
-  const interval = input.pollIntervalMs ?? 400;
+  // Harness questions and approvals have no stream; this is how long one can
+  // wait unseen while the reply itself is quiet.
+  const fallback = input.pollIntervalMs ?? 1_000;
   const answered = new Set<string>();
   for (;;) {
     if (input.signal?.aborted) return false;
-    await new Promise((resolve) => setTimeout(resolve, interval));
+    await wake.next(fallback, signal);
+    if (input.signal?.aborted) return false;
+    if (sent?.kind === "refused") {
+      input.stderr.write(`${sent.message}\n`);
+      return false;
+    }
     const session = await readSession(input, threadId, true);
     const pending =
       session === null || session === "unavailable"
@@ -577,6 +618,7 @@ async function runTurn(
     const current = await port.read();
     if (current === undefined) continue;
     const turn = current.turns.at(-1);
+    if (turn?.id === before && sent === undefined) continue;
     const text = turn?.reply ?? "";
     if (text.length > printed.length && text.startsWith(printed)) {
       const delta = text.slice(printed.length);
@@ -585,7 +627,7 @@ async function runTurn(
       else input.stdout.write(delta);
       printed = text;
     }
-    if (turn === undefined || isAgentSnapshotRunning(current)) continue;
+    if (turn === undefined || sent === undefined || isAgentSnapshotRunning(current)) continue;
     if (input.command.json) {
       input.stdout.write(
         `${JSON.stringify({

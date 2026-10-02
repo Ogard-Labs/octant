@@ -180,7 +180,9 @@ its actions as a tree — the last few calls in full with what they touched and
 how long they took, the rest folded into one line, failures in red, and a
 spinner on the call still running — plus a Tasks panel when the lead keeps a
 task list, a panel for a pending question or the suggested follow-ups, and a
-footer with the run's status, token use, and cost.
+footer with the run's status, token use, and cost. The reply appears as it
+is written: the terminal follows the same live feed the app does, so text and
+tool calls show up the moment the host has them.
 It draws with the app's own theme tokens — `--theme system|light|dark|octant`
 picks the preset, and the terminal's light or dark mode picks the palette.
 Enter sends, Shift+Enter adds a line, `/next N`, `/pause`, and `/resume` work
