@@ -923,11 +923,18 @@ Work also refuses when the previous driver is unavailable and its conversation
 ownership cannot be established.
 
 Optional Project and
-thread token spend ceilings (0060) are host owner policy: the server refuses a
-provider-consuming turn at admission when remaining reserved capacity cannot
-cover a declared per-turn bound, and the composer and Environment name a
-recovery. Spend is the existing `UsageRecord` ledger, never imported provider
-history.
+thread spend ceilings (0060) are host owner policy over three dimensions:
+tokens, turns, and total agent run time per window (for example two hours a
+day for a Project). The server refuses a provider-consuming turn at admission
+when remaining reserved token capacity cannot cover a declared per-turn bound,
+when the turn count is used up, or when settled plus in-flight run time has
+reached the budget, and the composer and Environment name the exhausted
+dimension and a recovery. Token spend is the existing `UsageRecord` ledger,
+never imported provider history. Turns and run time come from journaled
+`spend.turn-recorded@1` facts, one per admitted turn or child run, charged its
+actual admitted-to-settled time; a turn still in flight counts its elapsed time,
+and a turn a host exit interrupted records nothing. Monetary ceilings stay
+unenforced until pricing metadata exists.
 
 ### Native harness
 

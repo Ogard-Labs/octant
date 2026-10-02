@@ -726,7 +726,7 @@ export class WorkTurnService {
     if (spendAdmission?.status === "refused") {
       throw this.#failure("unavailable", spendAdmission.refusal.message);
     }
-    if (spendAdmission !== undefined && spendAdmission.reservedTokens > 0) {
+    if (spendAdmission !== undefined) {
       this.#spendReservations.set(String(command.requestId), spendReservationId);
     }
 

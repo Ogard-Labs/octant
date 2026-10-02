@@ -46,7 +46,7 @@ describe("ProjectSpendCeilingSection", () => {
     );
     expect(await screen.findByText(/No token ceiling is set on this Project/i)).toBeVisible();
     await user.type(screen.getByLabelText("Project token spend ceiling"), "50000");
-    await user.click(screen.getByRole("button", { name: "Set Project token ceiling" }));
+    await user.click(screen.getByRole("button", { name: "Set Project ceiling" }));
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "set-spend-ceiling",
@@ -56,5 +56,48 @@ describe("ProjectSpendCeilingSection", () => {
       }),
     );
     expect(await screen.findByText(/50,000 of 50,000 tokens remaining this month/i)).toBeVisible();
+  });
+
+  it("sets a daily Project agent run time ceiling without a token budget", async () => {
+    const user = userEvent.setup();
+    const projectId = "00000000-0000-4000-8000-000000000201";
+    const ceiling = {
+      scope: { kind: "project" as const, projectId },
+      window: { kind: "calendar" as const, period: "day" as const, timeZone: "UTC" },
+      policy: { runTimeBudgetSeconds: 7_200 },
+      version: 1,
+      setAt: "2026-09-17T00:00:00.000Z",
+      setBy: { kind: "local-user" as const, actorId: "host" },
+    };
+    const execute = vi.fn(async () => ({ kind: "set" as const, ceiling }));
+    const snapshot = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({
+        project: ceiling,
+        projectRemaining: {
+          ceilingRunTimeSeconds: 7_200,
+          usedRunTimeSeconds: 2_700,
+          remainingRunTimeSeconds: 4_500,
+          window: ceiling.window,
+          version: 1,
+        },
+      });
+    render(
+      <ProjectSpendCeilingSection client={{ snapshot, execute } as never} projectId={projectId} />,
+    );
+    await screen.findByText(/No token ceiling is set on this Project/i);
+    await user.type(screen.getByLabelText("Project agent run time ceiling in hours"), "2");
+    await user.click(screen.getByRole("combobox", { name: "Project ceiling window" }));
+    await user.click(await screen.findByRole("option", { name: "Each day" }));
+    await user.click(screen.getByRole("button", { name: "Set Project ceiling" }));
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "set-spend-ceiling",
+        policy: { runTimeBudgetSeconds: 7_200 },
+        window: expect.objectContaining({ kind: "calendar", period: "day" }),
+      }),
+    );
+    expect(await screen.findByText("1h 15m of 2h agent run time remaining this day")).toBeVisible();
   });
 });

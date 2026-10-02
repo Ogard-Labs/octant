@@ -5,6 +5,7 @@ import {
   LOCAL_HOST_ID,
   SPEND_CEILING_AGGREGATE_TYPE,
   SPEND_CEILING_EVENT_NAMES,
+  SPEND_TURN_AGGREGATE_TYPE,
   decodeSpendCeilingReservationId,
   decodeUtcTimestamp,
   type SpendCeilingCommand,
@@ -53,6 +54,18 @@ export interface SpendCeilingTurnRequest {
   readonly childSubjectIds?: ReadonlyArray<string>;
 }
 
+interface InFlightTurn {
+  readonly threadType: SpendCeilingThreadType;
+  readonly threadId: string;
+  readonly projectId?: string;
+  readonly startedAt: string;
+}
+
+interface TurnUse {
+  readonly turns: number;
+  readonly runTimeMs: number;
+}
+
 interface LiveReservation {
   readonly reservationId: string;
   readonly reservedTokens: number;
@@ -76,9 +89,11 @@ export interface SpendCeilingServiceOptions {
 }
 
 /**
- * Host-owned token spend ceilings. Policy is journaled; in-flight reservations
- * live in memory so a crash releases them instead of leaking capacity. Committed
+ * Host-owned spend ceilings. Policy is journaled; in-flight reservations live in
+ * memory so a crash releases them instead of leaking capacity. Committed token
  * spend is the existing usage projection, never imported provider history.
+ * Every admitted turn is journaled when it settles, so turn and run-time
+ * ceilings count work from before a ceiling was set and across restart.
  */
 export class SpendCeilingService {
   readonly #connection: SqliteConnection;
@@ -89,6 +104,7 @@ export class SpendCeilingService {
   readonly #threadExists: SpendCeilingServiceOptions["threadExists"];
   readonly #projectExists: SpendCeilingServiceOptions["projectExists"];
   readonly #reservations = new Map<string, LiveReservation>();
+  readonly #turns = new Map<string, InFlightTurn>();
 
   constructor(options: SpendCeilingServiceOptions) {
     this.#connection = options.connection;
@@ -127,10 +143,16 @@ export class SpendCeilingService {
     const project =
       projectScope === undefined ? undefined : readSpendCeiling(this.#connection, projectScope);
     const childIds = input.threadId === undefined ? [] : this.#childSubjectIds(input.threadId);
-    const threadRemaining = thread === undefined ? undefined : this.#remaining(thread, childIds);
-    const projectRemaining = project === undefined ? undefined : this.#remaining(project, childIds);
-    const threadFacts = this.#facts(thread, threadRemaining);
-    const projectFacts = this.#facts(project, projectRemaining);
+    const threadFacts = thread === undefined ? undefined : this.#facts(thread, childIds);
+    const projectFacts = project === undefined ? undefined : this.#facts(project, childIds);
+    const threadRemaining =
+      thread === undefined || threadFacts === undefined
+        ? undefined
+        : this.#remaining(thread, threadFacts);
+    const projectRemaining =
+      project === undefined || projectFacts === undefined
+        ? undefined
+        : this.#remaining(project, projectFacts);
     const preview = evaluateSpendCeilingAdmission({
       ...(threadFacts === undefined ? {} : { thread: threadFacts }),
       ...(projectFacts === undefined ? {} : { project: projectFacts }),
@@ -171,29 +193,44 @@ export class SpendCeilingService {
       command.kind === "raise-spend-ceiling"
         ? SPEND_CEILING_EVENT_NAMES.raised
         : SPEND_CEILING_EVENT_NAMES.set;
-    this.#append(command.scope, current?.version ?? 0, eventName, {
-      ceiling: decision.next,
+    const previous = {
       ...(decision.previousTokenBudget === undefined
         ? {}
         : { previousTokenBudget: decision.previousTokenBudget }),
+      ...(decision.previousTurnBudget === undefined
+        ? {}
+        : { previousTurnBudget: decision.previousTurnBudget }),
+      ...(decision.previousRunTimeBudgetSeconds === undefined
+        ? {}
+        : { previousRunTimeBudgetSeconds: decision.previousRunTimeBudgetSeconds }),
+    };
+    this.#append(command.scope, current?.version ?? 0, eventName, {
+      ceiling: decision.next,
+      ...previous,
     });
     return command.kind === "raise-spend-ceiling"
-      ? {
-          kind: "raised",
-          ceiling: decision.next,
-          previousTokenBudget: decision.previousTokenBudget ?? decision.next.policy.tokenBudget,
-        }
+      ? { kind: "raised", ceiling: decision.next, ...previous }
       : { kind: "set", ceiling: decision.next };
   }
 
   admit(request: SpendCeilingTurnRequest): SpendCeilingAdmission {
-    return this.#admit(request);
+    const admission = this.#admit(request);
+    if (admission.status === "admitted") {
+      this.#turns.set(String(request.reservationId), {
+        threadType: request.threadType,
+        threadId: request.threadId,
+        ...(request.projectId === undefined ? {} : { projectId: request.projectId }),
+        startedAt: this.#clock(),
+      });
+    }
+    return admission;
   }
 
   settle(input: {
     readonly reservationId: SpendCeilingReservationId;
     readonly observedTokens?: number;
   }): void {
+    this.#recordTurn(input.reservationId);
     const live = this.#reservations.get(String(input.reservationId));
     if (live === undefined) return;
     const settlement = settleSpendCeilingReservation({
@@ -235,10 +272,8 @@ export class SpendCeilingService {
       ...this.#childSubjectIds(request.threadId),
       ...(request.childSubjectIds ?? []),
     ];
-    const threadRemaining = thread === undefined ? undefined : this.#remaining(thread, childIds);
-    const projectRemaining = project === undefined ? undefined : this.#remaining(project, childIds);
-    const threadFacts = this.#facts(thread, threadRemaining);
-    const projectFacts = this.#facts(project, projectRemaining);
+    const threadFacts = thread === undefined ? undefined : this.#facts(thread, childIds);
+    const projectFacts = project === undefined ? undefined : this.#facts(project, childIds);
     const admission = evaluateSpendCeilingAdmission({
       ...(threadFacts === undefined ? {} : { thread: threadFacts }),
       ...(projectFacts === undefined ? {} : { project: projectFacts }),
@@ -258,38 +293,59 @@ export class SpendCeilingService {
     return admission;
   }
 
-  #remaining(
-    ceiling: SpendCeilingState,
-    childIds: ReadonlyArray<string>,
-  ): SpendCeilingRemaining | undefined {
-    const from = spendCeilingWindowStart(ceiling.window, decodeUtcTimestamp(this.#clock()));
-    const committed = this.#committedSpend(ceiling.scope, childIds, from);
-    if (committed.status !== "known") return undefined;
-    const reservedTokens = this.#reservedFor(ceiling.scope);
+  #remaining(ceiling: SpendCeilingState, facts: SpendCeilingScopeFacts): SpendCeilingRemaining {
+    const { tokenBudget, turnBudget, runTimeBudgetSeconds } = ceiling.policy;
+    const tokens =
+      tokenBudget === undefined || facts.committed.status !== "known"
+        ? {}
+        : {
+            ceilingTokens: tokenBudget,
+            committedTokens: facts.committed.tokens,
+            reservedTokens: facts.reservedTokens,
+            remainingTokens: remainingSpendCeilingTokens({
+              tokenBudget,
+              committedTokens: facts.committed.tokens,
+              reservedTokens: facts.reservedTokens,
+            }),
+          };
+    const turns =
+      turnBudget === undefined || facts.usedTurns === undefined
+        ? {}
+        : {
+            ceilingTurns: turnBudget,
+            usedTurns: facts.usedTurns,
+            remainingTurns: Math.max(0, turnBudget - facts.usedTurns),
+          };
+    const usedSeconds =
+      facts.usedRunTimeMs === undefined ? undefined : Math.floor(facts.usedRunTimeMs / 1_000);
+    const runTime =
+      runTimeBudgetSeconds === undefined || usedSeconds === undefined
+        ? {}
+        : {
+            ceilingRunTimeSeconds: runTimeBudgetSeconds,
+            usedRunTimeSeconds: usedSeconds,
+            remainingRunTimeSeconds: Math.max(0, runTimeBudgetSeconds - usedSeconds),
+          };
     return {
-      ceilingTokens: ceiling.policy.tokenBudget,
-      committedTokens: committed.tokens,
-      reservedTokens,
-      remainingTokens: remainingSpendCeilingTokens({
-        tokenBudget: ceiling.policy.tokenBudget,
-        committedTokens: committed.tokens,
-        reservedTokens,
-      }),
+      ...tokens,
+      ...turns,
+      ...runTime,
       window: ceiling.window,
       ...(ceiling.overrun === undefined ? {} : { overrun: ceiling.overrun }),
       version: ceiling.version,
     };
   }
 
-  #facts(
-    ceiling: SpendCeilingState | undefined,
-    remaining: SpendCeilingRemaining | undefined,
-  ): SpendCeilingScopeFacts | undefined {
-    if (ceiling === undefined) return undefined;
+  #facts(ceiling: SpendCeilingState, childIds: ReadonlyArray<string>): SpendCeilingScopeFacts {
+    const now = decodeUtcTimestamp(this.#clock());
+    const from = spendCeilingWindowStart(ceiling.window, now);
     const committed: SpendTokenTotal =
-      remaining === undefined
-        ? { status: "unavailable" }
-        : { status: "known", tokens: remaining.committedTokens };
+      ceiling.policy.tokenBudget === undefined
+        ? { status: "known", tokens: 0 }
+        : this.#committedSpend(ceiling.scope, childIds, from);
+    const needsTurns =
+      ceiling.policy.turnBudget !== undefined || ceiling.policy.runTimeBudgetSeconds !== undefined;
+    const used = needsTurns ? this.#turnUse(ceiling.scope, from, now) : undefined;
     return {
       scopeKind: ceiling.scope.kind,
       scopeId:
@@ -298,9 +354,68 @@ export class SpendCeilingService {
           : String(ceiling.scope.threadId),
       policy: ceiling.policy,
       committed,
-      reservedTokens: remaining?.reservedTokens ?? this.#reservedFor(ceiling.scope),
+      reservedTokens: this.#reservedFor(ceiling.scope),
       ...(ceiling.overrun === undefined ? {} : { overrun: ceiling.overrun }),
+      ...(used === undefined ? {} : { usedTurns: used.turns, usedRunTimeMs: used.runTimeMs }),
     };
+  }
+
+  /**
+   * Settled turns in the window plus every in-flight turn, whose elapsed time
+   * so far counts so concurrent turns cannot each start against the same
+   * remaining run time.
+   */
+  #turnUse(scope: SpendCeilingScope, from: string | undefined, now: string): TurnUse | undefined {
+    const column = scope.kind === "project" ? "project_id" : "thread_id";
+    const id = scope.kind === "project" ? String(scope.projectId) : String(scope.threadId);
+    let row: { readonly turns: number; readonly run_time_ms: number } | undefined;
+    try {
+      row = this.#connection
+        .prepare(
+          `SELECT COUNT(*) AS turns, COALESCE(SUM(run_time_ms), 0) AS run_time_ms
+          FROM spend_turn_projection
+          WHERE ${column} = ?${from === undefined ? "" : " AND settled_at >= ?"}`,
+        )
+        .get(...(from === undefined ? [id] : [id, from])) as
+        | { readonly turns: number; readonly run_time_ms: number }
+        | undefined;
+    } catch {
+      return undefined;
+    }
+    if (row === undefined) return undefined;
+    let turns = row.turns;
+    let runTimeMs = row.run_time_ms;
+    const nowMs = Date.parse(now);
+    for (const turn of this.#turns.values()) {
+      const matches = scope.kind === "project" ? turn.projectId === id : turn.threadId === id;
+      if (!matches) continue;
+      turns += 1;
+      runTimeMs += Math.max(0, nowMs - Date.parse(turn.startedAt));
+    }
+    if (!Number.isSafeInteger(turns) || !Number.isSafeInteger(runTimeMs)) return undefined;
+    return { turns, runTimeMs };
+  }
+
+  #recordTurn(reservationId: SpendCeilingReservationId): void {
+    const turn = this.#turns.get(String(reservationId));
+    if (turn === undefined) return;
+    this.#turns.delete(String(reservationId));
+    const settledAt = decodeUtcTimestamp(this.#clock());
+    this.#appendTo(
+      SPEND_TURN_AGGREGATE_TYPE,
+      String(reservationId),
+      0,
+      SPEND_CEILING_EVENT_NAMES.turnRecorded,
+      {
+        reservationId,
+        threadType: turn.threadType,
+        threadId: turn.threadId,
+        ...(turn.projectId === undefined ? {} : { projectId: turn.projectId }),
+        startedAt: decodeUtcTimestamp(turn.startedAt),
+        settledAt,
+        runTimeMs: Math.max(0, Date.parse(settledAt) - Date.parse(turn.startedAt)),
+      },
+    );
   }
 
   #committedSpend(
@@ -394,11 +509,18 @@ export class SpendCeilingService {
     payload: unknown,
   ): void {
     const aggregateId = scope.kind === "project" ? String(scope.projectId) : String(scope.threadId);
+    this.#appendTo(SPEND_CEILING_AGGREGATE_TYPE, aggregateId, expectedVersion, eventName, payload);
+  }
+
+  #appendTo(
+    aggregateType: string,
+    aggregateId: string,
+    expectedVersion: number,
+    eventName: string,
+    payload: unknown,
+  ): void {
     this.#journal.append({
-      aggregate: {
-        aggregateType: SPEND_CEILING_AGGREGATE_TYPE,
-        aggregateId,
-      },
+      aggregate: { aggregateType, aggregateId },
       expectedVersion,
       events: [
         {

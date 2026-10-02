@@ -28,6 +28,10 @@ export interface SpendCeilingScopeFacts {
   readonly committed: SpendTokenTotal;
   readonly reservedTokens: number;
   readonly overrun?: SpendCeilingOverrun;
+  /** Settled plus in-flight provider turns in the window; absent when unknown. */
+  readonly usedTurns?: number;
+  /** Settled run time plus elapsed in-flight time in the window; absent when unknown. */
+  readonly usedRunTimeMs?: number;
 }
 
 export type SpendCeilingAdmission =
@@ -56,6 +60,8 @@ export type SpendCeilingCommandDecision =
       readonly status: "accepted";
       readonly next: SpendCeilingState;
       readonly previousTokenBudget?: number;
+      readonly previousTurnBudget?: number;
+      readonly previousRunTimeBudgetSeconds?: number;
     }
   | { readonly status: "cleared"; readonly scope: SpendCeilingScope }
   | { readonly status: "refused"; readonly refusal: SpendCeilingCommandRefusal };
@@ -70,6 +76,16 @@ function formatCount(value: number): string {
   return value.toLocaleString("en-US");
 }
 
+/** "2h", "1h 30m", "45m", or "30s": run-time budgets are set in hours or minutes. */
+export function formatSpendCeilingRunTime(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  if (whole < 60) return `${whole}s`;
+  const hours = Math.floor(whole / 3_600);
+  const minutes = Math.floor((whole % 3_600) / 60);
+  if (hours === 0) return `${minutes}m`;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
 function recoveryFor(kind: SpendCeilingRefusal["kind"]): SpendCeilingRefusal["recovery"] {
   if (kind === "missing-turn-bound") {
     return ["raise-ceiling", "pause-work"];
@@ -77,17 +93,38 @@ function recoveryFor(kind: SpendCeilingRefusal["kind"]): SpendCeilingRefusal["re
   return [...DEFAULT_RECOVERY];
 }
 
-function refusalMessage(input: {
+interface RefusalInput {
   readonly kind: SpendCeilingRefusal["kind"];
+  readonly dimension: SpendCeilingRefusal["dimension"];
   readonly scopeKind: "project" | "thread";
+  readonly scopeId: string;
   readonly remainingTokens?: number;
   readonly overrunTokens?: number;
   readonly ceilingTokens?: number;
   readonly neededTokens?: number;
-}): string {
+  readonly remainingTurns?: number;
+  readonly ceilingTurns?: number;
+  readonly remainingRunTimeSeconds?: number;
+  readonly ceilingRunTimeSeconds?: number;
+}
+
+function refusalMessage(input: RefusalInput): string {
   const who = scopeLabel(input.scopeKind);
+  const recovery = `Raise or clear the ceiling, open Usage for this ${who}, or pause work.`;
+  if (input.dimension === "turns") {
+    if (input.kind === "unknown-spend") {
+      return `This ${who}'s turn ceiling cannot be measured because its turn ledger is unavailable. ${recovery}`;
+    }
+    return `This ${who}'s turn ceiling of ${formatCount(input.ceilingTurns ?? 0)} turns is used up for this window. ${recovery}`;
+  }
+  if (input.dimension === "run-time") {
+    if (input.kind === "unknown-spend") {
+      return `This ${who}'s agent run time ceiling cannot be measured because its turn ledger is unavailable. ${recovery}`;
+    }
+    return `This ${who}'s agent run time ceiling of ${formatSpendCeilingRunTime(input.ceilingRunTimeSeconds ?? 0)} is used up for this window. ${recovery}`;
+  }
   if (input.kind === "unknown-spend") {
-    return `This ${who}'s token spend ceiling cannot be measured because recent usage is unavailable. Raise or clear the ceiling, open Usage for this ${who}, or pause work.`;
+    return `This ${who}'s token spend ceiling cannot be measured because recent usage is unavailable. ${recovery}`;
   }
   if (input.kind === "missing-turn-bound") {
     return `This ${who}'s token spend ceiling cannot admit a turn without a per-turn token bound. Raise the ceiling to set a per-turn maximum, or pause work.`;
@@ -102,53 +139,97 @@ function refusalMessage(input: {
       input.neededTokens === undefined
         ? ""
         : ` This turn needs ${formatCount(input.neededTokens)}.`;
-    return `This ${who}'s token spend ceiling has ${formatCount(input.remainingTokens)} tokens remaining of ${formatCount(input.ceilingTokens)}.${needed} Raise or clear the ceiling, open Usage for this ${who}, or pause work.`;
+    return `This ${who}'s token spend ceiling has ${formatCount(input.remainingTokens)} tokens remaining of ${formatCount(input.ceilingTokens)}.${needed} ${recovery}`;
   }
-  return `This ${who}'s token spend ceiling is exhausted. Raise or clear the ceiling, open Usage for this ${who}, or pause work.`;
+  return `This ${who}'s token spend ceiling is exhausted. ${recovery}`;
 }
 
-function makeRefusal(input: {
-  readonly kind: SpendCeilingRefusal["kind"];
-  readonly scopeKind: "project" | "thread";
-  readonly scopeId: string;
-  readonly remainingTokens?: number;
-  readonly overrunTokens?: number;
-  readonly ceilingTokens?: number;
-  readonly neededTokens?: number;
-}): SpendCeilingRefusal {
+function makeRefusal(input: RefusalInput): SpendCeilingRefusal {
   return {
     kind: input.kind,
     scopeKind: input.scopeKind,
     scopeId: input.scopeId,
-    dimension: "tokens",
+    dimension: input.dimension,
     ...(input.remainingTokens === undefined ? {} : { remainingTokens: input.remainingTokens }),
     ...(input.overrunTokens === undefined ? {} : { overrunTokens: input.overrunTokens }),
     ...(input.ceilingTokens === undefined ? {} : { ceilingTokens: input.ceilingTokens }),
+    ...(input.remainingTurns === undefined ? {} : { remainingTurns: input.remainingTurns }),
+    ...(input.ceilingTurns === undefined ? {} : { ceilingTurns: input.ceilingTurns }),
+    ...(input.remainingRunTimeSeconds === undefined
+      ? {}
+      : { remainingRunTimeSeconds: input.remainingRunTimeSeconds }),
+    ...(input.ceilingRunTimeSeconds === undefined
+      ? {}
+      : { ceilingRunTimeSeconds: input.ceilingRunTimeSeconds }),
     recovery: recoveryFor(input.kind),
     message: refusalMessage(input),
   };
 }
 
-function remainingTokens(facts: SpendCeilingScopeFacts): number | undefined {
+function remainingTokens(facts: SpendCeilingScopeFacts, tokenBudget: number): number | undefined {
   if (facts.committed.status !== "known") return undefined;
-  return Math.max(0, facts.policy.tokenBudget - facts.committed.tokens - facts.reservedTokens);
+  return Math.max(0, tokenBudget - facts.committed.tokens - facts.reservedTokens);
 }
 
-function configuredTurnBound(
-  project: SpendCeilingScopeFacts | undefined,
-  thread: SpendCeilingScopeFacts | undefined,
-): number | undefined {
-  const bounds = [project?.policy.maxTokensPerTurn, thread?.policy.maxTokensPerTurn].filter(
-    (value): value is number => value !== undefined,
-  );
+function configuredTurnBound(scopes: ReadonlyArray<SpendCeilingScopeFacts>): number | undefined {
+  const bounds = scopes
+    .map((facts) => facts.policy.maxTokensPerTurn)
+    .filter((value): value is number => value !== undefined);
   if (bounds.length === 0) return undefined;
   return Math.min(...bounds);
 }
 
+function refuseTurnsOrRunTime(facts: SpendCeilingScopeFacts): SpendCeilingRefusal | undefined {
+  const { turnBudget, runTimeBudgetSeconds } = facts.policy;
+  const where = { scopeKind: facts.scopeKind, scopeId: facts.scopeId } as const;
+  if (turnBudget !== undefined) {
+    if (facts.usedTurns === undefined) {
+      return makeRefusal({
+        ...where,
+        kind: "unknown-spend",
+        dimension: "turns",
+        ceilingTurns: turnBudget,
+      });
+    }
+    if (facts.usedTurns >= turnBudget) {
+      return makeRefusal({
+        ...where,
+        kind: "exhausted",
+        dimension: "turns",
+        remainingTurns: 0,
+        ceilingTurns: turnBudget,
+      });
+    }
+  }
+  if (runTimeBudgetSeconds !== undefined) {
+    if (facts.usedRunTimeMs === undefined) {
+      return makeRefusal({
+        ...where,
+        kind: "unknown-spend",
+        dimension: "run-time",
+        ceilingRunTimeSeconds: runTimeBudgetSeconds,
+      });
+    }
+    if (facts.usedRunTimeMs >= runTimeBudgetSeconds * 1_000) {
+      return makeRefusal({
+        ...where,
+        kind: "exhausted",
+        dimension: "run-time",
+        remainingRunTimeSeconds: 0,
+        ceilingRunTimeSeconds: runTimeBudgetSeconds,
+      });
+    }
+  }
+  return undefined;
+}
+
 /**
  * Admit a provider-consuming turn against the intersection of Project and
- * thread token ceilings. Reservations are counted in `reservedTokens` so two
- * concurrent admits cannot both take the same remaining capacity.
+ * thread ceilings. Token reservations are counted in `reservedTokens` so two
+ * concurrent admits cannot both take the same remaining capacity. Turn and
+ * run-time budgets count in-flight turns, so a turn is admitted while any turn
+ * and any run time remains; a turn already running is never cut off when the
+ * run-time budget runs out, the next admission refuses instead.
  */
 export function evaluateSpendCeilingAdmission(input: {
   readonly project?: SpendCeilingScopeFacts;
@@ -172,13 +253,26 @@ export function evaluateSpendCeilingAdmission(input: {
         status: "refused",
         refusal: makeRefusal({
           kind: "overrun",
+          dimension: "tokens",
           scopeKind: facts.scopeKind,
           scopeId: facts.scopeId,
           overrunTokens,
-          ceilingTokens: facts.policy.tokenBudget,
+          ...(facts.policy.tokenBudget === undefined
+            ? {}
+            : { ceilingTokens: facts.policy.tokenBudget }),
         }),
       };
     }
+  }
+
+  for (const facts of scopes) {
+    const refusal = refuseTurnsOrRunTime(facts);
+    if (refusal !== undefined) return { status: "refused", refusal };
+  }
+
+  const tokenScopes = scopes.filter((facts) => facts.policy.tokenBudget !== undefined);
+  if (tokenScopes.length === 0) {
+    return { status: "admitted", reservedTokens: 0, reservations: [] };
   }
 
   const bound =
@@ -186,43 +280,49 @@ export function evaluateSpendCeilingAdmission(input: {
     Number.isSafeInteger(input.turnUpperBoundTokens) &&
     input.turnUpperBoundTokens > 0
       ? input.turnUpperBoundTokens
-      : configuredTurnBound(input.project, input.thread);
+      : configuredTurnBound(tokenScopes);
 
   if (bound === undefined || !Number.isSafeInteger(bound) || bound <= 0) {
-    const facts = scopes[0]!;
+    const facts = tokenScopes[0];
     return {
       status: "refused",
       refusal: makeRefusal({
         kind: "missing-turn-bound",
-        scopeKind: facts.scopeKind,
-        scopeId: facts.scopeId,
-        ceilingTokens: facts.policy.tokenBudget,
+        dimension: "tokens",
+        scopeKind: facts?.scopeKind ?? "thread",
+        scopeId: facts?.scopeId ?? "",
+        ...(facts?.policy.tokenBudget === undefined
+          ? {}
+          : { ceilingTokens: facts.policy.tokenBudget }),
       }),
     };
   }
 
-  for (const facts of scopes) {
+  for (const facts of tokenScopes) {
+    const tokenBudget = facts.policy.tokenBudget ?? 0;
     if (facts.committed.status !== "known") {
       return {
         status: "refused",
         refusal: makeRefusal({
           kind: "unknown-spend",
+          dimension: "tokens",
           scopeKind: facts.scopeKind,
           scopeId: facts.scopeId,
-          ceilingTokens: facts.policy.tokenBudget,
+          ceilingTokens: tokenBudget,
         }),
       };
     }
-    const remaining = remainingTokens(facts);
+    const remaining = remainingTokens(facts, tokenBudget);
     if (remaining === undefined || remaining < bound) {
       return {
         status: "refused",
         refusal: makeRefusal({
           kind: "exhausted",
+          dimension: "tokens",
           scopeKind: facts.scopeKind,
           scopeId: facts.scopeId,
           remainingTokens: remaining ?? 0,
-          ceilingTokens: facts.policy.tokenBudget,
+          ceilingTokens: tokenBudget,
           neededTokens: bound,
         }),
       };
@@ -232,7 +332,7 @@ export function evaluateSpendCeilingAdmission(input: {
   return {
     status: "admitted",
     reservedTokens: bound,
-    reservations: scopes.map((facts) => ({
+    reservations: tokenScopes.map((facts) => ({
       scopeKind: facts.scopeKind,
       scopeId: facts.scopeId,
       reservedTokens: bound,
@@ -409,7 +509,7 @@ function validateWindow(
   if (scope.kind === "project" && window.kind !== "calendar") {
     return commandRefusal(
       "invalid-window",
-      "A Project token ceiling uses a calendar day, week, or month in the host time zone.",
+      "A Project ceiling uses a calendar day, week, or month in the host time zone.",
     );
   }
   return undefined;
@@ -454,21 +554,58 @@ export function decideSpendCeilingCommand(input: {
     if (input.current === undefined) {
       return commandRefusal("ceiling-not-set", "There is no spend ceiling to raise.");
     }
-    if (input.command.tokenBudget <= input.current.policy.tokenBudget) {
-      return commandRefusal(
-        "not-a-raise",
-        "Raising a token ceiling requires a budget strictly above the current one.",
-      );
+    const current = input.current.policy;
+    const raises = [
+      ["token", input.command.tokenBudget, current.tokenBudget],
+      ["turn", input.command.turnBudget, current.turnBudget],
+      ["run-time", input.command.runTimeBudgetSeconds, current.runTimeBudgetSeconds],
+    ] as const;
+    for (const [dimension, next, previous] of raises) {
+      if (next === undefined) continue;
+      if (previous === undefined) {
+        return commandRefusal(
+          "not-a-raise",
+          `This ceiling has no ${dimension} budget to raise. Clear it and set a new ceiling to add one.`,
+        );
+      }
+      if (next <= previous) {
+        return commandRefusal(
+          "not-a-raise",
+          `Raising a ${dimension} ceiling requires a budget strictly above the current one.`,
+        );
+      }
     }
-    const { overrun: _cleared, ...withoutOverrun } = input.current;
+    // An overrun is a token fact; only a wider token budget resolves it.
+    const { overrun, ...withoutOverrun } = input.current;
+    const base =
+      input.command.tokenBudget === undefined || overrun === undefined
+        ? input.current
+        : withoutOverrun;
     return {
       status: "accepted",
-      previousTokenBudget: input.current.policy.tokenBudget,
+      ...(input.command.tokenBudget === undefined || current.tokenBudget === undefined
+        ? {}
+        : { previousTokenBudget: current.tokenBudget }),
+      ...(input.command.turnBudget === undefined || current.turnBudget === undefined
+        ? {}
+        : { previousTurnBudget: current.turnBudget }),
+      ...(input.command.runTimeBudgetSeconds === undefined ||
+      current.runTimeBudgetSeconds === undefined
+        ? {}
+        : { previousRunTimeBudgetSeconds: current.runTimeBudgetSeconds }),
       next: {
-        ...withoutOverrun,
+        ...base,
         policy: {
-          ...input.current.policy,
-          tokenBudget: input.command.tokenBudget,
+          ...current,
+          ...(input.command.tokenBudget === undefined
+            ? {}
+            : { tokenBudget: input.command.tokenBudget }),
+          ...(input.command.turnBudget === undefined
+            ? {}
+            : { turnBudget: input.command.turnBudget }),
+          ...(input.command.runTimeBudgetSeconds === undefined
+            ? {}
+            : { runTimeBudgetSeconds: input.command.runTimeBudgetSeconds }),
         },
         version: (actual + 1) as SpendCeilingState["version"],
         setAt: input.now,

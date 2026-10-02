@@ -4,6 +4,20 @@ import type { SpendCeilingClient } from "@octant/client-runtime/spend-ceiling-cl
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantSelectField } from "../ui/base/OctantSelect";
+import { spendCeilingLimits, spendCeilingRemainingPhrases } from "./spendCeilingLimits";
+
+type CalendarPeriod = "day" | "week" | "month";
+
+const PERIOD_OPTIONS = [
+  { id: "day", label: "Each day" },
+  { id: "week", label: "Each week" },
+  { id: "month", label: "Each month" },
+] as const;
+
+function isCalendarPeriod(value: string): value is CalendarPeriod {
+  return value === "day" || value === "week" || value === "month";
+}
 
 export function ProjectSpendCeilingSection(props: {
   readonly client: SpendCeilingClient;
@@ -11,6 +25,9 @@ export function ProjectSpendCeilingSection(props: {
 }) {
   const [snapshot, setSnapshot] = useState<SpendCeilingSnapshot | undefined>(undefined);
   const [budget, setBudget] = useState("");
+  const [turns, setTurns] = useState("");
+  const [hours, setHours] = useState("");
+  const [period, setPeriod] = useState<CalendarPeriod>("month");
   const [message, setMessage] = useState<string | undefined>(undefined);
   const scope = { kind: "project" as const, projectId: decodeProjectId(props.projectId) };
 
@@ -33,9 +50,11 @@ export function ProjectSpendCeilingSection(props: {
   const remaining = snapshot?.projectRemaining;
   const ceilingSet = snapshot?.project !== undefined;
   const version = snapshot?.project?.version ?? 0;
+  const window = remaining?.window;
+  const windowPeriod = window?.kind === "calendar" ? window.period : period;
 
   async function submit(kind: "set" | "raise" | "clear"): Promise<void> {
-    const tokenBudget = Number.parseInt(budget, 10);
+    const limits = spendCeilingLimits({ tokens: budget, turns, hours });
     const expectedVersion = decodeAggregateVersion(version);
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const command =
@@ -46,14 +65,14 @@ export function ProjectSpendCeilingSection(props: {
               kind: "raise-spend-ceiling" as const,
               scope,
               expectedVersion,
-              tokenBudget,
+              ...limits,
             }
           : {
               kind: "set-spend-ceiling" as const,
               scope,
               expectedVersion,
-              policy: { tokenBudget },
-              window: { kind: "calendar" as const, period: "month" as const, timeZone },
+              policy: limits,
+              window: { kind: "calendar" as const, period, timeZone },
             };
     try {
       const result = await props.client.execute(command);
@@ -70,16 +89,18 @@ export function ProjectSpendCeilingSection(props: {
 
   return (
     <section aria-label="Project spend ceiling" className="project-overview__ceiling">
-      <h3>Token spend ceiling</h3>
+      <h3>Spend ceiling</h3>
       {remaining === undefined ? (
         <p role="note">
           No token ceiling is set on this Project. A turn must also stay under any thread ceiling.
-          Setting one is a host owner command. The window is this calendar month.
+          Setting one is a host owner command. Tokens, turns, and total agent run time each count
+          over the calendar window you choose.
         </p>
       ) : (
         <p role="status">
-          {remaining.remainingTokens.toLocaleString()} of {remaining.ceilingTokens.toLocaleString()}{" "}
-          tokens remaining this month
+          {spendCeilingRemainingPhrases([remaining])
+            .map((phrase) => `${phrase} this ${windowPeriod}`)
+            .join(" · ")}
         </p>
       )}
       <form
@@ -93,10 +114,35 @@ export function ProjectSpendCeilingSection(props: {
           aria-label="Project token spend ceiling"
           inputMode="numeric"
           onChange={(event) => setBudget(event.target.value)}
+          placeholder="Tokens"
           value={budget}
         />
+        <OctantInput
+          aria-label="Project turn ceiling"
+          inputMode="numeric"
+          onChange={(event) => setTurns(event.target.value)}
+          placeholder="Turns"
+          value={turns}
+        />
+        <OctantInput
+          aria-label="Project agent run time ceiling in hours"
+          inputMode="decimal"
+          onChange={(event) => setHours(event.target.value)}
+          placeholder="Hours of agent run time"
+          value={hours}
+        />
+        {ceilingSet ? null : (
+          <OctantSelectField
+            aria-label="Project ceiling window"
+            onValueChange={(value) => {
+              if (isCalendarPeriod(value)) setPeriod(value);
+            }}
+            options={PERIOD_OPTIONS}
+            value={period}
+          />
+        )}
         <OctantButton type="submit" variant="outline">
-          {ceilingSet ? "Raise Project token ceiling" : "Set Project token ceiling"}
+          {ceilingSet ? "Raise Project ceiling" : "Set Project ceiling"}
         </OctantButton>
         {ceilingSet ? (
           <OctantButton onClick={() => void submit("clear")} type="button" variant="ghost">
