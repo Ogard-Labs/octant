@@ -1044,6 +1044,8 @@ native harness in `apps/server/src/harness`:
   subagent.
 - **Session.** `NativeHarnessSessionStore` journals one session per thread:
   routing decisions, turn records, context reductions, advisor interventions,
+  the steering notes a person typed (queued, handed to the lead inside a tool
+  result, dropped at the turn's end — so a restart keeps an undelivered one),
   the questions a lead asked with how each was
   settled, and — on each turn record — the last calls the lead made (tool,
   what it asked for, ok/refused/failed, duration), noted live on the session

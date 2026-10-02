@@ -11,6 +11,9 @@ import {
   decodeNativeHarnessSession,
   decodeNativeHarnessSessionId,
   decodeNativeHarnessSessionView,
+  decodeNativeHarnessSteeringCleared,
+  decodeNativeHarnessSteeringDelivered,
+  decodeNativeHarnessSteeringQueued,
   decodeUtcTimestamp,
   type NativeHarnessAdvisorIntervention,
   type NativeHarnessContextReduction,
@@ -79,7 +82,7 @@ export class NativeHarnessSessionStore {
   readonly #records = new Map<string, SessionRecord>();
   /** Calls of the turn running now, per thread; journaled with the turn when it ends. */
   readonly #activeTools = new Map<string, NativeHarnessToolCall[]>();
-  /** Notes typed during the running turn, per thread; delivered at the next tool step. */
+  /** Notes typed while the lead works, per thread, rebuilt from the journal; delivered at the next tool step. */
   readonly #steering = new Map<string, NativeHarnessSteeringNote[]>();
 
   constructor(options: NativeHarnessSessionStoreOptions) {
@@ -266,39 +269,84 @@ export class NativeHarnessSessionStore {
     return settled;
   }
 
-  queueSteering(threadId: string, note: NativeHarnessSteeringNote): boolean {
-    const notes = this.#steering.get(threadId) ?? [];
-    if (
-      notes.filter((entry) => entry.status === "queued").length >= MAX_NATIVE_HARNESS_STEERING_NOTES
-    ) {
-      return false;
-    }
-    notes.push(note);
-    while (notes.length > MAX_NATIVE_HARNESS_STEERING_NOTES) notes.shift();
-    this.#steering.set(threadId, notes);
-    return true;
+  /**
+   * Queues a note typed while the lead works. It is journaled before it
+   * counts, so a note sent just before a restart still reaches the lead on
+   * the next turn instead of vanishing with the process.
+   */
+  queueSteering(
+    threadId: string,
+    note: NativeHarnessSteeringNote,
+  ): "queued" | "full" | "no-session" {
+    const record = this.#records.get(threadId);
+    if (record === undefined) return "no-session";
+    const queued = (this.#steering.get(threadId) ?? []).filter(
+      (entry) => entry.status === "queued",
+    );
+    if (queued.length >= MAX_NATIVE_HARNESS_STEERING_NOTES) return "full";
+    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringQueued, {
+      sessionId: record.session.id,
+      note,
+    });
+    this.#applySteeringQueued(threadId, note);
+    return "queued";
   }
 
   /** Queued notes, marked delivered, for the tool step that carries them to the lead. */
   deliverSteering(threadId: string): ReadonlyArray<string> {
-    const notes = this.#steering.get(threadId) ?? [];
-    const queued = notes.filter((entry) => entry.status === "queued");
-    if (queued.length === 0) return [];
-    this.#steering.set(
-      threadId,
-      notes.map((entry) => (entry.status === "queued" ? { ...entry, status: "delivered" } : entry)),
+    const record = this.#records.get(threadId);
+    const queued = (this.#steering.get(threadId) ?? []).filter(
+      (entry) => entry.status === "queued",
     );
+    if (record === undefined || queued.length === 0) return [];
+    const noteIds = queued.map((entry) => entry.id);
+    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringDelivered, {
+      sessionId: record.session.id,
+      noteIds,
+    });
+    this.#applySteeringDelivered(threadId, noteIds);
     return queued.map((entry) => entry.text);
   }
 
   clearSteering(threadId: string, which: "delivered" | "all"): void {
-    if (which === "all") {
-      this.#steering.delete(threadId);
-      return;
-    }
-    const remaining = (this.#steering.get(threadId) ?? []).filter(
-      (entry) => entry.status === "queued",
+    const record = this.#records.get(threadId);
+    const notes = this.#steering.get(threadId) ?? [];
+    const dropping =
+      which === "all" ? notes.length : notes.filter((entry) => entry.status === "delivered").length;
+    // A turn ends with nothing delivered far more often than not; only a
+    // change worth replaying is journaled.
+    if (record === undefined || dropping === 0) return;
+    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringCleared, {
+      sessionId: record.session.id,
+      which,
+    });
+    this.#applySteeringCleared(threadId, which);
+  }
+
+  #applySteeringQueued(threadId: string, note: NativeHarnessSteeringNote): void {
+    const notes = this.#steering.get(threadId) ?? [];
+    notes.push(note);
+    while (notes.length > MAX_NATIVE_HARNESS_STEERING_NOTES) notes.shift();
+    this.#steering.set(threadId, notes);
+  }
+
+  #applySteeringDelivered(threadId: string, noteIds: ReadonlyArray<string>): void {
+    const delivered = new Set(noteIds.map(String));
+    const notes = this.#steering.get(threadId);
+    if (notes === undefined) return;
+    this.#steering.set(
+      threadId,
+      notes.map((entry) =>
+        delivered.has(String(entry.id)) ? { ...entry, status: "delivered" as const } : entry,
+      ),
     );
+  }
+
+  #applySteeringCleared(threadId: string, which: "delivered" | "all"): void {
+    const remaining =
+      which === "all"
+        ? []
+        : (this.#steering.get(threadId) ?? []).filter((entry) => entry.status === "queued");
     if (remaining.length === 0) this.#steering.delete(threadId);
     else this.#steering.set(threadId, remaining);
   }
@@ -504,6 +552,12 @@ export class NativeHarnessSessionStore {
     } else if (eventName === names.resumed) {
       const { detail: _detail, ...rest } = record.session;
       record.session = { ...rest, status: "idle" };
+    } else if (eventName === names.steeringQueued) {
+      this.#applySteeringQueued(threadId, decodeNativeHarnessSteeringQueued(payload).note);
+    } else if (eventName === names.steeringDelivered) {
+      this.#applySteeringDelivered(threadId, decodeNativeHarnessSteeringDelivered(payload).noteIds);
+    } else if (eventName === names.steeringCleared) {
+      this.#applySteeringCleared(threadId, decodeNativeHarnessSteeringCleared(payload).which);
     }
   }
 }

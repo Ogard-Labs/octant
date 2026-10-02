@@ -43,7 +43,7 @@ export interface NativeHarnessSessionRouteDependencies {
   readonly steer?: (input: {
     readonly threadId: string;
     readonly command: SteerNativeHarnessSession;
-  }) => boolean;
+  }) => "queued" | "cleared" | "full" | "no-session";
   /** Settles a pending question from any surface; the outcome says why it could not. */
   readonly answerQuestion?: (input: {
     readonly threadId: string;
@@ -194,8 +194,15 @@ export function createNativeHarnessSessionRouteHandler(
       } catch {
         return failure("Native harness steering note is invalid.", 400, origin);
       }
-      const accepted = dependencies.steer?.({ threadId, command }) ?? false;
-      if (!accepted) return failure("The steering queue is full.", 409, origin);
+      const outcome = dependencies.steer?.({ threadId, command }) ?? "no-session";
+      if (outcome === "full") return failure("The steering queue is full.", 409, origin);
+      if (outcome === "no-session") {
+        return failure(
+          "This thread has no harness run to steer yet. Send a message to start one.",
+          409,
+          origin,
+        );
+      }
       return json({ view: dependencies.store.read(threadId) ?? null }, 200, origin);
     }
 

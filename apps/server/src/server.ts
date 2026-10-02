@@ -5294,7 +5294,7 @@ export function startOctantServer(
       steer: ({ threadId, command }) => {
         if (command.kind === "clear") {
           nativeHarnessSessionsLive.clearSteering(threadId, "all");
-          return true;
+          return "cleared";
         }
         return nativeHarnessSessionsLive.queueSteering(threadId, {
           id: randomUUID(),
