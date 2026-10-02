@@ -79,9 +79,13 @@ remain in the thread draft store; approval requests keep their explicit controls
 Thread titles appear once in the title row. A thread pane's title row is its
 drag handle: an environment mark (a small neutral tile holding a laptop glyph
 when the thread runs on this computer, a cloud glyph and the host's name when
-it runs on another host), the title, and a quiet chip naming the Project, with
-the branch for Code. The chip truncates before the title does and is omitted
-without a Project. A surface that is not a thread shows no environment mark.
+it runs on another host), the title, a quiet chip naming the Project, and for
+Code a second chip naming the branch. The chips keep their width (each capped at 30% of the header) and the title truncates instead, so a long title never squeezes a chip to one letter;
+the Project chip is omitted without a Project and the branch chip without a
+branch. While the host projects the thread as executing, a "Running" pill with
+a spinner follows them; it carries no elapsed time because the host does not
+report when the turn began. A surface that is not a thread shows no
+environment mark.
 The model stays in the composer, not the title row. The tile holds its glyph
 so a later per-environment icon can replace it in place. Tab
 geometry and close-control presentation are shared with dock tools under

@@ -3520,11 +3520,20 @@ function LaunchedShell(
       ...withProviderMark(thread),
       ...threadRest(thread, { now: minuteNow, awaitingInput: false }),
     }));
+    // The pane header says "Running" for exactly the threads the sidebar's
+    // status mark calls working, so the two never disagree.
+    const runningThreadIds = new Set<string>();
+    for (const rows of [codeProjectThreads, workProjectThreads, markedChatNavigation]) {
+      for (const thread of rows) {
+        if (thread.activity === "working") runningThreadIds.add(thread.threadId);
+      }
+    }
     return {
       codeProjectThreads,
       markedChatNavigation,
       markedThreadGroups,
       providerByThreadId,
+      runningThreadIds,
       withProviderMark,
       workProjectThreads,
     };
@@ -3820,6 +3829,7 @@ function LaunchedShell(
     markedChatNavigation,
     markedThreadGroups,
     providerByThreadId,
+    runningThreadIds,
     withProviderMark,
     workProjectThreads,
   } = navigationModel;
@@ -6665,6 +6675,7 @@ function LaunchedShell(
                     codeProviderGroups={codeProviderGroups}
                     workProviderGroups={workProviderGroups}
                     providerByThreadId={providerByThreadId}
+                    runningThreadIds={runningThreadIds}
                     showProviderIcons={controller.settings.showThreadProviderIcons}
                     environmentNames={environmentNames}
                     {...(projectController.activeProject === undefined

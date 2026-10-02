@@ -388,6 +388,8 @@ export interface WorkspaceViewProps {
   readonly workProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   /** Resolved provider marks for thread-owned pane tabs. */
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
+  /** Threads the host projects as executing, read from the same rows the sidebar draws. */
+  readonly runningThreadIds?: ReadonlySet<string>;
   /** Mirrors the sidebar preference for the compact pane tab mark. */
   readonly showProviderIcons?: boolean;
   /** Host names by host id, for the pane title's environment mark. */
@@ -589,16 +591,14 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         (candidate) => String(candidate.id) === String(item.projectId),
       );
       const summary = item.pullRequestSummaries?.items[0];
-      const path =
-        project === undefined
-          ? undefined
-          : branch === undefined
-            ? project.name
-            : `${project.name}/${branch}`;
-      if (summary === undefined && path === undefined) continue;
+      // A branch is only named beside the Project it belongs to.
+      const projectName = project?.name;
+      const chipBranch = projectName === undefined ? undefined : branch;
+      if (summary === undefined && projectName === undefined) continue;
       facts.set(String(item.threadId), {
         ...(summary === undefined ? {} : { pullRequest: summary }),
-        ...(path === undefined ? {} : { path }),
+        ...(projectName === undefined ? {} : { projectName }),
+        ...(chipBranch === undefined ? {} : { branch: chipBranch }),
       });
     }
     return facts;
@@ -673,6 +673,9 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           {...(props.providerByThreadId === undefined
             ? {}
             : { providerByThreadId: props.providerByThreadId })}
+          {...(props.runningThreadIds === undefined
+            ? {}
+            : { runningThreadIds: props.runningThreadIds })}
           {...(props.showProviderIcons === undefined
             ? {}
             : { showProviderIcons: props.showProviderIcons })}
