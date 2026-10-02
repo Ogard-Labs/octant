@@ -58,7 +58,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
         ) : null}
         {scanning && snapshot === undefined ? (
           <p className="settings-section-line" role="status">
-            Scanning for installed runtimes…
+            Scanning for installed runtimes. This can take a few seconds.
           </p>
         ) : null}
 

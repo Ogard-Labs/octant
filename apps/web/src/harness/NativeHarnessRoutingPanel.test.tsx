@@ -63,7 +63,65 @@ describe("NativeHarnessRoutingPanel", () => {
 
     await waitFor(() => expect(screen.getByText("Jobs")).toBeVisible());
     expect(screen.queryByText("No direct-endpoint provider yet")).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "default model 1 provider" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Main model, model 1 provider" })).toBeVisible();
     expect(screen.getByText("missing-model")).toBeVisible();
+  });
+});
+
+describe("NativeHarnessRoutingPanel slot rows", () => {
+  const hostId = "00000000-0000-0000-0000-000000000001";
+  const savedJobs: NativeHarnessRoutingSettings = {
+    ...settings,
+    configuration: {
+      slots: [],
+      jobSlots: [{ job: "planner" as never, slotId: "plan" as never }],
+    },
+  };
+
+  it("names each slot by what it does and sends an unset one to Providers when nothing can fill it", async () => {
+    const onOpenProviders = vi.fn();
+    render(
+      <NativeHarnessRoutingPanel
+        client={{ routing: vi.fn(async () => savedJobs), updateRouting: vi.fn() }}
+        hostId={hostId}
+        onOpenProviders={onOpenProviders}
+        providers={[]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("group", { name: "Main model setting" })).toBeVisible(),
+    );
+    expect(screen.getByRole("group", { name: "Quick jobs setting" })).toBeVisible();
+    expect(screen.queryByText("smol")).not.toBeInTheDocument();
+    const connect = screen.getAllByRole("button", { name: "Connect a provider" });
+    expect(connect).toHaveLength(7);
+    await connect[0]?.click();
+    expect(onOpenProviders).toHaveBeenCalledOnce();
+  });
+
+  it("assigns the first available model when an unset slot is filled", async () => {
+    render(
+      <NativeHarnessRoutingPanel
+        client={{ routing: vi.fn(async () => savedJobs), updateRouting: vi.fn() }}
+        hostId={hostId}
+        providers={[
+          {
+            instanceId: "endpoint-1",
+            label: "Local endpoint",
+            models: [{ id: "model-a", label: "Model A" }],
+          },
+        ]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("group", { name: "Planning setting" })).toBeVisible(),
+    );
+    await screen.getByRole("button", { name: "Choose a model for Planning" }).click();
+    expect(
+      await screen.findByRole("combobox", { name: "Planning, model 1 provider" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add a fallback model for Planning" })).toBeVisible();
   });
 });

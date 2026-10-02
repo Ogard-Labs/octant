@@ -9,6 +9,8 @@ export interface DiscoveryClientOptions {
   readonly baseUrl: string;
   readonly fetch: typeof globalThis.fetch;
   readonly windowCapability: string;
+  /** How long a request may stay open before it fails as a timeout. */
+  readonly timeoutMs?: number;
 }
 
 export interface DiscoveryClient {
@@ -28,6 +30,7 @@ export class DiscoveryClientFailure extends Error {
 
 export function createDiscoveryClient(options: DiscoveryClientOptions): DiscoveryClient {
   const headers = { "x-octant-window-capability": options.windowCapability };
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   return {
     scan() {
       return request(
@@ -41,6 +44,7 @@ export function createDiscoveryClient(options: DiscoveryClientOptions): Discover
           }
           return result.snapshot;
         },
+        timeoutMs,
       );
     },
     connect(command) {
@@ -53,12 +57,48 @@ export function createDiscoveryClient(options: DiscoveryClientOptions): Discover
           body: JSON.stringify(command),
         },
         decodeDiscoveryCommandResult,
+        timeoutMs,
       );
     },
   };
 }
 
+/**
+ * The host's own scan budget is 10 s and each probe is cut off at 5 s, so a
+ * request still open after this long means the host is wedged. Without a limit
+ * the Settings page kept saying "Scanning…" for as long as the socket stayed open.
+ */
+const REQUEST_TIMEOUT_MS = 45_000;
+
 async function request<T>(
+  fetch: typeof globalThis.fetch,
+  url: string,
+  init: RequestInit,
+  decode: (value: unknown) => T,
+  timeoutMs: number,
+): Promise<T> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await readResponse(fetch, url, { ...init, signal: controller.signal }, decode);
+  } catch (error) {
+    if (timedOut) {
+      throw new DiscoveryClientFailure(
+        "timeout",
+        "The provider scan took too long to answer. Try again.",
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readResponse<T>(
   fetch: typeof globalThis.fetch,
   url: string,
   init: RequestInit,

@@ -136,41 +136,52 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
         pathDirs,
       );
 
-      for (const descriptor of descriptors) {
-        if (signal?.aborted) {
-          status = "cancelled";
-          message = "Discovery scan was cancelled.";
-          break;
+      // Each driver's probes stay serial (one driver can name several
+      // launchers), but the drivers run side by side. Probing them one after
+      // another made the scan the sum of every runtime's version and sign-in
+      // read: 7 to 17 s on a host with 17 runtimes, which Settings showed as a
+      // scan that never ended.
+      const scans = await Promise.all(
+        descriptors.map(async (descriptor) => {
+          try {
+            return await scanDescriptor(
+              descriptor,
+              pathDirs,
+              aliasTargets,
+              exec,
+              fs,
+              environment,
+              now,
+              startTime,
+              versionProbeConfinement,
+              signal,
+            );
+          } catch {
+            return undefined;
+          }
+        }),
+      );
+
+      for (const [index, found] of scans.entries()) {
+        const descriptor = descriptors[index];
+        if (descriptor === undefined) continue;
+        if (found === undefined) {
+          if (status === "completed") status = "partial";
+          continue;
         }
-        if (now() - startTime > MAX_SCAN_DURATION_MS) {
+        candidates.push(...found.candidates.slice(0, MAX_CANDIDATES_PER_DRIVER));
+        searchedDirectories.push({
+          driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
+          directories: [...found.searchedDirectories],
+        });
+        if (found.outOfTime && status === "completed") {
           status = "partial";
           message = "Discovery scan exceeded its time budget.";
-          break;
         }
-
-        try {
-          const found = await scanDescriptor(
-            descriptor,
-            pathDirs,
-            aliasTargets,
-            exec,
-            fs,
-            environment,
-            now,
-            startTime,
-            versionProbeConfinement,
-            signal,
-          );
-          candidates.push(...found.candidates.slice(0, MAX_CANDIDATES_PER_DRIVER));
-          searchedDirectories.push({
-            driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
-            directories: [...found.searchedDirectories],
-          });
-        } catch {
-          if (status === "completed") status = "partial";
-        }
-
-        if (candidates.length >= MAX_TOTAL_CANDIDATES) break;
+      }
+      if (signal?.aborted) {
+        status = "cancelled";
+        message = "Discovery scan was cancelled.";
       }
 
       // Deduplicate by the launcher path the scan examined, not the canonical target.
@@ -217,10 +228,13 @@ async function scanDescriptor(
 ): Promise<{
   readonly candidates: DiscoveryCandidate[];
   readonly searchedDirectories: ReadonlyArray<string>;
+  /** The driver's search stopped on the scan's time budget, not because it ran out of places. */
+  readonly outOfTime: boolean;
 }> {
   const candidates: DiscoveryCandidate[] = [];
   const seenPaths = new Set<string>();
   const searchedDirectories = new Set<string>();
+  let outOfTime = false;
 
   // Search PATH directories + approved locations. Alias targets are appended
   // after ordinary paths so discovery remains deterministic when a shell
@@ -242,7 +256,10 @@ async function scanDescriptor(
   for (const candidate of candidatePaths) {
     const candidatePath = candidate.path;
     if (signal?.aborted) break;
-    if (now() - startTime > MAX_SCAN_DURATION_MS) break;
+    if (now() - startTime > MAX_SCAN_DURATION_MS) {
+      outOfTime = true;
+      break;
+    }
     if (candidates.length >= MAX_CANDIDATES_PER_DRIVER) break;
 
     searchedDirectories.add(directoryOf(candidatePath));
@@ -317,7 +334,7 @@ async function scanDescriptor(
     });
   }
 
-  return { candidates, searchedDirectories: [...searchedDirectories] };
+  return { candidates, searchedDirectories: [...searchedDirectories], outOfTime };
 }
 
 function directoryOf(path: string): string {

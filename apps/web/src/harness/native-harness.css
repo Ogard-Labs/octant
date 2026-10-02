@@ -43,6 +43,13 @@
   justify-content: space-between;
 }
 
+/* The status and its action sat touching: the kit's control cell has no gap. */
+.native-harness-slot .setrow-control {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+}
+
 .native-harness-slot__count,
 .native-harness-candidate__rank {
   font-size: var(--text-sm);

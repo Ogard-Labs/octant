@@ -109,6 +109,34 @@ describe("discoveryClient", () => {
     await expect(client.scan()).rejects.toThrow(DiscoveryClientFailure);
   });
 
+  it("ends a scan the host never answers with a timeout failure", async () => {
+    vi.useFakeTimers();
+    try {
+      const hungFetch = vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+          }),
+      ) as unknown as typeof globalThis.fetch;
+      const client = createDiscoveryClient({
+        baseUrl: "http://127.0.0.1:3000",
+        fetch: hungFetch,
+        windowCapability: "test-cap",
+        timeoutMs: 30_000,
+      });
+      const outcome = client.scan().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(30_000);
+      const failure = await outcome;
+      expect(failure).toBeInstanceOf(DiscoveryClientFailure);
+      expect((failure as DiscoveryClientFailure).category).toBe("timeout");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("sends the window capability header", async () => {
     const fetchSpy = vi.fn(
       async () => new Response(JSON.stringify(scanResponse), { status: 200 }),
