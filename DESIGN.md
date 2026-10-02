@@ -1018,8 +1018,19 @@ open in the dock beside the transcript once, the first time they appear: the
 offer never moves focus from the composer, a rewrite never reopens a tab, and a
 tab the person closed stays closed. Document
 reads the file through the same host-authorized open the editor uses and
-renders Markdown with the preview's own viewer. The dock launcher is
-not a second thread switcher. With no open tab, it shows only capability-valid
+renders Markdown with the preview's own viewer. With no open tab, the dock
+opens on a compact thread overview above the tool launcher, three sections
+separated by hairlines and each omitted when the window has nothing to put in
+it: Running now lists the other threads the window knows are working (any mode,
+at most five, newest first, never the thread on screen), each as a spinner,
+title, a neutral Project dot and name, and age, and opens that thread; This
+thread gives label/value rows for Project, Checkout (a mono branch chip, plus
+Worktree when the thread runs in one), Model, Access, and Context (used of
+total with a thin bar, from the composer meter's own source); Changes (Code
+only, from the board's observed changed files, never a stale observation) gives
+the file count with +/- totals and an Open review button for the Review tool.
+Every row is a fact the window already holds; an unknown value is left out, not
+shown as a placeholder. Below it, the launcher shows only capability-valid
 tool rows, grouped under This thread, Workspace, and Devices when more than
 one group has a tool; the head's Add tool action appears once a tab is open, since with
 none open the body is already the list of tools to add. The bottom panel uses

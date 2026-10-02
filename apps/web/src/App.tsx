@@ -380,7 +380,13 @@ import {
   navigatorConfigurationKey,
   useNavigatorAssistant,
 } from "./navigator/useNavigatorAssistant";
-import { ComposerContextMeterShortcut } from "./context/ComposerContextMeter";
+import {
+  ComposerContextMeterShortcut,
+  composerContextOccupancy,
+} from "./context/ComposerContextMeter";
+import { CODE_ACCESS_POSTURE_LABEL } from "./code/CodeAccessPicker";
+import { DockThreadOverviewContent } from "./shell/DockThreadOverviewContent";
+import { runningNowThreads } from "./shell/dockThreadOverviewModel";
 import { ComposerContextMeterProvider } from "./context/composerContextMeterScope";
 import { useContextController } from "./context/useContextController";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
@@ -4290,6 +4296,97 @@ function LaunchedShell(
   // opens its Review beside that list, so the detail must remain visible.
   const dockPresentedOpen =
     dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
+  // The overview shows only while no tool is chosen, so its facts are gathered
+  // from rows the window already holds.
+  const dockOverview = (() => {
+    if (!dockPresentedOpen || dockResolution.kind !== "closed") return undefined;
+    if (dockThread === undefined) return undefined;
+    const mode = activeMode;
+    const codeThread =
+      mode !== "code"
+        ? undefined
+        : activeCodeThreadView !== undefined &&
+            String(activeCodeThreadView.thread.id) === dockThread.threadId
+          ? activeCodeThreadView.thread
+          : codeController.bootstrap?.threads.find(
+              (thread) => String(thread.id) === dockThread.threadId,
+            );
+    const workThread =
+      mode !== "work"
+        ? undefined
+        : workNavigation.bootstrap?.threads.find(
+            (thread) => String(thread.id) === dockThread.threadId,
+          );
+    const thread = codeThread ?? workThread;
+    const projectName =
+      thread === undefined
+        ? undefined
+        : projectController.projects.find(
+            (project) => String(project.id) === String(thread.projectId),
+          )?.name;
+    const modelLabel =
+      thread === undefined
+        ? undefined
+        : (providerController.observedByInstance
+            .get(thread.providerInstanceId)
+            ?.models.find((listed) => String(listed.id) === String(thread.modelId))?.displayName ??
+          String(thread.modelId));
+    const occupancy = composerContextOccupancy({
+      snapshot: contextController.snapshot,
+      fallback: mode === "code" ? activeCodeThreadUsageFallback : undefined,
+    });
+    const codeRow =
+      mode === "code"
+        ? navigationModel.codeProjectThreads.find((row) => row.threadId === dockThread.threadId)
+        : undefined;
+    return (
+      <DockThreadOverviewContent
+        access={
+          codeThread !== undefined
+            ? CODE_ACCESS_POSTURE_LABEL[codeThread.executionPolicy]
+            : workThread === undefined
+              ? undefined
+              : workThread.access === "auto-accept-edits"
+                ? "Auto-accept edits"
+                : "Ask first"
+        }
+        boardRevision={machineChanges.codeNavigation}
+        {...(occupancy === undefined
+          ? {}
+          : { context: { label: occupancy.label, percent: occupancy.percent } })}
+        {...(codeRow?.checkoutChip === undefined
+          ? {}
+          : { branchFallback: codeRow.checkoutChip.label })}
+        loadBoard={loadCodeBoard}
+        mode={mode}
+        model={modelLabel}
+        onOpenReview={() => addDockTab("review")}
+        onOpenRunning={(running) => {
+          if (running.mode === "chat") selectChatThread(running.threadId);
+          else if (running.mode === "work") selectWorkThread(running.threadId);
+          else selectCodeThread(running.threadId);
+        }}
+        projectId={thread?.projectId}
+        projectName={projectName}
+        running={runningNowThreads({
+          rows: {
+            chat: navigationModel.markedChatNavigation,
+            work: navigationModel.workProjectThreads,
+            code: navigationModel.codeProjectThreads,
+          },
+          active: { mode, threadId: dockThread.threadId },
+          projectNames: new Map(
+            projectController.projects.map((project) => [String(project.id), project.name]),
+          ),
+          now: minuteNow.getTime(),
+        })}
+        threadId={dockThread.threadId}
+        // Only a worktree Octant made is a worktree to the person: the
+        // Project's own folder also carries a chip (as an existing checkout).
+        worktree={codeRow?.checkoutChip?.checkoutKind === "managed-worktree"}
+      />
+    );
+  })();
   const dockPresentationWidth = resolveDockPresentationWidth({
     configuredWidth: contextSidebarWidth,
     resolution: dockResolution,
@@ -6895,6 +6992,7 @@ function LaunchedShell(
               onOpenTab={addDockTab}
               onSelectSurface={selectDockTab}
               open={dockPresentedOpen}
+              overview={dockOverview}
               plan={
                 bottomPanelOpen && activeBottomSurface?.id === "plan"
                   ? undefined
