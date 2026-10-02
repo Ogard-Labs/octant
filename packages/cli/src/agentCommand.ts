@@ -5,8 +5,9 @@ import {
   decodeNativeHarnessFollowUpPreview,
   decodeNativeHarnessSessionView,
   type NativeHarnessSessionView,
+  type OctantMode,
 } from "@octant/contracts";
-import { listAgentThreads } from "./agentHost";
+import { listAgentThreads, openAgentSideChat, readAgentGoal, reviseAgentGoal } from "./agentHost";
 import { AgentWake, followAgentThread } from "./agentLiveFeed";
 import {
   attachAgentThread,
@@ -16,7 +17,7 @@ import {
   isAgentSnapshotRunning,
 } from "./agentThread";
 import { runAgentTui } from "./agentTui";
-import { isTuiThemeId, type TuiThemeId } from "./agentTuiModel";
+import { describeAgentGoal, isTuiThemeId, type TuiThemeId } from "./agentTuiModel";
 import { failureMessage, type OpenedLocalControlSession } from "./localControl";
 
 export type AgentCliCommand =
@@ -237,7 +238,7 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
       return (await runTurn(input, threadId, input.command.prompt, lines)) ? 0 : 1;
     }
     input.stdout.write(
-      "Type a prompt and press Enter. /session shows the harness session; /next N takes a suggested follow-up; /pause and /resume hold or release the run; /quit exits.\n",
+      "Type a prompt and press Enter. /session shows the harness session; /next N takes a suggested follow-up; /pause and /resume hold or release the run; /side asks Side Chat, which only reads; /goal shows the goal and /goal revise changes its objective; /quit exits.\n",
     );
     for (;;) {
       const line = await lines.next();
@@ -260,12 +261,76 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
         await takeFollowUp(input, threadId, prompt.slice("/next".length).trim(), lines);
         continue;
       }
+      if (prompt === "/side" || prompt.startsWith("/side ")) {
+        await askSideChat(input, threadId, prompt.slice("/side".length).trim(), lines);
+        continue;
+      }
+      if (prompt === "/goal" || prompt.startsWith("/goal ")) {
+        await goalCommand(input, threadId, prompt.slice("/goal".length).trim());
+        continue;
+      }
       await runTurn(input, threadId, prompt, lines);
     }
     return 0;
   } finally {
     lines.close();
   }
+}
+
+/**
+ * Asks the thread's Side Chat and prints its answer. The question and answer
+ * live in that separate, read-only Chat, never in the thread itself.
+ */
+async function askSideChat(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+  question: string,
+  lines: LineSource,
+): Promise<void> {
+  if (question.length === 0) {
+    input.stderr.write("Ask a question: /side what is it changing?\n");
+    return;
+  }
+  const opened = await openAgentSideChat(input.session, threadId);
+  if (opened.kind === "refused") {
+    input.stderr.write(`${opened.message}\n`);
+    return;
+  }
+  await runTurn(input, String(opened.sidecar.sidecarThreadId), question, lines, "chat");
+}
+
+/** Shows the goal, or revises its objective against the version just read. */
+async function goalCommand(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+  argument: string,
+): Promise<void> {
+  const read = await readAgentGoal(input.session, threadId);
+  if (read.kind === "refused") {
+    input.stderr.write(`${read.message}\n`);
+    return;
+  }
+  if (read.goal === null) {
+    input.stdout.write("This thread has no goal.\n");
+    return;
+  }
+  const revise = /^revise\s+(.+)$/s.exec(argument);
+  if (revise === null) {
+    if (argument.length > 0)
+      input.stderr.write("Revise the objective with: /goal revise <new objective>\n");
+    else input.stdout.write(`${describeAgentGoal(read.goal)}\n`);
+    return;
+  }
+  const revised = await reviseAgentGoal(input.session, read.goal, (revise[1] ?? "").trim());
+  if (revised.kind === "refused") input.stderr.write(`${revised.message}\n`);
+  else if (revised.kind === "stale") {
+    const now = await readAgentGoal(input.session, threadId);
+    input.stderr.write(
+      `The goal changed on another screen first; nothing was revised. Now: ${
+        now.kind === "goal" && now.goal !== null ? describeAgentGoal(now.goal) : "unreadable"
+      }\n`,
+    );
+  } else input.stdout.write("Goal revised.\n");
 }
 
 /** Holds or releases the harness session; a held session refuses the next turn. */
@@ -542,8 +607,8 @@ async function runTurn(
   threadId: string,
   prompt: string,
   lines: LineSource,
+  mode: OctantMode = modeOf(input.command),
 ): Promise<boolean> {
-  const mode = modeOf(input.command);
   const port = agentThreadPort(input.session, mode, threadId);
   // Follow the thread before sending so the first words of the reply wake
   // the read that prints them.

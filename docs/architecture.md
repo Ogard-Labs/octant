@@ -1050,7 +1050,16 @@ native harness in `apps/server/src/harness`:
 - **Session.** `NativeHarnessSessionStore` journals one session per thread:
   routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
-  result, dropped at the turn's end — so a restart keeps an undelivered one),
+  result, dropped at the turn's end — so a restart keeps an undelivered one).
+  A client mints each note's id, and a queue of an id among the thread's
+  last 64 notes — even one delivered or taken since — lands nothing new, so a
+  retried steer is not a second note. Notes left when the turn ends become
+  the next prompt through `take`, which removes every queued note and returns
+  them to exactly one caller, so two clients watching the same turn end
+  cannot both send them. A person redirects running work only through these
+  ordered notes and through goal revisions checked against the goal's
+  version (a stale one is refused, never merged); Side Chat is a separate
+  read-only Chat and can do neither. Also journaled:
   the questions a lead asked with how each was
   settled, and — on each turn record — the last calls the lead made (tool,
   what it asked for, ok/refused/failed, duration), noted live on the session

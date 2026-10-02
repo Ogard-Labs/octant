@@ -5,6 +5,7 @@ import {
   type AgentThreadPort,
   type AgentThreadSnapshot,
 } from "./agentThread";
+import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
@@ -17,15 +18,20 @@ import {
   decideAgentApproval,
   listAgentModels,
   listAgentThreads,
+  openAgentSideChat,
   previewAgentFollowUp,
+  readAgentGoal,
   readAgentSession,
+  reviseAgentGoal,
   steerAgent,
+  takeAgentSteering,
   uploadAgentAttachment,
   type AgentModelChoice,
 } from "./agentHost";
 import { AgentWake, followAgentThread } from "./agentLiveFeed";
 import { notifyDesktop } from "./agentNotify";
 import {
+  describeAgentGoal,
   paletteFor,
   statusLineFrom,
   tasksFrom,
@@ -123,6 +129,12 @@ class AgentScreen {
   #showReasoning = false;
   #showHelp = false;
   #threadId: string;
+  #mode: OctantMode;
+  /**
+   * The thread a Side Chat is about, while the screen shows that Side Chat.
+   * Steering and goal changes are refused here: Side Chat only reads.
+   */
+  #home: { readonly threadId: string; readonly mode: OctantMode } | undefined;
   #threads: ReadonlyArray<ChatNavigationThread> = [];
   #models: ReadonlyArray<AgentModelChoice> = [];
   readonly #wake = new AgentWake();
@@ -161,7 +173,8 @@ class AgentScreen {
     this.#input = input;
     this.#verbose = input.verbose === true;
     this.#threadId = input.threadId;
-    this.#port = agentThreadPort(input.session, input.mode ?? "chat", input.threadId);
+    this.#mode = input.mode ?? "chat";
+    this.#port = agentThreadPort(input.session, this.#mode, input.threadId);
     const { BoxRenderable, TextRenderable, ScrollBoxRenderable, TextareaRenderable } = tui;
     const root = new BoxRenderable(renderer, {
       width: "100%",
@@ -298,7 +311,7 @@ class AgentScreen {
       };
       this.#input.signal?.addEventListener("abort", stop, { once: true });
       this.#renderer.on("destroy", stop);
-      this.#follow(this.#input.mode ?? "chat");
+      this.#follow(this.#mode);
       void this.#redrawOnChange(stopped.signal);
     });
   }
@@ -420,10 +433,11 @@ class AgentScreen {
     };
   }
 
-  async #switchThread(threadId: string): Promise<void> {
+  async #switchThread(threadId: string, mode: OctantMode = "chat"): Promise<void> {
     this.#threadId = threadId;
-    this.#port = agentThreadPort(this.#input.session, "chat", threadId);
-    this.#follow("chat");
+    this.#mode = mode;
+    this.#port = agentThreadPort(this.#input.session, mode, threadId);
+    this.#follow(mode);
     this.#drawn = "";
     this.#listing = undefined;
     this.#pendingFollowUp = undefined;
@@ -431,7 +445,11 @@ class AgentScreen {
     await this.refresh();
   }
 
-  /** A note the lead never reached during its turn becomes the next prompt. */
+  /**
+   * A note the lead never reached during its turn becomes the next prompt.
+   * The host hands the queued notes to one client only, so a second terminal
+   * or the app watching the same turn end cannot send them again.
+   */
   async #flushSteering(): Promise<void> {
     const queued = (this.#session?.steering ?? []).filter((note) => note.status === "queued");
     if (
@@ -444,10 +462,27 @@ class AgentScreen {
       return;
     }
     this.#flushingSteering = true;
+    const threadId = this.#threadId;
+    const port = this.#port;
     try {
-      const sent = await this.#port.send(queued.map((note) => note.text).join("\n\n"));
-      if (sent.kind === "refused") this.#note = sent.message;
-      else await steerAgent(this.#input.session, this.#threadId, { kind: "clear" });
+      const taken = await takeAgentSteering(this.#input.session, threadId);
+      if (taken.kind === "refused") {
+        this.#note = taken.message;
+        return;
+      }
+      if (taken.notes.length === 0) return;
+      const sent = await port.send(taken.notes.map((note) => note.text).join("\n\n"));
+      if (sent.kind === "refused") {
+        this.#note = sent.message;
+        // Put them back under their own ids so the person's notes are not lost.
+        for (const note of taken.notes) {
+          await steerAgent(this.#input.session, threadId, {
+            kind: "queue",
+            text: note.text,
+            noteId: note.id,
+          });
+        }
+      }
     } finally {
       this.#flushingSteering = false;
     }
@@ -504,7 +539,12 @@ class AgentScreen {
             : p.muted;
     this.#ticks += 1;
     const spinner = SPINNER[this.#ticks % SPINNER.length] ?? "";
-    const mode = this.#thread === undefined ? "" : ` · ${this.#thread.mode}`;
+    const mode =
+      this.#home !== undefined
+        ? " · side chat · /back returns"
+        : this.#thread === undefined
+          ? ""
+          : ` · ${this.#thread.mode}`;
     const percent = contextPercent(this.#thread, this.#models);
     const context =
       percent === undefined
@@ -576,6 +616,8 @@ class AgentScreen {
           "Ctrl+E       show / hide diffs and output  Ctrl+R  show / hide reasoning",
           "Ctrl+P       pause / resume the run        PgUp/PgDn · Ctrl+Home/End  scroll",
           "/next N      take a suggested follow-up    /pause /resume /model /threads /open N /quit",
+          "/side text   ask Side Chat, which only reads  /back  return to the thread",
+          "/steer text  note for the lead's next step    /goal · /goal revise text",
           "drag + Ctrl+C  copy selected text           /copy   copy the last reply",
           "y · a · n    answer an approval            1..9 or text  answer a question",
         ].join("\n"),
@@ -975,6 +1017,28 @@ class AgentScreen {
       await this.#previewFollowUp(text.slice("/next".length).trim());
       return;
     }
+    if (text === "/side" || text.startsWith("/side ")) {
+      await this.#side(text.slice("/side".length).trim());
+      return;
+    }
+    if (text === "/back") {
+      const home = this.#home;
+      if (home === undefined) this.#note = "This is the thread itself; /side opens its Side Chat.";
+      else {
+        this.#home = undefined;
+        await this.#switchThread(home.threadId, home.mode);
+      }
+      this.#draw();
+      return;
+    }
+    if (text === "/goal" || text.startsWith("/goal ")) {
+      await this.#goal(text.slice("/goal".length).trim());
+      return;
+    }
+    if (text.startsWith("/steer ")) {
+      await this.#steer(text.slice("/steer".length).trim());
+      return;
+    }
     const approval = this.#session?.approvals?.find((entry) => entry.status === "pending");
     if (approval !== undefined) {
       const lowered = text.toLowerCase();
@@ -1019,14 +1083,9 @@ class AgentScreen {
       this.#draw();
       return;
     }
-    if (isAgentSnapshotRunning(this.#thread)) {
+    if (isAgentSnapshotRunning(this.#thread) && this.#home === undefined) {
       // The lead is busy: the note lands at its next tool step, not as a turn.
-      const steered = await steerAgent(this.#input.session, this.#threadId, {
-        kind: "queue",
-        text,
-      });
-      if (steered.kind === "refused") this.#note = steered.message;
-      await this.refresh();
+      await this.#steer(text);
       return;
     }
     const resolved = await this.#resolveMentions(text);
@@ -1040,6 +1099,88 @@ class AgentScreen {
       threadMentionIds: resolved.threadMentionIds,
     });
     if (sent.kind === "refused") this.#note = sent.message;
+    await this.refresh();
+  }
+
+  /** Queues a note for the lead under an id this client minted, so a retry lands once. */
+  async #steer(text: string): Promise<void> {
+    if (this.#home !== undefined) {
+      this.#note = "Side Chat only reads; /back to steer the thread.";
+      this.#draw();
+      return;
+    }
+    if (text.length === 0) {
+      this.#note = "Type the note: /steer use sqlite";
+      this.#draw();
+      return;
+    }
+    const steered = await steerAgent(this.#input.session, this.#threadId, {
+      kind: "queue",
+      text,
+      noteId: randomUUID(),
+    });
+    if (steered.kind === "refused") this.#note = steered.message;
+    await this.refresh();
+  }
+
+  /**
+   * Opens this thread's Side Chat in place: a separate Chat that reads the
+   * thread and answers about it while the lead keeps working, and can never
+   * change it. The thread's own turn is not interrupted or added to.
+   */
+  async #side(question: string): Promise<void> {
+    if (this.#home === undefined) {
+      const opened = await openAgentSideChat(this.#input.session, this.#threadId);
+      if (opened.kind === "refused") {
+        this.#note = opened.message;
+        this.#draw();
+        return;
+      }
+      this.#home = { threadId: this.#threadId, mode: this.#mode };
+      await this.#switchThread(String(opened.sidecar.sidecarThreadId), "chat");
+    }
+    if (question.length === 0) {
+      this.#note = "Side Chat reads this thread and cannot change it. /back returns.";
+      this.#draw();
+      return;
+    }
+    const sent = await this.#port.send(question);
+    if (sent.kind === "refused") this.#note = sent.message;
+    await this.refresh();
+  }
+
+  /** Shows the goal, or revises its objective against the version just read. */
+  async #goal(argument: string): Promise<void> {
+    if (this.#home !== undefined) {
+      this.#note = "Side Chat only reads; /back to change the goal.";
+      this.#draw();
+      return;
+    }
+    const read = await readAgentGoal(this.#input.session, this.#threadId);
+    if (read.kind === "refused" || read.goal === null) {
+      this.#note = read.kind === "refused" ? read.message : "This thread has no goal.";
+      this.#draw();
+      return;
+    }
+    const revise = /^revise\s+(.+)$/s.exec(argument);
+    if (argument.length > 0 && revise === null) {
+      this.#note = "Revise the objective with: /goal revise <new objective>";
+      this.#draw();
+      return;
+    }
+    if (revise === null) {
+      this.#note = describeAgentGoal(read.goal);
+      this.#draw();
+      return;
+    }
+    const revised = await reviseAgentGoal(this.#input.session, read.goal, (revise[1] ?? "").trim());
+    if (revised.kind === "refused") this.#note = revised.message;
+    else if (revised.kind === "stale") {
+      const now = await readAgentGoal(this.#input.session, this.#threadId);
+      this.#note = `The goal changed on another screen first; nothing was revised. Now: ${
+        now.kind === "goal" && now.goal !== null ? describeAgentGoal(now.goal) : "unreadable"
+      }`;
+    } else this.#note = "Goal revised.";
     await this.refresh();
   }
 

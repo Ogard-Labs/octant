@@ -1,4 +1,4 @@
-import type { NativeHarnessSessionView } from "@octant/contracts";
+import type { NativeHarnessSessionView, ThreadGoal } from "@octant/contracts";
 import type { AgentThreadSnapshot } from "./agentThread";
 import { BUILT_IN_THEME_PRESET_IDS, resolveThemePresetTokens } from "@octant/theme";
 
@@ -251,4 +251,12 @@ function compact(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
   return String(count);
+}
+
+/** One line for the goal: its state, objective, and how many criteria an observed check met. */
+export function describeAgentGoal(goal: ThreadGoal): string {
+  const criteria = goal.criteria ?? [];
+  const met = criteria.filter((criterion) => criterion.status === "met").length;
+  const progress = criteria.length === 0 ? "" : ` · ${met} of ${criteria.length} criteria met`;
+  return `Goal (${goal.status}): ${goal.objective}${progress}`;
 }
