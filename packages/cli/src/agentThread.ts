@@ -350,7 +350,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
         return { kind: "refused", message: "The Code thread could not be read." };
       const staged = await session.send({
         path: "/api/code/evidence",
-        method: "POST",
+        method: "PUT",
         bytes: new TextEncoder().encode(prompt),
         headers: {
           "content-type": "text/plain; charset=utf-8",

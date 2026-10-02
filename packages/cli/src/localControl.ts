@@ -7,7 +7,7 @@ import {
 
 export interface LocalControlRequest {
   readonly path: string;
-  readonly method: "GET" | "POST";
+  readonly method: "GET" | "POST" | "PUT";
   readonly body?: unknown;
   /** Raw bytes instead of a JSON body, with their own content type. */
   readonly bytes?: Uint8Array;
