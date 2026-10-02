@@ -40,6 +40,22 @@ each reply, and each tool call the moment it finishes. A Code thread on a
 harness model therefore continues the same conversation on your next message,
 tool calls included, and picks it up again after Octant restarts.
 
+## Pausing and restarting
+
+**Pause** — on the harness card, the phone panel, or `/pause` in the terminal —
+lets the turn that is running finish, along with any helpers it already
+started, and starts nothing new: the next message is refused, the lead cannot
+start another helper, and a goal loop on the thread is paused too. **Resume**
+lifts it (resume the goal loop from its own panel).
+
+If Octant restarts while a turn is running, or while the lead was waiting for
+your answer to a question or an approval, the thread shows **Needs a check
+after restart** and refuses new work, so nothing picks up behind your back.
+Look at what the turn did, then press Resume. Resume first checks that the
+thread's model endpoint is still on and that its folder or checkout still
+exists, and says what is missing if not; then it records the cut-off turn and
+any question nobody can answer anymore as settled, and the thread runs again.
+
 If Octant stops while a tool is running, the model is told on its next turn
 that the call was interrupted. A tool that only reads, such as `read` or
 `grep`, is marked safe to call again. Anything else is marked as possibly

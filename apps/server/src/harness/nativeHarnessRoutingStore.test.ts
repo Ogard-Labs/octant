@@ -202,6 +202,124 @@ describe("native harness session store", () => {
     expect(restarted.read(threadId)?.session.status).toBe("idle");
   });
 
+  it("keeps a pause made while a turn was finishing after a restart", () => {
+    const threadId = "00000000-0000-4000-8000-000000000030";
+    const connection = openConnection();
+    const uuid = uuidFactory();
+    const open = () =>
+      new NativeHarnessSessionStore({
+        journal: journalFor(connection),
+        uuid,
+        actor,
+        clock: () => now,
+      });
+    const store = open();
+    store.ensure({
+      threadId,
+      mode: "code",
+      leadSlotId: "default" as never,
+      lead: candidate("big") as never,
+    });
+    store.markRunning(threadId);
+    store.pause(threadId, "paused-by-user", "Paused by the user.");
+    expect(store.turnInFlight(threadId)).toBe(true);
+    store.recordTurn(threadId, turnRecord(store, threadId));
+
+    const restarted = open();
+    expect(restarted.read(threadId)?.session.status).toBe("paused-by-user");
+    expect(restarted.turnInFlight(threadId)).toBe(false);
+  });
+
+  it("asks a person to recover a turn a restart cut off, and a resume settles it for good", () => {
+    const threadId = "00000000-0000-4000-8000-000000000031";
+    const connection = openConnection();
+    const uuid = uuidFactory();
+    const open = () =>
+      new NativeHarnessSessionStore({
+        journal: journalFor(connection),
+        uuid,
+        actor,
+        clock: () => now,
+      });
+    const store = open();
+    store.ensure({
+      threadId,
+      mode: "code",
+      leadSlotId: "default" as never,
+      lead: candidate("big") as never,
+    });
+    store.markRunning(threadId);
+
+    // The process stops mid-turn; nothing picks the work back up on its own.
+    const restarted = open();
+    expect(restarted.read(threadId)?.session).toMatchObject({
+      status: "recovery-required",
+      detail: expect.stringContaining("restarted while a turn was running"),
+    });
+    expect(restarted.resume(threadId)).toBe(true);
+    expect(restarted.read(threadId)?.session.status).toBe("idle");
+    expect(open().read(threadId)?.session.status).toBe("idle");
+  });
+
+  it("expires a question a restart left unanswerable when the recovery is resumed", () => {
+    const threadId = "00000000-0000-4000-8000-000000000032";
+    const connection = openConnection();
+    const uuid = uuidFactory();
+    const open = () =>
+      new NativeHarnessSessionStore({
+        journal: journalFor(connection),
+        uuid,
+        actor,
+        clock: () => now,
+      });
+    const store = open();
+    store.ensure({
+      threadId,
+      mode: "chat",
+      leadSlotId: "default" as never,
+      lead: candidate("big") as never,
+    });
+    store.askQuestion(threadId, {
+      id: "00000000-0000-4000-8000-0000000000c1",
+      prompt: "Which database?",
+      options: [],
+      status: "pending",
+      askedAt: now,
+    } as never);
+
+    const restarted = open();
+    expect(restarted.read(threadId)?.session.status).toBe("recovery-required");
+    restarted.resume(threadId);
+    expect(restarted.read(threadId)?.questions[0]?.status).toBe("expired");
+    expect(open().read(threadId)?.session.status).toBe("idle");
+  });
+
+  it("closes a turn that failed so neither a pause nor a restart waits on it", () => {
+    const threadId = "00000000-0000-4000-8000-000000000033";
+    const connection = openConnection();
+    const uuid = uuidFactory();
+    const open = () =>
+      new NativeHarnessSessionStore({
+        journal: journalFor(connection),
+        uuid,
+        actor,
+        clock: () => now,
+      });
+    const store = open();
+    store.ensure({
+      threadId,
+      mode: "work",
+      leadSlotId: "default" as never,
+      lead: candidate("big") as never,
+    });
+    store.markRunning(threadId);
+    store.settleTurn(threadId);
+
+    expect(store.turnInFlight(threadId)).toBe(false);
+    expect(store.read(threadId)?.session.status).toBe("idle");
+    expect(open().read(threadId)?.session.status).toBe("idle");
+  });
+
   it("keeps a lead's question pending until any surface answers it, then rebuilds it after a restart", async () => {
     const threadId = "00000000-0000-4000-8000-000000000021";
     const connection = openConnection();
@@ -468,3 +586,28 @@ describe("native harness session store", () => {
     ).toBe("no-session");
   });
 });
+
+/** A completed turn as the observer records it, for tests that only need one to exist. */
+function turnRecord(store: NativeHarnessSessionStore, threadId: string): never {
+  const session = store.read(threadId)?.session;
+  if (session === undefined) throw new Error("no session");
+  return {
+    turnId: "00000000-0000-4000-8000-0000000000d1",
+    sessionId: session.id,
+    sequence: session.turnsRun + 1,
+    job: "lead",
+    route: {
+      kind: "primary",
+      job: "lead",
+      slotId: session.leadSlotId,
+      candidate: session.lead,
+      decidedAt: now,
+      rejected: [],
+    },
+    toolCalls: 0,
+    stopReason: "end-of-turn",
+    usage: { inputTokens: 1, outputTokens: 1 },
+    startedAt: now,
+    endedAt: now,
+  } as never;
+}

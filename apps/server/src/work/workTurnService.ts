@@ -232,6 +232,8 @@ export interface WorkTurnServiceDependencies {
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
+    /** Every turn's end, whatever its outcome. */
+    readonly turnEnded?: (scope: NativeHarnessTurnScope) => void;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
     ) => Promise<void>;
@@ -1066,177 +1068,184 @@ export class WorkTurnService {
             projectId: input.thread.projectId,
           };
     if (harnessScope !== undefined) this.#nativeHarness?.turnStarted(harnessScope);
-    let usageReported = false;
-    if (input.access !== undefined) {
-      this.#runningAccess.set(String(input.command.threadId), {
-        requestId: String(input.command.requestId),
-        access: input.access,
-      });
-    }
-    const outcome = await this.#turnRuntime.run({
-      command: input.command,
-      providerSessionId: input.providerSessionId,
-      ...(input.access === undefined ? {} : { access: input.access }),
-      ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
-      ...(input.driver.conversationOwnership !== "provider"
-        ? {}
-        : {
-            onSessionReady: (handle: ProviderSessionHandle) => {
-              const resumeCursor = handle.resumeCursor ?? input.resumeCursor;
-              if (handle.sessionId !== input.providerSessionId || resumeCursor === undefined)
-                throw new Error("Provider did not return an exact resumable Work session.");
-              const latest = this.#projection.lookup(input.command.requestId);
-              if (latest === undefined) throw new Error("Work turn is unavailable.");
-              this.#append(latest.requestId, latest.version, "work.turn-updated@1", {
-                kind: "turn-updated",
-                requestId: latest.requestId,
-                threadId: latest.threadId,
-                turnId: latest.turnId,
-                status: "running",
-                resumeCursor,
-                updatedAt: decodeTimestamp(this.#clock()),
-              });
-            },
-          }),
-      projectRoot: input.projectRoot,
-      driver: input.driver,
-      signal: input.signal,
-      ...(input.thread?.modelOptionValues === undefined
-        ? {}
-        : { modelOptionValues: input.thread.modelOptionValues }),
-      ...(appManagedTools === undefined ? {} : { appManagedTools }),
-      ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
-      ...(providerContext.length === 0 ? {} : { context: providerContext }),
-      onDelta: (response) => {
-        const projected = this.#projection.lookup(input.command.requestId);
-        if (
-          input.signal.aborted ||
-          (projected?.status !== "accepted" && projected?.status !== "running")
-        ) {
-          return;
-        }
-        const previous = this.#liveResponses.get(String(input.command.requestId)) ?? "";
-        this.#liveResponses.set(String(input.command.requestId), response);
-        const delta = response.startsWith(previous) ? response.slice(previous.length) : response;
-        this.#liveUpdates.appendResponse(input.command.threadId, input.command.requestId, delta);
-      },
-      ...(this.#onRequestSettled === undefined ? {} : { onRequestSettled: this.#onRequestSettled }),
-      onUsage: (usage) => {
-        const projected = this.#projection.lookup(input.command.requestId);
-        if (
-          input.signal.aborted ||
-          (projected?.status !== "accepted" && projected?.status !== "running")
-        ) {
-          return;
-        }
-        this.#usageStore?.record(input.command.requestId, {
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
+    try {
+      let usageReported = false;
+      if (input.access !== undefined) {
+        this.#runningAccess.set(String(input.command.threadId), {
+          requestId: String(input.command.requestId),
+          access: input.access,
         });
-        if (published === undefined || this.#contextHarness === undefined) return;
+      }
+      const outcome = await this.#turnRuntime.run({
+        command: input.command,
+        providerSessionId: input.providerSessionId,
+        ...(input.access === undefined ? {} : { access: input.access }),
+        ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
+        ...(input.driver.conversationOwnership !== "provider"
+          ? {}
+          : {
+              onSessionReady: (handle: ProviderSessionHandle) => {
+                const resumeCursor = handle.resumeCursor ?? input.resumeCursor;
+                if (handle.sessionId !== input.providerSessionId || resumeCursor === undefined)
+                  throw new Error("Provider did not return an exact resumable Work session.");
+                const latest = this.#projection.lookup(input.command.requestId);
+                if (latest === undefined) throw new Error("Work turn is unavailable.");
+                this.#append(latest.requestId, latest.version, "work.turn-updated@1", {
+                  kind: "turn-updated",
+                  requestId: latest.requestId,
+                  threadId: latest.threadId,
+                  turnId: latest.turnId,
+                  status: "running",
+                  resumeCursor,
+                  updatedAt: decodeTimestamp(this.#clock()),
+                });
+              },
+            }),
+        projectRoot: input.projectRoot,
+        driver: input.driver,
+        signal: input.signal,
+        ...(input.thread?.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: input.thread.modelOptionValues }),
+        ...(appManagedTools === undefined ? {} : { appManagedTools }),
+        ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
+        ...(providerContext.length === 0 ? {} : { context: providerContext }),
+        onDelta: (response) => {
+          const projected = this.#projection.lookup(input.command.requestId);
+          if (
+            input.signal.aborted ||
+            (projected?.status !== "accepted" && projected?.status !== "running")
+          ) {
+            return;
+          }
+          const previous = this.#liveResponses.get(String(input.command.requestId)) ?? "";
+          this.#liveResponses.set(String(input.command.requestId), response);
+          const delta = response.startsWith(previous) ? response.slice(previous.length) : response;
+          this.#liveUpdates.appendResponse(input.command.threadId, input.command.requestId, delta);
+        },
+        ...(this.#onRequestSettled === undefined
+          ? {}
+          : { onRequestSettled: this.#onRequestSettled }),
+        onUsage: (usage) => {
+          const projected = this.#projection.lookup(input.command.requestId);
+          if (
+            input.signal.aborted ||
+            (projected?.status !== "accepted" && projected?.status !== "running")
+          ) {
+            return;
+          }
+          this.#usageStore?.record(input.command.requestId, {
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+          });
+          if (published === undefined || this.#contextHarness === undefined) return;
+          const snapshot = published.snapshot;
+          try {
+            usageReported = true;
+            this.#contextHarness.reconcileUsage({
+              subject: snapshot.subject,
+              planId: snapshot.next.plan.id,
+              requestShape: "work-turn",
+              actualInputTokens: usage.inputTokens,
+              actualOutputTokens: usage.outputTokens,
+              ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
+              ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
+              ...(usage.reasoningTokens === undefined
+                ? {}
+                : { reasoningTokens: usage.reasoningTokens }),
+              ...(usage.cacheReadInputTokens === undefined
+                ? {}
+                : { cacheReadInputTokens: usage.cacheReadInputTokens }),
+              ...(usage.cacheWriteInputTokens === undefined
+                ? {}
+                : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
+              ...(usage.providerExecutionDurationMs === undefined
+                ? {}
+                : { providerExecutionDurationMs: usage.providerExecutionDurationMs }),
+              currentVarianceReserve: snapshot.next.plan.reserves.variance,
+              maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
+            });
+          } catch {
+            // Usage reconciliation is best-effort during a live Work turn. A
+            // stale or rejected variance must not convert the provider run into
+            // a failed outcome.
+          }
+        },
+        onTasks: (tasks) => {
+          if (input.signal.aborted) return;
+          this.#liveTasks.set(String(input.command.requestId), tasks);
+          this.#liveUpdates.appendTasks(input.command.threadId, input.command.requestId, tasks);
+        },
+      });
+      const wroteFiles = observation?.finish();
+      const latest = this.#projection.lookup(input.command.requestId);
+      if (latest === undefined) return;
+      if (latest.status === "cancelled") {
+        // Cancelling settles the turn, but files the provider wrote before it
+        // stopped are still on disk. Returning without recording them told the
+        // person the folder was untouched when it was not.
+        if (wroteFiles !== undefined) {
+          const settledTasks = this.#liveTasks.get(String(input.command.requestId));
+          this.#persistUpdate(latest, {
+            status: "cancelled",
+            ...(latest.response === undefined ? {} : { response: latest.response }),
+            wroteFiles,
+            ...(settledTasks === undefined ? {} : { tasks: settledTasks }),
+          });
+          const settledCancel = this.#projection.lookup(input.command.requestId);
+          if (settledCancel !== undefined) {
+            this.#liveUpdates.settle(input.command.threadId, settledCancel);
+          }
+        }
+        return;
+      }
+      if (
+        outcome.kind === "completed" &&
+        harnessScope !== undefined &&
+        this.#nativeHarness !== undefined
+      ) {
+        await this.#nativeHarness
+          .turnCompleted({ ...harnessScope, text: outcome.response, toolCalls: 0 })
+          .catch(() => undefined);
+      }
+      const live = this.#liveResponses.get(String(input.command.requestId));
+      this.#persistOutcome(
+        live === undefined ? latest : decodeWorkTurnState({ ...latest, response: live }),
+        outcome,
+        wroteFiles,
+        this.#liveTasks.get(String(input.command.requestId)),
+      );
+      if (
+        outcome.kind === "completed" &&
+        !usageReported &&
+        published !== undefined &&
+        this.#contextHarness !== undefined
+      ) {
         const snapshot = published.snapshot;
         try {
-          usageReported = true;
           this.#contextHarness.reconcileUsage({
             subject: snapshot.subject,
             planId: snapshot.next.plan.id,
             requestShape: "work-turn",
-            actualInputTokens: usage.inputTokens,
-            actualOutputTokens: usage.outputTokens,
-            ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
-            ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
-            ...(usage.reasoningTokens === undefined
-              ? {}
-              : { reasoningTokens: usage.reasoningTokens }),
-            ...(usage.cacheReadInputTokens === undefined
-              ? {}
-              : { cacheReadInputTokens: usage.cacheReadInputTokens }),
-            ...(usage.cacheWriteInputTokens === undefined
-              ? {}
-              : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
-            ...(usage.providerExecutionDurationMs === undefined
-              ? {}
-              : { providerExecutionDurationMs: usage.providerExecutionDurationMs }),
+            actualInputTokens: 0,
+            actualOutputTokens: 0,
+            providerReported: false,
             currentVarianceReserve: snapshot.next.plan.reserves.variance,
             maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
           });
         } catch {
-          // Usage reconciliation is best-effort during a live Work turn. A
-          // stale or rejected variance must not convert the provider run into
-          // a failed outcome.
-        }
-      },
-      onTasks: (tasks) => {
-        if (input.signal.aborted) return;
-        this.#liveTasks.set(String(input.command.requestId), tasks);
-        this.#liveUpdates.appendTasks(input.command.threadId, input.command.requestId, tasks);
-      },
-    });
-    const wroteFiles = observation?.finish();
-    const latest = this.#projection.lookup(input.command.requestId);
-    if (latest === undefined) return;
-    if (latest.status === "cancelled") {
-      // Cancelling settles the turn, but files the provider wrote before it
-      // stopped are still on disk. Returning without recording them told the
-      // person the folder was untouched when it was not.
-      if (wroteFiles !== undefined) {
-        const settledTasks = this.#liveTasks.get(String(input.command.requestId));
-        this.#persistUpdate(latest, {
-          status: "cancelled",
-          ...(latest.response === undefined ? {} : { response: latest.response }),
-          wroteFiles,
-          ...(settledTasks === undefined ? {} : { tasks: settledTasks }),
-        });
-        const settledCancel = this.#projection.lookup(input.command.requestId);
-        if (settledCancel !== undefined) {
-          this.#liveUpdates.settle(input.command.threadId, settledCancel);
+          // Usage reconciliation is best-effort after a completed Work turn.
         }
       }
-      return;
-    }
-    if (
-      outcome.kind === "completed" &&
-      harnessScope !== undefined &&
-      this.#nativeHarness !== undefined
-    ) {
-      await this.#nativeHarness
-        .turnCompleted({ ...harnessScope, text: outcome.response, toolCalls: 0 })
-        .catch(() => undefined);
-    }
-    const live = this.#liveResponses.get(String(input.command.requestId));
-    this.#persistOutcome(
-      live === undefined ? latest : decodeWorkTurnState({ ...latest, response: live }),
-      outcome,
-      wroteFiles,
-      this.#liveTasks.get(String(input.command.requestId)),
-    );
-    if (
-      outcome.kind === "completed" &&
-      !usageReported &&
-      published !== undefined &&
-      this.#contextHarness !== undefined
-    ) {
-      const snapshot = published.snapshot;
-      try {
-        this.#contextHarness.reconcileUsage({
-          subject: snapshot.subject,
-          planId: snapshot.next.plan.id,
-          requestShape: "work-turn",
-          actualInputTokens: 0,
-          actualOutputTokens: 0,
-          providerReported: false,
-          currentVarianceReserve: snapshot.next.plan.reserves.variance,
-          maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
-        });
-      } catch {
-        // Usage reconciliation is best-effort after a completed Work turn.
+      if (outcome.kind === "completed" && wroteFiles !== undefined) {
+        await this.#backfillStatus(input.projectCanonicalRoot, input.thread, wroteFiles);
       }
+      const settled = this.#projection.lookup(input.command.requestId);
+      if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
+    } finally {
+      // A completed turn closed itself above; this closes one that did not.
+      if (harnessScope !== undefined) this.#nativeHarness?.turnEnded?.(harnessScope);
     }
-    if (outcome.kind === "completed" && wroteFiles !== undefined) {
-      await this.#backfillStatus(input.projectCanonicalRoot, input.thread, wroteFiles);
-    }
-    const settled = this.#projection.lookup(input.command.requestId);
-    if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
   }
 
   /**

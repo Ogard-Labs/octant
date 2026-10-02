@@ -92,6 +92,12 @@ export class NativeHarnessSessionStore {
    * note was delivered or taken. Rebuilt from the queued events on replay.
    */
   readonly #steeringIds = new Map<string, string[]>();
+  /**
+   * Threads whose turn has started and not closed, rebuilt from the journal.
+   * Status cannot carry this: a paused session keeps its pause while the
+   * turn it let finish is still running.
+   */
+  readonly #turnsInFlight = new Set<string>();
 
   constructor(options: NativeHarnessSessionStoreOptions) {
     this.#journal = options.journal;
@@ -99,6 +105,12 @@ export class NativeHarnessSessionStore {
     this.#actor = decodeActor(options.actor);
     this.#clock = options.clock;
     this.#hydrate();
+    this.#requireRecoveryAfterRestart();
+  }
+
+  /** Whether the thread's turn is still running, paused or not. */
+  turnInFlight(threadId: string): boolean {
+    return this.#turnsInFlight.has(threadId);
   }
 
   read(threadId: string): NativeHarnessSessionView | undefined {
@@ -191,6 +203,7 @@ export class NativeHarnessSessionStore {
     if (record === undefined) return;
     this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.turnCompleted, turn);
     push(record.turns, turn);
+    this.#turnsInFlight.delete(threadId);
     this.#setSession(record, {
       ...record.session,
       usage: addUsage(record.session.usage, turn.usage),
@@ -202,11 +215,40 @@ export class NativeHarnessSessionStore {
 
   markRunning(threadId: string): void {
     const record = this.#records.get(threadId);
-    if (record === undefined || record.session.status !== "idle") return;
+    if (record === undefined) return;
+    const now = this.#clock();
+    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.turnStarted, {
+      sessionId: record.session.id,
+      startedAt: now,
+    });
+    this.#turnsInFlight.add(threadId);
+    if (record.session.status !== "idle") return;
     this.#setSession(record, {
       ...record.session,
       status: "running",
-      updatedAt: decodeUtcTimestamp(this.#clock()),
+      updatedAt: decodeUtcTimestamp(now),
+    });
+  }
+
+  /**
+   * Closes a turn that ended without a completed record — it failed, or a
+   * person stopped it. A completed turn is already closed by its record.
+   */
+  settleTurn(threadId: string): void {
+    const record = this.#records.get(threadId);
+    if (record === undefined || !this.#turnsInFlight.has(threadId)) return;
+    const now = this.#clock();
+    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.turnSettled, {
+      sessionId: record.session.id,
+      outcome: "ended",
+      settledAt: now,
+    });
+    this.#turnsInFlight.delete(threadId);
+    if (record.session.status !== "running") return;
+    this.#setSession(record, {
+      ...record.session,
+      status: "idle",
+      updatedAt: decodeUtcTimestamp(now),
     });
   }
 
@@ -456,10 +498,34 @@ export class NativeHarnessSessionStore {
     return true;
   }
 
+  /**
+   * Lifts a pause or a recovery. Clearing a recovery first settles, in the
+   * journal, everything the restart left open — the turn it cut off and any
+   * approval or question nobody can answer now — so the next restart does not
+   * raise the same recovery again. A plain pause settles nothing: an approval
+   * the finishing turn is waiting on is still live.
+   */
   resume(threadId: string): boolean {
     const record = this.#records.get(threadId);
     if (record === undefined) return false;
     if (record.session.status === "running" || record.session.status === "idle") return false;
+    if (record.session.status === "recovery-required") {
+      const now = this.#clock();
+      if (this.#turnsInFlight.has(threadId)) {
+        this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.turnSettled, {
+          sessionId: record.session.id,
+          outcome: "lost-in-restart",
+          settledAt: now,
+        });
+        this.#turnsInFlight.delete(threadId);
+      }
+      for (const approval of record.approvals.filter((entry) => entry.status === "pending")) {
+        this.settleApproval(threadId, approval.id, { status: "expired" });
+      }
+      for (const question of record.questions.filter((entry) => entry.status === "pending")) {
+        this.settleQuestion(threadId, question.id, { status: "expired" });
+      }
+    }
     this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed, {
       sessionId: record.session.id,
     });
@@ -470,6 +536,29 @@ export class NativeHarnessSessionStore {
       updatedAt: decodeUtcTimestamp(this.#clock()),
     });
     return true;
+  }
+
+  /**
+   * After a restart, a session whose turn was cut off, or whose lead was
+   * waiting on an answer the restart dropped, needs a person before anything
+   * runs again. Derived from the replayed journal rather than written at
+   * start-up; the resume that clears it journals what it settled.
+   */
+  #requireRecoveryAfterRestart(): void {
+    for (const [threadId, record] of this.#records) {
+      const cutOff = this.#turnsInFlight.has(threadId);
+      const waiting =
+        record.approvals.some((entry) => entry.status === "pending") ||
+        record.questions.some((entry) => entry.status === "pending");
+      if (!cutOff && !waiting) continue;
+      record.session = {
+        ...record.session,
+        status: "recovery-required",
+        detail: cutOff
+          ? "Octant restarted while a turn was running. Check what it did, then resume."
+          : "Octant restarted while the lead was waiting for an answer. Resume to continue without it.",
+      };
+    }
   }
 
   #setSession(record: SessionRecord, session: NativeHarnessSession): void {
@@ -538,14 +627,22 @@ export class NativeHarnessSessionStore {
     const body = payload as Record<string, unknown>;
     if (eventName === names.routeDecided) {
       push(record.routes, body.decision as NativeHarnessRouteDecision);
+    } else if (eventName === names.turnStarted) {
+      this.#turnsInFlight.add(threadId);
+    } else if (eventName === names.turnSettled) {
+      this.#turnsInFlight.delete(threadId);
     } else if (eventName === names.turnCompleted) {
       const turn = payload as NativeHarnessTurnRecord;
       push(record.turns, turn);
+      this.#turnsInFlight.delete(threadId);
+      // The status stays what the journal last set. "Running" is never
+      // journaled, so the only status a completed turn can meet here is idle
+      // or one a person or the advisor chose — a pause made while the turn
+      // finished must survive the restart, not be cleared by the replay.
       record.session = {
         ...record.session,
         usage: addUsage(record.session.usage, turn.usage),
         turnsRun: record.session.turnsRun + 1,
-        status: "idle",
       };
     } else if (eventName === names.contextReduced) {
       const reduction = payload as NativeHarnessContextReduction;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { nativeHarnessSessionHeld, nativeHarnessStatusLabel } from "@octant/domain";
 import * as Clipboard from "expo-clipboard";
 import { Pressable, StyleSheet, Text, TextInput, View, AppState } from "react-native";
 import {
@@ -102,29 +103,27 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           Native harness
         </Text>
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-          {view.session.status}
+          {nativeHarnessStatusLabel(view.session.status)}
         </Text>
         <Pressable
           accessibilityRole="button"
           onPress={() => {
-            const paused = view.session.status !== "running" && view.session.status !== "idle";
+            const paused = nativeHarnessSessionHeld(view.session.status);
             void commandMobileNativeHarnessSession({
               transport: props.transport,
               threadId: props.threadId,
               kind: paused ? "resume-native-harness-session" : "pause-native-harness-session",
               sessionId: String(view.session.id),
               expectedVersion: view.session.version,
-            }).then((ok) => {
-              setNote(ok ? undefined : "The host refused that.");
+            }).then((result) => {
+              setNote(result.ok ? undefined : (result.message ?? "The host refused that."));
               void load();
             });
           }}
           testID="mobile-native-harness-pause"
         >
           <Text style={[mobileTypography.caption, { color: colors.textPrimary }]}>
-            {view.session.status !== "running" && view.session.status !== "idle"
-              ? "Resume"
-              : "Pause"}
+            {nativeHarnessSessionHeld(view.session.status) ? "Resume" : "Pause"}
           </Text>
         </Pressable>
       </View>

@@ -1849,6 +1849,8 @@ export function startOctantServer(
         nativeHarnessObserver?.admitTurn(scope) ?? { kind: "admitted" as const },
       turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) =>
         nativeHarnessObserver?.turnStarted(scope),
+      turnEnded: (scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0]) =>
+        nativeHarnessObserver?.turnEnded(scope),
       turnCompleted: async (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) => {
         try {
           threadFollowUpSuggestions.recordReply({
@@ -5303,6 +5305,44 @@ export function startOctantServer(
         },
         pause: (...args) => nativeHarnessSessionsLive.pause(...args),
         resume: (...args) => nativeHarnessSessionsLive.resume(...args),
+        turnInFlight: (threadId) => nativeHarnessSessionsLive.turnInFlight(threadId),
+      },
+      // A goal loop schedules its own rounds, so a pause must stop it too;
+      // it stays paused until a person resumes the loop itself.
+      onPaused: ({ threadId }) => {
+        const loop = goalLoopService.read(threadId).loop;
+        if (loop?.status !== "running") return;
+        void goalLoopService
+          .execute({ kind: "pause-goal-loop", threadId, expectedVersion: loop.version })
+          .catch(() => undefined);
+      },
+      recoveryBlockers: async ({ threadId }) => {
+        const view = nativeHarnessSessionsLive.read(threadId);
+        if (view === undefined) return [];
+        const blockers: string[] = [];
+        const provider = persistence.readProviderInstance(view.session.lead.providerInstanceId);
+        if (provider === undefined || !provider.enabled) {
+          blockers.push("The model's endpoint is gone or turned off; turn it on in Settings.");
+        }
+        if (view.session.mode === "code") {
+          let thread: ReturnType<typeof persistence.readCodeThread>;
+          try {
+            thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          } catch {
+            thread = undefined;
+          }
+          const checkout =
+            thread === undefined ? undefined : persistence.readCodeCheckout(thread.checkoutId);
+          if (checkout === undefined || checkout.availability === "unavailable") {
+            blockers.push("The thread's checkout is no longer available.");
+          }
+        } else if (view.session.projectId !== undefined) {
+          const project = persistence.readProject(view.session.projectId);
+          if (project === undefined || project.lifecycle !== "active") {
+            blockers.push("The thread's Project is no longer available.");
+          }
+        }
+        return blockers;
       },
       followUps: followUpActions,
       answerQuestion: ({ threadId, questionId, answer }) =>

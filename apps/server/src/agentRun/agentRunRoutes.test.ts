@@ -373,7 +373,11 @@ function createHandler(
         router: {
           resolve: () => ({ kind: "unroutable", job: "research", reason: "none" }) as never,
         },
-        sessions: { ensure: () => ({}) as never, recordRouteDecision: () => undefined },
+        sessions: {
+          ensure: () => ({}) as never,
+          recordRouteDecision: () => undefined,
+          read: () => undefined,
+        },
         uuid: () => String(ids.request),
       },
       {

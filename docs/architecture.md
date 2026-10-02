@@ -1074,7 +1074,20 @@ native harness in `apps/server/src/harness`:
   cannot both send them. A person redirects running work only through these
   ordered notes and through goal revisions checked against the goal's
   version (a stale one is refused, never merged); Side Chat is a separate
-  read-only Chat and can do neither. Also journaled:
+  read-only Chat and can do neither. A turn's start is journaled
+  (`native-harness-turn-started`) and closed by its completed record or a
+  `native-harness-turn-settled` frame, which every mode's turn path writes
+  however the turn ended. A person's pause drains: the running turn and the
+  helpers it started finish, while the next turn, a new `delegate`, and the
+  thread's goal loop are refused or paused. Replay keeps whatever status the
+  journal last set — a completed turn never clears a pause. A session whose
+  replayed journal still holds an open turn or a pending approval or
+  question is `recovery-required` after a restart: it admits nothing, and
+  only a resume clears it, after the host checks the lead's provider instance
+  is present and enabled and the thread's checkout or Project still exists
+  (`not-ready` names what is missing). That resume journals the lost turn as
+  `lost-in-restart` and the dead approvals and questions as expired, so the
+  next restart does not raise the recovery again. Also journaled:
   the questions a lead asked with how each was
   settled, and — on each turn record — the last calls the lead made (tool,
   what it asked for, ok/refused/failed, duration), noted live on the session
