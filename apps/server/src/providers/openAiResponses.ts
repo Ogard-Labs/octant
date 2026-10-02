@@ -20,14 +20,14 @@ export interface ProtocolToolResult {
   readonly toolCallId: string;
   readonly resultJson: string;
   readonly isError: boolean;
-  readonly images?: ReadonlyArray<ProviderToolImage>;
+  readonly images?: ReadonlyArray<ProviderToolImage> | undefined;
 }
 
 export interface ProtocolHistoryMessage {
   readonly role: "user" | "assistant";
   readonly text: string;
-  readonly toolCalls?: readonly ProtocolToolCall[];
-  readonly toolResults?: readonly ProtocolToolResult[];
+  readonly toolCalls?: readonly ProtocolToolCall[] | undefined;
+  readonly toolResults?: readonly ProtocolToolResult[] | undefined;
 }
 
 export interface ProtocolToolCall {
@@ -78,6 +78,8 @@ export interface ResponsesTurnInput {
   readonly modelId: string;
   readonly history: readonly ProtocolHistoryMessage[];
   readonly prompt: string;
+  /** Stable instructions, sent as the request's `instructions` so the prefix cache keeps them. */
+  readonly system?: string;
   readonly tools?: readonly ProviderToolDefinition[];
   readonly toolAnswers?: readonly ProviderToolAnswer[];
   readonly toolChoice?: "auto" | "required";
@@ -166,6 +168,7 @@ async function runResponsesTurn(
     path: "responses",
     body: {
       model: input.modelId,
+      ...(input.system === undefined ? {} : { instructions: input.system }),
       input: [
         ...input.history.flatMap((entry) => {
           // Entries that contain only tool results (role: "assistant",

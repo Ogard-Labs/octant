@@ -28,6 +28,27 @@ before writing. An edit needs a prior read of the same file and refuses when
 the file changed since. A truncated result says how much was left out and
 where to continue.
 
+When a turn offers Octant's own tools — the built-in browser, Canvas, computer
+use, the terminal, the Apple and Android simulators, helper agents — the model
+also gets one line per tool saying what it is for.
+
+## Conversations that survive a restart
+
+The harness saves its conversation step by step as it works: your message,
+each reply, and each tool call the moment it finishes. A Code thread on a
+harness model therefore continues the same conversation on your next message,
+tool calls included, and picks it up again after Octant restarts.
+
+If Octant stops while a tool is running, the model is told on its next turn
+that the call was interrupted. A tool that only reads, such as `read` or
+`grep`, is marked safe to call again. Anything else is marked as possibly
+done, and the model is told to check before repeating it. Octant never
+re-runs an interrupted call by itself.
+
+When a long conversation no longer fits the model's window, older tool
+results are left out of the request first, then whole earlier exchanges, with
+a note to the model. The saved conversation keeps everything.
+
 ## Model slots
 
 Routing is configured by slot, in **Settings → Octant Harness → Model slots**. A slot

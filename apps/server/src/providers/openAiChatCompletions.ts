@@ -26,6 +26,8 @@ export interface ChatCompletionsTurnInput {
   readonly modelId: string;
   readonly history: readonly ProtocolHistoryMessage[];
   readonly prompt: string;
+  /** Stable instructions, sent as the leading system message so the prefix cache keeps them. */
+  readonly system?: string;
   readonly tools?: readonly ProviderToolDefinition[];
   readonly toolAnswers?: readonly ProviderToolAnswer[];
   readonly toolChoice?: "auto" | "required";
@@ -143,6 +145,7 @@ function requestBody(input: ChatCompletionsTurnInput, streaming: boolean): Recor
   return {
     model: input.modelId,
     messages: [
+      ...(input.system === undefined ? [] : [{ role: "system", content: input.system }]),
       ...input.history.flatMap((entry): Record<string, unknown>[] => {
         if (entry.toolResults !== undefined) {
           return [
