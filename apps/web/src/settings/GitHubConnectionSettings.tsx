@@ -8,6 +8,7 @@ import type {
 } from "@octant/contracts";
 import { ChevronDown } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { SettingRow, SettingsFactList, SettingsSection, SettingsState } from "./primitives";
 
 /**
@@ -251,6 +252,32 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
             </div>
           </SettingRow>
         </div>
+        {credentialRemovable && logoutArmed ? (
+          <OctantConfirmDialog
+            confirmLabel={
+              snapshot.state === "insecure-storage"
+                ? "Confirm credential removal"
+                : "Confirm local logout"
+            }
+            destructive
+            onCancel={() => setLogoutArmed(false)}
+            onConfirm={() => {
+              setLogoutArmed(false);
+              void runCommand({
+                kind: "logout",
+                confirmation: "confirm-github-local-logout",
+              });
+            }}
+            title={
+              snapshot.state === "insecure-storage"
+                ? "Remove GitHub credential?"
+                : "Log out of GitHub?"
+            }
+          >
+            Logging out removes the credential from this host only. It does not revoke Octant&apos;s
+            GitHub authorization.
+          </OctantConfirmDialog>
+        ) : null}
         {commandError === undefined ? null : (
           <SettingsState kind="error">{commandError}</SettingsState>
         )}
@@ -326,36 +353,19 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
             >
               <div className="github-settings__controls">
                 {credentialRemovable ? (
-                  logoutArmed ? (
-                    <OctantButton
-                      disabled={commandBusy}
-                      onClick={() =>
-                        void runCommand({
-                          kind: "logout",
-                          confirmation: "confirm-github-local-logout",
-                        })
-                      }
-                      size="sm"
-                      type="button"
-                      variant="destructive"
-                    >
-                      {snapshot.state === "insecure-storage"
-                        ? "Confirm credential removal"
-                        : "Confirm local logout"}
-                    </OctantButton>
-                  ) : (
-                    <OctantButton
-                      disabled={commandBusy}
-                      onClick={() => setLogoutArmed(true)}
-                      size="sm"
-                      type="button"
-                      variant="secondary"
-                    >
-                      {snapshot.state === "insecure-storage"
-                        ? "Remove insecure credential"
-                        : "Log out on this host"}
-                    </OctantButton>
-                  )
+                  <OctantButton
+                    aria-expanded={logoutArmed}
+                    aria-haspopup="dialog"
+                    disabled={commandBusy}
+                    onClick={() => setLogoutArmed(true)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    {snapshot.state === "insecure-storage"
+                      ? "Remove insecure credential"
+                      : "Log out on this host"}
+                  </OctantButton>
                 ) : null}
               </div>
             </SettingRow>

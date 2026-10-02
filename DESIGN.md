@@ -1320,6 +1320,9 @@ ordinary confirmations use the standard action treatment. Long paths in the
 description wrap within the shared dialog. Their existing host approvals,
 receipts, and observed-state checks remain separate and mandatory.
 
+Settings connection removal uses the same confirmation while retaining its
+host command and GitHub's explicit local-logout confirmation.
+
 Remote device-key rotation uses the same confirmation. It remains limited to
 the paired browser and requires its own explicit choice after opening the
 dialog; cancellation leaves the key untouched.
