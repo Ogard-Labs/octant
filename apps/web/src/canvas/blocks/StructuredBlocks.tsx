@@ -1,5 +1,5 @@
 import { CANVAS_CHART_PALETTE } from "@octant/theme";
-import type { CanvasBlock, CanvasChartSeries } from "@octant/contracts/canvas";
+import type { CanvasBlock, CanvasChartSeries, CanvasStatusTone } from "@octant/contracts/canvas";
 import { computeYDomain, scaleX, scaleY, type ChartSeriesData } from "../chartGeometry";
 import { formatScalar } from "../canvasRuntime";
 import { DiagramBoard, type DiagramBoardLayoutRuntime } from "./DiagramBoard";
@@ -162,10 +162,25 @@ function TimelineBlock({
   readonly block: Extract<Block, { readonly kind: "timeline" }>;
 }) {
   return (
+    <TimelineList items={block.items.map((item) => ({ ...item, key: String(item.itemId) }))} />
+  );
+}
+
+/** One dated entry on a timeline; plans draw their dated tasks with it too. */
+export interface TimelineEntry {
+  readonly key: string;
+  readonly title: string;
+  readonly startAt: string;
+  readonly status?: CanvasStatusTone | undefined;
+  readonly detail?: string | undefined;
+}
+
+export function TimelineList({ items }: { readonly items: ReadonlyArray<TimelineEntry> }) {
+  return (
     <ol className="canvas-block__timeline">
-      {block.items.map((item) => (
+      {items.map((item) => (
         <li
-          key={item.itemId}
+          key={item.key}
           className={`canvas-block__timeline-item${item.status !== undefined ? ` canvas-block__timeline-item--${item.status}` : ""}`}
         >
           <time dateTime={item.startAt}>{formatDate(item.startAt)}</time>

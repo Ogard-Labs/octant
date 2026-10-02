@@ -145,6 +145,26 @@ describe("createCanvasAgentTools", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("discloses the plan block's phases, tasks, and statuses to an agent that asks for it", async () => {
+    const { set } = tools();
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["plan"] }),
+    });
+
+    expect(outcome.isError).not.toBe(true);
+    expect(outcome.result).toMatchObject({
+      blockSchema: {
+        properties: {
+          kind: { enum: ["plan"] },
+          phases: { type: "array" },
+          tasks: { type: "array" },
+        },
+      },
+    });
+    expect(JSON.stringify(outcome.result)).toContain("blocked");
+  });
+
   it.each([
     { blockKinds: [] },
     { blockKinds: ["raw-html"] },

@@ -151,6 +151,140 @@
   color: var(--oct-success-fg);
 }
 
+/* A plan: a head with progress and the view switch, then phases of task rows,
+   a board of status columns, or the timeline. */
+.canvas-plan {
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
+.canvas-plan__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2) var(--oct-space-3);
+}
+
+.canvas-plan__title {
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+}
+
+.canvas-plan__progress,
+.canvas-plan__phase-count {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-plan__views {
+  margin-inline-start: auto;
+}
+
+.canvas-plan__phases,
+.canvas-plan__timeline {
+  display: grid;
+  gap: var(--oct-space-4);
+}
+
+.canvas-plan__phase-title,
+.canvas-plan__column-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  margin: 0 0 var(--oct-space-2);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+}
+
+.canvas-plan__tasks,
+.canvas-plan__cards {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas-plan__task {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1) 0;
+}
+
+.canvas-plan__task-mark {
+  margin-top: 2px;
+  color: var(--oct-muted);
+}
+
+.canvas-plan__task[data-status="doing"] .canvas-plan__task-mark {
+  color: var(--oct-fg);
+}
+
+.canvas-plan__task[data-status="blocked"] .canvas-plan__task-mark {
+  color: var(--oct-danger-fg);
+}
+
+.canvas-plan__task[data-status="done"] .canvas-plan__task-mark {
+  color: var(--oct-success-fg);
+}
+
+.canvas-plan__task[data-status="done"] .canvas-plan__task-title {
+  color: var(--oct-muted);
+  text-decoration: line-through;
+}
+
+.canvas-plan__task-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.canvas-plan__task-title {
+  font-size: var(--oct-text-sm);
+}
+
+.canvas-plan__task-facts {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-plan__task-notes {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-plan__empty {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-plan__board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--oct-space-2);
+}
+
+.canvas-plan__column {
+  padding: var(--oct-space-2);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-fg-soft);
+}
+
+.canvas-plan__card {
+  display: grid;
+  gap: 2px;
+  padding: var(--oct-space-2);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-inset);
+  background: var(--oct-surface);
+}
+
 .canvas-block__diagram-svg {
   width: 100%;
   height: auto;

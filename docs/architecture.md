@@ -249,6 +249,15 @@ separate global tool installation or prompt catalogue. Browser shares one
 definition across modes. Canvas's `describe` operation lists the closed block
 catalogue and a creation example, or returns canonical schemas for up to three
 requested block kinds. It reads no Project data and creates no artifact.
+The catalogue includes a `plan` block: phases, and one list of tasks that each
+name their phase, carry a status (todo, doing, blocked, done), and may carry an
+owner, estimate, acceptance notes, dates, dependencies on other tasks in the
+block, and manifest source ids. The domain policy refuses a task in a missing
+phase, a dangling or circular dependency, or a missing source. Tasks are not
+nested in phases because nesting puts a task's dependencies past the Canvas
+depth budget. The renderer offers checklist, status-board, and timeline views;
+switching is a reading choice and revises nothing. A shared snapshot keeps the
+plan but drops its source ids.
 Descriptions explain the existing presentation flows and distinguish creation,
 queued jobs, and work proposals from opened previews or completed work.
 Work also includes a short, budgeted artifact instruction in its required
