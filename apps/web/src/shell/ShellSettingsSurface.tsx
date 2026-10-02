@@ -48,6 +48,7 @@ export interface ShellSettingsSurfaceProps {
   readonly automationNotificationClient: AutomationNotificationClient;
   readonly isNarrow: boolean;
   readonly nativeBoundsAvailable: boolean;
+  readonly reservesTitlebarInset?: boolean;
   readonly onBack: () => void;
   readonly onDeepLinkApplied: () => void;
   readonly onResetLayout: () => void;
@@ -111,6 +112,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             automationNotificationClient={props.automationNotificationClient}
             isNarrow={props.isNarrow}
             nativeBoundsAvailable={props.nativeBoundsAvailable}
+            {...(props.reservesTitlebarInset === undefined
+              ? {}
+              : { reservesTitlebarInset: props.reservesTitlebarInset })}
             onBack={props.onBack}
             onDeepLinkApplied={props.onDeepLinkApplied}
             onResetLayout={props.onResetLayout}

@@ -5635,6 +5635,7 @@ function LaunchedShell(
       automationNotificationClient={automationNotificationClient}
       isNarrow={isNarrow}
       nativeBoundsAvailable={nativeHost !== undefined}
+      reservesTitlebarInset={hostReservesTitlebarInset}
       onBack={controller.closeSettings}
       onDeepLinkApplied={controller.clearPendingSettingsDeepLink}
       onResetLayout={controller.resetActiveLayout}
