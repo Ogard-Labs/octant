@@ -68,6 +68,8 @@ import { WorkKindSwitch } from "../../shell/WorkKindSwitch";
 export interface WorkComposerAdapterProps {
   /** The person's name from their profile, for the greeting on the hero. */
   readonly greetingName?: string | undefined;
+  /** Text to start the composer with; a new revision replaces the draft once. */
+  readonly promptRequest?: { readonly text: string; readonly revision: number };
   readonly projectId?: ProjectId;
   readonly projectName?: string;
   readonly projectRoot?: string;
@@ -170,6 +172,16 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     { controller: browser, kind: "browser" },
   ]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const appliedPromptRevision = useRef<number | undefined>(undefined);
+  const promptRequest = props.promptRequest;
+  useEffect(() => {
+    if (promptRequest === undefined || appliedPromptRevision.current === promptRequest.revision) {
+      return;
+    }
+    appliedPromptRevision.current = promptRequest.revision;
+    setPrompt(promptRequest.text);
+    textareaRef.current?.focus();
+  }, [promptRequest]);
   const mentionListId = "work-new-thread-mentions";
   const images = useWorkComposerImages();
   const threadMentions = useThreadMentions({

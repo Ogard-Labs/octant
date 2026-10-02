@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
+import type { ProjectId } from "@octant/contracts";
 import {
   CANVAS_SCHEMA_VERSION,
   decodeCanvasActor,
@@ -7,6 +8,7 @@ import {
   decodeCanvasPlanTaskId,
   decodeCanvasVersionId,
   type CanvasDefinition,
+  type CanvasPlanTask,
   type CanvasId,
   type CanvasVersionId,
 } from "@octant/contracts/canvas";
@@ -64,6 +66,15 @@ export interface CanvasWorkspaceTabProps {
   readonly onPinCanvasInFocusZone?: (request: {
     readonly canvasId: CanvasId;
     readonly title: string;
+  }) => void;
+  /**
+   * Opens a new-thread draft in the Canvas's own Project with a plan task
+   * written into it. The person still sends it; nothing is created here.
+   */
+  readonly onStartPlanTask?: (request: {
+    readonly mode: "work" | "code";
+    readonly projectId: ProjectId;
+    readonly prompt: string;
   }) => void;
 }
 
@@ -290,15 +301,30 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   // reasons as a drag: the host refuses an older version as stale.
   const planRuntime = useMemo<PlanTaskRuntime | undefined>(() => {
     const revisePlanTask = props.client?.revisePlanTask;
-    if (
-      revisePlanTask === undefined ||
-      reviseBase === null ||
-      selectedVersionId === undefined ||
-      String(selectedVersionId) !== tipVersionId
-    ) {
-      return undefined;
-    }
+    const editable =
+      revisePlanTask !== undefined &&
+      reviseBase !== null &&
+      selectedVersionId !== undefined &&
+      String(selectedVersionId) === tipVersionId;
+    // A task starts as Work or Code in the Canvas's own Project. A Chat
+    // Project has no folder to bind, so a Chat Canvas offers no start.
+    const startMode =
+      props.tab.mode === "work" || props.tab.mode === "code" ? props.tab.mode : undefined;
+    const onStartPlanTask = props.onStartPlanTask;
+    const start: Pick<PlanTaskRuntime, "onStartTask"> =
+      onStartPlanTask === undefined || startMode === undefined
+        ? {}
+        : {
+            onStartTask: (planTitle, task) =>
+              onStartPlanTask({
+                mode: startMode,
+                projectId: props.tab.projectId,
+                prompt: planTaskPrompt(planTitle, task),
+              }),
+          };
+    if (!editable) return start.onStartTask === undefined ? undefined : start;
     return {
+      ...start,
       onSetStatus: async (blockId, taskId, status) => {
         const result = await revisePlanTask({
           kind: "canvas-plan-task-revise",
@@ -329,7 +355,10 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     loadCanvas,
     loadHistory,
     props.client,
+    props.onStartPlanTask,
     props.tab.canvasId,
+    props.tab.mode,
+    props.tab.projectId,
     reviseBase,
     selectedVersionId,
     tipVersionId,
@@ -769,3 +798,12 @@ const LOCAL_PERSON = decodeCanvasActor({
   kind: "local-user",
   actorId: "00000000-0000-4000-8000-000000000002",
 });
+
+/** What a new thread is asked to do when a person starts a plan task. */
+function planTaskPrompt(planTitle: string, task: CanvasPlanTask): string {
+  const notes = task.notes?.trim();
+  return [
+    `Work on this task from the plan "${planTitle}": ${task.title}`,
+    ...(notes === undefined || notes === "" ? [] : [`Done when: ${notes}`]),
+  ].join("\n");
+}

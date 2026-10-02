@@ -276,6 +276,11 @@ export interface WorkspaceViewProps {
     readonly canvasId: CanvasId;
     readonly title: string;
   }) => void;
+  /** Opens a prefilled draft for a Canvas plan task; nothing is created until sent. */
+  readonly onStartPlanTask?: import("../canvas/CanvasWorkspaceTab").CanvasWorkspaceTabProps["onStartPlanTask"];
+  /** Text a draft starts with, handed over from a Canvas plan task. */
+  readonly draftPendingPrompt?: string;
+  readonly onDraftPendingPromptConsumed?: () => void;
   readonly onDockResearch?: (request: {
     readonly threadId: string;
     readonly mode: "work" | "code";
@@ -1305,6 +1310,12 @@ function renderNonCodeTab(
             ? {}
             : { linearPluginEnabled: props.linearPluginEnabled })}
           {...(props.codeHome === undefined ? {} : { codeHome: props.codeHome })}
+          {...(props.draftPendingPrompt === undefined
+            ? {}
+            : { pendingPrompt: props.draftPendingPrompt })}
+          {...(props.onDraftPendingPromptConsumed === undefined
+            ? {}
+            : { onPendingPromptConsumed: props.onDraftPendingPromptConsumed })}
           {...(props.homeStart === undefined ? {} : { homeStart: props.homeStart })}
           {...(draftProjectId === undefined ? {} : { projectId: draftProjectId })}
           {...(props.onDraftSelectProject === undefined
@@ -1639,6 +1650,9 @@ function renderNonCodeTab(
           {...(props.onPinCanvasInFocusZone === undefined
             ? {}
             : { onPinCanvasInFocusZone: props.onPinCanvasInFocusZone })}
+          {...(props.onStartPlanTask === undefined
+            ? {}
+            : { onStartPlanTask: props.onStartPlanTask })}
         />
       </Suspense>
     );
