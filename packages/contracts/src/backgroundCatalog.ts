@@ -2,6 +2,9 @@ import { Schema } from "effect";
 
 /** Stable ids for the first-party image catalog shared by Zen and the app ground. */
 export const ZEN_BUILTIN_BACKGROUND_IDS = [
+  "soft-glow",
+  "soft-graphite",
+  "soft-sunset",
   "nordic-fjord-aurora",
   "lofoten-night",
   "aurora-crimson-ridge",

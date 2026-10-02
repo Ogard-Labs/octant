@@ -37,7 +37,12 @@ approval categories that stay independent of which provider is running.
 - Child processes receive an allowlist-sanitized environment. Credential
   broker coordinates, bridge secrets, and provider credentials are stripped
   from every child; secrets reach a process only as named references resolved
-  at launch.
+  at launch. Static AWS IAM keys (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+  `AWS_SESSION_TOKEN`) never reach the Codex runtime, even for a Bedrock host:
+  the runtime is not confined and those keys grant far more than model access.
+  Bedrock authenticates with `AWS_BEARER_TOKEN_BEDROCK` or an `AWS_PROFILE`
+  whose keys live in the AWS shared config, and the provider probe reports a
+  host that only exports static keys as not ready, naming both routes.
 - Server-side tool-call policy is one choke point: a closed tool catalog, a
   declared-capability ceiling per tool or extension component, mode and
   posture rules, and decision receipts. Every surface that dispatches a tool

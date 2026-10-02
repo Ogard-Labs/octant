@@ -1,4 +1,5 @@
-import type { SelectedSkillContextResolver } from "../extensions/selectedSkillContext";
+import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
+import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { randomUUID } from "node:crypto";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import {
@@ -612,6 +613,8 @@ export interface CodeOperationTurnPort {
     readonly context?: ReadonlyArray<ProviderContextBlock>;
     /** Images this turn carries, already read from the host's own store. */
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
+    /** The selected MCP servers' tools, beside the host's own for this turn. */
+    readonly extensionTools?: AppManagedToolSet;
   }) => Promise<{
     readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
     readonly evidence?: string;
@@ -679,7 +682,7 @@ export interface CodeOperationExecuteOptions {
 }
 
 export interface CodeOperationServiceOptions {
-  readonly resolveSelectedSkillContext?: SelectedSkillContextResolver;
+  readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   readonly authority: CodeOperationAuthorityPort;
   /**
    * Runs after the command has passed thread, checkout, lifecycle, and Project
@@ -2625,18 +2628,20 @@ export class CodeOperationService {
     const selections =
       command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
+    let extensionTools: AppManagedToolSet | undefined;
     if (selections.length > 0) {
       const resolved = await this.#options
-        .resolveSelectedSkillContext?.({ mode: "code", thread, selections })
+        .resolveSelectedExtensions?.({ mode: "code", thread, selections, windowId })
         .catch(() => undefined);
       if (resolved === undefined || resolved.kind === "unavailable") {
         return this.#failed(
           command.operationId,
           "unavailable",
-          resolved?.message ?? "Selected skill context is unavailable for Code on this host.",
+          resolved?.message ?? "Selected extension is unavailable for Code on this host.",
         );
       }
       skillContext = resolved.context;
+      extensionTools = resolved.tools;
     }
     const supportsImages = this.#options.supportsAttachments?.(thread) === true;
     // Notes the user pointed at the running product ride with the next turn
@@ -2692,6 +2697,7 @@ export class CodeOperationService {
       prompt,
       ...(context.length === 0 ? {} : { context }),
       ...(attachments.length === 0 ? {} : { attachments }),
+      ...(extensionTools === undefined ? {} : { extensionTools }),
     });
     this.#options.consumeIssueContextFramed?.(String(thread.id));
     return this.#providerResult(command.operationId, turn);

@@ -28,6 +28,65 @@ const alternateProviderId = "80000000-0000-4000-8000-0000000000a2" as never;
 const alternateModelId = "model-two" as never;
 
 describe("CodeThreadWorkspace", () => {
+  it("shows how long a completed Code turn worked and leaves unsettled turns without a duration", async () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "completed",
+              role: "assistant",
+              text: "The fix is ready.",
+              status: "completed",
+              startedAt: "2026-09-30T08:00:00.000Z",
+              at: "2026-09-30T08:01:12.000Z",
+            },
+            {
+              id: "waiting",
+              role: "assistant",
+              text: "Waiting for approval.",
+              status: "waiting",
+              startedAt: "2026-09-30T08:02:00.000Z",
+              at: "2026-09-30T08:03:00.000Z",
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByText("Worked for 1m 12s")).toBeVisible();
+    expect(screen.getAllByText(/Worked for/)).toHaveLength(1);
+  });
+
+  it("re-reads the thread's Canvas cards once a running reply settles", async () => {
+    const threadReferenceCards = vi.fn(async () => ({ cards: [] }));
+    const reply = (status: "incomplete" | "completed") =>
+      controller({
+        conversation: [{ id: "reply", role: "assistant", text: "Drafting the plan.", status }],
+      });
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        canvasClient={{ threadReferenceCards } as never}
+        controller={reply("incomplete")}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() => expect(threadReferenceCards).toHaveBeenCalledTimes(1));
+    expect(threadReferenceCards).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "code", threadId: String(threadId) }),
+    );
+
+    rerender(
+      <CodeThreadWorkspace
+        canvasClient={{ threadReferenceCards } as never}
+        controller={reply("completed")}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() => expect(threadReferenceCards).toHaveBeenCalledTimes(2));
+  });
+
   it("keeps the starting profile in the access menu, and stays quiet when it has none", async () => {
     const user = userEvent.setup();
     const profileId = "60000000-0000-4000-8000-000000000001";
@@ -1217,7 +1276,7 @@ describe("CodeThreadWorkspace", () => {
   it("keeps post-preview Canvas tools out of the live thread toolbar", () => {
     render(
       <CodeThreadWorkspace
-        canvasClient={{} as never}
+        canvasClient={{ threadReferenceCards: async () => ({ cards: [] }) } as never}
         controller={controller()}
         threadId={threadId}
       />,

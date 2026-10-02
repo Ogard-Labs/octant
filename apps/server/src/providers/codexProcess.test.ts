@@ -316,12 +316,14 @@ describe("probeCodexBinary", () => {
 });
 
 describe("codexAppServerArgs", () => {
-  it("turns off Codex's own subagents from the command line on every supported version", () => {
+  it("turns off Codex's own subagents and memories from the command line on every supported version", () => {
     const featureOverrides = [
       "-c",
       "features.multi_agent=false",
       "-c",
       "features.multi_agent_v2=false",
+      "-c",
+      "features.memories=false",
     ];
     // Before 0.145.0 the feature flags alone decide; `[agents]` holds role
     // tables there, so `agents.enabled` would parse as a role and fail startup.
@@ -387,6 +389,8 @@ describe("CodexProcessPort", () => {
         "features.multi_agent=false",
         "-c",
         "features.multi_agent_v2=false",
+        "-c",
+        "features.memories=false",
       ],
       environment: {
         openaiApiKey: true,

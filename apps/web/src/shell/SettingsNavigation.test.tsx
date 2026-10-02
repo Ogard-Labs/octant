@@ -54,7 +54,7 @@ describe("SettingsNavigation", () => {
     );
   });
 
-  it("uses the control radius on navigation rows and keeps panels as open sections", () => {
+  it("uses the control radius on navigation rows and keeps panels and groups shadowless", () => {
     render(
       <SettingsNavigation
         sections={[{ id: "general", label: "General" }]}
@@ -71,6 +71,25 @@ describe("SettingsNavigation", () => {
     );
     expect(settingsStyles).toMatch(/\.settings-panel\s*\{[^}]*box-shadow:\s*none;/s);
     expect(settingsStyles).toMatch(/\.settings-panel\s*\{[^}]*background:\s*transparent;/s);
+  });
+
+  it("gives Device tools an icon of its own, apart from Computer use", () => {
+    render(
+      <SettingsNavigation
+        sections={[
+          { id: "computer-use", label: "Computer use" },
+          { id: "device-tools", label: "Device tools" },
+        ]}
+        activeSection="computer-use"
+        onSelect={vi.fn()}
+      />,
+    );
+    const icon = (name: string) =>
+      screen.getByRole("button", { name }).querySelector("svg")?.getAttribute("class");
+    expect(icon("Device tools")).not.toBe(icon("Computer use"));
+    expect(
+      screen.getByRole("button", { name: "Device tools" }).querySelector("svg"),
+    ).toHaveAttribute("aria-hidden", "true");
   });
 
   it("stays absent when search leaves no implemented section", () => {

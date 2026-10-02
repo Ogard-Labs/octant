@@ -15,6 +15,7 @@ import {
   decodeProjectLifecycleChanged,
   decodeProjectMemoryView,
   decodeProjectOrderChanged,
+  decodeProjectColorChanged,
   decodeProjectRenamed,
   type EventEnvelope,
   type MemoryEntry,
@@ -157,6 +158,7 @@ export class ProjectProjection implements Projection {
 const projectDecoders = {
   "project.created@1": (payload: unknown) => decodeProjectCreated(payload).project,
   "project.renamed@1": (payload: unknown) => decodeProjectRenamed(payload).project,
+  "project.color-changed@1": (payload: unknown) => decodeProjectColorChanged(payload).project,
   "project.order-changed@1": (payload: unknown) => decodeProjectOrderChanged(payload).project,
   "project.lifecycle-changed@1": (payload: unknown) =>
     decodeProjectLifecycleChanged(payload).project,

@@ -172,8 +172,224 @@
 /* The launcher is the dock's own body, so its rows share the tab strip's
    left edge: the body keeps the strip's 8px inset instead of the 16px a
    tool's content gets, and each row's icon then lands under the tab icon. */
-.right-utility-dock__content:has(> .dock-work-map) {
+.right-utility-dock__content:has(> .dock-start) {
   padding: 0 var(--oct-space-2) var(--oct-space-3);
+  overflow-y: auto;
+}
+
+/* The overview and the launcher are one scrolling column. The launcher stays
+   whole beneath the overview, so a tool is never further than a scroll away,
+   and a hairline is all that separates the two. */
+.dock-start {
+  display: grid;
+  align-content: start;
+}
+
+.dock-start > .dock-overview + .dock-work-map {
+  margin-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.dock-overview {
+  display: grid;
+  gap: 0;
+  padding-top: var(--oct-space-2);
+}
+
+/* Sections share the launcher's left edge: 8px of inset plus the 1px a ghost
+   row draws, so a title lands over the icon column below it. */
+.dock-overview__section {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.dock-overview__section + .dock-overview__section {
+  margin-top: var(--oct-space-2);
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.dock-overview__label {
+  margin: 0;
+  padding: 0 var(--oct-space-2);
+  border-inline: 1px solid transparent;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.dock-overview__running {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One 32px line per running thread: spinner, title, then the Project and age
+   as quiet meta. The title is the only part that yields when the dock is
+   narrow. */
+.dock-overview__running-row {
+  display: flex;
+  width: 100%;
+  height: 32px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-2);
+  text-align: left;
+}
+
+.dock-overview__spinner {
+  flex: none;
+  color: var(--oct-muted);
+  animation: dock-overview-spin var(--oct-motion-spin) linear infinite;
+}
+
+@keyframes dock-overview-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock-overview__spinner {
+    animation: none;
+  }
+}
+
+.dock-overview__running-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-overview__project {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* Neutral on purpose: the default theme carries no hue, and a Project has no
+   colour of its own yet. */
+.dock-overview__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--oct-radius-pill);
+  background: currentColor;
+}
+
+.dock-overview__project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-overview__age {
+  flex: none;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.dock-overview__facts {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+}
+
+.dock-overview__fact {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-2);
+  border-inline: 1px solid transparent;
+}
+
+.dock-overview__fact-label {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.dock-overview__fact-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  min-width: 0;
+  margin: 0;
+}
+
+.dock-overview__value {
+  min-width: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.dock-overview__chip {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fg-soft);
+  color: var(--oct-fg-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-overview__meter {
+  flex: 1 0 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg-soft);
+}
+
+.dock-overview__meter::before {
+  display: block;
+  width: var(--dock-overview-fill, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--oct-muted);
+  content: "";
+}
+
+.dock-overview__changes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  padding: 0 var(--oct-space-2);
+  border-inline: 1px solid transparent;
+}
+
+.dock-overview__diffstat {
+  display: inline-flex;
+  gap: var(--oct-space-2);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.dock-overview__review {
+  margin-left: auto;
 }
 
 .dock-work-map {
@@ -607,6 +823,11 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
   line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.octant-confirmation__details {
+  margin-bottom: var(--oct-space-3);
 }
 
 .octant-dialog__popup > .right-utility-dock__surface {

@@ -14,6 +14,10 @@
   --oct-settings-reading-width: 920px;
   --oct-settings-control: 180px;
   --oct-settings-control-height: 28px;
+  /* One step above the workspace fill: a card on the page. */
+  --oct-settings-card-fill: color-mix(in oklab, var(--oct-fg) 3%, var(--oct-bg));
+  --oct-settings-tile-fill: color-mix(in oklab, var(--oct-fg) 8%, transparent);
+  --oct-settings-row-inset: 16px;
 }
 
 .settings-view__sidebar {
@@ -229,21 +233,52 @@
   white-space: nowrap;
 }
 
-/* The shared title/subtitle roles carry the type; this header only spaces the
-   sections below it, and the subtitle's own end margin must not stack on top. */
-.settings-view__header {
+/* The page head is the icon tile, the title and one line under it, and an
+   optional ghost action at the far edge, with the "On this page" row under it
+   on a page that has three sections or more. The shared title/subtitle roles
+   carry the type; this only places them, and the subtitle's own end margin
+   must not stack on top. */
+.settings-view__page-head {
   display: grid;
-  gap: 6px;
-  margin-bottom: 36px;
+  gap: var(--oct-space-4);
+  margin-bottom: var(--oct-space-8);
 }
 
+.settings-view__header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-4);
+}
+
+/* A faint tile holding the page's own navigation icon, so the page and its
+   rail row read as one thing. It is decoration: the h1 names the page. */
+.settings-view__header-tile {
+  display: grid;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  color: var(--octant-text-primary);
+  background: var(--oct-settings-tile-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-inset);
+}
+
+.settings-view__header-text {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: var(--oct-space-1);
+}
+
+.settings-view__header-action {
+  flex: 0 0 auto;
+}
+
+/* Size, weight, and tracking come from the shared page-title role. */
 .settings-view__header h1 {
   color: var(--octant-text-primary);
   margin: 0;
-  font-size: var(--oct-text-xl);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: -0.03em;
-  line-height: 1.2;
 }
 
 .settings-view__header .oct-subtitle {
@@ -253,6 +288,79 @@
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   line-height: 1.45;
+}
+
+/* Pill links to the page's own sections. Fills select and hairlines
+   separate, so a pill is a hairline ring that takes the faint fill on hover. */
+.settings-view__outline ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-view__outline-link {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  padding: 0 var(--oct-space-3);
+  color: var(--octant-text-secondary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-detail);
+  line-height: 1;
+  text-decoration: none;
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-pill);
+}
+
+.settings-view__outline-link:hover {
+  color: var(--octant-text-primary);
+  background: var(--oct-settings-tile-fill);
+}
+
+/* The Saved mark has a slot of its own width, so it arriving and leaving moves
+   nothing. The slot stays when it is empty. */
+.settings-view__saved {
+  display: inline-flex;
+  width: 72px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--oct-space-1);
+  margin-left: auto;
+  color: var(--octant-text-secondary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.settings-view__saved > [role="status"] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* The rail's own heading carries the search toggle at its trailing edge. */
+.settings-view__rail-head {
+  display: flex;
+  min-height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: var(--oct-space-2) 0;
+  margin-bottom: var(--oct-space-2);
+}
+
+.settings-view__rail-title {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.2;
 }
 
 /* flex: none, because the sidebar is a scrolling flex column: when the nav
@@ -266,6 +374,10 @@
   margin: 0 0 12px;
   padding: 0;
   border: 0;
+}
+
+.settings-view__field.settings-view__field--search[hidden] {
+  display: none;
 }
 
 .settings-view__search-label {
@@ -480,33 +592,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   border: 0;
   border-radius: 0;
   box-shadow: none;
-}
-
-.settings-panel__header {
-  display: grid;
-  gap: 4px;
-  padding: 0 0 12px;
-  border-bottom: 1px solid var(--oct-hairline);
-}
-
-.settings-panel__header h2,
-.settings-panel__header p {
-  margin: 0;
-}
-
-.settings-panel__header h2 {
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-regular);
-  letter-spacing: -0.01em;
-  text-transform: none;
-}
-
-.settings-panel__header p {
-  max-width: 68ch;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
-  line-height: 1.45;
 }
 
 .settings-panel__body {
@@ -972,55 +1057,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   min-width: 88px;
   justify-content: center;
   white-space: nowrap;
-}
-
-/* The row's trailing control keeps a hair of room before the rule ends: a
-   switch or icon button flush with the last pixel drew its shadow and focus
-   ring past the hairline, so the controls looked cut off at the edge. */
-.settings-card-section--open > .provlist > .provrow {
-  padding-inline: 0 4px;
-}
-
-/* Observation and action columns are explicit rather than content-sized.
-   "Checking", a model count, and an authentication state then replace one
-   another in place without moving the provider name or trailing controls. */
-.settings-card-section--open > .provlist > .provrow[data-reordering="false"] {
-  grid-template-columns: 32px minmax(0, 1fr) 84px 112px 68px;
-}
-
-.settings-card-section--open > .provlist > .provrow[data-reordering="true"] {
-  grid-template-columns: 24px 32px minmax(0, 1fr) 84px 112px 68px;
-}
-
-.settings-card-section--open > .provlist .prov-models {
-  min-width: 84px;
-  text-align: end;
-}
-
-.settings-card-section--open > .provlist .prov-status {
-  min-width: 112px;
-  justify-items: end;
-}
-
-.settings-card-section--open > .provlist .prov-actions {
-  min-width: 68px;
-  justify-content: flex-end;
-}
-
-@media (max-width: 560px) {
-  .settings-card-section--open > .provlist > .provrow[data-reordering="false"] {
-    grid-template-columns: 16px minmax(0, 1fr) auto;
-  }
-
-  .settings-card-section--open > .provlist > .provrow[data-reordering="true"] {
-    grid-template-columns: 24px 16px minmax(0, 1fr) auto;
-  }
-
-  .settings-card-section--open > .provlist .prov-models,
-  .settings-card-section--open > .provlist .prov-status,
-  .settings-card-section--open > .provlist .prov-actions {
-    min-width: 0;
-  }
 }
 
 .settings-card-section > .setgroup > .setrow:first-child {
@@ -2842,4 +2878,487 @@ textarea.settings-view__text-input {
   display: block;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+/* ── Settings kit: sections, grouped cards, rows ────────────────────────
+   Every Settings page is built from one section: a label, an optional
+   one-line description in muted ink, then one grouped card holding its rows.
+   The card is the card shape of the window frame (the 16px card radius, one
+   hairline, no shadow) one step above the workspace fill, and the rows inside
+   it are divided by a hairline inset from the card's edges.
+
+   The rules are scoped to `.settings-view` and placed last so they win over
+   the open-section recipes above, which first run still shares. The section
+   itself stays `overflow: visible`: its rows hold menus and popovers that
+   escape the card, so the first and last row round themselves instead of the
+   card clipping them. */
+
+.settings-view .settings-card-section.settings-card-section--open > h2,
+.settings-view .settings-card-section.settings-card-section--open > .settings-section-head > h2 {
+  padding: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.35;
+}
+
+.settings-view .settings-card-section.settings-card-section--open > h2,
+.settings-view .settings-card-section.settings-card-section--open > .settings-section-head {
+  padding-bottom: var(--oct-space-3);
+}
+
+.settings-view
+  .settings-card-section.settings-card-section--open
+  > h2:has(+ .settings-section-note) {
+  padding-bottom: var(--oct-space-1);
+}
+
+.settings-view .settings-card-section--open > .settings-section-note {
+  max-width: 68ch;
+  padding: 0 0 var(--oct-space-3);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+
+/* The grouped card. A row list, a fact list, and a panel body are the three
+   things a section holds. */
+.settings-view
+  .settings-card-section--open
+  > :is(.setgroup, .settings-fact-list, .settings-panel__body) {
+  overflow: visible;
+  background: var(--oct-settings-card-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+  box-shadow: none;
+}
+
+.settings-view .settings-card-section--open > .setgroup {
+  padding: 0;
+}
+
+/* A free-form panel body pads itself; the rows and facts of a list own theirs. */
+.settings-view .settings-card-section--open > .settings-panel__body {
+  display: grid;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-3) var(--oct-space-4);
+}
+
+.settings-view .settings-panel__body > .settings-panel__stack {
+  padding: 0;
+}
+
+.settings-view .settings-panel__body .settings-fact-list__row {
+  padding-inline: 0;
+}
+
+/* A hairline between rows, inset from the card's edges rather than running
+   to them. A gradient paints it so the row itself needs no pseudo-element or
+   border, and a row that already uses either keeps it. */
+.settings-view .settings-card-section--open > :is(.setgroup, .settings-fact-list) > * + * {
+  background-image: linear-gradient(var(--oct-hairline), var(--oct-hairline));
+  background-repeat: no-repeat;
+  background-position: var(--oct-settings-row-inset) 0;
+  background-size: calc(100% - 2 * var(--oct-settings-row-inset)) 1px;
+}
+
+.settings-view .settings-card-section--open > :is(.setgroup, .settings-fact-list) > :first-child {
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+}
+
+.settings-view .settings-card-section--open > :is(.setgroup, .settings-fact-list) > :last-child {
+  border-end-start-radius: inherit;
+  border-end-end-radius: inherit;
+}
+
+.settings-view .settings-card-section--open > .setgroup .setrow,
+.settings-view .settings-card-section--open > .setgroup > .setrow:first-child,
+.settings-view .settings-card-section--open > .setgroup > .setgroup-head + .setrow,
+.settings-view .settings-card-section--open > .setgroup > .setgroup-note + .setrow {
+  min-height: 52px;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-top: 0;
+}
+
+.settings-view .settings-card-section--open > .settings-fact-list > .settings-fact-list__row {
+  min-height: 52px;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-top: 0;
+}
+
+/* Other things a row list holds (a field, a bare setting, a group label)
+   take the same inset so everything in the card shares its left edge. */
+.settings-view
+  .settings-card-section--open
+  > .setgroup
+  > :is(.settings-view__field, .settings-view__setting, .settings-view__toggle) {
+  padding-inline: var(--oct-space-4);
+}
+
+.settings-view .settings-card-section--open > .setgroup > .setgroup-head {
+  padding: var(--oct-space-3) var(--oct-space-4) 0;
+}
+
+.settings-view .settings-card-section--open > .setgroup > .setgroup-note {
+  padding: 0 var(--oct-space-4) var(--oct-space-3);
+}
+
+/* A label that carries actions on its own line pads the same way. */
+.settings-view
+  .settings-card-section.settings-card-section--open
+  > .settings-section-head:has(+ .settings-section-note) {
+  padding-bottom: var(--oct-space-1);
+}
+
+.settings-view .settings-card-section.settings-card-section--open > :is(legend, summary) {
+  padding: 0 0 var(--oct-space-3);
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.35;
+}
+
+/* Two cards in one section (a switch row, then the facts it reports on) sit a
+   step apart rather than touching. */
+.settings-view
+  .settings-card-section--open
+  > :is(.setgroup, .settings-fact-list)
+  + :is(.setgroup, .settings-fact-list) {
+  margin-top: var(--oct-space-3);
+}
+
+/* A discrete object inside a section that is not a row list (a pairing
+   request, a custom editor) takes the card's shape. */
+.settings-view .settings-card {
+  display: grid;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  background: var(--oct-settings-card-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+}
+
+.settings-view .setrow-control > .settings-panel__stack {
+  padding: 0;
+}
+
+/* Sections keep one rhythm between them wherever the page nests them, and a
+   link in "On this page" lands with the label clear of the card above it. */
+.settings-view__content-inner :has(> .settings-card-section--open) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+}
+
+.settings-view .settings-card-section--open {
+  scroll-margin-top: var(--oct-space-4);
+}
+
+/* Appearance's older field rows were written for a card-less list, so they
+   take the card's inset here, and its scheme cards sit inside it. */
+.settings-view .settings-scheme {
+  padding: var(--oct-space-4);
+}
+
+.settings-view
+  .settings-theme-editor
+  .settings-card-section--open
+  > .setgroup
+  > .settings-view__field {
+  min-height: 52px;
+  padding: var(--oct-space-2) var(--oct-space-4);
+  border-top: 0;
+}
+
+.settings-view .setgroup > .settings-disclosure--section > summary {
+  padding-inline: var(--oct-space-4);
+  border-top: 0;
+}
+
+.settings-view .setgroup > .settings-disclosure--section > .settings-disclosure__body {
+  padding-inline: var(--oct-space-4);
+}
+
+.settings-view
+  .setgroup
+  > .settings-disclosure--section
+  > summary
+  .settings-disclosure__label
+  > span:first-child {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+/* Lists of reported items inside a card: the hairline comes from the card
+   rather than from each item. */
+.settings-view :is(.host-settings__capabilities, .github-settings__capabilities) > li {
+  min-height: 52px;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-top: 0;
+  border-bottom: 0;
+}
+
+.settings-view .federated-hosts-lifecycle__list > .setrow {
+  padding-inline: var(--oct-space-4);
+  border-top: 0;
+}
+
+.settings-view .settings-card-section--open > .settings-feedback-slot:empty {
+  display: none;
+}
+
+/* A fieldset inside a row list (Appearance's typography) holds rows of its
+   own; they are divided the same way, and its hidden legend is not a row. */
+.settings-view .settings-card-section--open > .setgroup > .settings-view__theme-group {
+  padding: 0;
+}
+
+.settings-view
+  .settings-card-section--open
+  > .setgroup
+  > .settings-view__theme-group
+  > :not(legend)
+  ~ :not(legend) {
+  background-image: linear-gradient(var(--oct-hairline), var(--oct-hairline));
+  background-repeat: no-repeat;
+  background-position: var(--oct-settings-row-inset) 0;
+  background-size: calc(100% - 2 * var(--oct-settings-row-inset)) 1px;
+}
+
+.settings-view .setgroup > .settings-view__theme-group > .settings-disclosure--inline {
+  padding-inline: var(--oct-space-4);
+}
+
+/* ── Providers on the kit ───────────────────────────────────────────────
+   Each provider is a row card: a 48px logo tile, the name and maker, a state
+   line, and the switch and details chevron at the right. Cards sit two to a
+   row, and one to a row under 900px. A card whose details are open takes the
+   whole row, because its configuration needs the width. */
+
+.settings-view .provider-list__groups {
+  display: grid;
+  gap: 28px;
+}
+
+.settings-view .provlist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--oct-space-3);
+}
+
+@media (max-width: 900px) {
+  .settings-view .provlist {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.settings-view .provlist > .provrow {
+  display: grid;
+  grid-template-areas:
+    "tile main actions"
+    "tile state actions"
+    "details details details";
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 0 var(--oct-space-3);
+  min-width: 0;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  background: var(--oct-settings-card-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+}
+
+.settings-view .provlist > .provrow[data-reordering="true"] {
+  grid-template-areas:
+    "grip tile main actions"
+    "grip tile state actions"
+    "details details details details";
+  grid-template-columns: auto 48px minmax(0, 1fr) auto;
+}
+
+.settings-view .provlist > .provrow:has(> .prov-details) {
+  grid-column: 1 / -1;
+}
+
+.settings-view .provlist > .provrow > .prov-grip-slot {
+  grid-area: grip;
+}
+
+.settings-view .provlist > .provrow > .icon-mark {
+  grid-area: tile;
+  width: 48px;
+  height: 48px;
+  color: var(--octant-text-primary);
+  background: var(--oct-settings-tile-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-inset);
+}
+
+.settings-view .provlist > .provrow > .prov-main {
+  grid-area: main;
+  align-self: end;
+}
+
+.settings-view .provlist > .provrow > .prov-observation {
+  display: flex;
+  grid-area: state;
+  flex-direction: row-reverse;
+  align-items: center;
+  align-self: start;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-1);
+}
+
+.settings-view .provlist > .provrow > .prov-actions {
+  grid-area: actions;
+  justify-self: end;
+}
+
+.settings-view .provlist > .provrow > .prov-details {
+  grid-area: details;
+  margin: var(--oct-space-3) 0 0;
+  padding: var(--oct-space-3) 0 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-view .provlist .prov-models:not(:empty)::before {
+  content: "·";
+  margin-inline-end: var(--oct-space-2);
+}
+
+/* The state dot says which of three things a provider is, without colour: a
+   filled ring is ready, a ring in ink needs setup or a sign-in, and a muted
+   ring is off or not checked. A failure keeps its own red role. Vivid colours
+   the ready dot green and the setup ring orange. */
+.settings-view .prov-state {
+  color: var(--octant-text-secondary);
+}
+
+.settings-view .prov-state::before {
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  background: transparent;
+  border: 1.5px solid var(--octant-text-muted);
+  opacity: 1;
+}
+
+.settings-view .prov-state[data-tone="ok"]::before {
+  background: var(--oct-provider-ready, var(--octant-text-primary));
+  border-color: var(--oct-provider-ready, var(--octant-text-primary));
+}
+
+.settings-view .prov-state[data-tone="warn"]::before {
+  background: transparent;
+  border-color: var(--oct-provider-setup, var(--octant-text-primary));
+}
+
+.settings-view .prov-state[data-tone="danger"] {
+  color: var(--oct-danger-fg);
+}
+
+.settings-view .prov-state[data-tone="danger"]::before {
+  background: transparent;
+  border-color: var(--oct-danger-fg);
+}
+
+.settings-view .provider-settings__summary {
+  display: block;
+  padding: var(--oct-space-1) 0 0;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+/* The agent-eligible pool is a disclosure row in a card of its own. */
+.settings-view .agent-eligible-models {
+  overflow: visible;
+  padding-inline: var(--oct-space-4);
+  background: var(--oct-settings-card-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+}
+
+.settings-view .agent-eligible-models__trigger {
+  min-height: 52px;
+  padding-inline: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.settings-view .agent-eligible-models__body {
+  padding-inline: 0;
+}
+
+.settings-view .provider-list .provider-settings__foot {
+  padding: var(--oct-space-3) 0 0;
+  border-top: 0;
+}
+
+/* ── Usage on the kit ───────────────────────────────────────────────────
+   The history's blocks are kit sections (a label over one card) and its
+   toolbar sits above them as a row of controls, so the Settings header is the
+   only title on the page. */
+
+.settings-view .provider-history {
+  height: auto;
+  overflow: visible;
+}
+
+.settings-view .provider-history__content {
+  width: 100%;
+  padding: 0;
+  gap: 28px;
+}
+
+.settings-view .provider-history__status {
+  position: static;
+  inset: auto;
+  padding: 0 0 var(--oct-space-1);
+}
+
+.settings-view .provider-history__header {
+  padding: 0 0 var(--oct-space-4);
+  border-bottom: 0;
+}
+
+.settings-view .provider-history__totals.settings-panel__body {
+  gap: var(--oct-space-4);
+}
+
+.settings-view .provider-history__breakdown .provider-history__table-scroll {
+  margin-inline: calc(-1 * var(--oct-space-4));
+  padding-inline: var(--oct-space-4);
+}
+
+/* Provider limits is a SurfaceSection on the standalone Usage page; inside
+   Settings its label, note, and list take the kit's recipes. */
+.settings-view .provider-limits > .oct-section-label,
+.settings-view .provider-limits > .surface-section__head > .oct-section-label {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: var(--oct-tracking-snug);
+}
+
+.settings-view .provider-limits > .surface-section__note {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+
+.settings-view .provider-limits__list {
+  padding: var(--oct-space-3) var(--oct-space-4);
+  background: var(--oct-settings-card-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+}
+
+.settings-view .provider-limits > .surface-section__head {
+  padding-bottom: var(--oct-space-3);
+  border-bottom: 0;
 }

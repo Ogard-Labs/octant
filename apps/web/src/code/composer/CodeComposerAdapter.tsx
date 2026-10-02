@@ -9,6 +9,10 @@ import {
   useComputerUseMention,
 } from "../../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
+import {
+  unattachedCapabilityMentionCopy,
+  unattachedCapabilityMentions,
+} from "@octant/plugin-host/capability-mentions";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useExtensionDraftSelections } from "../../chat/useExtensionDraftSelections";
 import {
@@ -144,6 +148,14 @@ export interface CodeComposerAdapterProps {
   readonly createFromControl?: ReactNode;
   /** Ready-made prompts shown under the composer; choosing one fills the prompt. */
   readonly suggestions?: ReadonlyArray<CodeComposerSuggestion>;
+  /** Threads executing now, and finished ones waiting for review, for the heading's line. */
+  readonly runningCount?: number | undefined;
+  readonly reviewCount?: number | undefined;
+  /**
+   * The start screen's action tiles and Running now strip, directly under the
+   * composer and its suggestions, ahead of the sections in `beneath`.
+   */
+  readonly homeStart?: ReactNode;
   /** Content shown under the composer (what is waiting, what to continue). */
   readonly beneath?: ReactNode;
   /**
@@ -437,6 +449,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // A Code thread belongs to a Project (decision 0037), so the first turn
   // cannot start until one is chosen.
   const [submitting, setSubmitting] = useState(false);
+  // A send refused before the host saw it explains itself beside the composer,
+  // since no thread exists to carry a reason.
+  const [sendNotice, setSendNotice] = useState<string>();
   const canSubmit =
     trimmed.length > 0 &&
     !props.creating &&
@@ -520,12 +535,21 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    setSubmitting(true);
-    const staged = images.filesForSend();
     const computerUseSelection = computer.selection;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
+    const unattachedMentions = unattachedCapabilityMentions(trimmed, [
+      ...extensionSelections,
+      ...(computerUseSelection === undefined ? [] : [computerUseSelection]),
+    ]);
+    if (unattachedMentions.length > 0) {
+      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions));
+      return;
+    }
+    setSendNotice(undefined);
+    setSubmitting(true);
+    const staged = images.filesForSend();
     void threadMentions
       .resolveForSend()
       .then(async (threadMentionIds) => {
@@ -660,7 +684,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     <section aria-label="New Code thread" className="code-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading greetingName={props.greetingName} question="What should we build?" />
+          <WelcomeHeading
+            greetingName={props.greetingName}
+            reviewCount={props.reviewCount}
+            runningCount={props.runningCount}
+          />
           {props.projectAvailable === false &&
           props.projectId !== undefined &&
           props.errorMessage === undefined ? (
@@ -669,24 +697,26 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         </div>
 
         <div className="composer-stack">
-          <div className="composer-tray composer-tray--above" aria-label="Thread context">
-            <div className="composer-tray__leading">
-              {projectControl}
-              {branchControl}
-              {environmentControl}
-            </div>
-            <div className="composer-tray__trailing">
-              {hasProject ? (
-                <CodeWorkspaceSelector
-                  onChange={setWorkspaceOverride}
-                  value={workspace}
-                  {...(props.creating === true ? { disabled: true } : {})}
-                />
-              ) : null}
-              {props.createFromControl}
-            </div>
-          </div>
           <ThreadComposer
+            startContext={
+              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                <div className="composer-tray__leading">
+                  {projectControl}
+                  {branchControl}
+                  {environmentControl}
+                </div>
+                <div className="composer-tray__trailing">
+                  {hasProject ? (
+                    <CodeWorkspaceSelector
+                      onChange={setWorkspaceOverride}
+                      value={workspace}
+                      {...(props.creating === true ? { disabled: true } : {})}
+                    />
+                  ) : null}
+                  {props.createFromControl}
+                </div>
+              </div>
+            }
             chips={
               <>
                 <ComputerUseMention controller={computer} surface="chips" />
@@ -895,6 +925,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         )}
 
+        {/* The action tiles and Running now come first: a running thread is
+            what a person most often came back to, and below the five
+            suggestions it sat under the fold. */}
+        {props.homeStart}
         {/* A draft of only spaces is empty to submit, so it is empty here too:
             the suggestions stay reachable instead of disappearing behind a
             stray space. */}
@@ -910,14 +944,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 key={suggestion.id}
                 onClick={() => applySuggestion(suggestion)}
                 size="sm"
+                title={suggestion.prompt}
                 type="button"
                 variant="ghost"
               >
-                <span className="code-home__suggestion-label">{suggestion.label}</span>
-                <span
-                  className="code-home__suggestion-text"
-                  id={`${suggestionDescriptionId}-${suggestion.id}`}
-                >
+                {suggestion.label}
+                <span className="sr-only" id={`${suggestionDescriptionId}-${suggestion.id}`}>
                   {suggestion.prompt}
                 </span>
               </OctantButton>
@@ -929,6 +961,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         {props.errorMessage !== undefined ? (
           <p className="code-composer-adapter__error" role="alert">
             {props.errorMessage}
+          </p>
+        ) : sendNotice !== undefined ? (
+          <p className="code-composer-adapter__error" role="alert">
+            {sendNotice}
           </p>
         ) : null}
         {props.creating ? (

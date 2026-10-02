@@ -201,6 +201,44 @@ describe("RepositoryTestProcessPort", () => {
     expect(linuxSpawn).not.toHaveBeenCalled();
   });
 
+  it.skipIf(process.platform !== "darwin")(
+    "runs system executables from /bin and /usr/bin without exposing another directory",
+    async () => {
+      const cwd = temporaryDirectory();
+      const other = temporaryDirectory();
+      const inside = join(cwd, "inside.txt");
+      const outside = join(other, "outside.txt");
+      writeFileSync(inside, "inside");
+      writeFileSync(outside, "outside");
+      const port = new RepositoryTestProcessPort({
+        temporaryDirectory: temporaryDirectory(),
+        receiptDirectory: temporaryDirectory(),
+        networkEgress: "none",
+      });
+
+      for (const command of ["/bin/cat", "/usr/bin/head"]) {
+        const allowed = await port.execute({
+          argv: [command, inside],
+          cwd,
+          environment: {},
+          timeoutMs: 5_000,
+        });
+        expect(allowed).toMatchObject({ termination: "exited", exitCode: 0 });
+        expect(new TextDecoder().decode(allowed.stdout)).toContain("inside");
+
+        const refused = await port.execute({
+          argv: [command, outside],
+          cwd,
+          environment: {},
+          timeoutMs: 5_000,
+        });
+        expect(refused).toMatchObject({ termination: "exited", exitCode: 1 });
+        expect(new TextDecoder().decode(refused.stdout)).not.toContain("outside");
+        expect(new TextDecoder().decode(refused.stderr)).toContain("Operation not permitted");
+      }
+    },
+  );
+
   it("lets a confined child read the exact host paths its caller names", async () => {
     const child = fakeChild(98);
     const spawn = vi.fn(() => child);

@@ -21,6 +21,8 @@ export interface ShellFrameProps {
   readonly onPreviewSidebarWidth: (width: number) => void;
   readonly sidebar: ReactNode;
   readonly sidebarCollapsed?: boolean;
+  /** A collapsed sidebar stays as its icon rail rather than leaving nothing. */
+  readonly sidebarRail?: boolean;
   readonly projectsSidebarOpen?: boolean;
   readonly sidebarResizable: boolean;
   readonly sidebarVibrancyMode?: SidebarVibrancyMode;
@@ -173,7 +175,7 @@ export function ShellFrame(props: ShellFrameProps) {
           <>
             {props.backdrop}
             {props.chrome}
-            {props.sidebarCollapsed ? null : props.sidebar}
+            {props.sidebarCollapsed && props.sidebarRail !== true ? null : props.sidebar}
             {props.sidebarResizable && !props.sidebarCollapsed ? (
               <ShellResizeHandle
                 accessibleName="Resize navigation sidebar"

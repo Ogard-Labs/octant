@@ -86,7 +86,7 @@ describe("Anthropic-compatible provider conformance", () => {
       },
       resume: {
         sessionId: interruptedSessionId,
-        resumeCursor: { driverKind: "anthropic-compatible", value: "unsupported" },
+        resumeCursor: { driverKind: "anthropic-compatible", value: interruptedSessionId },
         executionPolicy: "approval-gated",
       },
       staleResume: {
@@ -102,7 +102,7 @@ describe("Anthropic-compatible provider conformance", () => {
       },
       expectedEventKinds: ["interrupted"],
       expectedFailureCategories: {
-        staleResume: "unsupported",
+        staleResume: "stale-resume",
         unknownApproval: "unsupported",
         unknownUserInput: "unsupported",
       },

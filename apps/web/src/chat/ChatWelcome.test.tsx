@@ -101,6 +101,21 @@ describe("ChatWelcome", () => {
     expect(onCreateChat).toHaveBeenCalledExactlyOnceWith("Hello");
   });
 
+  it("refuses a first message whose @computer token cannot be attached here", async () => {
+    const user = userEvent.setup();
+    const onCreateChat = vi.fn();
+    render(<ChatWelcome onCreateChat={onCreateChat} />);
+
+    const draft = screen.getByRole("textbox", { name: "First message" });
+    await user.type(draft, "@computer describe my screen");
+    await user.click(screen.getByRole("button", { name: "Start chat" }));
+    expect(onCreateChat).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/Remove the token and send again, or start the thread and pick @Computer/),
+    ).toBeVisible();
+    expect(draft).toHaveValue("@computer describe my screen");
+  });
+
   it("opens the host command list from Chat's first-message composer", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();
@@ -133,7 +148,9 @@ describe("ChatWelcome", () => {
     const onCreateChat = vi.fn();
     render(<ChatWelcome onCreateChat={onCreateChat} />);
 
-    expect(screen.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+    ).toBeVisible();
     expect(screen.queryByText("Octant Chat")).not.toBeInTheDocument();
     expect(screen.queryByText(/Start a calm, focused conversation/)).not.toBeInTheDocument();
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Ship the preview");

@@ -41,7 +41,7 @@ describe("makeOpenAiCompatibleDriver", () => {
       credentialStatus: "stored",
       capabilities: {
         streaming: "unavailable",
-        resume: "unsupported",
+        resume: "supported",
         interruption: "supported",
         approvals: "unsupported",
         userQuestions: "unsupported",
@@ -464,6 +464,23 @@ describe("makeOpenAiCompatibleDriver", () => {
     expect(String(fetch.mock.calls[0]?.[0])).toMatch(/\/responses$/);
   });
 
+  it("refuses a resume cursor that names no saved conversation", async () => {
+    const driver = makeDriver({ fetch: vi.fn(async (url) => modelsResponse(url)) });
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          return yield* connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "openai-compatible", value: "never-started" },
+            executionPolicy: "approval-gated",
+          });
+        }),
+      ),
+    );
+    expect(String(exit)).toContain("stale-resume");
+  });
+
   it("fails unsupported session operations honestly and stop emits no false completion", async () => {
     const runtimeRegistry = new ProviderRuntimeRegistry();
     const driver = makeDriver({
@@ -476,11 +493,6 @@ describe("makeOpenAiCompatibleDriver", () => {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           for (const operation of [
-            connection.resume({
-              sessionId,
-              resumeCursor: { driverKind: "openai-compatible", value: "unsupported" },
-              executionPolicy: "approval-gated",
-            }),
             connection.answerApproval({ sessionId, requestId: "request", approved: false }),
             connection.answerUserInput({ sessionId, requestId: "request", answer: "answer" }),
           ]) {

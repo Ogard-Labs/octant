@@ -1,4 +1,5 @@
 import type { LinkedThreadPreview } from "@octant/contracts";
+import { useId } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 
@@ -15,10 +16,14 @@ export interface LinkedThreadPreviewDialogProps {
 
 export function LinkedThreadPreviewDialog(props: LinkedThreadPreviewDialogProps) {
   const preview = props.preview;
+  const titleId = useId();
+  const descriptionId = useId();
   return (
     <OctantDialog
       className="linked-thread-preview-dialog"
+      describedBy={descriptionId}
       label="Confirm parallel review"
+      labelledBy={titleId}
       onClose={props.submitting ? () => {} : props.onClose}
       open={props.open}
       popupId="linked-thread-preview-dialog"
@@ -26,7 +31,7 @@ export function LinkedThreadPreviewDialog(props: LinkedThreadPreviewDialogProps)
       <div className="linked-thread-preview-dialog__header">
         <div>
           <span className="linked-thread-preview-dialog__eyebrow">Linked threads</span>
-          <h2>Confirm parallel review</h2>
+          <h2 id={titleId}>Confirm parallel review</h2>
         </div>
         <OctantButton
           aria-label="Close linked-thread preview"
@@ -54,7 +59,7 @@ export function LinkedThreadPreviewDialog(props: LinkedThreadPreviewDialogProps)
         </p>
       )}
 
-      <p className="linked-thread-preview-dialog__authority" role="note">
+      <p className="linked-thread-preview-dialog__authority" id={descriptionId} role="note">
         Read-only plan authority applies to every peer thread. No approvals, credentials, or
         authority are transferred.
       </p>

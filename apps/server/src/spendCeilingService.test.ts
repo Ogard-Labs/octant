@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { decodeAggregateVersion } from "@octant/contracts";
+import { decodeAggregateVersion, decodeProjectId } from "@octant/contracts";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
@@ -47,6 +47,14 @@ function openService(options?: { readonly clock?: () => string }) {
     projectExists: () => true,
   });
   return { connection, journal, service, path: join(directory, "octant.sqlite3") };
+}
+
+function remainingOf(
+  snapshot: ReturnType<SpendCeilingService["snapshot"]>,
+  scope: "project" | "thread",
+) {
+  if ("kind" in snapshot) throw new Error("snapshot was unauthorized");
+  return scope === "project" ? snapshot.projectRemaining : snapshot.threadRemaining;
 }
 
 function insertUsage(
@@ -406,5 +414,148 @@ describe("SpendCeilingService", () => {
       }).kind,
     ).toBe("refused");
     void journal;
+  });
+
+  it("sets a new ceiling after a clear, on thread and Project scopes", () => {
+    const { service } = openService();
+    const scopes = [
+      { kind: "thread", threadType: "work-thread", threadId: ids.thread },
+      { kind: "project", projectId: decodeProjectId(ids.project) },
+    ] as const;
+    for (const scope of scopes) {
+      const window =
+        scope.kind === "thread"
+          ? ({ kind: "lifetime" } as const)
+          : ({ kind: "calendar", period: "day", timeZone: "UTC" } as const);
+      expect(
+        service.execute("local-window", {
+          kind: "set-spend-ceiling",
+          scope,
+          expectedVersion: decodeAggregateVersion(0),
+          policy: { turnBudget: 2 },
+          window,
+        }).kind,
+      ).toBe("set");
+      expect(
+        service.execute("local-window", {
+          kind: "clear-spend-ceiling",
+          scope,
+          expectedVersion: decodeAggregateVersion(1),
+        }).kind,
+      ).toBe("cleared");
+      const reset = service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope,
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { turnBudget: 3 },
+        window,
+      });
+      expect(reset).toMatchObject({ kind: "set", ceiling: { version: 3 } });
+      expect(
+        service.execute("local-window", {
+          kind: "raise-spend-ceiling",
+          scope,
+          expectedVersion: decodeAggregateVersion(3),
+          turnBudget: 4,
+        }).kind,
+      ).toBe("raised");
+    }
+  });
+
+  it("refuses a Project turn once its daily agent run time is used up, across restart", () => {
+    let clock = "2026-09-09T09:00:00.000Z";
+    const first = openService({ clock: () => clock });
+    first.service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { runTimeBudgetSeconds: 7_200 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+    const turn = {
+      threadId: ids.thread,
+      threadType: "work-thread" as const,
+      projectId: ids.project,
+    };
+    expect(first.service.admit({ ...turn, reservationId: ids.reservationA }).status).toBe(
+      "admitted",
+    );
+    clock = "2026-09-09T10:30:00.000Z";
+    first.service.settle({ reservationId: ids.reservationA });
+    expect(
+      remainingOf(
+        first.service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({
+      usedRunTimeSeconds: 5_400,
+      remainingRunTimeSeconds: 1_800,
+    });
+
+    // An in-flight turn's elapsed time counts before it settles.
+    expect(first.service.admit({ ...turn, reservationId: ids.reservationB }).status).toBe(
+      "admitted",
+    );
+    clock = "2026-09-09T11:00:00.000Z";
+    const third = decodeSpendCeilingReservationId("73000000-0000-4000-8000-0000000000cc");
+    const refused = first.service.admit({ ...turn, reservationId: third });
+    expect(refused.status).toBe("refused");
+    if (refused.status !== "refused") return;
+    expect(refused.refusal).toMatchObject({ dimension: "run-time", scopeKind: "project" });
+    first.service.settle({ reservationId: ids.reservationB });
+    first.connection.close();
+
+    const runtime = createPhase1RuntimeRegistries();
+    const connection = openSqlite(first.path);
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => clock,
+    });
+    const restarted = new SpendCeilingService({
+      connection,
+      journal,
+      clock: () => clock,
+      uuid: () => crypto.randomUUID(),
+      threadExists: () => true,
+      projectExists: () => true,
+    });
+    expect(restarted.admit({ ...turn, reservationId: third }).status).toBe("refused");
+    clock = "2026-09-10T00:00:01.000Z";
+    expect(restarted.admit({ ...turn, reservationId: third }).status).toBe("admitted");
+    connection.close();
+  });
+
+  it("counts turns settled before a turn ceiling was set, charged their elapsed time", () => {
+    let clock = now;
+    const { service } = openService({ clock: () => clock });
+    const turn = { threadId: ids.thread, threadType: "chat-thread" as const };
+    service.admit({ ...turn, reservationId: ids.reservationA });
+    clock = "2026-09-09T12:00:30.000Z";
+    service.settle({ reservationId: ids.reservationA });
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { turnBudget: 2, runTimeBudgetSeconds: 3_600 },
+      window: { kind: "lifetime" },
+    });
+    expect(
+      remainingOf(
+        service.snapshot({
+          principalKind: "local-window",
+          threadId: ids.thread,
+          threadType: "chat-thread",
+        }),
+        "thread",
+      ),
+    ).toMatchObject({ usedTurns: 1, remainingTurns: 1, usedRunTimeSeconds: 30 });
+    expect(service.admit({ ...turn, reservationId: ids.reservationB }).status).toBe("admitted");
+    const third = decodeSpendCeilingReservationId("73000000-0000-4000-8000-0000000000cc");
+    const refused = service.admit({ ...turn, reservationId: third });
+    expect(refused.status).toBe("refused");
+    if (refused.status !== "refused") return;
+    expect(refused.refusal).toMatchObject({ dimension: "turns", ceilingTurns: 2 });
   });
 });

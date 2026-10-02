@@ -75,7 +75,7 @@ describe("Azure AI Foundry provider conformance", () => {
       },
       resume: {
         sessionId: interruptedSessionId,
-        resumeCursor: { driverKind: "azure-foundry", value: "unsupported" },
+        resumeCursor: { driverKind: "azure-foundry", value: interruptedSessionId },
         executionPolicy: "approval-gated",
       },
       staleResume: {
@@ -91,7 +91,7 @@ describe("Azure AI Foundry provider conformance", () => {
       },
       expectedEventKinds: ["interrupted"],
       expectedFailureCategories: {
-        staleResume: "unsupported",
+        staleResume: "stale-resume",
         unknownApproval: "unsupported",
         unknownUserInput: "unsupported",
       },

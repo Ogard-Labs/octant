@@ -46,10 +46,20 @@ export function unattachedCapabilityMentions(
   );
 }
 
-/** The refusal reason a refused send shows beside the composer. */
+/**
+ * The refusal reason a refused send shows beside the composer.
+ *
+ * `mentionsAttach` names whether this composer can attach the token at all: a
+ * first-message composer with no suggestion list cannot tell the person to
+ * pick one, so it points them at the thread that can.
+ */
 export function unattachedCapabilityMentionCopy(
   mentions: ReadonlyArray<UnattachedCapabilityMention>,
+  mentionsAttach = true,
 ): string {
   const listed = mentions.map((mention) => `@${mention.label}`).join(" and ");
-  return `${listed} ${mentions.length === 1 ? "is" : "are"} not attached to this message. Pick the mention from the suggestion list, or remove the token, then send again.`;
+  const subject = `${listed} ${mentions.length === 1 ? "is" : "are"} not attached to this message.`;
+  return mentionsAttach
+    ? `${subject} Pick the mention from the suggestion list, or remove the token, then send again.`
+    : `${subject} Remove the token and send again, or start the thread and pick ${listed} from the suggestion list there.`;
 }
