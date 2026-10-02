@@ -1,4 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { CANVAS_SCHEMA_VERSION, decodeCanvasDefinition } from "@octant/contracts/canvas";
 import { describe, expect, it } from "vitest";
 import { CanvasDocument } from "./CanvasDocument";
 import { CanvasView } from "./CanvasView";
@@ -101,6 +103,63 @@ describe("Canvas accessibility basics", () => {
     const note = screen.getByRole("note");
     expect(note).toHaveTextContent("Numbers are preliminary.");
     expect(note).toHaveTextContent("Note");
+  });
+
+  it("shows a plan as a checklist, a status board, or a timeline without revising it", async () => {
+    const user = userEvent.setup();
+    const definition = decodeCanvasDefinition({
+      ...canvasFixture,
+      blocks: [
+        {
+          blockId: "plan-1",
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "plan",
+          title: "Launch plan",
+          phases: [
+            { phaseId: "build", title: "Build" },
+            { phaseId: "ship", title: "Ship" },
+          ],
+          tasks: [
+            {
+              taskId: "api",
+              phaseId: "build",
+              title: "Ship the API",
+              status: "done",
+              dueAt: "2026-08-03T12:00:00.000Z",
+            },
+            {
+              taskId: "docs",
+              phaseId: "ship",
+              title: "Write the docs",
+              status: "blocked",
+              dependsOn: ["api"],
+              owner: { kind: "agent", label: "Codex" },
+            },
+          ],
+        },
+      ],
+    });
+    render(<CanvasDocument definition={definition} />);
+
+    expect(screen.getByText("1 of 2 done")).toBeVisible();
+    const build = screen.getByRole("region", { name: "Build" });
+    expect(within(build).getByText("Ship the API")).toBeVisible();
+    const ship = screen.getByRole("region", { name: "Ship" });
+    expect(within(ship).getByText(/Codex · Waits on Ship the API/)).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Board" }));
+    expect(
+      within(screen.getByRole("region", { name: "Blocked" })).getByText("Write the docs"),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole("region", { name: "Done" })).getByText("Ship the API"),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Timeline" }));
+    expect(screen.getByText("Ship the API").closest("li")?.querySelector("time")).not.toBeNull();
+    expect(
+      within(screen.getByRole("region", { name: "Not scheduled" })).getByText("Write the docs"),
+    ).toBeVisible();
   });
 
   it("says a diagram in words for a reader who cannot see the drawing", () => {

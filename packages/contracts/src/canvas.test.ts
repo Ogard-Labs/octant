@@ -190,6 +190,33 @@ describe("Canvas contracts", () => {
         ],
       },
       {
+        blockId: "plan-1",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "plan",
+        title: "Launch plan",
+        view: "kanban",
+        phases: [{ phaseId: "build", title: "Build" }],
+        tasks: [
+          {
+            taskId: "api",
+            phaseId: "build",
+            title: "Ship the API",
+            status: "doing",
+            owner: { kind: "agent", label: "Codex" },
+            estimate: "2d",
+            notes: "Done when the contract tests pass.",
+            dueAt: "2026-08-03T21:00:00.000Z",
+          },
+          {
+            taskId: "docs",
+            phaseId: "build",
+            title: "Write the docs",
+            status: "todo",
+            dependsOn: ["api"],
+          },
+        ],
+      },
+      {
         blockId: "diagram-1",
         schemaVersion: CANVAS_SCHEMA_VERSION,
         kind: "diagram",

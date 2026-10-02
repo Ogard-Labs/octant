@@ -315,6 +315,41 @@ export const CanvasStaticExportBlock = Schema.Union(
       }).annotations(strict),
     ).pipe(Schema.maxItems(512)),
   }).annotations(strict),
+  // A shared plan keeps its phases and tasks but drops each task's source ids,
+  // which only resolve against the host that wrote it.
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("plan"),
+    title: ExportLabel,
+    view: Schema.optional(Schema.Literal("checklist", "kanban", "timeline")),
+    phases: Schema.NonEmptyArray(
+      Schema.Struct({
+        phaseId: boundedToken("CanvasPlanPhaseId"),
+        title: ExportLabel,
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(32)),
+    tasks: Schema.Array(
+      Schema.Struct({
+        taskId: boundedToken("CanvasPlanTaskId"),
+        phaseId: boundedToken("CanvasPlanPhaseId"),
+        title: ExportLabel,
+        status: Schema.Literal("todo", "doing", "blocked", "done"),
+        owner: Schema.optional(
+          Schema.Struct({
+            kind: Schema.Literal("person", "agent"),
+            label: Schema.optional(ExportLabel),
+          }).annotations(strict),
+        ),
+        estimate: Schema.optional(ExportLabel),
+        notes: Schema.optional(ExportText),
+        startAt: Schema.optional(UtcTimestamp),
+        dueAt: Schema.optional(UtcTimestamp),
+        dependsOn: Schema.optional(
+          Schema.Array(boundedToken("CanvasPlanTaskId")).pipe(Schema.maxItems(16)),
+        ),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(256)),
+  }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("diagram"),

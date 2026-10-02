@@ -167,6 +167,12 @@ function sanitizeBlock(block: CanvasBlock): CanvasStaticExportBlock {
       assertNoSecretShape(rest, `block.${block.blockId}`);
       return rest as CanvasStaticExportBlock;
     }
+    case "plan": {
+      const tasks = block.tasks.map(({ sourceIds: _sourceIds, ...task }) => task);
+      const shared = { ...block, tasks };
+      assertNoSecretShape(shared, `block.${block.blockId}`);
+      return shared;
+    }
     default:
       assertNoSecretShape(block, `block.${block.blockId}`);
       return block as CanvasStaticExportBlock;

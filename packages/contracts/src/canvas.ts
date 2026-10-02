@@ -47,6 +47,10 @@ export const CANVAS_MAX_DIFF_HUNKS = 128;
 export const CANVAS_MAX_DIFF_LINES = 4_096;
 export const CANVAS_MAX_SUMMARY_ITEMS = 128;
 export const CANVAS_MAX_TEXT_LENGTH = 32_768;
+export const CANVAS_MAX_PLAN_PHASES = 32;
+export const CANVAS_MAX_PLAN_TASKS = 256;
+export const CANVAS_MAX_PLAN_TASK_DEPENDENCIES = 16;
+export const CANVAS_MAX_PLAN_TASK_SOURCES = 8;
 
 // Descriptive aliases keep budget names discoverable without creating a
 // second source of truth.
@@ -214,6 +218,7 @@ export const CanvasBlockKind = Schema.Literal(
   "browser-reference",
   "evidence-reference",
   "image",
+  "plan",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -514,6 +519,69 @@ export const CanvasSummaryBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasSummaryBlock = typeof CanvasSummaryBlock.Type;
 
+// A plan is phases of tasks that the person and the agent both work in. A
+// task's links are manifest source ids (a thread, PR, file, or source the
+// Canvas already declares), never free paths or URLs, so a plan carries no
+// authority the manifest does not. `view` is the author's preferred view; a
+// reader may switch it without revising the Canvas.
+//
+// Tasks sit in one list that names each task's phase rather than nesting
+// inside phases: nested, a task's dependency list lands past the Canvas depth
+// budget the policy enforces on every version envelope.
+export const CanvasPlanTaskStatus = Schema.Literal("todo", "doing", "blocked", "done");
+export type CanvasPlanTaskStatus = typeof CanvasPlanTaskStatus.Type;
+
+export const CanvasPlanView = Schema.Literal("checklist", "kanban", "timeline");
+export type CanvasPlanView = typeof CanvasPlanView.Type;
+
+export const CanvasPlanOwner = Schema.Struct({
+  kind: Schema.Literal("person", "agent"),
+  label: Schema.optional(CanvasLabel),
+}).annotations(strict);
+export type CanvasPlanOwner = typeof CanvasPlanOwner.Type;
+
+export const CanvasPlanTaskId = boundedToken("CanvasPlanTaskId");
+export type CanvasPlanTaskId = typeof CanvasPlanTaskId.Type;
+
+export const CanvasPlanPhaseId = boundedToken("CanvasPlanPhaseId");
+export type CanvasPlanPhaseId = typeof CanvasPlanPhaseId.Type;
+
+export const CanvasPlanPhase = Schema.Struct({
+  phaseId: CanvasPlanPhaseId,
+  title: CanvasLabel,
+}).annotations(strict);
+export type CanvasPlanPhase = typeof CanvasPlanPhase.Type;
+
+export const CanvasPlanTask = Schema.Struct({
+  taskId: CanvasPlanTaskId,
+  phaseId: CanvasPlanPhaseId,
+  title: CanvasLabel,
+  status: CanvasPlanTaskStatus,
+  owner: Schema.optional(CanvasPlanOwner),
+  estimate: Schema.optional(boundedNonEmptyText(64)),
+  /** Acceptance notes: what done means for this task. */
+  notes: Schema.optional(CanvasText),
+  startAt: Schema.optional(UtcTimestamp),
+  dueAt: Schema.optional(UtcTimestamp),
+  dependsOn: Schema.optional(
+    Schema.Array(CanvasPlanTaskId).pipe(Schema.maxItems(CANVAS_MAX_PLAN_TASK_DEPENDENCIES)),
+  ),
+  sourceIds: Schema.optional(
+    Schema.Array(CanvasSourceId).pipe(Schema.maxItems(CANVAS_MAX_PLAN_TASK_SOURCES)),
+  ),
+}).annotations(strict);
+export type CanvasPlanTask = typeof CanvasPlanTask.Type;
+
+export const CanvasPlanBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("plan"),
+  title: CanvasLabel,
+  view: Schema.optional(CanvasPlanView),
+  phases: Schema.NonEmptyArray(CanvasPlanPhase).pipe(Schema.maxItems(CANVAS_MAX_PLAN_PHASES)),
+  tasks: Schema.Array(CanvasPlanTask).pipe(Schema.maxItems(CANVAS_MAX_PLAN_TASKS)),
+}).annotations(strict);
+export type CanvasPlanBlock = typeof CanvasPlanBlock.Type;
+
 const CanvasReferenceFields = {
   ...CanvasBlockFields,
   sourceId: CanvasSourceId,
@@ -586,6 +654,7 @@ export const CanvasBlock = Schema.Union(
   CanvasBrowserReferenceBlock,
   CanvasEvidenceReferenceBlock,
   CanvasImageBlock,
+  CanvasPlanBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
   // effect, so union membership never makes a definition executable.

@@ -65,6 +65,29 @@ function withBlocks(blocks: ReadonlyArray<unknown>): unknown {
   return { ...baseDefinition, blocks };
 }
 
+function planTask(taskId: string, overrides: Record<string, unknown> = {}) {
+  return { taskId, phaseId: "build", title: `Task ${taskId}`, status: "todo", ...overrides };
+}
+
+function plan(overrides: Record<string, unknown> = {}) {
+  return {
+    blockId: "plan",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "plan" as const,
+    title: "Launch plan",
+    phases: [{ phaseId: "build", title: "Build" }],
+    tasks: [
+      planTask("api", {
+        status: "doing",
+        owner: { kind: "agent", label: "Codex" },
+        sourceIds: [ids.source],
+      }),
+      planTask("docs", { dependsOn: ["api"] }),
+    ],
+    ...overrides,
+  };
+}
+
 function divider(blockId: string) {
   return { blockId, schemaVersion: CANVAS_SCHEMA_VERSION, kind: "divider" as const };
 }
@@ -229,6 +252,57 @@ describe("Canvas validation policy", () => {
           ]),
         ),
       "overlapping-groups",
+    );
+  });
+
+  it("accepts a plan whose tasks, phases, dependencies, and sources all resolve", () => {
+    expect(() => validateCanvasDefinition(withBlocks([plan()]))).not.toThrow();
+  });
+
+  it("refuses a plan task in a missing phase, a dangling or circular dependency, or a missing source", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([plan({ tasks: [planTask("api", { phaseId: "later" })] })]),
+        ),
+      "unknown-plan-phase",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([plan({ tasks: [planTask("api", { dependsOn: ["ghost"] })] })]),
+        ),
+      "dangling-plan-dependency",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            plan({
+              tasks: [
+                planTask("api", { dependsOn: ["docs"] }),
+                planTask("docs", { dependsOn: ["api"] }),
+              ],
+            }),
+          ]),
+        ),
+      "plan-dependency-cycle",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(withBlocks([plan({ tasks: [planTask("api"), planTask("api")] })])),
+      "duplicate-plan-task-id",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            plan({
+              tasks: [planTask("api", { sourceIds: ["00000000-0000-4000-8000-0000000000ff"] })],
+            }),
+          ]),
+        ),
+      "missing-source",
     );
   });
 

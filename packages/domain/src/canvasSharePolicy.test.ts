@@ -136,6 +136,36 @@ describe("Canvas share policy", () => {
     ]);
   });
 
+  it("shares a plan's phases and tasks without the source ids that only resolve on this host", () => {
+    const plan = {
+      blockId: "plan-1",
+      schemaVersion: 1,
+      kind: "plan",
+      title: "Launch plan",
+      phases: [{ phaseId: "build", title: "Build" }],
+      tasks: [
+        {
+          taskId: "api",
+          phaseId: "build",
+          title: "Ship the API",
+          status: "doing",
+          sourceIds: [ids.source],
+        },
+      ],
+    } as const;
+    const receipt = buildCanvasStaticExportReceipt({
+      request,
+      current: { ...current, definition: { ...current.definition, blocks: [plan] } },
+      context,
+    });
+    expect(receipt.document.blocks).toEqual([
+      {
+        ...plan,
+        tasks: [{ taskId: "api", phaseId: "build", title: "Ship the API", status: "doing" }],
+      },
+    ]);
+  });
+
   it("excludes board comments from a static export by default", () => {
     const comment = decodeCanvasComment({
       commentId: "88888888-8888-4888-8888-888888888888",

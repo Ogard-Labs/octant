@@ -41,7 +41,12 @@ export type CanvasPolicyRejectionCode =
   | "dangling-edge"
   | "duplicate-group-id"
   | "dangling-group-member"
-  | "overlapping-groups";
+  | "overlapping-groups"
+  | "duplicate-plan-phase-id"
+  | "duplicate-plan-task-id"
+  | "unknown-plan-phase"
+  | "dangling-plan-dependency"
+  | "plan-dependency-cycle";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -153,6 +158,8 @@ function sourceIdsForBlock(block: CanvasBlock): ReadonlyArray<CanvasSourceId> {
     case "evidence-reference":
     case "image":
       return "sourceId" in block && block.sourceId !== undefined ? [block.sourceId] : [];
+    case "plan":
+      return block.tasks.flatMap((task) => task.sourceIds ?? []);
     default:
       return [];
   }
@@ -334,6 +341,8 @@ function validateCrossReferences(definition: CanvasDefinition): void {
       }
     }
 
+    if (block.kind === "plan") validatePlan(block);
+
     if (block.kind === "diagram") {
       const nodes = new Set<string>();
       for (const node of block.nodes) {
@@ -379,6 +388,57 @@ function validateCrossReferences(definition: CanvasDefinition): void {
       }
     }
   }
+}
+
+/**
+ * A plan's phases and tasks are referenced by id: tasks name their phase and
+ * the tasks they wait on. Every reference must resolve inside the block, and
+ * dependencies must not loop, or the checklist, the kanban, and the
+ * dependency view would each draw a different, impossible plan.
+ */
+function validatePlan(block: Extract<CanvasBlock, { readonly kind: "plan" }>): void {
+  const phases = new Set<string>();
+  for (const phase of block.phases) {
+    if (phases.has(phase.phaseId)) {
+      reject("duplicate-plan-phase-id", `Canvas plan ${block.blockId} has duplicate phases.`);
+    }
+    phases.add(phase.phaseId);
+  }
+  const tasks = new Map<string, ReadonlyArray<string>>();
+  for (const task of block.tasks) {
+    if (tasks.has(task.taskId)) {
+      reject("duplicate-plan-task-id", `Canvas plan ${block.blockId} has duplicate tasks.`);
+    }
+    if (!phases.has(task.phaseId)) {
+      reject("unknown-plan-phase", `Canvas plan ${block.blockId} has a task in a missing phase.`);
+    }
+    tasks.set(task.taskId, task.dependsOn ?? []);
+  }
+  for (const [taskId, dependsOn] of tasks) {
+    for (const dependency of dependsOn) {
+      if (dependency === taskId || !tasks.has(dependency)) {
+        reject(
+          "dangling-plan-dependency",
+          `Canvas plan ${block.blockId} has a task waiting on a task it does not hold.`,
+        );
+      }
+    }
+  }
+  // Depth-first walk with an on-path set: meeting a task already on the
+  // current path means the dependencies loop.
+  const settled = new Set<string>();
+  const onPath = new Set<string>();
+  const visit = (taskId: string): void => {
+    if (settled.has(taskId)) return;
+    if (onPath.has(taskId)) {
+      reject("plan-dependency-cycle", `Canvas plan ${block.blockId} has circular dependencies.`);
+    }
+    onPath.add(taskId);
+    for (const dependency of tasks.get(taskId) ?? []) visit(dependency);
+    onPath.delete(taskId);
+    settled.add(taskId);
+  };
+  for (const taskId of tasks.keys()) visit(taskId);
 }
 
 function enforceBudgets(usage: CanvasBudgetUsage): void {

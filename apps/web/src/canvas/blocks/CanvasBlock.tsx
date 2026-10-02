@@ -1,6 +1,7 @@
 import type { CanvasBlock } from "@octant/contracts/canvas";
 import { CodeBlocks } from "./CodeBlocks";
 import { DataBlocks } from "./DataBlocks";
+import { PlanBlock } from "./PlanBlock";
 import { ReferenceBlocks } from "./ReferenceBlocks";
 import type { DiagramBoardLayoutRuntime } from "./DiagramBoard";
 import { StructuredBlocks } from "./StructuredBlocks";
@@ -50,6 +51,8 @@ export function CanvasBlockRenderer({
     case "evidence-reference":
     case "image":
       return <ReferenceBlocks block={block} />;
+    case "plan":
+      return <PlanBlock block={block} />;
     default:
       return null;
   }
