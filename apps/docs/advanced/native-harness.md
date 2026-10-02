@@ -50,6 +50,13 @@ When a long conversation no longer fits the model's window, older tool
 results are left out of the request first, then whole earlier exchanges, with
 a note to the model. The saved conversation keeps everything.
 
+Forking a Code thread on a harness model gives the fork the model's own
+memory up to the reply you forked from — every message, tool call, and result
+— rather than a summary. Paths point at the fork's own folder, and secret
+values the thread uses are blanked. The fork starts without the source's goal,
+task list, notes, or approvals. If Octant cannot tell exactly where that reply
+ends in the saved conversation, the fork gets a written summary instead.
+
 ## Goals
 
 Give a thread a goal and the harness works toward it. Every turn starts with

@@ -61,9 +61,21 @@ export const NativeHarnessTranscriptMessage = Schema.Struct({
 }).annotations(strict);
 export type NativeHarnessTranscriptMessage = typeof NativeHarnessTranscriptMessage.Type;
 
+/**
+ * The conversation a forked transcript was copied from. `turns` is how many of
+ * the copy's turns came from there, so a fork of this fork can tell its own
+ * turns from the inherited ones and the ancestry survives a replay.
+ */
+export const NativeHarnessTranscriptForkOrigin = Schema.Struct({
+  sessionId: ProviderSessionId,
+  turns: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type NativeHarnessTranscriptForkOrigin = typeof NativeHarnessTranscriptForkOrigin.Type;
+
 export const NativeHarnessTranscriptOpened = Schema.Struct({
   sessionId: ProviderSessionId,
   binding: NativeHarnessTranscriptBinding,
+  forkedFrom: Schema.optional(NativeHarnessTranscriptForkOrigin),
 }).annotations(strict);
 export type NativeHarnessTranscriptOpened = typeof NativeHarnessTranscriptOpened.Type;
 

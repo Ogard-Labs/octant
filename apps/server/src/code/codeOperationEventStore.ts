@@ -89,6 +89,9 @@ export interface ReplayCodeOperationEventsInput {
   readonly limit: number;
 }
 
+/** One read's worth of session records; a thread with more is refused, not truncated. */
+const MAX_SESSION_READY_RECORDS = 1_000;
+
 export interface ReadCodeConversationInput {
   readonly threadId: CodeThreadId;
   readonly afterCursor: number;
@@ -268,6 +271,38 @@ export class CodeOperationEventStore {
   }
 
   /** Indexed journal reads decode at most eleven frames, regardless of transcript size. */
+  /**
+   * The provider conversation each turn of a thread ran on, by operation: the
+   * resume cursor value its `provider-session-ready` recorded. A turn the
+   * provider never acquired a session for is absent. Undefined when the
+   * thread holds more of those records than one read returns, or a record
+   * does not decode, because a partial map would place a turn wrongly.
+   */
+  providerConversationsOfTurns(threadId: CodeThreadId): ReadonlyMap<string, string> | undefined {
+    try {
+      const envelopes = this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "provider-session-ready",
+        limit: MAX_SESSION_READY_RECORDS,
+      });
+      if (envelopes.length >= MAX_SESSION_READY_RECORDS) return undefined;
+      const conversations = new Map<string, string>();
+      for (const envelope of envelopes) {
+        if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1)
+          return undefined;
+        const frame = decodeCodeOperationEventFrame(envelope.payload);
+        if (String(frame.threadId) !== String(threadId)) return undefined;
+        if (frame.event.kind !== "provider-session-ready") continue;
+        const cursor = frame.event.resumeCursor;
+        if (cursor !== undefined) conversations.set(String(frame.operationId), cursor.value);
+      }
+      return conversations;
+    } catch {
+      return undefined;
+    }
+  }
+
   providerSessionForThread(
     threadId: CodeThreadId,
     operationId: CodeOperationId,
