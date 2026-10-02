@@ -15,8 +15,8 @@ export interface ThreadAttentionSources {
 /**
  * Collects every thread state the user is expected to act on. Chat and Work
  * surface a finished turn as unread and a durable question as a follow-up;
- * Code surfaces a durable question the same way, and a live blocked turn
- * through the provider requests the workspace is already rendering.
+ * Code surfaces both the same way, and a live blocked turn through the
+ * provider requests the workspace is already rendering.
  */
 export function collectThreadAttentionSignals(
   sources: ThreadAttentionSources,
@@ -73,14 +73,25 @@ export function collectThreadAttentionSignals(
     }
   }
   for (const thread of sources.codeThreads) {
-    if (thread.followUp !== true) continue;
-    signals.push({
+    const shared = {
       threadId: String(thread.threadId),
-      reason: "question-asked",
       title: thread.title,
-      source: "code",
+      source: "code" as const,
       ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
-    });
+    };
+    if (thread.followUp === true) {
+      signals.push({ ...shared, reason: "question-asked" });
+    } else if (
+      thread.unread === true &&
+      thread.executing !== true &&
+      thread.completedAt === undefined &&
+      thread.snooze === undefined
+    ) {
+      // Code Home said "1 waiting for your review" for a thread whose turn
+      // finished unseen, and the Inbox it links to listed nothing. A running,
+      // completed, or snoozed thread is not waiting on the person yet.
+      signals.push({ ...shared, reason: "turn-finished" });
+    }
   }
   for (const [threadId, requests] of Object.entries(sources.codeProviderRequestsByThreadId ?? {})) {
     if (requests.length === 0) continue;

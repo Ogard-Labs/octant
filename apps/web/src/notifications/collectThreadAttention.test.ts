@@ -160,6 +160,46 @@ describe("collecting thread attention", () => {
     ]);
   });
 
+  it("lists a Code thread that finished a turn in the background, as Home counts it", () => {
+    const base = {
+      executionPolicy: "approval-gated" as const,
+      lifecycle: "active" as const,
+      providerInstanceId: "provider-one" as never,
+      projectId: "project-1" as CodeThread["projectId"],
+    };
+    expect(
+      collectThreadAttentionSignals({
+        chatThreads: [],
+        workThreads: [],
+        codeThreads: [
+          { ...base, threadId: "code-done" as CodeThreadId, title: "Finished", unread: true },
+          {
+            ...base,
+            threadId: "code-running" as CodeThreadId,
+            title: "Still running",
+            unread: true,
+            executing: true,
+          },
+          {
+            ...base,
+            threadId: "code-completed" as CodeThreadId,
+            title: "Completed",
+            unread: true,
+            completedAt: "2026-10-01T10:00:00.000Z" as NonNullable<CodeThread["completedAt"]>,
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        threadId: "code-done",
+        reason: "turn-finished",
+        title: "Finished",
+        source: "code",
+        projectId: "project-1",
+      },
+    ]);
+  });
+
   it("raises a live Code approval with the summary the workspace shows", () => {
     const threadId = "code-a" as CodeThreadId;
     expect(
