@@ -139,6 +139,62 @@
   border-inline-start: 1px solid var(--oct-hairline);
 }
 
+/* A Project whose threads run in more than one checkout nests them under a
+   heading for each. The heading is quiet type on the ground, never a fill, so
+   it cannot be mistaken for a row. Its branch glyph sits in the icon column
+   thread rows use; the threads below take one more step of inset on their
+   content, not on their fill, so every row's fill still starts and ends the
+   same distance from the sidebar's edges. */
+.project-checkout + .project-checkout {
+  margin-top: var(--oct-space-1);
+}
+
+.project-checkout__row {
+  display: flex;
+  min-width: 0;
+  min-height: var(--oct-space-6);
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding-inline: var(--oct-nav-inset);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+}
+
+.project-checkout__glyph {
+  display: inline-flex;
+  flex: none;
+  width: var(--oct-icon-md);
+  align-items: center;
+  justify-content: center;
+}
+
+.project-checkout__branch {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  padding: 0 var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fg-soft);
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-space-5);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The kind stays whole while a long branch name truncates. */
+.project-checkout__kind {
+  flex: none;
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+
+.project-checkout__threads .sidebar-navigation__thread {
+  padding-inline-start: calc(var(--oct-nav-inset) + var(--oct-space-2));
+}
+
 /* The container carries the system's .sidebar-section label treatment; the h2
    inside exists for the outline and simply wears the container's quiet type. */
 .project-section__header {

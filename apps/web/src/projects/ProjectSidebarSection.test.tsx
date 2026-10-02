@@ -334,6 +334,58 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     expect(screen.getByRole("heading", { name: "Unfiled" })).toBeVisible();
   });
 
+  it("nests a Code Project's threads under the checkout each one runs in", () => {
+    const projectId = String(chatProjectA.id);
+    const primary = { checkoutKind: "existing-worktree", label: "main" } as const;
+    const props = {
+      archivedProjects: [],
+      availabilityByProject: new Map(),
+      onArchive: vi.fn(),
+      onMove: vi.fn(),
+      onProjectOpen: vi.fn(),
+      onReorder: vi.fn(),
+      onRestore: vi.fn(),
+      onSelectThread: vi.fn(),
+      projects: [chatProjectA],
+    };
+    const { rerender } = render(
+      <ProjectSidebarSection
+        {...props}
+        threads={[
+          { projectId, threadId: "thread-1", title: "Fix the parser", checkoutChip: primary },
+          { projectId, threadId: "thread-2", title: "Tidy imports", checkoutChip: primary },
+        ]}
+      />,
+    );
+
+    // One checkout is the common case, so the level stays out of the way.
+    expect(screen.queryByRole("group", { name: /^(Primary checkout|Worktree)/ })).toBeNull();
+
+    rerender(
+      <ProjectSidebarSection
+        {...props}
+        threads={[
+          { projectId, threadId: "thread-1", title: "Fix the parser", checkoutChip: primary },
+          {
+            projectId,
+            threadId: "thread-3",
+            title: "Try the new lexer",
+            checkoutChip: { checkoutKind: "managed-worktree", label: "octant/lexer" },
+          },
+        ]}
+      />,
+    );
+
+    const primaryGroup = screen.getByRole("group", { name: "Primary checkout, main" });
+    const worktreeGroup = screen.getByRole("group", { name: "Worktree, octant/lexer" });
+    expect(within(primaryGroup).getByRole("button", { name: /Fix the parser/ })).toBeVisible();
+    expect(within(worktreeGroup).getByRole("button", { name: /Try the new lexer/ })).toBeVisible();
+    // The heading names the branch once, so the rows under it do not repeat it.
+    expect(within(worktreeGroup).getAllByText("octant/lexer")).toHaveLength(1);
+    // The heading is not a control: nothing about a checkout opens from here.
+    expect(within(primaryGroup).getAllByRole("button")).toHaveLength(1);
+  });
+
   it("keeps an unavailable thread list actionable without hiding Projects", async () => {
     const user = userEvent.setup();
     const onRetryThreads = vi.fn();

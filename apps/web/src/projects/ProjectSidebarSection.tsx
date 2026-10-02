@@ -1058,6 +1058,9 @@ function ProjectGroup(props: {
                   ? {}
                   : { onRenameThread: props.onRenameThread })}
                 collapsedLimit={SIDEBAR_THREAD_LIMIT}
+                // Only Code threads carry a checkout, so Chat and Work Projects
+                // never split.
+                groupByCheckout
                 id={projectThreadListId(project.id)}
                 label={`Threads in ${project.name}`}
                 onSelectThread={props.onSelectThread!}

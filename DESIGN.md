@@ -876,7 +876,14 @@ alone on its line, and the shown facts on one line beneath it in a fixed order
 (Project, pull request, branch, then the age at the end); with no facts shown
 the age sits beside the status instead of opening a line of its own. Thread rows
 are not indented under their Project, so every row's fill sits the same
-distance from both edges of the sidebar. A hovered row takes the soft ink wash and the row
+distance from both edges of the sidebar. In Code, a Project whose threads run
+in two or more checkouts nests them under one heading per checkout, primary
+checkouts first: a branch glyph, the branch in a small mono chip, and a quiet
+"Primary checkout" or "Worktree" label. The heading is inert text, not a
+button, so keyboard focus skips it; its threads take one more step of indent on
+their content, never on their fill, and drop the branch fact the heading already
+states. A Project with a single checkout shows no heading. The Activity feed
+stays flat. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
 being there. Provider identity remains at the leading edge. A Project row leads with a 20px
@@ -891,7 +898,8 @@ snooze ends, or a neutral unread dot, in that priority order. Its accessible
 label and hover details retain overlapping states; a row never renders a
 second activity dot or a separate "Woke" label. A list longer than eight rows folds behind one quiet "Show
 more (n)" row that becomes "Show less"; the active thread stays visible while
-folded. Keyboard focus uses neutral fill and text emphasis. Project View and
+folded. Under checkout headings each checkout folds its own list, so a worktree's
+threads are never hidden behind the primary checkout's Show more. Keyboard focus uses neutral fill and text emphasis. Project View and
 Project Overview are real features, not
 decorative shortcuts.
 
