@@ -8,6 +8,13 @@ import {
   type OctantMode,
 } from "@octant/contracts";
 import { listAgentThreads, openAgentSideChat, readAgentGoal, reviseAgentGoal } from "./agentHost";
+import {
+  forkAgentThread,
+  listAgentCheckpoints,
+  markAgentCheckpoint,
+  restoreAgentCheckpoint,
+  type AgentBranchResult,
+} from "./agentBranches";
 import { AgentWake, followAgentThread } from "./agentLiveFeed";
 import {
   attachAgentThread,
@@ -17,7 +24,12 @@ import {
   isAgentSnapshotRunning,
 } from "./agentThread";
 import { runAgentTui } from "./agentTui";
-import { describeAgentGoal, isTuiThemeId, type TuiThemeId } from "./agentTuiModel";
+import {
+  defaultCheckpointLabel,
+  describeAgentGoal,
+  isTuiThemeId,
+  type TuiThemeId,
+} from "./agentTuiModel";
 import { failureMessage, type OpenedLocalControlSession } from "./localControl";
 
 export type AgentCliCommand =
@@ -238,7 +250,7 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
       return (await runTurn(input, threadId, input.command.prompt, lines)) ? 0 : 1;
     }
     input.stdout.write(
-      "Type a prompt and press Enter. /session shows the harness session; /next N takes a suggested follow-up; /pause and /resume hold or release the run; /side asks Side Chat, which only reads; /goal shows the goal and /goal revise changes its objective; /quit exits.\n",
+      "Type a prompt and press Enter. /session shows the harness session; /next N takes a suggested follow-up; /pause and /resume hold or release the run; /side asks Side Chat, which only reads; /goal shows the goal and /goal revise changes its objective; /fork forks at the last reply; /checkpoint marks it, /checkpoints lists them, /restore N starts a thread from one; /quit exits.\n",
     );
     for (;;) {
       const line = await lines.next();
@@ -269,6 +281,16 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
         await goalCommand(input, threadId, prompt.slice("/goal".length).trim());
         continue;
       }
+      if (
+        prompt === "/fork" ||
+        prompt === "/checkpoints" ||
+        prompt === "/checkpoint" ||
+        prompt.startsWith("/checkpoint ") ||
+        prompt.startsWith("/restore")
+      ) {
+        await branchCommand(input, threadId, prompt);
+        continue;
+      }
       await runTurn(input, threadId, prompt, lines);
     }
     return 0;
@@ -297,6 +319,61 @@ async function askSideChat(
     return;
   }
   await runTurn(input, String(opened.sidecar.sidecarThreadId), question, lines, "chat");
+}
+
+/**
+ * Forks and checkpoints. Each one that creates a thread names it and how to
+ * continue it; this session stays on the thread it was started with.
+ */
+async function branchCommand(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+  prompt: string,
+): Promise<void> {
+  const snapshot = await agentThreadPort(input.session, modeOf(input.command), threadId).read();
+  if (snapshot === undefined) {
+    input.stderr.write("The thread could not be read.\n");
+    return;
+  }
+  const created = (result: AgentBranchResult) => {
+    if (result.kind === "refused") input.stderr.write(`${result.message}\n`);
+    else
+      input.stdout.write(
+        `Created ${result.mode} thread ${result.threadId}. Continue it with: octant agent --thread ${result.threadId}\n`,
+      );
+  };
+  if (prompt === "/fork") {
+    created(await forkAgentThread(input.session, snapshot));
+    return;
+  }
+  if (prompt === "/checkpoint" || prompt.startsWith("/checkpoint ")) {
+    const label = prompt.slice("/checkpoint".length).trim() || defaultCheckpointLabel();
+    const marked = await markAgentCheckpoint(input.session, snapshot, label);
+    if (marked.kind === "refused") input.stderr.write(`${marked.message}\n`);
+    else input.stdout.write(`Marked checkpoint "${marked.checkpoint.label}".\n`);
+    return;
+  }
+  const listed = await listAgentCheckpoints(input.session, threadId);
+  if (listed.kind === "refused") {
+    input.stderr.write(`${listed.message}\n`);
+    return;
+  }
+  if (prompt === "/checkpoints") {
+    if (listed.checkpoints.length === 0)
+      input.stdout.write("No checkpoints yet. /checkpoint marks the last reply.\n");
+    listed.checkpoints.forEach((checkpoint, index) =>
+      input.stdout.write(`  ${index + 1}. ${checkpoint.label} · ${checkpoint.markedAt}\n`),
+    );
+    return;
+  }
+  const picked = listed.checkpoints[Number(prompt.slice("/restore".length).trim()) - 1];
+  if (picked === undefined) {
+    input.stderr.write("Pick a checkpoint by number from /checkpoints: /restore 1\n");
+    return;
+  }
+  created(
+    await restoreAgentCheckpoint(input.session, picked, `${snapshot.title} (${picked.label})`),
+  );
 }
 
 /** Shows the goal, or revises its objective against the version just read. */

@@ -164,6 +164,14 @@ the thread. `/goal` shows the thread's goal, and `/goal revise <objective>`
 changes its objective. If another screen changed the goal first, nothing is
 overwritten: the terminal says so and shows the newer goal.
 
+`/fork` forks the thread at its last finished reply — a Code fork on its own
+worktree and branch, a Chat fork with the conversation so far — and
+`/checkpoint [name]` marks that reply. `/checkpoints` lists the marks, and
+`/restore N` starts a new thread from one; the thread you are in is never
+rewound. The terminal UI moves to the new thread; the line mode prints its id
+and the `octant agent --thread` command that continues it. Work threads have
+neither forks nor checkpoints yet, and the terminal says so.
+
 ## Questions
 
 When the lead needs a decision it cannot make alone, it asks. The question
