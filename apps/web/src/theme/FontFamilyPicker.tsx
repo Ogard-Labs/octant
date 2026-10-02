@@ -34,11 +34,6 @@ const UI_FONTS: ReadonlyArray<FontOption> = [
   },
   { label: "System interface", family: SYSTEM_UI_FAMILY },
   { label: "SF Pro", family: "'SF Pro Text', -apple-system, system-ui, sans-serif" },
-  {
-    label: "Inter Variable",
-    family:
-      "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
-  },
   { label: "Inter", family: "Inter, system-ui, sans-serif" },
   { label: "Geist", family: "Geist, system-ui, sans-serif" },
   { label: "Helvetica Neue", family: "'Helvetica Neue', Helvetica, Arial, sans-serif" },

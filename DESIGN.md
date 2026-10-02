@@ -602,8 +602,9 @@ Typography has distinct jobs:
 | Terminal   | Geist Mono, SF Mono, Nerd Font fallbacks, monospace                                                 | Terminal output and prompt glyphs                                                  |
 
 The default interface is Geist at 13px and weight 400; transcript text defaults
-to 13px. Geist and Geist Mono are one family, both bundled, so text, code, and
-paths share one set of proportions on every platform; the stylesheet's own
+to 13px. Geist and Geist Mono are one family, both bundled, and the only faces Octant
+ships (the earlier Inter default and the Space Grotesk display face are gone),
+so text, code, and paths share one set of proportions on every platform; the stylesheet's own
 first-paint defaults are the same faces, so nothing swaps when settings load.
 Stacks saved while the defaults named a face Octant never bundled (the system
 interface stack, the JetBrains code and terminal stacks) read as today's

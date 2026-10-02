@@ -5,17 +5,6 @@
    colour. See DESIGN.md for the rules.
    ══════════════════════════════════════════════════════════════════════ */
 
-/* ─── display face ────────────────────────────────────────────────────
-   Self-hosted, one variable file, no third-party requests. See
-   fonts/LICENSE.txt. */
-@font-face {
-  font-family: "Octant Display";
-  src: url("../fonts/octant-display.woff2") format("woff2-variations");
-  font-weight: 300 700;
-  font-style: normal;
-  font-display: swap;
-}
-
 /* ─── design tokens ───────────────────────────────────────────────────
    Colour is declared once per token with light-dark(), so the two themes
    can never drift apart the way two duplicated palette blocks do. The
@@ -110,21 +99,17 @@
   --oct-focus-ring: 0 0 0 1px var(--oct-bg), 0 0 0 3px var(--oct-muted);
 
   /* ── type ── */
-  --oct-font-display: "Octant Display", system-ui, "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --oct-font-body:
-    "Iowan Old Style", "Palatino Linotype", "URW Palladio L", P052, ui-serif, Georgia, Cambria,
-    "Times New Roman", Times, serif;
+  /* One family. Geist sets the interface, headings, and transcript, and Geist
+     Mono sets code; the theme bridge points every role at the interface
+     setting, so these are only the first paint before settings load. The
+     earlier display face and body serif were never shown once the bridge
+     mapped every role to the interface face, and have been removed. */
+  --oct-font-display:
+    "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --oct-font-body: var(--oct-font-display);
+  --oct-font-transcript: var(--oct-font-display);
   --oct-font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
-  /* The fourth face, and the one exception to "three faces, three jobs".
-     The body serif is right for a page you read once; a transcript is a
-     working surface read for hours, interleaved with code and UI chrome,
-     and a serif fights that. This is the neutral UI sans a terminal-born
-     agent transcript reads best in. Set it to var(--oct-font-body) to go back to serif —
-     it is the single token that decides. */
-  --oct-font-transcript:
-    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    "Geist Mono Variable", "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   /* The interface scale is the size the user chose, not a frozen ladder.
      Every step keeps the ratio it has to the 13px default, so the whole
      scale moves together when the setting changes. Freezing these was why
