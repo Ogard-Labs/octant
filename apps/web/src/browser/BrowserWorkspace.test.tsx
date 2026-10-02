@@ -262,8 +262,16 @@ describe("BrowserWorkspace", () => {
       />,
     );
     fireEvent.change(screen.getByLabelText("Browser URL"), {
-      target: { value: "https://example.com/start" },
+      target: { value: "https://example.com/deeply/nested/start" },
     });
+    const address = screen.getByTitle("https://example.com/deeply/nested/start");
+    expect(address.querySelector(".middle-truncated-text__head")).toHaveTextContent(
+      "https://example.com/deeply/nested/",
+    );
+    expect(address.querySelector(".middle-truncated-text__tail")).toHaveTextContent("start");
+    expect(screen.getByRole("textbox", { name: "Browser URL" })).toHaveValue(
+      "https://example.com/deeply/nested/start",
+    );
     expect(screen.getByRole("textbox", { name: "Browser URL" }).closest("form")).toHaveAttribute(
       "novalidate",
     );

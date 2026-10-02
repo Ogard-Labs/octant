@@ -3,6 +3,7 @@ import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import { decodeCodeRelativePath } from "@octant/contracts/code";
 import { useEffect, useState } from "react";
 import { useCodeFileChangeWatch, noticeTouches } from "../code/useCodeFileChangeWatch";
+import { MiddleTruncatedText } from "../lib/MiddleTruncatedText";
 import { Markdown } from "../markdown/Markdown";
 import { ShellState } from "./ShellState";
 
@@ -115,7 +116,9 @@ export function DockDocumentTool(props: DockDocumentToolProps) {
   }
   return (
     <article aria-label={path} className="dock-document-tool">
-      <p className="dock-document-tool__path oct-meta oct-meta--mono">{path}</p>
+      <p className="dock-document-tool__path oct-meta oct-meta--mono">
+        <MiddleTruncatedText value={path} />
+      </p>
       {isMarkdownPath(path) ? (
         <div className="preview-viewer preview-viewer--markdown dock-document-tool__body">
           {load.text === "" ? (

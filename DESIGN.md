@@ -703,8 +703,8 @@ keyboard focus. Settings ›
 Sidebar › When collapsed can choose Hidden instead, which removes the sidebar
 completely and leaves Show sidebar and New thread in the native title rail.
 The rail never appears below the drawer breakpoint, where a collapsed sidebar
-is a closed drawer.
-The right dock defaults to 320px when open. A fresh window starts with it
+is a closed drawer. The right dock defaults to 420px when open. A fresh window
+starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is 38px in the native host and the status bar is 26px.
 While a route or tool is still loading, its state is one quiet line (spinner,
