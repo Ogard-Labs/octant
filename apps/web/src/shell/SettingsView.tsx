@@ -141,6 +141,11 @@ export interface SettingsViewProps {
   readonly workSettings?: WorkSettingsController;
   readonly codeController?: CodeController;
   readonly nativeBoundsAvailable: boolean;
+  /**
+   * The native window draws its traffic lights over the top-left corner, so
+   * the rail keeps a title band for them. Elsewhere the band is empty.
+   */
+  readonly reservesTitlebarInset?: boolean;
   readonly onBack?: () => void;
   readonly onResetLayout: () => void;
   readonly onResetNativeBounds: () => void;
@@ -444,10 +449,12 @@ export function SettingsView(props: SettingsViewProps) {
     >
       {narrow ? null : (
         <aside aria-label="Settings sidebar" className="settings-view__sidebar">
-          <div className="settings-view__sidebar-titlebar window-drag-region">
-            <span aria-hidden="true" className="settings-view__traffic-light-space" />
-            <span className="settings-view__drag-space" />
-          </div>
+          {props.reservesTitlebarInset === true ? (
+            <div className="settings-view__sidebar-titlebar window-drag-region">
+              <span aria-hidden="true" className="settings-view__traffic-light-space" />
+              <span className="settings-view__drag-space" />
+            </div>
+          ) : null}
           <div className="settings-view__sidebar-content">
             <div className="settings-view__rail-head">
               <h2 className="settings-view__rail-title">Settings</h2>

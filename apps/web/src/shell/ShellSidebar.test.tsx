@@ -527,6 +527,37 @@ describe("ShellSidebar", () => {
     expect(within(listSwitch).getByRole("button", { name: "Activity feed" })).toBeVisible();
   });
 
+  it("offers no Projects/Activity switch before there is a Project or thread to arrange", () => {
+    window.localStorage.clear();
+    render(
+      <ShellSidebar
+        chatNavigation={{ actions: { "new-chat": vi.fn() } }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={
+          <ProjectSidebarSection
+            archivedProjects={[]}
+            availabilityByProject={new Map()}
+            onArchive={vi.fn()}
+            onMove={vi.fn()}
+            onProjectOpen={vi.fn()}
+            onReorder={vi.fn()}
+            onRestore={vi.fn()}
+            onSelectThread={vi.fn()}
+            projects={[]}
+            threads={[]}
+          />
+        }
+        settings={defaultShellSettings()}
+        workspace={defaultWindowWorkspace(windowId)}
+      />,
+    );
+
+    expect(screen.queryByRole("group", { name: "Thread list" })).not.toBeInTheDocument();
+  });
+
   it("moves Inbox and Board into count tiles, and brings the rows back when tiles are off", async () => {
     const user = userEvent.setup();
     const actions = { "new-code-thread": vi.fn(), inbox: vi.fn(), "thread-board": vi.fn() };

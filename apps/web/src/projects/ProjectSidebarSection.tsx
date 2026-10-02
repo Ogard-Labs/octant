@@ -448,6 +448,12 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const onNewThread = props.onNewThreadInProject ?? props.onNewChatInProject;
   const newThreadVerb = props.newThreadVerb ?? "chat";
   const nestThreads = threads !== undefined && props.onSelectThread !== undefined;
+  // With neither Projects nor threads, the Projects/Activity switch has
+  // nothing to arrange and floated alone at the row's far edge (seen in Work
+  // before its first Project). It stays while the feed is the saved
+  // arrangement, so the way back out is never what went missing.
+  const showListSwitch =
+    nestThreads && (props.projects.length > 0 || (threads?.length ?? 0) > 0 || activityView);
   const threadsByProject =
     threads !== undefined && props.onSelectThread !== undefined
       ? groupThreadsByProject(threads, props.projects)
@@ -645,7 +651,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         {(props.projectViewsEnabled === true &&
           projectViewState !== undefined &&
           props.projects.length > 0) ||
-        nestThreads ? (
+        showListSwitch ? (
           <div className="project-nav__toolbar">
             {props.projectViewsEnabled === true &&
             projectViewState !== undefined &&
@@ -682,7 +688,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                 state={projectViewState}
               />
             ) : null}
-            {nestThreads ? (
+            {showListSwitch ? (
               <ThreadListViewSwitch activity={activityView} onChange={showActivityView} />
             ) : null}
           </div>

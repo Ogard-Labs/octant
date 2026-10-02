@@ -124,6 +124,9 @@
     border-radius: var(--oct-radius-md);
   }
 
+  /* The native band matches the page's title rail, so the "Settings" title
+     sits level with the breadcrumb beside it. */
+  .settings-view:not(.settings-view--narrow) .settings-view__sidebar-titlebar,
   .settings-view:not(.settings-view--narrow) .settings-view__workspace-titlebar {
     height: var(--oct-title-rail-h);
     min-height: var(--oct-title-rail-h);
@@ -139,7 +142,7 @@
   }
 
   .settings-view:not(.settings-view--narrow) .settings-view__sidebar-content {
-    padding-inline: var(--oct-space-2);
+    padding: var(--oct-space-3) var(--oct-space-2) 12px;
   }
 }
 
@@ -535,9 +538,10 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 /* The group label is what separates one group of pages from the next; a
    hairline on top of it drew two dividers where the eye needs one. The label
    was screen-reader-only here, which left the rail as one undifferentiated
-   list of eleven pages. */
+   list of eleven pages. Twenty-six pages now: the group gap and row height
+   are kept tight so most of the list fits without scrolling. */
 .settings-view__sidebar .settings-navigation__group + .settings-navigation__group {
-  padding-top: var(--oct-space-3);
+  padding-top: var(--oct-space-2);
 }
 
 .settings-navigation .setnav-section {
@@ -564,7 +568,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    relying on utility ordering. */
 .settings-navigation .setnav-item,
 .settings-view__back {
-  min-height: 32px;
+  min-height: 28px;
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
   line-height: 1.2;
@@ -1572,11 +1576,17 @@ textarea.settings-view__text-input {
   content: "✓ ";
 }
 
+/* The panes keep fixed Light and Dark colours, so against the panel they sit
+   on the Dark pane vanished in dark mode and the Light pane in light mode.
+   The frame is a theme token, which reads in both. */
 .settings-scheme__preview {
   position: relative;
   display: flex;
   height: 88px;
   overflow: hidden;
+  border: 1px solid var(--oct-border);
+  border-bottom: 0;
+  border-radius: var(--oct-radius-md) var(--oct-radius-md) 0 0;
 }
 
 .settings-scheme__preview-pane {
