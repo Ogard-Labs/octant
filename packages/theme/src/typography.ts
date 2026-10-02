@@ -62,6 +62,20 @@ export const SYSTEM_UI_FAMILY =
 export function savedUiFamily(family: string): string {
   return family === LEGACY_DEFAULT_UI_FAMILY ? DEFAULT_UI_TYPOGRAPHY.fontFamily : family;
 }
+/**
+ * The code and terminal stacks saved while they were the defaults. They named
+ * a JetBrains face Octant never bundled, so they always fell back to SF Mono;
+ * like the old interface stack, they mean "the default", now Geist Mono.
+ */
+const LEGACY_DEFAULT_EDITOR_FAMILY =
+  "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace";
+const LEGACY_DEFAULT_TERMINAL_FAMILY =
+  "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', monospace";
+
+function savedCodeFamily(family: unknown, legacy: string, current: string): unknown {
+  return family === legacy ? current : family;
+}
+
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 32;
 const MIN_LINE_HEIGHT = 1;
@@ -100,12 +114,20 @@ export function resolveTypographyProjection(
     DEFAULT_UI_TYPOGRAPHY.fontFamily,
   );
   const editorFamily = resolveFamily(
-    sourceEditor.family,
+    savedCodeFamily(
+      sourceEditor.family,
+      LEGACY_DEFAULT_EDITOR_FAMILY,
+      DEFAULT_EDITOR_TYPOGRAPHY.fontFamily,
+    ),
     availableFonts,
     DEFAULT_EDITOR_TYPOGRAPHY.fontFamily,
   );
   const terminalFamily = resolveFamily(
-    sourceTerminal.family,
+    savedCodeFamily(
+      sourceTerminal.family,
+      LEGACY_DEFAULT_TERMINAL_FAMILY,
+      DEFAULT_TERMINAL_TYPOGRAPHY.fontFamily,
+    ),
     availableFonts,
     DEFAULT_TERMINAL_TYPOGRAPHY.fontFamily,
   );

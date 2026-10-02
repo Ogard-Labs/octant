@@ -337,7 +337,7 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
     },
     editor: {
       family:
-        "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
+        "'Geist Mono Variable', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
       size: 13,
       weight: 400,
       lineHeight: 1.5,
@@ -347,8 +347,7 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
       // Nerd Font families sit after the text faces so prompt glyphs (starship,
       // powerlevel10k, lsd) resolve per character on machines that have one
       // installed, without changing how ordinary text renders.
-      family:
-        "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', monospace",
+      family: "'Geist Mono Variable', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', monospace",
       size: 12,
       weight: 400,
       lineHeight: 1.4,

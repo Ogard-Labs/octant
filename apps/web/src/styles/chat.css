@@ -350,12 +350,14 @@
   border-left: 1px solid var(--oct-border);
 }
 
-/* An inline identifier: a chip at the detail size on the control fill. */
+/* An inline identifier: a quiet chip at the detail size. A bordered box on
+   every path and file name turned a sentence listing several into a row of
+   buttons, so the chip is only a soft fill. */
 .chat-rich-text code {
   padding: 1px 5px;
   color: var(--oct-fg);
-  background: var(--oct-surface-warm);
-  border: 1px solid var(--oct-border);
+  background: color-mix(in oklab, var(--oct-fg) 7%, transparent);
+  border: 0;
   border-radius: 4px;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-detail);

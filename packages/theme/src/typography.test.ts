@@ -19,15 +19,14 @@ describe("typography projections", () => {
     });
     expect(DEFAULT_EDITOR_TYPOGRAPHY).toMatchObject({
       fontFamily:
-        "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
+        "'Geist Mono Variable', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
       fontSize: 13,
       fontWeight: 400,
       lineHeight: 1.5,
       fontLigatures: true,
     });
     expect(DEFAULT_TERMINAL_TYPOGRAPHY).toMatchObject({
-      fontFamily:
-        "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', monospace",
+      fontFamily: "'Geist Mono Variable', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', monospace",
       fontSize: 12,
       fontWeight: 400,
       lineHeight: 1.4,
@@ -164,5 +163,45 @@ describe("interface face migration", () => {
     };
 
     expect(resolveTypographyProjection(chosen, []).ui.fontFamily).toBe("'SF Pro Text', system-ui");
+  });
+});
+
+describe("code face migration", () => {
+  it("reads the old default code and terminal stacks as today's bundled Geist Mono", () => {
+    // That stack named a JetBrains face Octant never shipped, so it always fell
+    // back to SF Mono; saved settings still hold it word for word.
+    const saved: ThemeTypography = {
+      ...DEFAULT_THEME_SETTINGS.typography,
+      editor: {
+        ...DEFAULT_THEME_SETTINGS.typography.editor,
+        family:
+          "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
+      },
+      terminal: {
+        ...DEFAULT_THEME_SETTINGS.typography.terminal,
+        family:
+          "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', monospace",
+      },
+    };
+
+    const projection = resolveTypographyProjection(saved, []);
+
+    expect(projection.editor.fontFamily).toBe(DEFAULT_THEME_SETTINGS.typography.editor.family);
+    expect(projection.terminal.fontFamily).toBe(DEFAULT_THEME_SETTINGS.typography.terminal.family);
+    expect(projection.editor.fontFamily).toContain("Geist Mono Variable");
+  });
+
+  it("keeps a code face someone chose", () => {
+    const chosen: ThemeTypography = {
+      ...DEFAULT_THEME_SETTINGS.typography,
+      editor: {
+        ...DEFAULT_THEME_SETTINGS.typography.editor,
+        family: "'JetBrains Mono', ui-monospace, monospace",
+      },
+    };
+
+    expect(resolveTypographyProjection(chosen, []).editor.fontFamily).toBe(
+      "'JetBrains Mono', ui-monospace, monospace",
+    );
   });
 });

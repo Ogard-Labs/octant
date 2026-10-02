@@ -593,16 +593,23 @@ validated semantic roles; incomplete or low-contrast imports fall back safely.
 
 Typography has distinct jobs:
 
-| Job        | Default                                                                                                                   | Usage                                                                              |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interface  | `'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`                                  | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
-| Display    | inherits Interface                                                                                                        | Wordmark, section headings, selected navigation labels                             |
-| Transcript | inherits Interface                                                                                                        | Long-running conversation and composer; readable at 13–16px, 13px by default       |
-| Editor     | `'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |
-| Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                                                                         | Terminal output and prompt glyphs                                                  |
+| Job        | Default                                                                                             | Usage                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Interface  | `'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`            | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Display    | inherits Interface                                                                                  | Wordmark, section headings, selected navigation labels                             |
+| Transcript | inherits Interface                                                                                  | Long-running conversation and composer; readable at 13–16px, 13px by default       |
+| Editor     | `'Geist Mono Variable', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |
+| Terminal   | Geist Mono, SF Mono, Nerd Font fallbacks, monospace                                                 | Terminal output and prompt glyphs                                                  |
 
 The default interface is Geist at 13px and weight 400; transcript text defaults
-to 13px. The editor defaults to 13px, line height 1.5, and enabled ligatures.
+to 13px. Geist and Geist Mono are one family, both bundled, and the only faces Octant
+ships (the earlier Inter default and the Space Grotesk display face are gone),
+so text, code, and paths share one set of proportions on every platform; the stylesheet's own
+first-paint defaults are the same faces, so nothing swaps when settings load.
+Stacks saved while the defaults named a face Octant never bundled (the system
+interface stack, the JetBrains code and terminal stacks) read as today's
+defaults. At 13px Geist keeps the sidebar and rows uncramped; 14px measured
+too wide for the 304px sidebar. The editor defaults to 13px, line height 1.5, and enabled ligatures.
 The terminal defaults to 12px, line height 1.4, and disabled ligatures.
 
 The legacy saved interface stack beginning `-apple-system, BlinkMacSystemFont`
