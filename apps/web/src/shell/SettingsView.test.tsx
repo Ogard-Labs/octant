@@ -1376,8 +1376,8 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("button", { name: "GitHub" })).not.toBeInTheDocument();
   });
 
-  it("omits Linear when the bundled-off plugin is not effective", () => {
-    renderSettings();
+  it("omits Linear when the plugin is not effective", () => {
+    renderSettings({ effectivePlugins: new Map([["linear-integration", false]]) });
     expect(screen.queryByRole("button", { name: "Linear" })).not.toBeInTheDocument();
   });
 

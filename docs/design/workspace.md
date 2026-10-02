@@ -236,7 +236,7 @@ Project is created from; everything is journaled, cancels cleanly, quarantines i
 deleting, and reconciles after restart without re-running work.
 
 Code also has a host-scoped Linear issues workspace contributed by the
-bundled-off Linear plugin as `sidebar.destination` `linear-issues`, Code mode
+bundled Linear plugin (enabled by default) as `sidebar.destination` `linear-issues`, Code mode
 only. The sidebar row is shown only when that contribution is effective, its
 action is wired, and the Linear authentication snapshot reports `list-issues`
 available. Browse goes through the Integration port (`list-issues`,
