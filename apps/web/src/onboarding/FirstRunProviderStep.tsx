@@ -13,6 +13,7 @@ import {
 import type { ProviderInstanceId } from "@octant/contracts";
 import { forwardRef, type ComponentType } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import type {
   FirstRunDiscoveryNotice,
@@ -147,13 +148,12 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
         </section>
 
         {props.discoveryNotice === undefined ? null : (
-          <p
-            className="first-run__notice callout"
-            data-tone={props.discoveryNotice.tone}
-            role={props.discoveryNotice.tone === "attention" ? "alert" : "status"}
+          <OctantAlert
+            className="first-run__notice"
+            tone={props.discoveryNotice.tone === "attention" ? "warning" : "neutral"}
           >
             {props.discoveryNotice.message}
-          </p>
+          </OctantAlert>
         )}
 
         <div className="first-run__button-row">

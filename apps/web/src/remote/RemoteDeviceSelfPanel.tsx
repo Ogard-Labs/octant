@@ -6,8 +6,8 @@ import {
   remoteRotateDeviceKey,
   remoteSignOut,
 } from "@octant/client-runtime";
-import { AlertTriangle, CircleCheck } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { useRemoteSession } from "./useRemoteSession";
@@ -81,13 +81,13 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
     setStatus("");
     try {
       const result = await action();
-      if (!alive.current) return;
       const warning = warningFrom(result);
+      onComplete(warning);
+      if (!alive.current) return;
       // A warning means the host action committed but local cleanup did not.
       // Reporting it as plain success would misstate this browser's state.
       setStatusAssertive(warning !== undefined);
       setStatus(warning ?? successMessage ?? `${label} completed.`);
-      onComplete(warning);
     } catch (error) {
       if (!alive.current) return;
       setStatusAssertive(true);
@@ -200,20 +200,7 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
         </OctantConfirmDialog>
       ) : null}
       {status === "" ? null : (
-        <p
-          aria-live={statusAssertive ? "assertive" : "polite"}
-          className="remote-shell__status"
-          {...(statusAssertive ? { role: "alert" } : { role: "status" })}
-        >
-          {/* Status is carried by the words; the icon only speeds recognition,
-              so colour is never the sole signal. */}
-          {statusAssertive ? (
-            <AlertTriangle aria-hidden="true" size={14} strokeWidth={1.8} />
-          ) : (
-            <CircleCheck aria-hidden="true" size={14} strokeWidth={1.8} />
-          )}
-          <span>{status}</span>
-        </p>
+        <OctantAlert tone={statusAssertive ? "warning" : "success"}>{status}</OctantAlert>
       )}
     </section>
   );

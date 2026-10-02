@@ -1211,6 +1211,12 @@ and Tooltip. Composition rules:
   Skeleton for loading, and the shared `.toast-stack` notification owner for
   transient acknowledgements. Do not add another toast package or recreate
   these with styled spans or animated divs.
+- App-owned inline notices use `OctantAlert` for the status mark, tone, live
+  region, message, optional title, and explicit actions. Warning and danger
+  announce as `alert`; neutral, accent, and success announce as `status`.
+  Placement belongs to the feature; the callout recipe owns its appearance.
+  Permission decisions and confirmation side effects stay with the host and
+  their existing dialog callers.
 - Product notices use `OctantToast`: a semantic icon, short title, supporting
   detail, and an explicit Dismiss button. An optional inline action can open the
   relevant destination without implicitly dismissing the notice. Success and

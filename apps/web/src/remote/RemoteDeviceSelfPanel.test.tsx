@@ -118,6 +118,7 @@ describe("RemoteDeviceSelfPanel key rotation", () => {
     await user.click(screen.getByRole("button", { name: "Rotate key" }));
 
     const status = await screen.findByRole("status");
+    expect(status).toHaveAttribute("data-tone", "success");
     expect(status).toHaveTextContent(/Device key rotated/);
     // Rotation invalidates the session, so the panel must direct the user to
     // reconnect rather than imply the session continues.
@@ -137,6 +138,7 @@ describe("RemoteDeviceSelfPanel key rotation", () => {
     await user.click(screen.getByRole("button", { name: "Rotate key" }));
 
     const alert = await screen.findByRole("alert");
+    expect(alert).toHaveAttribute("data-tone", "warning");
     expect(alert).toHaveTextContent(/rotation failed/i);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     // The device keeps the key the host still trusts.

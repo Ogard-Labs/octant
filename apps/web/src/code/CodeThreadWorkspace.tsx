@@ -27,7 +27,7 @@ import {
   pickerGroupCarriesAppManagedTools,
   type PickerGroup,
 } from "@octant/domain";
-import { CircleAlert, CirclePause, X } from "lucide-react";
+import { CirclePause, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
@@ -45,6 +45,7 @@ import {
 } from "../composer/composerThreadDraftStore";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
@@ -1110,10 +1111,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           the composer's tray. */}
 
       {props.controller.errorMessage === undefined ? null : (
-        <div className="callout thread-column code-thread-workspace__callout" role="alert">
-          <CircleAlert aria-hidden="true" size={16} />
+        <OctantAlert className="thread-column code-thread-workspace__callout" tone="warning">
           <p>{props.controller.errorMessage}</p>
-        </div>
+        </OctantAlert>
       )}
 
       {props.controller.turnStatus === "waiting" ? (
@@ -1154,23 +1154,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         // for a history the host cannot read, where the retry offer lives, and
         // for a send the host refused before any turn existed to carry the
         // reason.
-        <div className="callout thread-column code-thread-workspace__callout" role="alert">
-          <CircleAlert aria-hidden="true" size={16} />
+        <OctantAlert
+          action={
+            props.controller.conversationHistory === "unavailable" ? (
+              <OctantButton
+                onClick={props.controller.retry}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Retry
+              </OctantButton>
+            ) : undefined
+          }
+          className="thread-column code-thread-workspace__callout"
+          tone="warning"
+        >
           <p>{props.controller.turnError}</p>
-          {/* An unreachable history is worth another ask, and the offer sits
-              with the notice rather than leaving a dead end. The composer
-              below stays usable either way. */}
-          {props.controller.conversationHistory === "unavailable" ? (
-            <OctantButton
-              onClick={props.controller.retry}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Retry
-            </OctantButton>
-          ) : null}
-        </div>
+        </OctantAlert>
       )}
 
       {/* The transcript row repeats the failure's own sentence; only this
@@ -1198,14 +1199,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       ) : null}
 
       {thread.lifecycle === "waiting" || thread.lifecycle === "interrupted" ? (
-        <div className="callout thread-column code-thread-workspace__callout" role="alert">
-          <CircleAlert aria-hidden="true" size={16} />
+        <OctantAlert className="thread-column code-thread-workspace__callout" tone="warning">
           <p>
             {thread.lifecycle === "waiting"
               ? "This thread is waiting for authoritative recovery or user input."
               : "This thread was interrupted and requires an explicit retry."}
           </p>
-        </div>
+        </OctantAlert>
       ) : null}
 
       {messages.length === 0 && pendingMessage === null ? (
