@@ -140,7 +140,8 @@ describe("GitHubConnectionSettings", () => {
     const opener = screen.getByRole("button", { name: "Log out on this host" });
     await user.click(opener);
     expect(screen.getByRole("dialog", { name: "Log out of GitHub?" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    // The dialog moves focus to Cancel on the frame after it opens.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus());
     expect(executeAuthenticationCommand).not.toHaveBeenCalled();
 
     await user.keyboard("{Escape}");
