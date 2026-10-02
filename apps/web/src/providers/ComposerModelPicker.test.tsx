@@ -456,6 +456,9 @@ describe("ComposerModelPicker", () => {
     expect(onModelOptionChange).not.toHaveBeenCalled();
     fireEvent.pointerUp(level);
     expect(onModelOptionChange).toHaveBeenCalledExactlyOnceWith("effort", "high");
+    // The thread's saved level arrives later; until it does, the knob stays
+    // where it was let go rather than jumping back to the old level.
+    expect(level).toHaveAttribute("aria-valuetext", "High");
   });
 
   it("exposes the reasoning range and current level without extra endpoint labels", async () => {

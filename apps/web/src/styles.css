@@ -3789,12 +3789,12 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   grid-template-columns: minmax(0, 1fr);
   /* Sources, results, and reasoning share one compact column. */
   grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(340px, calc(100vw - 24px));
+  width: min(380px, calc(100vw - 24px));
   /* Short results fit their content; long catalogs scroll inside the same bound. */
   height: auto;
   /* At enlarged text sizes neither side of the composer fits the full box.
      Use the positioner's available space so reasoning stays inside the window. */
-  max-height: min(360px, 65vh, var(--available-height, 360px), calc(100dvh - 24px));
+  max-height: min(480px, 70vh, var(--available-height, 480px), calc(100dvh - 24px));
   padding: 0;
   overflow: hidden;
   /* Size and place only. The popover recipe paints the fill, the edge, and the
@@ -3809,8 +3809,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .composer-model-picker__level {
   grid-column: 1 / -1;
   display: grid;
-  gap: var(--oct-space-1);
-  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-3);
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) var(--oct-space-4) var(--oct-space-3);
   border-top: 1px solid var(--octant-border);
 }
 
@@ -3941,11 +3941,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  gap: var(--oct-space-2);
-  width: auto;
-  min-width: 32px;
+  width: 32px;
   height: 32px;
-  padding: 0 var(--oct-space-2);
+  padding: 0;
 }
 
 /* The button recipe sizes every glyph inside a button to 1rem, which drew
@@ -3970,19 +3968,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   color: var(--octant-text-primary);
   background: var(--octant-selection);
   box-shadow: none;
-}
-
-/* The chosen source names itself beside its mark; the others stay marks, so
-   the row still fits several providers. */
-.composer-model-picker__rail-item--active .composer-model-picker__rail-label {
-  position: static;
-  width: auto;
-  height: auto;
-  overflow: visible;
-  clip-path: none;
-  padding-inline-end: var(--oct-space-1);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
 }
 
 .composer-model-picker__rail-item--favorites {
@@ -4057,14 +4042,23 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
-  min-height: 40px;
-  margin: 0;
+  min-height: 36px;
+  margin: var(--oct-space-2) var(--oct-space-2) var(--oct-space-1);
   padding: 0 var(--oct-space-3);
   color: var(--octant-text-muted);
+  background: var(--octant-control);
+  border-radius: var(--oct-radius-sm);
 }
 
+/* The whole row is the field, icon included. The global focus fill painted
+   a second box on the bare input, whose text then sat on that box's edge. */
 .composer-model-picker__search:focus-within {
   color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+
+.composer-model-picker .composer-model-picker__search input:focus-visible {
+  background: transparent;
 }
 
 .composer-model-picker__search input {
@@ -4089,7 +4083,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex-wrap: nowrap;
   flex: 0 0 auto;
   gap: var(--oct-space-1);
-  padding: 0 var(--oct-space-2) var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-2);
   overflow-x: auto;
   scrollbar-width: none;
   border-bottom: 1px solid var(--octant-border);
@@ -4182,9 +4176,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: var(--oct-space-3);
   width: 100%;
   height: auto;
-  min-height: 32px;
+  min-height: 36px;
   min-width: 0;
-  padding: var(--oct-space-1) var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-3);
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;

@@ -361,8 +361,8 @@ follow-up composer says "Reply…" in Chat, Work, and Code, and shows no rotatin
 tip.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
-grouping, search, Favorites, and Recent. The chosen provider tab names itself beside
-its mark; the others stay marks. The chosen model carries a check, not a filled row;
+grouping, search, Favorites, and Recent. Source tabs are marks alone and name
+themselves in a tooltip. The chosen model carries a check, not a filled row;
 a row's star shows on hover, on focus, or once it is on; and a provider mark leads
 each row only in a list mixed from several providers. Its reasoning control shows
 the full track, discrete stops, and filled range in the text colour, with the
