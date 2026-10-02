@@ -47,6 +47,66 @@ export function threadsInProject(
 }
 
 /**
+ * One checkout a Project's threads run in, as the tree draws it.
+ *
+ * `primary` is the folder the Project is bound to. The host reports it as an
+ * `existing-worktree` because it is a Git working tree it did not create, and
+ * only a worktree the host made for a thread (`managed-worktree`) is another
+ * place to work. A thread with no checkout chip has no branch to name, so its
+ * group carries none.
+ */
+export interface CheckoutThreadGroup {
+  readonly key: string;
+  readonly kind: "primary" | "worktree";
+  readonly branch?: string;
+  readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
+}
+
+/**
+ * Splits one Project's threads by the checkout they run in, or answers
+ * `undefined` when there is nothing to split.
+ *
+ * A Project whose threads all share a checkout is the common case, and a
+ * heading that only restates it on every Project is noise. The level exists
+ * only where it separates something. Groups keep the order their first thread
+ * arrived in, primary checkouts first, so the tree order the caller chose still
+ * decides which thread leads.
+ */
+export function groupThreadsByCheckout(
+  threads: ReadonlyArray<ChatThreadNavigationItem>,
+): ReadonlyArray<CheckoutThreadGroup> | undefined {
+  const byKey = new Map<
+    string,
+    { readonly group: CheckoutThreadGroup; readonly members: ChatThreadNavigationItem[] }
+  >();
+  for (const thread of threads) {
+    const chip = thread.checkoutChip;
+    const key = chip === undefined ? "none" : `${chip.checkoutKind}\0${chip.label}`;
+    const existing = byKey.get(key);
+    if (existing !== undefined) {
+      existing.members.push(thread);
+      continue;
+    }
+    const members = [thread];
+    byKey.set(key, {
+      members,
+      group: {
+        key,
+        kind: chip?.checkoutKind === "managed-worktree" ? "worktree" : "primary",
+        ...(chip === undefined ? {} : { branch: chip.label }),
+        threads: members,
+      },
+    });
+  }
+  if (byKey.size < 2) return undefined;
+  const groups = [...byKey.values()].map((entry) => entry.group);
+  return [
+    ...groups.filter((group) => group.kind === "primary"),
+    ...groups.filter((group) => group.kind === "worktree"),
+  ];
+}
+
+/**
  * Orders threads by the recency the host already reports, newest first, and
  * falls back to the title so equal or missing timestamps stay stable. This is
  * the ordering the sidebar activity view uses; nothing here derives a timestamp

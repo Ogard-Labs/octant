@@ -876,7 +876,14 @@ alone on its line, and the shown facts on one line beneath it in a fixed order
 (Project, pull request, branch, then the age at the end); with no facts shown
 the age sits beside the status instead of opening a line of its own. Thread rows
 are not indented under their Project, so every row's fill sits the same
-distance from both edges of the sidebar. A hovered row takes the soft ink wash and the row
+distance from both edges of the sidebar. In Code, a Project whose threads run
+in two or more checkouts nests them under one heading per checkout, primary
+checkouts first: a branch glyph, the branch in a small mono chip, and a quiet
+"Primary checkout" or "Worktree" label. The heading is inert text, not a
+button, so keyboard focus skips it; its threads take one more step of indent on
+their content, never on their fill, and drop the branch fact the heading already
+states. A Project with a single checkout shows no heading. The Activity feed
+stays flat. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
 being there. Provider identity remains at the leading edge. A Project row leads with a 20px
@@ -891,7 +898,8 @@ snooze ends, or a neutral unread dot, in that priority order. Its accessible
 label and hover details retain overlapping states; a row never renders a
 second activity dot or a separate "Woke" label. A list longer than eight rows folds behind one quiet "Show
 more (n)" row that becomes "Show less"; the active thread stays visible while
-folded. Keyboard focus uses neutral fill and text emphasis. Project View and
+folded. Under checkout headings each checkout folds its own list, so a worktree's
+threads are never hidden behind the primary checkout's Show more. Keyboard focus uses neutral fill and text emphasis. Project View and
 Project Overview are real features, not
 decorative shortcuts.
 
@@ -1018,8 +1026,19 @@ open in the dock beside the transcript once, the first time they appear: the
 offer never moves focus from the composer, a rewrite never reopens a tab, and a
 tab the person closed stays closed. Document
 reads the file through the same host-authorized open the editor uses and
-renders Markdown with the preview's own viewer. The dock launcher is
-not a second thread switcher. With no open tab, it shows only capability-valid
+renders Markdown with the preview's own viewer. With no open tab, the dock
+opens on a compact thread overview above the tool launcher, three sections
+separated by hairlines and each omitted when the window has nothing to put in
+it: Running now lists the other threads the window knows are working (any mode,
+at most five, newest first, never the thread on screen), each as a spinner,
+title, a neutral Project dot and name, and age, and opens that thread; This
+thread gives label/value rows for Project, Checkout (a mono branch chip, plus
+Worktree when the thread runs in one), Model, Access, and Context (used of
+total with a thin bar, from the composer meter's own source); Changes (Code
+only, from the board's observed changed files, never a stale observation) gives
+the file count with +/- totals and an Open review button for the Review tool.
+Every row is a fact the window already holds; an unknown value is left out, not
+shown as a placeholder. Below it, the launcher shows only capability-valid
 tool rows, grouped under This thread, Workspace, and Devices when more than
 one group has a tool; the head's Add tool action appears once a tab is open, since with
 none open the body is already the list of tools to add. The bottom panel uses
