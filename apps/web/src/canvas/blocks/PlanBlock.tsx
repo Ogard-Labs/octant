@@ -91,6 +91,12 @@ export function PlanBlock({
           setChosen((current) => new Map(current).set(String(task.taskId), status));
           void runtime
             .onSetStatus(String(authored.blockId), String(task.taskId), status)
+            // A save that throws (a dropped connection, a failed reload) is
+            // a refusal too: the mark goes back and the person is told.
+            .catch(() => ({
+              kind: "denied" as const,
+              message: "The status could not be saved. Try again.",
+            }))
             .then((result) => {
               if (result.kind === "accepted") return;
               // Back to what the person saw before this change, which may be
