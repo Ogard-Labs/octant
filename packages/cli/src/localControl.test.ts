@@ -90,4 +90,52 @@ describe("openLocalControlSession", () => {
       await expect(session.close()).resolves.toBeUndefined();
     });
   });
+
+  it("streams a held-open response line by line, even when a line arrives in pieces", async () => {
+    await withRunningHost(async (host) => {
+      const encoder = new TextEncoder();
+      const session = await openLocalControlSession({
+        host,
+        fetch: mockFetch(async (input, init) => {
+          if (String(input).endsWith("/window-authorities"))
+            return new Response(null, { status: 204 });
+          expect(new Headers(init?.headers).get("x-octant-window-capability")).not.toBeNull();
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode('{"sequence":1}\n{"seq'));
+              controller.enqueue(encoder.encode('uence":2}\n\n{"sequence":3}'));
+              controller.close();
+            },
+          });
+          return new Response(body, { status: 200 });
+        }),
+      });
+      if (session.kind !== "opened" || session.stream === undefined) throw new Error("not opened");
+      const opened = await session.stream(
+        "/api/chat/threads/t/events",
+        new AbortController().signal,
+      );
+      if (opened.kind !== "open") throw new Error("refused");
+      const lines: string[] = [];
+      for await (const line of opened.lines) lines.push(line);
+      expect(lines).toEqual(['{"sequence":1}', '{"sequence":2}', '{"sequence":3}']);
+    });
+  });
+
+  it("reports a stream the host refuses by its status", async () => {
+    await withRunningHost(async (host) => {
+      const session = await openLocalControlSession({
+        host,
+        fetch: mockFetch(async (input) =>
+          String(input).endsWith("/window-authorities")
+            ? new Response(null, { status: 204 })
+            : new Response("{}", { status: 409 }),
+        ),
+      });
+      if (session.kind !== "opened" || session.stream === undefined) throw new Error("not opened");
+      await expect(
+        session.stream("/api/work/turns/stream/t", new AbortController().signal),
+      ).resolves.toEqual({ kind: "refused", status: 409 });
+    });
+  });
 });

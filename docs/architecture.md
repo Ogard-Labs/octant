@@ -1072,7 +1072,13 @@ native harness in `apps/server/src/harness`:
   a renderer identity, like the desktop renderer, and `agentWindow.ts` opens
   the Project and then the thread in that window before driving it, because
   Code checkouts, goals, and harness approvals are authorized against what a
-  window has open.
+  window has open. `agentLiveFeed.ts` follows the thread's own live feed
+  under that same window capability — the Chat events stream, the Work
+  turn stream, or back-to-back replays of the running Code operation's
+  events — and only uses it as a wake-up: every redraw still reads the
+  thread through the mode's routes, so the stream never becomes a second
+  source of truth. Harness questions and approvals have no stream and are
+  picked up by a one-second fallback read.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
