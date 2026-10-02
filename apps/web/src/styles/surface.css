@@ -310,6 +310,19 @@
   color: var(--oct-fg);
 }
 
+.surface-empty__icon {
+  display: inline-flex;
+  margin-bottom: var(--oct-space-2);
+  color: var(--oct-muted);
+}
+
+/* The next step sits apart from the sentence so a button reads as a button,
+   not as a third line of text. */
+.surface-empty__action {
+  display: inline-flex;
+  margin-top: var(--oct-space-3);
+}
+
 /* ── Tabs ──────────────────────────────────────────────────────────────
    Plain-text tabs carry a 2px underline on the active item so the current
    view is visible without reading the content. */

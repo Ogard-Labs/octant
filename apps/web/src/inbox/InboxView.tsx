@@ -1,7 +1,7 @@
 import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { GithubAssignedWorkPage } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
-import { CircleDot, GitPullRequest, ListTodo, RefreshCw } from "lucide-react";
+import { CircleDot, GitPullRequest, Inbox, ListTodo, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
@@ -25,6 +25,8 @@ export interface InboxViewProps {
   readonly loadAssignedLinearIssues?: () => Promise<AssignedLinearIssuesList>;
   /** Opens the full Linear issue browser when the inbox list is incomplete. */
   readonly onOpenLinearIssues?: () => void;
+  /** The next step from an empty Inbox: see every thread on the Board. */
+  readonly onOpenBoard?: () => void;
 }
 
 type GithubSection =
@@ -127,7 +129,7 @@ export function InboxView(props: InboxViewProps) {
   const externalSectionsPresent = loadGithub !== undefined || loadLinear !== undefined;
 
   return (
-    <Surface ariaLabel="Inbox">
+    <Surface ariaLabel="Inbox" measure="wide">
       <SurfaceHeader
         onBack={props.onClose}
         subtitle="What is waiting on you, across every mode."
@@ -152,7 +154,24 @@ export function InboxView(props: InboxViewProps) {
       />
       <SurfaceSection label="Needs you">
         {props.attentionItems.length === 0 ? (
-          <SurfaceEmpty title="No thread is waiting on you." />
+          <SurfaceEmpty
+            icon={<Inbox size={20} strokeWidth={1.5} />}
+            title="No thread is waiting on you."
+            {...(props.onOpenBoard === undefined
+              ? {}
+              : {
+                  action: (
+                    <OctantButton
+                      onClick={props.onOpenBoard}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      Open the Board
+                    </OctantButton>
+                  ),
+                })}
+          />
         ) : (
           <ul className="surface-list">
             {props.attentionItems.map((item) => (

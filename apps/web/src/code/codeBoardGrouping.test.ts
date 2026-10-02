@@ -75,7 +75,7 @@ describe("codeBoardStatusLabel", () => {
   it("labels each specific board reason", () => {
     expect(codeBoardStatusReasonLabel("awaiting-input")).toBe("Waiting for a decision or answer");
     expect(codeBoardStatusReasonLabel("recovering")).toBe("Catching up after a restart");
-    expect(codeBoardStatusReasonLabel("delivery-waiting")).toBe("Checking whether it is finished");
+    expect(codeBoardStatusReasonLabel("delivery-waiting")).toBe("Not confirmed finished yet");
     expect(codeBoardStatusReasonLabel("delivery-satisfied")).toBe(
       "Done: what you asked for is finished",
     );

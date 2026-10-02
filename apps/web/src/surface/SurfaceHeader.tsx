@@ -104,6 +104,8 @@ export interface SurfaceEmptyProps {
   readonly title: string;
   readonly detail?: string;
   readonly action?: ReactNode;
+  /** A quiet mark above the line, for a page with nothing on it. Decorative. */
+  readonly icon?: ReactNode;
   /**
    * "page" is a surface with nothing on it, where the sentence is the only
    * thing to read. "lane" is one empty column beside full ones, where the same
@@ -112,13 +114,20 @@ export interface SurfaceEmptyProps {
   readonly tone?: "page" | "lane";
 }
 
-/** Quiet empty state: a line of text, not a card. */
+/** Quiet empty state: a line of text, not a card. An optional icon and a real button frame it. */
 export function SurfaceEmpty(props: SurfaceEmptyProps) {
   return (
     <div className="surface-empty" data-tone={props.tone ?? "page"} role="status">
+      {props.icon === undefined ? null : (
+        <span aria-hidden="true" className="surface-empty__icon">
+          {props.icon}
+        </span>
+      )}
       <span className={props.tone === "lane" ? "oct-meta" : "oct-row-label"}>{props.title}</span>
       {props.detail === undefined ? null : <span className="oct-row-detail">{props.detail}</span>}
-      {props.action}
+      {props.action === undefined ? null : (
+        <span className="surface-empty__action">{props.action}</span>
+      )}
     </div>
   );
 }

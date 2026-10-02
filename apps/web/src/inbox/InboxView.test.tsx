@@ -1,5 +1,6 @@
 import type { LinearIssueRow } from "@octant/contracts/linear-issues";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -24,6 +25,23 @@ const linearPage: AssignedLinearIssuesList = {
 };
 
 describe("InboxView", () => {
+  it("offers a real button to the Board when nothing is waiting", async () => {
+    const user = userEvent.setup();
+    const onOpenBoard = vi.fn();
+    render(
+      <InboxView
+        attentionItems={[]}
+        onClose={vi.fn()}
+        onOpenBoard={onOpenBoard}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("No thread is waiting on you.");
+    await user.click(screen.getByRole("button", { name: "Open the Board" }));
+    expect(onOpenBoard).toHaveBeenCalledOnce();
+  });
+
   it("announces unseen GitHub and Linear rows to assistive technology", async () => {
     document.head.insertAdjacentHTML("beforeend", `<style>${stylesheet}</style>`);
 

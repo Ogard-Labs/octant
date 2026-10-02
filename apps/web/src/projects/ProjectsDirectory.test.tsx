@@ -32,4 +32,13 @@ describe("ProjectsDirectory", () => {
     await user.click(within(directory).getByRole("button", { name: "Clear filters" }));
     expect(within(directory).getByRole("button", { name: /Octant, Code Project/ })).toBeVisible();
   });
+
+  it("leaves the page through the same Back to workspace control as the other destinations", async () => {
+    const user = userEvent.setup();
+    const onBack = vi.fn();
+    render(<ProjectsDirectory onBack={onBack} onOpenProject={vi.fn()} projects={[]} />);
+
+    await user.click(screen.getByRole("button", { name: "Back to workspace" }));
+    expect(onBack).toHaveBeenCalledOnce();
+  });
 });

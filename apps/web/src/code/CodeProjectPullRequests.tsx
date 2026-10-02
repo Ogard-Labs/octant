@@ -220,11 +220,13 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         dock ? (
           <SurfaceEmpty
             detail="Only a Code Project with a github.com origin lists pull requests."
+            icon={<GitPullRequest size={20} strokeWidth={1.5} />}
             title="No pull-request source for this Project"
           />
         ) : (
           <SurfaceEmpty
             detail="Add a Code Project to see pull requests here."
+            icon={<GitPullRequest size={20} strokeWidth={1.5} />}
             title="No Code Projects yet"
           />
         )
@@ -242,12 +244,13 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
               }
               size="sm"
               type="button"
-              variant="ghost"
+              variant="outline"
             >
               Check again
             </OctantButton>
           }
           detail="Pull requests show up here once a Project's Git remote points at github.com. Add one, then check again."
+          icon={<GitPullRequest size={20} strokeWidth={1.5} />}
           title={dock ? "This Project isn't on GitHub" : "None of your Code Projects is on GitHub"}
         />
       ) : null}
@@ -275,7 +278,12 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           {visibleRows.length === 0 && normalizedSearch !== "" ? (
             <SurfaceEmpty
               action={
-                <OctantButton onClick={() => setSearch("")} size="sm" type="button" variant="ghost">
+                <OctantButton
+                  onClick={() => setSearch("")}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
                   Clear search
                 </OctantButton>
               }

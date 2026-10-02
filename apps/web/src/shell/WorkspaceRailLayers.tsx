@@ -159,6 +159,7 @@ export interface WorkspaceRailLayersProps {
   readonly loadAssignedGithubWork?: () => Promise<GithubCatalogueReadResponse>;
   readonly loadAssignedLinearIssues?: () => Promise<AssignedLinearIssuesList>;
   readonly onOpenLinearIssues?: () => void;
+  readonly onOpenBoard?: () => void;
 }
 
 export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
@@ -194,6 +195,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               {...(props.onOpenLinearIssues === undefined
                 ? {}
                 : { onOpenLinearIssues: props.onOpenLinearIssues })}
+              {...(props.onOpenBoard === undefined ? {} : { onOpenBoard: props.onOpenBoard })}
             />
           </LazyRailSurface>
         </div>

@@ -814,6 +814,39 @@ describe("ShellSidebar", () => {
     expect(plugins).toHaveBeenCalledOnce();
   });
 
+  it("lights no count tile while the full Board is open, and Inbox only on the Inbox", () => {
+    const sidebar = (activeDestination: "thread-board" | "inbox") => (
+      <ShellSidebar
+        activeDestination={activeDestination}
+        codeNavigation={{
+          actions: { "new-code-thread": vi.fn(), inbox: vi.fn(), "thread-board": vi.fn() },
+        }}
+        countTiles={{ running: 2, toReview: 1, doneToday: 4 }}
+        inboxCount={3}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />
+    );
+    const { rerender } = render(sidebar("thread-board"));
+
+    const tiles = screen.getByRole("group", { name: "Thread counts" });
+    expect(within(tiles).getByRole("button", { name: "Running, 2" })).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(within(tiles).queryAllByRole("button", { current: "page" })).toHaveLength(0);
+
+    rerender(sidebar("inbox"));
+    expect(within(tiles).getByRole("button", { name: "Inbox, 3" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
   it("marks More and its menu item current while a destination it holds is open", async () => {
     const user = userEvent.setup();
     render(

@@ -246,7 +246,9 @@ export function ShellSidebar(props: ShellSidebarProps) {
             ...((props.countTiles.onOpenRunning ?? boardAction) === undefined
               ? {}
               : { onSelect: props.countTiles.onOpenRunning ?? boardAction }),
-            active: props.activeDestination === "thread-board",
+            // Never active: the tile opens the whole Board, which shows every
+            // status column. Lit on the Board, it claimed a Running filter
+            // that was not applied.
           },
           {
             id: "review",

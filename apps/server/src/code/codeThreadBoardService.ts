@@ -339,7 +339,9 @@ function waitingReasonLabel(reason: CodeBoardCard["statusReason"]): string | und
     case "interrupted":
       return "The last agent turn was interrupted.";
     case "delivery-waiting":
-      return "Checking whether it is finished.";
+      // A state, not progress: nothing is running here. "Checking whether it is
+      // finished" stayed on a stopped thread's card for hours and read as live.
+      return "Not confirmed finished yet.";
     default:
       return undefined;
   }

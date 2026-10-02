@@ -1,5 +1,5 @@
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
-import { Folder, PanelLeftClose, Plus, Search } from "lucide-react";
+import { Folder, FolderPlus, PanelLeftClose, Plus, Search } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -11,6 +11,8 @@ type ProjectModeFilter = "all" | ProjectSummary["type"];
 export interface ProjectsDirectoryProps {
   readonly availabilityByProject?: ReadonlyMap<ProjectId, ProjectAvailability>;
   readonly onAddProject?: () => void;
+  /** Leaves the page for the workspace; the same ghost control every destination page offers. */
+  readonly onBack?: () => void;
   readonly onDismiss?: () => void;
   readonly onOpenProject: (project: ProjectSummary) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
@@ -72,7 +74,7 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
     ? {
         title: "No Projects match this view.",
         action: (
-          <OctantButton onClick={clearFilters} size="sm" type="button" variant="ghost">
+          <OctantButton onClick={clearFilters} size="sm" type="button" variant="outline">
             Clear filters
           </OctantButton>
         ),
@@ -80,11 +82,31 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
     : {
         title: "No Projects yet.",
         detail: "Add a Project to see it here.",
+        icon: <FolderPlus size={20} strokeWidth={1.5} />,
+        ...(props.onAddProject === undefined
+          ? {}
+          : {
+              action: (
+                <OctantButton
+                  onClick={props.onAddProject}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Add Project
+                </OctantButton>
+              ),
+            }),
       };
 
   return (
-    <Surface ariaLabel="Projects" className="projects-directory" landmark="nav">
-      <SurfaceHeader title="Projects" {...(actions === undefined ? {} : { actions })} />
+    <Surface ariaLabel="Projects" className="projects-directory" landmark="nav" measure="wide">
+      <SurfaceHeader
+        subtitle="Every Project you have added, across all modes."
+        title="Projects"
+        {...(actions === undefined ? {} : { actions })}
+        {...(props.onBack === undefined ? {} : { onBack: props.onBack })}
+      />
       <div className="surface-toolbar">
         <label className="surface-toolbar__search">
           <Search aria-hidden="true" size={14} strokeWidth={1.6} />
