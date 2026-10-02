@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -133,7 +133,8 @@ describe("LinearConnectionSettings", () => {
     const opener = await screen.findByRole("button", { name: "Disconnect" });
     await user.click(opener);
     expect(screen.getByRole("dialog", { name: "Disconnect Linear?" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    // The dialog moves focus to Cancel on the frame after it opens.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus());
     expect(executeAuthenticationCommand).not.toHaveBeenCalled();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

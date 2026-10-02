@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import { useId, useRef, type ReactNode, type RefObject } from "react";
 import { OctantButton } from "./OctantButton";
 import { OctantDialog } from "./OctantDialog";
 
@@ -17,10 +17,10 @@ export function OctantConfirmDialog(props: {
 }) {
   const titleId = useId();
   const descriptionId = useId();
+  // The popup renders through a portal that mounts after this component, so
+  // Cancel is not in the document during this component's first commit. The
+  // dialog's initialFocus moves focus there on the next animation frame.
   const cancel = useRef<HTMLButtonElement>(null);
-  useLayoutEffect(() => {
-    cancel.current?.focus();
-  }, []);
   return (
     <OctantDialog
       open
