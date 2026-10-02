@@ -289,6 +289,7 @@ export function buildAgentRunRequestCommand(
     requestId: request.requestId,
     parentThreadId: request.parentThreadId,
     ...(request.parentRunId === undefined ? {} : { parentRunId: request.parentRunId }),
+    ...(request.dependsOn === undefined ? {} : { dependsOn: request.dependsOn }),
     role: request.role,
     task: request.task,
     creationPosture: input.creationPosture,

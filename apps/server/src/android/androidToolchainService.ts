@@ -29,6 +29,8 @@ import {
   redactedAndroidInputDiagnostic,
   type AndroidExecutionScope,
 } from "@octant/domain";
+import { takeJpegFrames } from "@octant/domain/managed-device-stream";
+import type { ServeAvdAttachment, ServeAvdPort } from "./serveAvdBrokerClient";
 
 export interface AndroidProcessResult {
   readonly termination: "exited" | "cancelled" | "timed-out" | "unavailable";
@@ -93,6 +95,9 @@ export interface AndroidToolchainServiceOptions {
   readonly newId: () => string;
   readonly environment?: () => Readonly<Record<string, string | undefined>>;
   readonly access?: (path: string) => Promise<void>;
+  /** Managed serve-avd for an already booted emulator serial. Absent means adb. */
+  readonly serveAvd?: ServeAvdPort;
+  readonly fetchImpl?: typeof fetch;
 }
 
 const MAX_RECENT = 64;
@@ -392,10 +397,6 @@ export class AndroidToolchainService {
     if (emulator === undefined || emulator.state !== "booted" || emulator.serial === undefined) {
       return { kind: "unavailable", message: "That emulator is not booted." };
     }
-    const adb = this.#sdk.adbPath;
-    if (adb === undefined) {
-      return { kind: "unavailable", message: "adb is unavailable on this host." };
-    }
     const serial = emulator.serial;
     const lifetime = new AbortController();
     this.#screenWatches.add(lifetime);
@@ -414,6 +415,40 @@ export class AndroidToolchainService {
     );
     signal.addEventListener("abort", finish, { once: true });
     if (signal.aborted) finish();
+    if (/^emulator-[0-9]+$/.test(serial) && !lifetime.signal.aborted) {
+      const managed = await this.#watchManaged(serial, lifetime.signal);
+      if (managed !== undefined) {
+        const reader = managed.frames.getReader();
+        const frames = new ReadableStream<Uint8Array>(
+          {
+            pull: async (controller) => {
+              const next = await reader.read();
+              if (next.done) {
+                finish();
+                controller.close();
+                return;
+              }
+              controller.enqueue(next.value);
+            },
+            cancel: async () => {
+              await reader.cancel();
+              finish();
+            },
+          },
+          { highWaterMark: 0 },
+        );
+        return { kind: "watching", screen: managed.screen, frames };
+      }
+    }
+    if (lifetime.signal.aborted) {
+      finish();
+      return { kind: "unavailable", message: "The emulator screen could not be captured." };
+    }
+    const adb = this.#sdk.adbPath;
+    if (adb === undefined) {
+      finish();
+      return { kind: "unavailable", message: "adb is unavailable on this host." };
+    }
     let first: Uint8Array | undefined;
     try {
       if (!lifetime.signal.aborted)
@@ -518,8 +553,15 @@ export class AndroidToolchainService {
     }
     if (request.kind === "shutdown") {
       const target = serial;
+      // `emu kill` needs the console-auth token that confined launches do not
+      // mount. Powering off through adbd reaches the same outcome and keeps the
+      // console-control secret out of the sandbox; `adb root` is best-effort so
+      // adbd can honour `reboot -p` on userdebug images, and a production image
+      // that refuses either step reports an honest failure instead of the
+      // console's `KO` the state update would mistake for success.
+      await this.#command([adb, "-s", target, "root"], context, 15_000, signal);
       const result = await this.#command(
-        [adb, "-s", target, "emu", "kill"],
+        [adb, "-s", target, "shell", "reboot", "-p"],
         context,
         request.timeoutMs,
         signal,
@@ -543,6 +585,8 @@ export class AndroidToolchainService {
       );
     }
     if (isAndroidEmulatorInputKind(request.kind)) {
+      const managed = await this.#serveAvdInput(request, serial, signal, startedAt);
+      if (managed !== undefined) return managed;
       const argv = inputArgv(adb, serial, request);
       if (argv === undefined) {
         return deniedEvidence(request, "invalid-destination", startedAt, this.#options.now());
@@ -640,14 +684,16 @@ export class AndroidToolchainService {
     context: AndroidExecutionContext,
   ): Promise<string | undefined> {
     for (const serial of serials) {
-      const named = await this.#command([adb, "-s", serial, "emu", "avd", "name"], context, 5_000);
-      const lines = text(named.stdout).trim().split(/\r?\n/);
-      if (
-        succeeded(named) &&
-        lines[0] === avd &&
-        (lines.length === 1 || (lines.length === 2 && lines[1] === "OK"))
-      )
-        return serial;
+      // `adb emu avd name` talks to the emulator console, which authenticates
+      // against ~/.emulator_console_auth_token — a file confined launches do
+      // not mount. `getprop` travels over adbd, whose keys live under the
+      // already-mounted ~/.android, so this match works inside confinement.
+      const named = await this.#command(
+        [adb, "-s", serial, "shell", "getprop", "ro.boot.qemu.avd_name"],
+        context,
+        5_000,
+      );
+      if (succeeded(named) && text(named.stdout).trim() === avd) return serial;
     }
     return undefined;
   }
@@ -680,6 +726,146 @@ export class AndroidToolchainService {
       await sleep(1_000, signal);
     }
     return false;
+  }
+
+  async #watchManaged(
+    serial: string,
+    signal: AbortSignal,
+  ): Promise<AndroidScreenWatch | undefined> {
+    const port = this.#options.serveAvd;
+    if (port === undefined) return undefined;
+    let attachment: ServeAvdAttachment | undefined;
+    try {
+      attachment = await port.open(serial, signal);
+    } catch {
+      return undefined;
+    }
+    if (attachment === undefined || signal.aborted) return undefined;
+    const fetchImpl = this.#options.fetchImpl ?? fetch;
+    const screen = await readServeAvdScreen(fetchImpl, attachment, serial, signal);
+    if (screen === undefined || signal.aborted) return undefined;
+    const headers = headerDeadline(signal, 5_000);
+    let response: Response;
+    try {
+      response = await fetchImpl(attachment.streamUrl, {
+        redirect: "error",
+        credentials: "omit",
+        signal: headers.signal,
+      });
+    } catch {
+      return undefined;
+    } finally {
+      headers.stop();
+    }
+    if (!response.ok || response.body === null) {
+      await response.body?.cancel();
+      return undefined;
+    }
+    const reader = response.body.getReader();
+    const first = await firstJpeg(reader, signal, 5_000);
+    if (first === undefined) {
+      await reader.cancel().catch(() => undefined);
+      return undefined;
+    }
+    let rest = first.rest;
+    const pending = [...first.frames];
+    const frames = new ReadableStream<Uint8Array>(
+      {
+        pull: async (controller) => {
+          try {
+            while (!signal.aborted) {
+              const next = pending.shift();
+              if (next !== undefined) {
+                controller.enqueue(lengthPrefixed(next));
+                return;
+              }
+              const chunk = await reader.read();
+              if (chunk.done) break;
+              const taken = takeJpegFrames(concatBytes(rest, chunk.value));
+              rest = taken.rest;
+              pending.push(...taken.frames);
+            }
+            controller.close();
+          } catch (error) {
+            controller.error(error);
+          } finally {
+            if (signal.aborted) await reader.cancel().catch(() => undefined);
+          }
+        },
+        cancel: () => reader.cancel(),
+      },
+      { highWaterMark: 0 },
+    );
+    return { kind: "watching", screen, frames };
+  }
+
+  /**
+   * Sends one input through serve-avd when the broker has attached a booted
+   * serial. Undefined means nothing was sent and adb should deliver it.
+   * A refused action is not also sent through adb.
+   */
+  async #serveAvdInput(
+    request: AndroidEmulatorRequest,
+    serial: string,
+    signal: AbortSignal,
+    startedAt: string,
+  ): Promise<AndroidEmulatorEvidence | undefined> {
+    const port = this.#options.serveAvd;
+    if (port === undefined || !/^emulator-[0-9]+$/.test(serial)) return undefined;
+    const command = serveAvdCommand(request);
+    if (command === undefined) return undefined;
+    let attachment: ServeAvdAttachment | undefined;
+    try {
+      attachment = await port.open(serial, signal);
+    } catch {
+      return undefined;
+    }
+    if (attachment === undefined || signal.aborted) return undefined;
+    const fetchImpl = this.#options.fetchImpl ?? fetch;
+    let body: Readonly<Record<string, unknown>> | undefined;
+    if (command.kind === "direct") body = command.body;
+    else {
+      const screen = await readServeAvdScreen(fetchImpl, attachment, serial, signal);
+      if (screen === undefined) return undefined;
+      body = command.build(screen);
+      if (body === undefined) return undefined;
+    }
+    let response: Response;
+    try {
+      response = await fetchImpl(
+        `${attachment.origin}/helper/${encodeURIComponent(serial)}/action`,
+        {
+          method: "POST",
+          redirect: "error",
+          credentials: "omit",
+          signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+    } catch {
+      return await this.#logged(
+        request,
+        "unavailable",
+        startedAt,
+        [{ severity: "note", message: `${request.kind} did not reach the emulator stream` }],
+        "uncertain",
+      );
+    }
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = undefined;
+    }
+    const refused = !response.ok || (isRecord(payload) && payload.ok === false);
+    return await this.#logged(
+      request,
+      refused ? "failed" : "succeeded",
+      startedAt,
+      [redactedAndroidInputDiagnostic(request)],
+      "complete",
+    );
   }
 
   async #screencap(
@@ -1183,4 +1369,183 @@ function androidRequestFingerprint(request: AndroidEmulatorRequest): string {
   return createHash("sha256")
     .update(JSON.stringify(decodeAndroidEmulatorRequest(request)))
     .digest("hex");
+}
+
+type ServeAvdCommand =
+  | { readonly kind: "direct"; readonly body: Readonly<Record<string, unknown>> }
+  | {
+      readonly kind: "point";
+      readonly build: (screen: {
+        readonly width: number;
+        readonly height: number;
+      }) => Readonly<Record<string, unknown>> | undefined;
+    };
+
+/** Keys serve-avd names directly. Anything else stays on one adb keyevent. */
+function serveAvdCommand(request: AndroidEmulatorRequest): ServeAvdCommand | undefined {
+  if (request.kind === "tap" && request.point !== undefined) {
+    const point = request.point;
+    return {
+      kind: "point",
+      build: (screen) => {
+        const at = screenFraction(point, screen);
+        return at === undefined ? undefined : { action: "tap", x: at.x, y: at.y };
+      },
+    };
+  }
+  if (request.kind === "swipe" && request.point !== undefined && request.toPoint !== undefined) {
+    const from = request.point;
+    const to = request.toPoint;
+    const durationMs = request.durationMs ?? 300;
+    return {
+      kind: "point",
+      build: (screen) => {
+        const start = screenFraction(from, screen);
+        const end = screenFraction(to, screen);
+        if (start === undefined || end === undefined) return undefined;
+        return {
+          action: "swipe",
+          x1: start.x,
+          y1: start.y,
+          x2: end.x,
+          y2: end.y,
+          durationMs,
+        };
+      },
+    };
+  }
+  if (request.kind === "type-text" && request.text !== undefined) {
+    return { kind: "direct", body: { action: "text", text: request.text } };
+  }
+  if (request.kind === "key-press" && request.key !== undefined) {
+    const name = request.key.toLowerCase();
+    if (name === "home") return { kind: "direct", body: { action: "button", button: "home" } };
+    if (name === "back" || name === "escape") {
+      return { kind: "direct", body: { action: "button", button: "back" } };
+    }
+    if (name === "lock") return { kind: "direct", body: { action: "button", button: "power" } };
+    if (name === "enter" || name === "return") {
+      return { kind: "direct", body: { action: "key", code: "Enter" } };
+    }
+  }
+  return undefined;
+}
+
+/** Aborts the stream request if headers do not arrive. The body keeps the parent signal. */
+function headerDeadline(
+  parent: AbortSignal,
+  timeoutMs: number,
+): { readonly signal: AbortSignal; stop: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onParent = () => controller.abort();
+  if (parent.aborted) controller.abort();
+  else parent.addEventListener("abort", onParent, { once: true });
+  return {
+    signal: controller.signal,
+    stop: () => clearTimeout(timer),
+  };
+}
+
+function screenFraction(
+  point: { readonly x: number; readonly y: number },
+  screen: { readonly width: number; readonly height: number },
+): { readonly x: number; readonly y: number } | undefined {
+  if (screen.width <= 0 || screen.height <= 0) return undefined;
+  return { x: point.x / screen.width, y: point.y / screen.height };
+}
+
+async function readServeAvdScreen(
+  fetchImpl: typeof fetch,
+  attachment: ServeAvdAttachment,
+  serial: string,
+  signal: AbortSignal,
+): Promise<{ readonly width: number; readonly height: number } | undefined> {
+  let response: Response;
+  try {
+    response = await fetchImpl(`${attachment.origin}/helper/${encodeURIComponent(serial)}/config`, {
+      redirect: "error",
+      credentials: "omit",
+      signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
+    });
+  } catch {
+    return undefined;
+  }
+  if (!response.ok) return undefined;
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(body) || typeof body.width !== "number" || typeof body.height !== "number") {
+    return undefined;
+  }
+  if (!Number.isFinite(body.width) || !Number.isFinite(body.height)) return undefined;
+  if (body.width <= 0 || body.height <= 0 || body.width > 20_000 || body.height > 20_000) {
+    return undefined;
+  }
+  return { width: body.width, height: body.height };
+}
+
+type ReadChunk = { readonly done: false; readonly value: Uint8Array } | { readonly done: true };
+
+async function firstJpeg(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<{ readonly frames: readonly Uint8Array[]; readonly rest: Uint8Array } | undefined> {
+  let rest: Uint8Array = new Uint8Array();
+  const deadline = Date.now() + timeoutMs;
+  while (!signal.aborted && Date.now() < deadline) {
+    const chunk = await readChunk(reader, deadline - Date.now(), signal);
+    if (chunk === undefined || chunk.done) return undefined;
+    const taken = takeJpegFrames(concatBytes(rest, chunk.value));
+    rest = taken.rest;
+    if (taken.frames.length > 0) return { frames: taken.frames, rest };
+  }
+  return undefined;
+}
+
+function readChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<ReadChunk | undefined> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: ReadChunk | undefined) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
+    const onAbort = () => finish(undefined);
+    const timer = setTimeout(() => finish(undefined), Math.max(0, timeoutMs));
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    reader.read().then(
+      (result) => {
+        if (result.done) finish({ done: true });
+        else finish({ done: false, value: result.value });
+      },
+      () => finish(undefined),
+    );
+  });
+}
+
+function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
+  if (left.byteLength === 0) return right;
+  const out = new Uint8Array(left.byteLength + right.byteLength);
+  out.set(left, 0);
+  out.set(right, left.byteLength);
+  return out;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

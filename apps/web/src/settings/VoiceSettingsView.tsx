@@ -18,7 +18,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SurfaceEmpty } from "../surface/SurfaceHeader";
-import { SettingRow } from "./primitives";
+import { SettingRow, SettingsSection } from "./primitives";
 import { settingId } from "./registry";
 
 export interface VoiceSettingsViewProps {
@@ -61,8 +61,7 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
         />
       ) : (
         <>
-          <div className="settings-card-section settings-card-section--open">
-            <h2>Speech to text</h2>
+          <SettingsSection title="Speech to text">
             <div className="setgroup">
               <SettingRow
                 description="Choose the provider and model that turn recordings into text."
@@ -84,9 +83,8 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
                 />
               </SettingRow>
             </div>
-          </div>
-          <div className="settings-card-section settings-card-section--open">
-            <h2>Text to speech</h2>
+          </SettingsSection>
+          <SettingsSection title="Text to speech">
             <div className="setgroup">
               <SettingRow
                 description="Choose a provider voice, or use this computer's voices without a provider call."
@@ -108,7 +106,7 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
                 />
               </SettingRow>
             </div>
-          </div>
+          </SettingsSection>
         </>
       )}
     </section>

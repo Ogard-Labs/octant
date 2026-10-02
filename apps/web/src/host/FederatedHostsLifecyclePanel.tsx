@@ -5,6 +5,7 @@ import type {
 } from "@octant/client-runtime/host-federation-lifecycle";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { OctantButton } from "../ui/base/OctantButton";
+import { SettingsSection } from "../settings/primitives";
 
 /**
  * Post-preview B6: Settings surface for per-host compatibility / auth /
@@ -121,18 +122,13 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
   );
 
   return (
-    <section
-      aria-label="Federated hosts"
-      className="settings-card-section settings-card-section--open federated-hosts-lifecycle"
+    <SettingsSection
+      className="federated-hosts-lifecycle"
+      description="Each host keeps its own connection state. Device credential expiry, revoke, or failure on one host never blocks the local host or other healthy hosts. A spent session reconnects from the paired device key; only a lost, revoked, or expired credential needs a new pair."
       id="settings-federated-hosts"
+      title="Federated hosts"
     >
-      <h2>Federated hosts</h2>
-      <p className="settings-section-note">
-        Each host keeps its own connection state. Device credential expiry, revoke, or failure on
-        one host never blocks the local host or other healthy hosts. A spent session reconnects from
-        the paired device key; only a lost, revoked, or expired credential needs a new pair.
-      </p>
-      <ul className="federated-hosts-lifecycle__list">
+      <ul className="setgroup federated-hosts-lifecycle__list">
         {snapshots.map((snapshot) => {
           const guidance = guidanceCopy(snapshot);
           const busy = busyHostId === snapshot.hostId;
@@ -202,7 +198,7 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
           {message}
         </p>
       ) : null}
-    </section>
+    </SettingsSection>
   );
 }
 

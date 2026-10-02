@@ -534,7 +534,10 @@ describe("application background contracts", () => {
   });
 
   it("replays settings written before the application background existed as the plain page", () => {
-    expect(decodeThemeSettings(validSettings).appBackground).toEqual(DEFAULT_APP_BACKGROUND);
+    expect(decodeThemeSettings(validSettings).appBackground).toEqual({ kind: "none", ...tuning });
+    // A fresh install is the one place the soft gradient arrives on its own.
+    expect(DEFAULT_THEME_SETTINGS.appBackground).toEqual(DEFAULT_APP_BACKGROUND);
+    expect(DEFAULT_APP_BACKGROUND).toMatchObject({ kind: "builtin", presetId: "soft-glow" });
     const event = decodeThemeSettingsUpdated({
       settings: { ...validSettings, sidebarBackground: DEFAULT_THEME_SETTINGS.sidebarBackground },
       version: 3,

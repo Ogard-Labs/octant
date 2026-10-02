@@ -71,7 +71,7 @@ describe("resolveSidebarContributions", () => {
     expect(resolveSidebarContributions("chat", effective).has("linear-issues")).toBe(false);
   });
 
-  it("omits linear-issues when the bundled-off plugin is not effective", () => {
+  it("omits linear-issues when the plugin is not effective", () => {
     expect(
       resolveSidebarContributions("code", effectiveMap({ "linear-integration": false })).has(
         "linear-issues",
@@ -101,7 +101,7 @@ describe("resolveSettingsSectionContributions", () => {
     ).toBe(false);
   });
 
-  it("omits linear when the bundled-off plugin is not effective", () => {
+  it("omits linear when the plugin is not effective", () => {
     expect(
       resolveSettingsSectionContributions(effectiveMap({ "linear-integration": false })).has(
         "linear",

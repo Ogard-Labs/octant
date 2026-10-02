@@ -145,7 +145,7 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
       <SettingsSection title="Connection">
         <div className="setgroup">
           <SettingRow
-            description="Connect, reconnect, or remove local credentials."
+            description="Connect or reconnect, and refresh what Octant sees."
             label="Connection"
             labelledBySection
             scope="host"
@@ -170,18 +170,6 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
               >
                 Refresh status
               </OctantButton>
-              {connected ? (
-                <OctantButton
-                  aria-expanded={disconnectArmed}
-                  aria-haspopup="dialog"
-                  disabled={commandBusy || refreshing}
-                  onClick={() => setDisconnectArmed(true)}
-                  type="button"
-                  variant="secondary"
-                >
-                  Disconnect
-                </OctantButton>
-              ) : null}
             </div>
           </SettingRow>
         </div>
@@ -282,6 +270,30 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
           </div>
         ) : null}
       </SettingsSection>
+
+      {connected ? (
+        <SettingsSection tone="danger" title="Disconnect">
+          <div className="setgroup">
+            <SettingRow
+              description="Removes Octant's Linear credentials from this host. Your Linear workspace is untouched."
+              label="Disconnect Linear"
+              scope="host"
+              settingId="linear-disconnect"
+            >
+              <OctantButton
+                aria-expanded={disconnectArmed}
+                aria-haspopup="dialog"
+                disabled={commandBusy || refreshing}
+                onClick={() => setDisconnectArmed(true)}
+                type="button"
+                variant="secondary"
+              >
+                Disconnect
+              </OctantButton>
+            </SettingRow>
+          </div>
+        </SettingsSection>
+      ) : null}
     </section>
   );
 }

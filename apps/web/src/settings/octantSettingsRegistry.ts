@@ -131,6 +131,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "color colour scheme system light dark theme mode preset octant palette",
         },
         {
+          id: settingId("appearance.scheme.style"),
+          label: "Style",
+          scope: "app",
+          keywords: "style vivid colour color colourful default monochrome tiles accent",
+        },
+        {
           id: settingId("appearance.typography.ui.family"),
           label: "Interface font",
           scope: "app",
@@ -192,6 +198,24 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "More row in the sidebar",
           scope: "app",
           keywords: "sidebar more row hidden menu destinations account customize reveal expand",
+        },
+        {
+          id: settingId("sidebar-count-tiles"),
+          label: "Count tiles",
+          scope: "app",
+          keywords: "sidebar count tiles inbox running review done today cards counts",
+        },
+        {
+          id: settingId("sidebar-search"),
+          label: "Thread filter",
+          scope: "app",
+          keywords: "sidebar search filter field icon always shown threads find",
+        },
+        {
+          id: settingId("sidebar-collapsed"),
+          label: "When collapsed",
+          scope: "app",
+          keywords: "sidebar collapse collapsed hide rail icons narrow hidden",
         },
         {
           id: settingId("mode-switcher"),

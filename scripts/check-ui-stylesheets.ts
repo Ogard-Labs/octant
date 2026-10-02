@@ -70,9 +70,17 @@ const SPACING_LITERAL = /(?<![\w.-])(\d*\.?\d+)px\b/g;
 const ACCESSIBILITY_MEDIA =
   /prefers-reduced-motion|prefers-reduced-transparency|prefers-contrast|forced-colors/;
 
-// DESIGN.md: nothing is bold except a page title. Content emphasis (`strong`,
-// transcript headings) and the handful of titles are the accepted residue.
-const HEAVY_WEIGHT = /^(?:bold|bolder|var\(--oct-weight-strong\))$/;
+// DESIGN.md's weight ladder: 400 body, 500 labels, 600 emphasis (section and
+// card titles, counts), 700 the page title alone. Anything past 600 is a
+// title's weight and is refused outside the title roles below.
+const HEAVY_WEIGHT = /^(?:bold|bolder|var\(--oct-weight-title\))$/;
+
+// The title weight is the page title's and the welcome greeting's alone: the
+// type roles in surface.css may use it, and anywhere else it is as heavy as
+// any other bold. Allowing it by token rather than by number keeps a feature
+// from writing 700 and calling it a title.
+const TITLE_WEIGHT = "var(--oct-weight-title)";
+const TITLE_ROLE_FILE = "styles/surface.css";
 
 // CSS allows whitespace between `!` and the keyword and matches the keyword
 // case-insensitively, so `! IMPORTANT` is the same annotation as `!important`.
@@ -80,11 +88,11 @@ const HEAVY_WEIGHT = /^(?:bold|bolder|var\(--oct-weight-strong\))$/;
 // `content: "Use !important"` and a suffixed `!important-foo` out of the rule.
 const IMPORTANT_ANNOTATION = /!\s*important\s*$/i;
 
-/** `!important` and casing must not let a weight slip past the 500 limit. */
+/** `!important` and casing must not let a weight slip past the 600 limit. */
 function isHeavyWeight(value: string): boolean {
   const weight = value.replace(IMPORTANT_ANNOTATION, "").trim().toLowerCase();
   const numeric = Number(weight);
-  return Number.isFinite(numeric) && weight !== "" ? numeric > 500 : HEAVY_WEIGHT.test(weight);
+  return Number.isFinite(numeric) && weight !== "" ? numeric > 600 : HEAVY_WEIGHT.test(weight);
 }
 
 /** Only an `@media` rule that names an accessibility feature earns the
@@ -102,6 +110,9 @@ const PRIMITIVE_OPENING =
 // `unstyled` hands the paint to the feature, but only when it is statically on:
 // `unstyled={false}` leaves the recipe in charge.
 const UNSTYLED_ON = /\bunstyled(?![\w-])(?!\s*=\s*\{\s*false\s*\})/;
+// The bare variant is the button recipe's own way of handing the paint over:
+// it draws nothing, so the feature stylesheet styling it repaints nothing.
+const BARE_VARIANT = /\bvariant\s*=\s*(?:"bare"|'bare'|\{\s*(?:"bare"|'bare')\s*\})/;
 const CLASS_ATTRIBUTE = /\bclassName\s*=\s*/;
 const STRING_LITERAL = /"([^"]*)"|'([^']*)'|`([^`$]*)`/g;
 
@@ -119,7 +130,13 @@ export function collectPrimitiveClasses(
       const attributes = readAttributes(source, match.index + match[0].length);
       // `unstyled` hands the paint to the feature on purpose; OctantTextarea
       // does the same for `composer-input`, the system prompt (0038).
-      if (UNSTYLED_ON.test(attributes) || /\bcomposer-input\b/.test(attributes)) continue;
+      if (
+        UNSTYLED_ON.test(attributes) ||
+        BARE_VARIANT.test(attributes) ||
+        /\bcomposer-input\b/.test(attributes)
+      ) {
+        continue;
+      }
       for (const className of classNamesIn(attributes)) {
         if (/^[a-z][\w-]*$/.test(className) && className !== "window-no-drag") {
           classes.set(className, primitive);
@@ -396,8 +413,9 @@ export function findStylesheetFindings(
       if (IMPORTANT_ANNOTATION.test(value) && !isAccessibilityFallback(headers)) {
         push("important", `${property} uses !important outside an accessibility fallback`);
       }
-      if (!isToken && name === "font-weight" && isHeavyWeight(value)) {
-        push("heavy-weight", `font-weight ${value} is heavier than a page title`);
+      const titleRole = value.trim() === TITLE_WEIGHT && normalized.endsWith(TITLE_ROLE_FILE);
+      if (!isToken && name === "font-weight" && isHeavyWeight(value) && !titleRole) {
+        push("heavy-weight", `font-weight ${value} is a title's weight outside the title roles`);
       }
       if (!isToken && PAINT_PROPERTY.test(name)) {
         const repainted = repaintedPrimitive(resolvedSelector(headers), primitiveClasses);

@@ -12,6 +12,7 @@ import type { MentionableThreadId, ThreadMentionCandidate } from "@octant/contra
 import type { PickerGroup } from "@octant/domain";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { Profiler } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkThreadWorkspace } from "./WorkThreadWorkspace";
@@ -101,6 +102,93 @@ describe("WorkThreadWorkspace", () => {
       "Browser approval could not be sent. Keep this request open and retry.",
     );
     expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
+  });
+
+  it("asks before a selected MCP server's tool runs in this Work thread", async () => {
+    const user = userEvent.setup();
+    const approval = {
+      approvalId: "90000000-0000-4000-8000-000000000002",
+      threadId: String(threadId),
+      packageId: "90000000-0000-4000-8000-000000000003",
+      componentId: "notes-server",
+      providerToolName: "plugin__notes__search",
+      mcpToolName: "search",
+      inputJson: '{"q":"plan"}',
+      requestedAt: "2026-09-09T10:00:00.000Z",
+    };
+    const otherThread = {
+      ...approval,
+      approvalId: "90000000-0000-4000-8000-000000000004",
+      threadId: "10000000-0000-4000-8000-000000000999",
+      mcpToolName: "elsewhere",
+    };
+    const extensionClient = {
+      listToolApprovals: vi.fn(async () => [otherThread, approval]),
+      decideToolApproval: vi.fn(async () => undefined),
+    };
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        extensionClient={extensionClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    const row = await screen.findByRole("group", { name: "Extension tool approval" });
+    expect(row).toHaveTextContent("Allow search?");
+    expect(row).toHaveTextContent('{"q":"plan"}');
+    await user.click(within(row).getByRole("button", { name: "Approve once" }));
+    expect(extensionClient.decideToolApproval).toHaveBeenCalledWith({
+      approvalId: approval.approvalId,
+      decision: "approved",
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("group", { name: "Extension tool approval" })).toBeNull(),
+    );
+  });
+
+  it("keeps an MCP tool approval open and explains a failed decision", async () => {
+    const user = userEvent.setup();
+    const approval = {
+      approvalId: "90000000-0000-4000-8000-000000000005",
+      threadId: String(threadId),
+      packageId: "90000000-0000-4000-8000-000000000003",
+      componentId: "notes-server",
+      providerToolName: "plugin__notes__search",
+      mcpToolName: "search",
+      inputJson: "{}",
+      requestedAt: "2026-09-09T10:00:00.000Z",
+    };
+    const extensionClient = {
+      listToolApprovals: vi.fn(async () => [approval]),
+      decideToolApproval: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    };
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        extensionClient={extensionClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    const row = await screen.findByRole("group", { name: "Extension tool approval" });
+    await user.click(within(row).getByRole("button", { name: "Deny" }));
+    expect(await within(row).findByRole("alert")).toHaveTextContent(
+      "The approval could not be sent. Keep this request open and retry.",
+    );
+    expect(screen.getByRole("group", { name: "Extension tool approval" })).toBeInTheDocument();
   });
 
   it("saves reasoning for the current Work model and restores its default", async () => {
@@ -401,7 +489,7 @@ describe("WorkThreadWorkspace", () => {
 
     render(
       <WorkThreadWorkspace
-        canvasClient={{} as never}
+        canvasClient={{ threadReferenceCards: async () => ({ cards: [] }) } as never}
         threadClient={threadClient}
         threadId={threadId}
         title="Draft brief"
@@ -410,6 +498,61 @@ describe("WorkThreadWorkspace", () => {
 
     await screen.findByLabelText("Bound provider and model");
     expect(screen.queryByRole("button", { name: "Canvas" })).not.toBeInTheDocument();
+  });
+
+  it("shows the Canvas the task authored and offers to open it", async () => {
+    const user = userEvent.setup();
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const card = {
+      schemaVersion: 1,
+      kind: "canvas-reference-card",
+      cardId: "20000000-0000-4000-8000-000000000001",
+      canvasId: "20000000-0000-4000-8000-000000000002",
+      versionId: "20000000-0000-4000-8000-000000000003",
+      title: "Launch plan",
+      scope: { hostId: "local", mode: "work", workspace: { kind: "work-root", projectId: null } },
+      originThreadId: threadId,
+      status: "ready",
+      authority: {
+        filesystem: false,
+        shell: false,
+        git: false,
+        network: false,
+        tools: true,
+        subagents: false,
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+      },
+      actorId: "99999999-9999-4999-8999-999999999999",
+      providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      modelId: "octant-test-model",
+      createdAt: "2026-08-01T21:00:00.000Z",
+      actionCount: 0,
+    } as unknown as CanvasThreadReferenceCard;
+    const threadReferenceCards = vi.fn(async () => ({ cards: [card] }));
+    const onCanvasReferencesObserved = vi.fn();
+    const onOpenCanvas = vi.fn();
+
+    render(
+      <WorkThreadWorkspace
+        canvasClient={{ threadReferenceCards } as never}
+        onCanvasReferencesObserved={onCanvasReferencesObserved}
+        onOpenCanvas={onOpenCanvas}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Open Canvas" }));
+    expect(threadReferenceCards).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "work", threadId: String(threadId) }),
+    );
+    expect(onCanvasReferencesObserved).toHaveBeenCalledWith(String(threadId), [card]);
+    expect(onOpenCanvas).toHaveBeenCalledWith(card);
   });
 
   it("shows the files a turn changed instead of narrating them in prose", async () => {
@@ -1483,6 +1626,41 @@ describe("WorkThreadWorkspace", () => {
     expect(composer).toHaveValue("second draft #[Roadmap]  @second.md ");
     expect(screen.getByLabelText("Mentioned threads")).toHaveTextContent("Roadmap");
     expect(await screen.findByAltText("second.png")).toBeInTheDocument();
+  });
+
+  it("shows the host's reason when it refuses to start a Work turn", async () => {
+    const user = userEvent.setup();
+    const reason =
+      "This thread has used all 2 of its turns. Raise or clear its spend ceiling in Usage to continue.";
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns: [workTurn({ status: "completed" })] })),
+      startFirstTurn: vi.fn(async () => {
+        throw new WorkTurnClientFailure(reason, 409);
+      }),
+      putAttachment: vi.fn(),
+      discardAttachment: vi.fn(async () => undefined),
+    };
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    const composer = await screen.findByLabelText("Work prompt");
+    await user.type(composer, "one more pass");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+    expect(screen.queryByText("The Work turn could not be started.")).not.toBeInTheDocument();
   });
 
   it("restores the captured Work context when the deferred send is refused", async () => {

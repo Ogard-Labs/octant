@@ -259,11 +259,13 @@ describe("GitHubConnectionSettings", () => {
     await user.tab();
     expect(screen.getByRole("button", { name: "Enable Projects metadata" })).toHaveFocus();
     await user.tab();
-    expect(screen.getByRole("button", { name: "Log out on this host" })).toHaveFocus();
+    // Diagnostics comes before the page's destructive group, which sits last.
+    expect(screen.getByRole("button", { name: "Advanced diagnostics" })).toHaveFocus();
     await user.tab();
     expect(screen.getByRole("link", { name: /GitHub application settings/ })).toHaveFocus();
     await user.tab();
-    expect(screen.getByRole("button", { name: "Advanced diagnostics" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Log out on this host" })).toHaveFocus();
+    screen.getByRole("button", { name: "Advanced diagnostics" }).focus();
 
     await user.keyboard("{Enter}");
     expect(screen.getByText("read:org")).toBeInTheDocument();

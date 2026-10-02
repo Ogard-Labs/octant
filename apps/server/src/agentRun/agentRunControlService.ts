@@ -236,6 +236,7 @@ export function buildControlCreationRequest(input: {
     requestId: input.control.requestId,
     parentThreadId: input.control.parentThreadId,
     ...(input.control.parentRunId === undefined ? {} : { parentRunId: input.control.parentRunId }),
+    ...(input.control.dependsOn === undefined ? {} : { dependsOn: input.control.dependsOn }),
     role: input.control.role,
     task: input.control.task,
     mode: input.facts.mode,

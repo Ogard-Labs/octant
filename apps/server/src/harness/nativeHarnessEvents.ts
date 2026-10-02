@@ -1,6 +1,10 @@
 import {
   NATIVE_HARNESS_ROUTING_EVENT_NAMES,
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
+  NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES,
+  NativeHarnessTranscriptMessageAppended,
+  NativeHarnessTranscriptOpened,
+  NativeHarnessTranscriptToolSettled,
   NativeHarnessAdvisorIntervention,
   NativeHarnessContextReduction,
   NativeHarnessFollowUpCreation,
@@ -108,5 +112,16 @@ export function registerNativeHarnessEvents(registry: EventRegistry): EventRegis
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalAsked, 1, NativeHarnessApproval)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalSettled, 1, NativeHarnessApprovalSettled)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.paused, 1, NativeHarnessSessionPaused)
-    .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed, 1, NativeHarnessSessionResumed);
+    .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed, 1, NativeHarnessSessionResumed)
+    .register(NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.opened, 1, NativeHarnessTranscriptOpened)
+    .register(
+      NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.messageAppended,
+      1,
+      NativeHarnessTranscriptMessageAppended,
+    )
+    .register(
+      NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.toolSettled,
+      1,
+      NativeHarnessTranscriptToolSettled,
+    );
 }

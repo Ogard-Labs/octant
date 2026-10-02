@@ -356,11 +356,29 @@ export const AgentRunResultDelivery = Schema.Struct({
 }).annotations(strict);
 export type AgentRunResultDelivery = typeof AgentRunResultDelivery.Type;
 
+/**
+ * Sibling runs a run waits for, under the same parent thread. The host starts
+ * the run only once every one of them completed, hands it their results, and
+ * fails it without running when any of them failed, was cancelled, or was
+ * interrupted. Existing runs only, so a cycle cannot be expressed.
+ */
+export const MAX_AGENT_RUN_DEPENDENCIES = 8;
+export const AgentRunDependencies = Schema.Array(AgentRunId).pipe(
+  Schema.minItems(1),
+  Schema.maxItems(MAX_AGENT_RUN_DEPENDENCIES),
+  Schema.filter((ids) => new Set(ids.map(String)).size === ids.length, {
+    message: () => "AgentRun dependencies must be distinct",
+  }),
+);
+export type AgentRunDependencies = typeof AgentRunDependencies.Type;
+
 export const AgentRun = Schema.Struct({
   id: AgentRunId,
   requestId: AgentRunRequestId,
   parentThreadId: AgentRunParentThreadId,
   parentRunId: Schema.optional(AgentRunId),
+  /** Optional so runs journaled before dependencies existed replay unchanged. */
+  dependsOn: Schema.optional(AgentRunDependencies),
   depth: Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(2)),
   role: AgentRunRole,
   task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
@@ -406,6 +424,7 @@ export const AgentRunCommand = Schema.Union(
     requestId: AgentRunRequestId,
     parentThreadId: AgentRunParentThreadId,
     parentRunId: Schema.optional(AgentRunId),
+    dependsOn: Schema.optional(AgentRunDependencies),
     role: AgentRunRole,
     task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
     creationPosture: AgentRunCreationPosture,

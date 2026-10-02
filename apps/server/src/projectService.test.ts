@@ -1051,6 +1051,91 @@ describe("ProjectService", () => {
     );
   });
 
+  it("journals one event per Project colour change and refuses it on an archived Project", async () => {
+    const fixture = fixtureService({ projects: [chatProject()] });
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-project-color",
+      projectId: chatId,
+      expectedVersion: 1,
+      color: "purple",
+    });
+    expect(result).toMatchObject({
+      kind: "project-color-changed",
+      project: { color: "purple", version: 2 },
+    });
+    expect(fixture.append).toHaveBeenCalledTimes(1);
+    expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+      "project.color-changed@1",
+    );
+
+    const archived = fixtureService({ projects: [{ ...chatProject(), lifecycle: "archived" }] });
+    await expect(
+      archived.service.executeProject(windowId, {
+        kind: "change-project-color",
+        projectId: chatId,
+        expectedVersion: 1,
+        color: "red",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(archived.append).not.toHaveBeenCalled();
+  });
+
+  it("replays a Project colour and its clearing across persistence restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-project-color-service-"));
+    const projectId = decodeProjectId("00000000-0000-4000-8000-000000000697");
+    const coloured = decodeProjectId("00000000-0000-4000-8000-000000000696");
+    const run = <A>(body: (service: ProjectService) => Promise<A>) =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const persistence = yield* Persistence;
+            return yield* Effect.promise(() => body(persistentService(persistence)));
+          }).pipe(
+            Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
+          ),
+        ),
+      );
+    try {
+      await run(async (service) => {
+        for (const id of [projectId, coloured]) {
+          await service.executeProject(windowId, {
+            kind: "create-chat-project",
+            projectId: id,
+            expectedVersion: 0,
+            name: "Colour replay",
+            hostId: "local",
+          });
+        }
+        await service.executeProject(windowId, {
+          kind: "change-project-color",
+          projectId,
+          expectedVersion: 1,
+          color: "green",
+        });
+        await service.executeProject(windowId, {
+          kind: "change-project-color",
+          projectId,
+          expectedVersion: 2,
+          color: null,
+        });
+        await service.executeProject(windowId, {
+          kind: "change-project-color",
+          projectId: coloured,
+          expectedVersion: 1,
+          color: "orange",
+        });
+      });
+
+      const restored = await run((service) => service.bootstrap(windowId));
+      const byId = new Map(restored.active.map((project) => [project.id, project]));
+      expect(byId.get(coloured)?.color).toBe("orange");
+      expect(byId.get(projectId)?.color).toBeUndefined();
+      expect(byId.get(projectId)?.version).toBe(3);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("replays the pull-request background refresh opt-in across persistence restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-project-pr-cadence-service-"));
     const codeId = decodeProjectId("00000000-0000-4000-8000-000000000698");

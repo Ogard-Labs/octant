@@ -48,6 +48,7 @@ export interface ShellDialogHostProps {
   ) => Promise<ProjectId | undefined>;
   readonly onCreatedProject: (projectId: ProjectId, mode: OctantMode, name: string) => void;
   readonly searchOpen: boolean;
+  readonly searchQuery: string;
   readonly searchThreads: ReadonlyArray<ThreadSearchThread>;
   readonly searchProjects: ReadonlyArray<ThreadSearchProject>;
   readonly searchListing: ThreadSearchListingStatus;
@@ -90,6 +91,7 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
       ) : null}
       {props.searchOpen ? (
         <ThreadSearchOverlay
+          initialQuery={props.searchQuery}
           mode={props.mode}
           threads={props.searchThreads}
           projects={props.searchProjects}

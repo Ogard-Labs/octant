@@ -195,11 +195,15 @@ setInterval(() => {}, 1000);`,
   });
 
   it("reports unconfirmed cleanup when signaling the updater is denied", async () => {
+    // The updater exits on its own; only cleanup is under test. A 100 ms
+    // budget raced node's own start-up under a loaded suite and reported a
+    // timeout instead, so the budget is generous, as in the clean-exit test
+    // above, and the run still ends as soon as cleanup is refused.
     await expect(
       runProviderCliUpdate({
         binaryPath: process.execPath,
         args: ["-e", "process.exit(0)"],
-        timeoutMs: 100,
+        timeoutMs: 5_000,
         terminationGraceMs: 10,
         processGroupExists: () => true,
         killProcessGroup: () => {
@@ -212,7 +216,7 @@ setInterval(() => {}, 1000);`,
         "Provider CLI update did not confirm that the updater process tree exited. Restart Octant before another update or session on this CLI.",
       diagnostic: { stage: "cleanup", kind: "cleanup-unconfirmed" },
     });
-  }, 2000);
+  });
 
   it("bounds captured updater output in bytes and drains the rest without growing memory", async () => {
     const result = await runProviderCliUpdate({
@@ -289,6 +293,8 @@ exit 1
     const names = [
       "OCTANT_SIMULATOR_DEVICE_BROKER_URL",
       "OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN",
+      "OCTANT_SERVE_AVD_BROKER_URL",
+      "OCTANT_SERVE_AVD_BROKER_TOKEN",
       "OCTANT_COMPUTER_USE_BROKER_TOKEN",
       "OCTANT_CREDENTIAL_BROKER_TOKEN",
       "OCTANT_DESKTOP_BRIDGE_SECRET",

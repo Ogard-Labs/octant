@@ -47,4 +47,17 @@ describe("keychainHelperBuildArgs", () => {
       source.match(/credentialData\.resetBytes\(in: 0\.\.<credentialData\.count\)/g)?.length ?? 0,
     ).toBeGreaterThanOrEqual(2);
   });
+
+  it("fails fast on and replaces Keychain items another helper build owns", async () => {
+    const source = await readFile(
+      resolve(repositoryRoot, "apps/desktop/native/keychain-helper/OctantKeychainHelper.swift"),
+      "utf8",
+    );
+
+    expect(source).toContain("SecKeychainSetUserInteractionAllowed(false)");
+    expect(source).toContain("SecKeychainItemDelete(");
+    expect(source).toContain(
+      "guard providerItemReadable(account: providerAccount, storeScope: storeScope) else { fail(.unavailable) }",
+    );
+  });
 });

@@ -88,7 +88,8 @@ describe("WorkComposerAdapter", () => {
         projectRoot="/home/user/docs"
       />,
     );
-    expect(html).toContain("What are we working on?");
+    expect(html).toMatch(/Good (morning|afternoon|evening)/);
+    expect(html).not.toContain("What are we working on?");
     expect(html).toContain("My Docs");
     expect(html).not.toContain("Octant Work");
     expect(html).not.toContain("confined folder");
@@ -109,7 +110,7 @@ describe("WorkComposerAdapter", () => {
     expect(html).not.toContain("Attach folder");
   });
 
-  it("carries host and Project context on the row above the composer", () => {
+  it("carries host and Project context on the row inside the composer, above the prompt", () => {
     const { container } = render(<WorkComposerAdapter {...baseProps} />);
     const frame = container.querySelector(".composer");
     const tray = container.querySelector(".composer-tray");
@@ -120,8 +121,11 @@ describe("WorkComposerAdapter", () => {
     if (frame === null || tray === null || row === null) {
       throw new Error("Composer stack is incomplete.");
     }
-    expect(frame.contains(tray)).toBe(false);
-    expect(tray.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(frame.contains(tray)).toBe(true);
+    expect(
+      tray.compareDocumentPosition(screen.getByRole("textbox", { name: "First message" })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(tray.textContent).toContain("No folder");
     expect(tray.querySelector(".host-selector--environment")).not.toBeNull();
   });
