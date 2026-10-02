@@ -27,8 +27,10 @@
 /* The context ring is the one composer mark that carries colour in every
    style: a reader checks how full the window is at a glance, and a grey arc
    beside grey controls had to be read rather than seen. The arc takes the
-   palette's amber, the track a faint step of the same hue so the ring reads
-   whole, and a near-full window turns it red. */
+   palette's amber and a near-full window turns it red. The track is a faint step
+   of the text ink rather than of the arc's hue: at a low share a tinted track
+   nearly vanished on both grounds and the short arc read as a spinner on a
+   finished thread, where a neutral groove reads as a gauge in light and dark. */
 .composer-context-meter {
   --composer-context-meter-ink: var(--octant-palette-orange, var(--octant-text-primary));
 }
@@ -38,7 +40,7 @@
 }
 
 .composer-context-meter__track {
-  stroke: color-mix(in oklab, var(--composer-context-meter-ink) 28%, transparent);
+  stroke: color-mix(in oklab, var(--octant-text-primary) 20%, transparent);
   stroke-width: 2;
 }
 

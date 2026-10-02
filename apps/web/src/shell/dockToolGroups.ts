@@ -5,7 +5,7 @@ const TOOL_GROUPS: ReadonlyArray<{
   readonly ids: ReadonlyArray<RightUtilityDockSurfaceId>;
 }> = [
   {
-    label: "This thread",
+    label: "Thread tools",
     ids: ["environment", "side-chat", "plan", "delivery", "agents", "document", "canvas", "review"],
   },
   { label: "Workspace", ids: ["files", "terminal", "browser", "tests", "pull-requests"] },

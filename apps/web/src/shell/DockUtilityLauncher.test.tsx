@@ -116,7 +116,7 @@ describe("right sidebar tool launcher", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
     expect(
-      within(screen.getByRole("group", { name: "This thread" })).getByRole("button", {
+      within(screen.getByRole("group", { name: "Thread tools" })).getByRole("button", {
         name: "Environment",
       }),
     ).toBeVisible();
@@ -130,6 +130,6 @@ describe("right sidebar tool launcher", () => {
         name: "Android emulator",
       }),
     ).toBeVisible();
-    expect(screen.getAllByText(/^(This thread|Workspace|Devices)$/)).toHaveLength(3);
+    expect(screen.getAllByText(/^(Thread tools|Workspace|Devices)$/)).toHaveLength(3);
   });
 });
