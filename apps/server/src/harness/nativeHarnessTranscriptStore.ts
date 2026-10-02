@@ -10,6 +10,7 @@ import {
   decodeNativeHarnessTranscriptOpened,
   decodeNativeHarnessTranscriptToolSettled,
   type NativeHarnessTranscriptBinding,
+  type NativeHarnessTranscriptForkOrigin,
   type NativeHarnessTranscriptMessage,
   type NativeHarnessTranscriptToolCall,
   type NativeHarnessTranscriptToolResult,
@@ -28,6 +29,8 @@ const REPLAY_BATCH_SIZE = 1_000;
 /** A session's conversation as the journal holds it. */
 export interface NativeHarnessTranscript {
   readonly binding: NativeHarnessTranscriptBinding;
+  /** The conversation this one was forked from, and how many turns it brought. */
+  readonly forkedFrom?: NativeHarnessTranscriptForkOrigin;
   /** Messages in order; settled tool calls appear as one results message after their call. */
   readonly messages: ReadonlyArray<NativeHarnessTranscriptMessage>;
   /**
@@ -42,7 +45,11 @@ export interface NativeHarnessTranscript {
 }
 
 export type NativeHarnessTranscriptEvent =
-  | { readonly kind: "opened"; readonly binding: NativeHarnessTranscriptBinding }
+  | {
+      readonly kind: "opened";
+      readonly binding: NativeHarnessTranscriptBinding;
+      readonly forkedFrom?: NativeHarnessTranscriptForkOrigin;
+    }
   | { readonly kind: "message"; readonly message: NativeHarnessTranscriptMessage }
   | { readonly kind: "settled"; readonly result: NativeHarnessTranscriptToolResult };
 
@@ -50,9 +57,13 @@ export interface NativeHarnessTranscriptStore {
   /**
    * Starts a conversation. Starting again under the same id begins a new
    * generation: the earlier one stays in the journal but is no longer what a
-   * resume rebuilds.
+   * resume rebuilds. A fork names where its copied turns came from.
    */
-  readonly open: (sessionId: ProviderSessionId, binding: NativeHarnessTranscriptBinding) => void;
+  readonly open: (
+    sessionId: ProviderSessionId,
+    binding: NativeHarnessTranscriptBinding,
+    forkedFrom?: NativeHarnessTranscriptForkOrigin,
+  ) => void;
   readonly load: (sessionId: ProviderSessionId) => NativeHarnessTranscript | undefined;
   readonly append: (sessionId: ProviderSessionId, message: NativeHarnessTranscriptMessage) => void;
   readonly settle: (
@@ -71,6 +82,7 @@ export function foldNativeHarnessTranscript(
   events: ReadonlyArray<NativeHarnessTranscriptEvent>,
 ): NativeHarnessTranscript | undefined {
   let binding: NativeHarnessTranscriptBinding | undefined;
+  let forkedFrom: NativeHarnessTranscriptForkOrigin | undefined;
   const messages: NativeHarnessTranscriptMessage[] = [];
   let pendingCalls: ReadonlyArray<NativeHarnessTranscriptToolCall> = [];
   const pendingResults = new Map<string, NativeHarnessTranscriptToolResult>();
@@ -91,6 +103,7 @@ export function foldNativeHarnessTranscript(
   for (const event of events) {
     if (event.kind === "opened") {
       binding = event.binding;
+      forkedFrom = event.forkedFrom;
       messages.length = 0;
       pendingCalls = [];
       pendingResults.clear();
@@ -106,6 +119,7 @@ export function foldNativeHarnessTranscript(
   if (binding === undefined) return undefined;
   return {
     binding,
+    ...(forkedFrom === undefined ? {} : { forkedFrom }),
     messages,
     ...(pendingCalls.length === 0
       ? {}
@@ -117,9 +131,13 @@ export function foldNativeHarnessTranscript(
 export class MemoryNativeHarnessTranscriptStore implements NativeHarnessTranscriptStore {
   readonly #events = new Map<string, NativeHarnessTranscriptEvent[]>();
 
-  open(sessionId: ProviderSessionId, binding: NativeHarnessTranscriptBinding): void {
+  open(
+    sessionId: ProviderSessionId,
+    binding: NativeHarnessTranscriptBinding,
+    forkedFrom?: NativeHarnessTranscriptForkOrigin,
+  ): void {
     const events = this.#events.get(String(sessionId)) ?? [];
-    events.push({ kind: "opened", binding });
+    events.push({ kind: "opened", binding, ...(forkedFrom === undefined ? {} : { forkedFrom }) });
     this.#events.set(String(sessionId), events);
   }
 
@@ -162,11 +180,19 @@ export class JournalNativeHarnessTranscriptStore implements NativeHarnessTranscr
     this.#actor = decodeActor(options.actor);
   }
 
-  open(sessionId: ProviderSessionId, binding: NativeHarnessTranscriptBinding): void {
+  open(
+    sessionId: ProviderSessionId,
+    binding: NativeHarnessTranscriptBinding,
+    forkedFrom?: NativeHarnessTranscriptForkOrigin,
+  ): void {
     this.#append(
       sessionId,
       NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.opened,
-      decodeNativeHarnessTranscriptOpened({ sessionId, binding }),
+      decodeNativeHarnessTranscriptOpened({
+        sessionId,
+        binding,
+        ...(forkedFrom === undefined ? {} : { forkedFrom }),
+      }),
     );
   }
 
@@ -244,7 +270,12 @@ function decodeEvent(
 ): NativeHarnessTranscriptEvent | undefined {
   const names = NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES;
   if (eventName === names.opened) {
-    return { kind: "opened", binding: decodeNativeHarnessTranscriptOpened(payload).binding };
+    const opened = decodeNativeHarnessTranscriptOpened(payload);
+    return {
+      kind: "opened",
+      binding: opened.binding,
+      ...(opened.forkedFrom === undefined ? {} : { forkedFrom: opened.forkedFrom }),
+    };
   }
   if (eventName === names.messageAppended) {
     return {

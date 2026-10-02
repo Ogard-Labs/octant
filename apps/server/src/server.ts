@@ -298,6 +298,8 @@ import { createContextRouteHandler } from "./contextRoutes";
 import { GitEnvironmentPort } from "./gitEnvironmentPort";
 import { GitObservationPort } from "./code/gitObservationPort";
 import { GitMutationPort } from "./code/gitMutationPort";
+import { codeThreadTurns } from "./code/codeForkPoint";
+import { seedCodeForkHarnessSession } from "./harness/nativeHarnessFork";
 import { GitService } from "./code/gitService";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
 import { GhRepositoryCataloguePort } from "./github/ghRepositoryCataloguePort";
@@ -4439,6 +4441,23 @@ export function startOctantServer(
             : undefined;
         },
         resolveForkHandoff: forkHandoffResolver(() => routeCodeService),
+        forkProviderSession: (input) =>
+          seedCodeForkHarnessSession(
+            {
+              transcripts: nativeHarnessTranscripts,
+              harnessDriverKind: (instanceId) => {
+                const instance = persistence.readProviderInstance(instanceId);
+                return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind)
+                  ? instance.driverKind
+                  : undefined;
+              },
+              sourceTurns: (threadId) =>
+                codeThreadTurns((page) => codeBoardEventStore.conversation(page), threadId),
+              sourceConversations: (threadId) =>
+                codeBoardEventStore.providerConversationsOfTurns(threadId),
+            },
+            input,
+          ),
         resolveProfileSkills: createCodeProfileSkillResolver({
           snapshot: () => extensionApiService.snapshot(),
           loadSkillText: createStoredCodeProfileSkillTextLoader({

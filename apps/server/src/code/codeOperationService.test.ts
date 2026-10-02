@@ -1678,8 +1678,11 @@ describe("CodeOperationService", () => {
       operationId: startProviderTurn.operationId,
     });
     const started = fixture.turns.start.mock.calls[0]![0];
-    expect((started.context ?? []).map((block) => block.text).join("\n")).toContain(
-      "Forked from: user asked about the loader.",
+    // It travels apart from the turn's other context, so a provider that can
+    // take up the source's own conversation does not also read it as text.
+    expect(started.forkHandoff?.text).toContain("Forked from: user asked about the loader.");
+    expect((started.context ?? []).map((block) => block.text).join("\n")).not.toContain(
+      "Forked from",
     );
     // The durable message stays exactly what the user typed.
     expect(started.prompt).toBe("does this still hold?");

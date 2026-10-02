@@ -1029,6 +1029,23 @@ native harness in `apps/server/src/harness`:
   taken effect (`replay: "unsafe"`, check before repeating); nothing is
   silently re-run. Chat and Work still rebuild their history on the host and
   start a fresh session each turn.
+- **Forks.** A Code fork on a harness model starts its first session from a
+  copy of the source's transcript through the fork point
+  (`seedCodeForkHarnessSession`), resumed like any other: the lead keeps its
+  own messages, tool calls, and results instead of a text summary. A turn
+  begins with the one user message `send` journals for it, and the copy is cut
+  at the turn after the named one; the copy refuses — and the fork reads the
+  text handoff instead — unless the transcript holds exactly the turns the
+  source ran on that session, the named turn finished, and its last step
+  settled. Copied paths under the source's checkout are rewritten to the
+  fork's worktree, and the secret values the fork's turn resolved are
+  replaced with `[REDACTED]`. The copy's `opened` event names its source
+  session and how many turns it inherited, so a fork of a fork counts its own
+  turns correctly and the ancestry survives replay. The source's transcript is
+  never touched. App state is not copied: a fork starts with no goal, plan,
+  task list, steering notes, questions, or remembered approvals, because each
+  of those is keyed to the thread that owns it, and it never inherits running
+  state or access.
 - **Tools.** `createNativeHarnessTools` composes the nine working tools and
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
   closed tool catalog (`harness-*` capability ids). Every call decodes its
