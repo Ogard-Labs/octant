@@ -258,7 +258,8 @@ appear in Files and Document. That instruction offers no tools or authority.
 A Canvas diagram block is also a board. The renderer zooms, pans, and fits the
 same deterministic layout every surface draws, and a user's drag or keyboard
 nudge is journaled through `/api/canvas/layout-revise` as a new immutable
-`canvas.version-appended@1` version with `actor: local-user`, admitted by the
+`canvas.version-appended@1` version with `actor: local-user` that the host
+stamps itself, whatever actor the request names, admitted by the
 pure `admitCanvasDiagramLayoutRevision` policy (target must be a diagram,
 every moved node must exist, the sequence must be the head, budgets stand).
 Agent revisions and user layout share one history; a stale drag is refused and
@@ -270,7 +271,9 @@ boards but does not move nodes. Comments are journaled facts of one
 concurrent comments conflict on the journal instead of both winning; the
 service rebuilds them with the pure `applyCanvasCommentEvent` reducer, refuses
 unauthorized reads with no bodies, and stamps each comment's origin (`host` or
-the authenticated `remote-device`) beside its `local-user` author. Shared
+the authenticated `remote-device`) beside its `local-user` author. The host
+stamps that author (and a resolve's or delete's actor) itself and ignores the
+actor the request names, so a renderer can never author a comment as an agent. Shared
 snapshots serialise the definition and so never carry comments
 ([decisions/0052-canvas-boards.md](decisions/0052-canvas-boards.md)).
 

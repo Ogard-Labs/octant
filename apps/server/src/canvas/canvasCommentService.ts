@@ -11,6 +11,8 @@ import {
   decodeCanvasCommentEvent,
   decodeCanvasCommentsOutcome,
   decodeCanvasId,
+  decodeCanvasActor,
+  type CanvasActor,
   type CanvasCommentCommandResult,
   type CanvasCommentDenialCode,
   type CanvasCommentEvent,
@@ -123,6 +125,7 @@ export class CanvasCommentService {
   readonly #projection: Pick<CanvasProjection, "getById">;
   readonly #uuid: () => string;
   readonly #actor: typeof EventActor.Type;
+  readonly #person: CanvasActor;
   readonly #authorize: CanvasCommentServiceDependencies["authorize"];
   readonly #state = new Map<string, CanvasCommentState>();
   #replayed = false;
@@ -135,6 +138,7 @@ export class CanvasCommentService {
     this.#projection = options.projection;
     this.#uuid = options.uuid;
     this.#actor = decodeActor(options.actor);
+    this.#person = decodeCanvasActor({ kind: "local-user", actorId: this.#actor.actorId });
     this.#authorize = dependencies.authorize;
   }
 
@@ -205,7 +209,11 @@ export class CanvasCommentService {
       };
     }
     const state = this.#stateFor(canvasId);
-    const admitted = admitCanvasCommentCommand(requestInput, state, origin);
+    const admitted = admitCanvasCommentCommand(
+      withPersonActor(requestInput, this.#person),
+      state,
+      origin,
+    );
     if (admitted.kind === "rejected") {
       return {
         kind: "denied",
@@ -299,6 +307,28 @@ function commentDenialCode(code: CanvasBoardRejectionCode): CanvasCommentDenialC
     case "unknown-node":
     case "missing-position":
       return "malformed-request";
+  }
+}
+
+/**
+ * Comments reach this service only from the person's own window or paired
+ * device, so the host names that person as the author. The command's author
+ * fields were once trusted as sent, and the renderer copied the creating
+ * agent's identity into them: a comment typed in the Canvas showed "Agent".
+ */
+function withPersonActor(requestInput: unknown, person: CanvasActor): unknown {
+  if (typeof requestInput !== "object" || requestInput === null) return requestInput;
+  const kind: unknown = Reflect.get(requestInput, "kind");
+  switch (kind) {
+    case "canvas-comment-add":
+    case "canvas-comment-reply":
+      return { ...requestInput, author: person };
+    case "canvas-comment-resolve":
+      return { ...requestInput, resolvedBy: person };
+    case "canvas-comment-delete":
+      return { ...requestInput, deletedBy: person };
+    default:
+      return requestInput;
   }
 }
 
