@@ -233,8 +233,8 @@ html[data-octant-native-host="true"]
   --sidebar-rail-fill: transparent;
   position: relative;
   display: flex;
-  width: 40px;
-  height: 36px;
+  width: 44px;
+  height: 40px;
   align-items: center;
   justify-content: center;
   border-radius: var(--oct-radius-sm);
@@ -273,14 +273,14 @@ html[data-octant-native-host="true"]
 
 .sidebar-rail__project {
   display: flex;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   align-items: center;
   justify-content: center;
   border-radius: var(--oct-radius-sm);
   background: color-mix(in oklab, var(--oct-fg) 14%, transparent);
   color: var(--oct-fg);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
 }
 

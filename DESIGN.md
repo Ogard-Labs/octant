@@ -687,7 +687,9 @@ collapses it to a 76px icon rail by default: Show sidebar, New thread, and
 Search at the top, then the modes, the count tiles as icons with their counts
 as badges, the remaining destination rows, up to six Project letter tiles with
 a Projects button for the rest, the Activity feed, and Settings at the foot.
-Every rail control names itself in its tooltip and accessible name. Settings ›
+Rail icons are 20px on a 44 by 40px face. Every rail control names itself in
+its accessible name and in a label that opens beside the rail on hover or
+keyboard focus. Settings ›
 Sidebar › When collapsed can choose Hidden instead, which removes the sidebar
 completely and leaves Show sidebar and New thread in the native title rail.
 The rail never appears below the drawer breakpoint, where a collapsed sidebar
