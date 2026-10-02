@@ -808,16 +808,22 @@ function LaunchedShell(
   // entry. A request Zen never honours expires rather than opening a shell
   // the next time the person happens to enter Zen.
   const [homeTerminalProjectId, setHomeTerminalProjectId] = useState<ProjectId>();
+  // Start screens stay up until Zen is active, so a second click can arrive
+  // while the first entry is pending; only the latest request may expire.
+  const homeTerminalRequest = useRef(0);
   useEffect(() => {
     if (homeTerminalProjectId === undefined || !zen.active || zen.space === null) return;
     setHomeTerminalProjectId(undefined);
     void addZenProjectTerminal(homeTerminalProjectId);
   }, [homeTerminalProjectId, zen.active, zen.space]);
   function openHomeTerminal(projectId: ProjectId): void {
+    const request = ++homeTerminalRequest.current;
     setHomeTerminalProjectId(projectId);
     if (zen.active) return;
     void zen.enterZen().finally(() => {
-      window.setTimeout(() => setHomeTerminalProjectId(undefined), 3_000);
+      window.setTimeout(() => {
+        if (homeTerminalRequest.current === request) setHomeTerminalProjectId(undefined);
+      }, 3_000);
     });
   }
   // A renderer older than the host-backed setting stored each sidebar view's
