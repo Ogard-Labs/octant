@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { modeIcons, modeLabels } from "./ModeSwitcher";
 import { visibleModeOf, visibleModes, type VisibleMode } from "./workKind";
 import type { SidebarTile, SidebarTileId } from "./SidebarCountTiles";
@@ -73,7 +74,12 @@ export function SidebarRail(props: SidebarRailProps) {
   const activeMode = visibleModeOf(props.activeMode);
   const visibleProjects = props.projects.slice(0, RAIL_PROJECT_LIMIT);
   return (
-    <aside aria-label="Octant sidebar, collapsed" className="sidebar-rail" data-octant-sidebar-rail>
+    <aside
+      aria-label="Octant sidebar, collapsed"
+      className="sidebar-rail"
+      data-native-host={props.nativeHost ? "" : undefined}
+      data-octant-sidebar-rail
+    >
       {props.nativeHost ? (
         <span aria-hidden="true" className="sidebar-rail__traffic-lights window-drag-region" />
       ) : null}
@@ -173,8 +179,9 @@ function RailDivider() {
 /**
  * One rail control. The link recipe paints nothing; the face inside carries
  * the hover and current fills, as the count tiles do, so the shared button
- * recipe is never repainted. The name is the visible tooltip too, because an
- * icon alone names nothing for a sighted reader.
+ * recipe is never repainted. The name also shows as a label beside the rail
+ * on hover and keyboard focus, because an icon alone names nothing for a
+ * sighted reader, and the native title tooltip was slow and easy to miss.
  */
 function RailButton(props: {
   readonly label: string;
@@ -186,23 +193,24 @@ function RailButton(props: {
 }) {
   const Icon = props.icon;
   return (
-    <OctantButton
-      aria-current={props.active === true ? "page" : undefined}
-      aria-label={props.label}
-      className="sidebar-rail__button window-no-drag hover:no-underline"
-      disabled={props.onSelect === undefined}
-      onClick={() => props.onSelect?.()}
-      title={props.label}
-      type="button"
-      variant="link"
-    >
-      <span aria-hidden="true" className="sidebar-rail__face">
-        {Icon === undefined ? null : <Icon size={16} strokeWidth={1.7} />}
-        {props.children}
-        {props.badge === undefined || props.badge === 0 ? null : (
-          <span className="sidebar-rail__badge">{props.badge > 99 ? "99+" : props.badge}</span>
-        )}
-      </span>
-    </OctantButton>
+    <OctantTooltip label={props.label} side="right">
+      <OctantButton
+        aria-current={props.active === true ? "page" : undefined}
+        aria-label={props.label}
+        className="sidebar-rail__button window-no-drag hover:no-underline"
+        disabled={props.onSelect === undefined}
+        onClick={() => props.onSelect?.()}
+        type="button"
+        variant="link"
+      >
+        <span aria-hidden="true" className="sidebar-rail__face">
+          {Icon === undefined ? null : <Icon size={20} strokeWidth={1.7} />}
+          {props.children}
+          {props.badge === undefined || props.badge === 0 ? null : (
+            <span className="sidebar-rail__badge">{props.badge > 99 ? "99+" : props.badge}</span>
+          )}
+        </span>
+      </OctantButton>
+    </OctantTooltip>
   );
 }

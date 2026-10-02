@@ -138,13 +138,14 @@ always publishes `default`. Vivid reads best in the light theme.
 ### Shapes and depth
 
 Radius has one number per role, defined once as `--oct-radius-*` in
-`octant.css`: a compact control is 8px, a control or a row 10px, an object
+`octant.css`: a compact control is 6px, a control or a row 8px, an object
 resting inside a card or well, such as a Settings page's icon tile or a board
-card in its column, 12px (`--oct-radius-inset`), and a card, panel, menu, or
-popover 16px. The recipes reach the same numbers through `--radius`,
-whose `lg` step is the control and whose `xl` step lands on the card's 16px, so
-a menu and the popover beside it share a corner. Welcome composers and
-dialogs stay at 20px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
+card in its column, 8px (`--oct-radius-inset`), and a card, panel, menu, or
+popover 12px. The scale is deliberately tight: the first desktop scale
+(10/16/20) read as soft beside the dense text it framed. The recipes reach the
+same numbers through `--radius`, whose `lg` step is the control and whose `xl`
+step lands on the card's 12px, so a menu and the popover beside it share a
+corner. Welcome composers and dialogs use 14px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
 bounded by a hairline ring, not lifted; shadow means something that genuinely
 floats — a welcome composer (`--octant-shadow-md`) or an overlay
 (`--octant-shadow-overlay`). A card is for a discrete object a person acts on
@@ -207,7 +208,7 @@ draw the same hairline.
 
 Every Settings page is built from one kit, in `settings/primitives.tsx`:
 
-- **Page header.** A 42px icon tile (12px radius, a faint 8% ink fill, a
+- **Page header.** A 42px icon tile (8px inset radius, a faint 8% ink fill, a
   hairline) holding the page's own navigation icon at 20px, the page title
   (`.oct-title`, 28px), a one-line subtitle with the page scope, and an
   optional ghost action at the far edge (Appearance's "Reset to default").
@@ -468,7 +469,7 @@ The rest of the thread view is one set of recipes in `octant.css` and the
 reply prose in `chat.css`, worn by Chat, Work, and Code alike; a mode positions
 them and repaints nothing. The scroll frame (`transcript-scroll`) keeps 20px
 between rows. A person's message is a right-aligned bubble (`turn-user`,
-`bubble`: control fill, hairline, 16px radius, no shadow) with its time beneath
+`bubble`: control fill, hairline, 12px radius, no shadow) with its time beneath
 it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, with no card of its own: only the work a turn
@@ -651,7 +652,7 @@ reading-width preference. Canvas documents use a 62ch measure.
 
 Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px. Off-scale pixel spacing in a stylesheet is ratcheted by `bun run ui:check` against the recorded baseline; a change may lower a file's count but never raise it. Use `gap-*`
 for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
-chains. The desktop radius scale is 10px compact control, 16px panel and card, 20px
+chains. The desktop radius scale is 8px control, 12px panel and card, 14px
 welcome composer and dialog, the shared medium follow-up radius, and 9999px only for compact chips, meters, or circular icon
 controls. Product
 chrome uses those tokens and nothing else: a `border-radius` is a token, `0`,
@@ -683,11 +684,14 @@ surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing. Hide sidebar
-collapses it to a 76px icon rail by default: Show sidebar, New thread, and
+collapses it to a 56px icon rail by default (76px in the desktop app, where
+the native traffic lights sit at its top): Show sidebar, New thread, and
 Search at the top, then the modes, the count tiles as icons with their counts
 as badges, the remaining destination rows, up to six Project letter tiles with
 a Projects button for the rest, the Activity feed, and Settings at the foot.
-Every rail control names itself in its tooltip and accessible name. Settings ›
+Rail icons are 20px on a 40px face. Every rail control names itself in
+its accessible name and in a label that opens beside the rail on hover or
+keyboard focus. Settings ›
 Sidebar › When collapsed can choose Hidden instead, which removes the sidebar
 completely and leaves Show sidebar and New thread in the native title rail.
 The rail never appears below the drawer breakpoint, where a collapsed sidebar
@@ -1087,7 +1091,7 @@ is neutral explanatory text rather than a warning callout.
 The Board is an operational reading surface with four fixed,
 server-authoritative statuses: Ready, In Progress, Waiting, and Done. All
 four lanes show by default as soft wells: a faint tint of the text ink (3%)
-over the workspace colour, one soft hairline, the 16px radius, 8px of inner
+over the workspace colour, one soft hairline, the 12px radius, 8px of inner
 padding, and 12px between wells. A well's head names it once by mark, name,
 and count, with no rule under it: the name at the section-label step in the
 secondary ink and the count pinned to the trailing edge in the meta ink. The
@@ -1098,7 +1102,7 @@ take palette colours (Ready stays grey, In Progress orange, Waiting purple,
 Done green). A Board/List toggle leads the toolbar, and every control on it
 (the segmented choices, search, Filters, Refresh, View) is one 28px rail
 control. A card is a raised object inside its well: the card fill, a hairline,
-the 12px inset radius, and 12px of padding. It carries the Project as an
+the 8px inset radius, and 12px of padding. It carries the Project as an
 eyebrow, the title, and, while the thread is executing, a live line under the
 title (a small turning arc and the latest sub-agent line in the mono meta voice,
 or "Working…" before one reports). Under that come what the thread waits on,
@@ -1119,7 +1123,7 @@ recipe; in Settings, the extension and skill collections are kit cards too, and
 the Installed and Marketplace switch rides the first section's label line. The
 command palette
 groups results and shows a shortcut badge when a row maps to a user-bindable
-chord. Shared dialogs keep the 20px overlay radius and overlay shadow.
+chord. Shared dialogs keep the 14px overlay radius and overlay shadow.
 
 The context meter is a circular composer control, not a dock tab: a 16px
 gauge with a full track and a 2px round-capped arc filled clockwise from
@@ -1304,6 +1308,10 @@ receipts, and observed-state checks remain separate and mandatory.
 
 Settings connection removal uses the same confirmation while retaining its
 host command and GitHub's explicit local-logout confirmation.
+
+Remote device-key rotation uses the same confirmation. It remains limited to
+the paired browser and requires its own explicit choice after opening the
+dialog; cancellation leaves the key untouched.
 
 The pull-request merge warning stays inline and nonmodal. Opening it focuses
 Cancel; Tab can leave the warning to continue reviewing. Escape within the warning
