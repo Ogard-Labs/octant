@@ -7,7 +7,12 @@ import {
   type NativeHarnessSessionView,
 } from "@octant/contracts";
 import { listAgentThreads } from "./agentHost";
-import { agentThreadPort, createAgentThread, isAgentSnapshotRunning } from "./agentThread";
+import {
+  attachAgentThread,
+  agentThreadPort,
+  createAgentThread,
+  isAgentSnapshotRunning,
+} from "./agentThread";
 import { runAgentTui } from "./agentTui";
 import { isTuiThemeId, type TuiThemeId } from "./agentTuiModel";
 import { failureMessage, type OpenedLocalControlSession } from "./localControl";
@@ -23,12 +28,14 @@ export type AgentCliCommand =
       /** Line mode even on a terminal that could draw the full screen. */
       readonly plain: boolean;
       readonly theme?: TuiThemeId;
-      /** Attach to the most recently used Chat thread instead of creating one. */
+      /** Attach to the latest thread instead of creating one: this folder's Code or Work Project first, else Chat. */
       readonly last: boolean;
       /** No desktop notification when a turn ends. */
       readonly quiet: boolean;
       /** `auto` follows the folder: a Code or Work Project holding it, else Chat. */
       readonly mode: "chat" | "work" | "code" | "auto";
+      /** A harness model for a new Work or Code thread: `model` or `endpoint/model`. */
+      readonly model?: string;
     }
   | { readonly action: "harness-slots"; readonly json: boolean }
   | { readonly action: "harness-session"; readonly threadId: string; readonly json: boolean };
@@ -44,6 +51,7 @@ const AGENT_FLAGS: ReadonlyArray<string> = [
   "last",
   "quiet",
   "mode",
+  "model",
 ];
 
 export function resolveAgentCliCommand(
@@ -61,6 +69,7 @@ export function resolveAgentCliCommand(
     const project = text("project");
     const title = text("title");
     const theme = text("theme");
+    const model = text("model");
     if (theme !== undefined && !isTuiThemeId(theme)) return undefined;
     const mode = text("mode") ?? "auto";
     if (mode !== "chat" && mode !== "work" && mode !== "code" && mode !== "auto") return undefined;
@@ -70,6 +79,7 @@ export function resolveAgentCliCommand(
       ...(threadId === undefined ? {} : { threadId }),
       ...(project === undefined ? {} : { project }),
       ...(title === undefined ? {} : { title }),
+      ...(model === undefined ? {} : { model }),
       json: flags.json === true,
       plain: flags.plain === true,
       last: flags.last === true,
@@ -447,7 +457,43 @@ async function readSession(
 
 async function resolveThread(input: RunAgentCliCommandInput): Promise<string | undefined> {
   if (input.command.action !== "agent") return undefined;
-  if (input.command.threadId !== undefined) return input.command.threadId;
+  if (
+    (input.command.threadId !== undefined || input.command.last) &&
+    input.command.mode !== "chat"
+  ) {
+    // A Work or Code thread is driven by what this terminal's window has
+    // open, and its mode is the thread's own, never a guess from flags.
+    const attached = await attachAgentThread(input.session, {
+      threadId: input.command.threadId,
+      mode: input.command.mode,
+      projectName: input.command.project,
+    });
+    if (attached.kind === "refused") {
+      input.stderr.write(`${attached.message}\n`);
+      return undefined;
+    }
+    if (attached.kind === "attached") {
+      resolvedMode = attached.mode;
+      if (!input.command.json) {
+        input.stdout.write(
+          `Continuing ${attached.mode === "code" ? "Code" : "Work"} thread in ${attached.projectName}.\n`,
+        );
+      }
+      return attached.threadId;
+    }
+    if (input.command.mode !== "auto") {
+      input.stderr.write(
+        input.command.threadId === undefined
+          ? `There is no ${input.command.mode === "code" ? "Code" : "Work"} thread to continue in this folder's Project.\n`
+          : `No ${input.command.mode === "code" ? "Code" : "Work"} thread ${input.command.threadId} on this host.\n`,
+      );
+      return undefined;
+    }
+  }
+  if (input.command.threadId !== undefined) {
+    resolvedMode = "chat";
+    return input.command.threadId;
+  }
   if (input.command.last) {
     const latest = (await listAgentThreads(input.session))[0];
     if (latest === undefined) {
@@ -461,6 +507,7 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
     title:
       input.command.title ?? `Agent ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
     projectName: input.command.project,
+    model: input.command.model,
   });
   if (created.kind === "refused") {
     input.stderr.write(`${created.message}\n`);
@@ -482,8 +529,10 @@ let resolvedMode: "chat" | "work" | "code" | undefined;
 
 function modeOf(command: AgentCliCommand): "chat" | "work" | "code" {
   if (command.action !== "agent") return "chat";
+  // The thread's own mode, once known, wins over the flag that found it.
+  if (resolvedMode !== undefined) return resolvedMode;
   if (command.mode !== "auto") return command.mode;
-  return resolvedMode ?? "chat";
+  return "chat";
 }
 
 async function runTurn(

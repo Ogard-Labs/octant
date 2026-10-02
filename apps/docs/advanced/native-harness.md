@@ -194,8 +194,15 @@ refused with the exact `octant project add` command to run. If the host is not
 running, `octant agent` starts it the way `octant server start` does and
 waits for it before opening the thread. `--plain` keeps the line-by-line mode, which is also what a pipe or
 `--json` (one JSON object per line) gets. `--thread <id>` attaches to an
-existing thread, `--last` to the one you used most recently, and
-`--project <name>` files a new thread in a Project. Inside the screen,
+existing thread in whatever mode it is, and `--last` continues the latest
+Code or Work thread of the Project you are in (anywhere else, your latest
+Chat thread). A Code thread keeps its conversation from one run of
+`octant agent` to the next, tool calls included. `--model <model>` picks the
+harness model for a new Work or Code thread — `endpoint/model` when two
+endpoints offer the same id — and an unknown name lists the ones on offer.
+`--project <name>` files a new thread in a Project. The terminal opens the
+Project and the thread in its own window on the host, exactly as the app
+does, so the same checkout, goal, and approval rules apply to it. Inside the screen,
 `/threads` lists your threads and `/open N` switches; `/model` lists every
 model a harness endpoint offers and `/model N` switches the thread to it,
 with the header showing how much of that model's window the last turn used.
