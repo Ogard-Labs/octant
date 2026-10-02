@@ -494,6 +494,21 @@ does not survive the move; the thread lands on its persisted posture. A thread
 that owns a managed worktree is refused, because that checkout is the thread's
 own tree rather than the Project's.
 
+A Code fork (`fork-code-thread`) is a managed-worktree creation the host
+resolves itself: the client names the source thread and a finished turn, and
+the host picks the files from its own record — the checkpoint the next writing
+turn captured before it ran (a Plan turn in between writes nothing and is
+skipped), or a fresh capture of the source checkout when the named turn is the
+newest. It refuses a turn that has not finished and a point a writing turn
+passed without a capture rather than guess. The worktree starts at that
+checkpoint's commit on a new delivery branch, and the captured trees are laid
+over it, so uncommitted work arrives too; a failure to lay them down removes
+the worktree and creates nothing. The fork starts approval-gated with
+current-session persistence and inherits no profile, pending outcome proposal,
+running turn, or session grant. Every Code thread creation checks a
+`forkedFrom` origin on the server: it must name another thread of the same
+Project.
+
 A child AgentRun starts only when the thread's agent delegates to it through the
 Octant Harness `delegate` tool, and its result returns to that agent through
 `collect`; the host's AgentRun routes read and control existing runs but start

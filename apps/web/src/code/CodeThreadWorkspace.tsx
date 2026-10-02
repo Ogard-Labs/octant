@@ -967,9 +967,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   /**
    * Start a second thread that continues this conversation from this answer.
    *
-   * Nothing here changes: the fork is a new thread on the same checkout, and
-   * the original keeps every turn it already has. The host decides what
-   * history the fork's first turn carries, so this only names the point.
+   * Nothing here changes: the fork is a new thread on its own worktree and
+   * branch, and the original keeps every turn and file it already has. The
+   * host decides which files and history the fork starts from, so this only
+   * names the point.
    */
   async function forkFrom(message: CodeConversationMessage) {
     const operationId = message.operationId;
@@ -983,7 +984,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         title: forkTitle(view.thread.title),
       });
       if (forked === undefined) {
-        setForkMessage("The thread could not be forked. This thread is unchanged.");
+        const reason = props.controller.lastExecuteError.current?.message;
+        setForkMessage(`${reason ?? "The thread could not be forked."} This thread is unchanged.`);
         return;
       }
       props.onOpenCodeThread?.(forked.id, forked.title, forked.projectId);

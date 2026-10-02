@@ -158,7 +158,8 @@ appears below the reply; hover over the reply to reveal its timestamp and action
 when the pointer leaves. Keyboard focus can still reveal the action buttons.
 Chat and Code offer Copy and Fork below the reply; Chat also offers Regenerate.
 Fork creates a new thread with history through the selected response and leaves
-the original unchanged. Failures, interruptions, and requests for
+the original unchanged; a Code fork also gets its own worktree and branch with
+the files as they were at that response. Failures, interruptions, and requests for
 input remain visible. Chat, Work, and Code share this history treatment and fold
 inline reasoning into an expandable Thinking disclosure. Code also keeps its
 provider-reported reasoning channel in the turn’s existing disclosure.

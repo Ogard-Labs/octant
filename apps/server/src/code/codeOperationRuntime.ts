@@ -4,6 +4,7 @@ import {
   type AgentRun,
   type AgentRunId,
   CodeApprovalId,
+  MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES,
   MAX_CODE_OPERATION_SUMMARY_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
@@ -56,6 +57,7 @@ import {
 } from "./gitObservationPort";
 import { GitService } from "./gitService";
 import { CodeOperationEventStore } from "./codeOperationEventStore";
+import { chooseCodeForkPoint } from "./codeForkPoint";
 import {
   CodeRuntimeWorkRecorder,
   codeRuntimeWorkObserved,
@@ -72,6 +74,7 @@ import {
   isAndroidEmulatorInputKind,
   isAndroidEmulatorOpenInputKind,
   harnessAutoReviewEffective,
+  mayWriteToRepository,
   unsupportedModelOptionValues,
 } from "@octant/domain";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
@@ -100,7 +103,11 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import type { ProviderContextBlock } from "@octant/contracts";
-import { CodeServiceError, type ManagedCodeThreadCreationPort } from "./codeService";
+import {
+  CodeServiceError,
+  type CodeForkPoint,
+  type ManagedCodeThreadCreationPort,
+} from "./codeService";
 import { RepositoryTestRunner } from "./repositoryTestRunner";
 import { RepositoryTestDiscoveryService } from "./repositoryTestDiscoveryService";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "../scaffold/curatedScaffoldCatalog";
@@ -424,6 +431,12 @@ export interface CodeOperationRuntime {
     afterCursor: number,
     limit: number,
   ): Promise<CodeConversationPage>;
+  /** The files a fork of `source` at `throughOperationId` starts from. */
+  forkPoint(
+    windowId: WindowId,
+    source: CodeThread,
+    throughOperationId: string,
+  ): Promise<CodeForkPoint>;
   readEvidence(
     windowId: WindowId,
     threadId: CodeThreadId,
@@ -1095,6 +1108,48 @@ export function createCodeOperationRuntime(
         limit,
         providerInstanceId: thread.providerInstanceId,
       });
+    },
+    forkPoint: async (windowId, source, throughOperationId) => {
+      if (!(await options.windowAccess.canAccessProject(windowId, source.projectId))) {
+        return { status: "refused", reason: "unavailable" };
+      }
+      const turns: CodeConversationPage["turns"][number][] = [];
+      let cursor = 0;
+      for (let page = 0; page < MAX_FORK_POINT_PAGES; page += 1) {
+        const listed = events.conversation({
+          threadId: source.id,
+          afterCursor: cursor,
+          limit: MAX_CODE_CONVERSATION_PAGE_SIZE,
+          providerInstanceId: source.providerInstanceId,
+        });
+        turns.push(...listed.turns);
+        if (!listed.hasMore || listed.nextCursor <= cursor) break;
+        cursor = listed.nextCursor;
+      }
+      const choice = chooseCodeForkPoint(turns, throughOperationId);
+      if (choice.kind === "refused") return { status: "refused", reason: choice.reason };
+      if (choice.kind === "checkpoint") return forkPointFrom(choice.checkpoint);
+      // The named turn is the newest: the checkout as it stands now is its result.
+      const checkout = options.persistence.readCodeCheckout(source.checkoutId);
+      if (checkout === undefined || checkout.availability !== "available") {
+        return { status: "refused", reason: "unavailable" };
+      }
+      const capture = git.checkpoint;
+      if (capture === undefined) return { status: "refused", reason: "unavailable" };
+      const root = await authority.resolveCheckoutRoot(windowId, source, checkout);
+      if (root === undefined) return { status: "refused", reason: "unavailable" };
+      const captured = await capture({
+        checkoutId: String(checkout.id),
+        checkoutRoot: root.checkoutRoot,
+        // Capturing writes only Git objects, which a Plan thread's own posture
+        // would refuse; the person asking for the fork is what authorizes it.
+        executionPolicy: mayWriteToRepository(source.executionPolicy)
+          ? source.executionPolicy
+          : "approval-gated",
+      }).catch(() => undefined);
+      return captured?.status === "captured"
+        ? forkPointFrom(captured.snapshot)
+        : { status: "refused", reason: "unavailable" };
     },
     readEvidence: async (windowId, threadId, operationId, contentId) => {
       try {
@@ -3014,4 +3069,21 @@ function concatenatedOutput(stdout: Uint8Array, stderr: Uint8Array): Uint8Array 
   combined.set(stdout, 0);
   combined.set(stderr, stdout.byteLength);
   return combined;
+}
+
+/** Conversation pages read to find a fork point; a longer history refuses as not found. */
+const MAX_FORK_POINT_PAGES = 64;
+
+function forkPointFrom(checkpoint: {
+  readonly worktree: string;
+  readonly index: string;
+  readonly head?: string | undefined;
+}): CodeForkPoint {
+  // A worktree starts from a commit; a repository with none has nowhere to start.
+  if (checkpoint.head === undefined) return { status: "refused", reason: "no-commits" };
+  return {
+    status: "resolved",
+    head: checkpoint.head,
+    files: { worktree: checkpoint.worktree, index: checkpoint.index },
+  };
 }

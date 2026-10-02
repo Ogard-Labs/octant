@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { decodeCodeCheckoutId, decodeCodeRepositoryId, type Project } from "@octant/contracts";
 import type {
+  CodeForkFiles,
   ManagedCodeThreadCleanupOutcome,
   ManagedCodeThreadCommitOutcome,
   ManagedCodeThreadCreationInput,
@@ -20,6 +21,15 @@ export interface ManagedCodeThreadCreationDeps {
   readonly service: ManagedWorktreeService;
   readonly repository: ManagedWorktreeRepositoryPort;
   readonly clock: () => string;
+  /**
+   * Lays a fork's files over the fresh worktree. Absent where the host cannot
+   * write Git trees, in which case a fork refuses rather than starting from
+   * its last commit and silently losing the work it was forked to continue.
+   */
+  readonly applySourceFiles?: (
+    input: Readonly<{ worktreeRoot: string; files: CodeForkFiles }>,
+    signal: AbortSignal,
+  ) => Promise<"applied" | "failed">;
 }
 
 export function deriveManagedWorktreeCheckoutId(input: {
@@ -169,6 +179,23 @@ export function createManagedCodeThreadCreationPort(
         return created.status === "refused"
           ? { status: "refused", reason: created.reason }
           : { status: created.status };
+      }
+      if (input.sourceFiles !== undefined) {
+        const applied =
+          deps.applySourceFiles === undefined
+            ? "failed"
+            : await deps
+                .applySourceFiles(
+                  { worktreeRoot: created.targetPath, files: input.sourceFiles },
+                  signal,
+                )
+                .catch(() => "failed" as const);
+        if (applied !== "applied") {
+          await deps.service
+            .rollbackCreation(created.receipt.receiptId, new AbortController().signal)
+            .catch(() => undefined);
+          return { status: "refused", reason: "source-files-unavailable" };
+        }
       }
       return {
         status: "created",

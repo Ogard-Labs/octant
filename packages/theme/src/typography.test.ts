@@ -156,6 +156,17 @@ describe("interface face migration", () => {
     ).toBe(DEFAULT_THEME_SETTINGS.typography.ui.family);
   });
 
+  it("gives the bundled Geist to someone who picked the old Geist entry", () => {
+    const picked: ThemeTypography = {
+      ...DEFAULT_THEME_SETTINGS.typography,
+      ui: { ...DEFAULT_THEME_SETTINGS.typography.ui, family: "Geist, system-ui, sans-serif" },
+    };
+
+    expect(resolveTypographyProjection(picked, []).ui.fontFamily).toBe(
+      DEFAULT_THEME_SETTINGS.typography.ui.family,
+    );
+  });
+
   it("keeps a deliberately chosen system stack", () => {
     const chosen: ThemeTypography = {
       ...DEFAULT_THEME_SETTINGS.typography,

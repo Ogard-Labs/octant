@@ -60,8 +60,16 @@ export const SYSTEM_UI_FAMILY =
  * whichever face was the default when they saved.
  */
 export function savedUiFamily(family: string): string {
-  return family === LEGACY_DEFAULT_UI_FAMILY ? DEFAULT_UI_TYPOGRAPHY.fontFamily : family;
+  return family === LEGACY_DEFAULT_UI_FAMILY || family === UNBUNDLED_GEIST_FAMILY
+    ? DEFAULT_UI_TYPOGRAPHY.fontFamily
+    : family;
 }
+/**
+ * What Appearance's old "Geist" entry saved. It named a family Octant does not
+ * bundle (the bundled face is Geist Variable), so a person who picked Geist got
+ * the system face instead; they asked for Geist, so they get the bundled one.
+ */
+const UNBUNDLED_GEIST_FAMILY = "Geist, system-ui, sans-serif";
 /**
  * The code and terminal stacks saved while they were the defaults. They named
  * a JetBrains face Octant never bundled, so they always fell back to SF Mono;
