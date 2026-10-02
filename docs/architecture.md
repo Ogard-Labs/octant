@@ -274,7 +274,8 @@ appear in Files and Document. That instruction offers no tools or authority.
 A Canvas diagram block is also a board. The renderer zooms, pans, and fits the
 same deterministic layout every surface draws, and a user's drag or keyboard
 nudge is journaled through `/api/canvas/layout-revise` as a new immutable
-`canvas.version-appended@1` version with `actor: local-user`, admitted by the
+`canvas.version-appended@1` version with `actor: local-user` that the host
+stamps itself, whatever actor the request names, admitted by the
 pure `admitCanvasDiagramLayoutRevision` policy (target must be a diagram,
 every moved node must exist, the sequence must be the head, budgets stand).
 Agent revisions and user layout share one history; a stale drag is refused and
@@ -286,7 +287,9 @@ boards but does not move nodes. Comments are journaled facts of one
 concurrent comments conflict on the journal instead of both winning; the
 service rebuilds them with the pure `applyCanvasCommentEvent` reducer, refuses
 unauthorized reads with no bodies, and stamps each comment's origin (`host` or
-the authenticated `remote-device`) beside its `local-user` author. Shared
+the authenticated `remote-device`) beside its `local-user` author. The host
+stamps that author (and a resolve's or delete's actor) itself and ignores the
+actor the request names, so a renderer can never author a comment as an agent. Shared
 snapshots serialise the definition and so never carry comments
 ([decisions/0052-canvas-boards.md](decisions/0052-canvas-boards.md)).
 
@@ -511,9 +514,17 @@ gone fails the start closed. A dependency that failed or was cancelled fails
 the dependent without running it (`dependency-failed: <id>`); an interrupted
 dependency does not, because a retry can still complete it. A run cannot be
 admitted on a sibling that already failed or was cancelled, and since only
-existing runs can be named, a cycle cannot be expressed. A
-parked run still counts toward the active-run limits (three per parent, four
-per host), which keeps graphs small.
+existing runs can be named, a cycle cannot be expressed.
+
+How many children run at once is the person's setting
+(`AgentRunPolicySettings.concurrency`: per thread and on the host, defaults 4
+and 8, each at most `MAX_AGENT_RUN_CONCURRENCY` = 16). Run slots enforce it at
+start: `createInMemoryCapacityPort` counts reservations per thread and per
+host, reads the limits on every reservation, and reports which limit is full;
+the capacity queue skips a waiter whose own thread is full so another thread's
+waiter can take a freed slot. A run waiting on dependencies or a slot holds no
+slot. Admission separately caps unfinished children (any active status,
+waiting included) at 16 per parent and 32 per host as the runaway guard.
 
 Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /
@@ -1009,6 +1020,22 @@ native harness in `apps/server/src/harness`:
   refuse private destinations, and connect through a `lookup` that checks
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
+- **Goals.** A thread goal may carry up to twelve acceptance criteria
+  (`ThreadGoalCriterion`), each with an optional check command; one without a
+  command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
+  goal — objective, each criterion's status, budget left — in front of every
+  harness turn as per-turn content after the stable instructions. The `goal`
+  tool reads it and lets the lead write criteria once, only while the goal has
+  none; a person revises them afterwards. `goal-check` (Code, policed exactly
+  as `bash`, approval naming the command) runs a criterion's own check — the
+  command comes from the goal, never the call, is at most 200 characters so
+  the approval shows it whole, and is fixed when approval is asked; a check
+  changed while the approval was open runs nothing — and records the observed
+  outcome with `record-thread-goal-check` as `test` evidence, met only on a
+  zero exit. When the last criterion is met the goal completes on that
+  evidence (0025); a model saying it is done completes nothing. A goal loop
+  treats a goal with criteria as complete only when all are met, and a round
+  whose own checks completed the goal takes no further spend.
 - **Routing.** `NativeHarnessRoutingStore` journals a host default and
   Project overrides of slot tables; `resolveNativeHarnessRoute` in
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns

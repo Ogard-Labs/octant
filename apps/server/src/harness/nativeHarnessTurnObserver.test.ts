@@ -9,7 +9,11 @@ const scope = {
   modelId: "frontier-large" as never,
 };
 
-function observer(isHarness = true, session?: { status: string; detail?: string }) {
+function observer(
+  isHarness = true,
+  session?: { status: string; detail?: string },
+  goal?: Record<string, unknown>,
+) {
   const recorded: { turns: unknown[]; interventions: unknown[] } = {
     turns: [],
     interventions: [],
@@ -40,6 +44,7 @@ function observer(isHarness = true, session?: { status: string; detail?: string 
     resolveDriver: () => undefined,
     hostId: "00000000-0000-4000-8000-0000000000aa",
     scratchRoot: "/tmp",
+    ...(goal === undefined ? {} : { readGoal: () => goal as never }),
     uuid: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`,
     clock: () => "2026-09-05T12:00:00.000Z",
   });
@@ -52,6 +57,32 @@ describe("native harness turn observer", () => {
     expect(harness[0]?.kind).toBe("instructions");
     expect(harness[0]?.text).toContain("todo-write");
     expect(observer(false).subject.contextFor(scope)).toEqual([]);
+  });
+
+  it("puts an open goal's criteria after the stable instructions and drops a completed one", () => {
+    const goal = {
+      objective: "Make the parser accept trailing commas",
+      status: "active",
+      budget: { turnBudget: 10 },
+      usage: { tokensUsed: 0, elapsedMs: 0, turnsUsed: 3 },
+      criteria: [
+        { id: "c1", text: "Parser tests pass", check: "bun run test parser", status: "met" },
+        { id: "c2", text: "Docs mention it", status: "unmet" },
+      ],
+    };
+    const context = observer(true, undefined, goal).subject.contextFor(scope);
+    const instructions = context.filter((block) => block.kind === "instructions");
+    const work = context.find((block) => block.kind === "work-item");
+    expect(context.indexOf(work as never)).toBeGreaterThan(
+      context.indexOf(instructions.at(-1) as never),
+    );
+    expect(work?.text).toContain("- [met] c1: Parser tests pass (check: bun run test parser)");
+    expect(work?.text).toContain("- [unmet] c2: Docs mention it (a person confirms this one)");
+    expect(work?.text).toContain("Budget left: 7 of 10 turns.");
+    const done = observer(true, undefined, { ...goal, status: "complete" }).subject.contextFor(
+      scope,
+    );
+    expect(done.some((block) => block.kind === "work-item")).toBe(false);
   });
 
   it("hands a pending advisor redirect to exactly the next turn", async () => {

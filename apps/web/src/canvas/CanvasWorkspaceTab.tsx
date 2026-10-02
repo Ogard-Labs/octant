@@ -253,7 +253,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           versionId: decodeCanvasVersionId(globalThis.crypto.randomUUID()),
           blockId,
           positions,
-          actor: reviseBase.actor,
+          actor: LOCAL_PERSON,
           expectedSequence,
           schemaVersion: CANVAS_SCHEMA_VERSION,
           issuedAt: decodeUtcTimestamp(new Date().toISOString()),
@@ -683,7 +683,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               </OctantButton>
             </div>
             <CanvasCommentsPanel
-              author={reviseBase.actor}
+              author={LOCAL_PERSON}
               canvasId={props.tab.canvasId}
               definition={definition}
               load={commentsClient.load}

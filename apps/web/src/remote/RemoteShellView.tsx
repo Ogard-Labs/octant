@@ -21,7 +21,7 @@ import { useRemoteSession } from "./useRemoteSession";
 
 export interface RemoteShellViewProps {
   readonly bridge: RemoteSessionBridge;
-  readonly onReset: () => void;
+  readonly onReset: (warning?: string) => void;
   readonly onSignedOut?: () => void;
   readonly origin?: string;
 }
@@ -74,7 +74,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   if (state.kind === "incompatible") {
     return (
       <ShellState
-        action={{ label: "Start over", onClick: props.onReset }}
+        action={{ label: "Start over", onClick: () => props.onReset() }}
         message={state.reason}
         role="alert"
         state="warning"
@@ -86,7 +86,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   if (state.kind === "unauthorized") {
     return (
       <ShellState
-        action={{ label: "Start over", onClick: props.onReset }}
+        action={{ label: "Start over", onClick: () => props.onReset() }}
         message={state.reason}
         role="alert"
         state="disconnected"
@@ -172,7 +172,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         ))}
       </section>
 
-      <OctantButton onClick={props.onReset} type="button" variant="secondary">
+      <OctantButton onClick={() => props.onReset()} type="button" variant="secondary">
         End remote session
       </OctantButton>
     </section>

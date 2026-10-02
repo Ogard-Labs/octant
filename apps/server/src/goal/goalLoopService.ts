@@ -247,6 +247,7 @@ export class GoalLoopService {
         mayCompleteGoalLoop({
           evidence: outcome.evidence ?? [],
           providerReportsComplete: outcome.providerReportsComplete === true,
+          criteria: this.#dependencies.readGoal(threadId)?.criteria,
         }) &&
         outcome.providerReportsComplete === true;
       // A round that already ran must not be lost because the spend could not

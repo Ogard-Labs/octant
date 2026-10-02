@@ -133,7 +133,12 @@ export function decideGoalLoopRound(facts: GoalLoopRoundFacts): GoalLoopRoundDec
 export function mayCompleteGoalLoop(input: {
   readonly evidence: ReadonlyArray<ThreadGoalEvidenceRef>;
   readonly providerReportsComplete: boolean;
+  /** A goal with criteria completes only when every criterion's check has passed. */
+  readonly criteria?: ReadonlyArray<{ readonly status: "unmet" | "met" }> | undefined;
 }): boolean {
+  if (input.criteria !== undefined && input.criteria.length > 0) {
+    return input.criteria.every((criterion) => criterion.status === "met");
+  }
   return input.evidence.length > 0;
 }
 

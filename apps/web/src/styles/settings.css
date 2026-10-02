@@ -2278,10 +2278,6 @@ textarea.settings-view__text-input {
   justify-content: flex-end;
 }
 
-.app-update__notice {
-  display: block;
-}
-
 /* The privacy explanation for an update check stays one disclosure under the
    rows; the person weighing the switch opens it, everyone else reads three
    rows. */

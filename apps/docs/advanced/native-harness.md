@@ -12,7 +12,8 @@ every mode and on every surface: web, desktop, phone, and the `octant` CLI.
 Nine working tools — `read`, `grep`, `glob`, `bash`, `edit`, `write`,
 `web-fetch`, `web-search`, `todo-write` — four harness reads:
 `context-remaining`, `journal-lookup`, `second-opinion`, and `delegate` — and
-`ask-user`, which lets the lead stop and ask you something. Each mode trims
+`ask-user`, which lets the lead stop and ask you something — plus `goal` and
+`goal-check` for the thread's goal (see [Goals](#goals)). Each mode trims
 the set to what it may reach:
 
 | Mode | Files                   | Shell     | Web                 | Delegation |
@@ -48,6 +49,26 @@ re-runs an interrupted call by itself.
 When a long conversation no longer fits the model's window, older tool
 results are left out of the request first, then whole earlier exchanges, with
 a note to the model. The saved conversation keeps everything.
+
+## Goals
+
+Give a thread a goal and the harness works toward it. Every turn starts with
+the goal in front of the model: the objective, each acceptance criterion and
+whether it is met yet, and how much of the budget is left.
+
+A criterion is a concrete statement, ideally with a check command that proves
+it — `bun run test parser` exits zero, for example. If the goal has no
+criteria yet, the model writes them once with the `goal` tool before it
+starts; after that only you change them. In a Code thread the model runs a
+criterion's own check with `goal-check`. That asks for approval exactly as a
+shell command does, and the approval shows the whole command (a check command
+is at most 200 characters; put a longer one in a script). A criterion without a
+check command is one you confirm.
+
+The goal completes only when every criterion's check has passed — never
+because the model says it is finished. That is also the model's signal to
+stop. When the budget runs out first, the model is told to summarize where
+the work stands and stop.
 
 ## Model slots
 
@@ -87,8 +108,8 @@ independent tasks side by side, then starts a task that needs their output with
 `after`. That task begins only once all of them have finished, with their
 replies in front of it; if one of them fails or is cancelled, it never runs.
 `delegate wait` blocks until the children finish, and `status` shows what each
-one is waiting on. At most three children of a thread are active at once,
-waiting ones included.
+one is waiting on. How many children run at once is a setting (below); a
+child that is only waiting does not take a slot.
 
 This is how a frontier model plans and reviews while cheaper models read and
 implement: put the strong model on `default` and `slow`, the cheap one on

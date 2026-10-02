@@ -19,6 +19,8 @@ describe("closed tool catalog", () => {
       "harness-delegate",
       "harness-edit",
       "harness-glob",
+      "harness-goal",
+      "harness-goal-check",
       "harness-grep",
       "harness-journal-lookup",
       "harness-read",

@@ -1,8 +1,8 @@
-import { CircleAlert } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { ProviderUsageLimit, UsageResumeThreadState } from "@octant/contracts";
 import { resetCountdownLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * What the person is told when a provider's own protocol signal stopped a
@@ -117,69 +117,66 @@ export function UsageLimitNotice(props: {
       </p>
     ) : null;
   return (
-    <div className="callout callout-warn" role="alert">
-      <CircleAlert aria-hidden="true" size={16} />
-      <div>
-        <p>{usageLimitExplanation(props.limit, props.provider)}</p>
-        {reset === undefined ? null : <p>{reset}</p>}
-        {resume === undefined ? (
-          <>
-            {canOfferResume(props.limit) &&
-            props.resumable === true &&
-            props.onScheduleResume !== undefined ? (
-              <p>
-                <OctantButton
-                  onClick={props.onScheduleResume}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Resume when the limit resets
-                </OctantButton>
-              </p>
-            ) : null}
-            {snoozeOffer}
-          </>
-        ) : resume.status === "scheduled" ? (
-          <>
-            <p>Resume scheduled — {resetCountdownLabel(resume.record.resetsAt, now)}</p>
-            {props.onCancelResume === undefined ? null : (
-              <p>
-                <OctantButton
-                  onClick={props.onCancelResume}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Cancel resume
-                </OctantButton>
-              </p>
-            )}
-            {snoozeOffer}
-          </>
-        ) : (
-          <>
-            <p>{settledResumeLine(resume)}</p>
-            {resume.status === "dispatched" ||
-            !canOfferResume(props.limit) ||
-            props.resumable !== true ||
-            props.onScheduleResume === undefined ? null : (
-              <p>
-                <OctantButton
-                  onClick={props.onScheduleResume}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Resume when the limit resets
-                </OctantButton>
-              </p>
-            )}
-            {snoozeOffer}
-          </>
-        )}
-        {props.action}
-      </div>
-    </div>
+    <OctantAlert tone="warning">
+      <p>{usageLimitExplanation(props.limit, props.provider)}</p>
+      {reset === undefined ? null : <p>{reset}</p>}
+      {resume === undefined ? (
+        <>
+          {canOfferResume(props.limit) &&
+          props.resumable === true &&
+          props.onScheduleResume !== undefined ? (
+            <p>
+              <OctantButton
+                onClick={props.onScheduleResume}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Resume when the limit resets
+              </OctantButton>
+            </p>
+          ) : null}
+          {snoozeOffer}
+        </>
+      ) : resume.status === "scheduled" ? (
+        <>
+          <p>Resume scheduled — {resetCountdownLabel(resume.record.resetsAt, now)}</p>
+          {props.onCancelResume === undefined ? null : (
+            <p>
+              <OctantButton
+                onClick={props.onCancelResume}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Cancel resume
+              </OctantButton>
+            </p>
+          )}
+          {snoozeOffer}
+        </>
+      ) : (
+        <>
+          <p>{settledResumeLine(resume)}</p>
+          {resume.status === "dispatched" ||
+          !canOfferResume(props.limit) ||
+          props.resumable !== true ||
+          props.onScheduleResume === undefined ? null : (
+            <p>
+              <OctantButton
+                onClick={props.onScheduleResume}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Resume when the limit resets
+              </OctantButton>
+            </p>
+          )}
+          {snoozeOffer}
+        </>
+      )}
+      {props.action}
+    </OctantAlert>
   );
 }

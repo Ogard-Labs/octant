@@ -836,6 +836,7 @@ h4 {
 /* ─── callout ───────────────────────────────────────────────────────── */
 .callout {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--oct-space-4);
   padding: var(--oct-space-5);
@@ -848,43 +849,64 @@ h4 {
 .callout p {
   margin: 0;
 }
+.callout__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.callout__actions {
+  flex: 0 0 auto;
+}
 /* A leading status mark sits with the sentence; the half-line offset keeps
    it on the first line's optical axis for multi-line text. Most callouts
    warn, so the mark borrows the warning text role unless the tone says
    otherwise - hue alone must never be the only signal (DESIGN.md colour
    roles pair each status surface with its text role). */
-.callout svg {
+.callout > svg {
   flex: 0 0 auto;
   margin-top: 1px;
   color: var(--oct-warn-fg);
 }
-.callout-title {
+.callout .callout-title {
   font-family: var(--oct-font-display);
   font-weight: var(--oct-weight-display);
   color: var(--oct-fg);
-  margin-bottom: 2px;
+  margin-bottom: var(--oct-space-1);
 }
 /* A tone is a tinted ground with a tinted hairline - the same language as
    the approval and severity surfaces - never a saturated edge stripe,
    which made a thread notice read as a generic chat-app warning box. */
-.callout-accent {
+.callout-accent,
+.callout[data-tone="accent"] {
   background: var(--oct-accent-soft);
   border-color: color-mix(in oklab, var(--oct-accent-fg) 30%, transparent);
 }
-.callout-ok {
+.callout-ok,
+.callout[data-tone="success"] {
   background: var(--oct-success-soft);
   border-color: color-mix(in oklab, var(--oct-success-fg) 30%, transparent);
 }
-.callout-ok svg {
+.callout-ok > svg,
+.callout[data-tone="success"] > svg {
   color: var(--oct-success-fg);
 }
-.callout-warn {
+.callout-accent > svg,
+.callout[data-tone="accent"] > svg {
+  color: var(--oct-accent-fg);
+}
+.callout-warn,
+.callout[data-tone="warning"] {
   background: var(--oct-warn-soft);
   border-color: color-mix(in oklab, var(--oct-warn-fg) 30%, transparent);
 }
-.callout-danger {
+.callout-danger,
+.callout[data-tone="danger"] {
   background: var(--oct-danger-soft);
   border-color: color-mix(in oklab, var(--oct-danger-fg) 30%, transparent);
+}
+.callout-danger > svg,
+.callout[data-tone="danger"] > svg {
+  color: var(--oct-danger-fg);
 }
 
 /* ─── thread column ─────────────────────────────────────────────────────
@@ -2590,6 +2612,13 @@ input.switch:checked::after {
   color: var(--oct-muted);
   font-size: var(--oct-text-detail);
 }
+.approval-row__error {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--oct-danger-fg);
+  font-size: var(--oct-text-detail);
+  overflow-wrap: anywhere;
+}
 .approval-row__code {
   flex: 1 1 100%;
   min-width: 0;
@@ -2601,9 +2630,12 @@ input.switch:checked::after {
 }
 .approval-row__actions {
   display: inline-flex;
+  flex-wrap: wrap;
   flex: 0 0 auto;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
+  max-width: 100%;
   margin-inline-start: auto;
 }
 

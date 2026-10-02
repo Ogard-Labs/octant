@@ -341,6 +341,23 @@ describe("CanvasService plan tasks", () => {
 });
 
 describe("CanvasService board layout", () => {
+  it("records a node drag as the host's person even when the request names the Canvas's agent", () => {
+    const { service, projection } = createService(
+      undefined,
+      undefined,
+      version({ definition: diagramDefinition }),
+    );
+    const agent = { kind: "agent", actorId: provenance.actor.actorId } as const;
+    expect(
+      service.reviseDiagramLayout(
+        layoutReviseCommand({ actor: agent }),
+        boardContext,
+        boardProject,
+      ),
+    ).toMatchObject({ kind: "accepted" });
+    expect(projection.getById(canvasId)?.currentVersion.createdBy.kind).toBe("local-user");
+  });
+
   it("journals a user's node drag as a new immutable version that survives reload", () => {
     const { service, projection, journal, connection } = createService(
       undefined,
@@ -352,7 +369,10 @@ describe("CanvasService board layout", () => {
 
     const head = projection.getById(canvasId)?.currentVersion;
     expect(head?.sequence).toBe(2);
-    expect(head?.createdBy).toEqual(provenance.actor);
+    expect(head?.createdBy).toEqual({
+      kind: "local-user",
+      actorId: "00000000-0000-4000-8000-000000000002",
+    });
     const board = head?.definition.blocks.find((block) => block.blockId === "board-1");
     expect(board?.kind === "diagram" ? board.layout : undefined).toBe("manual");
     expect(

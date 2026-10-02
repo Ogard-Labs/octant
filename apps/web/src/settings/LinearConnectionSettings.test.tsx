@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type {
   IntegrationAuthenticationCommand,
@@ -120,6 +121,7 @@ describe("LinearConnectionSettings", () => {
   });
 
   it("disconnects after confirmation", async () => {
+    const user = userEvent.setup();
     const executeAuthenticationCommand = vi.fn(async () => unauthorizedSnapshot);
     render(
       <LinearConnectionSettings
@@ -128,8 +130,25 @@ describe("LinearConnectionSettings", () => {
         })}
       />,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Disconnect" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm disconnect" }));
+    const opener = await screen.findByRole("button", { name: "Disconnect" });
+    await user.click(opener);
+    expect(screen.getByRole("dialog", { name: "Disconnect Linear?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(executeAuthenticationCommand).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+    expect(executeAuthenticationCommand).not.toHaveBeenCalled();
+
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(executeAuthenticationCommand).not.toHaveBeenCalled();
+    await user.click(opener);
+    await user.click(screen.getByTestId("octant-dialog-backdrop"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(executeAuthenticationCommand).not.toHaveBeenCalled();
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Confirm disconnect" }));
     expect(executeAuthenticationCommand).toHaveBeenCalledWith({ kind: "logout" });
   });
 

@@ -19,7 +19,10 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 export interface CanvasCommentsPanelProps {
   readonly canvasId: CanvasId;
   readonly definition: CanvasDefinition;
-  /** The local user every comment is authored as; the host stamps the device. */
+  /**
+   * The person sending these comments. The host replaces it with its own
+   * person and stamps the device, so the field cannot make a comment an agent's.
+   */
   readonly author: CanvasActor;
   readonly load: (canvasId: CanvasId) => Promise<CanvasCommentsOutcome>;
   readonly send: (command: CanvasCommentCommand) => Promise<CanvasCommentCommandResult>;

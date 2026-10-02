@@ -39,6 +39,10 @@ describe("the dock Document tool", () => {
     );
     expect(await screen.findByRole("heading", { name: "Handoff" })).toBeInTheDocument();
     expect(screen.getByRole("article", { name: "docs/handoff.md" })).toBeInTheDocument();
+    const path = screen.getByTitle("docs/handoff.md");
+    expect(path).toHaveTextContent("docs/handoff.md");
+    expect(path.querySelector(".middle-truncated-text__head")).toHaveTextContent("docs/");
+    expect(path.querySelector(".middle-truncated-text__tail")).toHaveTextContent("handoff.md");
     expect(codeClient.openFile).toHaveBeenCalledWith(threadId, checkoutId, "docs/handoff.md");
   });
 

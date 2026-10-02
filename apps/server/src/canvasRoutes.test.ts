@@ -710,9 +710,11 @@ describe("canvas routes", () => {
     );
     const body = JSON.parse(await reread!.text());
     expect(body.version.sequence).toBe(2);
+    // The host records the drag as its own person, whatever actor the
+    // request carried.
     expect(body.version.createdBy).toEqual({
       kind: "local-user",
-      actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      actorId: "00000000-0000-4000-8000-000000000002",
     });
     const board = body.version.definition.blocks.find(
       (block: { blockId: string }) => block.blockId === "board-1",

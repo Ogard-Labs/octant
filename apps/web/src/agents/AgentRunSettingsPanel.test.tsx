@@ -57,6 +57,33 @@ describe("AgentRunSettingsPanel", () => {
     await waitFor(() => expect(toggle()).toBeChecked());
   });
 
+  it("raises how many helpers run at once in a thread, keeping the app limit and posture", async () => {
+    const user = userEvent.setup();
+    const update = vi.fn(async () => ({
+      ...baseSettings({ creationPosture: "automatic", version: 2 }),
+      concurrency: { perThread: 5, onHost: 8 },
+    }));
+    const client = {
+      current: vi.fn(async () => baseSettings({ creationPosture: "automatic", version: 1 })),
+      update,
+    };
+    render(<AgentRunSettingsPanel client={client} />);
+    await waitFor(() => expect(toggle()).toBeChecked());
+    expect(screen.getByRole("spinbutton", { name: "Run at once in a thread" })).toHaveValue(4);
+    expect(screen.getByRole("spinbutton", { name: "Run at once in the app" })).toHaveValue(8);
+
+    await user.click(screen.getByRole("button", { name: "Increase Run at once in a thread" }));
+
+    expect(update).toHaveBeenCalledWith({
+      creationPosture: "automatic",
+      concurrency: { perThread: 5, onHost: 8 },
+      expectedVersion: 1,
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("spinbutton", { name: "Run at once in a thread" })).toHaveValue(5),
+    );
+  });
+
   it("turns subagents off", async () => {
     const user = userEvent.setup();
     const update = vi.fn(async () => baseSettings({ creationPosture: "off", version: 2 }));

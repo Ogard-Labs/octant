@@ -4,6 +4,7 @@ import {
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
 import { useEffect, useState } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -122,16 +123,6 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
           <>
             {state === undefined ? "Octant" : `Octant ${state.currentVersion}`}
             {status === "up-to-date" ? " · Up to date" : null}
-            {notice === undefined ? null : (
-              <span className="app-update__notice" role="status">
-                {notice}
-              </span>
-            )}
-            {alert === undefined ? null : (
-              <span className="app-update__notice" role="alert">
-                {alert}
-              </span>
-            )}
           </>
         }
         focused={props.focused ?? false}
@@ -193,6 +184,10 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
           ) : null}
         </div>
       </SettingRow>
+      {notice === undefined ? null : <OctantAlert tone="neutral">{notice}</OctantAlert>}
+      {alert === undefined ? null : (
+        <OctantAlert tone={waiting === undefined ? "danger" : "warning"}>{alert}</OctantAlert>
+      )}
 
       {offeredNotes === undefined ? null : (
         <p className="app-update__offer-notes" role="note">

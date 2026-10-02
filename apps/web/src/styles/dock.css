@@ -398,9 +398,6 @@
   gap: var(--oct-space-2);
 }
 
-/* The launcher is only its rows: no visible title, and a hairline between
-   groups where a label used to sit. Rows keep one left edge, the icon 9px in
-   (the ghost border plus 8px). */
 .dock-work-map__empty {
   margin: 0;
   padding: 0 var(--oct-space-2);
@@ -425,6 +422,13 @@
   margin-top: var(--oct-space-2);
   padding-top: var(--oct-space-2);
   border-top: 1px solid var(--oct-hairline);
+}
+
+.dock-work-map__group-title {
+  padding: var(--oct-space-1) var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
 }
 
 /* A launcher row: the tool's icon and its name on one 32px line. */
@@ -484,8 +488,6 @@
   padding: var(--oct-space-2) var(--oct-space-3);
   border-bottom: 1px solid var(--oct-border);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .dock-document-tool__body {
@@ -515,6 +517,22 @@
   right: auto;
   left: 0;
   min-width: 176px;
+}
+
+.dock-utility-launcher__group {
+  display: grid;
+}
+
+.dock-utility-launcher__group + .dock-utility-launcher__group {
+  margin-top: var(--oct-space-1);
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.dock-utility-launcher__group-title {
+  padding: var(--oct-space-1) var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
 }
 
 /* The right dock clips at its own edge, and with two tabs open the plus sits
