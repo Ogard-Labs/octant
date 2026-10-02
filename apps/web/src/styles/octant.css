@@ -1124,28 +1124,25 @@ input.switch:checked::after {
 .octant-switch[data-slot="switch"] {
   width: 38px;
   height: 22px;
-  border: 0;
+  /* The off edge is a border, not an inset shadow: the track keeps no
+     box-shadow so a focus halo cannot creep back in (visual language
+     contract). Both states keep the 1px border so the knob's travel is the
+     same; on paints it the fill colour. */
+  border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-pill);
   background: var(--octant-control);
-  box-shadow: inset 0 0 0 1px var(--octant-border-strong);
+  box-shadow: none;
   transition:
     background var(--oct-motion-base) var(--oct-ease-standard),
-    box-shadow var(--oct-motion-base) var(--oct-ease-standard);
+    border-color var(--oct-motion-base) var(--oct-ease-standard);
 }
-/* Focus has no text to underline, so the track takes the fill and edge
-   emphasis the other focusable controls use (0114). */
 .octant-switch[data-slot="switch"]:focus-visible:not([data-checked]) {
   background: var(--octant-control-hover);
-  box-shadow: inset 0 0 0 1px var(--octant-text-primary);
+  border-color: var(--octant-text-primary);
 }
 .octant-switch[data-slot="switch"][data-checked] {
   background: var(--oct-fg);
-  box-shadow: none;
-}
-.octant-switch[data-slot="switch"][data-checked]:focus-visible {
-  box-shadow:
-    0 0 0 2px var(--oct-bg),
-    0 0 0 3px var(--octant-text-primary);
+  border-color: var(--oct-fg);
 }
 .octant-switch[data-slot="switch"] > [data-slot="switch-thumb"] {
   width: 16px;
@@ -1153,13 +1150,13 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-pill);
   background: var(--oct-bg);
   box-shadow: 0 0 0 1px var(--octant-border-strong);
-  translate: 3px 0;
+  translate: 2px 0;
   transition: translate var(--oct-motion-base) var(--oct-ease-standard);
 }
 .octant-switch[data-slot="switch"][data-checked] > [data-slot="switch-thumb"] {
   background: var(--oct-bg);
   box-shadow: none;
-  translate: 19px 0;
+  translate: 18px 0;
 }
 
 /* ─── table ───────────────────────────────────────────────────────────
