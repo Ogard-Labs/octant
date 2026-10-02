@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  effectiveAgentRunConcurrency,
   type ChatThreadId,
   type DiscoveryCandidate,
   LOCAL_TOOL_HOST_ID,
@@ -1987,7 +1988,9 @@ export function startOctantServer(
       options.agentRunProcessSupervisor ?? agentRunSessionSupervisor;
     const agentRunOrchestration = new AgentRunOrchestrationService({
       persistence: agentRunPersistence,
-      capacity: createInMemoryCapacityPort(),
+      capacity: createInMemoryCapacityPort(() =>
+        effectiveAgentRunConcurrency(agentRunSettingsStore.current()),
+      ),
       worktree: {
         isVerifiedIsolation: (workspace) =>
           workspace.verified && workspace.worktreeRoot !== workspace.checkoutRoot,

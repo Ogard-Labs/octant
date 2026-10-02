@@ -495,9 +495,17 @@ gone fails the start closed. A dependency that failed or was cancelled fails
 the dependent without running it (`dependency-failed: <id>`); an interrupted
 dependency does not, because a retry can still complete it. A run cannot be
 admitted on a sibling that already failed or was cancelled, and since only
-existing runs can be named, a cycle cannot be expressed. A
-parked run still counts toward the active-run limits (three per parent, four
-per host), which keeps graphs small.
+existing runs can be named, a cycle cannot be expressed.
+
+How many children run at once is the person's setting
+(`AgentRunPolicySettings.concurrency`: per thread and on the host, defaults 4
+and 8, each at most `MAX_AGENT_RUN_CONCURRENCY` = 16). Run slots enforce it at
+start: `createInMemoryCapacityPort` counts reservations per thread and per
+host, reads the limits on every reservation, and reports which limit is full;
+the capacity queue skips a waiter whose own thread is full so another thread's
+waiter can take a freed slot. A run waiting on dependencies or a slot holds no
+slot. Admission separately caps unfinished children (any active status,
+waiting included) at 16 per parent and 32 per host as the runaway guard.
 
 Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /

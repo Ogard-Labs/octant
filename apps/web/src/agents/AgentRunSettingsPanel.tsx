@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AgentRunPolicySettings, AgentRunSelectableCreationPosture } from "@octant/contracts";
+import {
+  MAX_AGENT_RUN_CONCURRENCY,
+  effectiveAgentRunConcurrency,
+  type AgentRunConcurrency,
+  type AgentRunPolicySettings,
+  type AgentRunSelectableCreationPosture,
+} from "@octant/contracts";
 import {
   AgentRunSettingsClientFailure,
   type AgentRunSettingsClient,
 } from "@octant/client-runtime/agent-run-settings-client";
 import { SettingRow, SettingsSection } from "../settings/primitives";
+import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import "./agent-hierarchy.css";
 
@@ -55,14 +62,17 @@ export function AgentRunSettingsPanel(props: {
     void load();
   }, [load]);
 
-  const choose = useCallback(
-    async (posture: AgentRunSelectableCreationPosture) => {
+  const save = useCallback(
+    async (change: {
+      readonly creationPosture: AgentRunSelectableCreationPosture;
+      readonly concurrency?: AgentRunConcurrency;
+    }) => {
       if (settings === undefined || saving) return;
       setSaving(true);
       setMessage(undefined);
       try {
         const updated = await props.client.update({
-          creationPosture: posture,
+          ...change,
           expectedVersion: settings.version,
         });
         setSettings(updated);
@@ -83,6 +93,22 @@ export function AgentRunSettingsPanel(props: {
     },
     [props.client, settings, saving, load],
   );
+  // The host reads a stored Ask as Off, so anything but Automatic is Off.
+  const posture: AgentRunSelectableCreationPosture =
+    settings?.creationPosture === "automatic" ? "automatic" : "off";
+  const choose = useCallback(
+    (next: AgentRunSelectableCreationPosture) => save({ creationPosture: next }),
+    [save],
+  );
+  const setLimit = useCallback(
+    (key: keyof AgentRunConcurrency, value: number) => {
+      if (settings === undefined) return;
+      const current = effectiveAgentRunConcurrency(settings);
+      if (current[key] === value) return;
+      void save({ creationPosture: posture, concurrency: { ...current, [key]: value } });
+    },
+    [posture, save, settings],
+  );
 
   if (status === "loading") {
     return <p role="status">Loading the Agents policy…</p>;
@@ -95,8 +121,8 @@ export function AgentRunSettingsPanel(props: {
     );
   }
 
-  // The host reads a stored Ask as Off, so anything but Automatic is Off.
-  const on = settings?.creationPosture === "automatic";
+  const on = posture === "automatic";
+  const limits = effectiveAgentRunConcurrency(settings ?? {});
 
   return (
     <section aria-label="Agents" className="agent-run-settings-panel">
@@ -114,6 +140,34 @@ export function AgentRunSettingsPanel(props: {
               disabled={saving}
               label="Let the agent start subagents"
               onCheckedChange={(checked) => void choose(checked ? "automatic" : "off")}
+            />
+          </SettingRow>
+          <SettingRow
+            description="How many helper agents of one thread run at the same time. Helpers that are only waiting — for other helpers or a free slot — don't count."
+            label="Run at once in a thread"
+            scope="app"
+            settingId="subagent-concurrency-per-thread"
+          >
+            <OctantNumberStepper
+              label="Run at once in a thread"
+              max={MAX_AGENT_RUN_CONCURRENCY}
+              min={1}
+              onChange={(value) => setLimit("perThread", value)}
+              value={limits.perThread}
+            />
+          </SettingRow>
+          <SettingRow
+            description="How many helper agents run at the same time across every thread."
+            label="Run at once in the app"
+            scope="app"
+            settingId="subagent-concurrency-on-host"
+          >
+            <OctantNumberStepper
+              label="Run at once in the app"
+              max={MAX_AGENT_RUN_CONCURRENCY}
+              min={1}
+              onChange={(value) => setLimit("onHost", value)}
+              value={limits.onHost}
             />
           </SettingRow>
         </div>

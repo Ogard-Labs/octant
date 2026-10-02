@@ -1,5 +1,6 @@
 import {
   decodeAgentRunPolicySettings,
+  type AgentRunConcurrency,
   type AgentRunPolicySettings,
   type AgentRunSelectableCreationPosture,
 } from "@octant/contracts";
@@ -14,6 +15,8 @@ export interface AgentRunSettingsClient {
   current(): Promise<AgentRunPolicySettings>;
   update(input: {
     readonly creationPosture: AgentRunSelectableCreationPosture;
+    /** Absent keeps the current limits. */
+    readonly concurrency?: AgentRunConcurrency;
     readonly expectedVersion: number;
   }): Promise<AgentRunPolicySettings>;
 }
