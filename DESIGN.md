@@ -185,11 +185,15 @@ Surface (reading measure 880px, or wide for boards)
   surface-toolbar search takes the slack · filters · view switch
   SurfaceSection  section label over a hairline
     surface-row   label + detail on the left, control on the right
-  SurfaceEmpty    a quiet line of text, not a card
+  SurfaceEmpty    a quiet icon, one line of text, and a real outline button
+                  for the next step; not a card
 ```
 
 Leaving a reader route is always the ghost "Back to workspace" control in the
-header. Settings is the same shell with a 920px measure and its own
+header. The destination pages the sidebar reaches (Inbox, Board, Pull requests,
+Projects) share one frame: the wide measure, so the title, subtitle, and Back
+control sit on the same left and right edges from page to page. A list there
+runs the frame's width; a board's columns may use all of it. Settings is the same shell with a 920px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. The groups are Personal (how Octant looks and
 behaves for you), Modes (each mode's defaults), Models (which provider or model

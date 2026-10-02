@@ -46,7 +46,7 @@ const STATUS_REASON_LABELS: Record<ThreadBoardReason, string> = {
   "awaiting-input": "Waiting for a decision or answer",
   interrupted: "The agent stopped partway through",
   recovering: "Catching up after a restart",
-  "delivery-waiting": "Checking whether it is finished",
+  "delivery-waiting": "Not confirmed finished yet",
   "idle-unmet-delivery": "Paused before it was finished",
 };
 

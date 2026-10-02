@@ -470,6 +470,15 @@ describe("CodeThreadBoardService derivation", () => {
     expect(cardFor(view.cards, ids.ready).statusReason).toBe("idle-unmet-delivery");
   });
 
+  it("does not describe a stopped thread's waiting delivery as a check in progress", async () => {
+    const board = service({ threads: allThreads });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    const waiting = cardFor(view.cards, ids.waiting);
+    expect(waiting.executing).toBe(false);
+    expect(waiting.blockingReason).toBe("Not confirmed finished yet.");
+  });
+
   it("does not treat a completed model turn as Done when the delivery target is unmet", async () => {
     const board = service({
       threads: [boardThread({ thread: thread({ id: ids.ready, outcomeKind: "opened-pr" }) })],

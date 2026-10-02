@@ -6232,6 +6232,7 @@ function LaunchedShell(
                   <ProjectsDirectory
                     availabilityByProject={projectController.availabilityByProject}
                     onAddProject={() => openProjectCreate()}
+                    onBack={() => setProjectsListOpen(false)}
                     onOpenProject={(project) => void openSelectedProject(project)}
                     projects={projectController.allProjects}
                     {...(activeProjectId === undefined
@@ -6272,6 +6273,10 @@ function LaunchedShell(
                     undefined,
                     signalProjectId,
                   );
+                }}
+                onOpenBoard={() => {
+                  pluginSidebarDestinationActionContext.closeOverlays();
+                  pluginSidebarDestinationActionContext.openThreadBoard();
                 }}
                 {...(githubIssuesReadAvailable ? { loadAssignedGithubWork } : {})}
                 {...(linearIssuesRead
