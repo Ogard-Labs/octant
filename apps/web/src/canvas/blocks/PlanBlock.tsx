@@ -103,13 +103,20 @@ export function PlanBlock({
           if (task.status === status) return;
           setNotice(undefined);
           setChosen((current) => new Map(current).set(String(task.taskId), status));
-          void onSetStatus(String(authored.blockId), String(task.taskId), status).then((result) => {
-            if (result.kind === "accepted") return;
-            // Back to what the person saw before this change, which may be
-            // an accepted change the reload has not delivered yet.
-            setChosen((current) => new Map(current).set(String(task.taskId), task.status));
-            setNotice(result.message);
-          });
+          void onSetStatus(String(authored.blockId), String(task.taskId), status)
+            // A save that throws (a dropped connection, a failed reload) is
+            // a refusal too: the mark goes back and the person is told.
+            .catch(() => ({
+              kind: "denied" as const,
+              message: "The status could not be saved. Try again.",
+            }))
+            .then((result) => {
+              if (result.kind === "accepted") return;
+              // Back to what the person saw before this change, which may be
+              // an accepted change the reload has not delivered yet.
+              setChosen((current) => new Map(current).set(String(task.taskId), task.status));
+              setNotice(result.message);
+            });
         };
   const onStartTask = runtime?.onStartTask;
   const actions: PlanTaskActions = {

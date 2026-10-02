@@ -180,7 +180,8 @@ describe("Canvas accessibility basics", () => {
     const onSetStatus = vi
       .fn()
       .mockResolvedValueOnce({ kind: "accepted" })
-      .mockResolvedValueOnce({ kind: "denied", message: "The plan changed on the host." });
+      .mockResolvedValueOnce({ kind: "denied", message: "The plan changed on the host." })
+      .mockRejectedValueOnce(new Error("connection dropped"));
     render(<CanvasDocument definition={definition} planRuntime={{ onSetStatus }} />);
 
     await user.click(screen.getByRole("button", { name: "Ship the API: Doing. Change status" }));
@@ -191,6 +192,11 @@ describe("Canvas accessibility basics", () => {
     await user.click(screen.getByRole("button", { name: "Ship the API: Done. Change status" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "Blocked" }));
     expect(await screen.findByRole("status")).toHaveTextContent("The plan changed on the host.");
+    expect(screen.getByRole("button", { name: "Ship the API: Done. Change status" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Ship the API: Done. Change status" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "To do" }));
+    expect(await screen.findByText("The status could not be saved. Try again.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Ship the API: Done. Change status" })).toBeVisible();
   });
 
