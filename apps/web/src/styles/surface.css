@@ -574,6 +574,26 @@
   -webkit-mask-composite: source-in;
 }
 
+/* Light ink on a light ground has far less contrast headroom than light ink on
+   a dark one, and the grey dots are busiest in the lower half, exactly where the
+   suggestions and the Continue list read. There the ground fades out sooner so
+   that text sits on calm paper; dark keeps the longer fade. */
+:root[data-octant-theme-mode="light"] .app-backdrop[data-placement="welcome"] {
+  mask-image:
+    radial-gradient(
+      ellipse 680px 380px at 50% 290px,
+      transparent 42%,
+      color-mix(in srgb, currentColor 40%, transparent) 70%,
+      currentColor 100%
+    ),
+    linear-gradient(
+      to bottom,
+      currentColor 22%,
+      color-mix(in srgb, currentColor 25%, transparent) 46%,
+      transparent 66%
+    );
+}
+
 /* Under the whole shell there is no composer to clear; the ground only
    softens toward the bottom, where transcripts and lists do their reading. */
 .app-backdrop[data-placement="shell"] {

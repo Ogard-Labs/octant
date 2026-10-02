@@ -344,9 +344,10 @@ fact the host does not report is left out rather than invented. Running
 threads show here instead of in Continue, so one thread is not listed twice.
 Each part leaves when it has nothing to show. Under the Vivid style the tiles'
 icon squares take the blue, orange, and purple palette hues. Code's five prompt
-suggestions are one compact row of label-only chips under Running now, like
-Chat's Write, Learn, Plan, and Explore starters; the prompt rides as the chip's
-tooltip and description and fills the composer when chosen, nothing more.
+suggestions are one compact row of label-only chips under Running now, and
+Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
+button: hairline, resting fill, hover and focus fill); the prompt rides as the
+chip's tooltip and description and fills the composer when chosen, nothing more.
 
 First-run setup is optional from its first step. Skipping preserves settled answers,
 waits for pending writes, and grants no authority. Profile editing has its own
@@ -388,7 +389,9 @@ moves across it: the drawn dot pattern and its pulse and wave motions read as
 noise behind the work and were removed, and a ground saved with them resolves
 to the plain page. Behind a
 start screen the ground is masked away behind the composer and fades out below
-it, so the prompt and the recent-thread list read on the plain page. A person
+it, so the prompt and the recent-thread list read on the plain page; in the
+light theme it fades out sooner, because dark dots on a pale ground leave less
+contrast for the text above them. A person
 may instead put the ground behind every page, inside the primary card, and
 under the sidebar too when they ask for it (see Shapes and depth). Conversations
 soften it beneath one continuous reading background so agent replies remain
