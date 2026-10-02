@@ -154,9 +154,31 @@ describe("CodeAccessPicker", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Next turn access" }));
-    expect(
-      await screen.findByRole("menuitemradio", { name: "Raise thread · Full access" }),
-    ).toHaveAttribute("aria-disabled", "true");
+    const full = await screen.findByRole("menuitemradio", { name: "Raise thread · Full access" });
+    expect(full).toHaveAttribute("aria-disabled", "true");
+    // A greyed-out option with no reason read as a bug; the reason is printed
+    // on the item, not only in a tooltip a touch screen never shows.
+    expect(full).toHaveAccessibleDescription("Confirm in the desktop app");
+    expect(full).toHaveTextContent("Confirm in the desktop app");
+  });
+
+  it("gives no reason line to options that are available", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeAccessPicker
+        ceiling="approval-gated"
+        nativeConfirmationAvailable
+        onLowerThread={vi.fn()}
+        onRaiseThread={vi.fn()}
+        onSelect={vi.fn()}
+        value="approval-gated"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    const full = await screen.findByRole("menuitemradio", { name: "Raise thread · Full access" });
+    expect(full).not.toHaveAttribute("aria-disabled", "true");
+    expect(full).not.toHaveTextContent("desktop app");
   });
 
   it("offers to lower a Full access thread back to Ask for approvals", async () => {

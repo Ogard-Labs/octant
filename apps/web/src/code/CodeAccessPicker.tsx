@@ -6,6 +6,7 @@ import {
   accessPosturesAtOrBelow,
 } from "@octant/domain/code-policy";
 import { ChevronDown } from "lucide-react";
+import { useId } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   OctantMenuRoot,
@@ -72,13 +73,17 @@ export interface CodeAccessPickerProps {
  * The picker also offers a durable action to lower the thread back to approval-gated.
  */
 export function CodeAccessPicker(props: CodeAccessPickerProps) {
+  const optionIdPrefix = useId();
   const offered = accessPosturesAtOrBelow(props.ceiling);
   const raises = accessPosturesAbove(props.ceiling);
   const options: ReadonlyArray<{
     readonly id: ProviderExecutionPolicy;
     readonly label: string;
     readonly disabled?: boolean;
+    /** The plain-words sentence behind a disabled option, shown as its tooltip. */
     readonly disabledReason?: string;
+    /** The short line printed under a disabled option so the reason is visible without hover. */
+    readonly disabledNote?: string;
   }> = [
     ...offered.map((id) => ({
       id,
@@ -90,8 +95,9 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
       ...(id === "full-access" && !props.nativeConfirmationAvailable
         ? {
             disabled: true,
+            disabledNote: "Confirm in the desktop app",
             disabledReason:
-              "Full access requires native confirmation. Remembered Project Full access is granted when a thread is created.",
+              "Full access requires native confirmation, which only the desktop app can give. Remembered Project Full access is granted when a thread is created.",
           }
         : {}),
     })),
@@ -138,8 +144,28 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
                   key={option.id}
                   title={option.disabledReason}
                   value={option.id}
+                  {...(option.disabledNote === undefined
+                    ? {}
+                    : {
+                        // Name the option by its label alone and expose the note
+                        // as its description, as the shared menu does.
+                        "aria-labelledby": `${optionIdPrefix}-${option.id}-label`,
+                        "aria-describedby": `${optionIdPrefix}-${option.id}-note`,
+                      })}
                 >
-                  {option.label}
+                  {option.disabledNote === undefined ? (
+                    option.label
+                  ) : (
+                    <span className="flex min-w-0 flex-col">
+                      <span id={`${optionIdPrefix}-${option.id}-label`}>{option.label}</span>
+                      <span
+                        className="text-xs text-muted-foreground"
+                        id={`${optionIdPrefix}-${option.id}-note`}
+                      >
+                        {option.disabledNote}
+                      </span>
+                    </span>
+                  )}
                 </OctantMenuRadioItem>
               ))}
             </OctantMenuRadioGroup>

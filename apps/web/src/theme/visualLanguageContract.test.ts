@@ -184,6 +184,13 @@ describe("the public-block visual language", () => {
     );
   });
 
+  it("wraps the model picker's catalog filters instead of hiding the later ones behind a sideways scroll", () => {
+    const css = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const rule = /\.composer-model-picker__catalogs\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/flex-wrap:\s*wrap/);
+    expect(rule).not.toMatch(/overflow-x:\s*auto/);
+  });
+
   it("keeps focused buttons free of a drawn outline", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
 
