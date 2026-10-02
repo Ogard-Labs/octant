@@ -22,6 +22,7 @@ import {
   type UsageResumeSettled,
 } from "@octant/contracts";
 import {
+  AGENT_RUN_DEPENDENCY_WAITING_REASON,
   AgentRunPolicyRejected,
   agentRunPoolRouteWaitingReason,
   assertAgentRunUsageResumeCancellable,
@@ -93,6 +94,34 @@ export class AgentRunPersistenceService {
     this.#connection = options.connection;
   }
 
+  /**
+   * A run may wait only on siblings that exist under the same parent thread
+   * and can still complete. Waiting on a run that already failed would admit
+   * work that is certain never to start.
+   */
+  #refuseDependencies(command: RequestAgentRunInput["command"]): AgentRunCommandResult | undefined {
+    for (const dependencyId of command.dependsOn ?? []) {
+      const dependency = this.#projection.getById(dependencyId);
+      if (dependency === undefined || dependency.parentThreadId !== command.parentThreadId) {
+        return {
+          kind: "run-command-failed",
+          reason: "invalid",
+          message: `AgentRun dependency ${String(dependencyId)} is not a run of this thread.`,
+        };
+      }
+      // An interrupted sibling can still be retried, so it is waited on like
+      // a running one; failed and cancelled siblings are where waiting ends.
+      if (dependency.lifecycleStatus === "failed" || dependency.lifecycleStatus === "cancelled") {
+        return {
+          kind: "run-command-failed",
+          reason: "invalid",
+          message: `AgentRun dependency ${String(dependencyId)} already ${dependency.lifecycleStatus}; this run could never start.`,
+        };
+      }
+    }
+    return undefined;
+  }
+
   requestRun(input: RequestAgentRunInput): AgentRunCommandResult {
     const existing = this.#projection.getByRequestId(input.command.requestId);
     if (existing !== undefined) {
@@ -112,6 +141,8 @@ export class AgentRunPersistenceService {
         message: "AgentRun parent does not exist.",
       };
     }
+    const dependencyRefusal = this.#refuseDependencies(input.command);
+    if (dependencyRefusal !== undefined) return dependencyRefusal;
     if (parent !== undefined && parent.parentThreadId !== input.command.parentThreadId) {
       return {
         kind: "run-command-failed",
@@ -476,10 +507,13 @@ export class AgentRunPersistenceService {
       // journaled usage limit holds no live execution either — its session
       // already ended on the limit and the reset fact rides the aggregate —
       // so the wait, and any recovery opt-in bound to it, survives restart.
+      // A run parked on its dependencies never started either; the dependency
+      // scheduler re-evaluates it at boot.
       if (
         run.lifecycleStatus === "waiting" &&
         (agentRunPoolRouteWaitingReason(run.routingReceipt) !== undefined ||
-          run.usageLimit !== undefined)
+          run.usageLimit !== undefined ||
+          run.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON)
       ) {
         continue;
       }

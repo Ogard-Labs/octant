@@ -44,6 +44,7 @@ const DEFAULT_SHELL_TIMEOUT_MS = 120_000;
 /** A criterion's check is often a whole test suite; it gets longer than an ad hoc command. */
 const GOAL_CHECK_TIMEOUT_MS = 600_000;
 const MAX_FETCH_TEXT_BYTES = 128 * 1024;
+const DEFAULT_DELEGATE_WAIT_MS = 60_000;
 
 export interface NativeHarnessShellRun {
   readonly status: "ran" | "timed-out" | "cancelled" | "unavailable";
@@ -77,6 +78,10 @@ export interface NativeHarnessDelegateChild {
   readonly task: string;
   readonly lifecycleStatus: string;
   readonly resultAvailable: boolean;
+  /** The runs this child waits for, when it was started with `after`. */
+  readonly after?: ReadonlyArray<string>;
+  /** Why a child is waiting, failed, or was interrupted. */
+  readonly reason?: string;
 }
 
 export type NativeHarnessDelegateCollect =
@@ -94,9 +99,22 @@ export interface NativeHarnessDelegatePort {
     readonly role: "research" | "implementation" | "review" | "custom";
     readonly task: string;
     readonly includeParentContext: boolean;
+    readonly after?: ReadonlyArray<string> | undefined;
   }): Promise<NativeHarnessDelegateStart>;
   status(): Promise<ReadonlyArray<NativeHarnessDelegateChild>>;
   collect(runId: string): Promise<NativeHarnessDelegateCollect>;
+  /**
+   * Waits until every named child (every child, when none are named) has
+   * finished for good, or the time runs out; reports each one either way.
+   */
+  wait(input: {
+    readonly runIds?: ReadonlyArray<string> | undefined;
+    readonly timeoutMs: number;
+    readonly signal?: AbortSignal | undefined;
+  }): Promise<{
+    readonly finished: boolean;
+    readonly children: ReadonlyArray<NativeHarnessDelegateChild>;
+  }>;
 }
 
 export interface NativeHarnessWebFetchResult {
@@ -491,6 +509,7 @@ async function execute(
           role: input.role,
           task: input.task,
           includeParentContext: input.includeParentContext === true,
+          ...(input.after === undefined ? {} : { after: input.after.map(String) }),
         });
         return started.status === "accepted"
           ? ok(started)
@@ -498,6 +517,15 @@ async function execute(
       }
       if (input.operation === "status") {
         return ok({ children: await port.status() });
+      }
+      if (input.operation === "wait") {
+        return ok(
+          await port.wait({
+            ...(input.runIds === undefined ? {} : { runIds: input.runIds.map(String) }),
+            timeoutMs: input.timeoutMs ?? DEFAULT_DELEGATE_WAIT_MS,
+            signal,
+          }),
+        );
       }
       const collected = await port.collect(input.runId);
       return collected.status === "refused" ? refused(collected.reason) : ok(collected);

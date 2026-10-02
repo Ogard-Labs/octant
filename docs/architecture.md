@@ -483,6 +483,22 @@ or wider-than-parent grants. Whether the agent may delegate is one host
 setting, on by default; a stored Ask from the retired "only when I start them"
 choice reads as off.
 
+Children can form a dependency graph. A run admitted with `dependsOn` (up to
+eight existing sibling runs of the same parent thread) parks as Waiting under
+`waiting-on-dependencies`: it holds no capacity slot, the capacity queue never
+starts it, and a restart leaves it parked. `AgentRunDependencyScheduler` asks
+the orchestration service to settle it on every committed status change and
+once at boot, through the pure `decideAgentRunDependencies`. When every
+dependency completed, the run starts (or joins the capacity queue if no slot is
+free) and receives each dependency's reply as a context block; a reply that is
+gone fails the start closed. A dependency that failed or was cancelled fails
+the dependent without running it (`dependency-failed: <id>`); an interrupted
+dependency does not, because a retry can still complete it. A run cannot be
+admitted on a sibling that already failed or was cancelled, and since only
+existing runs can be named, a cycle cannot be expressed. A
+parked run still counts toward the active-run limits (three per parent, four
+per host), which keeps graphs small.
+
 Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /
 Done); Chat has no board. Code lists active open and draft pull requests from

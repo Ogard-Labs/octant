@@ -16,6 +16,7 @@
  */
 
 import { Schema } from "effect";
+import { AgentRunDependencies, MAX_AGENT_RUN_DEPENDENCIES } from "./agentRun";
 import { ContextConfidence } from "./context";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import {
@@ -319,17 +320,32 @@ export type NativeHarnessAskUserArguments = typeof NativeHarnessAskUserArguments
  * authority, and admits it under the creation posture — a model never picks
  * a provider or widens anything by asking.
  */
+export const MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS = 120_000;
+
 export const NativeHarnessDelegateArguments = Schema.Union(
   Schema.Struct({
     operation: Schema.Literal("start"),
     role: Schema.Literal("research", "implementation", "review", "custom"),
     task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
     includeParentContext: Schema.optional(Schema.Boolean),
+    /**
+     * Runs this child waits for. It starts only once all of them completed,
+     * receives their replies, and never runs if one failed or was cancelled.
+     */
+    after: Schema.optional(AgentRunDependencies),
   }).annotations(strict),
   Schema.Struct({ operation: Schema.Literal("status") }).annotations(strict),
   Schema.Struct({
     operation: Schema.Literal("collect"),
     runId: Schema.UUID,
+  }).annotations(strict),
+  /** Blocks until the named children (or all of them) finished, or the time runs out. */
+  Schema.Struct({
+    operation: Schema.Literal("wait"),
+    runIds: Schema.optional(AgentRunDependencies),
+    timeoutMs: Schema.optional(
+      Schema.Int.pipe(Schema.between(0, MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS)),
+    ),
   }).annotations(strict),
 );
 export type NativeHarnessDelegateArguments = typeof NativeHarnessDelegateArguments.Type;
@@ -556,18 +572,31 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
   {
     name: "delegate",
     description:
-      "Hand an independent, bounded task to a child agent with start, then use status to inspect your children and collect with the returned runId to read a finished reply. Supply a standalone brief with the objective, expected output, and boundaries. Children run on the model configured for their role and cannot exceed the parent's authority. An accepted start is not completion; collect and assess the result before relying on it. Use second-opinion, when offered, for advisor feedback that does not need a separate child task.",
+      "Run work as a graph of child agents. start hands one bounded task to a child (a standalone brief: objective, expected output, boundaries) and returns its runId. Independent tasks run in parallel; give a task that needs others' output `after` with their runIds, and it starts only when they all completed, with their replies in front of it. If one of those fails or is cancelled, it never runs. status lists your children with what each waits on; wait blocks until the named children (or all) finish; collect reads a finished child's reply. An accepted start is not completion: collect and assess results before relying on them. At most a few children run at once, so keep graphs small. Use second-opinion, when offered, for advice that needs no separate task.",
     inputSchema: {
       type: "object",
       properties: {
-        operation: { type: "string", enum: ["start", "status", "collect"] },
+        operation: { type: "string", enum: ["start", "status", "collect", "wait"] },
         role: { type: "string", enum: ["research", "implementation", "review", "custom"] },
         task: {
           type: "string",
           description: "A standalone brief: objective, output format, boundaries.",
         },
         includeParentContext: { type: "boolean" },
+        after: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: MAX_AGENT_RUN_DEPENDENCIES,
+          description: "runIds this task must wait for (start only).",
+        },
         runId: { type: "string" },
+        runIds: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: MAX_AGENT_RUN_DEPENDENCIES,
+          description: "Children to wait for (wait only); omit to wait for all.",
+        },
+        timeoutMs: { type: "integer", minimum: 0, maximum: MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS },
       },
       required: ["operation"],
     },

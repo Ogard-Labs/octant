@@ -400,6 +400,46 @@ describe("createRecordedAgentRunContextSnapshotPort", () => {
     ).toBeUndefined();
   });
 
+  it("hands a run started by its graph the replies of the runs it waited for", () => {
+    const first = {
+      ...agentRun(),
+      id: "44444444-4444-4444-8444-444444444441" as never,
+      task: "Map the ingest paths",
+    } as AgentRun;
+    const second = {
+      ...agentRun(),
+      id: "44444444-4444-4444-8444-444444444442" as never,
+      role: "review",
+    } as AgentRun;
+    const joined = { ...agentRun(), dependsOn: [first.id, second.id] } as AgentRun;
+    const runs = new Map([first, second, joined].map((entry) => [String(entry.id), entry]));
+    const replies = new Map([
+      [String(first.id), "Ingest has two paths."],
+      [String(second.id), "Both paths look safe."],
+    ]);
+    const port = createRecordedAgentRunContextSnapshotPort({
+      getById: (id) => runs.get(String(id)),
+      readAdmittedContext: () => undefined,
+      readResultText: (id) => replies.get(String(id)),
+    });
+    const resolve = () =>
+      port.resolve({
+        runId: joined.id,
+        contextSnapshotId: joined.routingReceipt.contextSnapshotId,
+      });
+
+    const context = resolve();
+    expect(context?.map((block) => block.kind)).toEqual(["work-item", "work-item"]);
+    expect(context?.[0]?.text).toContain("Its task: Map the ingest paths");
+    expect(context?.[0]?.text).toContain("Ingest has two paths.");
+    expect(context?.[1]?.text).toContain("Result of review run");
+
+    // A reply that is gone fails the start closed: the run would otherwise
+    // begin without the input it was told to wait for.
+    replies.delete(String(second.id));
+    expect(resolve()).toBeUndefined();
+  });
+
   it("fails closed for an unknown run or a snapshot id the run never recorded", () => {
     const admitted: ReadonlyArray<ProviderContextBlock> = [
       { kind: "user-message", text: "Which service paged first?" },

@@ -13,6 +13,8 @@ import {
   agentRunResultReference,
   effectiveAgentRunExecutionTarget,
   isAgentRunTerminalStatus,
+  AGENT_RUN_DEPENDENCY_WAITING_REASON,
+  decideAgentRunDependencies,
 } from "@octant/domain";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
 import type { AgentRunSessionOutcome } from "./agentRunSessionPort";
@@ -193,6 +195,18 @@ export class AgentRunOrchestrationService {
         runId: accepted.run.id,
         expectedVersion: accepted.run.version,
         recoveryReason: poolWaitingReason,
+      });
+    }
+
+    // A run that waits on siblings holds no capacity while it waits: it parks
+    // under its own reason, which the capacity queue never starts, and the
+    // dependency scheduler releases it once its dependencies settle.
+    if (accepted.run.dependsOn !== undefined && accepted.run.dependsOn.length > 0) {
+      return this.#persistence.applyCommand({
+        kind: "wait-agent-run",
+        runId: accepted.run.id,
+        expectedVersion: accepted.run.version,
+        recoveryReason: AGENT_RUN_DEPENDENCY_WAITING_REASON,
       });
     }
 
@@ -650,41 +664,72 @@ export class AgentRunOrchestrationService {
   }
 
   /**
+   * Settle a run parked on its dependencies: fail it when one can no longer
+   * complete, start it when all completed and a slot is free. A ready run
+   * with no free slot stays parked; the capacity queue starts it next.
+   */
+  releaseDependencyWait(runId: AgentRunId): void {
+    const run = this.#persistence.getById(runId);
+    if (run === undefined) return;
+    const decision = decideAgentRunDependencies(run, (id) => this.#persistence.getById(id));
+    if (decision.kind === "fail") {
+      this.#persistence.applyCommand({
+        kind: "fail-agent-run",
+        runId: run.id,
+        expectedVersion: run.version,
+        recoveryReason: decision.recoveryReason,
+      });
+      return;
+    }
+    if (decision.kind !== "ready") return;
+    this.#startReserved(run);
+  }
+
+  /** Reserve a slot and start the run; false when no slot is free. */
+  #startReserved(run: AgentRun): boolean {
+    const reservation = this.#capacity.tryReserve({
+      runId: run.id,
+      providerInstanceId: String(
+        effectiveAgentRunExecutionTarget(run.routingReceipt).providerInstanceId,
+      ),
+    });
+    if (reservation.status === "queued") return false;
+    this.#reservations.set(run.id, reservation.reservationId);
+    let started: AgentRunCommandResult;
+    try {
+      started = this.start(run.id, run.version, run.authority);
+    } catch {
+      this.#capacity.release(reservation.reservationId);
+      this.#reservations.delete(run.id);
+      return true;
+    }
+    if (started.kind === "run-command-failed") {
+      this.#capacity.release(reservation.reservationId);
+      this.#reservations.delete(run.id);
+    }
+    return true;
+  }
+
+  /**
    * Capacity is released only after a terminal process signal. At that point,
    * atomically attempt the oldest persisted capacity waiter and let the normal
    * start path repeat approval and workspace checks before spawning it.
    */
   #dequeueCapacityWaiter(): void {
     for (const run of this.#persistence.snapshot().values()) {
+      // A run parked on dependencies that all completed is waiting only for a
+      // slot now, exactly like a capacity waiter.
+      const waitsForSlot =
+        run.recoveryReason === "provider-capacity-saturated" ||
+        decideAgentRunDependencies(run, (id) => this.#persistence.getById(id)).kind === "ready";
       if (
         run.lifecycleStatus !== "waiting" ||
-        run.recoveryReason !== "provider-capacity-saturated" ||
+        !waitsForSlot ||
         !this.#approvals.isCurrent({ runId: run.id, authority: run.authority })
       ) {
         continue;
       }
-
-      const reservation = this.#capacity.tryReserve({
-        runId: run.id,
-        providerInstanceId: String(
-          effectiveAgentRunExecutionTarget(run.routingReceipt).providerInstanceId,
-        ),
-      });
-      if (reservation.status === "queued") return;
-
-      this.#reservations.set(run.id, reservation.reservationId);
-      let started: AgentRunCommandResult;
-      try {
-        started = this.start(run.id, run.version, run.authority);
-      } catch {
-        this.#capacity.release(reservation.reservationId);
-        this.#reservations.delete(run.id);
-        continue;
-      }
-      if (started.kind === "run-command-failed") {
-        this.#capacity.release(reservation.reservationId);
-        this.#reservations.delete(run.id);
-      }
+      this.#startReserved(run);
       return;
     }
   }
