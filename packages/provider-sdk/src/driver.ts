@@ -75,6 +75,13 @@ export interface ProviderSessionResume {
   readonly resumeCursor: ProviderResumeCursor;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove?: boolean;
+  /**
+   * The thread's current model. A driver that reports `modelSwitch` as
+   * supported runs the resumed session on it; any other driver keeps the model
+   * its session was opened with, and the host refuses a turn that would need
+   * a different one.
+   */
+  readonly modelId?: ProviderModelId;
   readonly modelOptionValues?: ProviderModelOptionValues;
 }
 
