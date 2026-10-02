@@ -330,8 +330,32 @@ export function applyResult(current: CodeBootstrap | undefined, result: CodeComm
   }
 }
 
-export function commandTargets(command: CodeCommand, threadId: CodeThreadId): boolean {
-  return "threadId" in command && command.threadId === threadId;
+/**
+ * The open thread view after a command result that rewrote its thread record.
+ * A model or reasoning change no longer re-opens the thread, so the record the
+ * host returned is laid onto the view in place.
+ */
+export function withUpdatedThread(
+  current: CodeThreadView | undefined,
+  result: CodeCommandResult,
+): CodeThreadView | undefined {
+  if (current === undefined || result.kind !== "thread-updated") return current;
+  if (String(result.thread.id) !== String(current.thread.id)) return current;
+  return { ...current, thread: result.thread };
+}
+
+/**
+ * Whether a command's result must re-open the active thread. A model or
+ * reasoning change only rewrites the thread record, which the command result
+ * already carries; re-opening it cleared and re-read the whole conversation,
+ * so every reasoning click flashed the transcript behind the picker.
+ */
+export function commandReloadsThread(command: CodeCommand, threadId: CodeThreadId): boolean {
+  return (
+    "threadId" in command &&
+    command.threadId === threadId &&
+    command.kind !== "change-code-thread-provider"
+  );
 }
 
 export function acceptFrame(
