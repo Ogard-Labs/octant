@@ -1391,9 +1391,12 @@ describe("CodeThreadWorkspace", () => {
         },
       ],
     } as never as PickerGroup;
+    const answered = [
+      { id: "reply", role: "assistant" as const, text: "Done.", status: "completed" as const },
+    ];
     const { rerender } = render(
       <CodeThreadWorkspace
-        controller={controller({ execute })}
+        controller={controller({ execute, conversation: answered })}
         providerGroups={[canSwitch, alternateProviderGroup()]}
         threadId={threadId}
       />,
@@ -1416,13 +1419,27 @@ describe("CodeThreadWorkspace", () => {
     await user.keyboard("{Escape}");
     rerender(
       <CodeThreadWorkspace
-        controller={controller({ execute })}
+        controller={controller({ execute, conversation: answered })}
         providerGroups={[{ ...canSwitch, modelSwitch: "unsupported" }, alternateProviderGroup()]}
         threadId={threadId}
       />,
     );
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     expect(screen.queryByRole("option", { name: "Model Three" })).not.toBeInTheDocument();
+  });
+
+  it("keeps every provider for a thread whose first turn never reached its provider", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    expect(screen.getByRole("option", { name: "Remote Provider" })).toBeInTheDocument();
   });
 
   it("shows the next turn's access and sends a narrower posture with the message", async () => {
