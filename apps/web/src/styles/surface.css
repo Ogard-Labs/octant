@@ -518,27 +518,15 @@
   }
 }
 
-/* At phone width the chip row wrapped and left "This computer" alone on a
-   second line, which read as a second row of settings. It stays on one line
-   and the leading chips scroll sideways when a longer host name does not fit;
-   the pickers open in a portal, so the scroll box clips nothing. */
+/* At phone width the tray stays on one row while it fits, which keeps
+   "This computer" from sitting alone under two chips in Work. The leading
+   chips wrap inside their own box when they cannot fit: Code carries three
+   (Project, branch, host) and a no-wrap scrolling row still counted its full
+   393px toward the pane's minimum width, so the whole start screen grew to
+   425px and the composer, send button and cards ran off a 390px phone. */
 @media (max-width: 680px) {
   .composer-tray--inside {
     flex-wrap: nowrap;
-  }
-
-  .composer-tray--inside .composer-tray__leading {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .composer-tray--inside .composer-tray__leading::-webkit-scrollbar {
-    display: none;
-  }
-
-  .composer-tray--inside .composer-tray__leading > * {
-    flex: 0 0 auto;
   }
 
   /* The two labels name the choice on their own; their icons cost about 40px,
