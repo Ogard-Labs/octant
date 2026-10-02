@@ -233,6 +233,8 @@ function matchesIdempotentControlRequest(
   return (
     existing.parentThreadId === request.parentThreadId &&
     existing.parentRunId === request.parentRunId &&
+    (existing.dependsOn ?? []).map(String).join(",") ===
+      (request.dependsOn ?? []).map(String).join(",") &&
     existing.role === request.role &&
     existing.task === request.task &&
     existing.routingReceipt.mode === parent.parentMode &&

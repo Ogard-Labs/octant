@@ -100,6 +100,7 @@ export * from "./imageGenerationInvocationPolicy";
 export * from "./userProfilePolicy";
 export * from "./agentProfilePolicy";
 export * from "./agentRunPolicy";
+export * from "./agentRunDependencyPolicy";
 export * from "./agentRunForest";
 export * from "./agentRunForestCanvas";
 export * from "./agentRunControlPolicy";

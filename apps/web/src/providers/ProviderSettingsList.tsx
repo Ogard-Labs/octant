@@ -16,7 +16,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { SettingRow } from "../settings/primitives";
+import { SettingRow, SettingsSection } from "../settings/primitives";
 import { ProviderGlyph } from "./ProviderGlyph";
 import {
   AnthropicConfigurationForm,
@@ -264,15 +264,12 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
 
   return props.status !== "ready" && ordered.length === 0 ? null : (
     <>
-      <section
-        aria-label="Providers"
-        className="settings-card-section settings-card-section--open provider-list"
-      >
-        {/* The pane is already titled "Providers"; this label names the list
-            against the detection section above it. */}
-        <div className="settings-section-head">
-          <h2>{props.heading ?? "Configured providers"}</h2>
-          {props.showReorder === false || ordered.length < 2 ? null : (
+      {/* The pane is already titled "Providers"; this label names the list
+          against the detection section above it, and the region keeps the
+          name "Providers". The readiness summary is the label's description. */}
+      <SettingsSection
+        actions={
+          props.showReorder === false || ordered.length < 2 ? undefined : (
             <OctantButton
               aria-pressed={reordering}
               onClick={() => setReordering((current) => !current)}
@@ -282,24 +279,30 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
             >
               {reordering ? "Done reordering" : "Reorder providers"}
             </OctantButton>
-          )}
-        </div>
-        <p className="settings-section-note">
-          {reordering
-            ? "Use the arrow controls to change the model-picker order."
-            : (props.note ?? "The first ready provider is the default for new threads.")}
-        </p>
-        {readinessSummary.ready + readinessSummary.needsSetup + readinessSummary.off ===
-        0 ? null : (
-          <p
-            aria-label="Provider readiness summary"
-            className="oct-meta provider-settings__summary"
-            role="status"
-          >
-            {readinessSummary.ready} ready · {readinessSummary.needsSetup} needs setup ·{" "}
-            {readinessSummary.off} off
-          </p>
-        )}
+          )
+        }
+        ariaLabel="Providers"
+        className="provider-list"
+        description={
+          <>
+            {reordering
+              ? "Use the arrow controls to change the model-picker order."
+              : (props.note ?? "The first ready provider is the default for new threads.")}
+            {readinessSummary.ready + readinessSummary.needsSetup + readinessSummary.off ===
+            0 ? null : (
+              <span
+                aria-label="Provider readiness summary"
+                className="provider-settings__summary"
+                role="status"
+              >
+                {readinessSummary.ready} ready · {readinessSummary.needsSetup} needs setup ·{" "}
+                {readinessSummary.off} off
+              </span>
+            )}
+          </>
+        }
+        title={props.heading ?? "Configured providers"}
+      >
         {ordered.length === 0 ? (
           <p className="settings-section-line">No providers configured.</p>
         ) : !showDetectionGroups ? (
@@ -310,37 +313,34 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
             {ordered.map((instance, index) => renderProviderRow(instance, index))}
           </div>
         ) : (
-          <>
+          <div className="provider-list__groups">
             {groups.detected.length === 0 ? null : (
-              <>
-                <h3 className="oct-section-label">Detected on this host</h3>
+              <SettingsSection title="Detected on this host">
                 <div className="provlist">
                   {groups.detected.map(({ instance, index }) => renderProviderRow(instance, index))}
                 </div>
-              </>
+              </SettingsSection>
             )}
             {groups.notFound.length === 0 ? null : (
-              <>
-                <h3 className="oct-section-label">Supported, not detected</h3>
+              <SettingsSection title="Supported, not detected">
                 <div className="provlist">
                   {groups.notFound.map(({ instance, index }) => renderProviderRow(instance, index))}
                 </div>
-              </>
+              </SettingsSection>
             )}
             {groups.other.length === 0 ? null : (
-              <>
-                <h3 className="oct-section-label">Other providers</h3>
+              <SettingsSection title="Other providers">
                 <div className="provlist">
                   {groups.other.map(({ instance, index }) => renderProviderRow(instance, index))}
                 </div>
-              </>
+              </SettingsSection>
             )}
-          </>
+          </div>
         )}
         {props.createForm === undefined ? null : (
           <div className="provider-settings__foot">{props.createForm}</div>
         )}
-      </section>
+      </SettingsSection>
       {ordered.length === 0 || props.showAgentEligibleModels === false ? null : (
         <AgentEligibleModelsControls
           agentEligibleModels={props.defaults.agentEligibleModels}
@@ -728,7 +728,7 @@ function ProviderRow(props: ProviderRowProps) {
         </span>
       ) : null}
       <span className="icon-mark">
-        <ProviderGlyph displayName={name} driverKind={props.instance.driverKind} size={16} />
+        <ProviderGlyph displayName={name} driverKind={props.instance.driverKind} size={24} />
       </span>
       <span className="prov-main">
         <span className="prov-name oct-row-label">

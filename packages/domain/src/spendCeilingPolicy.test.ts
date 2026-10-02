@@ -131,6 +131,66 @@ describe("evaluateSpendCeilingAdmission", () => {
   });
 });
 
+describe("evaluateSpendCeilingAdmission turn and run-time budgets", () => {
+  it("refuses a Project whose daily agent run time is used up, counting in-flight time", () => {
+    const project = projectFacts({
+      policy: { runTimeBudgetSeconds: 7_200 },
+      committed: { status: "known", tokens: 0 },
+      usedTurns: 3,
+      usedRunTimeMs: 7_200_000,
+    });
+    const result = evaluateSpendCeilingAdmission({ project });
+    expect(result.status).toBe("refused");
+    if (result.status !== "refused") return;
+    expect(result.refusal).toMatchObject({
+      kind: "exhausted",
+      dimension: "run-time",
+      scopeKind: "project",
+      remainingRunTimeSeconds: 0,
+      ceilingRunTimeSeconds: 7_200,
+    });
+    expect(result.refusal.message).toContain("agent run time ceiling of 2h is used up");
+    expect(
+      evaluateSpendCeilingAdmission({
+        project: { ...project, usedRunTimeMs: 7_199_000 },
+      }),
+    ).toEqual({ status: "admitted", reservedTokens: 0, reservations: [] });
+  });
+
+  it("refuses the turn past a thread turn budget and needs no token bound without a token budget", () => {
+    const thread = threadFacts({ policy: { turnBudget: 2 }, usedTurns: 1 });
+    expect(evaluateSpendCeilingAdmission({ thread }).status).toBe("admitted");
+    const full = evaluateSpendCeilingAdmission({ thread: { ...thread, usedTurns: 2 } });
+    expect(full.status).toBe("refused");
+    if (full.status !== "refused") return;
+    expect(full.refusal).toMatchObject({ dimension: "turns", remainingTurns: 0, ceilingTurns: 2 });
+  });
+
+  it("refuses rather than assuming zero when the turn ledger is unavailable", () => {
+    const result = evaluateSpendCeilingAdmission({
+      thread: threadFacts({ policy: { runTimeBudgetSeconds: 60 } }),
+    });
+    expect(result.status).toBe("refused");
+    if (result.status !== "refused") return;
+    expect(result.refusal).toMatchObject({ kind: "unknown-spend", dimension: "run-time" });
+  });
+
+  it("enforces the token budget beside a run-time budget on the same ceiling", () => {
+    const result = evaluateSpendCeilingAdmission({
+      project: projectFacts({
+        policy: { tokenBudget: 5_000, runTimeBudgetSeconds: 7_200 },
+        committed: { status: "known", tokens: 4_900 },
+        usedTurns: 0,
+        usedRunTimeMs: 0,
+      }),
+      turnUpperBoundTokens: 500,
+    });
+    expect(result.status).toBe("refused");
+    if (result.status !== "refused") return;
+    expect(result.refusal.dimension).toBe("tokens");
+  });
+});
+
 describe("settleSpendCeilingReservation", () => {
   it("releases on cancel and records overrun when observed spend exceeds the reservation", () => {
     expect(settleSpendCeilingReservation({ reservedTokens: 100 })).toEqual({ kind: "released" });
@@ -299,6 +359,47 @@ describe("decideSpendCeilingCommand", () => {
     expect(raise.status).toBe("accepted");
     if (raise.status !== "accepted") return;
     expect(raise.next.overrun).toBeUndefined();
+  });
+});
+
+describe("decideSpendCeilingCommand run-time raises", () => {
+  const scope = { kind: "project" as const, projectId };
+  const current: SpendCeilingState = {
+    scope,
+    window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    policy: { runTimeBudgetSeconds: 7_200 },
+    version: version1,
+    setAt: now,
+    setBy: actor,
+  };
+  const raise = (fields: {
+    readonly runTimeBudgetSeconds?: number;
+    readonly turnBudget?: number;
+  }) =>
+    decideSpendCeilingCommand({
+      principalKind: "local-window",
+      command: { kind: "raise-spend-ceiling", scope, expectedVersion: version1, ...fields },
+      current,
+      scopeExists: true,
+      now,
+      actor,
+    });
+
+  it("widens a run-time budget and keeps the window", () => {
+    const result = raise({ runTimeBudgetSeconds: 10_800 });
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") return;
+    expect(result.next.policy).toEqual({ runTimeBudgetSeconds: 10_800 });
+    expect(result.next.window).toEqual(current.window);
+    expect(result.previousRunTimeBudgetSeconds).toBe(7_200);
+  });
+
+  it("refuses to add a budget dimension the ceiling does not have through a raise", () => {
+    const result = raise({ turnBudget: 10 });
+    expect(result.status).toBe("refused");
+    if (result.status !== "refused") return;
+    expect(result.refusal.kind).toBe("not-a-raise");
+    expect(raise({ runTimeBudgetSeconds: 7_200 }).status).toBe("refused");
   });
 });
 

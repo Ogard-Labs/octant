@@ -1,5 +1,6 @@
 import type { DiscoveryCandidate, DiscoverySnapshot, ProviderInstance } from "@octant/contracts";
 import { useState } from "react";
+import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface ProviderDiscoverySectionProps {
@@ -30,12 +31,8 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
   );
 
   return (
-    <section
-      aria-label="Find providers"
-      className="settings-card-section settings-card-section--open provider-discovery"
-    >
-      <div className="settings-section-head">
-        <h2>Find providers</h2>
+    <SettingsSection
+      actions={
         <OctantButton
           className="provider-discovery__scan-action"
           size="sm"
@@ -46,10 +43,11 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
         >
           {scanning ? "Scanning…" : "Check again"}
         </OctantButton>
-      </div>
-
-      <p className="settings-section-note">Find installed providers and check their connections.</p>
-
+      }
+      className="provider-discovery"
+      description="Find installed providers and check their connections."
+      title="Find providers"
+    >
       <div className="provider-discovery__status-slot" aria-live="polite">
         {!scanning && newCandidates.length === 0 && snapshot?.status === "completed" ? (
           <p className="settings-section-line" role="status">
@@ -126,7 +124,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
           ))}
         </div>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 

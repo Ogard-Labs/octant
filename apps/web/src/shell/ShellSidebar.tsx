@@ -7,11 +7,12 @@ import type { SettingsDeepLink } from "@octant/contracts";
 import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
-import { PanelLeftClose, Search } from "lucide-react";
-import type { ReactNode } from "react";
+import { PanelLeftClose, Search, SquarePen, X } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { AGENTS_CENTER_NAVIGATION_ENABLED } from "../agents/agentsCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
   resolveSidebarContributions,
@@ -20,10 +21,17 @@ import {
 import { IconButton } from "./IconButton";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
+import { SidebarCountTiles, type SidebarTile } from "./SidebarCountTiles";
+import { SidebarRail, type SidebarRailProject } from "./SidebarRail";
+import type { VisibleMode } from "./workKind";
 import { SidebarMore } from "./SidebarMore";
 import { SidebarProfile } from "./SidebarProfile";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
-import { layoutSidebarDestinations, type SidebarNavigationInput } from "./navigationModel";
+import {
+  layoutSidebarDestinations,
+  sidebarNavigationDescriptor,
+  type SidebarNavigationInput,
+} from "./navigationModel";
 
 export interface ShellSidebarProps {
   readonly backgroundCoveredByWorkspace?: boolean;
@@ -76,7 +84,8 @@ export interface ShellSidebarProps {
   /** Hides the sidebar; the window chrome then offers the matching Show control. */
   readonly onCollapseSidebar?: () => void;
   readonly onRetryChat?: () => void;
-  readonly onSelectMode: (mode: OctantMode) => void;
+  /** Chat and Work show as one Work mode; App resolves which kind it opens. */
+  readonly onSelectMode: (mode: VisibleMode) => void;
   readonly settings: ShellSettings;
   readonly workspace: WindowWorkspace;
   readonly projectSection: ReactNode;
@@ -90,10 +99,56 @@ export interface ShellSidebarProps {
   readonly githubIssuesReadAvailable?: boolean;
   /** Threads waiting on the user right now; mirrors the dock badge count. */
   readonly inboxCount?: number;
+  /**
+   * The current mode's counts for the Running, To review, and Done today
+   * tiles, with where each one goes. Absent leaves those tiles out.
+   */
+  readonly countTiles?: {
+    readonly running: number;
+    readonly toReview: number;
+    readonly doneToday: number;
+    readonly onOpenRunning?: () => void;
+    readonly onOpenReview?: () => void;
+    readonly onOpenDone?: () => void;
+  };
+  /**
+   * The in-place filter over the current mode's thread rows. Absent keeps the
+   * Search icon on the command overlay, as before the filter existed.
+   */
+  readonly threadFilter?: {
+    readonly query: string;
+    readonly onQueryChange: (query: string) => void;
+    /** Enter hands the text to the command overlay, which searches every thread. */
+    readonly onSearchEverywhere?: (query: string) => void;
+  };
+  /**
+   * Present while the sidebar is collapsed to its icon rail: the sidebar then
+   * draws the rail instead of the full column, from the same destinations,
+   * counts, and modes.
+   */
+  readonly rail?: {
+    readonly onExpand: () => void;
+    readonly projects: ReadonlyArray<SidebarRailProject>;
+    readonly onOpenActivity?: () => void;
+  };
 }
+
+const NEW_THREAD_DESTINATIONS = new Set(["new-chat", "new-code-thread", "new-work-thread"]);
 
 export function ShellSidebar(props: ShellSidebarProps) {
   const modes = enabledModes(props.settings);
+  const searchAlwaysShown = props.settings.sidebarSearchPresentation === "field";
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchField = useRef<HTMLInputElement>(null);
+  const filter = props.threadFilter;
+  const filterShown = filter !== undefined && (searchAlwaysShown || searchOpen);
+  useEffect(() => {
+    if (searchOpen && !searchAlwaysShown) searchField.current?.focus();
+  }, [searchOpen, searchAlwaysShown]);
+  const closeSearch = () => {
+    setSearchOpen(false);
+    filter?.onQueryChange("");
+  };
   const activeMode = props.workspace.activeMode;
   const chatReady = activeMode === "chat" && props.chatNavigation !== undefined;
   const codeReady = activeMode === "code" && props.codeNavigation !== undefined;
@@ -161,6 +216,53 @@ export function ShellSidebar(props: ShellSidebarProps) {
     input: navigationInput,
     moreEnabled: props.settings.sidebarMoreEnabled,
   });
+  // New thread lives in the header now, so its row would say the same thing
+  // twice. With the tiles on, Inbox and Board each have a tile that goes
+  // where their row went.
+  const newThreadId = destinationLayout.rows.find((id) => NEW_THREAD_DESTINATIONS.has(id));
+  const newThread = newThreadId === undefined ? undefined : navigationActions[newThreadId];
+  const newThreadLabel =
+    newThreadId === undefined ? undefined : sidebarNavigationDescriptor(newThreadId).label;
+  const tilesShown = props.settings.sidebarCountTiles && props.countTiles !== undefined;
+  const destinationRows = destinationLayout.rows.filter(
+    (id) =>
+      !NEW_THREAD_DESTINATIONS.has(id) &&
+      !(tilesShown && (id === "inbox" || id === "thread-board")),
+  );
+  const boardAction = navigationActions["thread-board"];
+  const tiles: ReadonlyArray<SidebarTile> =
+    !tilesShown || props.countTiles === undefined
+      ? []
+      : [
+          {
+            id: "inbox",
+            count: props.inboxCount ?? 0,
+            ...(navigationActions.inbox === undefined ? {} : { onSelect: navigationActions.inbox }),
+            active: props.activeDestination === "inbox",
+          },
+          {
+            id: "running",
+            count: props.countTiles.running,
+            ...((props.countTiles.onOpenRunning ?? boardAction) === undefined
+              ? {}
+              : { onSelect: props.countTiles.onOpenRunning ?? boardAction }),
+            active: props.activeDestination === "thread-board",
+          },
+          {
+            id: "review",
+            count: props.countTiles.toReview,
+            ...(props.countTiles.onOpenReview === undefined
+              ? {}
+              : { onSelect: props.countTiles.onOpenReview }),
+          },
+          {
+            id: "done",
+            count: props.countTiles.doneToday,
+            ...(props.countTiles.onOpenDone === undefined
+              ? {}
+              : { onSelect: props.countTiles.onOpenDone }),
+          },
+        ];
   const secondaryActions = destinationLayout.menu.flatMap((descriptor) => {
     const action = navigationActions[descriptor.id];
     return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
@@ -169,6 +271,43 @@ export function ShellSidebar(props: ShellSidebarProps) {
     const action = navigationActions[descriptor.id];
     return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
   });
+  if (props.rail !== undefined) {
+    return (
+      <SidebarRail
+        activeMode={activeMode}
+        destinations={destinationRows.flatMap((id) => {
+          const action = navigationActions[id];
+          return id === "projects" || action === undefined
+            ? []
+            : [
+                {
+                  id,
+                  label: sidebarNavigationDescriptor(id).label,
+                  onSelect: action,
+                  active: props.activeDestination === id,
+                },
+              ];
+        })}
+        modes={modes}
+        nativeHost={props.nativeHost === true}
+        {...(newThread === undefined || newThreadLabel === undefined
+          ? {}
+          : { newThread: { label: newThreadLabel, onSelect: () => newThread() } })}
+        onExpand={props.rail.onExpand}
+        {...(props.rail.onOpenActivity === undefined
+          ? {}
+          : { onOpenActivity: props.rail.onOpenActivity })}
+        {...(navigationActions.projects === undefined
+          ? {}
+          : { onOpenProjects: navigationActions.projects })}
+        {...(props.onOpenSearch === undefined ? {} : { onOpenSearch: props.onOpenSearch })}
+        onOpenSettings={() => props.onOpenSettings()}
+        onSelectMode={props.onSelectMode}
+        projects={props.rail.projects}
+        tiles={tiles}
+      />
+    );
+  }
   return (
     <aside
       aria-label="Octant sidebar"
@@ -216,14 +355,34 @@ export function ShellSidebar(props: ShellSidebarProps) {
           <ModeSwitcher
             actions={
               <>
-                <span className="sidebar__chrome-activity" data-octant-sidebar-chrome-actions />
                 <span className="sidebar__primary-actions">
-                  <IconButton
-                    data-navigation-id="search"
-                    icon={Search}
-                    label="Search"
-                    onClick={props.onOpenSearch}
-                  />
+                  {filter === undefined || searchAlwaysShown ? (
+                    filter === undefined ? (
+                      <IconButton
+                        data-navigation-id="search"
+                        icon={Search}
+                        label="Search"
+                        onClick={props.onOpenSearch}
+                      />
+                    ) : null
+                  ) : (
+                    <IconButton
+                      aria-expanded={searchOpen}
+                      data-navigation-id="search"
+                      icon={Search}
+                      label="Search"
+                      onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+                    />
+                  )}
+                  {newThread === undefined || newThreadLabel === undefined ? null : (
+                    <IconButton
+                      className="sidebar__new-thread"
+                      data-navigation-id={newThreadId}
+                      icon={SquarePen}
+                      label={newThreadLabel}
+                      onClick={() => newThread()}
+                    />
+                  )}
                   {props.nativeHost === true || props.onCollapseSidebar === undefined ? null : (
                     <IconButton
                       className="sidebar__browser-collapse"
@@ -237,9 +396,49 @@ export function ShellSidebar(props: ShellSidebarProps) {
             }
             activeMode={props.workspace.activeMode}
             modes={modes}
-            onSelectMode={props.onSelectMode}
+            onSelectMode={(mode) => {
+              if (mode !== "chat") props.onSelectMode(mode);
+            }}
             presentation={props.settings.modeSwitcherPresentation}
           />
+          {filterShown && filter !== undefined ? (
+            <div className="sidebar-search" role="search">
+              <Search
+                aria-hidden="true"
+                className="sidebar-search__icon"
+                size={14}
+                strokeWidth={1.8}
+              />
+              <OctantInput
+                aria-label="Filter threads"
+                className="sidebar-search__field"
+                onChange={(event) => filter.onQueryChange(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && !searchAlwaysShown) {
+                    event.preventDefault();
+                    closeSearch();
+                  } else if (event.key === "Enter" && filter.onSearchEverywhere !== undefined) {
+                    event.preventDefault();
+                    filter.onSearchEverywhere(filter.query);
+                  }
+                }}
+                placeholder="Filter threads"
+                title="Type to filter this list. Enter searches every thread."
+                ref={searchField}
+                type="search"
+                value={filter.query}
+              />
+              {searchAlwaysShown ? null : (
+                <IconButton
+                  className="sidebar-search__close"
+                  icon={X}
+                  label="Close search"
+                  onClick={closeSearch}
+                />
+              )}
+            </div>
+          ) : null}
+          {tiles.length === 0 ? null : <SidebarCountTiles tiles={tiles} />}
           <SidebarNavigation
             {...(props.activeDestination === undefined
               ? {}
@@ -270,7 +469,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
             projectSection={
               props.projectsDirectory === undefined ? props.projectSection : undefined
             }
-            rows={destinationLayout.rows}
+            rows={destinationRows}
           />
           {chatStatusMessage === undefined ? null : (
             <div

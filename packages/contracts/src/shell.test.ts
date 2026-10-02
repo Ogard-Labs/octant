@@ -78,6 +78,9 @@ const settings = {
   },
   sidebarDestinations: { order: [], visibility: [] },
   sidebarMoreEnabled: true,
+  sidebarCountTiles: true,
+  sidebarSearchPresentation: "icon",
+  sidebarCollapsedPresentation: "rail",
   environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
   firstRunOnboarding: "pending",
   automaticUpdateChecks: true,
@@ -1137,6 +1140,32 @@ describe("sidebar destination customization", () => {
           { id: "inbox", visibility: "hidden" },
         ],
       }),
+    ).toThrow();
+  });
+});
+
+describe("sidebar count tiles and search preferences", () => {
+  it("decodes a store that predates them with the tiles on and search behind an icon", () => {
+    const {
+      sidebarCountTiles: _tiles,
+      sidebarSearchPresentation: _search,
+      ...predatesThem
+    } = settings;
+    const decoded = decodeShellSettings(predatesThem);
+    expect(decoded.sidebarCountTiles).toBe(true);
+    expect(decoded.sidebarSearchPresentation).toBe("icon");
+  });
+
+  it("keeps tiles turned off and an always-shown search field", () => {
+    const decoded = decodeShellSettings({
+      ...settings,
+      sidebarCountTiles: false,
+      sidebarSearchPresentation: "field",
+    });
+    expect(decoded.sidebarCountTiles).toBe(false);
+    expect(decoded.sidebarSearchPresentation).toBe("field");
+    expect(() =>
+      decodeShellSettings({ ...settings, sidebarSearchPresentation: "overlay" }),
     ).toThrow();
   });
 });

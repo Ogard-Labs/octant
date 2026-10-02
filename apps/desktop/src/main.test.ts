@@ -106,19 +106,22 @@ describe("canonical local host endpoint", () => {
 });
 
 describe("packaged desktop host capabilities", () => {
-  it("reports vibrancy support only for the native macOS host", () => {
+  it("reports vibrancy and the Simulator frame only for macOS, and the Android frame on every host", () => {
     expect(resolveDesktopHostCapabilities("darwin")).toEqual({
       liveBrowserSupported: false,
+      liveAndroidFrameSupported: true,
       liveSimulatorFrameSupported: true,
       sidebarVibrancySupported: true,
     });
     expect(resolveDesktopHostCapabilities("linux")).toEqual({
       liveBrowserSupported: false,
+      liveAndroidFrameSupported: true,
       liveSimulatorFrameSupported: false,
       sidebarVibrancySupported: false,
     });
     expect(resolveDesktopHostCapabilities("darwin", true)).toEqual({
       liveBrowserSupported: true,
+      liveAndroidFrameSupported: true,
       liveSimulatorFrameSupported: true,
       sidebarVibrancySupported: true,
     });

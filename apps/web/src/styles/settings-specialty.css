@@ -255,14 +255,8 @@
   gap: 0;
 }
 
-.settings-view .extensions-settings__body {
-  gap: 0;
-  padding: 0;
-  border-top: 1px solid var(--oct-hairline);
-}
-
 .settings-view .extensions-settings__cards .extcard {
-  padding: 14px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--oct-hairline);
   border-radius: 0;
   background: transparent;
@@ -286,12 +280,13 @@
   gap: 0;
 }
 
+/* Reported capabilities are the rows of a card (the section's .setgroup), so
+   the hairline between them comes from the card, inset from its edges. */
 .settings-view .host-settings__capabilities {
   display: grid;
-  gap: 8px;
+  gap: 0;
   margin: 0;
-  padding: 12px 0;
-  border-top: 1px solid var(--oct-hairline);
+  padding: 0;
   list-style: none;
 }
 
@@ -301,7 +296,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  border-top: 1px solid var(--oct-hairline);
 }
 
 .settings-view .github-settings__capabilities > li {
@@ -309,9 +303,8 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 16px;
   align-items: center;
-  min-height: 44px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--oct-hairline);
+  min-height: 52px;
+  padding: 12px 16px;
 }
 
 .settings-view .github-settings__capabilities > li > .github-settings__note {

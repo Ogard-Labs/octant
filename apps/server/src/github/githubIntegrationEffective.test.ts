@@ -168,8 +168,8 @@ describe("isGithubIntegrationEffective", () => {
 });
 
 describe("isLinearIntegrationEffective", () => {
-  it("treats bundled Linear as not effective when the extension store has no row", () => {
-    expect(isLinearIntegrationEffective({ packages: [] })).toBe(false);
+  it("treats bundled Linear as effective when the extension store has no row", () => {
+    expect(isLinearIntegrationEffective({ packages: [] })).toBe(true);
   });
 
   it("is effective when the store row is installed, trusted, and desired", () => {

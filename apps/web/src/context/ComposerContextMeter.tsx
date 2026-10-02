@@ -246,6 +246,43 @@ function UsageRing(props: { readonly alert: boolean; readonly usedPercent: numbe
  * declared for the selected model stands in — the popover says whose number
  * it is.
  */
+/**
+ * How full the window is, from the same two sources the meter itself reads: the
+ * host's context plan, or, where no plan exists, the provider's own report.
+ * Absent when neither names a window, so a caller shows nothing rather than a
+ * guessed share.
+ */
+export function composerContextOccupancy(input: {
+  readonly snapshot?: ContextInspectorSnapshot | undefined;
+  readonly fallback?: ComposerContextUsageFallback | undefined;
+}):
+  | {
+      readonly usedTokens: number;
+      readonly totalTokens: number;
+      readonly percent: number;
+      readonly label: string;
+    }
+  | undefined {
+  if (input.snapshot !== undefined) {
+    const model = contextWindowModel(input.snapshot);
+    if (model.totalTokens <= 0) return undefined;
+    return {
+      usedTokens: model.usedTokens,
+      totalTokens: model.totalTokens,
+      percent: model.percent,
+      label: `${compactTokens(model.usedTokens)} of ${compactTokens(model.totalTokens)}`,
+    };
+  }
+  const reported = input.fallback === undefined ? undefined : reportedWindow(input.fallback);
+  if (reported === undefined) return undefined;
+  return {
+    usedTokens: reported.usedTokens,
+    totalTokens: reported.windowTokens,
+    percent: reported.percent,
+    label: `${compactTokens(reported.usedTokens)} of ${compactTokens(reported.windowTokens)}`,
+  };
+}
+
 function reportedWindow(fallback: ComposerContextUsageFallback):
   | {
       readonly percent: number;

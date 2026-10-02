@@ -45,38 +45,20 @@
   position: relative;
 }
 
-/* Section labels wear the section-label recipe (13/500 over a hairline), not
-   the bolder group head. The first section of each view carries the
-   Installed / Marketplace switch on its label line. */
-.extensions-settings__section > .setgroup-head,
-.extensions-settings__section > .settings-section-head > .setgroup-head {
-  min-height: auto;
-  padding: 10px 0 8px;
-  border-bottom: 0;
-  font-weight: var(--oct-weight-display);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.3;
-}
-
-.extensions-settings__section > .settings-section-head {
-  padding: 0;
-}
-
-.extensions-settings__section > .settings-section-head > .setgroup-head {
-  padding: 0;
-}
-
 .extensions-settings__section--attention .extensions-settings__body {
   color: var(--oct-warn-fg);
 }
 
-/* Collection shells stay open like Appearance. Individual install and review
-   objects can still establish their own elevation when they need it. */
+/* A section's body is the Settings kit card: the 16px card radius, one
+   hairline, the raised fill. Installed packages and skills are rows inside it,
+   divided by their own hairline at the card's inset. */
 .extensions-settings__body {
   display: grid;
   gap: var(--oct-space-3);
-  padding: 12px 0 0;
-  border-top: 1px solid var(--oct-hairline);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  background: var(--oct-settings-card-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
 }
 
 .extensions-settings__cards {

@@ -253,7 +253,10 @@ function resolveMcpDeclaration(
         config.type === "streamable-http"
       )
         capabilities.push("network");
-      if (typeof config.command === "string") capabilities.push("shell");
+      // A command here launches the MCP server itself, which Octant runs in
+      // its own supervised sandbox and whose every tool call waits for a
+      // person. It gives the model no shell, so it is tagged like an Agent
+      // Plugin's stdio server rather than as `shell`, which Work refuses.
       if (
         config.env !== undefined ||
         config.headers !== undefined ||

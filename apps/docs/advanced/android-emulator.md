@@ -7,7 +7,13 @@ description: The in-app Android emulator pane for booting, watching, and driving
 The Android emulator dock tab is a device pane bound to the owning Code
 thread and checkout. It is a separate destination from the iOS Simulator: it
 uses the Android SDK's `emulator` and `adb`, not Xcode, `simctl`, or the iOS
-device helper.
+device helper. When the desktop has the managed `serve-avd` tool, the pane
+uses it for the live picture and for tap, swipe, text, Home, Back, and Lock
+on an emulator `adb` already reports as booted (`emulator-<port>`). Boot
+still starts the emulator binary. If the stream is missing or shows no frame,
+the pane keeps `adb exec-out screencap` and `adb shell input`. Do not start
+`serve-avd` in a way that boots an AVD. The pane attaches only to a serial
+that is already running.
 
 ## What you can do
 

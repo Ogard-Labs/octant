@@ -102,6 +102,8 @@ export function createRecordedAgentRunContextSnapshotPort(options: {
     readonly runId: AgentRunId;
     readonly contextSnapshotId: AgentRunContextSnapshotId;
   }) => ReadonlyArray<ProviderContextBlock> | undefined;
+  /** The reply a completed run left; absent when it was never recorded or was purged. */
+  readonly readResultText?: (runId: AgentRunId) => string | undefined;
 }): AgentRunContextSnapshotPort {
   return {
     resolve: ({ runId, contextSnapshotId }) => {
@@ -110,10 +112,46 @@ export function createRecordedAgentRunContextSnapshotPort(options: {
       if (String(run.routingReceipt.contextSnapshotId) !== String(contextSnapshotId)) {
         return undefined;
       }
-      if (run.routingReceipt.admittedContextBlocks === undefined) return [];
-      return options.readAdmittedContext({ runId: run.id, contextSnapshotId });
+      const admitted =
+        run.routingReceipt.admittedContextBlocks === undefined
+          ? []
+          : options.readAdmittedContext({ runId: run.id, contextSnapshotId });
+      if (admitted === undefined) return undefined;
+      const dependencies = dependencyResultBlocks(run, options);
+      return dependencies === undefined ? undefined : [...admitted, ...dependencies];
     },
   };
+}
+
+/**
+ * What a run's dependencies produced, one block each, so a run started by its
+ * graph works from its predecessors' replies. A dependency whose reply is gone
+ * fails the resolution closed: the run would otherwise start without the very
+ * input it was told to wait for.
+ */
+function dependencyResultBlocks(
+  run: AgentRun,
+  options: {
+    readonly getById: (runId: AgentRunId) => AgentRun | undefined;
+    readonly readResultText?: (runId: AgentRunId) => string | undefined;
+  },
+): ReadonlyArray<ProviderContextBlock> | undefined {
+  const blocks: ProviderContextBlock[] = [];
+  for (const dependencyId of run.dependsOn ?? []) {
+    const dependency = options.getById(dependencyId);
+    const text = options.readResultText?.(dependencyId);
+    if (dependency === undefined || text === undefined) return undefined;
+    blocks.push({
+      kind: "work-item",
+      text: [
+        `Result of ${dependency.role} run ${String(dependency.id)}, which this task waited for.`,
+        `Its task: ${dependency.task.slice(0, 600)}`,
+        "Its reply:",
+        text,
+      ].join("\n"),
+    });
+  }
+  return blocks;
 }
 
 export interface AgentRunSessionRuntimeOptions {

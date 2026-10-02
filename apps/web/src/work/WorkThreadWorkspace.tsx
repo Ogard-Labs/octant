@@ -1,4 +1,3 @@
-import { useComposerTip } from "../composer/useComposerTip";
 import {
   BrowserUseMention,
   ComputerUseMention,
@@ -77,6 +76,7 @@ import {
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
   ThreadMentionChips,
@@ -101,6 +101,7 @@ import {
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
+import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import {
@@ -291,6 +292,11 @@ export interface WorkThreadWorkspaceProps {
   readonly extensionClient?: ExtensionClient;
   readonly browserAvailable?: boolean;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /** The Canvas cards the host lists for this thread, each time they are read. */
+  readonly onCanvasReferencesObserved?: (
+    threadId: string,
+    cards: ReadonlyArray<CanvasThreadReferenceCard>,
+  ) => void;
   readonly onThreadUpdated?: (thread: WorkThread) => void;
   readonly draftStore?: ComposerThreadDraftStore;
 }
@@ -553,14 +559,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
   });
-  const tip = useComposerTip({
-    scopeKey: String(props.threadId),
-    files: props.fileMentionClient !== undefined,
-    threads: threadMentions.composer !== undefined,
-    commands: slash.commandIds,
-    browser: browser.available,
-    computer: computer.available,
-  });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
     draft: prompt,
@@ -586,6 +584,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     steered.pending === undefined &&
     projectId !== undefined &&
     (props.turnClient !== undefined || props.mutationClient !== undefined);
+  const settledTurnCount = turns.filter(
+    (turn) => turn.status !== "accepted" && turn.status !== "running" && turn.status !== "waiting",
+  ).length;
   const transcriptRows = useMemo<ReadonlyArray<WorkTranscriptRow>>(() => {
     const rows: WorkTranscriptRow[] = [];
     if (turns.length === 0) rows.push({ kind: "empty", key: "empty" });
@@ -1150,9 +1151,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         computer.consume(computerUseSelection);
         textareaRef.current?.focus();
         return true;
-      } catch {
+      } catch (error) {
         await discardUploadedAttachments();
-        setErrorMessage("The Work turn could not be started.");
+        setErrorMessage(
+          error instanceof WorkTurnClientFailure
+            ? error.message
+            : "The Work turn could not be started.",
+        );
         return false;
       } finally {
         setCreating(false);
@@ -1634,6 +1639,33 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         }
       />
 
+      {props.canvasClient === undefined ? null : (
+        <div className="thread-column">
+          <CanvasThreadReferenceCardList
+            client={props.canvasClient}
+            mode="work"
+            {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
+            {...(props.onCanvasReferencesObserved === undefined
+              ? {}
+              : {
+                  onCardsObserved: (cards: ReadonlyArray<CanvasThreadReferenceCard>) =>
+                    props.onCanvasReferencesObserved?.(String(props.threadId), cards),
+                })}
+            projectId={projectId ?? null}
+            // A settled turn may have authored a Canvas; re-read the cards so
+            // the document appears without reopening the thread.
+            refreshKey={settledTurnCount}
+            threadId={props.threadId}
+          />
+        </div>
+      )}
+
+      <ExtensionToolApprovalPrompt
+        className="thread-column"
+        client={props.extensionClient}
+        threadId={String(props.threadId)}
+        turnActive={turnRunning}
+      />
       {pendingBrowserApproval === undefined ? null : (
         <section
           aria-label="Browser origin approval"
@@ -1787,7 +1819,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               if (creating || completionLocked) return;
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
-            placeholder={turnRunning ? "Send the next message…" : tip}
+            placeholder={turnRunning ? "Send the next message…" : "Reply…"}
             ref={textareaRef}
             rows={4}
             value={prompt}

@@ -46,6 +46,30 @@ describe("the threads a Code start screen offers to continue", () => {
     ]);
   });
 
+  it("keeps running threads out of Continue and chooses them before its limit", async () => {
+    const running = (title: string, at: string) =>
+      ({ title, lastMeaningfulActivityAt: at, executing: true }) as unknown as CodeBoardCard;
+    const loadBoard = vi.fn(async () =>
+      view([
+        running("Running but quiet", "2026-08-01T09:00:00.000Z"),
+        card("Sixth", "2026-09-02T09:00:00.000Z"),
+        card("Fifth", "2026-09-03T09:00:00.000Z"),
+        card("Fourth", "2026-09-04T09:00:00.000Z"),
+        card("Third", "2026-09-05T09:00:00.000Z"),
+        card("Second", "2026-09-06T09:00:00.000Z"),
+        card("First", "2026-09-07T09:00:00.000Z"),
+      ]),
+    );
+    const { result } = renderHook(() => useContinueCards(loadBoard, 0));
+
+    await waitFor(() => expect(result.current.kind).toBe("ready"));
+    const ready = result.current.kind === "ready" ? result.current : undefined;
+    expect(titles(ready?.running ?? [])).toEqual(["Running but quiet"]);
+    expect(ready?.runningTotal).toBe(1);
+    expect(titles(ready?.cards ?? [])).not.toContain("Running but quiet");
+    expect(ready?.cards).toHaveLength(6);
+  });
+
   it("reads the board once while its loader keeps its identity across rerenders", async () => {
     const loadBoard = vi.fn(async () =>
       view([card("Ai slop callouts", "2026-09-06T01:00:00.000Z")]),

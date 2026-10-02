@@ -36,8 +36,11 @@ Projects support the following operations:
 - **Rename**: change the Project display name.
 - **Pin/Order**: pin a Project to the sidebar and reorder pinned Projects.
 - **Archive/Restore**: archive a Project to reduce sidebar clutter. Archived Projects retain all data and can be restored.
-- **Search**: filter the current mode's sidebar threads by title or by their
-  Project, Recents, or Unfiled label.
+- **Search**: click the magnifier at the top of the sidebar to open **Filter
+  threads**, then type to filter the current mode's threads by title or by their
+  Project, Recents, or Unfiled label. Press Enter to search every thread instead,
+  or Escape to close it. **Settings ›
+  Sidebar › Thread filter** can keep the field always shown.
 - **Relink**: when a bound root becomes unavailable (moved or removed), the Project shows `Relink required`. Use audited relink to point to the new location. Root availability is observed at bootstrap and is not journaled, so relinking does not rewrite durable history.
 - **Remember Full access** (Code Projects): `octant project access <name> full-access` on the host lets new Code threads that choose Remember for this Project start with Full access without a per-thread confirmation, or raise an existing thread to it; `octant project access <name> approval-gated` returns to the default.
 
@@ -48,6 +51,25 @@ Chat and Work Project overviews can start a thread directly. Their model pickers
 ## Project hierarchy
 
 The sidebar displays a mode-aware Project hierarchy. Each mode group lists its Projects, and the active Project is highlighted. Threads belong to exactly one Project. A cross-Project tab drop does not silently change authority; it offers to open the thread in a new window instead.
+
+## Count tiles and the thread list
+
+Four tiles at the top of the sidebar count what matters right now: **Inbox**
+(threads that need you), **Running**, **To review** (finished turns you have
+not opened yet), and **Done today**. Click a tile to go there: Running opens
+the Board (the Activity feed in Chat), To review opens the Activity feed, and
+Done today opens the Completed shelf. Turn the tiles off in **Settings ›
+Sidebar › Count tiles** to get the plain Inbox and Board rows back.
+
+**Hide sidebar** shrinks the sidebar to a narrow rail of icons: the modes, the
+count tiles with their numbers, your Projects as letter tiles, the Activity
+feed, and Settings. Click **Show sidebar** at the top of the rail to bring it
+back. Choose **Hidden** in **Settings › Sidebar › When collapsed** to hide it
+completely instead.
+
+The switch beside the Project view picker chooses how threads are listed:
+**Projects** groups them under their Project, **Activity** lists them by
+recency.
 
 ## What a thread row shows
 

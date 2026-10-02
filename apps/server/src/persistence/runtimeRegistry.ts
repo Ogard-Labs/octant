@@ -63,6 +63,7 @@ import {
   ProjectLifecycleChanged,
   ProjectOrderChanged,
   ProjectProviderPolicyChanged,
+  ProjectColorChanged,
   ProjectRenamed,
   ProviderDefaultsUpdated,
   ProviderCatalogUpdated,
@@ -132,6 +133,7 @@ import {
   SpendCeilingRaised,
   SpendCeilingCleared,
   SpendCeilingOverrunRecorded,
+  SpendTurnRecorded,
   AGENT_MESSAGE_EVENT_NAMES,
   AgentMessageSent,
   AgentMessageDelivered,
@@ -255,6 +257,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     })
     .register("project.created@1", 1, ProjectCreated)
     .register("project.renamed@1", 1, ProjectRenamed)
+    .register("project.color-changed@1", 1, ProjectColorChanged)
     .register("project.order-changed@1", 1, ProjectOrderChanged)
     .register("project.lifecycle-changed@1", 1, ProjectLifecycleChanged)
     .register("project.binding-relinked@1", 1, ProjectBindingRelinked)
@@ -398,7 +401,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(SPEND_CEILING_EVENT_NAMES.set, 1, SpendCeilingSet)
     .register(SPEND_CEILING_EVENT_NAMES.raised, 1, SpendCeilingRaised)
     .register(SPEND_CEILING_EVENT_NAMES.cleared, 1, SpendCeilingCleared)
-    .register(SPEND_CEILING_EVENT_NAMES.overrunRecorded, 1, SpendCeilingOverrunRecorded);
+    .register(SPEND_CEILING_EVENT_NAMES.overrunRecorded, 1, SpendCeilingOverrunRecorded)
+    .register(SPEND_CEILING_EVENT_NAMES.turnRecorded, 1, SpendTurnRecorded);
   for (const eventName of RETIRED_EVENT_NAMES) {
     events.register(eventName, 1, RetiredEventPayload);
   }

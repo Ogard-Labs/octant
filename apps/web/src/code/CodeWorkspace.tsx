@@ -152,6 +152,11 @@ export interface CodeWorkspaceProps {
   readonly onOpenSettings?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /** The Canvas cards the host lists for this thread, each time they are read. */
+  readonly onCanvasReferencesObserved?: (
+    threadId: string,
+    cards: ReadonlyArray<CanvasThreadReferenceCard>,
+  ) => void;
   /**
    * Opens a Code thread this workspace started, such as a fork of the one in
    * view. Absent on a surface with no tab of its own.
@@ -215,6 +220,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           : { onCreatePullRequest: () => props.onOpenSurface?.("code-pr") })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
+        {...(props.onCanvasReferencesObserved === undefined
+          ? {}
+          : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
         {...(props.onOpenCodeThread === undefined
           ? {}
           : { onOpenCodeThread: props.onOpenCodeThread })}

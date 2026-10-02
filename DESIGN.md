@@ -21,7 +21,9 @@ Read the relevant section rather than the entire document:
 
 Octant is a local-first desktop workspace for supervising Chat, Work, and Code
 threads, providers, Projects, agents, changes, and delivery. Its visual north
-star is a quiet graphite workbench:
+star is a calm graphite workbench that shows what is happening at a glance —
+counts, running work, and whose thing is whose — and turns vivid when a person
+asks for it (Settings › Appearance › Style):
 
 - One active thread, board, Project overview, or Project-level list is the
   primary work surface.
@@ -36,14 +38,19 @@ star is a quiet graphite workbench:
   pane. A capable region with no selected tool shows a compact launcher; a pane
   with no valid tool exposes no dock toggle. Neither region fabricates a tab or
   repeats another pane's content.
-- Hierarchy comes from typography, spacing, hairline borders, and selection
-  fills. Colour is scarce and semantic.
+- Hierarchy comes from typography (size first, then weight), spacing, cards
+  for discrete objects, and selection fills. In the Default style the chrome is
+  monochrome; colour names identity (a Project, a provider, a count tile under
+  Vivid) and never stands in for status, which keeps its own warning, failure,
+  and diff roles.
 - Controls are familiar, compact, keyboard reachable, and honest about
   loading, stale, unavailable, permission, and error states.
 
-Avoid dashboard walls, decorative gradients, neon developer styling, permanent
-low-frequency controls, oversized setup cards, pill-shaped everything, and
-invented data. A feature that is not available must explain why and offer the
+Avoid dashboard walls (counts belong in a few tiles, not a grid of them),
+neon developer styling, permanent low-frequency controls, oversized setup
+cards, pill-shaped everything, and invented data. Gradients belong to the
+application ground, to a Vivid tile's face, and to a Project's letter tile;
+chrome stays flat. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground (0091): a first-party picture or a
 person's photo, shown plain or through one still print effect, behind the
@@ -58,10 +65,14 @@ but they do not own a second palette or visual language.
 
 ### Voice
 
-- **Crafted, not vibed.** Hierarchy comes from size and colour, not from
-  weight or capitals. One title per page. Section labels are sentence-case
-  and quiet. Nothing is uppercase except a monospace identifier that already
-  is. Nothing is bold except the page title.
+- **Crafted, not vibed.** Hierarchy comes from size, then weight, then
+  colour — never capitals. One title per page. Section labels are
+  sentence-case and quiet. Nothing is uppercase except a monospace identifier
+  that already is. Weights follow one ladder: 400 for reading text, 500 for
+  labels and controls, 600 for emphasis (section and card titles, counts, the
+  app's name), and 700 only for the page title and the welcome greeting,
+  through the title-only `--oct-weight-title` token the stylesheet check
+  refuses anywhere else.
 - **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
   Product nouns keep their capital (Project, Chat, Work, Code, Environment).
 - **One sentence of help.** A subtitle or row description is one sentence
@@ -88,9 +99,9 @@ essential sits under 12px at the default.
 
 | Role          | Size | Weight | Colour          | Where                                                     |
 | ------------- | ---- | ------ | --------------- | --------------------------------------------------------- |
-| Hero          | 28   | 500    | primary         | Welcome question only (`oct-title--hero`)                 |
-| Title         | 20   | 600    | primary         | One per page (`oct-title`)                                |
-| Section label | 14   | 500    | secondary       | Group heading over a hairline (`oct-section-label`)       |
+| Hero          | 36   | 700    | primary         | Welcome greeting only (`oct-title--hero`)                 |
+| Title         | 28   | 700    | primary         | One per page (`oct-title`)                                |
+| Section label | 14   | 600    | secondary       | Group heading over a hairline (`oct-section-label`)       |
 | Row label     | 14   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
 | Body          | 14   | 400    | primary         | Transcript, paragraphs, controls                          |
 | Detail        | 13   | 400    | secondary       | Subtitle, row description, menu detail (`oct-row-detail`) |
@@ -114,18 +125,34 @@ outlines and halos so selected and expanded fills carry the visible state cue
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 
+Settings › Appearance › Style chooses how much of that palette the chrome
+uses. **Default** is the monochrome described above. **Vivid** lets the
+places that name something carry colour: the welcome greeting, the sidebar's
+count tiles, board column marks, and a Project's accent. Vivid draws every
+hue from the preset's palette roles (`--octant-palette-*`, read through the
+`--oct-vivid-*` aliases in `styles/vivid.css`), so it follows the light or
+dark theme and any tinted preset, and it never recolours a warning, a
+failure, or a diff. The root carries `data-octant-style`; increased contrast
+always publishes `default`. Vivid reads best in the light theme.
+
 ### Shapes and depth
 
 Radius has one number per role, defined once as `--oct-radius-*` in
-`octant.css`: a compact control is 8px, a control or a row 10px, a card, panel,
-menu, or popover 16px. The recipes reach the same numbers through `--radius`,
+`octant.css`: a compact control is 8px, a control or a row 10px, an object
+resting inside a card or well, such as a Settings page's icon tile or a board
+card in its column, 12px (`--oct-radius-inset`), and a card, panel, menu, or
+popover 16px. The recipes reach the same numbers through `--radius`,
 whose `lg` step is the control and whose `xl` step lands on the card's 16px, so
 a menu and the popover beside it share a corner. Welcome composers and
 dialogs stay at 20px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
 bounded by a hairline ring, not lifted; shadow means something that genuinely
 floats — a welcome composer (`--octant-shadow-md`) or an overlay
-(`--octant-shadow-overlay`). Groups, lists, empty states, and headers are
-never cards.
+(`--octant-shadow-overlay`). A card is for a discrete object a person acts on
+as a whole: a count tile, a live running-thread card, an action tile, a board
+card, a provider, a Settings group of rows (see "Page shell"). Plain lists, empty states, and
+headers are never cards. A button shaped like a card asks the shared button
+recipe for its `bare` variant, which draws nothing, and the feature stylesheet
+owns its face; every other button keeps the recipe's paint.
 
 The window frame is the one place cards carry the layout. The sidebar and the
 gutters around the workspace are a single back surface painted in the sidebar's
@@ -178,6 +205,53 @@ Change action, and the pattern dials appear only while the pattern is drawn.
 Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
 
+Every Settings page is built from one kit, in `settings/primitives.tsx`:
+
+- **Page header.** A 42px icon tile (12px radius, a faint 8% ink fill, a
+  hairline) holding the page's own navigation icon at 20px, the page title
+  (`.oct-title`, 28px), a one-line subtitle with the page scope, and an
+  optional ghost action at the far edge (Appearance's "Reset to default").
+  The tile is decoration and hidden from assistive technology; the h1 is the
+  only heading that names the page.
+- **On this page.** A page with three sections or more shows a row of pill
+  links to them under the header. They are links, not headings, so the page's
+  heading outline is unchanged. Sections register themselves with the shell,
+  so one that mounts late joins the row and the row never names one that is
+  not drawn.
+- **Section.** A 14px label in medium weight, an optional one-line
+  description in the secondary ink below it, then one grouped card: the 16px
+  card radius, one hairline, a fill one step above the workspace
+  (`color-mix(in oklab, var(--oct-fg) 3%, var(--oct-bg))`), no shadow. The
+  card never clips: a section keeps `overflow: visible` because its rows hold
+  menus and popovers, so the first and last row round themselves instead.
+  Rows are divided by a hairline inset 16px from the card's edges. A section
+  label may carry ghost actions that act on the whole section on its own
+  line; a primary never lives in a section head.
+- **Row.** At least 52px tall with a 12px by 16px inset: a 14px row label and
+  a one-sentence 13px detail on the left, the control at the right edge. A
+  compound editor stacks its control under the label. Single-line controls
+  stay 28px tall.
+- **Saved.** Settings save as you change them. A slot of fixed width at the
+  right of the top rail shows a check and "Saved" for about two seconds once
+  a change resolves (a shell setting or a theme write), and holds its place
+  when empty so nothing shifts. A host that refuses a change shows nothing.
+  A Save button exists only for compound forms: a provider's connection
+  details and the harness model slots.
+- **Destructive.** A page's destructive group (logging out of GitHub,
+  disconnecting Linear, purging thread history, revoking paired devices) is
+  its own section, last on the page, whose card holds the destructive row
+  with the destructive button variant. The danger is carried by the
+  placement and the confirm control; the label keeps its ink.
+- **Rail.** Each page keeps its icon (16px) in the navigation rail, and
+  Device tools has its own, apart from Computer use. Search is an icon beside
+  the "Settings" heading that reveals the field; Cmd/Ctrl+F reveals and
+  focuses it, the field stays mounted while folded away, and it folds back
+  when it loses focus empty. Below the narrow breakpoint the field is always
+  shown.
+
+This kit reverses the earlier open-row layout, in which a section was a label
+over hairline rows on the page ground, at the maintainer's request.
+
 ### Content tabs
 
 Workspace content and dock tool tabs share a compact 26px recipe for height,
@@ -186,7 +260,12 @@ width; inactive controls appear on hover or keyboard focus and stay visible on
 touch devices. Thread tabs retain provider marks when enabled. The pane's drag
 handle stays quiet: an environment mark (a 20px neutral tile, laptop for this
 computer, cloud for another host), the thread title at the sm step in medium
-weight, and a pill chip naming the Project in meta ink — no provider mark. See
+weight, a pill chip naming the Project in meta ink, and in Code a second
+chip naming the checkout's branch in the mono identifier face — no provider
+mark. The two chips shrink before the title does. While the host projects the
+thread as executing, a "Running" pill with a small spinner follows the chips.
+The host reports that a turn is executing but not when it began, so the pill
+names the state and claims no elapsed time. See
 [Workspace](docs/design/workspace.md).
 
 ### Welcome and composer
@@ -220,27 +299,66 @@ matching project binding revision; missing metadata never borrows another root.
 The strip stays mounted while metadata loads, and full paths are available in
 tooltips. Code retains its checkout, branch, diff, and pull-request controls.
 
-Chat, Work, and Code open on the same screen: the hero question and one
-raised composer. The composer is prompt first, four lines tall before it
+Chat, Work, and Code open on the same screen: a greeting and one raised
+composer. The hero says only the greeting for the hour and the person's name
+("Good evening, Henrik", the hero role). One quiet line under it, at the
+detail step in muted ink, gives the date in the person's locale, then "N
+running" and "N waiting for your review", with a zero count left out; Chat,
+which counts nothing, shows the date alone. The question each mode used to ask
+in the heading lives in the composer's placeholder instead ("Ask anything…",
+"Describe the work…", "Describe the change…"), and the message field keeps its
+accessible name. The composer is prompt first, four lines tall before it
 grows; its toolbar row holds how the thread runs (attach and image on the
 left; model and access on the right, next to send). Where the thread runs
-(Project, base branch, checkout, Environment, repository) rides in a quiet
-row immediately above the card, so the composer stays a single object.
-The row wraps rather than grows: a control that needs a list ("Create
-from…") floats over the page. Nothing about delivery is asked up front; it
-is derived from the row and shown on the thread once it exists.
+(Project, base branch, checkout, Environment, repository) is the first row
+inside the card, above the prompt, as small bordered chips on a faint fill
+(the `--oct-radius-sm` step), so the composer stays a single object. The chip
+is painted on the plain element that holds each control, never on the shared
+trigger inside it. The row wraps rather than grows: a control that needs a
+list ("Create from…") floats over the page. A thread's own follow-up
+composer keeps its context strip beneath the card. Nothing about delivery is
+asked up front; it is derived from the chips and shown on the thread once it
+exists.
+
+Under the composer, Work and Code start screens offer a row of action tiles and
+then a Running now strip, both on the composer's measure and ahead of Code's
+prompt suggestions, so a running thread is never under the fold. The tiles are
+always a three-column grid, one column under 560px, so one or two tiles keep a
+tile's width instead of stretching across the row; a detail line wraps to a
+second line before it is cut. A tile is a card
+button: a 36px icon square, the action as a row label, and one detail line.
+Code offers **Add a folder** (Bind a repository as a Project), **Open
+terminal** (A shell on this computer, in Octant) once a Project is selected,
+and **Review N changes** (Finished threads that wait for you) when N is above
+zero, where N counts unread threads that are not running or rested, the
+sidebar's To review rule. Open terminal starts a Project terminal and pins it in
+Zen, the only place one lives. Work offers the same tiles without a terminal,
+because Work has no shell. Review opens the Inbox. Running now is a section
+label with an Open board link and up to four cards, one per executing thread:
+provider mark, title, a small spinner, how long ago the thread last moved, a
+Project chip, in Code a mono branch chip, and the host's latest activity line
+in a mono well. The host keeps no turn start time on the board or in
+navigation, so a card says "Active 4m ago" rather than an elapsed time, and a
+fact the host does not report is left out rather than invented. Running
+threads show here instead of in Continue, so one thread is not listed twice.
+Each part leaves when it has nothing to show. Under the Vivid style the tiles'
+icon squares take the blue, orange, and purple palette hues. Code's five prompt
+suggestions are one compact row of label-only chips under Running now, like
+Chat's Write, Learn, Plan, and Explore starters; the prompt rides as the chip's
+tooltip and description and fills the composer when chosen, nothing more.
 
 First-run setup is optional from its first step. Skipping preserves settled answers,
 waits for pending writes, and grants no authority. Profile editing has its own
-Personal settings destination. Code suggestions keep their full descriptions
-visible; Continue retains compact recent-task rows and their status and Git cues.
+Personal settings destination. Continue retains compact recent-task rows and
+their status and Git cues.
 Empty Code entry offers folder setup and a direct route to Code settings.
 A Work or Code pane with no thread and no Project asks one centred question
 ("Pick a folder to work in"), says in one sentence what choosing a folder
 means, and offers Choose a folder… as the primary action with starting
 without one beside it; once a Project exists the new task leads instead.
-Start-screen composers ask in plain words ("Ask anything…") rather than
-showing a feature tip; tips belong to a thread's follow-up composer.
+Start-screen composers ask in plain words ("Ask anything…"); a thread's
+follow-up composer says "Reply…" in Chat, Work, and Code, and shows no rotating
+tip.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
 grouping, search, Favorites, and Recent. Its reasoning control shows the full track,
@@ -250,7 +368,11 @@ supported. Existing thread selections remain authoritative.
 
 The screen sits on the application ground (0091, 0129), set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, or the
-plain page (the default). Effect: the picture is shown as it is, pixelated, or
+plain page. A fresh install starts on Soft glow, one of three Gradient
+pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
+print, so the ground follows the window's scheme; the stylesheet swaps them
+by `data-octant-theme-mode`. A settings row written before the ground
+existed replays as the plain page it showed. Effect: the picture is shown as it is, pixelated, or
 dithered, at a chosen pixel size and colour count; an animated picture is
 printed from its still frame. Nothing is drawn over the picture and nothing
 moves across it: the drawn dot pattern and its pulse and wave motions read as
@@ -560,8 +682,16 @@ focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
-rail clamp or drawer. The workspace sidebar supports resizing and may collapse
-completely while leaving Show sidebar and New thread in the native title rail.
+rail clamp or drawer. The workspace sidebar supports resizing. Hide sidebar
+collapses it to a 76px icon rail by default: Show sidebar, New thread, and
+Search at the top, then the modes, the count tiles as icons with their counts
+as badges, the remaining destination rows, up to six Project letter tiles with
+a Projects button for the rest, the Activity feed, and Settings at the foot.
+Every rail control names itself in its tooltip and accessible name. Settings ›
+Sidebar › When collapsed can choose Hidden instead, which removes the sidebar
+completely and leaves Show sidebar and New thread in the native title rail.
+The rail never appears below the drawer breakpoint, where a collapsed sidebar
+is a closed drawer.
 The right dock defaults to 320px when open. A fresh window starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is 38px in the native host and the status bar is 26px.
@@ -570,8 +700,9 @@ then the title) on the page ground, never a raised card: a card with a title
 and a sentence reads as a finished empty state.
 
 Navigation panes stay compact hairline rails. Routine form layouts stay open
-and unshadowed; setup objects, settings sections (0109), and cards use the
-card recipe (`OctantCard`), which draws a hairline ring rather than a shadow —
+and unshadowed; setup objects and cards use the card recipe (`OctantCard`), and
+a Settings section's group is the same hairline-ringed shape in its own fill,
+and neither draws a shadow —
 a card sits in the page, and shadow is reserved for something that floats
 above it (0090). Welcome composers keep their raised frame.
 Chat, Work, and Code welcome composers share the `.composer` frame (20px,
@@ -636,8 +767,8 @@ reading above it and both ends named below. Popovers, menus, dialogs, and hover 
 the floating surface and the overlay shadow, and have exactly one 1px hairline
 edge: the overlay shadow carries it for menus and popovers, and the shared
 dialog draws it as a border. A feature stylesheet sizes and places a popup and
-never sets its fill, border, or shadow. Environment and inline Settings sections remain
-flat on their owning surface. Frosted material is limited to native/optional sidebar
+never sets its fill, border, or shadow. Environment stays flat on its owning surface, and a
+Settings section is a hairline-ringed card on the page, not a floating object. Frosted material is limited to native/optional sidebar
 translucency and the floating activity picture-in-picture; reduced
 transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
 
@@ -719,9 +850,13 @@ keeps its own dither in Settings. Escape closes the open panel and only leaves
 Zen when none is open. Pinning shows no notice: the card that arrives says the
 same thing, and the notice landed on top of it.
 
-The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
-available as a labeled selector, compact list, or icon presentation according
-to the user's setting. Code and Work keep separate Project View sets. The
+The app has three server-enforced modes—Chat, Work, and Code—shown as two:
+**Work**, which lists Chat and Work threads together and whose new-thread
+composer opens with a Chat / In a folder switch in its context tray, and
+**Code**. Work reopens on the kind last used. Mode switching is available as a
+labeled selector, compact list, or icon presentation according to the user's
+setting; with two modes the icon presentation shows the labels instead of
+icons in a faint tray after a larger "Octant", so the header reads Octant [Work | Code]. Code and Work keep separate Project View sets. The
 sidebar keeps Projects as a first-class destination alongside the active mode's
 compact thread list. The Projects directory and the selected Project overview
 occupy the main workspace in turn, following the
@@ -741,21 +876,50 @@ alone on its line, and the shown facts on one line beneath it in a fixed order
 (Project, pull request, branch, then the age at the end); with no facts shown
 the age sits beside the status instead of opening a line of its own. Thread rows
 are not indented under their Project, so every row's fill sits the same
-distance from both edges of the sidebar. A hovered row takes the soft ink wash and the row
+distance from both edges of the sidebar. In Code, a Project whose threads run
+in two or more checkouts nests them under one heading per checkout, primary
+checkouts first: a branch glyph, the branch in a small mono chip, and a quiet
+"Primary checkout" or "Worktree" label. The heading is inert text, not a
+button, so keyboard focus skips it; its threads take one more step of indent on
+their content, never on their fill, and drop the branch fact the heading already
+states. A Project with a single checkout shows no heading. The Activity feed
+stays flat. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
-being there. Provider identity remains at the leading edge. One fixed trailing
+being there. Provider identity remains at the leading edge. A Project row leads with a 20px
+rounded letter tile: the Project's first letter, white, on the colour the person
+picked from the theme palette, or a neutral tile when none is set. The same tile
+heads the Project overview, where it is the colour picker; the row's actions menu
+offers Colour with a No colour choice, and an archived Project cannot change it.
+The colour is identity, never status: it never stands in for a warning, a
+selection, or an activity mark. One fixed trailing
 status position shows a working spinner, an attention symbol, a clock when a
 snooze ends, or a neutral unread dot, in that priority order. Its accessible
 label and hover details retain overlapping states; a row never renders a
 second activity dot or a separate "Woke" label. A list longer than eight rows folds behind one quiet "Show
 more (n)" row that becomes "Show less"; the active thread stays visible while
-folded. Keyboard focus uses neutral fill and text emphasis. Project View and
+folded. Under checkout headings each checkout folds its own list, so a worktree's
+threads are never hidden behind the primary checkout's Show more. Keyboard focus uses neutral fill and text emphasis. Project View and
 Project Overview are real features, not
 decorative shortcuts.
 
-Primary sidebar destinations are New thread, Board, and Pull requests
-when valid for the active mode. The destinations a person placed under Menu
+The sidebar header carries the mode switcher, Search, and New thread (New
+chat in Chat, New task in Work and Code); the New thread row no longer
+repeats it. Under the header sit four count tiles in a 2×2 grid: Inbox (the
+threads that need the person), Running (threads the host projects as
+executing), To review (finished turns not opened since), and Done today
+(threads completed since local midnight). Each tile is one button whose name
+carries its count ("Running, 2"); Inbox opens the Inbox, Running opens the
+Board (the Activity feed in Chat, which has no board), To review opens the
+Activity feed, and Done today opens the Completed shelf. With the tiles on,
+the Inbox and Board rows are left out because their tiles go to the same
+place. Settings › Sidebar › Count tiles turns them off and brings the rows
+back. Tiles are neutral faces in the Default style; under Vivid each takes a
+palette hue, as a solid face with primary-foreground text in the light theme
+and as a tint with a coloured count in the dark one.
+
+Primary sidebar destinations are Board and Pull requests when valid for the
+active mode. The destinations a person placed under Menu
 only wait in a More row that closes the destination list — an ellipsis opening
 a popup beside the rail with those destinations and Customize sidebar; the
 setting that turns the More row off returns them to the bottom-left identity
@@ -763,36 +927,38 @@ menu. The identity menu owns Settings, Navigator, Agents, Providers, Usage,
 Plugins, Automations, Artifacts, and Zen entry points. The account menu opens
 above its identity row, aligned to the
 row’s leading edge. Search is a compact in-place filter for the current mode's visible
-threads, with a command-style overlay available for broader actions.
+threads: the header's Search icon opens a Filter threads field under the
+header, Escape or its close control clears and hides it, and Settings ›
+Sidebar › Thread filter can keep the field always shown. Enter in the field
+hands its text to the command-style overlay, which searches every thread of
+the mode; the overlay also stays in the command palette. The list's two
+arrangements, the Project tree and the Activity feed, are a visible
+Projects/Activity switch on the row the Project view picker uses, not an icon
+in the header.
 
-Settings is a grouped form page. The shared resizable navigation rail and
-search remain fixed while one centred, bounded 920px reading column scrolls.
-A 32–64px workspace gutter protects the content at narrower widths. The page
-title, quiet section captions, and primary field labels have distinct roles;
-sections follow a consistent 28px rhythm. Navigation groups use quiet
-sentence-case labels without hairlines between groups. A section is an open object: its content is one
-hairline-separated row list on the page ground, while the label and its one-line
-description remain outside the list. Discrete editors and protected actions may
-retain a bounded surface when their hierarchy requires it.
-Everything inside takes the section's inset, including content that is not a
-row. A section keeps `overflow: visible`, because its rows hold menus and
-popovers that have to escape it. Keybindings have their own destination and raw
-JSON stays behind an advanced disclosure. Inline profile and provider editors keep
-their aligned row edges (0096), now measured from the section's inset rather
-than the page's. Ready providers open
-onto a bounded model list with search, shown counts, and shared visibility
+Settings is a grouped form page. The shared resizable navigation rail
+stays fixed while one centred, bounded 920px reading column scrolls. A 32–64px
+workspace gutter protects the content at narrower widths. The page title,
+section labels, and row labels have distinct roles; sections follow a
+consistent 28px rhythm. Navigation groups use quiet sentence-case labels
+without hairlines between groups. A section is a label and its one-line
+description over one grouped card of hairline-divided rows (see "Page shell"
+for the kit). Discrete editors and install reviews keep their own boundaries
+inside a section. Everything inside takes the card's 16px inset, including
+content that is not a row. Keybindings have their own destination and raw JSON
+stays behind an advanced disclosure. Inline profile and provider editors keep
+their aligned row edges (0096), measured from the card's inset. Ready providers
+open onto a bounded model list with search, shown counts, and shared visibility
 switches. Routine connection diagnostics and capabilities use a separate
-disclosure; setup and authentication guidance remains visible. Install reviews, visual
-theme previews, and confirmation dialogs retain their discrete boundaries. A destructive group is an open section at the end of
-its page, marked by that placement and by its confirm control, not by heading
-colour or a card. Labels and descriptions align left, controls align
-right, and compound editors may expand below. A section label may carry the
-ghost actions that act on the whole section on its own line; a primary never
-lives in a section head. A row's "more" (a custom font stack, network
-details, what an update check sends) sits behind one `.settings-disclosure`
-recipe: a 12px summary with the app's chevron, never the browser's marker.
-Loading and status lines are one quiet sentence; only an error keeps a box.
-Essential labels and explanatory
+disclosure; setup and authentication guidance remains visible. Visual theme
+previews and confirmation dialogs retain their discrete boundaries. A
+destructive group is its own section at the end of its page, marked by that
+placement and by its confirm control, not by heading colour. Labels and
+descriptions align left, controls align right, and compound editors may expand
+below. A row's "more" (a custom font stack, network details, what an update
+check sends) sits behind one `.settings-disclosure` recipe: a 12px summary with
+the app's chevron, never the browser's marker. Loading and status lines are one
+quiet sentence; only an error keeps a box. Essential labels and explanatory
 text are at least 12px at the default interface scale. Every control uses the
 owned Octant/shadcn adapter, inherits the interface typography projection, and
 either saves immediately or uses a compact Save action for a compound form.
@@ -807,9 +973,19 @@ with the current selection in the row and the searchable catalog in a bounded
 popup. Unconfigured defaults say Choose model.
 
 Operational settings use progressive disclosure. Provider and skill lists lead
-with compact readiness counts. Provider rows show identity, one effective
-status, details, and enablement; ordering controls appear only in an explicit
-Reorder mode. Skill rows show the source class and one effective state;
+with compact readiness counts. A provider is a row card on the Settings kit:
+a 48px rounded logo tile (the licensed bundled mark, or a monogram when there is
+none, never an approximation of a brand mark), the name in the row-label role,
+the maker and runtime in meta ink, a state line, and the details chevron and
+enable switch at the trailing edge. Cards sit two to a row, one to a row under
+900px, and a card whose details are open takes the whole row. The state line
+reads from a dot that carries the state without colour: a filled ink dot is
+ready, a ring in ink needs setup or a sign-in, a muted ring is off or not
+checked, and a failure keeps its red role. Only under Vivid does ready turn the
+palette's green and setup the palette's orange. The detected, supported-but-not-
+detected, and other groups are Settings sections; the readiness summary is the
+label's description. Ordering controls appear only in an explicit Reorder mode.
+Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
 input, output, and measurement quality. Reasoning, cache, execution time, and
@@ -820,7 +996,10 @@ remaining percentage and an accessible meter, followed by its reset countdown.
 Account, model, and provider-instance scopes remain distinct. An elapsed reset
 shows Awaiting updated limits until a fresh reading arrives; it never implies
 refilled capacity. Provider cards use the shared surface typography and tokens
-and stack at narrow widths.
+and stack at narrow widths. Inside Settings, Usage has no title of its own: its
+controls sit above kit sections (overview, token totals, provider limits,
+breakdown), each a label over one card, and the Settings header is the only
+title.
 
 First run is a five-step wizard with a progress rail. Each step is pending,
 current, or completed: the current step is a filled card, completed steps show
@@ -847,8 +1026,19 @@ open in the dock beside the transcript once, the first time they appear: the
 offer never moves focus from the composer, a rewrite never reopens a tab, and a
 tab the person closed stays closed. Document
 reads the file through the same host-authorized open the editor uses and
-renders Markdown with the preview's own viewer. The dock launcher is
-not a second thread switcher. With no open tab, it shows only capability-valid
+renders Markdown with the preview's own viewer. With no open tab, the dock
+opens on a compact thread overview above the tool launcher, three sections
+separated by hairlines and each omitted when the window has nothing to put in
+it: Running now lists the other threads the window knows are working (any mode,
+at most five, newest first, never the thread on screen), each as a spinner,
+title, a neutral Project dot and name, and age, and opens that thread; This
+thread gives label/value rows for Project, Checkout (a mono branch chip, plus
+Worktree when the thread runs in one), Model, Access, and Context (used of
+total with a thin bar, from the composer meter's own source); Changes (Code
+only, from the board's observed changed files, never a stale observation) gives
+the file count with +/- totals and an Open review button for the Review tool.
+Every row is a fact the window already holds; an unknown value is left out, not
+shown as a placeholder. Below it, the launcher shows only capability-valid
 tool rows, grouped under This thread, Workspace, and Devices when more than
 one group has a tool; the head's Add tool action appears once a tab is open, since with
 none open the body is already the list of tools to add. The bottom panel uses
@@ -896,29 +1086,48 @@ is neutral explanatory text rather than a warning callout.
 
 The Board is an operational reading surface with four fixed,
 server-authoritative statuses: Ready, In Progress, Waiting, and Done. All
-four lanes show by default, each named once by mark, label, and count with no
-rule under the head, as a 12px meta label with the count at the lane's
-trailing edge; a Board/List toggle leads the toolbar, and every control on it
+four lanes show by default as soft wells: a faint tint of the text ink (3%)
+over the workspace colour, one soft hairline, the 16px radius, 8px of inner
+padding, and 12px between wells. A well's head names it once by mark, name,
+and count, with no rule under it: the name at the section-label step in the
+secondary ink and the count pinned to the trailing edge in the meta ink. The
+mark is told apart by shape, not hue: Ready a hollow ring, In Progress a small
+turning arc while any card in the column is executing and a filled dot when
+none is, Waiting a filled dot, Done a check. Under the Vivid style the marks
+take palette colours (Ready stays grey, In Progress orange, Waiting purple,
+Done green). A Board/List toggle leads the toolbar, and every control on it
 (the segmented choices, search, Filters, Refresh, View) is one 28px rail
-control. A card is a flat
-hairline-edged object on the card fill: the Project as an eyebrow, the title,
-and one line of what the thread waits on or is doing, active runs and failing
-checks, who runs it, and when it last moved. Checkout, branch, plan, and
+control. A card is a raised object inside its well: the card fill, a hairline,
+the 12px inset radius, and 12px of padding. It carries the Project as an
+eyebrow, the title, and, while the thread is executing, a live line under the
+title (a small turning arc and the latest sub-agent line in the mono meta voice,
+or "Working…" before one reports). Under that come what the thread waits on,
+active runs and failing checks, and each linked pull request as a compact
+preview box (the PR mark and title, then the repository, state, and checks).
+The card ends with a footer row: the provider mark (the same glyph as the
+sidebar's, 16px, named for assistive technology), the worktree branch in a mono
+chip and the diff size in the existing green and red roles (Code only, and only
+when the tree changed), and the age at the trailing edge. Checkout, plan, and
 review facts live on the list view and the thread. Waiting does not become a
 warning wall. Labels and facts use the selected
 interface typography. Thread listing, pull-request snapshot, and per-thread
 runtime reads overlap where independent.
 
-Usage totals and filters are raised cards. Provider create forms, individual
-extension objects, and artifact cards use the same raised recipe; extension and
-skill collection shells remain open. The command palette
+Usage totals sit in the Settings kit's card inside Settings. Provider create
+forms, individual extension objects, and artifact cards use the same raised
+recipe; in Settings, the extension and skill collections are kit cards too, and
+the Installed and Marketplace switch rides the first section's label line. The
+command palette
 groups results and shows a shortcut badge when a row maps to a user-bindable
 chord. Shared dialogs keep the 20px overlay radius and overlay shadow.
 
 The context meter is a circular composer control, not a dock tab: a 16px
-gauge with a full faint track and a 2px round-capped arc filled clockwise from
-twelve o'clock by the used share, in the foreground ink (the theme's warning
-ink from 80%). It opens an opaque 320px popover: a header with the used and
+gauge with a full track and a 2px round-capped arc filled clockwise from
+twelve o'clock by the used share. It is the one composer mark that carries
+colour in every style: the arc is the palette's amber with its track a faint
+step of the same hue, and from 80% the ring turns red, so how full the window
+is reads at a glance. It
+opens an opaque 320px popover: a header with the used and
 maximum figures and share, one 4px segmented bar whose empty track is the free
 space, a breakdown folded behind a chevron each time the popover opens, the
 provider's limits as a name, a reset countdown or weekday, a share, and a thin
@@ -927,10 +1136,10 @@ Usage for a provider the host does not plan). The breakdown lists only the
 parts the data attributes: planned threads show their manifest categories,
 overhead, reserve, and free space; a provider-reported window shows used and
 free, with the thread's input and output totals kept apart because they are
-sums over turns, not parts of the window. Categories are told apart by a
-graded neutral ramp mixed from the foreground and each swatch is named. A limit
-near its cap is marked on its row and in its bar's value text, never by ink
-alone. Unknown or stale data is labeled as such and never rendered as zero.
+sums over turns, not parts of the window. Categories are told apart by palette
+hues (the largest share in blue) and each swatch is named; limit bars fill in
+blue. A limit near its cap is marked on its row and in its bar's value text,
+never by ink alone. Unknown or stale data is labeled as such and never rendered as zero.
 
 The task visualizer is a compact composer-adjacent chip backed by the thread's
 journaled plan. It appears only when a real plan exists, shows proposed review
@@ -1199,7 +1408,7 @@ follows the rendered contracts encoded by their selectors and tests.
 Background refresh preserves already loaded controls and active drafts. Use the
 initial loading view only before a surface has data. Provider and theme feedback
 occupy bounded, scrollable status slots; a changed status must not push the form
-below it. Provider metadata uses fixed columns and shows Checking during probes.
+below it. A provider card's state line keeps its own grid area and shows Checking during probes.
 Last observed model facts are presentation only and never authorize selection
 or execution. Saved Chat/Code revisions reconcile untouched fields without
 remounting the form. Keep deliberate section expansion, text growth, and manual
