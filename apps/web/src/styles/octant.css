@@ -1116,34 +1116,49 @@ input.switch:checked::after {
 /* The Base UI switch adapter (.octant-switch) is sized and coloured here
    rather than by its utility classes: the utility track and thumb left the
    "on" thumb flush with the track's edge under a drop shadow, which read as
-   a clipped half-moon. Track and thumb are the same monochrome pair as
-   input.switch, and the thumb's own shadow is gone. */
+   a clipped half-moon. Off is a quiet track with a hairline edge and a knob
+   that matches the page; on is the filled track with the inverse knob. The
+   earlier off state painted a near-black knob on a pale track, which in
+   light mode read as the active one (Providers & Models, where most switches
+   are off). Neither state carries a drop shadow on the thumb. */
 .octant-switch[data-slot="switch"] {
   width: 38px;
   height: 22px;
   border: 0;
   border-radius: var(--oct-radius-pill);
-  background: var(--oct-border);
-  box-shadow: none;
-  transition: background var(--oct-motion-base) var(--oct-ease-standard);
+  background: var(--octant-control);
+  box-shadow: inset 0 0 0 1px var(--octant-border-strong);
+  transition:
+    background var(--oct-motion-base) var(--oct-ease-standard),
+    box-shadow var(--oct-motion-base) var(--oct-ease-standard);
 }
+/* Focus has no text to underline, so the track takes the fill and edge
+   emphasis the other focusable controls use (0114). */
 .octant-switch[data-slot="switch"]:focus-visible:not([data-checked]) {
   background: var(--octant-control-hover);
+  box-shadow: inset 0 0 0 1px var(--octant-text-primary);
 }
 .octant-switch[data-slot="switch"][data-checked] {
   background: var(--oct-fg);
+  box-shadow: none;
+}
+.octant-switch[data-slot="switch"][data-checked]:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--oct-bg),
+    0 0 0 3px var(--octant-text-primary);
 }
 .octant-switch[data-slot="switch"] > [data-slot="switch-thumb"] {
   width: 16px;
   height: 16px;
   border-radius: var(--oct-radius-pill);
-  background: var(--oct-fg);
-  box-shadow: none;
+  background: var(--oct-bg);
+  box-shadow: 0 0 0 1px var(--octant-border-strong);
   translate: 3px 0;
   transition: translate var(--oct-motion-base) var(--oct-ease-standard);
 }
 .octant-switch[data-slot="switch"][data-checked] > [data-slot="switch-thumb"] {
   background: var(--oct-bg);
+  box-shadow: none;
   translate: 19px 0;
 }
 
