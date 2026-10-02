@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import {
   CANVAS_SCHEMA_VERSION,
+  decodeCanvasActor,
   decodeCanvasVersionId,
   type CanvasDefinition,
   type CanvasId,
@@ -249,7 +250,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           versionId: decodeCanvasVersionId(globalThis.crypto.randomUUID()),
           blockId,
           positions,
-          actor: reviseBase.actor,
+          actor: LOCAL_PERSON,
           expectedSequence,
           schemaVersion: CANVAS_SCHEMA_VERSION,
           issuedAt: decodeUtcTimestamp(new Date().toISOString()),
@@ -629,7 +630,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               </OctantButton>
             </div>
             <CanvasCommentsPanel
-              author={reviseBase.actor}
+              author={LOCAL_PERSON}
               canvasId={props.tab.canvasId}
               definition={definition}
               load={commentsClient.load}
@@ -704,3 +705,14 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     </div>
   );
 }
+
+/**
+ * Comments and drags are the person's, not the agent that made the Canvas.
+ * The host stamps its own local person on both and ignores what is sent; this
+ * is that same identity, so the request no longer claims to be the agent, as
+ * it did when the creating agent's provenance was copied straight in.
+ */
+const LOCAL_PERSON = decodeCanvasActor({
+  kind: "local-user",
+  actorId: "00000000-0000-4000-8000-000000000002",
+});

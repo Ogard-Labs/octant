@@ -172,6 +172,36 @@ describe("CanvasCommentService", () => {
     });
   });
 
+  it("journals a comment and its resolution as the host's person even when the request names an agent", () => {
+    const { service } = fixture();
+    const comments = service();
+    const agent = { kind: "agent", actorId: ids.provider } as const;
+    expect(
+      comments.comment({ ...add(0), author: agent }, context, project, { kind: "host" }),
+    ).toMatchObject({ kind: "accepted", sequence: 1 });
+    expect(
+      comments.comment(
+        {
+          kind: "canvas-comment-resolve",
+          canvasId: ids.canvas,
+          commentId: ids.comment,
+          resolvedBy: agent,
+          expectedSequence: 1,
+          issuedAt: now,
+        },
+        context,
+        project,
+        { kind: "host" },
+      ),
+    ).toMatchObject({ kind: "accepted", sequence: 2 });
+
+    const outcome = comments.comments(canvasId, context, project);
+    expect(outcome.kind === "ready" && outcome.threads[0]?.comment).toMatchObject({
+      author: actor,
+      resolvedBy: actor,
+    });
+  });
+
   it("refuses the second of two comments written against the same sequence", () => {
     const { service } = fixture();
     const a = service();
