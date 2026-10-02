@@ -154,7 +154,7 @@ describe("DraftThreadWorkspace", () => {
       }
     },
   );
-  it("keeps the context pickers above the composer with model controls inside it", () => {
+  it("keeps the context chips as the composer's first row with model controls below the prompt", () => {
     const { container } = render(<DraftThreadWorkspace {...baseProps} />);
     const composer = container.querySelector(".composer");
     const contextBar = container.querySelector(".composer-tray");
@@ -162,15 +162,17 @@ describe("DraftThreadWorkspace", () => {
       screen.getByRole("button", { name: "Provider and model" }).closest(".composer-row"),
     ).not.toBeNull();
     expect(contextBar).not.toBeNull();
-    expect(composer?.contains(contextBar)).toBe(false);
-    expect(contextBar?.compareDocumentPosition(composer as Element)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
+    expect(composer?.contains(contextBar)).toBe(true);
+    expect(
+      contextBar?.compareDocumentPosition(screen.getByRole("textbox", { name: "First message" })),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("renders mode-specific welcome copy for chat", () => {
     render(<DraftThreadWorkspace {...baseProps} />);
-    expect(screen.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+    ).toBeVisible();
     expect(screen.queryByText("Octant Chat")).not.toBeInTheDocument();
     expect(screen.queryByText(/Start a calm, focused conversation/)).not.toBeInTheDocument();
   });
@@ -261,14 +263,60 @@ describe("DraftThreadWorkspace", () => {
 
   it("renders mode-specific welcome copy for code", () => {
     render(<DraftThreadWorkspace {...baseProps} mode="code" />);
-    expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
   });
 
   it("renders mode-specific welcome copy for work", () => {
     render(<DraftThreadWorkspace {...baseProps} mode="work" />);
-    expect(screen.getByRole("heading", { name: "What are we working on?" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+    ).toBeVisible();
     expect(screen.queryByText("Octant Work")).not.toBeInTheDocument();
+  });
+
+  it("offers Open terminal on Code's start screen but never on Work's", async () => {
+    const user = userEvent.setup();
+    const onOpenTerminal = vi.fn();
+    const homeStart = {
+      reviewCount: 2,
+      runningCount: 3,
+      onReview: vi.fn(),
+      running: [],
+      onOpenTerminal,
+    };
+    const { unmount } = render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        homeStart={homeStart}
+        mode="code"
+        onAttachFolder={vi.fn()}
+        projectId={codeProjectId}
+        projects={projects}
+      />,
+    );
+    expect(screen.getByText(/ · 3 running · 2 waiting for your review$/)).toBeVisible();
+    const tiles = within(screen.getByRole("group", { name: "Quick actions" }));
+    expect(tiles.getByRole("button", { name: /Review 2 changes/ })).toBeVisible();
+    await user.click(tiles.getByRole("button", { name: /Open terminal/ }));
+    expect(onOpenTerminal).toHaveBeenCalledExactlyOnceWith(codeProjectId);
+    unmount();
+
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        homeStart={homeStart}
+        mode="work"
+        onAttachFolder={vi.fn()}
+        projectId={workProjectId}
+        projects={projects}
+      />,
+    );
+    const workTiles = within(screen.getByRole("group", { name: "Quick actions" }));
+    expect(workTiles.getByRole("button", { name: /Add a folder/ })).toBeVisible();
+    expect(workTiles.queryByRole("button", { name: /Open terminal/ })).not.toBeInTheDocument();
   });
 
   it("renders intent cards for the active mode", () => {

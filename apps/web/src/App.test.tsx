@@ -3063,7 +3063,9 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "New task" }));
 
     expect(await screen.findByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+    ).toBeVisible();
   });
 
   it("keeps the threads to continue on screen when a new task starts over", async () => {
@@ -3118,7 +3120,9 @@ describe("App", () => {
 
     const kept = screen.getByRole("region", { name: "Continue" });
     expect(within(kept).getByText("Ai slop callouts")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+    ).toBeVisible();
   });
 
   it("keeps the draft composer's chosen Project after a visit to Settings", async () => {

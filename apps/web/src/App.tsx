@@ -185,6 +185,7 @@ import {
 import { useLaunchSession } from "./shell/useLaunchSession";
 import { adoptLegacySidebarRowProperties } from "./shell/sidebarRowProperties";
 import { WorkspaceView } from "./shell/WorkspaceView";
+import type { DraftThreadWorkspaceProps } from "./shell/DraftThreadWorkspace";
 import {
   SidebarThreadDragContext,
   useWorkspaceSurfaceDrag,
@@ -413,6 +414,12 @@ import type {
   SidebarNavigationDescriptorId,
   ThreadProviderIdentity,
 } from "./shell/navigationModel";
+import {
+  reviewWaitingCount,
+  runningCardsFromBoard,
+  runningCardsFromNavigation,
+  runningThreadCount,
+} from "./shell/runningNow";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
@@ -795,6 +802,30 @@ function LaunchedShell(
     if (!zen.active) return;
     void zen.refreshThreads();
   }, [zen.active, zen.refreshThreads]);
+  // A Project terminal lives only as a Zen card, so Open terminal on a start
+  // screen asks Zen to hold it. The card cannot be pinned until Zen is loaded
+  // and active, so the request waits here for that instead of racing the
+  // entry. A request Zen never honours expires rather than opening a shell
+  // the next time the person happens to enter Zen.
+  const [homeTerminalProjectId, setHomeTerminalProjectId] = useState<ProjectId>();
+  // Start screens stay up until Zen is active, so a second click can arrive
+  // while the first entry is pending; only the latest request may expire.
+  const homeTerminalRequest = useRef(0);
+  useEffect(() => {
+    if (homeTerminalProjectId === undefined || !zen.active || zen.space === null) return;
+    setHomeTerminalProjectId(undefined);
+    void addZenProjectTerminal(homeTerminalProjectId);
+  }, [homeTerminalProjectId, zen.active, zen.space]);
+  function openHomeTerminal(projectId: ProjectId): void {
+    const request = ++homeTerminalRequest.current;
+    setHomeTerminalProjectId(projectId);
+    if (zen.active) return;
+    void zen.enterZen().finally(() => {
+      window.setTimeout(() => {
+        if (homeTerminalRequest.current === request) setHomeTerminalProjectId(undefined);
+      }, 3_000);
+    });
+  }
   // A renderer older than the host-backed setting stored each sidebar view's
   // row choice in localStorage. Adopt it once, as soon as the host's settings
   // are in hand: after that a person may have changed the host record, and a
@@ -3793,6 +3824,54 @@ function LaunchedShell(
     workProjectThreads,
   } = navigationModel;
 
+  // Work and Code start screens share one shape: tiles and the threads running
+  // now. Code reads its running cards off the board, which carries the branch
+  // and the host's activity line; Work has no board card to read, so its cards
+  // come from the navigation rows that already say a turn is executing.
+  const homeStart: DraftThreadWorkspaceProps["homeStart"] =
+    activeMode === "code" || activeMode === "work"
+      ? {
+          reviewCount: reviewWaitingCount(
+            activeMode === "code" ? codeProjectThreads : workProjectThreads,
+          ),
+          runningCount:
+            activeMode === "code"
+              ? continueCards.kind === "ready"
+                ? continueCards.runningTotal
+                : 0
+              : runningThreadCount(workProjectThreads),
+          onReview: openInbox,
+          running:
+            activeMode === "code"
+              ? continueCards.kind === "ready"
+                ? runningCardsFromBoard(continueCards.running, {
+                    projectNames: new Map(
+                      codeBoardProjects.map((project) => [String(project.id), project.name]),
+                    ),
+                    providers: new Map(
+                      providerController.instances.map((instance) => [
+                        String(instance.id),
+                        { displayName: instance.displayName, driverKind: instance.driverKind },
+                      ]),
+                    ),
+                  })
+                : []
+              : runningCardsFromNavigation(
+                  workProjectThreads.map(withProviderMark),
+                  new Map(workBoardProjects.map((project) => [String(project.id), project.name])),
+                ),
+          onOpenRunning: (card) =>
+            activeMode === "code"
+              ? selectCodeThread(card.threadId)
+              : selectWorkThread(card.threadId),
+          onOpenBoard: () => {
+            pluginSidebarDestinationActionContext.closeOverlays();
+            pluginSidebarDestinationActionContext.openThreadBoard();
+          },
+          ...(activeMode === "code" ? { onOpenTerminal: openHomeTerminal } : {}),
+        }
+      : undefined;
+
   // What a Code thread row offers on right-click. Each one carries the row's
   // navigation id, which for a Project-backed thread is its Code thread id;
   // the controller refuses anything its bootstrap does not hold rather than
@@ -6626,6 +6705,7 @@ function LaunchedShell(
                       FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true
                     }
                     linearClient={linearClient}
+                    {...(homeStart === undefined ? {} : { homeStart })}
                     codeHome={{
                       continueCards,
                       ...(pendingIssue === undefined ? {} : { pendingIssue }),

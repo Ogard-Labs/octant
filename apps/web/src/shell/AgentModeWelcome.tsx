@@ -1,5 +1,6 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import { FolderOpen, FolderPlus, SquarePen } from "lucide-react";
+import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { OctantButton } from "../ui/base/OctantButton";
 import { WorkKindSwitch } from "./WorkKindSwitch";
 
@@ -11,11 +12,14 @@ export interface AgentModeWelcomeProps {
   readonly onOpenDraft?: () => void;
   readonly providerReady: boolean;
   readonly providerMessage?: string;
+  /** The person's name for the greeting once a Project leads the page with a task. */
+  readonly greetingName?: string | undefined;
+  readonly runningCount?: number | undefined;
+  readonly reviewCount?: number | undefined;
 }
 
 interface Presentation {
   readonly name: string;
-  readonly heading: string;
   readonly lead: string;
   readonly newTask: string;
 }
@@ -24,33 +28,35 @@ interface Presentation {
    choosing it means. The page it replaced opened on "Bind a confined folder"
    and "the harness composer", which named the mechanism instead of the
    outcome. */
+const folderQuestion: Record<AgentModeWelcomeProps["mode"], string> = {
+  work: "Pick a folder to work in",
+  code: "Pick a folder to code in",
+};
+
 const withoutProjects: Record<AgentModeWelcomeProps["mode"], Presentation> = {
   work: {
     name: "Work",
-    heading: "Pick a folder to work in",
     lead: "Work reads and edits the documents, decks, and spreadsheets in one folder you choose. It can’t change anything outside it.",
     newTask: "Start without a folder",
   },
   code: {
     name: "Code",
-    heading: "Pick a folder to code in",
     lead: "Code works inside one folder you choose and asks before it changes a file.",
     newTask: "Start without a folder",
   },
 };
 
-/* Once a folder is bound the page is a starting point, not setup: it leads
-   with the task and keeps adding a folder as the second thing to do. */
+/* Once a folder is bound the page is a starting point, not setup: it greets
+   the person like the start screens do, leads with the task, and keeps adding
+   a folder as the second thing to do. */
 const withProjects: Record<AgentModeWelcomeProps["mode"], Presentation> = {
   work: {
     name: "Work",
-    heading: "Start a task",
     lead: "Pick a Project in the sidebar, or start here and choose one as you go.",
     newTask: "Start a new task",
   },
   code: {
     name: "Code",
-    heading: "Start a Code thread",
     lead: "Pick a Project in the sidebar, or start here and choose one as you go.",
     newTask: "Start a new thread",
   },
@@ -92,7 +98,15 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
         <span aria-hidden="true" className="agent-mode-welcome__mark">
           <FolderOpen size={20} strokeWidth={1.6} />
         </span>
-        <h1 className="oct-title oct-title--hero">{presentation.heading}</h1>
+        {leadsWithTask ? (
+          <WelcomeHeading
+            greetingName={props.greetingName}
+            reviewCount={props.reviewCount}
+            runningCount={props.runningCount}
+          />
+        ) : (
+          <h1 className="oct-title oct-title--hero">{folderQuestion[props.mode]}</h1>
+        )}
         <p className="agent-mode-welcome__lead">{presentation.lead}</p>
         <WorkKindSwitch />
         <div className="agent-mode-welcome__actions">

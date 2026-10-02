@@ -372,6 +372,11 @@
   margin: 0 auto;
 }
 
+/* The date and what is running sit under the greeting, quieter than it. */
+.welcome__status {
+  margin: 0;
+}
+
 .composer-stack {
   position: relative;
   isolation: isolate;
@@ -393,18 +398,20 @@
   min-height: 96px;
 }
 
-/* Where the thread runs rides in a quiet row above the card, so the
-   composer stays one object — prompt and send row — instead of a banded
-   stack. The earlier in-card band read as a second box, and a rear tray
-   peeking out above had once let a repository list push the prompt down the
-   page; above-and-quiet keeps the pickers reachable without either. */
-.composer-tray--above {
+/* Where the thread runs is the first row inside the card, as small chips
+   above the prompt: the card stays one object, and the pickers sit with the
+   message they belong to. The row wraps rather than grows, and a control that
+   opens a list floats over the page instead of pushing the prompt down it. An
+   earlier in-card band read as a second box and a rear tray peeking out above
+   had let a repository list push the prompt down the page; chips with no band
+   behind them avoid both. */
+.composer-tray--inside {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 6px 12px;
-  margin: 0 2px 10px;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
   color: var(--oct-meta);
 }
 
@@ -435,14 +442,14 @@
   white-space: nowrap;
 }
 
-/* Every tray control shares one quiet trigger: icon, label, chevron. */
+/* Every tray control shares one trigger size: icon, label, chevron. */
 .composer-tray__item {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   min-height: 24px;
   height: 24px;
-  padding: 0 7px;
+  padding: 0 var(--oct-space-2);
   font-size: var(--oct-text-xs);
   font-weight: 500;
   white-space: nowrap;
@@ -451,12 +458,31 @@
 .composer-tray [role="combobox"] {
   min-height: 24px;
   height: 24px;
-  padding: 0 7px;
+  padding: 0 var(--oct-space-2);
   border-color: transparent;
   background: transparent;
   box-shadow: none;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+/* Inside the card each control is a small bordered chip on a faint fill, so
+   it reads as a choice made rather than as a field. The chip is painted on
+   the plain element that holds the control, never on the trigger: the
+   triggers are shared button and select recipes a feature stylesheet may size
+   but not repaint. */
+.composer-tray--inside .composer-tray__leading > *,
+.composer-tray--inside .composer-tray__trailing > * {
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 4%, transparent);
+}
+
+/* The Environment is a plain span rather than a trigger, so the chip draws
+   its own inset and height to match the triggers beside it. */
+.composer-tray--inside .host-selector {
+  min-height: 24px;
+  padding-inline: var(--oct-space-2);
 }
 /* The shared row already carries a gap before send. A surface that places
    its own gap ahead of the model and access controls makes that first gap

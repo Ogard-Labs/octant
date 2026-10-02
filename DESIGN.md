@@ -99,7 +99,7 @@ essential sits under 12px at the default.
 
 | Role          | Size | Weight | Colour          | Where                                                     |
 | ------------- | ---- | ------ | --------------- | --------------------------------------------------------- |
-| Hero          | 36   | 700    | primary         | Welcome question only (`oct-title--hero`)                 |
+| Hero          | 36   | 700    | primary         | Welcome greeting only (`oct-title--hero`)                 |
 | Title         | 28   | 700    | primary         | One per page (`oct-title`)                                |
 | Section label | 14   | 600    | secondary       | Group heading over a hairline (`oct-section-label`)       |
 | Row label     | 14   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
@@ -294,20 +294,58 @@ matching project binding revision; missing metadata never borrows another root.
 The strip stays mounted while metadata loads, and full paths are available in
 tooltips. Code retains its checkout, branch, diff, and pull-request controls.
 
-Chat, Work, and Code open on the same screen: the hero question and one
-raised composer. The composer is prompt first, four lines tall before it
+Chat, Work, and Code open on the same screen: a greeting and one raised
+composer. The hero says only the greeting for the hour and the person's name
+("Good evening, Henrik", the hero role). One quiet line under it, at the
+detail step in muted ink, gives the date in the person's locale, then "N
+running" and "N waiting for your review", with a zero count left out; Chat,
+which counts nothing, shows the date alone. The question each mode used to ask
+in the heading lives in the composer's placeholder instead ("Ask anything…",
+"Describe the work…", "Describe the change…"), and the message field keeps its
+accessible name. The composer is prompt first, four lines tall before it
 grows; its toolbar row holds how the thread runs (attach and image on the
 left; model and access on the right, next to send). Where the thread runs
-(Project, base branch, checkout, Environment, repository) rides in a quiet
-row immediately above the card, so the composer stays a single object.
-The row wraps rather than grows: a control that needs a list ("Create
-from…") floats over the page. Nothing about delivery is asked up front; it
-is derived from the row and shown on the thread once it exists.
+(Project, base branch, checkout, Environment, repository) is the first row
+inside the card, above the prompt, as small bordered chips on a faint fill
+(the `--oct-radius-sm` step), so the composer stays a single object. The chip
+is painted on the plain element that holds each control, never on the shared
+trigger inside it. The row wraps rather than grows: a control that needs a
+list ("Create from…") floats over the page. A thread's own follow-up
+composer keeps its context strip beneath the card. Nothing about delivery is
+asked up front; it is derived from the chips and shown on the thread once it
+exists.
+
+Under the composer, Work and Code start screens offer a row of action tiles and
+then a Running now strip, both on the composer's measure and ahead of Code's
+prompt suggestions, so a running thread is never under the fold. The tiles are
+always a three-column grid, one column under 560px, so one or two tiles keep a
+tile's width instead of stretching across the row; a detail line wraps to a
+second line before it is cut. A tile is a card
+button: a 36px icon square, the action as a row label, and one detail line.
+Code offers **Add a folder** (Bind a repository as a Project), **Open
+terminal** (A shell on this computer, in Octant) once a Project is selected,
+and **Review N changes** (Finished threads that wait for you) when N is above
+zero, where N counts unread threads that are not running or rested, the
+sidebar's To review rule. Open terminal starts a Project terminal and pins it in
+Zen, the only place one lives. Work offers the same tiles without a terminal,
+because Work has no shell. Review opens the Inbox. Running now is a section
+label with an Open board link and up to four cards, one per executing thread:
+provider mark, title, a small spinner, how long ago the thread last moved, a
+Project chip, in Code a mono branch chip, and the host's latest activity line
+in a mono well. The host keeps no turn start time on the board or in
+navigation, so a card says "Active 4m ago" rather than an elapsed time, and a
+fact the host does not report is left out rather than invented. Running
+threads show here instead of in Continue, so one thread is not listed twice.
+Each part leaves when it has nothing to show. Under the Vivid style the tiles'
+icon squares take the blue, orange, and purple palette hues. Code's five prompt
+suggestions are one compact row of label-only chips under Running now, like
+Chat's Write, Learn, Plan, and Explore starters; the prompt rides as the chip's
+tooltip and description and fills the composer when chosen, nothing more.
 
 First-run setup is optional from its first step. Skipping preserves settled answers,
 waits for pending writes, and grants no authority. Profile editing has its own
-Personal settings destination. Code suggestions keep their full descriptions
-visible; Continue retains compact recent-task rows and their status and Git cues.
+Personal settings destination. Continue retains compact recent-task rows and
+their status and Git cues.
 Empty Code entry offers folder setup and a direct route to Code settings.
 A Work or Code pane with no thread and no Project asks one centred question
 ("Pick a folder to work in"), says in one sentence what choosing a folder

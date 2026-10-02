@@ -42,7 +42,9 @@ describe("AgentModeWelcome", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Start a Code thread" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+    ).toBeVisible();
     const [first, second] = screen.getAllByRole("button");
     expect(first).toHaveTextContent("Start a new thread");
     expect(second).toHaveTextContent("Add another folder");
