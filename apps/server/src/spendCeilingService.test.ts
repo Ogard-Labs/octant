@@ -416,6 +416,52 @@ describe("SpendCeilingService", () => {
     void journal;
   });
 
+  it("sets a new ceiling after a clear, on thread and Project scopes", () => {
+    const { service } = openService();
+    const scopes = [
+      { kind: "thread", threadType: "work-thread", threadId: ids.thread },
+      { kind: "project", projectId: decodeProjectId(ids.project) },
+    ] as const;
+    for (const scope of scopes) {
+      const window =
+        scope.kind === "thread"
+          ? ({ kind: "lifetime" } as const)
+          : ({ kind: "calendar", period: "day", timeZone: "UTC" } as const);
+      expect(
+        service.execute("local-window", {
+          kind: "set-spend-ceiling",
+          scope,
+          expectedVersion: decodeAggregateVersion(0),
+          policy: { turnBudget: 2 },
+          window,
+        }).kind,
+      ).toBe("set");
+      expect(
+        service.execute("local-window", {
+          kind: "clear-spend-ceiling",
+          scope,
+          expectedVersion: decodeAggregateVersion(1),
+        }).kind,
+      ).toBe("cleared");
+      const reset = service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope,
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { turnBudget: 3 },
+        window,
+      });
+      expect(reset).toMatchObject({ kind: "set", ceiling: { version: 3 } });
+      expect(
+        service.execute("local-window", {
+          kind: "raise-spend-ceiling",
+          scope,
+          expectedVersion: decodeAggregateVersion(3),
+          turnBudget: 4,
+        }).kind,
+      ).toBe("raised");
+    }
+  });
+
   it("refuses a Project turn once its daily agent run time is used up, across restart", () => {
     let clock = "2026-09-09T09:00:00.000Z";
     const first = openService({ clock: () => clock });

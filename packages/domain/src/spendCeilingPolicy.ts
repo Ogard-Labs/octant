@@ -519,6 +519,11 @@ export function decideSpendCeilingCommand(input: {
   readonly principalKind: PrincipalKind;
   readonly command: SpendCeilingCommand;
   readonly current?: SpendCeilingState;
+  /**
+   * The scope's journal version. It keeps counting after a clear removes the
+   * ceiling, so a later set must continue from it rather than from zero.
+   */
+  readonly aggregateVersion?: number;
   readonly scopeExists: boolean;
   readonly now: UtcTimestamp;
   readonly actor: SpendCeilingState["setBy"];
@@ -533,6 +538,7 @@ export function decideSpendCeilingCommand(input: {
   if (actual !== expected) {
     return commandRefusal("version-conflict", "Spend ceiling changed; reload and retry.");
   }
+  const nextVersion = ((input.aggregateVersion ?? actual) + 1) as SpendCeilingState["version"];
 
   if (input.command.kind === "set-spend-ceiling") {
     const invalid = validateWindow(input.command.scope, input.command.window);
@@ -543,7 +549,7 @@ export function decideSpendCeilingCommand(input: {
         scope: input.command.scope,
         window: input.command.window,
         policy: input.command.policy,
-        version: (actual + 1) as SpendCeilingState["version"],
+        version: nextVersion,
         setAt: input.now,
         setBy: input.actor,
       },
@@ -607,7 +613,7 @@ export function decideSpendCeilingCommand(input: {
             ? {}
             : { runTimeBudgetSeconds: input.command.runTimeBudgetSeconds }),
         },
-        version: (actual + 1) as SpendCeilingState["version"],
+        version: nextVersion,
         setAt: input.now,
         setBy: input.actor,
       },

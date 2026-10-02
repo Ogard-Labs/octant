@@ -171,10 +171,12 @@ export class SpendCeilingService {
 
   execute(principalKind: PrincipalKind, command: SpendCeilingCommand): SpendCeilingCommandResult {
     const current = readSpendCeiling(this.#connection, command.scope);
+    const aggregateVersion = this.#aggregateVersion(command.scope);
     const decision = decideSpendCeilingCommand({
       principalKind,
       command,
       ...(current === undefined ? {} : { current }),
+      aggregateVersion,
       scopeExists: this.#scopeExists(command.scope),
       now: decodeUtcTimestamp(this.#clock()),
       actor: { kind: "local-user", actorId: LOCAL_ACTOR_ID },
@@ -183,7 +185,7 @@ export class SpendCeilingService {
       return { kind: "refused", refusal: decision.refusal };
     }
     if (decision.status === "cleared") {
-      this.#append(command.scope, current?.version ?? 0, SPEND_CEILING_EVENT_NAMES.cleared, {
+      this.#append(command.scope, aggregateVersion, SPEND_CEILING_EVENT_NAMES.cleared, {
         scope: command.scope,
         clearedAt: decodeUtcTimestamp(this.#clock()),
       });
@@ -204,7 +206,7 @@ export class SpendCeilingService {
         ? {}
         : { previousRunTimeBudgetSeconds: decision.previousRunTimeBudgetSeconds }),
     };
-    this.#append(command.scope, current?.version ?? 0, eventName, {
+    this.#append(command.scope, aggregateVersion, eventName, {
       ceiling: decision.next,
       ...previous,
     });
@@ -502,14 +504,30 @@ export class SpendCeilingService {
     });
   }
 
+  #aggregateVersion(scope: SpendCeilingScope): number {
+    const row = this.#connection
+      .prepare(
+        "SELECT aggregate_version FROM aggregate_heads WHERE aggregate_type = ? AND aggregate_id = ?",
+      )
+      .get(SPEND_CEILING_AGGREGATE_TYPE, spendCeilingAggregateId(scope)) as
+      | { readonly aggregate_version: number }
+      | undefined;
+    return row?.aggregate_version ?? 0;
+  }
+
   #append(
     scope: SpendCeilingScope,
     expectedVersion: number,
     eventName: string,
     payload: unknown,
   ): void {
-    const aggregateId = scope.kind === "project" ? String(scope.projectId) : String(scope.threadId);
-    this.#appendTo(SPEND_CEILING_AGGREGATE_TYPE, aggregateId, expectedVersion, eventName, payload);
+    this.#appendTo(
+      SPEND_CEILING_AGGREGATE_TYPE,
+      spendCeilingAggregateId(scope),
+      expectedVersion,
+      eventName,
+      payload,
+    );
   }
 
   #appendTo(
@@ -587,3 +605,7 @@ export function formatSpendCeilingRefusal(refusal: SpendCeilingRefusal): string 
 }
 
 export { decodeSpendCeilingReservationId };
+
+function spendCeilingAggregateId(scope: SpendCeilingScope): string {
+  return scope.kind === "project" ? String(scope.projectId) : String(scope.threadId);
+}
