@@ -482,6 +482,7 @@ async function* conversationStreamFrames(
   const disclosure = agentRunConversationDisclosure(dependencies, latestRun, {
     surface: "stream",
     afterSequence,
+    live: dependencies.liveConversations.read({ runId: latestRun.id, afterSequence }),
   });
   const lastSequence = disclosure.entries.at(-1)?.sequence;
   yield {
@@ -856,6 +857,7 @@ async function mutateLiveRun(
       const decoded = decodeAgentRunResumeRequest(body);
       runId = decoded.runId;
       expectedVersion = decoded.expectedVersion;
+      message = decoded.message;
     }
   } catch {
     return failure(`AgentRun ${action} fields are invalid.`, 400, origin);
@@ -876,7 +878,7 @@ async function mutateLiveRun(
     } else if (action === "retry") {
       assertAgentRunRetryAllowed(run, expectedVersion as AggregateVersion);
     } else {
-      assertAgentRunResumeAllowed(run, expectedVersion as AggregateVersion);
+      assertAgentRunResumeAllowed(run, expectedVersion as AggregateVersion, message);
     }
   } catch (error) {
     if (error instanceof AgentRunPolicyRejected) {
@@ -910,7 +912,12 @@ async function mutateLiveRun(
   const result =
     action === "retry"
       ? dependencies.orchestration.retry(runId, expectedVersion, parent.liveAuthority)
-      : dependencies.orchestration.resume(runId, expectedVersion, parent.liveAuthority);
+      : dependencies.orchestration.resume(
+          runId,
+          expectedVersion,
+          parent.liveAuthority,
+          message === undefined ? undefined : { message },
+        );
   if (result.kind === "run-updated" && result.run.lifecycleStatus === "starting") {
     // The runtime awaits workspace verification before acquiring a provider.
     // Bind synchronously after acceptance, before that asynchronous boundary resumes.

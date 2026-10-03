@@ -374,6 +374,13 @@ export type AgentRunDependencies = typeof AgentRunDependencies.Type;
 
 export const AgentRun = Schema.Struct({
   id: AgentRunId,
+  /** Absent on legacy runs, which belong to generation 1. */
+  generation: Schema.optional(
+    Schema.Int.pipe(
+      Schema.greaterThanOrEqualTo(1),
+      Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+    ),
+  ),
   requestId: AgentRunRequestId,
   parentThreadId: AgentRunParentThreadId,
   parentRunId: Schema.optional(AgentRunId),
@@ -496,13 +503,20 @@ export const AgentRunCommand = Schema.Union(
   }).annotations(strict),
   /**
    * Journals how a finished run's result reached its parent. Written once per
-   * run, only after the delivery actually happened — a turn carrying it, the
+   * result generation, only after the delivery actually happened — a turn carrying it, the
    * parent's tool returning it, or a refused/invalidated outcome — so a
    * restarted host can tell an owed delivery from a settled one.
    */
   Schema.Struct({
     kind: Schema.Literal("settle-agent-run-result-delivery"),
     runId: AgentRunId,
+    /** Omission names generation 1, never the latest generation. */
+    generation: Schema.optional(
+      Schema.Int.pipe(
+        Schema.greaterThanOrEqualTo(1),
+        Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+      ),
+    ),
     expectedVersion: AggregateVersion,
     outcome: AgentRunResultDeliveryOutcome,
     detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
@@ -515,6 +529,7 @@ export const AgentRunCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("resume-agent-run"),
     runId: AgentRunId,
+    message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
     expectedVersion: AggregateVersion,
   }).annotations(strict),
   /**
@@ -563,6 +578,12 @@ export type AgentRunRequested = typeof AgentRunRequested.Type;
 
 export const AgentRunStatusChanged = Schema.Struct({
   runId: AgentRunId,
+  generation: Schema.optional(
+    Schema.Int.pipe(
+      Schema.greaterThanOrEqualTo(1),
+      Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+    ),
+  ),
   fromStatus: AgentRunLifecycleStatus,
   toStatus: AgentRunLifecycleStatus,
   version: AggregateVersion,
