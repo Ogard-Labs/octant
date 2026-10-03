@@ -303,7 +303,9 @@ export function createAgentRunSessionRuntime(
         "resume-unavailable",
         run.lifecycleStatus === "waiting"
           ? "This child has no saved session to resume; its existing wait remains unchanged."
-          : "The child has no compatible saved provider conversation. Use Retry to start a fresh session.",
+          : run.lifecycleStatus === "completed"
+            ? "The child has no compatible saved provider conversation. Start a new delegation from the parent."
+            : "The child has no compatible saved provider conversation. Use Retry to start a fresh session.",
       );
     }
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
@@ -643,9 +645,33 @@ export function createAgentRunSessionRuntime(
   };
 
   return {
-    checkResume: (run) => {
+    checkResume: async (run) => {
       try {
-        savedConversation(run);
+        const previous = savedConversation(run);
+        if (run.workspaceReceipt.kind === "code-worktree") {
+          const controller = new AbortController();
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const observed = await Promise.race([
+              options.verifyCodeWorkspace?.({ run, signal: controller.signal }),
+              new Promise<undefined>((resolve) => {
+                timer = setTimeout(() => {
+                  controller.abort();
+                  resolve(undefined);
+                }, 10_000);
+              }),
+            ]);
+            if (observed?.status !== "verified" || observed.identity !== previous.workspaceIdentity)
+              return {
+                status: "refused",
+                message:
+                  "The child's original managed workspace could not be verified. Restore it or delegate a new child.",
+              };
+          } finally {
+            if (timer !== undefined) clearTimeout(timer);
+            controller.abort();
+          }
+        }
         return { status: "ready" };
       } catch (error) {
         return {

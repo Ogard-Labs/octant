@@ -798,7 +798,9 @@ function printSession(
   if (view.session.detail !== undefined) stdout.write(`  ${view.session.detail}\n`);
   for (const route of view.routes.slice(-5)) {
     const model = "candidate" in route ? String(route.candidate.modelId) : "—";
-    stdout.write(`  route ${route.job} → ${route.slotId}: ${route.kind} (${model})\n`);
+    stdout.write(
+      `  route ${route.job} → ${route.kind === "inherited-parent" ? "parent" : route.slotId}: ${route.kind} (${model})\n`,
+    );
   }
   for (const intervention of view.interventions.slice(-5)) {
     const detail =

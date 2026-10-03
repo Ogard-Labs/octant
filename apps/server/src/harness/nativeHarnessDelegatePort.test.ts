@@ -277,7 +277,9 @@ function delegationPair(
             parentRoute: {
               providerInstanceId: currentParent.providerInstanceId,
               modelId: currentParent.modelId,
-              ...(currentParent.reasoning === undefined ? {} : { reasoning: currentParent.reasoning }),
+              ...(currentParent.reasoning === undefined
+                ? {}
+                : { reasoning: currentParent.reasoning }),
               projectId,
             },
           };
@@ -421,12 +423,12 @@ function delegationPair(
       ...(options.noResume
         ? {}
         : {
-            resume: (
+            resume: async (
               ...input: Parameters<AgentRunOrchestrationService["resume"]>
-            ): AgentRunCommandResult => {
+            ): Promise<AgentRunCommandResult> => {
               resumes.push(input);
               if (options.resumeResult !== undefined) return options.resumeResult;
-              return {
+              const result: AgentRunCommandResult = {
                 kind: "run-updated",
                 run: {
                   ...admitted,
@@ -435,6 +437,9 @@ function delegationPair(
                   generation: (admitted.generation ?? 1) + 1,
                 },
               };
+              input[3]?.resolveLiveAuthority?.();
+              input[3]?.onExecutionAccepted?.(result.run);
+              return result;
             },
           }),
     },
@@ -890,9 +895,10 @@ describe("completed child follow-up parity", () => {
         version: 2,
       });
       expect(pair.resumes).toEqual([
-        [dependencyId, 1, allowedAuthority, { message: input.message }],
+        [dependencyId, 1, allowedAuthority, expect.objectContaining({ message: input.message })],
       ]);
       expect(pair.authorizations).toEqual([
+        { parentThreadId: scope.parentThreadId, windowId: scope.windowId },
         { parentThreadId: scope.parentThreadId, windowId: scope.windowId },
       ]);
       expect(pair.accepted).toEqual([

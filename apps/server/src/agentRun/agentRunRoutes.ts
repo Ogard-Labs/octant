@@ -912,13 +912,19 @@ async function mutateLiveRun(
   const result =
     action === "retry"
       ? dependencies.orchestration.retry(runId, expectedVersion, parent.liveAuthority)
-      : dependencies.orchestration.resume(
-          runId,
-          expectedVersion,
-          parent.liveAuthority,
-          message === undefined ? undefined : { message },
-        );
-  if (result.kind === "run-updated" && result.run.lifecycleStatus === "starting") {
+      : await dependencies.orchestration.resume(runId, expectedVersion, parent.liveAuthority, {
+          ...(message === undefined ? {} : { message }),
+          resolveLiveAuthority: () =>
+            dependencies.authorizeCreation({ parentThreadId: run.parentThreadId, windowId })
+              ?.liveAuthority,
+          onExecutionAccepted: (accepted) =>
+            dependencies.onExecutionAccepted?.({ run: accepted, windowId, operation: "resume" }),
+        });
+  if (
+    action === "retry" &&
+    result.kind === "run-updated" &&
+    result.run.lifecycleStatus === "starting"
+  ) {
     // The runtime awaits workspace verification before acquiring a provider.
     // Bind synchronously after acceptance, before that asynchronous boundary resumes.
     dependencies.onExecutionAccepted?.({ run: result.run, windowId, operation: action });

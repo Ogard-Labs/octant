@@ -1431,7 +1431,11 @@ describe("managed child continuation", () => {
       const beforeEvents = events();
       const beforeReserve = reserve.mock.calls.length;
       const beforeRelease = release.mock.calls.length;
-      const result = harness.orchestration.resume(waiting.run.id, waiting.run.version, authority);
+      const result = await harness.orchestration.resume(
+        waiting.run.id,
+        waiting.run.version,
+        authority,
+      );
       expect(harness.persistence.getById(waiting.run.id)).toEqual(waiting.run);
       expect(events()).toEqual(beforeEvents);
       expect(reserve).toHaveBeenCalledTimes(beforeReserve);
@@ -1460,7 +1464,7 @@ describe("managed child continuation", () => {
     },
   );
 
-  it("resumes a waiting child through its saved session and reserves a new live slot", () => {
+  it("resumes a waiting child through its saved session and reserves a new live slot", async () => {
     const start = vi.fn();
     const resume = vi.fn();
     const capacity = createInMemoryCapacityPort();
@@ -1479,14 +1483,18 @@ describe("managed child continuation", () => {
       outcome: { kind: "waiting", reason: "Needs a follow-up" },
     });
     if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
-    const continued = harness.orchestration.resume(waited.run.id, waited.run.version, authority);
+    const continued = await harness.orchestration.resume(
+      waited.run.id,
+      waited.run.version,
+      authority,
+    );
     expect(continued).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "starting" } });
     expect(start).toHaveBeenCalledOnce();
     expect(resume).toHaveBeenCalledOnce();
     expect(reserve).toHaveBeenCalledTimes(2);
   });
 
-  it("preserves an honest resume refusal and never retries the original task automatically", () => {
+  it("preserves an honest resume refusal and never retries the original task automatically", async () => {
     const start = vi.fn();
     const resume = vi.fn(() => {
       throw new AgentRunSessionError(
@@ -1510,7 +1518,11 @@ describe("managed child continuation", () => {
       outcome: { kind: "waiting", reason: "Provider wait" },
     });
     if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
-    const continued = harness.orchestration.resume(waited.run.id, waited.run.version, authority);
+    const continued = await harness.orchestration.resume(
+      waited.run.id,
+      waited.run.version,
+      authority,
+    );
     expect(continued).toMatchObject({
       kind: "run-updated",
       run: { lifecycleStatus: "waiting", recoveryReason: expect.stringContaining("Retry") },
@@ -1521,7 +1533,7 @@ describe("managed child continuation", () => {
 
   it.each(["waiting", "completed"] as const)(
     "leaves a %s child unchanged when its execution backend cannot resume",
-    (status) => {
+    async (status) => {
       const start = vi.fn();
       const harness = createHarness(createInMemoryCapacityPort(), true, {
         start,
@@ -1544,7 +1556,7 @@ describe("managed child continuation", () => {
       });
       if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
       expect(
-        harness.orchestration.resume(waited.run.id, waited.run.version, authority, {
+        await harness.orchestration.resume(waited.run.id, waited.run.version, authority, {
           message: "Continue",
         }),
       ).toMatchObject({
@@ -1559,7 +1571,7 @@ describe("managed child continuation", () => {
   );
 });
 
-it("starts another capacity waiter without restarting a continuation whose resume cannot be persisted", () => {
+it("starts another capacity waiter without restarting a continuation whose resume cannot be persisted", async () => {
   const start = vi.fn();
   const resume = vi.fn();
   const capacity = createInMemoryCapacityPort(() => ({ perThread: 1, onHost: 1 }));
@@ -1616,9 +1628,9 @@ it("starts another capacity waiter without restarting a continuation whose resum
   vi.spyOn(harness.journal, "append").mockImplementationOnce(() => {
     throw new Error("Journal unavailable");
   });
-  expect(() =>
+  await expect(
     harness.orchestration.resume(continuation.run.id, continuation.run.version, authority),
-  ).toThrow("Journal unavailable");
+  ).rejects.toThrow("Journal unavailable");
   expect(resume).not.toHaveBeenCalled();
   expect(release).toHaveBeenCalledTimes(3);
   expect(harness.persistence.getById(continuation.run.id)).toEqual(continuation.run);
@@ -1626,7 +1638,7 @@ it("starts another capacity waiter without restarting a continuation whose resum
   expect(start.mock.calls.map(([run]) => run.id)).toEqual([admitted.run.id, next.run.id]);
 });
 
-it("resumes a completed child's next generation while preserving journaled prior replies", () => {
+it("resumes a completed child's next generation while preserving journaled prior replies", async () => {
   const resume = vi.fn();
   const harness = createHarness(undefined, true, {
     start: vi.fn(),
@@ -1662,7 +1674,7 @@ it("resumes a completed child's next generation while preserving journaled prior
     expectedVersion: delivered.run.version,
   });
   if (acknowledged.kind !== "run-updated") throw new Error("acknowledgement failed");
-  const next = orchestration.resume(completed.id, acknowledged.run.version, authority, {
+  const next = await orchestration.resume(completed.id, acknowledged.run.version, authority, {
     message: "Explain the evidence",
   });
   expect(next).toMatchObject({
@@ -1726,7 +1738,7 @@ it("resumes a completed child's next generation while preserving journaled prior
   ).toMatchObject({ kind: "run-updated" });
 });
 
-it("keeps completion unchanged when follow-up resume evidence, authority or capacity is unavailable", () => {
+it("keeps completion unchanged when follow-up resume evidence, authority or capacity is unavailable", async () => {
   const resume = vi.fn();
   const checkResume = vi.fn((): { status: "ready" } | { status: "refused"; message: string } => ({
     status: "refused",
@@ -1756,27 +1768,27 @@ it("keeps completion unchanged when follow-up resume evidence, authority or capa
   if (completed === undefined) throw new Error("completion failed");
   reserve.mockClear();
   expect(
-    orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
+    await orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
   ).toMatchObject({ kind: "run-command-failed" });
   expect(reserve).not.toHaveBeenCalled();
   checkResume.mockReturnValue({ status: "ready" });
-  expect(orchestration.resume(completed.id, completed.version, authority)).toMatchObject({
+  expect(await orchestration.resume(completed.id, completed.version, authority)).toMatchObject({
     kind: "run-command-failed",
   });
   approvals.isCurrent = () => false;
   expect(
-    orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
+    await orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
   ).toMatchObject({ kind: "run-command-failed" });
   approvals.isCurrent = () => true;
   reserve.mockReturnValue({ status: "queued", scope: "host", reason: "full" });
   expect(
-    orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
+    await orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
   ).toMatchObject({ kind: "run-command-failed", reason: "limit-reached" });
   expect(persistence.getById(completed.id)).toEqual(completed);
   expect(resume).not.toHaveBeenCalled();
 });
 
-it("refuses completed-child follow-ups at the existing unfinished-child admission limit", () => {
+it("refuses completed-child follow-ups at the existing unfinished-child admission limit", async () => {
   const resume = vi.fn();
   const { orchestration, persistence } = createHarness(undefined, true, {
     start: vi.fn(),
@@ -1809,8 +1821,104 @@ it("refuses completed-child follow-ups at the existing unfinished-child admissio
     expect(requested.kind).toBe("run-accepted");
   }
   expect(
-    orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
+    await orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
   ).toMatchObject({ kind: "run-command-failed", reason: "limit-reached" });
   expect(persistence.getById(completed.id)).toEqual(completed);
   expect(resume).not.toHaveBeenCalled();
 });
+
+it.each(["workspace-refused", "stale-version", "authority-revoked", "accepted"] as const)(
+  "rechecks a completed child's async preflight before mutation: %s",
+  async (scenario) => {
+    let finish:
+      | ((value: { status: "ready" } | { status: "refused"; message: string }) => void)
+      | undefined;
+    const readiness = new Promise<{ status: "ready" } | { status: "refused"; message: string }>(
+      (resolve) => {
+        finish = resolve;
+      },
+    );
+    let bound = false;
+    const acquired = vi.fn();
+    const resume = vi.fn(() => {
+      void Promise.resolve().then(() => acquired(bound));
+    });
+    const capacity = createInMemoryCapacityPort();
+    const reserve = vi.spyOn(capacity, "tryReserve");
+    const harness = createHarness(capacity, true, {
+      start: vi.fn(),
+      resume,
+      checkResume: () => readiness,
+      stop: async () => undefined,
+    });
+    const admitted = harness.orchestration.admit({
+      command: requestCommand(),
+      parentAuthority: authority,
+      liveAuthority: authority,
+      confirmed: true,
+    });
+    if (admitted.kind !== "run-accepted") throw new Error("Expected admitted child");
+    harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
+    harness.orchestration.onSessionSettled({
+      runId: admitted.run.id,
+      outcome: { kind: "completed", responseText: "Retained original reply" },
+    });
+    const completed = harness.persistence.getById(admitted.run.id);
+    if (completed === undefined) throw new Error("Expected completed child");
+    const delivered = harness.persistence.applyCommand({
+      kind: "settle-agent-run-result-delivery",
+      runId: completed.id,
+      expectedVersion: completed.version,
+      generation: completed.generation ?? 1,
+      outcome: "delivered",
+    });
+    if (delivered.kind !== "run-updated") throw new Error("Expected delivered result");
+    reserve.mockClear();
+    const accepted = vi.fn(() => {
+      bound = true;
+    });
+    let live: AgentRunAuthority | undefined = authority;
+    const pending = harness.orchestration.resume(completed.id, delivered.run.version, authority, {
+      message: "Continue with the evidence",
+      resolveLiveAuthority: () => live,
+      onExecutionAccepted: accepted,
+    });
+    expect(harness.persistence.getById(completed.id)).toEqual(delivered.run);
+    expect(reserve).not.toHaveBeenCalled();
+    if (scenario === "stale-version")
+      harness.persistence.applyCommand({
+        kind: "acknowledge-agent-run-result",
+        runId: completed.id,
+        expectedVersion: delivered.run.version,
+      });
+    if (scenario === "authority-revoked") live = undefined;
+    const before = harness.persistence.getById(completed.id);
+    const events = () =>
+      harness.connection.prepare("SELECT * FROM event_journal ORDER BY global_sequence").all();
+    const beforeEvents = events();
+    finish?.(
+      scenario === "workspace-refused"
+        ? { status: "refused", message: "Original workspace is gone" }
+        : { status: "ready" },
+    );
+    const result = await pending;
+    if (scenario === "accepted") {
+      expect(result).toMatchObject({
+        kind: "run-updated",
+        run: { generation: 2, lifecycleStatus: "starting" },
+      });
+      expect(accepted).toHaveBeenCalledOnce();
+      expect(acquired).toHaveBeenCalledExactlyOnceWith(true);
+    } else {
+      expect(result).toMatchObject({
+        kind: "run-command-failed",
+        reason: scenario === "stale-version" ? "stale-version" : "unsupported-transition",
+      });
+      expect(harness.persistence.getById(completed.id)).toEqual(before);
+      expect(events()).toEqual(beforeEvents);
+      expect(reserve).not.toHaveBeenCalled();
+      expect(resume).not.toHaveBeenCalled();
+      expect(accepted).not.toHaveBeenCalled();
+    }
+  },
+);

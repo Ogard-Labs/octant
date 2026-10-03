@@ -398,13 +398,59 @@ export async function followUpAgentRunDelegation(
         )
     )
       return { status: "refused", reason: "delegate-target-unavailable" };
-    // resume is synchronous today. Bind the accepted execution before yielding,
-    // so the runtime's asynchronous workspace check cannot outrun its window grant.
-    const result = options.orchestration.resume(
+    const result = await options.orchestration.resume(
       run.id,
       request.expectedVersion,
       parent.liveAuthority,
-      { message: request.message },
+      {
+        message: request.message,
+        resolveLiveAuthority: () => {
+          if (
+            options.admission.settings.current().creationPosture !== "automatic" ||
+            options.isTainted?.() ||
+            options.isPaused?.()
+          )
+            return undefined;
+          const currentParent = options.admission.authorizeCreation({
+            parentThreadId: run.parentThreadId,
+            windowId: options.windowId,
+          });
+          if (
+            currentParent === undefined ||
+            currentParent.parentMode !== parent.parentMode ||
+            currentParent.parentRoute.projectId !== parent.parentRoute.projectId ||
+            !currentParent.parentAuthority.subagents ||
+            !currentParent.liveAuthority.subagents
+          )
+            return undefined;
+          clampAgentRunAuthority({
+            requestedAuthority: run.authority,
+            parentAuthority: currentParent.parentAuthority,
+            liveParentGrant: currentParent.liveAuthority,
+          });
+          if (
+            !options
+              .listTargets()
+              .some(
+                (candidate) =>
+                  candidate.providerInstanceId === String(target.providerInstanceId) &&
+                  candidate.modelIds.includes(String(target.modelId)) &&
+                  (run.routingReceipt.rawReasoning === undefined ||
+                    candidate.reasoningByModel?.[String(target.modelId)]?.includes(
+                      run.routingReceipt.rawReasoning,
+                    ) === true),
+              )
+          )
+            return undefined;
+          return currentParent.liveAuthority;
+        },
+        onExecutionAccepted: (accepted) =>
+          options.admission.onExecutionAccepted?.({
+            run: accepted,
+            windowId: options.windowId,
+            operation: "resume",
+          }),
+      },
     );
     if (result.kind === "run-command-failed")
       return { status: "refused", reason: result.reason, message: result.message };
@@ -414,11 +460,6 @@ export async function followUpAgentRunDelegation(
         reason: "unsupported-transition",
         message: "The child did not accept the follow-up.",
       };
-    options.admission.onExecutionAccepted?.({
-      run: result.run,
-      windowId: options.windowId,
-      operation: "resume",
-    });
     return {
       status: "accepted",
       runId: String(result.run.id),
