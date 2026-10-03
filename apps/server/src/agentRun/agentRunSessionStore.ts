@@ -2,12 +2,15 @@ import {
   AgentRunConversationEntry,
   MAX_AGENT_RUN_CONVERSATION_BYTES,
   MAX_AGENT_RUN_CONVERSATION_ENTRIES,
+  ProviderDriverKind,
+  ProviderInstanceId,
   ProviderResumeCursor,
   ProviderSessionId,
   type AgentRun,
   type AgentRunId,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
 import { agentRunContentSubject } from "../persistence/agentRunContentStore";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import type { AgentRunLiveConversationPersistence } from "./agentRunLiveConversationStore";
@@ -21,6 +24,16 @@ const SessionRecord = Schema.Struct({
   workspaceIdentity: Schema.optional(Schema.NonEmptyString.pipe(Schema.maxLength(256))),
 });
 const decodeSessionRecord = Schema.decodeUnknownSync(SessionRecord);
+const ProviderIdentityRecord = Schema.Struct({
+  binding: SessionRecord.fields.binding,
+  sessionId: ProviderSessionId,
+  providerInstanceId: ProviderInstanceId,
+  driverKind: ProviderDriverKind,
+  value: Schema.NonEmptyString.pipe(Schema.maxLength(MAX_SESSION_BYTES)),
+});
+const decodeProviderIdentity = Schema.decodeUnknownSync(ProviderIdentityRecord);
+export type AgentRunProviderIdentityRecord = typeof ProviderIdentityRecord.Type;
+
 const ConversationRecord = Schema.Struct({
   status: Schema.Literal("live", "complete", "stale"),
   entries: Schema.Array(AgentRunConversationEntry).pipe(
@@ -49,6 +62,91 @@ export class AgentRunSessionStore {
   readonly #getById: (runId: AgentRunId) => AgentRun | undefined;
   readonly sessions: AgentRunSessionStatePort;
   readonly conversations: AgentRunLiveConversationPersistence;
+
+  /** Adapter-owned opaque identity, never reconstructed from a resume cursor. */
+  readProviderIdentity(run: AgentRun): AgentRunProviderIdentityRecord | undefined {
+    const session = this.#identitySession(run);
+    if (session === undefined) return undefined;
+    const text = this.#read(run.id, "managed-provider-identity");
+    if (text === undefined || encoder.encode(text).byteLength > MAX_SESSION_BYTES) return undefined;
+    try {
+      const record = decodeProviderIdentity(JSON.parse(text));
+      return record.binding === session.binding &&
+        record.sessionId === session.sessionId &&
+        record.providerInstanceId ===
+          effectiveAgentRunExecutionTarget(run.routingReceipt).providerInstanceId
+        ? record
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  writeProviderIdentity(run: AgentRun, record: AgentRunProviderIdentityRecord): boolean {
+    const session = this.#identitySession(run);
+    if (
+      session === undefined ||
+      session.binding !== record.binding ||
+      session.sessionId !== record.sessionId ||
+      record.providerInstanceId !==
+        effectiveAgentRunExecutionTarget(run.routingReceipt).providerInstanceId
+    )
+      return false;
+    let text: string;
+    try {
+      text = JSON.stringify(decodeProviderIdentity(record));
+    } catch {
+      return false;
+    }
+    if (encoder.encode(text).byteLength > MAX_SESSION_BYTES) return false;
+    return this.#write(run, "managed-provider-identity", text);
+  }
+
+  removeProviderIdentity(run: AgentRun, record: AgentRunProviderIdentityRecord): void {
+    const current = this.readProviderIdentity(run);
+    if (current === undefined || JSON.stringify(current) !== JSON.stringify(record)) return;
+    this.#connection
+      .prepare(
+        "DELETE FROM agent_run_content_store WHERE content_id = ? AND run_id = ? AND content_kind = ? AND body_text = ?",
+      )
+      .run(
+        `managed-provider-identity:${String(run.id)}`,
+        String(run.id),
+        "managed-provider-identity",
+        JSON.stringify(current),
+      );
+  }
+
+  async removeProviderIdentities(
+    providerInstanceId: ProviderInstanceId,
+    signal: AbortSignal,
+  ): Promise<void> {
+    signal.throwIfAborted();
+    await Promise.resolve();
+    signal.throwIfAborted();
+    this.#connection
+      .prepare(`DELETE FROM agent_run_content_store WHERE content_kind = 'managed-provider-identity'
+      AND CASE WHEN json_valid(body_text) THEN json_extract(body_text, '$.providerInstanceId') END = ?`)
+      .run(String(providerInstanceId));
+  }
+
+  #identitySession(run: AgentRun): AgentRunSessionRecord | undefined {
+    const current = this.#current(run.id);
+    if (
+      current === undefined ||
+      current.lifecycleStatus === "cancelled" ||
+      current.executionKind !== "octant-managed" ||
+      String(current.requestId) !== String(run.requestId) ||
+      String(current.routingReceipt.contextSnapshotId) !==
+        String(run.routingReceipt.contextSnapshotId) ||
+      JSON.stringify(current.authority) !== JSON.stringify(run.authority) ||
+      JSON.stringify(current.workspaceReceipt) !== JSON.stringify(run.workspaceReceipt) ||
+      JSON.stringify(effectiveAgentRunExecutionTarget(current.routingReceipt)) !==
+        JSON.stringify(effectiveAgentRunExecutionTarget(run.routingReceipt))
+    )
+      return undefined;
+    return this.sessions.read(run);
+  }
 
   constructor(options: {
     readonly connection: SqliteConnection;
