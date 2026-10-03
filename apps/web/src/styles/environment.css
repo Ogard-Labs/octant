@@ -577,3 +577,13 @@
     transition: none;
   }
 }
+
+/* Increased contrast strengthens the card outlines. It lives here, after the
+   cards' own border shorthands: this sheet loads after styles.css, so an
+   override there was reset to the hairline by these same-specificity rules. */
+@media (prefers-contrast: more) {
+  .thread-environment-dock__header,
+  .environment-card__rows {
+    border-color: var(--octant-border-strong);
+  }
+}

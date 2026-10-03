@@ -572,7 +572,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".right-utility-dock")).toContain("background: var(--oct-bg);");
     expect(cssRule(".octant-dialog__popup")).toContain("background: var(--oct-bg);");
     // The Environment's boundary is its header card now, not the checkout block.
-    expect(cssRule(".thread-environment-dock__header", 1)).toContain(
+    expect(cssRule(".thread-environment-dock__header")).toContain(
       "border: 1px solid var(--oct-hairline);",
     );
     // The meta line mixes the branch with the folder; only the folder is an
@@ -593,10 +593,17 @@ describe("WindowChrome", () => {
     expect(styles).toContain("@media (prefers-reduced-transparency: reduce)");
     expect(styles).toContain("@media (prefers-contrast: more)");
     expect(styles).toContain(".shell--material-translucent.shell-frame > .sidebar");
-    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(
-      ".thread-environment-dock__header",
+    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(".environment-checkout");
+    // The card outlines' override sits after their own borders, in the sheet
+    // that loads last, or the base hairline wins at equal specificity.
+    const environmentContrast = environmentStyles.slice(
+      environmentStyles.lastIndexOf("@media (prefers-contrast: more)"),
     );
-    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(".environment-card__rows");
+    expect(environmentStyles.lastIndexOf("@media (prefers-contrast: more)")).toBeGreaterThan(
+      environmentStyles.indexOf(".environment-card__rows {"),
+    );
+    expect(environmentContrast).toContain(".thread-environment-dock__header");
+    expect(environmentContrast).toContain(".environment-card__rows");
     expect(cssRule('.project-row[data-active="true"]', 1)).toContain(
       "background: var(--octant-control-hover);",
     );
