@@ -47,6 +47,7 @@ export class NativeHarnessRouter {
   resolve(input: {
     readonly job: NativeHarnessJob;
     readonly projectId?: ProjectId | undefined;
+    readonly isEligible?: (candidate: NativeHarnessSlotCandidate) => boolean;
   }): NativeHarnessRouteDecision {
     const nowMs = this.#now();
     const override =
@@ -61,7 +62,7 @@ export class NativeHarnessRouter {
         const cooldown = this.#cooldowns.get(nativeHarnessSlotCandidateKey(candidate));
         const active = cooldown !== undefined && cooldown.untilMs > nowMs;
         return {
-          ready: this.#options.isReady(candidate),
+          ready: this.#options.isReady(candidate) && (input.isEligible?.(candidate) ?? true),
           ...(active
             ? {
                 coolingDown: {
