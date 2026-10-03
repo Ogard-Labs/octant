@@ -310,7 +310,8 @@ export function createThreadMessageQueuePort(
                 ?.turns.find((turn) => String(turn.submissionId) === String(input.messageId))
                 ?.attempts.at(-1)?.id
             : input.messageId;
-        if (latest.tail !== undefined && String(latest.tail.id) === String(ownTail)) return true;
+        if (latest.tail !== undefined && String(latest.tail.id) === String(ownTail))
+          return latest.tail.status === "active";
         return latest.tail?.id === current.tail?.id && latest.tail?.status === current.tail?.status;
       };
       try {

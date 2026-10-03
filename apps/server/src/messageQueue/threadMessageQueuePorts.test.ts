@@ -242,6 +242,8 @@ describe("queued turn admission", () => {
         const guard = startFirstTurn.mock.calls[0]?.[2]?.admissionCurrent;
         workTurns = [accepted.turn];
         expect(guard?.()).toBe(true);
+        workTurns = [decodeWorkTurnState({ ...accepted.turn, status: "cancelled" })];
+        expect(guard?.()).toBe(false);
         workTurns = [
           decodeWorkTurnState({ ...accepted.turn, turnId: "92000000-0000-4000-8000-000000000099" }),
         ];
