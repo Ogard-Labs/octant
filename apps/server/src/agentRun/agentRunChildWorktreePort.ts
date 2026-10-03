@@ -5,7 +5,9 @@ import {
   decodeCodeThreadId,
   decodeProjectId,
   decodeWindowId,
+  type AgentRunWorkspaceReceipt,
   type CodeCheckoutIdentity,
+  type CodeThreadId,
 } from "@octant/contracts";
 import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
 import type { ManagedWorktreeReceipt } from "../code/managedWorktreeReceiptStore";
@@ -79,6 +81,28 @@ export function deriveAgentRunChildWorktreeThreadId(
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20)}`;
 }
 
+export function resolveAgentRunChildWorktreeThreadId(input: {
+  readonly parentThreadId: string;
+  readonly requestId: string;
+  readonly repositoryId: string;
+  readonly workspace: AgentRunWorkspaceReceipt;
+}): CodeThreadId | undefined {
+  const workspace = input.workspace;
+  if (workspace.kind !== "code-worktree" || !workspace.verified) return undefined;
+  // Legacy runs also have request ids. Only the recorded workspace distinguishes
+  // their parent-owned checkout from the checkout allocated for one request.
+  for (const requestId of [input.requestId, undefined]) {
+    const childThreadId = deriveAgentRunChildWorktreeThreadId(input.parentThreadId, requestId);
+    if (
+      workspace.worktreeRoot ===
+      managedTargetPath(workspace.checkoutRoot, input.repositoryId, childThreadId)
+    ) {
+      return decodeCodeThreadId(childThreadId);
+    }
+  }
+  return undefined;
+}
+
 function childBranchIntent(childThreadId: string): string {
   return `octant/agent-run/${childThreadId.replaceAll("-", "")}`;
 }
@@ -107,6 +131,10 @@ function toPrepared(receipt: ManagedWorktreeReceipt): AgentRunChildWorktreePrepa
 export function createAgentRunChildWorktreePort(input: {
   readonly service: ManagedWorktreeService;
   readonly repository: ManagedWorktreeRepositoryPort;
+  readonly observeExecutionIdentity: (
+    root: string,
+    signal: AbortSignal,
+  ) => Promise<{ readonly identity: string; readonly branch: string } | undefined>;
   readonly loadReceipt: (receiptId: string) => Promise<ManagedWorktreeReceipt | undefined>;
   readonly findActive: (lookup: {
     readonly repositoryId: string;
@@ -117,7 +145,20 @@ export function createAgentRunChildWorktreePort(input: {
     readonly branchIntent: string;
     readonly refIntent: string;
   }) => Promise<ManagedWorktreeReceipt | undefined>;
-}): AgentRunChildWorktreePort {
+}): AgentRunChildWorktreePort & {
+  readonly verifyExecution: (request: {
+    readonly requestId: string;
+    readonly parentThreadId: string;
+    readonly repositoryId: string;
+    readonly repositoryRoot: string;
+    readonly parentCheckoutRoot: string;
+    readonly worktreeRoot: string;
+    readonly signal: AbortSignal;
+  }) => Promise<
+    | { readonly status: "verified"; readonly identity: string }
+    | { readonly status: "refused"; readonly reason: string }
+  >;
+} {
   async function available(receipt: ManagedWorktreeReceipt): Promise<boolean> {
     const observation = await input.repository
       .observe(receipt.canonicalRepositoryPath, new AbortController().signal)
@@ -144,6 +185,96 @@ export function createAgentRunChildWorktreePort(input: {
     );
   }
   return {
+    verifyExecution: async (request) => {
+      const refused = {
+        status: "refused",
+        reason:
+          "The child's registered workspace is unavailable or no longer owned by this run. Restore the original workspace or delegate a new child.",
+      } as const;
+      try {
+        const childThreadId = deriveAgentRunChildWorktreeThreadId(
+          request.parentThreadId,
+          request.requestId,
+        );
+        const branchIntent = childBranchIntent(childThreadId);
+        const expectedPath = managedTargetPath(
+          request.repositoryRoot,
+          request.repositoryId,
+          childThreadId,
+        );
+        if (
+          request.worktreeRoot !== expectedPath ||
+          request.worktreeRoot === request.parentCheckoutRoot ||
+          request.worktreeRoot === request.repositoryRoot
+        )
+          return refused;
+        const receipt = await input.findActive({
+          repositoryId: request.repositoryId,
+          threadId: childThreadId,
+          checkoutId: String(
+            deriveManagedWorktreeCheckoutId({
+              repositoryId: request.repositoryId,
+              threadId: childThreadId,
+            }),
+          ),
+          canonicalRepositoryPath: request.repositoryRoot,
+          canonicalWorktreePath: expectedPath,
+          branchIntent,
+          refIntent: `refs/heads/${branchIntent}`,
+        });
+        if (receipt?.state !== "ready") return refused;
+        const observation = await input.repository.observe(request.repositoryRoot, request.signal);
+        const child = await input.repository.observe(expectedPath, request.signal);
+        if (
+          observation.status !== "available" ||
+          child.status !== "available" ||
+          observation.repositoryRoot !== request.repositoryRoot ||
+          child.repositoryRoot !== expectedPath ||
+          observation.repositoryId !== request.repositoryId ||
+          child.repositoryId !== request.repositoryId ||
+          child.commonDirectory !== observation.commonDirectory
+        )
+          return refused;
+        const targets = observation.worktrees.filter(
+          (worktree) => worktree.status === "present" && worktree.canonicalPath === expectedPath,
+        );
+        const target = targets.length === 1 ? targets[0] : undefined;
+        if (
+          target === undefined ||
+          target.detached ||
+          target.locked !== undefined ||
+          target.prunable !== undefined ||
+          target.branch !== receipt.refIntent ||
+          child.checkout.branch !== receipt.refIntent ||
+          child.checkout.detached ||
+          child.checkout.locked !== undefined ||
+          child.checkout.prunable !== undefined
+        )
+          return refused;
+        const physical = await input.observeExecutionIdentity(expectedPath, request.signal);
+        if (
+          physical === undefined ||
+          physical.branch !== receipt.refIntent ||
+          request.signal.aborted
+        )
+          return refused;
+        return {
+          status: "verified",
+          identity: createHash("sha256")
+            .update(
+              JSON.stringify([
+                receipt.receiptId,
+                request.repositoryId,
+                childThreadId,
+                physical.identity,
+              ]),
+            )
+            .digest("hex"),
+        };
+      } catch {
+        return refused;
+      }
+    },
     prepare: async (request: AgentRunChildWorktreePrepareInput) => {
       const childThreadId = decodeCodeThreadId(
         deriveAgentRunChildWorktreeThreadId(request.parentThreadId, request.requestId),

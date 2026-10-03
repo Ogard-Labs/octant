@@ -16,7 +16,7 @@
  */
 
 import { Schema } from "effect";
-import { AgentRunDependencies, MAX_AGENT_RUN_DEPENDENCIES } from "./agentRun";
+import { AgentRunDependencies, AgentRunId, MAX_AGENT_RUN_DEPENDENCIES } from "./agentRun";
 import { ContextConfidence } from "./context";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import {
@@ -33,7 +33,7 @@ import {
   NativeHarnessSlotId,
 } from "./nativeHarnessRouting";
 import { ProjectId } from "./projects";
-import type { ProviderToolDefinition } from "./providers";
+import { ProviderInstanceId, ProviderModelId, type ProviderToolDefinition } from "./providers";
 import { ThreadPlanStepId } from "./threadPlan";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -977,9 +977,19 @@ export const NativeHarnessQuestionStatus = Schema.Literal(
 );
 export type NativeHarnessQuestionStatus = typeof NativeHarnessQuestionStatus.Type;
 
-/** A question the lead asked the person, and what became of it. */
+/** Attribution only: a child interaction grants no authority to its parent or siblings. */
+export const NativeHarnessInteractionSource = Schema.Struct({
+  runId: AgentRunId,
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  providerName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+}).annotations(strict);
+export type NativeHarnessInteractionSource = typeof NativeHarnessInteractionSource.Type;
+
+/** A question the lead or one of its children asked the person. */
 export const NativeHarnessQuestion = Schema.Struct({
   id: NativeHarnessQuestionId,
+  source: Schema.optional(NativeHarnessInteractionSource),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
   options: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))).pipe(
     Schema.maxItems(MAX_NATIVE_HARNESS_QUESTION_OPTIONS),
@@ -1021,9 +1031,11 @@ export type NativeHarnessApprovalStatus = typeof NativeHarnessApprovalStatus.Typ
  */
 export const NativeHarnessApproval = Schema.Struct({
   id: NativeHarnessApprovalId,
-  toolName: NativeHarnessToolName,
+  toolName: Schema.Union(NativeHarnessToolName, Schema.Literal("provider-action")),
+  source: Schema.optional(NativeHarnessInteractionSource),
   summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(240)),
   approvalClass: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192))),
   status: NativeHarnessApprovalStatus,
   /** Set on an approval that also covers the class for the session. */
   remembered: Schema.optional(Schema.Boolean),

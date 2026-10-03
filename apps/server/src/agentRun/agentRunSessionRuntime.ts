@@ -175,6 +175,14 @@ export interface AgentRunSessionInteractions {
 export interface AgentRunSessionRuntimeOptions {
   readonly interactions?: AgentRunSessionInteractions;
   readonly sessionStore?: AgentRunSessionStatePort;
+  /** Live host ownership, independent of HEAD so a child can resume after committing. */
+  readonly verifyCodeWorkspace?: (input: {
+    readonly run: AgentRun;
+    readonly signal: AbortSignal;
+  }) => Promise<
+    | { readonly status: "verified"; readonly identity: string }
+    | { readonly status: "refused"; readonly reason: string }
+  >;
   /** Current observed capability; absent is unsupported, never an optimistic probe. */
   readonly supportsResume?: (providerInstanceId: ProviderInstanceId) => boolean;
   /** Resolves the configured driver for a provider instance, or undefined. */
@@ -285,10 +293,9 @@ interface LiveSession {
  * same capacity scheduler, same normalized events — is what keeps that promise
  * without inventing a second launch path or a second authority path.
  *
- * Every start-time dependency is resolved before the session is considered
- * live, and a missing one throws {@link AgentRunSessionError}. Orchestration
- * already treats a throwing `start` as process death, so an unstartable child
- * lands in a durable recoverable state instead of appearing to run.
+ * Durable execution prerequisites fail synchronously with AgentRunSessionError.
+ * Live Code workspace ownership is checked asynchronously under the runtime
+ * deadline, before acquiring the provider or publishing a new conversation.
  */
 export function createAgentRunSessionRuntime(
   options: AgentRunSessionRuntimeOptions,
@@ -297,6 +304,46 @@ export function createAgentRunSessionRuntime(
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
+
+  const savedConversation = (run: AgentRun): AgentRunSessionRecord => {
+    const previous = options.sessionStore?.read(run);
+    if (previous === undefined || previous.resumeCursor === undefined) {
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        run.lifecycleStatus === "waiting"
+          ? "This child has no saved session to resume; its existing wait remains unchanged."
+          : "The child has no compatible saved provider conversation. Use Retry to start a fresh session.",
+      );
+    }
+    const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+    const driver = options.resolveDriver(target.providerInstanceId);
+    clampAgentRunSessionAuthority(run);
+    const projectRoot = resolveProjectRoot(run, options.scratchRoot);
+    if (
+      sessions.has(run.id) ||
+      run.lifecycleStatus === "cancelled" ||
+      driver === undefined ||
+      options.supportsResume?.(target.providerInstanceId) !== true ||
+      previous.binding !== childSessionBinding(run, driver, projectRoot) ||
+      (run.workspaceReceipt.kind === "code-worktree" && previous.workspaceIdentity === undefined) ||
+      !validResumeCursor(previous.resumeCursor, {
+        driver,
+        run,
+        projectRoot,
+        sessionId: previous.sessionId,
+      }) ||
+      options.context.resolve({
+        runId: run.id,
+        contextSnapshotId: run.routingReceipt.contextSnapshotId,
+      }) === undefined
+    ) {
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "The child has no compatible saved provider conversation. Use Retry to start a fresh session.",
+      );
+    }
+    return previous;
+  };
 
   const startSession = (run: AgentRun, continuation?: { readonly message?: string }) => {
     if (sessions.has(run.id))
@@ -343,26 +390,7 @@ export function createAgentRunSessionRuntime(
     }
 
     const binding = childSessionBinding(run, driver, projectRoot);
-    const previous = continuation === undefined ? undefined : options.sessionStore?.read(run);
-    if (
-      continuation !== undefined &&
-      (run.lifecycleStatus === "cancelled" ||
-        options.supportsResume?.(target.providerInstanceId) !== true ||
-        previous === undefined ||
-        previous.binding !== binding ||
-        previous.resumeCursor === undefined ||
-        !validResumeCursor(previous.resumeCursor, {
-          driver,
-          run,
-          projectRoot,
-          sessionId: previous.sessionId,
-        }))
-    ) {
-      throw new AgentRunSessionError(
-        "resume-unavailable",
-        "The child has no compatible saved provider conversation. Use Retry to start a fresh session.",
-      );
-    }
+    const previous = continuation === undefined ? undefined : savedConversation(run);
     const prompt =
       continuation === undefined
         ? run.task
@@ -434,7 +462,11 @@ export function createAgentRunSessionRuntime(
     const providerSessionId = previous?.sessionId ?? decodeProviderSessionId(options.uuid());
     let record: AgentRunSessionRecord = previous ?? { sessionId: providerSessionId, binding };
     try {
-      if (options.sessionStore !== undefined && !options.sessionStore.write(run, record)) {
+      if (
+        run.workspaceReceipt.kind !== "code-worktree" &&
+        options.sessionStore !== undefined &&
+        !options.sessionStore.write(run, record)
+      ) {
         throw new AgentRunSessionError(
           "resume-unavailable",
           "The child session cannot be persisted under its parent thread.",
@@ -449,6 +481,25 @@ export function createAgentRunSessionRuntime(
         "The child session cannot be persisted under its parent thread.",
       );
     }
+    const verifyWorkspace = async (signal: AbortSignal): Promise<string | undefined> => {
+      if (run.workspaceReceipt.kind !== "code-worktree") return undefined;
+      const refusal =
+        "workspace-unavailable: The child's original managed workspace could not be verified. Restore it or delegate a new child.";
+      try {
+        const observed = await options.verifyCodeWorkspace?.({ run, signal });
+        signal.throwIfAborted();
+        if (observed === undefined) return refusal;
+        if (observed.status === "refused") return `workspace-unavailable: ${observed.reason}`;
+        if (previous !== undefined && previous.workspaceIdentity !== observed.identity)
+          return refusal;
+        record = { ...record, workspaceIdentity: observed.identity };
+        if (options.sessionStore !== undefined && !options.sessionStore.write(run, record))
+          return refusal;
+        return undefined;
+      } catch {
+        return refusal;
+      }
+    };
     const recordCursor = (cursor: ProviderResumeCursor | undefined): boolean => {
       if (cursor === undefined) return true;
       if (!validResumeCursor(cursor, { driver, run, projectRoot, sessionId: providerSessionId }))
@@ -463,11 +514,12 @@ export function createAgentRunSessionRuntime(
 
     const listeners = new Set<(outcome: AgentRunSessionOutcome) => void>();
     let settledOutcome: AgentRunSessionOutcome | undefined;
+    let publishedStart = false;
     const settle = (outcome: AgentRunSessionOutcome): void => {
       if (settledOutcome !== undefined) return;
       settledOutcome = outcome;
       try {
-        options.onSessionSettled?.({ runId: run.id, outcome });
+        if (publishedStart) options.onSessionSettled?.({ runId: run.id, outcome });
       } catch {
         // A transient observer must never prevent lifecycle settlement.
       }
@@ -503,22 +555,6 @@ export function createAgentRunSessionRuntime(
       },
     };
     sessions.set(run.id, live);
-    try {
-      options.onSessionStarted?.({ runId: run.id, resumed: continuation !== undefined });
-      options.onUserMessage?.({
-        runId: run.id,
-        kind:
-          continuation === undefined
-            ? "task"
-            : continuation.message === undefined
-              ? "resume"
-              : "follow-up",
-        text: prompt,
-        occurredAt: decodeUtcTimestamp(new Date().toISOString()),
-      });
-    } catch {
-      // A transient observer must never prevent provider startup.
-    }
 
     void Effect.runPromiseExit(
       Effect.scoped(
@@ -536,6 +572,26 @@ export function createAgentRunSessionRuntime(
           modelId: target.modelId,
           sessionId: providerSessionId,
           prompt,
+          verifyWorkspace,
+          onSessionReady: () => {
+            publishedStart = true;
+            try {
+              options.onSessionStarted?.({ runId: run.id, resumed: continuation !== undefined });
+              options.onUserMessage?.({
+                runId: run.id,
+                kind:
+                  continuation === undefined
+                    ? "task"
+                    : continuation.message === undefined
+                      ? "resume"
+                      : "follow-up",
+                text: prompt,
+                occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+              });
+            } catch {
+              // A transient observer must never prevent provider startup.
+            }
+          },
           resumeCursor: previous?.resumeCursor,
           recordCursor,
           requireResumeCursor: options.supportsResume?.(target.providerInstanceId) === true,
@@ -553,29 +609,35 @@ export function createAgentRunSessionRuntime(
           onConnectionReady: (connection, providerSessionId) => {
             if (connection.steer === undefined) return;
             live.steer = async (message) => {
-              if (controller.signal.aborted || sessions.get(run.id) !== live) return "unsupported";
+              if (
+                controller.signal.aborted ||
+                inputController.signal.aborted ||
+                sessions.get(run.id) !== live
+              )
+                return "unsupported";
               const steer = connection.steer;
               if (steer === undefined) return "unsupported";
               const result = await Effect.runPromiseExit(
-                steer({ sessionId: providerSessionId, message }),
+                steer({ sessionId: providerSessionId, message }).pipe(
+                  Effect.tap((acknowledgement) =>
+                    Effect.sync(() => {
+                      if (acknowledgement !== "steered") return;
+                      options.onUserMessage?.({
+                        runId: run.id,
+                        kind: "steering",
+                        text: message,
+                        occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+                      });
+                    }),
+                  ),
+                ),
                 { signal: AbortSignal.any([controller.signal, inputController.signal]) },
               );
-              if (
-                Exit.isSuccess(result) &&
-                result.value === "steered" &&
-                !controller.signal.aborted &&
-                !inputController.signal.aborted &&
-                sessions.get(run.id) === live
-              ) {
-                options.onUserMessage?.({
-                  runId: run.id,
-                  kind: "steering",
-                  text: message,
-                  occurredAt: decodeUtcTimestamp(new Date().toISOString()),
-                });
-                return "steered";
-              }
-              return "unsupported";
+              // An acknowledged delivery already happened. Completion/cancellation
+              // before this Promise continuation cannot retract the provider's receipt.
+              return Exit.isSuccess(result) && result.value === "steered"
+                ? "steered"
+                : "unsupported";
             };
           },
           ...(appManagedTools === undefined ? {} : { appManagedTools }),
@@ -600,6 +662,20 @@ export function createAgentRunSessionRuntime(
   };
 
   return {
+    checkResume: (run) => {
+      try {
+        savedConversation(run);
+        return { status: "ready" };
+      } catch (error) {
+        return {
+          status: "refused",
+          message:
+            error instanceof AgentRunSessionError
+              ? error.message
+              : "The saved child conversation could not be verified.",
+        };
+      }
+    },
     start: (run) => startSession(run),
     resume: (run, input) => startSession(run, input ?? {}),
     steer: async ({ runId, message }) => {
@@ -782,6 +858,8 @@ interface ManagedSessionInput {
   readonly modelId: ProviderModelId;
   readonly sessionId: ProviderSessionId;
   readonly prompt: string;
+  readonly verifyWorkspace: (signal: AbortSignal) => Promise<string | undefined>;
+  readonly onSessionReady: () => void;
   readonly resumeCursor: ProviderResumeCursor | undefined;
   readonly recordCursor: (cursor: ProviderResumeCursor | undefined) => boolean;
   readonly requireResumeCursor: boolean;
@@ -919,6 +997,11 @@ function runSessionTurn(
   releaseCapacity: () => void,
 ): Effect.Effect<AgentRunSessionOutcome, ProviderFailure, Scope.Scope> {
   return Effect.gen(function* () {
+    const workspaceRefusal = yield* Effect.promise(input.verifyWorkspace);
+    if (workspaceRefusal !== undefined) {
+      return { kind: "interrupted", reason: boundedReason(workspaceRefusal) };
+    }
+    input.onSessionReady();
     const connection = yield* input.driver.acquire({
       instanceId: input.providerInstanceId,
       projectRoot: input.projectRoot,

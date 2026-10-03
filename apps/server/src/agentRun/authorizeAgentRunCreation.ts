@@ -203,12 +203,10 @@ export function authorizeAgentRunCreation(input: {
 
 /**
  * The live grant a host-scheduled usage resume may claim when no window
- * carries the parent thread — the same shape the window-bound path derives,
- * sourced only from durable state: the run's journaled mode and, for Code,
- * the parent thread's persisted posture. A window-scoped full-access grant
- * cannot be proven without the window, so a run admitted wider than the
- * persisted posture hits the resume's ordinary authority check and settles
- * honestly rather than inheriting a grant nobody can prove.
+ * carries the parent thread. A child admitted by a live window may use only
+ * that exact window's grant, even after its parent tab is hidden. Without a
+ * host-owned execution binding (including after restart), only the persisted
+ * parent posture is available.
  *
  * Returns `undefined` when the parent thread the grant derives from can no
  * longer be read; the dispatch then reports a refusal instead of guessing.
@@ -216,6 +214,10 @@ export function authorizeAgentRunCreation(input: {
 export function scheduledAgentRunLiveAuthority(input: {
   readonly persistence: PersistenceService;
   readonly run: AgentRun;
+  readonly executionWindow?: {
+    readonly windowId: WindowId;
+    readonly codeSessionAuthority: CodeSessionAuthorityStore;
+  };
 }): AgentRunAuthority | undefined {
   switch (input.run.routingReceipt.mode) {
     case "chat":
@@ -232,7 +234,12 @@ export function scheduledAgentRunLiveAuthority(input: {
         return undefined;
       }
       if (codeThread === undefined || codeThread.lifecycle !== "active") return undefined;
-      return codeParentLiveGrant(codeThread.executionPolicy, codeThread.permissionPersistence);
+      const thread =
+        input.executionWindow?.codeSessionAuthority.effectiveThread(
+          input.executionWindow.windowId,
+          codeThread,
+        ) ?? codeThread;
+      return codeParentLiveGrant(thread.executionPolicy, thread.permissionPersistence);
     }
     default:
       return undefined;

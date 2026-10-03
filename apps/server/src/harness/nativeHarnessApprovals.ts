@@ -5,7 +5,7 @@ import {
   type NativeHarnessApproval,
   type NativeHarnessApprovalId,
   type NativeHarnessSlotCandidate,
-  type NativeHarnessToolName,
+  type NativeHarnessInteractionSource,
   type OctantMode,
   type ProjectId,
 } from "@octant/contracts";
@@ -18,6 +18,7 @@ export type NativeHarnessApprovalOutcome = "approved" | "denied" | "expired" | "
 interface Waiter {
   readonly threadId: string;
   readonly approvalClass: string;
+  readonly allowRemember: boolean;
   readonly resolve: (outcome: NativeHarnessApprovalOutcome, remembered?: boolean) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   readonly onAbort: () => void;
@@ -56,12 +57,19 @@ export class NativeHarnessApprovalStore {
     readonly mode: OctantMode;
     readonly projectId?: ProjectId | undefined;
     readonly lead: NativeHarnessSlotCandidate;
-    readonly toolName: NativeHarnessToolName;
+    readonly toolName: NativeHarnessApproval["toolName"];
+    readonly source?: NativeHarnessInteractionSource;
     readonly summary: string;
     readonly approvalClass: string;
     readonly signal?: AbortSignal | undefined;
   }): Promise<NativeHarnessApprovalOutcome> {
-    if (this.#remembered.get(input.threadId)?.has(input.approvalClass) === true) {
+    if (input.signal?.aborted) return Promise.resolve("cancelled");
+    if (input.source !== undefined && input.summary.length > 8_192)
+      return Promise.resolve("denied");
+    if (
+      input.source === undefined &&
+      this.#remembered.get(input.threadId)?.has(input.approvalClass) === true
+    ) {
       return Promise.resolve("approved");
     }
     this.#options.sessions.ensure({
@@ -75,7 +83,11 @@ export class NativeHarnessApprovalStore {
     const approval = decodeNativeHarnessApproval({
       id: approvalId,
       toolName: input.toolName,
+      ...(input.source === undefined ? {} : { source: input.source }),
       summary: input.summary.length > 240 ? input.summary.slice(0, 240) : input.summary,
+      ...(input.source !== undefined && input.summary.length > 240
+        ? { detail: input.summary }
+        : {}),
       approvalClass: input.approvalClass,
       status: "pending",
       askedAt: decodeUtcTimestamp(this.#options.clock()),
@@ -102,6 +114,7 @@ export class NativeHarnessApprovalStore {
       const waiter: Waiter = {
         threadId: input.threadId,
         approvalClass: input.approvalClass,
+        allowRemember: input.source === undefined,
         resolve: settle,
         timer: setTimeout(
           () => settle("expired"),
@@ -136,12 +149,13 @@ export class NativeHarnessApprovalStore {
         ? "approval-not-found"
         : "already-settled";
     }
-    if (decision === "approve-always") {
+    const remember = decision === "approve-always" && waiter.allowRemember;
+    if (remember) {
       const classes = this.#remembered.get(threadId) ?? new Set<string>();
       classes.add(waiter.approvalClass);
       this.#remembered.set(threadId, classes);
     }
-    waiter.resolve(decision === "deny" ? "denied" : "approved", decision === "approve-always");
+    waiter.resolve(decision === "deny" ? "denied" : "approved", remember);
     return "decided";
   }
 }

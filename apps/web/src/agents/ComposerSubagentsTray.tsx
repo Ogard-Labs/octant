@@ -1,4 +1,5 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { ChevronDown, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -23,6 +24,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 export function ThreadSubagentsTray(props: {
   readonly client: AgentRunClient;
   readonly threadId: string;
+  readonly interactionsClient?: Pick<NativeHarnessClient, "session">;
   /** Opens the Agents tool; with a run id, on that subagent's conversation. */
   readonly onOpenSubagent?: (runId?: string) => void;
 }) {
@@ -32,15 +34,89 @@ export function ThreadSubagentsTray(props: {
   });
   if (subagents.status !== "ready") return null;
   return (
-    <SubagentsTray
-      busy={subagents.busy}
-      entries={subagents.entries}
-      {...(subagents.errorMessage === undefined ? {} : { errorMessage: subagents.errorMessage })}
-      {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
-      onStop={(runId) => void subagents.cancelRun(runId)}
-      onStopAll={() => void subagents.stopAll()}
-      reconnecting={subagents.reconnecting}
-    />
+    <>
+      {props.interactionsClient === undefined ||
+      !subagents.entries.some((entry) =>
+        isActiveAgentHierarchyStatus(entry.lifecycleStatus),
+      ) ? null : (
+        <ChildRunAttention
+          client={props.interactionsClient}
+          threadId={props.threadId}
+          entries={subagents.entries}
+          {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
+        />
+      )}
+      <SubagentsTray
+        busy={subagents.busy}
+        entries={subagents.entries}
+        {...(subagents.errorMessage === undefined ? {} : { errorMessage: subagents.errorMessage })}
+        {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
+        onStop={(runId) => void subagents.cancelRun(runId)}
+        onStopAll={() => void subagents.stopAll()}
+        reconnecting={subagents.reconnecting}
+      />
+    </>
+  );
+}
+
+function ChildRunAttention(props: {
+  readonly client: Pick<NativeHarnessClient, "session">;
+  readonly threadId: string;
+  readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
+  readonly onOpenSubagent?: (runId?: string) => void;
+}) {
+  const [pending, setPending] = useState<{
+    readonly threadId: string;
+    readonly runIds: ReadonlyArray<string>;
+  }>();
+  useEffect(() => {
+    let active = true;
+    let reading = false;
+    const refresh = async () => {
+      if (reading) return;
+      reading = true;
+      try {
+        const view = await props.client.session(props.threadId);
+        if (active)
+          setPending({
+            threadId: props.threadId,
+            runIds: [...(view?.approvals ?? []), ...(view?.questions ?? [])]
+              .filter((item) => item.status === "pending" && item.source !== undefined)
+              .flatMap((item) => (item.source === undefined ? [] : [String(item.source.runId)])),
+          });
+      } catch {
+        // Keep the last observed request reachable while the host reconnects.
+      } finally {
+        reading = false;
+      }
+    };
+    void refresh();
+    const stop = scheduleVisibleInterval(() => void refresh(), 1_500);
+    return () => {
+      active = false;
+      stop();
+    };
+  }, [props.client, props.threadId]);
+  const runId =
+    pending?.threadId === props.threadId
+      ? pending.runIds.find((id) =>
+          props.entries.some(
+            (entry) => entry.runId === id && isActiveAgentHierarchyStatus(entry.lifecycleStatus),
+          ),
+        )
+      : undefined;
+  if (runId === undefined) return null;
+  return (
+    <div className="composer-subagents__notice" role="status">
+      A subagent needs your input.{" "}
+      {props.onOpenSubagent === undefined ? (
+        "Open Agents to respond."
+      ) : (
+        <OctantButton size="xs" variant="link" onClick={() => props.onOpenSubagent?.(runId)}>
+          Review request
+        </OctantButton>
+      )}
+    </div>
   );
 }
 

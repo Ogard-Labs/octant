@@ -6572,6 +6572,7 @@ function LaunchedShell(
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
+                    nativeHarnessClient={nativeHarnessClient}
                     onOpenSubagent={openSubagent}
                     onOpenAgents={openSubagent}
                     chatClient={chatClient}

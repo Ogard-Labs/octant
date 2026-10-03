@@ -560,6 +560,34 @@ or wider-than-parent grants. Whether the agent may delegate is one host
 setting, on by default; a stored Ask from the retired "only when I start them"
 choice reads as off.
 
+Each Code child allocation is keyed by its parent and delegation request. Two
+sibling requests receive distinct managed worktrees; only the same request can
+reuse its verified receipt. The host checks the actual Git worktree inventory
+and records the starting commit. Children start from committed source; the
+parent checkout's uncommitted edits are not copied into a child worktree.
+
+Managed children retain a private provider-session cursor and a bounded,
+purgeable conversation alongside their journaled lifecycle. A cursor is bound
+to the run, provider, model, workspace, context, and authority. Resume uses that
+same native session only when the provider supports it and the binding still
+matches; it never silently starts a fresh session. Missing or invalid continuity
+requires Retry. Restarted conversation views are marked stale until execution
+reconnects, and a purged subject cannot restore its session or conversation.
+
+Children on either harness use the host's approval and question stores. Each
+prompt identifies its child, provider, and model and is checked against the
+live parent and child authority before and after the answer. A child approval
+permits only that request, never consumes or creates a remembered lead-session
+grant, and cannot approve an opaque provider action in Plan mode. Cancelled or
+expired requests and requests whose transport was lost at restart cannot be
+answered. The composer signals pending child input and opens its detail view.
+
+Live child steering is optional on a provider connection. Codex uses its
+current-turn steering command; Octant's harness inserts a note after a complete
+tool-results step or response and persists it before acknowledging delivery.
+Unsupported steering is reported as such; a saved note alone is not evidence
+that the running child received it.
+
 Children can form a dependency graph. A run admitted with `dependsOn` (up to
 eight existing sibling runs of the same parent thread) parks as Waiting under
 `waiting-on-dependencies`: it holds no capacity slot, the capacity queue never
@@ -1049,7 +1077,7 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   scoped subscription to its normalized events, established before a caller
   sends so a provider that answers immediately is not missed (0082) — plus
   `start`, `resume`, `send`, `interrupt`, `stop`, `answerApproval`,
-  `answerUserInput`, and `answerTool`. Every driver passes
+  `answerUserInput`, and `answerTool`, with optional current-turn `steer`. Every driver passes
   the shared conformance harness (chat, child-agent, and context-facts
   suites) before it is selectable.
 - **Model configuration.** Model variants may carry normalized family and choice

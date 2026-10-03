@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
-import { lstat, realpath } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, readFile, realpath } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { checkpointRefNamespace } from "./gitMutationPort";
 import {
@@ -54,6 +56,71 @@ async function run(
       };
     }
     throw error;
+  }
+}
+
+/** Physical identity excludes HEAD and the index, which ordinary child work changes. */
+export async function observeManagedWorktreeExecutionIdentity(
+  root: string,
+  signal: AbortSignal,
+): Promise<{ readonly identity: string; readonly branch: string } | undefined> {
+  try {
+    signal.throwIfAborted();
+    if ((await realpath(root)) !== root) return undefined;
+    const rootStat = await lstat(root, { bigint: true });
+    const pointerPath = join(root, ".git");
+    const pointerStat = await lstat(pointerPath, { bigint: true });
+    if (
+      !rootStat.isDirectory() ||
+      rootStat.isSymbolicLink() ||
+      !pointerStat.isFile() ||
+      pointerStat.isSymbolicLink()
+    )
+      return undefined;
+    const gitDirectoryResult = await run(
+      "git",
+      ["-C", root, "rev-parse", "--absolute-git-dir"],
+      signal,
+    );
+    if (gitDirectoryResult.exitCode !== 0) return undefined;
+    const gitDirectory = gitDirectoryResult.stdout.trim();
+    if ((await realpath(gitDirectory)) !== gitDirectory) return undefined;
+    const gitStat = await lstat(gitDirectory, { bigint: true });
+    if (!gitStat.isDirectory() || gitStat.isSymbolicLink()) return undefined;
+    if ((await readFile(join(gitDirectory, "gitdir"), "utf8")).trim() !== pointerPath)
+      return undefined;
+    const branch = await run("git", ["-C", root, "symbolic-ref", "--quiet", "HEAD"], signal);
+    if (branch.exitCode !== 0) return undefined;
+    const rootAfter = await lstat(root, { bigint: true });
+    const pointerAfter = await lstat(pointerPath, { bigint: true });
+    if (
+      rootAfter.dev !== rootStat.dev ||
+      rootAfter.ino !== rootStat.ino ||
+      pointerAfter.dev !== pointerStat.dev ||
+      pointerAfter.ino !== pointerStat.ino ||
+      (await realpath(root)) !== root
+    )
+      return undefined;
+    signal.throwIfAborted();
+    return {
+      branch: branch.stdout.trim(),
+      identity: createHash("sha256")
+        .update(
+          JSON.stringify([
+            root,
+            String(rootStat.dev),
+            String(rootStat.ino),
+            String(pointerStat.dev),
+            String(pointerStat.ino),
+            gitDirectory,
+            String(gitStat.dev),
+            String(gitStat.ino),
+          ]),
+        )
+        .digest("hex"),
+    };
+  } catch {
+    return undefined;
   }
 }
 

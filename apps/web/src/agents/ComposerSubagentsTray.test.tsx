@@ -149,6 +149,44 @@ describe("SubagentsTray", () => {
 });
 
 describe("ThreadSubagentsTray", () => {
+  it("makes a child's pending approval reachable from the parent composer and clears it when leaving that thread", async () => {
+    const runId = "90000000-0000-4000-8000-000000000001";
+    const client = {
+      parentSummary: vi.fn(async () => ({
+        parentThreadId: threadId,
+        entries: [{ ...entry(runId, "running"), requestId: "r1", parentThreadId: threadId }],
+      })),
+      acknowledge: vi.fn(),
+      cancel: vi.fn(),
+    } as never;
+    const interactionsClient = {
+      session: vi.fn(async () => ({
+        approvals: [{ status: "pending", source: { runId } }],
+        questions: [],
+      })),
+    } as never;
+    const onOpenSubagent = vi.fn();
+    const rendered = render(
+      <ThreadSubagentsTray
+        client={client}
+        interactionsClient={interactionsClient}
+        threadId={threadId}
+        onOpenSubagent={onOpenSubagent}
+      />,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Review request" }));
+    expect(onOpenSubagent).toHaveBeenCalledWith(runId);
+    rendered.rerender(
+      <ThreadSubagentsTray
+        client={client}
+        interactionsClient={interactionsClient}
+        threadId="22222222-2222-4222-8222-222222222222"
+        onOpenSubagent={onOpenSubagent}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Review request" })).not.toBeInTheDocument();
+  });
+
   it("shows the host's working subagents and none of its finished ones", async () => {
     const client = {
       parentSummary: vi.fn(async () => ({

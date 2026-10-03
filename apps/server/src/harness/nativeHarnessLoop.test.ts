@@ -103,6 +103,133 @@ const isTerminal = (event: ProviderRuntimeEvent) =>
   event.kind === "completed" || event.kind === "failed" || event.kind === "interrupted";
 
 describe("native harness loop", () => {
+  it("does not acknowledge a steering note that cancellation prevents from reaching the model", async () => {
+    const scripted = scriptedTransport([
+      {
+        text: "Reading",
+        toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+      },
+    ]);
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(scripted.transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          yield* sendAndCollect(connection, "Review", (event) => event.kind === "tool-request");
+          const note = yield* Effect.fork(
+            connection.steer?.({ sessionId, message: "Check the parser" }) ??
+              Effect.succeed("unsupported"),
+          );
+          yield* Effect.yieldNow();
+          yield* connection.stop(sessionId);
+          expect(yield* Fiber.join(note)).toBe("unsupported");
+          expect(
+            transcripts
+              .load(sessionId)
+              ?.messages.some((message) => message.text === "Check the parser"),
+          ).toBe(false);
+          expect(scripted.requests).toHaveLength(1);
+        }),
+      ),
+    );
+  });
+
+  it("continues with a note received during the final response before completing the turn", async () => {
+    let finish: ((response: NativeHarnessResponse) => void) | undefined;
+    const requests: NativeHarnessRequest[] = [];
+    const transport: NativeHarnessTransport = {
+      open: async () => ({
+        fits: () => true,
+        send: async (request) => {
+          requests.push(request);
+          if (requests.length === 1)
+            return await new Promise<NativeHarnessResponse>((resolve) => {
+              finish = resolve;
+            });
+          return { text: "Rechecked", toolCalls: [] };
+        },
+        release: () => undefined,
+      }),
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({ sessionId, prompt: "Review", attachments: [], tools });
+          const note = yield* Effect.fork(
+            connection.steer?.({ sessionId, message: "Recheck the parser" }) ??
+              Effect.succeed("unsupported"),
+          );
+          yield* Effect.yieldNow();
+          expect(finish).toBeDefined();
+          finish?.({ text: "Initial review", toolCalls: [] });
+          expect(yield* Fiber.join(note)).toBe("steered");
+          expect(Array.from(yield* Fiber.join(terminal)).at(-1)?.kind).toBe("completed");
+          expect(requests).toHaveLength(2);
+          expect(requests[1]?.history.slice(-2)).toEqual([
+            { role: "assistant", text: "Initial review" },
+            { role: "user", text: "Recheck the parser" },
+          ]);
+        }),
+      ),
+    );
+  });
+
+  it("delivers steering after pending tool results and records it before acknowledging the note", async () => {
+    const scripted = scriptedTransport([
+      {
+        text: "Reading",
+        toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+      },
+      { text: "Used SQLite", toolCalls: [] },
+    ]);
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(scripted.transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          yield* sendAndCollect(
+            connection,
+            "Choose a database",
+            (event) => event.kind === "tool-request",
+          );
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          const note = yield* Effect.fork(
+            connection.steer?.({ sessionId, message: "Use SQLite" }) ??
+              Effect.succeed("unsupported"),
+          );
+          yield* Effect.yieldNow();
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: "{}",
+            isError: false,
+          });
+          expect(yield* Fiber.join(note)).toBe("steered");
+          expect(Array.from(yield* Fiber.join(terminal)).at(-1)?.kind).toBe("completed");
+          const history = scripted.requests[1]?.history;
+          expect(history?.at(-1)).toMatchObject({ role: "user", text: "Use SQLite" });
+          expect(history?.at(-2)?.toolResults?.[0]?.toolCallId).toBe("read-1");
+          expect(
+            transcripts
+              .load(sessionId)
+              ?.messages.some(
+                (message) => message.role === "user" && message.text === "Use SQLite",
+              ),
+          ).toBe(true);
+        }),
+      ),
+    );
+  });
+
   it("resumes after a restart mid-step and tells the model which interrupted calls only read", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-harness-loop-"));
     directories.push(directory);

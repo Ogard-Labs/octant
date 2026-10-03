@@ -22,11 +22,12 @@ import {
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { contextKeyForProject, defaultWindowWorkspace } from "@octant/domain";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
 import {
   authorizeAgentRunCreation,
   layoutContainsAgentRunThread,
+  scheduledAgentRunLiveAuthority,
 } from "./authorizeAgentRunCreation";
 
 const now = "2026-08-29T12:00:00.000Z";
@@ -186,6 +187,37 @@ function authorize(input: {
     codeSessionAuthority: input.authority ?? new CodeSessionAuthorityStore(),
   });
 }
+
+describe("live child execution authority", () => {
+  it("uses only the admitted window's session grant without requiring a visible parent tab", () => {
+    const authority = new CodeSessionAuthorityStore();
+    const otherWindow = decodeWindowId("00000000-0000-4000-8000-00000000a002");
+    const readWindowWorkspace = vi.fn(() => undefined);
+    const input = {
+      persistence: { readCodeThread: () => codeThread(), readWindowWorkspace } as never,
+      run: { parentThreadId: parentId(ids.code), routingReceipt: { mode: "code" } } as never,
+      executionWindow: { windowId: ids.window, codeSessionAuthority: authority },
+    };
+    authority.grantFullAccess(otherWindow, ids.code);
+    expect(scheduledAgentRunLiveAuthority(input)?.executionPolicy).toBe("approval-gated");
+    authority.grantFullAccess(ids.window, ids.code);
+    expect(scheduledAgentRunLiveAuthority(input)?.executionPolicy).toBe("full-access");
+    expect(readWindowWorkspace).not.toHaveBeenCalled();
+    authority.revokeWindow(ids.window);
+    expect(scheduledAgentRunLiveAuthority(input)?.executionPolicy).toBe("approval-gated");
+    authority.grantFullAccess(ids.window, ids.code);
+    const { executionWindow: _, ...afterRestart } = input;
+    expect(scheduledAgentRunLiveAuthority(afterRestart)?.executionPolicy).toBe("approval-gated");
+    expect(
+      scheduledAgentRunLiveAuthority({
+        ...input,
+        persistence: {
+          readCodeThread: () => ({ ...codeThread(), lifecycle: "archived" }),
+        } as never,
+      }),
+    ).toBeUndefined();
+  });
+});
 
 describe("authorizeAgentRunCreation", () => {
   it("refuses creation when the window has no persisted workspace", () => {

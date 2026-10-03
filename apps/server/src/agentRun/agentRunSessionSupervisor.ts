@@ -5,6 +5,7 @@ import {
   isAgentRunSessionDeath,
   AgentRunSessionError,
   type AgentRunSessionHandle,
+  type AgentRunResumeReadiness,
   type AgentRunSessionOutcome,
   type AgentRunSessionPort,
 } from "./agentRunSessionPort";
@@ -65,6 +66,18 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
 
   start(run: AgentRun): AgentRunSessionHandle {
     return this.#start(run);
+  }
+
+  checkResume(run: AgentRun): AgentRunResumeReadiness {
+    if (this.#sessions.has(run.id))
+      return { status: "refused", message: "This child still owns an active session." };
+    if (this.#port.resume === undefined || this.#port.checkResume === undefined) {
+      return {
+        status: "refused",
+        message: "This execution cannot verify a saved child conversation.",
+      };
+    }
+    return this.#port.checkResume(run);
   }
 
   resume(run: AgentRun, input?: { readonly message?: string }): AgentRunSessionHandle {
