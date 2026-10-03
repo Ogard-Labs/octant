@@ -16,6 +16,7 @@ import { ShellState } from "../shell/ShellState";
 import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
 import { AgentRunDetail } from "./AgentRunDetail";
 import { buildAgentHierarchyModel, isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
+import { useAgentRunControlCommands } from "./useAgentRunControlCommands";
 import { useAgentRunConversation } from "./useAgentRunConversation";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -187,38 +188,7 @@ export function AgentRunHierarchy(props: {
     [props.client, refresh],
   );
 
-  const command = useCallback(
-    async (
-      action: "steer" | "retry" | "resume",
-      input: { readonly runId: string; readonly version: number; readonly message?: string },
-    ) => {
-      try {
-        const runId = decodeAgentRunId(input.runId);
-        const result =
-          action === "steer"
-            ? await props.client.steer({
-                runId,
-                expectedVersion: input.version,
-                message: input.message ?? "",
-              })
-            : action === "retry"
-              ? await props.client.retry({ runId, expectedVersion: input.version })
-              : await props.client.resume({ runId, expectedVersion: input.version });
-        if (result.kind === "run-command-failed") {
-          setErrorMessage(result.message);
-          return;
-        }
-        await refresh();
-      } catch (error) {
-        setErrorMessage(
-          error instanceof AgentRunClientFailure
-            ? error.message
-            : "AgentRun command failed. Retry against authoritative state.",
-        );
-      }
-    },
-    [props.client, refresh],
-  );
+  const controls = useAgentRunControlCommands(props.client, refresh);
 
   const usageResume = useCallback(
     async (input: {
@@ -283,13 +253,15 @@ export function AgentRunHierarchy(props: {
       <>
         {error}
         <AgentRunDetail
+          key={selectedRow.runId}
           row={selectedRow}
           onBack={leaveSelectedRun}
           onAcknowledge={(input) => void acknowledge(input)}
           onCancel={(input) => void cancel(input)}
-          onSteer={(input) => void command("steer", input)}
-          onRetry={(input) => void command("retry", input)}
-          onResume={(input) => void command("resume", input)}
+          onSteer={(input) => void controls.steer(input).then(setErrorMessage)}
+          onRetry={(input) => void controls.retry(input).then(setErrorMessage)}
+          onResume={(input) => void controls.resume(input).then(setErrorMessage)}
+          onFollowUp={controls.resume}
           onUsageResume={(input) => void usageResume(input)}
           {...(conversationState.conversation === undefined
             ? {}
