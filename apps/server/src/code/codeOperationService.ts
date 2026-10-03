@@ -621,6 +621,8 @@ export interface CodeOperationTurnPort {
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     /** The selected MCP servers' tools, beside the host's own for this turn. */
     readonly extensionTools?: AppManagedToolSet;
+    /** The host rechecks this after runtime preparation, before launching. */
+    readonly admissionCurrent?: () => boolean;
   }) => Promise<{
     readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
     readonly evidence?: string;
@@ -685,6 +687,8 @@ export interface CodeOperationExecuteOptions {
    * command cannot carry it.
    */
   readonly limitRecovery?: boolean;
+  /** Host-only revocation check; never grants authority or travels on the wire. */
+  readonly admissionCurrent?: () => boolean;
 }
 
 export interface CodeOperationServiceOptions {
@@ -872,6 +876,7 @@ export class CodeOperationService {
           scope.thread,
           scope.checkout,
           existing.event.result,
+          options.admissionCurrent,
         );
       }
       if (command.kind === "start-provider-turn") {
@@ -900,6 +905,14 @@ export class CodeOperationService {
         command.operationId,
         "unauthorized",
         "This provider or model is not allowed by this Code Project's provider policy.",
+      );
+    }
+
+    if (command.kind === "start-provider-turn" && options.admissionCurrent?.() === false) {
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Code turn admission is no longer current.",
       );
     }
 
@@ -997,48 +1010,56 @@ export class CodeOperationService {
                     turnAccessPosture(scope.thread, command, recordedStart?.event.executionPolicy),
                   )
                 : scope.thread;
-            const deliveryRefusal =
+            let turnRefusal =
               command.kind === "start-provider-turn"
                 ? this.#refuseInvalidAgentRunDelivery(command)
                 : undefined;
             if (
               command.kind === "start-provider-turn" &&
               recordedStart === undefined &&
-              deliveryRefusal === undefined
+              turnRefusal === undefined
             ) {
               const checkpoint = await this.#checkpoint(
                 turnThread,
                 scope.checkout.id,
                 root.checkoutRoot,
               );
-              this.#options.events.append({
-                threadId: command.threadId,
-                operationId: command.operationId,
-                expectedCursor: resultCursor,
-                event: {
-                  kind: "conversation-turn-started",
-                  providerInstanceId: scope.thread.providerInstanceId,
-                  modelId: scope.thread.modelId,
-                  sessionId: command.sessionId,
-                  prompt: command.prompt,
-                  ...(command.extensionSelections === undefined ||
-                  command.extensionSelections.length === 0
-                    ? {}
-                    : { extensionSelections: command.extensionSelections }),
-                  executionPolicy: turnThread.executionPolicy,
-                  ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
-                  ...(starting.attachments.length === 0
-                    ? {}
-                    : { attachments: starting.attachments }),
-                  ...(checkpoint === undefined ? {} : { checkpoint }),
-                },
-              });
-              resultCursor += 1;
+              if (options.admissionCurrent?.() === false) {
+                turnRefusal = this.#failed(
+                  command.operationId,
+                  "unauthorized",
+                  "Code turn admission is no longer current.",
+                );
+              } else {
+                this.#options.events.append({
+                  threadId: command.threadId,
+                  operationId: command.operationId,
+                  expectedCursor: resultCursor,
+                  event: {
+                    kind: "conversation-turn-started",
+                    providerInstanceId: scope.thread.providerInstanceId,
+                    modelId: scope.thread.modelId,
+                    sessionId: command.sessionId,
+                    prompt: command.prompt,
+                    ...(command.extensionSelections === undefined ||
+                    command.extensionSelections.length === 0
+                      ? {}
+                      : { extensionSelections: command.extensionSelections }),
+                    executionPolicy: turnThread.executionPolicy,
+                    ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
+                    ...(starting.attachments.length === 0
+                      ? {}
+                      : { attachments: starting.attachments }),
+                    ...(checkpoint === undefined ? {} : { checkpoint }),
+                  },
+                });
+                resultCursor += 1;
+              }
             }
             try {
               result =
-                deliveryRefusal !== undefined
-                  ? deliveryRefusal
+                turnRefusal !== undefined
+                  ? turnRefusal
                   : await this.#execute(
                       command,
                       windowId,
@@ -1046,6 +1067,7 @@ export class CodeOperationService {
                       scope.checkout,
                       root,
                       starting.attachments,
+                      options.admissionCurrent,
                     );
             } catch (error) {
               const category =
@@ -1091,6 +1113,7 @@ export class CodeOperationService {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     cached: CodeOperationResult,
+    admissionCurrent?: () => boolean,
   ): Promise<CodeOperationResult> {
     // A stale turn can be resumed long after the Project's provider policy
     // changed, and this path starts a real provider session. The policy admits
@@ -1132,8 +1155,12 @@ export class CodeOperationService {
         ),
         root.checkoutRoot,
         recordedTurnAttachments(frames),
+        admissionCurrent,
       );
-      return recovered.kind === "provider-turn-state" ? recovered : cached;
+      return recovered.kind === "provider-turn-state" ||
+        (recovered.kind === "operation-failed" && recovered.failure.category === "unauthorized")
+        ? recovered
+        : cached;
     } catch {
       return this.#failed(command.operationId, "failed", "Code provider turn recovery failed.");
     }
@@ -1580,6 +1607,7 @@ export class CodeOperationService {
     root: NonNullable<Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>>,
     /** The images the caller resolved for a starting provider turn. */
     attachments: ReadonlyArray<CodeAttachmentReference>,
+    admissionCurrent?: () => boolean,
   ): Promise<CodeOperationResult> {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
     switch (command.kind) {
@@ -1978,7 +2006,14 @@ export class CodeOperationService {
           }),
         });
       case "start-provider-turn":
-        return this.#providerTurn(command, windowId, thread, root.checkoutRoot, attachments);
+        return this.#providerTurn(
+          command,
+          windowId,
+          thread,
+          root.checkoutRoot,
+          attachments,
+          admissionCurrent,
+        );
       case "answer-provider-input":
         return this.#providerInput(command, thread, root.checkoutRoot);
       case "answer-provider-approval":
@@ -2623,6 +2658,7 @@ export class CodeOperationService {
     thread: CodeThread,
     checkoutRoot: string,
     references: ReadonlyArray<CodeAttachmentReference>,
+    admissionCurrent?: () => boolean,
   ): Promise<CodeOperationResult> {
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
@@ -2695,6 +2731,15 @@ export class CodeOperationService {
         "An image attached to this turn is unavailable.",
       );
     }
+    // Prompt, context, and attachment reads can finish after admission was revoked.
+    if (admissionCurrent?.() === false) {
+      await extensionTools?.close?.().catch(() => undefined);
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Code turn admission is no longer current.",
+      );
+    }
     const turn = await this.#options.turns.start({
       windowId,
       thread,
@@ -2705,6 +2750,7 @@ export class CodeOperationService {
       ...(forkHandoff === undefined ? {} : { forkHandoff }),
       ...(attachments.length === 0 ? {} : { attachments }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
+      ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
     });
     this.#options.consumeIssueContextFramed?.(String(thread.id));
     return this.#providerResult(command.operationId, turn);

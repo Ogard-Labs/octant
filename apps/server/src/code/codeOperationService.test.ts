@@ -795,7 +795,7 @@ describe("CodeOperationService", () => {
     expect(terminals.terminate).toHaveBeenCalledWith(approvalTerminal);
   });
 
-  it("recovers a stale running provider-turn result by reconstructing the runtime turn", async () => {
+  it("recovers a stale running turn only while host admission remains current", async () => {
     const providerOperation = decodeCodeOperationId("48484848-4848-4484-8484-484848484848");
     const prompt = decodeCodeEvidenceReference({
       contentId: "61616161-6161-4161-8161-616161616161",
@@ -911,6 +911,36 @@ describe("CodeOperationService", () => {
     ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
     expect(turns.start).toHaveBeenCalledOnce();
     // Recovery must not append a second operation-result for the same receipt.
+    expect(events.append).not.toHaveBeenCalled();
+    turns.start.mockClear();
+    const release = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    let current = true;
+    evidence.read.mockImplementation(async () => {
+      entered.resolve();
+      await release.promise;
+      return "prompt";
+    });
+    const pending = service.execute(
+      ids.window,
+      {
+        kind: "start-provider-turn",
+        operationId: providerOperation,
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        sessionId: "60606060-6060-4060-8060-606060606060",
+        prompt,
+      },
+      { admissionCurrent: () => current },
+    );
+    await entered.promise;
+    current = false;
+    release.resolve();
+    await expect(pending).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unauthorized" },
+    });
+    expect(turns.start).not.toHaveBeenCalled();
     expect(events.append).not.toHaveBeenCalled();
   });
 
@@ -1405,6 +1435,77 @@ describe("CodeOperationService", () => {
       expectedStateToken: "f".repeat(64),
       executionPolicy: "auto-accept-edits",
     });
+  });
+
+  it("refuses a host turn revoked while its checkout checkpoint is being prepared", async () => {
+    const release = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    let current = true;
+    const fixture = providerTurnFixture();
+    fixture.git.checkpoint.mockImplementation(async () => {
+      entered.resolve();
+      await release.promise;
+      return { status: "failed" };
+    });
+
+    const pending = fixture.service.execute(ids.window, startProviderTurn, {
+      admissionCurrent: () => current,
+    });
+    await entered.promise;
+    current = false;
+    release.resolve();
+
+    await expect(pending).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unauthorized" },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(fixture.events.append).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ kind: "conversation-turn-started" }),
+      }),
+    );
+  });
+
+  it("fails a recorded host turn revoked while its prompt is loading without starting it", async () => {
+    const release = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    let current = true;
+    const fixture = providerTurnFixture();
+    fixture.evidence.read.mockImplementation(async () => {
+      entered.resolve();
+      await release.promise;
+      return "does this still hold?";
+    });
+
+    const pending = fixture.service.execute(ids.window, startProviderTurn, {
+      admissionCurrent: () => current,
+    });
+    await entered.promise;
+    expect(fixture.events.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ kind: "conversation-turn-started" }),
+      }),
+    );
+    current = false;
+    release.resolve();
+
+    await expect(pending).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unauthorized" },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(fixture.events.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "operation-result",
+          result: expect.objectContaining({
+            kind: "operation-failed",
+            failure: expect.objectContaining({ category: "unauthorized" }),
+          }),
+        }),
+      }),
+    );
   });
 
   it("sends the images the journal recorded, and refuses ones no turn may claim", async () => {
@@ -2274,6 +2375,8 @@ function providerTurnFixture(
     append: vi.fn(),
     historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
   };
+  const git = { checkpoint: vi.fn(async () => ({ status: "failed" as const })) };
+  const evidence = { put: vi.fn(), read: vi.fn(async () => "does this still hold?") };
   const service = new CodeOperationService({
     authority: {
       readThread: vi.fn(() => activeThread),
@@ -2295,15 +2398,15 @@ function providerTurnFixture(
     } as never,
     terminals: {} as never,
     repositoryTests: {} as never,
-    git: {} as never,
+    git: git as never,
     pullRequests: {} as never,
     reviewFindings: {} as never,
     turns: turns as never,
-    evidence: { put: vi.fn(), read: vi.fn(async () => "does this still hold?") } as never,
+    evidence: evidence as never,
     events: events as never,
     ...serviceOptions,
   });
-  return { service, turns, events };
+  return { service, turns, events, git, evidence };
 }
 
 describe("CodeOperationService terminal readers", () => {

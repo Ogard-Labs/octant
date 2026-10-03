@@ -1693,6 +1693,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         forkSeeded = true;
       }
     }
+    // Driver, credentials, and fork preparation may outlive the host's admission.
+    if (input.admissionCurrent?.() === false) {
+      this.settleSpendReservation(key);
+      await input.extensionTools?.close?.().catch(() => undefined);
+      return {
+        state: "failed" as const,
+        failure: {
+          category: "unauthorized" as const,
+          message: "Code turn admission is no longer current.",
+        },
+      };
+    }
     const context =
       forkSeeded || input.forkHandoff === undefined
         ? input.context

@@ -469,6 +469,49 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("refuses a host turn revoked during runtime provider preparation without starting the provider", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const driver = providerDriver(connection);
+    const release = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    let current = true;
+    const fixture = runtimeFixture({
+      provider: driver,
+      approvalValidator: false,
+      resolveProviderDriver: async () => {
+        entered.resolve();
+        await release.promise;
+        return driver;
+      },
+    });
+    try {
+      const pending = fixture.runtime.execute(
+        windowId,
+        {
+          kind: "start-provider-turn",
+          operationId: operationId(13),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        },
+        { admissionCurrent: () => current },
+      );
+      await entered.promise;
+      current = false;
+      release.resolve();
+      await expect(pending).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "failed",
+        failure: { category: "unauthorized" },
+      });
+      expect(connection.start).not.toHaveBeenCalled();
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("refuses a saved reasoning choice that discovery no longer offers before admitting the turn", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -2796,6 +2839,9 @@ function runtimeFixture(options: {
   throwRuntimeWorkReporter?: boolean;
   onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   probeProvider?: Parameters<typeof createCodeOperationRuntime>[0]["probeProvider"];
+  readonly resolveProviderDriver?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolveProviderDriver"];
   isProviderModelAllowed?: (thread: CodeThread) => boolean;
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
   evidencePut?: (
@@ -2873,7 +2919,7 @@ function runtimeFixture(options: {
       credentialReferences: options.credentialReferences ?? [],
       environment: {},
     }),
-    resolveProviderDriver: async () => options.provider,
+    resolveProviderDriver: options.resolveProviderDriver ?? (async () => options.provider),
     ...(options.computerUseTools === undefined
       ? {}
       : { computerUseTools: options.computerUseTools }),
