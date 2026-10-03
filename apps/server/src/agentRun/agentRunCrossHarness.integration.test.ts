@@ -468,6 +468,7 @@ function fixture(
     now: Date.parse(now),
   });
   const route = createAgentRunRouteHandler({
+    listTargets: common.listTargets,
     windowAuthorityStore: windows,
     persistence,
     orchestration,

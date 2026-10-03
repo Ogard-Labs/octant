@@ -324,6 +324,22 @@ export type AgentRunFollowUpResult =
     }
   | { readonly status: "refused"; readonly reason: string; readonly message?: string };
 
+export function isAgentRunTargetEligible(
+  run: AgentRun,
+  targets: ReadonlyArray<AgentsToolTarget>,
+): boolean {
+  const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+  return targets.some(
+    (candidate) =>
+      candidate.providerInstanceId === String(target.providerInstanceId) &&
+      candidate.modelIds.includes(String(target.modelId)) &&
+      (run.routingReceipt.rawReasoning === undefined ||
+        candidate.reasoningByModel?.[String(target.modelId)]?.includes(
+          run.routingReceipt.rawReasoning,
+        ) === true),
+  );
+}
+
 /** A follow-up keeps the admitted route and workspace; it cannot create a new child. */
 export async function followUpAgentRunDelegation(
   options: AgentRunDelegationOptions,
@@ -384,20 +400,7 @@ export async function followUpAgentRunDelegation(
       parentAuthority: parent.parentAuthority,
       liveParentGrant: parent.liveAuthority,
     });
-    const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
-    if (
-      !options
-        .listTargets()
-        .some(
-          (candidate) =>
-            candidate.providerInstanceId === String(target.providerInstanceId) &&
-            candidate.modelIds.includes(String(target.modelId)) &&
-            (run.routingReceipt.rawReasoning === undefined ||
-              candidate.reasoningByModel?.[String(target.modelId)]?.includes(
-                run.routingReceipt.rawReasoning,
-              ) === true),
-        )
-    )
+    if (!isAgentRunTargetEligible(run, options.listTargets()))
       return { status: "refused", reason: "delegate-target-unavailable" };
     const result = await options.orchestration.resume(
       run.id,
@@ -429,20 +432,7 @@ export async function followUpAgentRunDelegation(
             parentAuthority: currentParent.parentAuthority,
             liveParentGrant: currentParent.liveAuthority,
           });
-          if (
-            !options
-              .listTargets()
-              .some(
-                (candidate) =>
-                  candidate.providerInstanceId === String(target.providerInstanceId) &&
-                  candidate.modelIds.includes(String(target.modelId)) &&
-                  (run.routingReceipt.rawReasoning === undefined ||
-                    candidate.reasoningByModel?.[String(target.modelId)]?.includes(
-                      run.routingReceipt.rawReasoning,
-                    ) === true),
-              )
-          )
-            return undefined;
+          if (!isAgentRunTargetEligible(run, options.listTargets())) return undefined;
           return currentParent.liveAuthority;
         },
         onExecutionAccepted: (accepted) =>

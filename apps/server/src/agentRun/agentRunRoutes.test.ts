@@ -159,6 +159,8 @@ function createHandler(
   options: {
     readonly onExecutionAccepted?: AgentRunControlAdmissionDependencies["onExecutionAccepted"];
     readonly resume?: (run: AgentRun) => unknown;
+    readonly listTargets?: AgentRunRouteDependencies["listTargets"];
+    readonly reasoning?: string;
     readonly processes?: AgentRunProcessSupervisorPort;
     readonly authorizeCancellation?: (input: { readonly run: AgentRun }) => boolean;
     readonly authorizeCreation?: () => boolean;
@@ -304,6 +306,7 @@ function createHandler(
             }),
       },
       parentRoute: {
+        ...(options.reasoning === undefined ? {} : { reasoning: options.reasoning }),
         providerInstanceId: ids.provider as never,
         modelId: "gpt-4o" as never,
         ...(parentMode === "chat" ? {} : { projectId: "77777777-7777-4777-8777-777777777777" }),
@@ -344,6 +347,16 @@ function createHandler(
     ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
   };
   const handler = createAgentRunRouteHandler({
+    listTargets:
+      options.listTargets ??
+      (() => [
+        {
+          providerInstanceId: ids.provider,
+          modelIds: ["gpt-4o"],
+          displayName: "Fixture",
+          driverKind: "openai",
+        },
+      ]),
     windowAuthorityStore,
     persistence,
     liveConversations,
@@ -1997,6 +2010,76 @@ describe("agentRunRoutes", () => {
     expect((await post({ ...base, message: "duplicate" }))?.status).toBe(409);
     expect(resume).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ["provider", false],
+    ["model", false],
+    ["reasoning", false],
+    ["provider", true],
+    ["model", true],
+    ["reasoning", true],
+  ] as const)(
+    "refuses a removed %s on UI follow-up, including preflight drift: %s",
+    async (removed, duringPreflight) => {
+      let revoked = !duringPreflight;
+      const resume = vi.fn();
+      const { handler, token, persistence, orchestration, create } = createHandler({
+        reasoning: "high",
+        listTargets: () => [
+          {
+            providerInstanceId: revoked && removed === "provider" ? "unavailable" : ids.provider,
+            modelIds: revoked && removed === "model" ? [] : ["gpt-4o"],
+            reasoningByModel: { "gpt-4o": revoked && removed === "reasoning" ? [] : ["high"] },
+            displayName: "Fixture",
+            driverKind: "openai",
+          },
+        ],
+        processes: {
+          start: vi.fn(),
+          resume,
+          checkResume: async () => {
+            revoked = true;
+            return { status: "ready" };
+          },
+          stop: async () => undefined,
+        },
+      });
+      const run = await startedRun(create);
+      expect(run.routingReceipt.rawReasoning).toBe("high");
+      orchestration.onSessionSettled({
+        runId: run.id,
+        outcome: { kind: "completed", responseText: "First answer" },
+      });
+      const finished = persistence.getById(run.id);
+      if (finished === undefined) throw new Error("Missing completion");
+      const delivered = persistence.applyCommand({
+        kind: "settle-agent-run-result-delivery",
+        runId: finished.id,
+        expectedVersion: finished.version,
+        generation: finished.generation ?? 1,
+        outcome: "delivered",
+      });
+      if (delivered.kind !== "run-updated") throw new Error("Delivery failed");
+      const response = await handler(
+        new Request("http://127.0.0.1/api/agent-runs/resume", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": token },
+          body: JSON.stringify({
+            runId: run.id,
+            expectedVersion: delivered.run.version,
+            message: "Continue",
+          }),
+        }),
+      );
+      expect(response?.status).toBe(409);
+      expect(await response?.json()).toMatchObject({
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+      });
+      expect(resume).not.toHaveBeenCalled();
+      expect(persistence.getById(run.id)).toEqual(delivered.run);
+    },
+  );
 
   it("resumes a waiting child and refuses a restart interruption without resume evidence", async () => {
     const { handler, token, persistence, create } = createHandler();

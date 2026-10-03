@@ -617,7 +617,9 @@ The delivery service serializes work per parent and defers while it is busy.
 A completed managed child accepts an explicit follow-up through either
 delegation tool or the Agents views. The caller supplies its current version
 and a bounded message; native resume support, saved identity, current authority,
-workspace, capacity, and spend are rechecked. Code workspace ownership and the
+workspace, capacity, and spend are rechecked. Both tools and the UI revalidate
+the saved provider, model, and reasoning against the parent's current eligible
+catalog, including after asynchronous workspace preflight. Code workspace ownership and the
 saved physical identity are verified asynchronously before a new generation
 starts; current version and exact-window authority are checked again after
 that wait. Execution preparation reserves spend and provider capacity before the
@@ -627,7 +629,9 @@ and follow-up draft unchanged. An accepted execution binds its window before
 provider acquisition. One accepted completed-child follow-up is staged in its
 private session record before the lifecycle commit, bound to that session and
 the next generation; an uncommitted future generation cannot replay it. Recovery
-resumes an unsent message verbatim. The record is marked uncertain before send
+resumes an unsent message verbatim. A provider failure before sending that message
+interrupts the generation so Resume can recover the accepted input in the saved
+session. The record is marked uncertain before send
 and cleared on confirmed completion; an uncertain delivery refuses automatic
 resending and asks the caller to inspect the retained conversation. This is one
 continuation input, not an editable work queue.
