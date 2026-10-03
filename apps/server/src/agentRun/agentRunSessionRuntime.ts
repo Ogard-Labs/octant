@@ -17,6 +17,7 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
+  type ProviderModelOptionValues,
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderServiceLimits,
@@ -185,6 +186,8 @@ export interface AgentRunSessionRuntimeOptions {
   >;
   /** Current observed capability; absent is unsupported, never an optimistic probe. */
   readonly supportsResume?: (providerInstanceId: ProviderInstanceId) => boolean;
+  /** Maps the admitted reasoning choice to the current model's declared option key. */
+  readonly resolveModelOptionValues?: (run: AgentRun) => ProviderModelOptionValues | undefined;
   /** Resolves the configured driver for a provider instance, or undefined. */
   readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   readonly capacityScheduler: ProviderCapacityScheduler;
@@ -305,6 +308,19 @@ export function createAgentRunSessionRuntime(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
 
+  const modelOptionsFor = (run: AgentRun): ProviderModelOptionValues | undefined => {
+    const reasoning = run.routingReceipt.rawReasoning;
+    if (reasoning === undefined) return undefined;
+    const values = options.resolveModelOptionValues?.(run);
+    if (values === undefined || !Object.values(values).includes(reasoning)) {
+      throw new AgentRunSessionError(
+        "provider-unavailable",
+        "The child's selected reasoning is no longer supported by its current model.",
+      );
+    }
+    return values;
+  };
+
   const savedConversation = (run: AgentRun): AgentRunSessionRecord => {
     const previous = options.sessionStore?.read(run);
     if (previous === undefined || previous.resumeCursor === undefined) {
@@ -346,6 +362,7 @@ export function createAgentRunSessionRuntime(
           : "The child has no compatible saved provider conversation. Use Retry to start a fresh session.",
       );
     }
+    modelOptionsFor(run);
     return previous;
   };
 
@@ -393,6 +410,7 @@ export function createAgentRunSessionRuntime(
       }
     }
 
+    const modelOptionValues = modelOptionsFor(run);
     const binding = childSessionBinding(run, driver, projectRoot);
     const previous = continuation === undefined ? undefined : savedConversation(run);
     const prompt =
@@ -574,6 +592,7 @@ export function createAgentRunSessionRuntime(
           capacityScheduler: options.capacityScheduler,
           providerInstanceId: target.providerInstanceId,
           modelId: target.modelId,
+          ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
           sessionId: providerSessionId,
           prompt,
           verifyWorkspace,
@@ -884,6 +903,7 @@ interface ManagedSessionInput {
   readonly capacityScheduler: ProviderCapacityScheduler;
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
+  readonly modelOptionValues?: ProviderModelOptionValues;
   readonly sessionId: ProviderSessionId;
   readonly prompt: string;
   readonly verifyWorkspace: (signal: AbortSignal) => Promise<string | undefined>;
@@ -1054,6 +1074,9 @@ function runSessionTurn(
       ? connection.start({
           sessionId: input.sessionId,
           modelId: input.modelId,
+          ...(input.modelOptionValues === undefined
+            ? {}
+            : { modelOptionValues: input.modelOptionValues }),
           // The clamped run authority is what reaches the provider. Nothing here
           // may widen it, and no parent-thread policy is consulted.
           executionPolicy: input.authority.executionPolicy,
@@ -1063,6 +1086,9 @@ function runSessionTurn(
           sessionId: input.sessionId,
           resumeCursor: input.resumeCursor,
           modelId: input.modelId,
+          ...(input.modelOptionValues === undefined
+            ? {}
+            : { modelOptionValues: input.modelOptionValues }),
           executionPolicy: input.authority.executionPolicy,
           tools: input.appManagedTools?.definitions ?? [],
         });
@@ -1531,6 +1557,7 @@ function childSessionBinding(run: AgentRun, driver: ProviderDriver, projectRoot:
         projectRoot,
         run.workspaceReceipt,
         run.authority,
+        ...(run.routingReceipt.rawReasoning === undefined ? [] : [run.routingReceipt.rawReasoning]),
       ]),
     )
     .digest("hex");
