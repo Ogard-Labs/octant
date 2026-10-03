@@ -1472,7 +1472,8 @@ describe("CodeOperationService", () => {
     const release = Promise.withResolvers<void>();
     const entered = Promise.withResolvers<void>();
     let current = true;
-    const fixture = providerTurnFixture();
+    const takeProductFeedbackForTurn = vi.fn(() => ({ attachments: [] }));
+    const fixture = providerTurnFixture({ takeProductFeedbackForTurn });
     fixture.evidence.read.mockImplementation(async () => {
       entered.resolve();
       await release.promise;
@@ -1497,6 +1498,7 @@ describe("CodeOperationService", () => {
       failure: { category: "unauthorized" },
     });
     expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(takeProductFeedbackForTurn).not.toHaveBeenCalled();
     expect(fixture.events.append).toHaveBeenLastCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
@@ -2384,6 +2386,7 @@ function providerTurnFixture(
       | "isProviderModelAllowed"
       | "agentRuns"
       | "consumeIssueContextFramed"
+      | "takeProductFeedbackForTurn"
     >
   > & { readonly thread?: CodeThread } = {},
 ) {

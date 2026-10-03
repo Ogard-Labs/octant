@@ -623,6 +623,11 @@ export interface CodeOperationTurnPort {
     readonly extensionTools?: AppManagedToolSet;
     /** The host rechecks this after runtime preparation, before launching. */
     readonly admissionCurrent?: () => boolean;
+    /** Consume feedback synchronously only after the runtime's final admission check. */
+    readonly takeProductFeedback?: () => {
+      readonly context?: string;
+      readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
+    };
   }) => Promise<{
     readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
     readonly evidence?: string;
@@ -772,18 +777,18 @@ export interface CodeOperationServiceOptions {
   }) => Promise<ReadonlyArray<ProviderContextBlock>>;
   /**
    * Takes the notes the user pointed at the running product and hands them to
-   * this turn. The port marks each note carried in the same step, so a note
-   * travels exactly once; absent on a host with no browser surface, where a
-   * thread simply has no notes waiting.
+   * this turn after runtime admission. The synchronous port marks each note
+   * carried before launch, without yielding to a later admission revocation.
+   * Absent on a host with no browser surface.
    */
   readonly takeProductFeedbackForTurn?: (input: {
     readonly threadId: CodeThreadId;
     readonly operationId: CodeOperationId;
     readonly supportsImages: boolean;
-  }) => Promise<{
+  }) => {
     readonly context?: string;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
-  }>;
+  };
   readonly takeIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly peekIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly consumeIssueContextFramed?: (threadId: string) => void;
@@ -2692,16 +2697,6 @@ export class CodeOperationService {
       extensionTools = resolved.tools;
     }
     const supportsImages = this.#options.supportsAttachments?.(thread) === true;
-    // Notes the user pointed at the running product ride with the next turn
-    // they send. They are quoted as evidence beside the prompt, never folded
-    // into it, and the port records that each one went before it is used.
-    const feedback = await this.#options
-      .takeProductFeedbackForTurn?.({
-        threadId: command.threadId,
-        operationId: command.operationId,
-        supportsImages,
-      })
-      .catch(() => undefined);
     const profileContext = await this.#resolveProfileContext(thread);
     const issueContext =
       this.#options.peekIssueContextFramed?.(String(thread.id)) ??
@@ -2712,9 +2707,6 @@ export class CodeOperationService {
       ...profileContext,
       ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
       ...(await this.#resolveFileMentions(command.fileMentionPaths, windowId, thread)),
-      ...(feedback?.context === undefined || feedback.context.trim().length === 0
-        ? []
-        : [{ kind: "user-message", text: feedback.context } as const]),
       ...(issueContext === undefined
         ? []
         : [{ kind: "user-message", text: issueContext.text } as const]),
@@ -2729,8 +2721,7 @@ export class CodeOperationService {
         "refused",
       );
     }
-    const own = await this.#attachmentInputs(command.threadId, references);
-    const attachments = own === undefined ? undefined : [...own, ...(feedback?.attachments ?? [])];
+    const attachments = await this.#attachmentInputs(command.threadId, references);
     if (attachments === undefined) {
       return this.#failed(
         command.operationId,
@@ -2749,6 +2740,7 @@ export class CodeOperationService {
         "refused",
       );
     }
+    const takeProductFeedback = this.#options.takeProductFeedbackForTurn;
     const turn = await this.#options.turns.start({
       windowId,
       thread,
@@ -2760,6 +2752,16 @@ export class CodeOperationService {
       ...(attachments.length === 0 ? {} : { attachments }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
+      ...(takeProductFeedback === undefined
+        ? {}
+        : {
+            takeProductFeedback: () =>
+              takeProductFeedback({
+                threadId: command.threadId,
+                operationId: command.operationId,
+                supportsImages,
+              }),
+          }),
     });
     if (turn.admission !== "refused") {
       this.#options.consumeIssueContextFramed?.(String(thread.id));

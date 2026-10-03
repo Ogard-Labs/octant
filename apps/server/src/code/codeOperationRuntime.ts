@@ -1706,10 +1706,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         },
       };
     }
-    const context =
-      forkSeeded || input.forkHandoff === undefined
-        ? input.context
-        : [input.forkHandoff, ...(input.context ?? [])];
+    // Feedback stays pending through every preparation refusal. Consuming it
+    // here does not yield between the final admission check and owning the turn.
+    let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
+    try {
+      feedback = input.takeProductFeedback?.();
+    } catch {
+      // A feedback read failure must not prevent the person's message from running.
+    }
+    const context = [
+      ...(forkSeeded || input.forkHandoff === undefined ? [] : [input.forkHandoff]),
+      ...(input.context ?? []),
+      ...(feedback?.context === undefined || feedback.context.trim().length === 0
+        ? []
+        : [{ kind: "user-message", text: feedback.context } as const]),
+    ];
+    const attachments = [...(input.attachments ?? []), ...(feedback?.attachments ?? [])];
     const active: ActiveTurn = {
       ...(command.computerUseSelection === undefined
         ? {}
@@ -1737,7 +1749,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       deniedApprovals: 0,
       state: "running",
     };
-    active.launch = () => this.#launch(active, input.prompt, context, input.attachments);
+    active.launch = () =>
+      this.#launch(
+        active,
+        input.prompt,
+        context.length === 0 ? undefined : context,
+        attachments.length === 0 ? undefined : attachments,
+      );
     this.#active.set(key, active);
     // The turn is the unit of work, so the operation it runs under is the
     // record's identity. It opens here rather than in `#launch`, because a turn
