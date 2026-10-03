@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_NATIVE_HARNESS_ROUTING_SETTINGS,
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
   decodeNativeHarnessSlotCandidate,
   decodeNativeHarnessRouteDecision,
   NATIVE_HARNESS_BUILT_IN_SLOTS,
@@ -15,6 +16,7 @@ import {
   type AgentRunCommandResult,
   type NativeHarnessRouteDecision,
 } from "@octant/contracts";
+import { boundedToolResultJson } from "../providers/toolResultJson";
 import { evaluateAgentRunCommand } from "@octant/domain";
 import { createAgentsManagedTools } from "../agentRun/agentRunManagedTools";
 import type { AgentRunControlAdmissionDependencies } from "../agentRun/agentRunControlAdmission";
@@ -223,6 +225,7 @@ function delegationPair(
     noResume?: boolean;
     resumeResult?: AgentRunCommandResult;
     settlementFailure?: "failed" | "new-generation";
+    resultText?: string;
   } = {},
 ) {
   const commands: AgentRunCommand[] = [];
@@ -354,7 +357,7 @@ function delegationPair(
         ...(stored.result === undefined ? {} : { result: stored.result }),
       },
     ],
-    resultText: () => "prior reply",
+    resultText: () => options.resultText ?? "prior reply",
   };
   const router = new NativeHarnessRouter({
     store: {
@@ -778,6 +781,69 @@ describe("completed child follow-up parity", () => {
       expect(await collect()).toMatchObject({ version: 2, generation: 2 });
       expect(pair.settlements).toHaveLength(1);
     });
+    it(`${transport} leaves an oversized encoded reply owed and never returns a lossy preview as consumed`, async () => {
+      const pair = delegationPair({
+        resultText: "\u0000".repeat(16_384),
+        run: {
+          lifecycleStatus: "completed",
+          generation: 2,
+          result: { truncated: false } as AgentRun["result"],
+        },
+      });
+      const result =
+        transport === "native"
+          ? await pair.native.collect(dependencyId)
+          : (
+              await pair.managed.execute({
+                name: "octant_agents",
+                inputJson: JSON.stringify({ operation: "wait", runId: dependencyId }),
+              })
+            ).result;
+      expect(pair.settlements).toEqual([]);
+      expect(result).toMatchObject(
+        transport === "native"
+          ? { status: "refused", reason: "result-too-large" }
+          : { status: "error", error: "result-too-large" },
+      );
+      const encoded = boundedToolResultJson(result);
+      expect(Buffer.byteLength(encoded)).toBeLessThanOrEqual(MAX_PROVIDER_TOOL_RESULT_BYTES);
+      expect(JSON.parse(encoded)).not.toHaveProperty("preview");
+    });
+    it(`${transport} includes metadata in the response budget before consuming an escaped reply`, async () => {
+      for (const [length, fits] of [
+        [10_899, true],
+        [10_900, false],
+      ] as const) {
+        const text = "\u0000".repeat(length);
+        const pair = delegationPair({
+          resultText: text,
+          run: {
+            lifecycleStatus: "completed",
+            generation: 2,
+            result: { truncated: false } as AgentRun["result"],
+          },
+        });
+        const result =
+          transport === "native"
+            ? await pair.native.collect(dependencyId)
+            : (
+                await pair.managed.execute({
+                  name: "octant_agents",
+                  inputJson: JSON.stringify({ operation: "wait", runId: dependencyId }),
+                })
+              ).result;
+        const encoded = boundedToolResultJson(result);
+        expect(Buffer.byteLength(encoded)).toBeLessThanOrEqual(MAX_PROVIDER_TOOL_RESULT_BYTES);
+        expect(pair.settlements).toHaveLength(fits ? 1 : 0);
+        expect(JSON.parse(encoded)).toMatchObject(
+          fits
+            ? { status: "completed", text, generation: 2, version: 2 }
+            : transport === "native"
+              ? { status: "refused", reason: "result-too-large" }
+              : { status: "error", error: "result-too-large" },
+        );
+      }
+    });
     it(`${transport} withholds a reply when its delivery cannot be settled for that generation`, async () => {
       for (const settlementFailure of ["failed", "new-generation"] as const) {
         const pair = delegationPair({
@@ -860,7 +926,7 @@ describe("completed child follow-up parity", () => {
       ).toEqual([
         expect.objectContaining({
           runId: dependencyId,
-          version: transport === "native" ? 1 : 2,
+          version: 1,
           generation: 2,
         }),
       ]);
@@ -881,7 +947,15 @@ describe("completed child follow-up parity", () => {
       });
     });
     it(`${transport} continues the same child with an explicit message and current version`, async () => {
-      const pair = delegationPair({ run: { lifecycleStatus: "completed" } });
+      const pair = delegationPair({
+        run: {
+          lifecycleStatus: "completed",
+          resultDelivery: {
+            outcome: "consumed",
+            settledAt: decodeUtcTimestamp("2026-10-03T12:00:00.000Z"),
+          },
+        },
+      });
       const input = {
         runId: dependencyId,
         expectedVersion: 1,

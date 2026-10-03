@@ -11,7 +11,7 @@ import { type AgentRunControlAdmissionDependencies } from "../agentRun/agentRunC
 import {
   agentRunDelegationCapabilities,
   followUpAgentRunDelegation,
-  recordAgentRunResultConsumption,
+  collectAgentRunResult,
   startAgentRunDelegation,
   type AgentsToolTarget,
 } from "../agentRun/agentRunDelegation";
@@ -166,16 +166,7 @@ export function createNativeHarnessDelegatePort(
       }
       const text = options.persistence.resultText(run.id);
       if (text === undefined) return { status: "refused", reason: "result-unavailable" };
-      const consumed = recordAgentRunResultConsumption(options.persistence, run);
-      if (consumed.status === "refused")
-        return { status: "refused", reason: "result-delivery-unavailable" };
-      return {
-        status: "completed",
-        text,
-        truncated: run.result.truncated,
-        version: consumed.run.version,
-        generation: run.generation ?? 1,
-      };
+      return collectAgentRunResult(options.persistence, run, text);
     },
   };
 }

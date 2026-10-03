@@ -1,5 +1,6 @@
 import {
   LOCAL_HOST_ID,
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
   decodeAgentRunControlRequest,
   decodeAgentRunResumeRequest,
   decodeProjectId,
@@ -498,4 +499,86 @@ export function recordAgentRunResultConsumption(
   )
     return { status: "settled", run: current };
   return { status: "refused" };
+}
+
+/** Whole child rows fit with their bounds; inspecting them never consumes results. */
+export function boundedAgentRunChildren<T, H extends object>(
+  children: ReadonlyArray<T>,
+  header: Readonly<H>,
+): Readonly<H> & {
+  readonly children: ReadonlyArray<T>;
+  readonly bounds: {
+    readonly truncated: boolean;
+    readonly returnedChildren: number;
+    readonly omittedChildren: number;
+  };
+} {
+  const carried: T[] = [];
+  const response = () => ({
+    ...header,
+    children: carried,
+    bounds: {
+      truncated: carried.length < children.length,
+      returnedChildren: carried.length,
+      omittedChildren: children.length - carried.length,
+    },
+  });
+  for (const child of children) {
+    carried.push(child);
+    if (Buffer.byteLength(JSON.stringify(response()), "utf8") > MAX_PROVIDER_TOOL_RESULT_BYTES) {
+      carried.pop();
+      break;
+    }
+  }
+  return response();
+}
+
+/** Do not settle a reply that a provider would replace with a lossy preview. */
+export function collectAgentRunResult(
+  persistence: Pick<AgentRunPersistenceService, "getById"> &
+    Partial<Pick<AgentRunPersistenceService, "applyCommand">>,
+  run: AgentRun,
+  text: string,
+):
+  | {
+      readonly status: "completed";
+      readonly runId: string;
+      readonly version: number;
+      readonly generation: number;
+      readonly text: string;
+      readonly truncated: boolean;
+    }
+  | {
+      readonly status: "refused";
+      readonly reason: "result-too-large" | "result-delivery-unavailable";
+      readonly message: string;
+    } {
+  const reply = {
+    status: "completed" as const,
+    runId: String(run.id),
+    version: run.version,
+    generation: run.generation ?? 1,
+    text,
+    truncated: run.result?.truncated === true,
+  };
+  // Settlement increments the version. Budget the largest safe version before
+  // journaling so metadata cannot push a carried reply past the encoder limit.
+  if (
+    Buffer.byteLength(JSON.stringify({ ...reply, version: Number.MAX_SAFE_INTEGER }), "utf8") >
+    MAX_PROVIDER_TOOL_RESULT_BYTES
+  )
+    return {
+      status: "refused",
+      reason: "result-too-large",
+      message:
+        "This result exceeds the tool response budget. It remains owed; wait for delivery to the parent before following up.",
+    };
+  const consumed = recordAgentRunResultConsumption(persistence, run);
+  if (consumed.status === "refused")
+    return {
+      status: "refused",
+      reason: "result-delivery-unavailable",
+      message: "The result could not be recorded as received by the parent.",
+    };
+  return { ...reply, version: consumed.run.version };
 }

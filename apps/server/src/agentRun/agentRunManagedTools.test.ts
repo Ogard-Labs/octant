@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
+  decodeAgentRunId,
   decodeProviderInstanceId,
   decodeUtcTimestamp,
   decodeProviderModelId,
   type AgentRun,
   type AgentRunAuthority,
+  type AgentRunCommand,
 } from "@octant/contracts";
 import { evaluateAgentRunCommand } from "@octant/domain";
 import type { AgentRunNativeCapabilityEvidence } from "@octant/domain/agent-run-control-policy";
+import { boundedToolResultJson } from "../providers/toolResultJson";
 import { createAgentsManagedTools, type AgentsToolTarget } from "./agentRunManagedTools";
 import type { AgentRunControlParentFacts } from "./agentRunControlService";
 import type { AgentRunOrchestrationService } from "./agentRunOrchestrationService";
@@ -89,9 +93,12 @@ function tool(
   } = {},
 ) {
   const calls: string[] = [];
+  const settlements: AgentRunCommand[] = [];
   const runs = [...(options.runs ?? [])];
   return {
     calls,
+    settlements,
+    currentRuns: () => runs,
     set: createAgentsManagedTools({
       admission: {
         persistence: { getByRequestId: () => undefined },
@@ -133,6 +140,7 @@ function tool(
         parentSummary: () => options.summary ?? [],
         getById: (runId) => runs.find((run) => String(run.id) === String(runId)),
         applyCommand: (command) => {
+          settlements.push(command);
           const index = runs.findIndex((run) => String(run.id) === String(command.runId));
           const run = evaluateAgentRunCommand(
             runs[index],
@@ -362,12 +370,57 @@ describe("agents managed tools", () => {
           runId: ids.run,
           lifecycleStatus: "completed",
           resultAvailable: true,
-          resultText: "child reply",
-          version: 2,
+          version: 1,
           generation: 2,
         },
       ],
     });
+  });
+
+  it("keeps every result owed when an oversized child status list omits replies", async () => {
+    const runs = Array.from({ length: 24 }, (_, i) =>
+      queuedRun({
+        id: decodeAgentRunId(`00000000-0000-4000-8000-${String(i + 100).padStart(12, "0")}`),
+        lifecycleStatus: "completed",
+        generation: 2,
+      }),
+    );
+    const summary: AgentRunParentSummaryEntry[] = runs.map((run) => ({
+      runId: run.id,
+      requestId: run.requestId,
+      parentThreadId: run.parentThreadId,
+      role: "research",
+      task: "x".repeat(8192),
+      lifecycleStatus: "completed",
+      executionKind: "octant-managed",
+      usageQuality: "provider-reported",
+      route: {
+        requestedProviderInstanceId: ids.provider,
+        requestedModelId: decodeProviderModelId("gpt-4o"),
+        executionProviderInstanceId: ids.provider,
+        executionModelId: decodeProviderModelId("gpt-4o"),
+        poolDerived: false,
+      },
+      resultAcknowledgement: { required: false, acknowledged: false },
+      result: { reference: `octant://agent-run/${run.id}/result/2`, truncated: false },
+      resultText: "reply".repeat(3000),
+      version: run.version,
+      updatedAt: run.updatedAt,
+    }));
+    const subject = tool({ runs, summary });
+    const outcome = await call(subject.set, { operation: "status" });
+    expect(subject.settlements).toEqual([]);
+    expect(subject.currentRuns().every((run) => run.resultDelivery === undefined)).toBe(true);
+    const encoded = boundedToolResultJson(outcome.result);
+    expect(Buffer.byteLength(encoded)).toBeLessThanOrEqual(MAX_PROVIDER_TOOL_RESULT_BYTES);
+    const wire = JSON.parse(encoded);
+    expect(wire).toMatchObject({ status: "ok", bounds: { truncated: true } });
+    expect(wire.children.length).toBeGreaterThan(0);
+    expect(wire.children.length).toBeLessThan(24);
+    expect(wire.bounds.omittedChildren).toBe(24 - wire.children.length);
+    expect(
+      wire.children.every((child: Record<string, unknown>) => child.resultText === undefined),
+    ).toBe(true);
   });
 
   it("waits for a completed child and returns its result text", async () => {
