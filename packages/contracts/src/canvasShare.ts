@@ -5,6 +5,7 @@ import {
   CanvasId,
   CanvasSchemaVersion,
   CanvasVersionId,
+  canvasChartSeriesIssue,
   decodeCanvasDefinition,
   type CanvasDefinition,
   type CanvasVersion,
@@ -287,7 +288,18 @@ export const CanvasStaticExportBlock = Schema.Union(
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("chart"),
-    chartType: Schema.Literal("line", "bar", "area", "scatter", "distribution"),
+    chartType: Schema.Literal(
+      "line",
+      "bar",
+      "area",
+      "scatter",
+      "distribution",
+      "pie",
+      "donut",
+      "stacked-bar",
+      "grouped-bar",
+      "bar-line",
+    ),
     series: Schema.Array(
       Schema.Struct({
         seriesId: boundedToken("CanvasSeriesId"),
@@ -298,9 +310,16 @@ export const CanvasStaticExportBlock = Schema.Union(
             y: Schema.Number,
           }).annotations(strict),
         ).pipe(Schema.maxItems(2_048)),
+        mark: Schema.optional(Schema.Literal("bar", "line")),
       }).annotations(strict),
     ).pipe(Schema.maxItems(64)),
-  }).annotations(strict),
+  })
+    .annotations(strict)
+    .pipe(
+      Schema.filter((block) => canvasChartSeriesIssue(block) === undefined, {
+        message: () => "Chart series do not match the chart type.",
+      }),
+    ),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("timeline"),
