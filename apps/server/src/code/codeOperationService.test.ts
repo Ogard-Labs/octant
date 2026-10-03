@@ -4,6 +4,9 @@ import {
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceReference,
   decodeCodeOperationId,
+  decodeCodeOperationEventFrame,
+  decodeProviderSessionId,
+  type CodeOperationEventFrame,
   decodeCodeThread,
   decodeCodeThreadId,
   type AgentRun,
@@ -1988,6 +1991,121 @@ describe("CodeOperationService", () => {
     );
   });
 
+  it("replays the admitted group while deferring new siblings and admits the child's next generation separately", async () => {
+    const first = codeRunFor(ids.thread);
+    const second = codeRunFor(ids.thread, { id: "d6a1b000-0000-4000-8000-000000000005" });
+    const third = codeRunFor(ids.thread, { id: "d6a1b000-0000-4000-8000-000000000006" });
+    const runs = new Map([first, second, third].map((run) => [run.id, run]));
+    const fixture = providerTurnFixture({
+      recordEvents: true,
+      agentRuns: { getById: (id) => runs.get(id) },
+    });
+    const delivery = { kind: "agent-result", runId: first.id, runIds: [first.id, second.id] };
+    for (const invalid of [
+      codeRunFor(String(third.id), { id: second.id }),
+      { ...second, lifecycleStatus: "running" as const },
+    ]) {
+      runs.set(second.id, invalid);
+      await expect(
+        fixture.service.execute(ids.window, { ...startProviderTurn, delivery }),
+      ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "invalid" } });
+    }
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    runs.set(second.id, second);
+    await expect(
+      fixture.service.execute(ids.window, { ...startProviderTurn, delivery }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", delivery });
+    runs.set(first.id, {
+      ...first,
+      resultDelivery: { outcome: "delivered", settledAt: first.updatedAt },
+    });
+    const next = {
+      ...startProviderTurn,
+      operationId: decodeCodeOperationId("74747474-7474-4474-8474-747474747474"),
+    };
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...next,
+        delivery: { kind: "agent-result", runId: second.id, runIds: [second.id, third.id] },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      operationId: startProviderTurn.operationId,
+      delivery,
+    });
+    expect(fixture.turns.start).toHaveBeenCalledTimes(1);
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...next,
+        delivery: { kind: "agent-result", runId: third.id },
+      }),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "waiting" } });
+    fixture.events.append({
+      threadId: ids.thread,
+      operationId: startProviderTurn.operationId,
+      expectedCursor: 3,
+      event: { kind: "operation-state", state: "completed" },
+    });
+    const resumed = { ...first, generation: 2 };
+    runs.set(first.id, resumed);
+    await expect(
+      fixture.service.execute(ids.window, { ...startProviderTurn, delivery }),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "invalid" } });
+    const newDelivery = {
+      kind: "agent-result",
+      runId: first.id,
+      runGenerations: [{ runId: first.id, generation: 2 }],
+    };
+    await expect(
+      fixture.service.execute(ids.window, { ...next, delivery: newDelivery }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", delivery: newDelivery });
+    expect(fixture.turns.start).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers an admitted delivery operation through the existing provider recovery path", async () => {
+    const run = codeRunFor(ids.thread);
+    const delivery = { kind: "agent-result" as const, runId: run.id };
+    const fixture = providerTurnFixture({ recordEvents: true, agentRuns: { getById: () => run } });
+    const parent = thread();
+    fixture.events.append({
+      threadId: ids.thread,
+      operationId: startProviderTurn.operationId,
+      expectedCursor: 0,
+      event: {
+        kind: "conversation-turn-started",
+        providerInstanceId: parent.providerInstanceId,
+        modelId: parent.modelId,
+        sessionId: decodeProviderSessionId(startProviderTurn.sessionId),
+        prompt: startProviderTurn.prompt,
+        executionPolicy: parent.executionPolicy,
+        delivery,
+      },
+    });
+    fixture.events.append({
+      threadId: ids.thread,
+      operationId: startProviderTurn.operationId,
+      expectedCursor: 1,
+      event: {
+        kind: "operation-result",
+        result: {
+          kind: "provider-turn-state",
+          operationId: startProviderTurn.operationId,
+          state: "running",
+          delivery,
+        },
+      },
+    });
+    await expect(
+      fixture.service.execute(ids.window, { ...startProviderTurn, delivery }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", delivery });
+    expect(fixture.turns.start).toHaveBeenCalledTimes(1);
+    expect(
+      fixture.events
+        .historyForThread()
+        .frames.filter((frame) => frame.event.kind === "conversation-turn-started"),
+    ).toHaveLength(1);
+  });
+
   it("admits a delivery turn the journaled run backs and journals its mark", async () => {
     const run = codeRunFor(ids.thread);
     const fixture = providerTurnFixture({
@@ -2171,7 +2289,7 @@ const startProviderTurn = {
   }),
 } as const;
 
-const codeRunFor = (parentThreadId: string): AgentRun =>
+const codeRunFor = (parentThreadId: string, overrides: Record<string, unknown> = {}): AgentRun =>
   decodeAgentRun({
     id: "d6a1b000-0000-4000-8000-000000000001",
     requestId: "d6a1b000-0000-4000-8000-000000000002",
@@ -2235,6 +2353,7 @@ const codeRunFor = (parentThreadId: string): AgentRun =>
     version: 4,
     createdAt: "2026-07-21T10:00:00.000Z",
     updatedAt: "2026-07-21T10:00:00.000Z",
+    ...overrides,
   });
 
 /**
@@ -2256,9 +2375,9 @@ function providerTurnFixture(
       | "isProviderModelAllowed"
       | "agentRuns"
     >
-  > & { readonly thread?: CodeThread } = {},
+  > & { readonly thread?: CodeThread; readonly recordEvents?: boolean } = {},
 ) {
-  const { thread: threadOverride, ...serviceOptions } = options;
+  const { thread: threadOverride, recordEvents, ...serviceOptions } = options;
   const activeThread = threadOverride ?? thread();
   const turns = {
     start: vi.fn(
@@ -2269,10 +2388,29 @@ function providerTurnFixture(
     answerApproval: vi.fn(),
     cancel: vi.fn(),
   };
+  const frames: CodeOperationEventFrame[] = [];
   const events = {
-    replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
-    append: vi.fn(),
-    historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+    replay: vi.fn((input: Parameters<CodeOperationServiceOptions["events"]["replay"]>[0]) => {
+      const replay = frames.filter(
+        (frame) =>
+          String(frame.operationId) === String(input.operationId) &&
+          frame.cursor > input.afterCursor,
+      );
+      return { status: "ok" as const, frames: replay, nextCursor: replay.at(-1)?.cursor ?? 0 };
+    }),
+    append: vi.fn((input: Parameters<CodeOperationServiceOptions["events"]["append"]>[0]) => {
+      if (recordEvents)
+        frames.push(
+          decodeCodeOperationEventFrame({
+            threadId: input.threadId,
+            operationId: input.operationId,
+            event: input.event,
+            cursor: input.expectedCursor + 1,
+            occurredAt: "2026-07-21T10:00:00.000Z",
+          }),
+        );
+    }),
+    historyForThread: vi.fn(() => ({ status: "ok" as const, frames })),
   };
   const service = new CodeOperationService({
     authority: {

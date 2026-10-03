@@ -323,15 +323,47 @@ export const AgentRunResultAcknowledgement = Schema.Struct({
 export type AgentRunResultAcknowledgement = typeof AgentRunResultAcknowledgement.Type;
 
 /**
- * Marks a turn the host itself started to carry a finished subagent run's
- * result into its parent thread. `kind` names what the turn is; `runId`
- * names the run it delivers, so a delivery replayed after a crash can never
- * mint a second turn for the same result.
+ * Bounds one parent wake to the results already finished. Legacy marks name
+ * one run; batches include their primary run exactly once. Generation-less
+ * marks cover generation 1 only, so a resumed child can deliver a new result.
  */
+export const MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE = 16;
+export const AgentRunResultDeliveryRunIds = Schema.Array(AgentRunId).pipe(
+  Schema.minItems(1),
+  Schema.maxItems(MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE),
+  Schema.filter((ids) => new Set(ids.map(String)).size === ids.length),
+);
+
+export const AgentRunResultDeliveryGeneration = Schema.Struct({
+  runId: AgentRunId,
+  generation: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
+}).annotations(strict);
+export const AgentRunResultDeliveryGenerations = Schema.Array(
+  AgentRunResultDeliveryGeneration,
+).pipe(Schema.minItems(1), Schema.maxItems(MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE));
+
 export const AgentRunResultDeliveryMark = Schema.Struct({
   kind: Schema.Literal("agent-result"),
   runId: AgentRunId,
-}).annotations(strict);
+  runIds: Schema.optional(AgentRunResultDeliveryRunIds),
+  runGenerations: Schema.optional(AgentRunResultDeliveryGenerations),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((mark) => {
+      const ids = mark.runIds ?? [mark.runId];
+      return (
+        ids.some((id) => String(id) === String(mark.runId)) &&
+        (mark.runGenerations === undefined ||
+          (mark.runGenerations.length === ids.length &&
+            new Set(mark.runGenerations.map((member) => String(member.runId))).size ===
+              ids.length &&
+            mark.runGenerations.every((member) =>
+              ids.some((id) => String(id) === String(member.runId)),
+            )))
+      );
+    }),
+  );
 export type AgentRunResultDeliveryMark = typeof AgentRunResultDeliveryMark.Type;
 
 /**
