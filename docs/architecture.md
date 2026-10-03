@@ -927,9 +927,18 @@ modelId }`, and the model picker is provider-first. Discovery can find
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
   those tokens. **Host-driven** (`subscription-oauth`, direct HTTP drivers):
-  the host runs PKCE and/or device flow; the 0054 broker holds refresh and
-  access material as opaque refs — never journaled, logged, exported, or
-  renderer-visible. Secrets
+  the host runs a generic authorization-code PKCE runner and a device-code
+  runner from a provider descriptor (endpoints, scopes, and a public client
+  id). PKCE binds a one-shot loopback redirect on a random port, checks state
+  and the code verifier, and times out. Device-code polling waits with backoff
+  until consent, denial, or expiry. Refresh and access material stay in the
+  0054 broker as opaque refs — never journaled, logged, exported, or
+  renderer-visible. The raw credential resolve path refuses that material, so
+  a refresh token is not handed out as an API key. Refresh runs in the broker.
+  A revoked, expired, or reused refresh token becomes a typed sign-in-again
+  state. An API-key path stays available beside every sign-in. The effective
+  authority rule is in [security and authority](#security-and-authority); the
+  historical record remains Proposed. Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
   never receive raw token material. Broker URLs and tokens are stripped from
@@ -1573,24 +1582,36 @@ mechanisms are:
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
   into authority on another.
+- **Host-driven provider sign-in.** A local principal may start a descriptor-driven
+  PKCE or device-code sign-in. The host, not a provider child and not the
+  renderer, owns the loopback redirect, the device poll, and refresh. State and
+  the code verifier are checked, the redirect is one-shot, and an unanswered
+  consent times out. Tokens stay in the credential broker. The journal records
+  the terms acknowledgment (who and when) and the public sign-in state, never
+  an access token, refresh token, authorization code, or verifier. A remote
+  principal cannot acknowledge terms, start the flow, or refresh. A revoked,
+  expired, or reused refresh token is a typed sign-in-again state and drops the
+  stored grant. The API-key path remains available beside that sign-in.
+  [0111](decisions/0111-host-driven-provider-oauth.md) stays a Proposed
+  historical record; this section is the effective rule.
 
 ## Package map
 
-| Package                   | Responsibility                                                                                                                        | Depends on                                                        |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `packages/contracts`      | Effect Schema entities, commands, events, RPC and wire contracts; no runtime logic                                                    | `effect`                                                          |
-| `packages/domain`         | Pure policies and state transitions (modes, tool calls, approvals, remote access, boards, canvas, …)                                  | contracts, theme                                                  |
-| `packages/theme`          | Semantic theme schema, presets, backgrounds, typography, importer, contrast                                                           | contracts                                                         |
-| `packages/provider-sdk`   | `ProviderDriver` interface, normalized runtime events, discovery, conformance harnesses                                               | contracts, `effect`                                               |
-| `packages/plugin-host`    | Extension manifests, component model, activation ladder, addressing, bundled skills and provider-driver plugins, Agent Plugins loader | contracts, `yaml`                                                 |
-| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties (re-exports contracts/extensions)                       | contracts                                                         |
-| `packages/host-runtime`   | Host paths, owner receipts, service lifecycle, bridge secret, diagnostics, redaction (shared by desktop and CLI)                      | —                                                                 |
-| `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads                    | contracts, domain                                                 |
-| `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                                       | contracts, host-runtime                                           |
-| `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway                     | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
-| `apps/desktop`            | Electron shell: windows, menus, native credential-store integration, pickers, signed updates, server process lifecycle, packaging     | contracts, domain, host-runtime                                   |
-| `apps/web`                | React renderer for desktop and paired browsers                                                                                        | client-runtime, contracts, domain, plugin-host, theme             |
-| `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                | client-runtime, contracts, domain                                 |
+| Package                   | Responsibility                                                                                                                                          | Depends on                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `packages/contracts`      | Effect Schema entities, commands, events, RPC and wire contracts; no runtime logic                                                                      | `effect`                                                          |
+| `packages/domain`         | Pure policies and state transitions (modes, tool calls, approvals, remote access, boards, canvas, …)                                                    | contracts, theme                                                  |
+| `packages/theme`          | Semantic theme schema, presets, backgrounds, typography, importer, contrast                                                                             | contracts                                                         |
+| `packages/provider-sdk`   | `ProviderDriver` interface, normalized runtime events, discovery, conformance harnesses                                                                 | contracts, `effect`                                               |
+| `packages/plugin-host`    | Extension manifests, component model, activation ladder, addressing, bundled skills and provider-driver plugins, Agent Plugins loader                   | contracts, `yaml`                                                 |
+| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties (re-exports contracts/extensions)                                         | contracts                                                         |
+| `packages/host-runtime`   | Host paths, owner receipts, service lifecycle, credential broker, host OAuth runners, bridge secret, diagnostics, redaction (shared by desktop and CLI) | —                                                                 |
+| `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads                                      | contracts, domain                                                 |
+| `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                                                         | contracts, host-runtime                                           |
+| `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway                                       | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
+| `apps/desktop`            | Electron shell: windows, menus, native credential-store integration, pickers, signed updates, server process lifecycle, packaging                       | contracts, domain, host-runtime                                   |
+| `apps/web`                | React renderer for desktop and paired browsers                                                                                                          | client-runtime, contracts, domain, plugin-host, theme             |
+| `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                                  | client-runtime, contracts, domain                                 |
 
 Dependencies point inward: no package imports an app, and `contracts` imports
 nothing first-party.
