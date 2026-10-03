@@ -342,6 +342,17 @@ describe("Canvas contracts", () => {
         sourceId: ids.source,
         alt: "A bounded image",
       },
+      {
+        blockId: "mockup-1",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "mockup",
+        device: "phone",
+        title: "Settings",
+        nodes: [
+          { nodeId: "screen", component: "window", label: "Settings" },
+          { nodeId: "save", component: "button", label: "Save", parentId: "screen" },
+        ],
+      },
     ] as const;
     expect(decodeCanvasDefinition({ ...definition, blocks })).toMatchObject({ blocks });
   });

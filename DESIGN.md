@@ -669,7 +669,12 @@ fresh install reads Small and Narrow, so a question, its reply, and the
 composer under them all read at 13px, never under the chrome around them. The column uses
 `width: min(100% - 40px, measure)` with automatic horizontal margins. Welcome composers share a 768px maximum so
 Chat, Work, and Code start from the same prompt geometry independently of the
-reading-width preference. Canvas documents use a 62ch measure.
+reading-width preference. Canvas documents use a 62ch measure. A mockup is a
+wireframe of one screen, in a desktop, tablet, or phone frame. It draws only
+the closed catalog — window, header, sidebar, list, list row, form field,
+button, toggle, tabs, card, image placeholder, and text — and those controls
+are inert. In the Default style the wireframe uses neutral ink, hairline, and
+surface, never a hue.
 
 ## Spacing, shapes, and depth
 

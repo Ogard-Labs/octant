@@ -51,6 +51,9 @@ export const CANVAS_MAX_PLAN_PHASES = 32;
 export const CANVAS_MAX_PLAN_TASKS = 256;
 export const CANVAS_MAX_PLAN_TASK_DEPENDENCIES = 16;
 export const CANVAS_MAX_PLAN_TASK_SOURCES = 8;
+export const CANVAS_MAX_MOCKUP_DEPTH = 6;
+export const CANVAS_MAX_MOCKUP_NODES = 64;
+export const CANVAS_MAX_MOCKUP_TEXT_LENGTH = 120;
 
 // Descriptive aliases keep budget names discoverable without creating a
 // second source of truth.
@@ -221,6 +224,7 @@ export const CanvasBlockKind = Schema.Literal(
   "evidence-reference",
   "image",
   "plan",
+  "mockup",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -783,6 +787,52 @@ export const CanvasPlanTask = Schema.Struct({
 }).annotations(strict);
 export type CanvasPlanTask = typeof CanvasPlanTask.Type;
 
+export const CanvasMockupComponent = Schema.Literal(
+  "window",
+  "header",
+  "sidebar",
+  "list",
+  "list-row",
+  "form-field",
+  "button",
+  "toggle",
+  "tabs",
+  "card",
+  "image-placeholder",
+  "text",
+);
+export type CanvasMockupComponent = typeof CanvasMockupComponent.Type;
+
+export const CanvasMockupDevice = Schema.Literal("desktop", "tablet", "phone");
+export type CanvasMockupDevice = typeof CanvasMockupDevice.Type;
+
+const CanvasMockupText = boundedNonEmptyText(CANVAS_MAX_MOCKUP_TEXT_LENGTH);
+const CanvasMockupNodeId = boundedToken("CanvasMockupNodeId");
+
+/**
+ * One drawn part of a screen. The tree is a parent chain, not nested objects:
+ * a nested screen lands past the Canvas depth budget before a settings screen
+ * can name its rows.
+ */
+export const CanvasMockupNode = Schema.Struct({
+  nodeId: CanvasMockupNodeId,
+  component: CanvasMockupComponent,
+  label: CanvasMockupText,
+  parentId: Schema.optional(CanvasMockupNodeId),
+  /** Drawn state of a toggle. The control is not live. */
+  on: Schema.optional(Schema.Boolean),
+}).annotations(strict);
+export type CanvasMockupNode = typeof CanvasMockupNode.Type;
+
+export const CanvasMockupBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("mockup"),
+  device: CanvasMockupDevice,
+  title: CanvasMockupText,
+  nodes: Schema.Array(CanvasMockupNode).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_NODES)),
+}).annotations(strict);
+export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
+
 export const CanvasPlanBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("plan"),
@@ -867,6 +917,7 @@ export const CanvasBlock = Schema.Union(
   CanvasBrowserReferenceBlock,
   CanvasEvidenceReferenceBlock,
   CanvasImageBlock,
+  CanvasMockupBlock,
   CanvasPlanBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side

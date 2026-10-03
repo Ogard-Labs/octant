@@ -15,7 +15,12 @@ import type { CanvasWorkspaceScope } from "@octant/contracts/canvas-cards";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { CanvasService } from "./canvasService";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
-import { loginSequenceExample, orderStateExample, chartExamples } from "@octant/domain";
+import {
+  loginSequenceExample,
+  orderStateExample,
+  chartExamples,
+  settingsScreenExample,
+} from "@octant/domain";
 
 export const CANVAS_TOOL_NAME = "octant_canvas";
 
@@ -166,6 +171,7 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
     if (kind === "sequence") examples.push(loginSequenceExample);
     if (kind === "state") examples.push(orderStateExample);
     if (kind === "chart") examples.push(...chartExamples);
+    if (kind === "mockup") examples.push(settingsScreenExample);
   }
   return examples;
 }
@@ -248,6 +254,7 @@ function toolDescription(mode: "chat" | "work" | "code"): string {
     "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
     "A login or request flow is a sequence block: participants, ordered messages, activations, and notes. A lifecycle such as an order is a state block: states that may nest, labeled transitions, and an initial and a final state. Use diagram for a generic graph of nodes and edges. Describe sequence or state to get an example.",
     "A share of a whole is a pie or a donut: one series of labeled slices whose values are not negative. Comparing series across the same categories is a stacked-bar or a grouped-bar; every series lists those categories in the same order, and a stacked bar's values are not negative. A bar-line pairs bar series and line series on those categories, and each series names its mark. Describe chart to get an example of each.",
+    "A screen is a mockup: a device of desktop, tablet, or phone, and a tree of window, header, sidebar, list, list row, form field, button, toggle, tabs, card, image placeholder, and text. Nodes name a parent rather than nesting. The controls are drawn, not live. Describe mockup to get a settings screen.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
   ].join(" ");
