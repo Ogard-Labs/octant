@@ -801,9 +801,17 @@ flowchart LR
   implicitly. Removing a paired host or Project deletes what it owns and
   reports what it retained. A retention window (host default, Project
   override, or thread override) never deletes on its own; only a confirmed
-  purge erases a thread's bulk content, derived projections, and that
-  thread's own journal events, then records a tombstone so a rebuild cannot
-  resurrect the transcript. See `docs/decisions/0035`. The one self-applying
+  purge erases a thread's bulk content, derived projections, attachments,
+  canvases authored in that thread (including their comments, shares,
+  refreshes, actions, and mirrored files), agent-run session and content
+  stores, harness sessions, and a managed worktree only when no other
+  thread still references it. It then records a tombstone so a rebuild
+  cannot resurrect the transcript. Usage records stay and are named in
+  the outcome; deciding whether they should be erased is a later choice.
+  The tombstone, other threads, Projects, credentials, external
+  repositories, and SQLite free pages are named retained scopes rather
+  than hidden leftovers. A remote principal cannot purge. See
+  `docs/decisions/0035`. The one self-applying
   exception is startup journal compaction, which removes a
   `code.checkout-observed@1` event only when the next event of the same
   checkout observes the identical state; it preserves every answer a
