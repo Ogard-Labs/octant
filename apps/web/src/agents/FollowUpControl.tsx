@@ -47,6 +47,7 @@ export function FollowUpControl(props: {
       aria-busy={busy}
       aria-label="Follow up with this subagent"
       className="agent-run-detail__steer"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
