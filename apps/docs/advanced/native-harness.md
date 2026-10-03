@@ -98,8 +98,10 @@ the work stands and stop.
 
 Routing is configured by slot, in **Settings → Octant Harness → Model slots**. A slot
 is an ordered list of models: the first is used; the rest are fallbacks when
-the first is rate-limited, down, or timing out. Jobs the harness performs map
-onto slots:
+the first is rate-limited, down, or timing out. **Choose model** and **Add
+fallback** add an empty row; Octant never picks a model for you, so choose a
+provider and a model in the row before **Save slots**. Jobs the harness
+performs map onto slots:
 
 | Job                           | Default slot | Named in Settings  |
 | ----------------------------- | ------------ | ------------------ |
