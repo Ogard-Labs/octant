@@ -1653,10 +1653,12 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with
   `out/Octant-linux-x64/` kept for inspection). Linux packages skip Darwin
-  helpers. A dogfood AppImage is not a signed auto-update channel: release
-  workflows scaffold `<base>/<ring>/linux-x64.json` beside
-  `darwin-arm64.json`, and in-app Linux updates stay fail-closed until a
-  maintainer-published signed feed exists. Override with
+  helpers. A dogfood AppImage is not code-signed. An AppImage launch checks
+  the signed `<base>/<ring>/linux-x64.json` feed, verifies the signature and
+  hash before use, replaces the image atomically (write beside, fsync,
+  rename), and relaunches. A bad signature, a non-writable location, or a
+  launch that is not that image fails closed, and the reason is shown in
+  Settings. Windows stays out. Override with
   `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64` on a matching host only.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.

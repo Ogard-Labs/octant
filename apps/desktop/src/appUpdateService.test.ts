@@ -538,7 +538,7 @@ describe("applying an update", () => {
   it("applies only when the person asks and nothing is running", async () => {
     const { port, updates } = await staged();
 
-    expect(updates.install({ activeAgentCount: 0, attentionRequired: false })).toEqual({
+    expect(await updates.install({ activeAgentCount: 0, attentionRequired: false })).toEqual({
       kind: "installing",
     });
     expect(port.calls.quitAndInstall).toBe(1);
@@ -547,7 +547,7 @@ describe("applying an update", () => {
   it("refuses to replace the app under work in flight", async () => {
     const { port, updates } = await staged();
 
-    expect(updates.install({ activeAgentCount: 1, attentionRequired: false })).toEqual({
+    expect(await updates.install({ activeAgentCount: 1, attentionRequired: false })).toEqual({
       kind: "wait",
       activeAgentCount: 1,
       attentionRequired: false,
@@ -559,13 +559,13 @@ describe("applying an update", () => {
     const { port, updates } = service();
     await updates.check();
 
-    expect(updates.install({ activeAgentCount: 0, attentionRequired: false })).toEqual({
+    expect(await updates.install({ activeAgentCount: 0, attentionRequired: false })).toEqual({
       kind: "not-ready",
     });
     expect(port.calls.quitAndInstall).toBe(0);
   });
 
-  it("refuses update checks on Linux until a signed channel exists", async () => {
+  it("refuses a Linux launch that is not a portable image without contacting the feed", async () => {
     const fetchImpl = vi.fn() as unknown as typeof globalThis.fetch;
     const updates = createAppUpdateService({
       updater: updater(),
@@ -577,17 +577,181 @@ describe("applying an update", () => {
     const state = await updates.check();
     expect(state).toMatchObject({
       status: "refused",
-      refusal: "untrusted-signature",
+      refusal: "unsupported-install",
+      message:
+        "This install cannot replace itself. Octant updates a portable image in place; a package or archive has to be replaced by hand.",
     });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("keeps the signed update channel darwin-only while Linux feed scaffolding lands", () => {
-    // A release matrix may build an AppImage and name <ring>/linux-x64.json,
-    // but an unsigned dogfood artifact must still refuse in-app updates.
+  it("reads the signed feed on Linux and still refuses Windows", () => {
     expect(supportsSignedDesktopUpdateChannel("darwin")).toBe(true);
-    expect(supportsSignedDesktopUpdateChannel("linux")).toBe(false);
+    expect(supportsSignedDesktopUpdateChannel("linux")).toBe(true);
     expect(supportsSignedDesktopUpdateChannel("win32")).toBe(false);
+  });
+});
+
+describe("portable image updates", () => {
+  const linuxRelease = {
+    ...release,
+    platform: "linux",
+    arch: "x64",
+    url: "https://updates.example.test/Octant-0.3.0-linux-x64.AppImage",
+  } as unknown as AppUpdateRelease;
+
+  function imagePort(
+    location:
+      | { readonly kind: "portable"; readonly path: string }
+      | { readonly kind: "not-portable" }
+      | {
+          readonly kind: "not-writable";
+          readonly path: string;
+        } = { kind: "portable", path: "/opt/Octant.AppImage" },
+    applied: "relaunched" | "rolled-back" | "restore-failed" = "relaunched",
+  ) {
+    const calls: Array<{ readonly bytes: Uint8Array; readonly sha256: string }> = [];
+    return {
+      calls,
+      port: {
+        locate: async () => location,
+        replaceAndRelaunch: async (bytes: Uint8Array, sha256: string) => {
+          calls.push({ bytes, sha256 });
+          return { kind: applied } as const;
+        },
+      },
+    };
+  }
+
+  function linuxService(
+    options: {
+      readonly document?: unknown;
+      readonly serves?: Buffer;
+      readonly publicKey?: string;
+      readonly location?: Parameters<typeof imagePort>[0];
+      readonly applied?: "relaunched" | "rolled-back" | "restore-failed";
+    } = {},
+  ) {
+    const port = updater();
+    const image = imagePort(options.location, options.applied);
+    const feedUrl = updateFeedUrl(FEED_BASE_URL, {
+      ring: "stable",
+      platform: "linux",
+      arch: "x64",
+    });
+    const fetchImpl = vi.fn(async (input: string) => {
+      if (input.startsWith(feedUrl)) {
+        return new Response(JSON.stringify(options.document ?? signedFeed(linuxRelease)), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(served(options.serves ?? artifactBytes), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    const updates = createAppUpdateService({
+      updater: port,
+      portableImage: image.port,
+      feedBaseUrl: FEED_BASE_URL,
+      app: { version: "0.2.0" as AppVersion, platform: "linux", arch: "x64" },
+      automaticChecks: false,
+      verifier: createFeedVerifier(options.publicKey ?? publicKeyBase64),
+      fetchImpl,
+      clock: () => "2026-08-19T10:00:00.000Z",
+    });
+    return { fetchImpl, image, port, updates };
+  }
+
+  it("offers a release the same key signed, and does not ask the platform updater to fetch it", async () => {
+    const { image, port, updates } = linuxService();
+
+    expect(await updates.check()).toMatchObject({ status: "available" });
+    expect(await updates.download()).toMatchObject({ status: "ready" });
+    expect(port.calls.setFeedURL).toHaveLength(0);
+    expect(port.calls.checkForUpdates).toBe(0);
+    expect(image.calls).toHaveLength(0);
+  });
+
+  it("refuses a bad signature before any bytes are written", async () => {
+    const other = generateKeyPairSync("ed25519");
+    const { fetchImpl, image, updates } = linuxService({
+      document: {
+        schemaVersion: 1,
+        release: linuxRelease,
+        signature: sign(null, canonicalReleaseBytes(linuxRelease), other.privateKey).toString(
+          "base64",
+        ),
+      },
+    });
+
+    expect(await updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "untrusted-signature",
+    });
+    await updates.download();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(image.calls).toHaveLength(0);
+  });
+
+  it("discards a download that does not match the signed hash and does not replace the image", async () => {
+    const { image, port, updates } = linuxService({ serves: Buffer.from("not the release") });
+    await updates.check();
+
+    expect(await updates.download()).toMatchObject({
+      status: "refused",
+      refusal: "corrupt-artifact",
+    });
+    expect(image.calls).toHaveLength(0);
+    expect(port.calls.setFeedURL).toHaveLength(0);
+  });
+
+  it("refuses a portable image it cannot write, and says so", async () => {
+    const { fetchImpl, image, updates } = linuxService({
+      location: { kind: "not-writable", path: "/opt/Octant.AppImage" },
+    });
+
+    expect(await updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "not-writable",
+      message:
+        "Octant cannot write a replacement beside this portable image, so it will not install an update.",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(image.calls).toHaveLength(0);
+  });
+
+  it("replaces the image only when nothing is running, and passes the signed hash", async () => {
+    const { image, port, updates } = linuxService();
+    await updates.check();
+    await updates.download();
+
+    expect(await updates.install({ activeAgentCount: 1, attentionRequired: false })).toEqual({
+      kind: "wait",
+      activeAgentCount: 1,
+      attentionRequired: false,
+    });
+    expect(image.calls).toHaveLength(0);
+
+    expect(await updates.install({ activeAgentCount: 0, attentionRequired: false })).toEqual({
+      kind: "installing",
+    });
+    expect(image.calls).toHaveLength(1);
+    expect(image.calls[0]?.sha256).toBe(artifactDigest);
+    expect(Buffer.from(image.calls[0]?.bytes ?? new Uint8Array())).toEqual(artifactBytes);
+    expect(port.calls.quitAndInstall).toBe(0);
+  });
+
+  it("keeps the previous image available to retry when relaunch fails", async () => {
+    const { image, updates } = linuxService({ applied: "rolled-back" });
+    await updates.check();
+    await updates.download();
+
+    expect(await updates.install({ activeAgentCount: 0, attentionRequired: false })).toEqual({
+      kind: "not-ready",
+    });
+    expect(updates.state()).toMatchObject({
+      status: "ready",
+      message: "Octant could not relaunch the update, so the previous copy was restored.",
+    });
+    expect(image.calls).toHaveLength(1);
   });
 });
 
