@@ -175,4 +175,66 @@ describe("NativeHarnessRoutingPanel slot rows", () => {
       expectedVersion: savedJobs.version,
     });
   });
+  it("keeps a slot and its saved settings while its only model is being changed", async () => {
+    const user = userEvent.setup();
+    const lead = { hostId, providerInstanceId: "endpoint-1", modelId: "model-a" };
+    const promotion = { hostId, providerInstanceId: "endpoint-1", modelId: "model-b" };
+    const custom: NativeHarnessRoutingSettings = {
+      ...settings,
+      configuration: {
+        slots: [
+          {
+            id: "review-pass" as never,
+            candidates: [lead as never],
+            overflowPromotion: promotion as never,
+          },
+        ],
+        jobSlots: [],
+      },
+    };
+    const updateRouting = vi.fn(async () => ({
+      kind: "routing-settings" as const,
+      settings: custom,
+    }));
+    render(
+      <NativeHarnessRoutingPanel
+        client={{ routing: vi.fn(async () => custom), updateRouting }}
+        hostId={hostId}
+        providers={[
+          ...providers,
+          {
+            instanceId: "endpoint-2",
+            label: "Second endpoint",
+            models: [{ id: "model-c", label: "Model C" }],
+          },
+        ]}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("combobox", { name: "review-pass, model 1 provider" }),
+    );
+    await user.click(await screen.findByRole("option", { name: "Second endpoint" }));
+    expect(screen.getByRole("combobox", { name: "review-pass, model 1" })).toHaveTextContent(
+      "Choose a model",
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "review-pass, model 1" }));
+    await user.click(await screen.findByRole("option", { name: "Model C" }));
+    await user.click(screen.getByRole("button", { name: "Save slots" }));
+
+    expect(updateRouting).toHaveBeenCalledWith({
+      configuration: {
+        slots: [
+          {
+            id: "review-pass",
+            candidates: [{ hostId, providerInstanceId: "endpoint-2", modelId: "model-c" }],
+            overflowPromotion: promotion,
+          },
+        ],
+        jobSlots: [],
+      },
+      expectedVersion: custom.version,
+    });
+  });
 });

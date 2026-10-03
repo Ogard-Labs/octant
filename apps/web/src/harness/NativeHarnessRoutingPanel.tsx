@@ -177,11 +177,14 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
     );
   }
 
+  // A slot whose only row is unset is out of the draft, but its row is still on
+  // screen, so a custom slot stays listed while it has edited rows.
   const slotIds = [
-    ...NATIVE_HARNESS_BUILT_IN_SLOT_IDS,
-    ...draft.slots
-      .map((slot) => String(slot.id))
-      .filter((id) => !(NATIVE_HARNESS_BUILT_IN_SLOT_IDS as ReadonlyArray<string>).includes(id)),
+    ...new Set([
+      ...NATIVE_HARNESS_BUILT_IN_SLOT_IDS,
+      ...draft.slots.map((slot) => String(slot.id)),
+      ...Object.keys(editedRows),
+    ]),
   ];
   const slotFor = (id: string) => draft.slots.find((slot) => String(slot.id) === id);
   const setSlot = (id: string, next: NativeHarnessSlot | undefined) =>
@@ -198,7 +201,10 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
   const setRows = (id: string, rows: ReadonlyArray<CandidateRow>) => {
     setEditedRows({ ...editedRows, [id]: rows });
     const candidates = rows.flatMap((row) => (row.kind === "chosen" ? [row.candidate] : []));
-    const slot = slotFor(id);
+    // Leaving the draft while a row is unset must not lose settings this page
+    // does not show, such as the overflow promotion, so fall back to the saved slot.
+    const slot =
+      slotFor(id) ?? settings?.configuration.slots.find((saved) => String(saved.id) === id);
     setSlot(
       id,
       candidates.length === 0 ? undefined : { ...(slot ?? { id: id as never }), candidates },
