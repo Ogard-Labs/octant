@@ -1,5 +1,6 @@
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
-import type { ThreadMessageQueueResult } from "@octant/contracts";
+import { decodeThreadMentionCandidate, type ThreadMessageQueueResult } from "@octant/contracts";
+import type { ThreadMentionClient } from "@octant/client-runtime";
 import {
   decodeCodeAttachmentId,
   decodeCodeRelativePath,
@@ -30,6 +31,118 @@ const alternateProviderId = "80000000-0000-4000-8000-0000000000a2" as never;
 const alternateModelId = "model-two" as never;
 
 describe("Code host queue", () => {
+  it.each(["mention resolution", "queue acknowledgment"] as const)(
+    "allows a new submission after switching threads during %s",
+    async (pendingStep) => {
+      const host = queueTestHost();
+      const response = Promise.withResolvers<ThreadMessageQueueResult>();
+      const resolution =
+        Promise.withResolvers<Awaited<ReturnType<ThreadMentionClient["resolve"]>>>();
+      const mentions: ThreadMentionClient = {
+        search: vi.fn(async () => [
+          decodeThreadMentionCandidate({
+            threadId: mentionedThreadId,
+            mode: "chat",
+            title: "Release plan",
+            placement: { kind: "recents" },
+            updatedAt: "2026-08-15T09:00:00.000Z",
+          }),
+        ]),
+        resolve: vi.fn(() => resolution.promise),
+        openSideChat: vi.fn(),
+        execute: vi.fn(),
+      };
+      const attachments: CodeAttachmentClient = {
+        putAttachment: vi.fn(async (input) => ({
+          attachmentId: input.attachmentId,
+          displayName: input.displayName,
+          mediaType: input.mediaType,
+          byteLength: input.bytes.byteLength,
+          digest: "a".repeat(64),
+        })),
+        discardAttachment: vi.fn(async () => undefined),
+        attachment: vi.fn(),
+      };
+      if (pendingStep === "queue acknowledgment")
+        host.execute.mockImplementationOnce(() => response.promise);
+      const user = userEvent.setup();
+      const { rerender } = render(
+        <CodeThreadWorkspace
+          messageQueueClient={host}
+          threadMentionClient={mentions}
+          attachmentClient={attachments}
+          controller={controller({ turnStatus: "running" })}
+          threadId={threadId}
+        />,
+      );
+      const composer = screen.getByLabelText("Follow-up message");
+      if (pendingStep === "mention resolution") {
+        await user.type(composer, "#Rel");
+        await user.click(await screen.findByRole("option", { name: /Release plan/ }));
+      }
+      await user.type(composer, "First");
+      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      if (pendingStep === "mention resolution") expect(mentions.resolve).toHaveBeenCalledOnce();
+      else await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
+
+      const nextController = controller(
+        { turnStatus: "running", pendingDraft: "Second" },
+        anotherThreadId,
+      );
+      rerender(
+        <CodeThreadWorkspace
+          messageQueueClient={host}
+          threadMentionClient={mentions}
+          attachmentClient={attachments}
+          controller={nextController}
+          threadId={anotherThreadId}
+        />,
+      );
+      expect(composer).toHaveValue("Second");
+      pasteImage(composer, "second.png");
+      await screen.findByAltText("second.png");
+      await act(async () => {
+        if (pendingStep === "mention resolution")
+          resolution.resolve({ mentions: [], unavailable: [] });
+        else {
+          const command = host.execute.mock.calls[0]?.[0];
+          if (command === undefined) throw new Error("Expected enqueue");
+          response.resolve(host.apply(command));
+        }
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled(),
+      );
+      expect(screen.getByRole("button", { name: "Remove second.png" })).toBeEnabled();
+      expect(composer).toHaveValue("Second");
+      expect(nextController.setPendingDraft).not.toHaveBeenCalledWith("");
+      const earlierSubmissions = pendingStep === "mention resolution" ? 0 : 1;
+      expect(host.execute).toHaveBeenCalledTimes(earlierSubmissions);
+
+      const nextResponse = Promise.withResolvers<ThreadMessageQueueResult>();
+      host.execute.mockImplementationOnce(() => nextResponse.promise);
+      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      await waitFor(() => expect(host.execute).toHaveBeenCalledTimes(earlierSubmissions + 1));
+      expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Remove second.png" })).toBeDisabled();
+      await user.click(composer);
+      await user.keyboard("{Enter}");
+      expect(host.execute).toHaveBeenCalledTimes(earlierSubmissions + 1);
+      const command = host.execute.mock.calls[earlierSubmissions]?.[0];
+      if (command?.kind !== "enqueue") throw new Error("Expected new thread enqueue");
+      expect(command.scope.threadId).toBe(anotherThreadId);
+      expect(command.payload.prompt).toBe("Second");
+      expect(command.payload.attachmentIds).toHaveLength(1);
+      await act(async () => {
+        nextResponse.resolve(host.apply(command));
+      });
+      await waitFor(() => expect(composer).toHaveValue(""));
+      expect(screen.queryByAltText("second.png")).not.toBeInTheDocument();
+      await user.type(composer, "Third");
+      expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled();
+    },
+  );
+
   it("queues multiple messages without sending after a turn finishes", async () => {
     const host = queueTestHost();
     const user = userEvent.setup();

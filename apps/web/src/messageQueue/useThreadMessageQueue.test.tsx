@@ -247,7 +247,14 @@ describe("host-owned follow-up queues", () => {
     },
   );
 
-  it.each(["unchanged", "newer", "edited back"] as const)(
+  it.each([
+    "unchanged",
+    "caret only",
+    "no-op write",
+    "newer",
+    "edited back",
+    "cleared back",
+  ] as const)(
     "reconciles a recovered acceptance while preserving a %s draft identity",
     async (scenario) => {
       const host = queueTestHost();
@@ -255,7 +262,7 @@ describe("host-owned follow-up queues", () => {
         host.apply(command);
         throw new Error("lost response");
       });
-      const store = createComposerThreadDraftStore(localStorage);
+      let store = createComposerThreadDraftStore(localStorage);
       const write = (text: string) =>
         store.write("code", threadId, { text, caretIndex: text.length, stagedDropped: false });
       write("Original");
@@ -278,8 +285,14 @@ describe("host-owned follow-up queues", () => {
         );
       });
       first.unmount();
-      if (scenario !== "unchanged") write("Newer");
-      if (scenario === "edited back") write("Original");
+      store = createComposerThreadDraftStore(localStorage);
+      if (scenario === "caret only")
+        store.write("code", threadId, { text: "Original", caretIndex: 2, stagedDropped: false });
+      if (scenario === "no-op write") write("Original");
+      if (scenario === "newer" || scenario === "edited back") write("Newer");
+      if (scenario === "cleared back") store.clear("code", threadId);
+      if (scenario === "edited back" || scenario === "cleared back") write("Original");
+      store = createComposerThreadDraftStore(localStorage);
       const text = store.read("code", threadId)?.text ?? "";
       const clear = vi.fn(() => {
         store.clear("code", threadId);
@@ -296,7 +309,8 @@ describe("host-owned follow-up queues", () => {
       await act(async () => {
         await reopened.result.current.retry();
       });
-      if (scenario === "unchanged") expect(clear).toHaveBeenCalledOnce();
+      if (scenario === "unchanged" || scenario === "caret only" || scenario === "no-op write")
+        expect(clear).toHaveBeenCalledOnce();
       else {
         expect(clear).not.toHaveBeenCalled();
         expect(store.read("code", threadId)?.text).toBe(text);

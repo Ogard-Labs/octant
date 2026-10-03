@@ -741,8 +741,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         setSendNotice("This message could not be queued. Your draft is kept.");
       } finally {
         queuePreparingRef.current = false;
-        if (mountedRef.current && activeThreadKeyRef.current === originThreadKey)
-          setQueuePreparing(false);
+        if (mountedRef.current) setQueuePreparing(false);
       }
       return;
     }

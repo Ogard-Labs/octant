@@ -220,9 +220,11 @@ export function createComposerThreadDraftStore(
   return {
     read: (mode, threadId) => snapshot.get(composerDraftRecordKey(mode, threadId)),
     write: (mode, threadId, draft) => {
-      const receiptSaved = markQueueDraftChanged(mode, threadId, asQueueReceiptStorage(storage));
       const key = composerDraftRecordKey(mode, threadId);
       const normalized = normalizeDraft(draft);
+      const receiptSaved =
+        snapshot.get(key)?.text === normalized?.text ||
+        markQueueDraftChanged(mode, threadId, asQueueReceiptStorage(storage));
       const result = persistMerged((next) => {
         if (normalized === undefined) {
           if (!next.has(key) && !snapshot.has(key)) return [];
@@ -249,8 +251,9 @@ export function createComposerThreadDraftStore(
       return result;
     },
     clear: (mode, threadId) => {
-      const receiptSaved = markQueueDraftChanged(mode, threadId, asQueueReceiptStorage(storage));
       const key = composerDraftRecordKey(mode, threadId);
+      const receiptSaved =
+        !snapshot.has(key) || markQueueDraftChanged(mode, threadId, asQueueReceiptStorage(storage));
       const result = persistMerged((next) => {
         if (!next.has(key) && !snapshot.has(key)) return [];
         next.delete(key);
