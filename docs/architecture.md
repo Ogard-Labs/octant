@@ -509,10 +509,12 @@ running turn, or session grant. Every Code thread creation checks a
 `forkedFrom` origin on the server: it must name another thread of the same
 Project.
 
-A child AgentRun starts only when the thread's agent delegates to it through the
-Octant Harness `delegate` tool, and its result returns to that agent through
-`collect`; the host's AgentRun routes read and control existing runs but start
-none. Admission (`admitAgentRunControlRequest`) prepares the child's workspace
+A child AgentRun starts only when the thread's agent delegates through the
+Octant Harness `delegate` tool or a provider harness's `octant_agents` tool.
+Both entry points use the same host admission, routing, workspace, and lifecycle
+services. Either parent harness can target either child harness; provider-owned
+hidden subagents remain disabled. The host's AgentRun routes read and control
+existing runs but create none. Admission (`admitAgentRunControlRequest`) prepares the child's workspace
 on the server: Chat a research-only virtual workspace, Work the current
 confined Project root and binding revision, and Code an isolated managed
 worktree that is confirmed before admission. No client supplies a path, a
@@ -551,6 +553,63 @@ Only notes retained in the fitted provider request are recorded and acknowledged
 notes omitted to fit the context limit are refused.
 Unsupported steering is reported as such; a saved note alone is not evidence
 that the running child received it.
+
+Delegation resolves explicit provider/model selections against the parent's
+current eligible catalog, including Project policy and supported reasoning
+values. With no explicit target, both harnesses use the same role-to-slot
+mapping and host/Project Model slots. An unconfigured route can inherit the
+authorized parent target; a configured but unavailable or disallowed route does
+not bypass its settings. The selected target and routing decisions remain
+visible. Off, paused, tainted, and unauthorized parents cannot start helpers.
+
+Parent conversation context is opt-in and fixed at admission. Chat uses its
+admitted conversation; Work and Code expose bounded accepted prompts and
+completed replies with source attribution, provider/model identity, taint, and
+omission metadata. Work/Code selections contain at most 24 blocks of 4,000
+characters, including metadata. Reasoning and tool bodies are excluded. A
+foreign, changing, or incompletely read selection fails closed.
+
+Finished siblings currently owing a result to the same parent can be delivered
+in one ordinary parent turn, capped at 16 members and 32,768 prompt characters.
+Delivery does not wait for every sibling to finish. Each member's identity and
+result generation are validated and journaled on the receiving turn; replay
+settles only those members. Actual fallback provider/model attribution is kept.
+The delivery service serializes work per parent and defers while it is busy.
+
+A completed managed child accepts an explicit follow-up through either
+delegation tool or the Agents views. The caller supplies its current version
+and a bounded message; native resume support, saved identity, current authority,
+workspace, capacity, and spend are rechecked. Both tools and the UI revalidate
+the saved provider, model, and reasoning against the parent's current eligible
+catalog, including after asynchronous workspace preflight. Code workspace ownership and the
+saved physical identity are verified asynchronously before a new generation
+starts; current version and exact-window authority are checked again after
+that wait. Execution preparation reserves spend and provider capacity before the
+lifecycle commit, and releases both when the commit or host admission refuses.
+A synchronous admission refusal leaves the completed generation, prior result,
+and follow-up draft unchanged. An accepted execution binds its window before
+provider acquisition. One accepted completed-child follow-up is staged in its
+private session record before the lifecycle commit, bound to that session and
+the next generation; an uncommitted future generation cannot replay it. Recovery
+resumes an unsent message verbatim. A provider failure before sending that message
+interrupts the generation so Resume can recover the accepted input in the saved
+session. The record is marked uncertain before send
+and cleared on confirmed completion; an uncertain delivery refuses automatic
+resending and asks the caller to inspect the retained conversation. This is one
+continuation input, not an editable work queue.
+The child keeps its identity and conversation, while a new result generation gets its own delivery and
+acknowledgement. Legacy delivery marks cover generation 1 only. A cancelled
+child cannot continue, and unsupported continuation never becomes a silent
+fresh start. The prior result must first reach its parent or be explicitly
+collected; a refused follow-up keeps that result available. Status reads do not
+consume replies. Only complete replies that fit the tool response bound are
+consumed by explicit collection or single-child wait.
+
+Managed Claude children persist the identity written by the adapter in private,
+purgeable child content, bound to the admitted child and saved session. This
+contains no credentials and is removed with parent content or provider removal.
+The existing adapter still verifies the exact identity and native history;
+a saved cursor alone cannot reconstruct missing proof.
 
 Children can form a dependency graph. A run admitted with `dependsOn` (up to
 eight existing sibling runs of the same parent thread) parks as Waiting under

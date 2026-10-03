@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
+  decodeAgentRunId,
   decodeProviderInstanceId,
+  decodeUtcTimestamp,
   decodeProviderModelId,
   type AgentRun,
   type AgentRunAuthority,
+  type AgentRunCommand,
 } from "@octant/contracts";
+import { evaluateAgentRunCommand } from "@octant/domain";
 import type { AgentRunNativeCapabilityEvidence } from "@octant/domain/agent-run-control-policy";
+import { boundedToolResultJson } from "../providers/toolResultJson";
 import { createAgentsManagedTools, type AgentsToolTarget } from "./agentRunManagedTools";
 import type { AgentRunControlParentFacts } from "./agentRunControlService";
 import type { AgentRunOrchestrationService } from "./agentRunOrchestrationService";
@@ -74,6 +80,7 @@ const TARGETS: ReadonlyArray<AgentsToolTarget> = [
 function tool(
   options: {
     posture?: "off" | "automatic";
+    noRouting?: boolean;
     tainted?: boolean;
     targets?: ReadonlyArray<AgentsToolTarget>;
     admitted?: {
@@ -86,8 +93,12 @@ function tool(
   } = {},
 ) {
   const calls: string[] = [];
+  const settlements: AgentRunCommand[] = [];
+  const runs = [...(options.runs ?? [])];
   return {
     calls,
+    settlements,
+    currentRuns: () => runs,
     set: createAgentsManagedTools({
       admission: {
         persistence: { getByRequestId: () => undefined },
@@ -127,7 +138,18 @@ function tool(
       },
       persistence: {
         parentSummary: () => options.summary ?? [],
-        getById: (runId) => options.runs?.find((run) => String(run.id) === String(runId)),
+        getById: (runId) => runs.find((run) => String(run.id) === String(runId)),
+        applyCommand: (command) => {
+          settlements.push(command);
+          const index = runs.findIndex((run) => String(run.id) === String(command.runId));
+          const run = evaluateAgentRunCommand(
+            runs[index],
+            command,
+            decodeUtcTimestamp("2026-10-03T12:00:00.000Z"),
+          );
+          runs[index] = run;
+          return { kind: "run-updated", run };
+        },
         resultText: (runId) => (String(runId) === ids.run ? "child reply" : undefined),
       },
       mode: "chat",
@@ -135,6 +157,28 @@ function tool(
       parentThreadId: ids.thread,
       listTargets: () => options.targets ?? TARGETS,
       isTainted: () => options.tainted ?? false,
+      ...(options.noRouting
+        ? {}
+        : {
+            routing: {
+              router: {
+                resolve: () =>
+                  ({
+                    kind: "primary",
+                    job: "researcher",
+                    slotId: "default",
+                    decidedAt: "2026-10-03T10:00:00.000Z",
+                    rejected: [],
+                    candidate: {
+                      hostId: "00000000-0000-4000-8000-0000000000aa",
+                      providerInstanceId: ids.provider,
+                      modelId: "gpt-4o",
+                    },
+                  }) as never,
+              },
+              recordDecision: () => undefined,
+            },
+          }),
       authorizeCancel: options.authorizeCancel ?? (() => true),
       uuid: () => "00000000-0000-4000-8000-0000000000ee",
       sleep: () => Promise.resolve(),
@@ -166,6 +210,30 @@ describe("agents managed tools", () => {
       ],
     });
     expect((outcome.result as { roles: string[] }).roles.length).toBeGreaterThan(0);
+  });
+
+  it("refuses follow-ups without a current version and bounded explicit message", async () => {
+    const { set, calls } = tool();
+    const valid = {
+      operation: "follow-up",
+      runId: ids.run,
+      expectedVersion: 3,
+      message: "Continue",
+    };
+    for (const invalid of [
+      { ...valid, runId: undefined },
+      { ...valid, expectedVersion: undefined },
+      { ...valid, expectedVersion: 0 },
+      { ...valid, expectedVersion: 1.5 },
+      { ...valid, message: undefined },
+      { ...valid, message: " " },
+      { ...valid, message: "x".repeat(4097) },
+    ])
+      expect((await call(set, invalid)).result).toMatchObject({
+        status: "error",
+        error: "invalid-agents-input",
+      });
+    expect(calls).toEqual([]);
   });
 
   it("refuses to delegate while subagents are off, without consulting authority", async () => {
@@ -215,6 +283,32 @@ describe("agents managed tools", () => {
     });
   });
 
+  it("refuses an unavailable role route instead of silently inheriting the parent", async () => {
+    const { set } = tool({ noRouting: true });
+    const outcome = await call(set, {
+      operation: "delegate",
+      task: "Look",
+      reasoning: "high",
+    });
+    expect(outcome.result).toMatchObject({
+      status: "refused",
+      reason: "delegate-routing-unavailable",
+    });
+  });
+
+  it("rejects a foreign dependency before workspace or child admission", async () => {
+    const { set, calls } = tool({ runs: [queuedRun({ parentThreadId: "foreign" as never })] });
+    const outcome = await call(set, {
+      operation: "delegate",
+      task: "Look",
+      after: [ids.run],
+      providerInstanceId: String(ids.provider),
+      modelId: "gpt-4o",
+    });
+    expect(outcome.result).toMatchObject({ status: "refused", reason: "dependency-not-found" });
+    expect(calls).not.toContain("admit");
+  });
+
   it("keeps a delegation awaiting person confirmation queued instead of starting it", async () => {
     const { set, calls } = tool({
       admitted: {
@@ -242,6 +336,7 @@ describe("agents managed tools", () => {
 
   it("lists only this thread's children on status", async () => {
     const { set } = tool({
+      runs: [queuedRun({ lifecycleStatus: "completed", generation: 2 })],
       summary: [
         {
           runId: ids.run as never,
@@ -275,10 +370,57 @@ describe("agents managed tools", () => {
           runId: ids.run,
           lifecycleStatus: "completed",
           resultAvailable: true,
-          resultText: "child reply",
+          version: 1,
+          generation: 2,
         },
       ],
     });
+  });
+
+  it("keeps every result owed when an oversized child status list omits replies", async () => {
+    const runs = Array.from({ length: 24 }, (_, i) =>
+      queuedRun({
+        id: decodeAgentRunId(`00000000-0000-4000-8000-${String(i + 100).padStart(12, "0")}`),
+        lifecycleStatus: "completed",
+        generation: 2,
+      }),
+    );
+    const summary: AgentRunParentSummaryEntry[] = runs.map((run) => ({
+      runId: run.id,
+      requestId: run.requestId,
+      parentThreadId: run.parentThreadId,
+      role: "research",
+      task: "x".repeat(8192),
+      lifecycleStatus: "completed",
+      executionKind: "octant-managed",
+      usageQuality: "provider-reported",
+      route: {
+        requestedProviderInstanceId: ids.provider,
+        requestedModelId: decodeProviderModelId("gpt-4o"),
+        executionProviderInstanceId: ids.provider,
+        executionModelId: decodeProviderModelId("gpt-4o"),
+        poolDerived: false,
+      },
+      resultAcknowledgement: { required: false, acknowledged: false },
+      result: { reference: `octant://agent-run/${run.id}/result/2`, truncated: false },
+      resultText: "reply".repeat(3000),
+      version: run.version,
+      updatedAt: run.updatedAt,
+    }));
+    const subject = tool({ runs, summary });
+    const outcome = await call(subject.set, { operation: "status" });
+    expect(subject.settlements).toEqual([]);
+    expect(subject.currentRuns().every((run) => run.resultDelivery === undefined)).toBe(true);
+    const encoded = boundedToolResultJson(outcome.result);
+    expect(Buffer.byteLength(encoded)).toBeLessThanOrEqual(MAX_PROVIDER_TOOL_RESULT_BYTES);
+    const wire = JSON.parse(encoded);
+    expect(wire).toMatchObject({ status: "ok", bounds: { truncated: true } });
+    expect(wire.children.length).toBeGreaterThan(0);
+    expect(wire.children.length).toBeLessThan(24);
+    expect(wire.bounds.omittedChildren).toBe(24 - wire.children.length);
+    expect(
+      wire.children.every((child: Record<string, unknown>) => child.resultText === undefined),
+    ).toBe(true);
   });
 
   it("waits for a completed child and returns its result text", async () => {

@@ -1,4 +1,13 @@
 import {
+  boundedAgentRunChildren,
+  type AgentRunDelegationResult,
+  type AgentRunFollowUpInput,
+  type AgentRunFollowUpResult,
+  type AgentRunDelegationInput,
+  type agentRunDelegationCapabilities,
+} from "../agentRun/agentRunDelegation";
+import type { AgentRunParentSummaryRoute } from "../agentRun/agentRunProjection";
+import {
   decodeUtcTimestamp,
   MAX_NATIVE_HARNESS_TOOL_DETAIL,
   NATIVE_HARNESS_TOOL_DEFINITIONS,
@@ -68,9 +77,7 @@ export interface NativeHarnessWebSearchResult {
   readonly snippet: string;
 }
 
-export type NativeHarnessDelegateStart =
-  | { readonly status: "accepted"; readonly runId: string; readonly lifecycleStatus: string }
-  | { readonly status: "refused"; readonly reason: string; readonly message?: string };
+export type NativeHarnessDelegateStart = AgentRunDelegationResult;
 
 export interface NativeHarnessDelegateChild {
   readonly runId: string;
@@ -78,6 +85,10 @@ export interface NativeHarnessDelegateChild {
   readonly task: string;
   readonly lifecycleStatus: string;
   readonly resultAvailable: boolean;
+  readonly version?: number;
+  readonly generation?: number;
+  readonly route?: AgentRunParentSummaryRoute;
+  readonly reasoning?: string;
   /** The runs this child waits for, when it was started with `after`. */
   readonly after?: ReadonlyArray<string>;
   /** Why a child is waiting, failed, or was interrupted. */
@@ -85,9 +96,20 @@ export interface NativeHarnessDelegateChild {
 }
 
 export type NativeHarnessDelegateCollect =
-  | { readonly status: "completed"; readonly text: string; readonly truncated: boolean }
-  | { readonly status: "not-ready"; readonly lifecycleStatus: string }
-  | { readonly status: "refused"; readonly reason: string };
+  | {
+      readonly status: "completed";
+      readonly text: string;
+      readonly truncated: boolean;
+      readonly version?: number;
+      readonly generation?: number;
+    }
+  | {
+      readonly status: "not-ready";
+      readonly lifecycleStatus: string;
+      readonly version?: number;
+      readonly generation?: number;
+    }
+  | { readonly status: "refused"; readonly reason: string; readonly message?: string };
 
 /**
  * Delegation as the tool set sees it. The port owns admission: role→slot
@@ -95,12 +117,9 @@ export type NativeHarnessDelegateCollect =
  * behind it, and a refusal comes back as a value the model can read.
  */
 export interface NativeHarnessDelegatePort {
-  start(input: {
-    readonly role: "research" | "implementation" | "review" | "custom";
-    readonly task: string;
-    readonly includeParentContext: boolean;
-    readonly after?: ReadonlyArray<string> | undefined;
-  }): Promise<NativeHarnessDelegateStart>;
+  capabilities(): Promise<ReturnType<typeof agentRunDelegationCapabilities>>;
+  start(input: AgentRunDelegationInput): Promise<NativeHarnessDelegateStart>;
+  followUp?(input: AgentRunFollowUpInput): Promise<AgentRunFollowUpResult>;
   status(): Promise<ReadonlyArray<NativeHarnessDelegateChild>>;
   collect(runId: string): Promise<NativeHarnessDelegateCollect>;
   /**
@@ -504,31 +523,47 @@ async function execute(
     case "delegate": {
       const input = args as NativeHarnessDelegateArguments;
       const port = ports.delegate!;
+      if (input.operation === "capabilities") return ok(await port.capabilities());
       if (input.operation === "start") {
         const started = await port.start({
           role: input.role,
           task: input.task,
           includeParentContext: input.includeParentContext === true,
+          ...(input.providerInstanceId === undefined
+            ? {}
+            : { providerInstanceId: input.providerInstanceId }),
+          ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
+          ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
           ...(input.after === undefined ? {} : { after: input.after.map(String) }),
         });
         return started.status === "accepted"
           ? ok(started)
           : refused(started.reason, started.message);
       }
+      if (input.operation === "follow-up") {
+        if (port.followUp === undefined) return refused("follow-up-unavailable");
+        const result = await port.followUp({
+          runId: input.runId,
+          expectedVersion: input.expectedVersion,
+          message: input.message,
+        });
+        return result.status === "accepted" ? ok(result) : refused(result.reason, result.message);
+      }
       if (input.operation === "status") {
-        return ok({ children: await port.status() });
+        return ok(boundedAgentRunChildren(await port.status(), {}));
       }
       if (input.operation === "wait") {
-        return ok(
-          await port.wait({
-            ...(input.runIds === undefined ? {} : { runIds: input.runIds.map(String) }),
-            timeoutMs: input.timeoutMs ?? DEFAULT_DELEGATE_WAIT_MS,
-            signal,
-          }),
-        );
+        const waited = await port.wait({
+          ...(input.runIds === undefined ? {} : { runIds: input.runIds.map(String) }),
+          timeoutMs: input.timeoutMs ?? DEFAULT_DELEGATE_WAIT_MS,
+          signal,
+        });
+        return ok(boundedAgentRunChildren(waited.children, { finished: waited.finished }));
       }
       const collected = await port.collect(input.runId);
-      return collected.status === "refused" ? refused(collected.reason) : ok(collected);
+      return collected.status === "refused"
+        ? refused(collected.reason, collected.message)
+        : ok(collected);
     }
     case "ask-user": {
       const input = args as NativeHarnessAskUserArguments;

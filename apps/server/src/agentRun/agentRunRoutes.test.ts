@@ -9,6 +9,7 @@ import {
   AgentRunPolicySettings,
   AgentRunRequested,
   AgentRunResultAcknowledged,
+  AgentRunResultDeliverySettled,
   AgentRunStatusChanged,
   decodeAgentRunControlRequest,
   decodeAgentRunId,
@@ -37,15 +38,18 @@ import { WindowAuthorityStore } from "../windowAuthorityStore";
 import {
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
+  AGENT_RUN_RESULT_DELIVERY_SETTLED,
   AGENT_RUN_STATUS_CHANGED,
   AgentRunEventStore,
 } from "./agentRunEventStore";
 import {
   AgentRunOrchestrationService,
+  type AgentRunProcessSupervisorPort,
   createInMemoryCapacityPort,
 } from "./agentRunOrchestrationService";
 import { AgentRunPersistenceService } from "./agentRunPersistenceService";
 import { AgentRunProjection } from "./agentRunProjection";
+import { AgentRunSessionStore } from "./agentRunSessionStore";
 import { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
 import { AgentRunSessionError } from "./agentRunSessionPort";
 import { createAgentRunRouteHandler, type AgentRunRouteDependencies } from "./agentRunRoutes";
@@ -155,6 +159,9 @@ function createHandler(
   options: {
     readonly onExecutionAccepted?: AgentRunControlAdmissionDependencies["onExecutionAccepted"];
     readonly resume?: (run: AgentRun) => unknown;
+    readonly listTargets?: AgentRunRouteDependencies["listTargets"];
+    readonly reasoning?: string;
+    readonly processes?: AgentRunProcessSupervisorPort;
     readonly authorizeCancellation?: (input: { readonly run: AgentRun }) => boolean;
     readonly authorizeCreation?: () => boolean;
     readonly authorizeParentThread?: (input: {
@@ -188,6 +195,7 @@ function createHandler(
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
+    .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
     .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings);
   const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
   const journal = new Journal({ connection, registry, projections, clock: () => now });
@@ -224,7 +232,7 @@ function createHandler(
     capacity: options.capacity ?? createInMemoryCapacityPort(),
     worktree: { isVerifiedIsolation: () => false, isParentCheckout: () => true },
     approvals: { isCurrent: () => true },
-    processes: {
+    processes: options.processes ?? {
       start: () => undefined,
       stop: async () => undefined,
       ...(options.resume === undefined ? {} : { resume: options.resume }),
@@ -298,6 +306,7 @@ function createHandler(
             }),
       },
       parentRoute: {
+        ...(options.reasoning === undefined ? {} : { reasoning: options.reasoning }),
         providerInstanceId: ids.provider as never,
         modelId: "gpt-4o" as never,
         ...(parentMode === "chat" ? {} : { projectId: "77777777-7777-4777-8777-777777777777" }),
@@ -338,6 +347,16 @@ function createHandler(
     ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
   };
   const handler = createAgentRunRouteHandler({
+    listTargets:
+      options.listTargets ??
+      (() => [
+        {
+          providerInstanceId: ids.provider,
+          modelIds: ["gpt-4o"],
+          displayName: "Fixture",
+          driverKind: "openai",
+        },
+      ]),
     windowAuthorityStore,
     persistence,
     liveConversations,
@@ -387,7 +406,15 @@ function createHandler(
         orchestration,
         persistence,
         router: {
-          resolve: () => ({ kind: "unroutable", job: "research", reason: "none" }) as never,
+          resolve: () =>
+            ({
+              kind: "primary",
+              job: "researcher",
+              slotId: "default",
+              decidedAt: "2026-10-03T10:00:00.000Z",
+              rejected: [],
+              candidate: { hostId: "local", providerInstanceId: ids.provider, modelId: "gpt-4o" },
+            }) as never,
         },
         sessions: {
           ensure: () => ({}) as never,
@@ -395,6 +422,14 @@ function createHandler(
           read: () => undefined,
         },
         uuid: () => String(ids.request),
+        listTargets: () => [
+          {
+            providerInstanceId: String(ids.provider),
+            modelIds: ["gpt-4o"],
+            displayName: "Fixture",
+            driverKind: "openai",
+          },
+        ],
       },
       {
         parentThreadId: String(ids.thread),
@@ -471,6 +506,86 @@ describe("agentRunRoutes", () => {
     liveConversations.complete(accepted.run.id);
     await expect(readFrame()).resolves.toMatchObject({ kind: "delta", status: "complete" });
     await expect(reader.read()).resolves.toMatchObject({ done: true });
+  });
+
+  it("re-reads durable terminal history for the final stream snapshot after reload", async () => {
+    const { handler, persistence, liveConversations, token, connection } = createHandler();
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Remember the conversation",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    if (accepted.kind !== "run-accepted") throw new Error("admission failed");
+    let current = accepted.run;
+    for (const kind of [
+      "start-agent-run",
+      "mark-agent-run-running",
+      "complete-agent-run",
+    ] as const) {
+      const identity = { runId: current.id, expectedVersion: current.version };
+      const result = persistence.applyCommand(
+        kind === "complete-agent-run"
+          ? {
+              ...identity,
+              kind,
+              result: { reference: `octant://agent-run/${current.id}/result`, truncated: false },
+              resultText: "Final answer",
+            }
+          : { ...identity, kind },
+      );
+      if (result.kind !== "run-updated") throw new Error("transition failed");
+      current = result.run;
+    }
+    const store = new AgentRunSessionStore({
+      connection,
+      getById: (id) => persistence.getById(id),
+    });
+    const writing = new AgentRunLiveConversationStore({ persistence: store.conversations });
+    writing.begin(current.id);
+    for (let i = 0; i < 160; i++) writing.appendText(current.id, `History ${i}`, now as never);
+    writing.complete(current.id);
+    const reloaded = new AgentRunLiveConversationStore({ persistence: store.conversations });
+    const read = vi
+      .spyOn(liveConversations, "read")
+      .mockImplementation((input) => reloaded.read(input));
+    vi.spyOn(liveConversations, "subscribe").mockImplementation((input) =>
+      reloaded.subscribe(input),
+    );
+    const headers = { "x-octant-window-capability": token };
+    const snapshot = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation?runId=${current.id}`, { headers }),
+    );
+    const expected = await snapshot?.json();
+    expect(expected).toMatchObject({ status: "complete", truncated: true });
+    // The retained view becomes available between the initial live probe and final disclosure.
+    read.mockReturnValueOnce(undefined);
+    const stream = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation/stream?runId=${current.id}`, {
+        headers,
+      }),
+    );
+    const frame = JSON.parse((await stream?.text()) ?? "null");
+    expect(frame).toMatchObject({ ...expected, kind: "snapshot" });
+    expect(frame.entries.length).toBeGreaterThan(1);
+    const ordinary = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation/stream?runId=${current.id}`, {
+        headers,
+      }),
+    );
+    expect(JSON.parse((await ordinary?.text()) ?? "null")).toMatchObject({
+      ...expected,
+      kind: "snapshot",
+    });
   });
 
   it("authorizes conversation streams from the run parent before opening a listener", async () => {
@@ -1255,10 +1370,12 @@ describe("agentRunRoutes", () => {
       includeParentContext: false,
     });
 
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       status: "accepted",
       runId: String(ids.run),
       lifecycleStatus: "starting",
+      target: { providerInstanceId: ids.provider, modelId: "gpt-4o" },
+      route: { kind: "primary" },
     });
     expect(persistence.getById(ids.run)?.parentThreadId).toBe(ids.thread);
   });
@@ -1836,6 +1953,134 @@ describe("agentRunRoutes", () => {
     expect(body.run.lifecycleStatus).toBe("starting");
   });
 
+  it("requires an authorized explicit message to resume a completed child at a new generation", async () => {
+    let authorized = true;
+    const resume = vi.fn();
+    const { handler, token, persistence, orchestration, create } = createHandler({
+      authorizeParentThread: () => authorized,
+      processes: {
+        start: vi.fn(),
+        resume,
+        checkResume: () => ({ status: "ready" }),
+        stop: async () => undefined,
+      },
+    });
+    const run = await startedRun(create);
+    orchestration.onSessionSettled({
+      runId: run.id,
+      outcome: { kind: "completed", responseText: "First answer" },
+    });
+    const finished = persistence.getById(run.id);
+    if (finished === undefined) throw new Error("missing completion");
+    const delivered = persistence.applyCommand({
+      kind: "settle-agent-run-result-delivery",
+      runId: finished.id,
+      expectedVersion: finished.version,
+      generation: finished.generation ?? 1,
+      outcome: "delivered",
+    });
+    if (delivered.kind !== "run-updated") throw new Error("delivery failed");
+    const completed = delivered.run;
+    const post = (body: Record<string, unknown>) =>
+      handler(
+        new Request("http://127.0.0.1/api/agent-runs/resume", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": token },
+          body: JSON.stringify(body),
+        }),
+      );
+    const base = { runId: run.id, expectedVersion: completed.version };
+    expect((await post(base))?.status).toBe(400);
+    expect((await post({ ...base, message: " " }))?.status).toBe(400);
+    expect((await post({ ...base, message: "x".repeat(4097) }))?.status).toBe(400);
+    authorized = false;
+    expect((await post({ ...base, message: "Continue" }))?.status).toBe(403);
+    authorized = true;
+    expect((await post({ ...base, expectedVersion: 1, message: "Continue" }))?.status).toBe(409);
+    expect(persistence.getById(run.id)).toEqual(completed);
+    const response = await post({ ...base, message: "Explain this answer" });
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      kind: "run-updated",
+      run: { id: run.id, generation: 2, lifecycleStatus: "starting" },
+    });
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({ generation: 2 }), {
+      message: "Explain this answer",
+    });
+    expect((await post({ ...base, message: "duplicate" }))?.status).toBe(409);
+    expect(resume).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["provider", false],
+    ["model", false],
+    ["reasoning", false],
+    ["provider", true],
+    ["model", true],
+    ["reasoning", true],
+  ] as const)(
+    "refuses a removed %s on UI follow-up, including preflight drift: %s",
+    async (removed, duringPreflight) => {
+      let revoked = !duringPreflight;
+      const resume = vi.fn();
+      const { handler, token, persistence, orchestration, create } = createHandler({
+        reasoning: "high",
+        listTargets: () => [
+          {
+            providerInstanceId: revoked && removed === "provider" ? "unavailable" : ids.provider,
+            modelIds: revoked && removed === "model" ? [] : ["gpt-4o"],
+            reasoningByModel: { "gpt-4o": revoked && removed === "reasoning" ? [] : ["high"] },
+            displayName: "Fixture",
+            driverKind: "openai",
+          },
+        ],
+        processes: {
+          start: vi.fn(),
+          resume,
+          checkResume: async () => {
+            revoked = true;
+            return { status: "ready" };
+          },
+          stop: async () => undefined,
+        },
+      });
+      const run = await startedRun(create);
+      expect(run.routingReceipt.rawReasoning).toBe("high");
+      orchestration.onSessionSettled({
+        runId: run.id,
+        outcome: { kind: "completed", responseText: "First answer" },
+      });
+      const finished = persistence.getById(run.id);
+      if (finished === undefined) throw new Error("Missing completion");
+      const delivered = persistence.applyCommand({
+        kind: "settle-agent-run-result-delivery",
+        runId: finished.id,
+        expectedVersion: finished.version,
+        generation: finished.generation ?? 1,
+        outcome: "delivered",
+      });
+      if (delivered.kind !== "run-updated") throw new Error("Delivery failed");
+      const response = await handler(
+        new Request("http://127.0.0.1/api/agent-runs/resume", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": token },
+          body: JSON.stringify({
+            runId: run.id,
+            expectedVersion: delivered.run.version,
+            message: "Continue",
+          }),
+        }),
+      );
+      expect(response?.status).toBe(409);
+      expect(await response?.json()).toMatchObject({
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+      });
+      expect(resume).not.toHaveBeenCalled();
+      expect(persistence.getById(run.id)).toEqual(delivered.run);
+    },
+  );
+
   it("resumes a waiting child and refuses a restart interruption without resume evidence", async () => {
     const { handler, token, persistence, create } = createHandler();
     const run = await startedRun(create);
@@ -1853,7 +2098,7 @@ describe("agentRunRoutes", () => {
         body: JSON.stringify({ runId: run.id, expectedVersion: interrupted?.version }),
       }),
     );
-    expect(response?.status).toBe(400);
+    expect(response?.status).toBe(409);
     expect(await response!.json()).toMatchObject({ kind: "run-command-failed" });
   });
 });

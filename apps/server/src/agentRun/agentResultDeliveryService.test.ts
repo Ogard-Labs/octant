@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeAgentRun,
+  decodeAggregateVersion,
+  decodeProviderModelId,
   type AgentRun,
+  type AgentRunResultDeliveryMark,
+  type AgentRunResultDeliveryOutcome,
   type CommittedAppend,
   type EventEnvelope,
 } from "@octant/contracts";
@@ -9,6 +13,16 @@ import {
   AgentResultDeliveryService,
   type AgentResultDeliveryModePort,
 } from "./agentResultDeliveryService";
+
+import {
+  agentRunResultGeneration,
+  coveredAgentResultDeliveryMembers,
+  validateAgentResultDelivery,
+} from "./agentResultDeliveryBatch";
+import {
+  agentResultDeliveryBatchPrompt,
+  MAX_AGENT_RESULT_DELIVERY_PROMPT_CHARACTERS,
+} from "./agentResultDeliveryPrompt";
 
 const now = "2026-07-21T10:00:00.000Z";
 
@@ -111,18 +125,31 @@ function deliveryFixture(
   const runs = new Map((options.runs ?? []).map((run) => [run.id, run] as const));
   const applyCommand = vi.fn(
     options.applyCommand ??
-      ((command: { readonly runId: AgentRun["id"] }) => ({
-        kind: "run-updated",
-        run: decodeAgentRun({
-          ...runs.get(command.runId),
-          resultDelivery: { outcome: "delivered", settledAt: now },
-          version: 5,
-        }),
-      })),
+      ((command: {
+        readonly runId: AgentRun["id"];
+        readonly outcome: AgentRunResultDeliveryOutcome;
+      }) => {
+        const current = runs.get(command.runId);
+        if (current === undefined) throw new Error("Unknown run");
+        const run = {
+          ...current,
+          resultDelivery: { outcome: command.outcome, settledAt: current.updatedAt },
+          version: decodeAggregateVersion(current.version + 1),
+        };
+        runs.set(run.id, run);
+        return { kind: "run-updated", run };
+      }),
   );
   const chat: AgentResultDeliveryModePort = {
     inspect: vi.fn(async () => ({ kind: "ready" as const })),
-    dispatch: vi.fn(async () => ({ kind: "dispatched" as const })),
+    dispatch: vi.fn(async (batch: ReadonlyArray<AgentRun>) => ({
+      kind: "dispatched" as const,
+      runIds: batch.map((run) => run.id),
+      runGenerations: batch.map((run) => ({
+        runId: run.id,
+        generation: agentRunResultGeneration(run),
+      })),
+    })),
     ...options.chat,
   };
   const timers: Array<{ readonly at: number; readonly fire: () => void }> = [];
@@ -144,13 +171,275 @@ function deliveryFixture(
     unschedule: () => undefined,
   });
   const flush = async () => {
-    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    for (let i = 0; i < 100; i += 1) await Promise.resolve();
   };
   const emit = (append: CommittedAppend) => service.onCommittedAppend(append);
-  return { service, chat, applyCommand, timers, flush, emit };
+  return { service, chat, applyCommand, timers, flush, emit, runs };
 }
 
 describe("AgentResultDeliveryService", () => {
+  it.each(["consumed", "replaced", "resumed"] as const)(
+    "delivers an unchanged sibling when another result is %s during preparation",
+    async (change) => {
+      const first = finishedRun();
+      const second = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000005" });
+      let release: (() => void) | undefined;
+      const preparation = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const admitted: AgentRunResultDeliveryMark[] = [];
+      let preparing = true;
+      const fixture = deliveryFixture({
+        runs: [first, second],
+        chat: {
+          dispatch: vi.fn<AgentResultDeliveryModePort["dispatch"]>(async (batch) => {
+            const primary = batch[0];
+            if (primary === undefined) throw new Error("Empty batch");
+            const mark: AgentRunResultDeliveryMark = {
+              kind: "agent-result",
+              runId: primary.id,
+              runIds: batch.map((run) => run.id),
+              runGenerations: batch.map((run) => ({
+                runId: run.id,
+                generation: run.generation ?? 1,
+              })),
+            };
+            if (preparing) {
+              preparing = false;
+              await preparation;
+            }
+            // Mode admission rechecks the captured mark after asynchronous preparation.
+            const validation = validateAgentResultDelivery({
+              delivery: mark,
+              threadId: String(first.parentThreadId),
+              mode: "chat",
+              getById: (id) => fixture.runs.get(id),
+            });
+            if (validation.kind === "invalid")
+              return { kind: "refused", detail: validation.detail };
+            if (validation.runs.some((run) => run.resultDelivery !== undefined))
+              return { kind: "refused", detail: "A child result already settled." };
+            admitted.push(mark);
+            return {
+              kind: "dispatched",
+              runIds: batch.map((run) => run.id),
+              runGenerations: mark.runGenerations,
+            };
+          }),
+        },
+      });
+      fixture.service.start();
+      await fixture.flush();
+      expect(fixture.chat.dispatch).toHaveBeenCalledWith([first, second]);
+      const changed = finishedRun({
+        version: 9,
+        ...(change === "consumed"
+          ? { resultDelivery: { outcome: "consumed", settledAt: now } }
+          : change === "replaced"
+            ? { generation: 2 }
+            : { lifecycleStatus: "running" }),
+      });
+      fixture.runs.set(first.id, changed);
+      expect(fixture.runs.get(second.id)).toEqual(second);
+      expect(admitted).toEqual([]);
+      release?.();
+      await fixture.flush();
+
+      expect(fixture.runs.get(second.id)?.resultDelivery?.outcome).toBe("delivered");
+      expect(admitted.map((mark) => mark.runGenerations)).toEqual([
+        change === "replaced"
+          ? [
+              { runId: first.id, generation: 2 },
+              { runId: second.id, generation: 1 },
+            ]
+          : [{ runId: second.id, generation: 1 }],
+      ]);
+      expect(fixture.applyCommand).not.toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "failed" }),
+      );
+      if (change !== "replaced") expect(fixture.runs.get(first.id)).toEqual(changed);
+      expect(fixture.timers).toHaveLength(0);
+    },
+  );
+
+  it("settles an unchanged batch after a fatal parent refusal without retrying", async () => {
+    const first = finishedRun();
+    const second = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000005" });
+    const fixture = deliveryFixture({
+      runs: [first, second],
+      chat: {
+        dispatch: vi.fn(async () => ({ kind: "refused" as const, detail: "Parent revoked" })),
+      },
+    });
+    fixture.service.start();
+    await fixture.flush();
+    expect(fixture.chat.dispatch).toHaveBeenCalledTimes(1);
+    expect([...fixture.runs.values()].map((run) => run.resultDelivery?.outcome)).toEqual([
+      "failed",
+      "failed",
+    ]);
+    expect(fixture.timers).toHaveLength(0);
+  });
+
+  it("replays a partially settled group after a crash without swallowing a new sibling", async () => {
+    const first = finishedRun();
+    const second = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000005" });
+    const newSibling = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000006" });
+    const marks: AgentRunResultDeliveryMark[] = [];
+    const dispatch: AgentResultDeliveryModePort["dispatch"] = async (batch) => {
+      const primary = batch[0];
+      if (primary === undefined) throw new Error("Empty batch");
+      const mark: AgentRunResultDeliveryMark = {
+        kind: "agent-result",
+        runId: primary.id,
+        runIds: batch.map((run) => run.id),
+      };
+      const covered = coveredAgentResultDeliveryMembers(mark, marks);
+      if (covered.length > 0)
+        return {
+          kind: "dispatched",
+          runIds: covered.map((member) => member.runId),
+          runGenerations: covered,
+        };
+      marks.push(mark);
+      return { kind: "dispatched", runIds: batch.map((run) => run.id) };
+    };
+    const fixture = deliveryFixture({ runs: [first, second], chat: { dispatch } });
+    fixture.applyCommand.mockImplementationOnce(() => {
+      const run = {
+        ...first,
+        resultDelivery: { outcome: "delivered" as const, settledAt: first.updatedAt },
+      };
+      fixture.runs.set(first.id, run);
+      return { kind: "run-updated", run };
+    });
+    fixture.applyCommand.mockImplementationOnce(() => {
+      throw new Error("Host stopped before second settle");
+    });
+    fixture.service.start();
+    await fixture.flush();
+    expect(fixture.runs.get(first.id)?.resultDelivery?.outcome).toBe("delivered");
+    expect(fixture.runs.get(second.id)?.resultDelivery).toBeUndefined();
+    fixture.service.stop();
+
+    const restarted = deliveryFixture({
+      runs: [...fixture.runs.values(), newSibling],
+      chat: { dispatch: vi.fn(dispatch) },
+    });
+    restarted.service.start();
+    await restarted.flush();
+    expect(marks.map((mark) => mark.runIds)).toEqual([[first.id, second.id], [newSibling.id]]);
+    expect(restarted.chat.dispatch).toHaveBeenNthCalledWith(1, [second, newSibling]);
+    expect(restarted.chat.dispatch).toHaveBeenNthCalledWith(2, [newSibling]);
+    expect(restarted.runs.get(second.id)?.resultDelivery?.outcome).toBe("delivered");
+    expect(restarted.runs.get(newSibling.id)?.resultDelivery?.outcome).toBe("delivered");
+  });
+
+  it("serializes a parent while a child resumes and never settles the new generation with an old receipt", async () => {
+    const first = finishedRun();
+    let release: (() => void) | undefined;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const fixture = deliveryFixture({
+      runs: [first],
+      chat: {
+        dispatch: vi.fn<AgentResultDeliveryModePort["dispatch"]>(async (batch) => {
+          calls += 1;
+          if (calls === 1) await pending;
+          return {
+            kind: "dispatched",
+            runIds: batch.map((run) => run.id),
+            runGenerations: batch.map((run) => ({
+              runId: run.id,
+              generation: agentRunResultGeneration(run),
+            })),
+          };
+        }),
+      },
+    });
+    fixture.service.start();
+    await fixture.flush();
+    const resumed = { ...first, generation: 2, version: decodeAggregateVersion(9) };
+    fixture.runs.set(first.id, resumed);
+    fixture.emit(settleStatusEvent(String(first.id)));
+    await fixture.flush();
+    expect(fixture.chat.dispatch).toHaveBeenCalledTimes(1);
+    release?.();
+    await fixture.flush();
+    expect(fixture.chat.dispatch).toHaveBeenCalledTimes(2);
+    expect(fixture.applyCommand).toHaveBeenCalledTimes(1);
+    expect(fixture.applyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: first.id, generation: 2 }),
+    );
+    expect(fixture.runs.get(first.id)?.resultDelivery?.outcome).toBe("delivered");
+  });
+
+  it("bounds group size and refuses a dispatch receipt containing a foreign member", async () => {
+    const runs = Array.from({ length: 17 }, (_, index) =>
+      finishedRun({ id: `d8a1b000-0000-4000-8000-${String(index + 100).padStart(12, "0")}` }),
+    );
+    const fixture = deliveryFixture({ runs });
+    fixture.service.start();
+    await fixture.flush();
+    expect(fixture.chat.dispatch).toHaveBeenCalledTimes(2);
+    expect(fixture.chat.dispatch).toHaveBeenNthCalledWith(1, runs.slice(0, 16));
+    expect(fixture.chat.dispatch).toHaveBeenNthCalledWith(2, runs.slice(16));
+    const run = finishedRun();
+    const foreign = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000099" });
+    const invalid = deliveryFixture({
+      runs: [run],
+      chat: { dispatch: async () => ({ kind: "dispatched", runIds: [foreign.id] }) },
+    });
+    invalid.service.start();
+    await invalid.flush();
+    expect(invalid.applyCommand).not.toHaveBeenCalled();
+    expect(invalid.timers).toHaveLength(1);
+  });
+
+  it("frames bounded sibling excerpts with the provider and model that actually ran", () => {
+    const first = finishedRun();
+    const fallback = {
+      ...first,
+      routingReceipt: {
+        ...first.routingReceipt,
+        selectedFallback: {
+          providerInstanceId: first.routingReceipt.selectedProviderInstanceId,
+          modelId: decodeProviderModelId("fallback-model"),
+          reason: "primary unavailable",
+        },
+      },
+    };
+    const second = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000005" });
+    const prompt = agentResultDeliveryBatchPrompt([fallback, second], () => "x".repeat(100_000));
+    expect(prompt.length).toBeLessThanOrEqual(MAX_AGENT_RESULT_DELIVERY_PROMPT_CHARACTERS);
+    expect(prompt).toContain("not new authorization");
+    expect(prompt).toContain("fallback-model");
+    expect(prompt).toContain(String(first.id));
+    expect(prompt).toContain(String(second.id));
+    expect(prompt).toContain("excerpt was truncated");
+  });
+
+  it("groups finished siblings while another sibling is still running and separates parents", async () => {
+    const first = finishedRun();
+    const second = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000005" });
+    const running = finishedRun({
+      id: "d8a1b000-0000-4000-8000-000000000006",
+      lifecycleStatus: "running",
+    });
+    const otherParent = finishedRun({
+      id: "d8a1b000-0000-4000-8000-000000000007",
+      parentThreadId: "d8a1b000-0000-4000-8000-0000000000bb",
+    });
+    const fixture = deliveryFixture({ runs: [first, second, running, otherParent] });
+    fixture.service.start();
+    await fixture.flush();
+    expect(fixture.chat.dispatch).toHaveBeenCalledTimes(2);
+    expect(fixture.chat.dispatch).toHaveBeenCalledWith([first, second]);
+    expect(fixture.chat.dispatch).toHaveBeenCalledWith([otherParent]);
+  });
+
   it("delivers a finished run's result to its parent and journals the settle", async () => {
     const run = finishedRun();
     const fixture = deliveryFixture({ runs: [run] });
@@ -158,7 +447,7 @@ describe("AgentResultDeliveryService", () => {
     await fixture.flush();
 
     expect(fixture.chat.inspect).toHaveBeenCalledWith(run);
-    expect(fixture.chat.dispatch).toHaveBeenCalledWith(run);
+    expect(fixture.chat.dispatch).toHaveBeenCalledWith([run]);
     expect(fixture.applyCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "settle-agent-run-result-delivery",
@@ -174,7 +463,7 @@ describe("AgentResultDeliveryService", () => {
     fixture.service.start();
     await fixture.flush();
 
-    expect(fixture.chat.dispatch).toHaveBeenCalledWith(run);
+    expect(fixture.chat.dispatch).toHaveBeenCalledWith([run]);
   });
 
   it("keeps a deferred delivery armed and re-fires when the parent thread commits", async () => {
@@ -187,7 +476,7 @@ describe("AgentResultDeliveryService", () => {
           dispatches += 1;
           return dispatches === 1
             ? { kind: "deferred" as const, detail: "parent mid-turn" }
-            : { kind: "dispatched" as const };
+            : { kind: "dispatched" as const, runIds: [run.id] };
         }),
       },
     });

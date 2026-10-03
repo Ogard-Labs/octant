@@ -42,6 +42,7 @@ import {
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import { isAgentRunTargetEligible, type AgentsToolTarget } from "./agentRunDelegation";
 import type { AgentRunControlParentFacts } from "./agentRunControlService";
 import type { AgentRunControlAdmissionDependencies } from "./agentRunControlAdmission";
 import type { AgentRunOrchestrationService } from "./agentRunOrchestrationService";
@@ -59,6 +60,7 @@ const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 
 export interface AgentRunRouteDependencies {
+  readonly listTargets: (parent: AgentRunControlParentFacts) => ReadonlyArray<AgentsToolTarget>;
   readonly onExecutionAccepted?: AgentRunControlAdmissionDependencies["onExecutionAccepted"];
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly persistence: AgentRunPersistenceService;
@@ -482,6 +484,7 @@ async function* conversationStreamFrames(
   const disclosure = agentRunConversationDisclosure(dependencies, latestRun, {
     surface: "stream",
     afterSequence,
+    live: dependencies.liveConversations.read({ runId: latestRun.id, afterSequence }),
   });
   const lastSequence = disclosure.entries.at(-1)?.sequence;
   yield {
@@ -856,6 +859,7 @@ async function mutateLiveRun(
       const decoded = decodeAgentRunResumeRequest(body);
       runId = decoded.runId;
       expectedVersion = decoded.expectedVersion;
+      message = decoded.message;
     }
   } catch {
     return failure(`AgentRun ${action} fields are invalid.`, 400, origin);
@@ -876,7 +880,7 @@ async function mutateLiveRun(
     } else if (action === "retry") {
       assertAgentRunRetryAllowed(run, expectedVersion as AggregateVersion);
     } else {
-      assertAgentRunResumeAllowed(run, expectedVersion as AggregateVersion);
+      assertAgentRunResumeAllowed(run, expectedVersion as AggregateVersion, message);
     }
   } catch (error) {
     if (error instanceof AgentRunPolicyRejected) {
@@ -907,11 +911,45 @@ async function mutateLiveRun(
     });
     return json(result, result.kind === "run-command-failed" ? 409 : 200, origin);
   }
+  if (action === "resume" && !isAgentRunTargetEligible(run, dependencies.listTargets(parent))) {
+    return json(
+      {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message:
+          "The child's provider, model or reasoning choice is no longer available for this parent.",
+      },
+      409,
+      origin,
+    );
+  }
   const result =
     action === "retry"
       ? dependencies.orchestration.retry(runId, expectedVersion, parent.liveAuthority)
-      : dependencies.orchestration.resume(runId, expectedVersion, parent.liveAuthority);
-  if (result.kind === "run-updated" && result.run.lifecycleStatus === "starting") {
+      : await dependencies.orchestration.resume(runId, expectedVersion, parent.liveAuthority, {
+          ...(message === undefined ? {} : { message }),
+          resolveLiveAuthority: () => {
+            const currentParent = dependencies.authorizeCreation({
+              parentThreadId: run.parentThreadId,
+              windowId,
+            });
+            if (
+              currentParent === undefined ||
+              currentParent.parentMode !== run.routingReceipt.mode ||
+              currentParent.parentRoute.projectId !== run.routingReceipt.projectId ||
+              !isAgentRunTargetEligible(run, dependencies.listTargets(currentParent))
+            )
+              return undefined;
+            return currentParent.liveAuthority;
+          },
+          onExecutionAccepted: (accepted) =>
+            dependencies.onExecutionAccepted?.({ run: accepted, windowId, operation: "resume" }),
+        });
+  if (
+    action === "retry" &&
+    result.kind === "run-updated" &&
+    result.run.lifecycleStatus === "starting"
+  ) {
     // The runtime awaits workspace verification before acquiring a provider.
     // Bind synchronously after acceptance, before that asynchronous boundary resumes.
     dependencies.onExecutionAccepted?.({ run: result.run, windowId, operation: action });

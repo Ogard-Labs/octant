@@ -2,13 +2,22 @@ import { mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { decodeNativeHarnessContextRemaining, type ToolActionAuthority } from "@octant/contracts";
+import {
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
+  decodeNativeHarnessContextRemaining,
+  type ToolActionAuthority,
+} from "@octant/contracts";
+import { boundedToolResultJson } from "../providers/toolResultJson";
 import { ToolCallAuthorityService, type ToolCallLiveFacts } from "../toolCallAuthorityService";
 import { GoalService } from "../goal/goalService";
 import { InMemoryGoalStore } from "../goal/goalService.test-support";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
-import { createNativeHarnessTools, type NativeHarnessToolPorts } from "./nativeHarnessTools";
+import {
+  createNativeHarnessTools,
+  type NativeHarnessToolPorts,
+  type NativeHarnessDelegatePort,
+} from "./nativeHarnessTools";
 
 const uuid = (() => {
   let counter = 0;
@@ -90,6 +99,95 @@ describe("native harness tools", () => {
       "edit",
       "write",
     ]);
+  });
+
+  it("forwards a versioned child follow-up and refuses hosts without that capability", async () => {
+    const inputs: unknown[] = [];
+    const delegate: NativeHarnessDelegatePort = {
+      capabilities: async () => {
+        throw new Error("unexpected capabilities read");
+      },
+      start: async () => {
+        throw new Error("must not start a new child");
+      },
+      status: async () => [],
+      collect: async () => ({ status: "refused", reason: "run-not-found" }),
+      wait: async () => ({ finished: true, children: [] }),
+    };
+    const input = {
+      operation: "follow-up",
+      runId: "00000000-0000-4000-8000-000000000001",
+      expectedVersion: 7,
+      message: "Check the conclusion",
+    };
+    const unsupported = await fixture({}, { delegate });
+    expect((await call(unsupported.tools, "delegate", input)).result).toMatchObject({
+      error: "follow-up-unavailable",
+    });
+    const supported = await fixture(
+      {},
+      {
+        delegate: {
+          ...delegate,
+          followUp: async (request) => {
+            inputs.push(request);
+            return {
+              status: "accepted",
+              runId: request.runId,
+              version: 8,
+              generation: 2,
+              lifecycleStatus: "starting",
+            };
+          },
+        },
+      },
+    );
+    expect((await call(supported.tools, "delegate", input)).result).toMatchObject({
+      status: "accepted",
+      version: 8,
+      generation: 2,
+    });
+    expect(inputs).toEqual([{ runId: input.runId, expectedVersion: 7, message: input.message }]);
+  });
+
+  it("bounds native batch status and wait without collecting omitted children", async () => {
+    let collected = 0;
+    const children = Array.from({ length: 24 }, (_, i) => ({
+      runId: `child-${i}`,
+      role: "research",
+      task: "x".repeat(8192),
+      lifecycleStatus: "completed",
+      resultAvailable: true,
+      version: 3,
+      generation: 1,
+    }));
+    const delegate: NativeHarnessDelegatePort = {
+      capabilities: async () => {
+        throw new Error("unexpected capabilities read");
+      },
+      start: async () => {
+        throw new Error("must not start a new child");
+      },
+      status: async () => children,
+      collect: async () => {
+        collected++;
+        return { status: "refused", reason: "unexpected collection" };
+      },
+      wait: async () => ({ finished: true, children }),
+    };
+    const { tools } = await fixture({}, { delegate });
+    for (const operation of ["status", "wait"]) {
+      const outcome = await call(tools, "delegate", { operation });
+      const encoded = boundedToolResultJson(outcome.result);
+      expect(Buffer.byteLength(encoded)).toBeLessThanOrEqual(MAX_PROVIDER_TOOL_RESULT_BYTES);
+      const wire = JSON.parse(encoded);
+      expect(wire).toMatchObject({ bounds: { truncated: true } });
+      expect(wire.children.length).toBeGreaterThan(0);
+      expect(wire.children.length).toBeLessThan(24);
+      expect(wire.bounds.omittedChildren).toBe(24 - wire.children.length);
+      if (operation === "wait") expect(wire.finished).toBe(true);
+    }
+    expect(collected).toBe(0);
   });
 
   it("refuses a tool the model invented without consulting any port", async () => {

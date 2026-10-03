@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { collectAgentRunResult } from "./agentRunDelegation";
+import { readAgentRunResultText } from "../persistence/agentRunContentStore";
 import { AgentRunSessionError } from "./agentRunSessionPort";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,6 +10,7 @@ import { AGENT_RUN_DEPENDENCY_WAITING_REASON } from "@octant/domain";
 import { Effect, Schema } from "effect";
 import {
   AgentRunRequested,
+  AgentRunResultDeliverySettled,
   AgentRunResultAcknowledged,
   AgentRunStatusChanged,
   MAX_AGENT_RUN_RESULT_CHARACTERS,
@@ -31,6 +34,7 @@ import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import {
   AGENT_RUN_REQUESTED,
+  AGENT_RUN_RESULT_DELIVERY_SETTLED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
   AGENT_RUN_STATUS_CHANGED,
   AgentRunEventStore,
@@ -246,6 +250,7 @@ function createHarness(
   applyMigrations(connection, MIGRATIONS, () => now);
   const registry = registerNativeHarnessEvents(
     new EventRegistry()
+      .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
       .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
       .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
       .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged),
@@ -1262,7 +1267,7 @@ describe("AgentRun dependency graphs", () => {
     const orchestration = restart();
     const waiting = persistence.getById(dependent.id);
     if (waiting === undefined) throw new Error("The dependent is gone.");
-    expect(orchestration.resume(dependent.id, waiting.version + 1, authority)).toMatchObject({
+    expect(await orchestration.resume(dependent.id, waiting.version + 1, authority)).toMatchObject({
       kind: "run-command-failed",
       reason: "stale-version",
     });
@@ -1282,7 +1287,7 @@ describe("AgentRun dependency graphs", () => {
 
     const parked = persistence.getById(dependent.id);
     if (parked === undefined) throw new Error("The dependent is gone.");
-    orchestration.resume(dependent.id, parked.version, authority);
+    await orchestration.resume(dependent.id, parked.version, authority);
     expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("starting");
     expect(starts).toContain(String(dependent.id));
   });
@@ -1304,7 +1309,7 @@ describe("AgentRun dependency graphs", () => {
     // Resuming the child alone does not get around its parent's pause.
     const parked = persistence.getById(dependent.id);
     if (parked === undefined) throw new Error("The dependent is gone.");
-    expect(orchestration.resume(dependent.id, parked.version, authority)).toMatchObject({
+    expect(await orchestration.resume(dependent.id, parked.version, authority)).toMatchObject({
       kind: "run-command-failed",
       reason: "unsupported-transition",
     });
@@ -1427,7 +1432,11 @@ describe("managed child continuation", () => {
       const beforeEvents = events();
       const beforeReserve = reserve.mock.calls.length;
       const beforeRelease = release.mock.calls.length;
-      const result = harness.orchestration.resume(waiting.run.id, waiting.run.version, authority);
+      const result = await harness.orchestration.resume(
+        waiting.run.id,
+        waiting.run.version,
+        authority,
+      );
       expect(harness.persistence.getById(waiting.run.id)).toEqual(waiting.run);
       expect(events()).toEqual(beforeEvents);
       expect(reserve).toHaveBeenCalledTimes(beforeReserve);
@@ -1456,7 +1465,7 @@ describe("managed child continuation", () => {
     },
   );
 
-  it("resumes a waiting child through its saved session and reserves a new live slot", () => {
+  it("resumes a waiting child through its saved session and reserves a new live slot", async () => {
     const start = vi.fn();
     const resume = vi.fn();
     const capacity = createInMemoryCapacityPort();
@@ -1475,14 +1484,18 @@ describe("managed child continuation", () => {
       outcome: { kind: "waiting", reason: "Needs a follow-up" },
     });
     if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
-    const continued = harness.orchestration.resume(waited.run.id, waited.run.version, authority);
+    const continued = await harness.orchestration.resume(
+      waited.run.id,
+      waited.run.version,
+      authority,
+    );
     expect(continued).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "starting" } });
     expect(start).toHaveBeenCalledOnce();
     expect(resume).toHaveBeenCalledOnce();
     expect(reserve).toHaveBeenCalledTimes(2);
   });
 
-  it("preserves an honest resume refusal and never retries the original task automatically", () => {
+  it("preserves an honest resume refusal and never retries the original task automatically", async () => {
     const start = vi.fn();
     const resume = vi.fn(() => {
       throw new AgentRunSessionError(
@@ -1506,7 +1519,11 @@ describe("managed child continuation", () => {
       outcome: { kind: "waiting", reason: "Provider wait" },
     });
     if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
-    const continued = harness.orchestration.resume(waited.run.id, waited.run.version, authority);
+    const continued = await harness.orchestration.resume(
+      waited.run.id,
+      waited.run.version,
+      authority,
+    );
     expect(continued).toMatchObject({
       kind: "run-updated",
       run: { lifecycleStatus: "waiting", recoveryReason: expect.stringContaining("Retry") },
@@ -1515,34 +1532,47 @@ describe("managed child continuation", () => {
     expect(release).toHaveBeenCalledTimes(2);
   });
 
-  it("leaves a waiting child unchanged when its execution backend cannot resume", () => {
-    const start = vi.fn();
-    const harness = createHarness(createInMemoryCapacityPort(), true, {
-      start,
-      stop: async () => undefined,
-    });
-    const admitted = harness.orchestration.admit({
-      command: requestCommand(),
-      parentAuthority: authority,
-      liveAuthority: authority,
-      confirmed: true,
-    });
-    if (admitted.kind !== "run-accepted") throw new Error("Fixture was not admitted");
-    harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
-    const waited = harness.orchestration.onSessionSettled({
-      runId: admitted.run.id,
-      outcome: { kind: "waiting", reason: "Provider wait" },
-    });
-    if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
-    expect(
-      harness.orchestration.resume(waited.run.id, waited.run.version, authority),
-    ).toMatchObject({ kind: "run-command-failed", message: expect.stringContaining("Retry") });
-    expect(harness.persistence.getById(waited.run.id)?.version).toBe(waited.run.version);
-    expect(start).toHaveBeenCalledOnce();
-  });
+  it.each(["waiting", "completed"] as const)(
+    "leaves a %s child unchanged when its execution backend cannot resume",
+    async (status) => {
+      const start = vi.fn();
+      const harness = createHarness(createInMemoryCapacityPort(), true, {
+        start,
+        stop: async () => undefined,
+      });
+      const admitted = harness.orchestration.admit({
+        command: requestCommand(),
+        parentAuthority: authority,
+        liveAuthority: authority,
+        confirmed: true,
+      });
+      if (admitted.kind !== "run-accepted") throw new Error("Fixture was not admitted");
+      harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
+      const waited = harness.orchestration.onSessionSettled({
+        runId: admitted.run.id,
+        outcome:
+          status === "waiting"
+            ? { kind: "waiting", reason: "Provider wait" }
+            : { kind: "completed", responseText: "Retained reply" },
+      });
+      if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
+      expect(
+        await harness.orchestration.resume(waited.run.id, waited.run.version, authority, {
+          message: "Continue",
+        }),
+      ).toMatchObject({
+        kind: "run-command-failed",
+        message: expect.stringContaining(
+          status === "completed" ? "Start a new delegation from the parent." : "Retry",
+        ),
+      });
+      expect(harness.persistence.getById(waited.run.id)).toEqual(waited.run);
+      expect(start).toHaveBeenCalledOnce();
+    },
+  );
 });
 
-it("starts another capacity waiter without restarting a continuation whose resume cannot be persisted", () => {
+it("starts another capacity waiter without restarting a continuation whose resume cannot be persisted", async () => {
   const start = vi.fn();
   const resume = vi.fn();
   const capacity = createInMemoryCapacityPort(() => ({ perThread: 1, onHost: 1 }));
@@ -1599,12 +1629,358 @@ it("starts another capacity waiter without restarting a continuation whose resum
   vi.spyOn(harness.journal, "append").mockImplementationOnce(() => {
     throw new Error("Journal unavailable");
   });
-  expect(() =>
+  await expect(
     harness.orchestration.resume(continuation.run.id, continuation.run.version, authority),
-  ).toThrow("Journal unavailable");
+  ).rejects.toThrow("Journal unavailable");
   expect(resume).not.toHaveBeenCalled();
   expect(release).toHaveBeenCalledTimes(3);
   expect(harness.persistence.getById(continuation.run.id)).toEqual(continuation.run);
   expect(harness.persistence.getById(next.run.id)?.lifecycleStatus).toBe("starting");
   expect(start.mock.calls.map(([run]) => run.id)).toEqual([admitted.run.id, next.run.id]);
 });
+
+it("collects after failed delivery before following up and preserves both journaled settlements", async () => {
+  const outcome = "failed" as const;
+  const resume = vi.fn();
+  const harness = createHarness(undefined, true, {
+    start: vi.fn(),
+    resume,
+    checkResume: () => ({ status: "ready" }),
+    stop: async () => undefined,
+  });
+  const { orchestration, persistence } = harness;
+  const admitted = orchestration.admit({
+    command: requestCommand(),
+    parentAuthority: authority,
+    confirmed: true,
+    liveAuthority: authority,
+  });
+  if (admitted.kind !== "run-accepted") throw new Error("admission failed");
+  orchestration.start(admitted.run.id, admitted.run.version, authority);
+  orchestration.onSessionSettled({
+    runId: admitted.run.id,
+    outcome: { kind: "completed", responseText: "First reply" },
+  });
+  const completed = persistence.getById(admitted.run.id);
+  if (completed?.result === undefined) throw new Error("completion failed");
+  expect(
+    await orchestration.resume(completed.id, completed.version, authority, {
+      message: "Too early",
+    }),
+  ).toMatchObject({
+    kind: "run-command-failed",
+    message: "Collect the current result or wait for delivery to the parent before following up.",
+  });
+  expect(persistence.getById(completed.id)).toEqual(completed);
+  expect(persistence.resultText(completed.id)).toBe("First reply");
+  expect(resume).not.toHaveBeenCalled();
+  const undelivered = persistence.applyCommand({
+    kind: "settle-agent-run-result-delivery",
+    runId: completed.id,
+    expectedVersion: completed.version,
+    outcome,
+  });
+  if (undelivered.kind !== "run-updated") throw new Error("delivery settlement failed");
+  expect(
+    await orchestration.resume(completed.id, undelivered.run.version, authority, {
+      message: "Still too early",
+    }),
+  ).toMatchObject({ kind: "run-command-failed" });
+  expect(persistence.getById(completed.id)).toEqual(undelivered.run);
+  const collected = collectAgentRunResult(persistence, undelivered.run, "First reply");
+  expect(collected).toMatchObject({
+    status: "completed",
+    text: "First reply",
+    generation: 1,
+    version: undelivered.run.version + 1,
+  });
+  persistence.rebuildFromJournal();
+  const consumed = persistence.getById(completed.id);
+  if (consumed === undefined) throw new Error("missing collected run");
+  expect(consumed).toMatchObject({
+    version: undelivered.run.version + 1,
+    resultDelivery: { outcome: "consumed" },
+    result: completed.result,
+  });
+  expect(persistence.resultText(completed.id)).toBe("First reply");
+  const settlementReplay = harness.store.replayAll(100);
+  if (settlementReplay.status !== "ok") throw new Error("settlement replay failed");
+  const settlements = settlementReplay.events
+    .filter((event) => event.eventName === AGENT_RUN_RESULT_DELIVERY_SETTLED)
+    .map((event) => Schema.decodeUnknownSync(AgentRunResultDeliverySettled)(event.payload));
+  expect(settlements).toMatchObject([
+    { version: undelivered.run.version, delivery: { outcome } },
+    { version: consumed.version, delivery: { outcome: "consumed" } },
+  ]);
+  const acknowledged = persistence.applyCommand({
+    kind: "acknowledge-agent-run-result",
+    runId: completed.id,
+    expectedVersion: consumed.version,
+  });
+  if (acknowledged.kind !== "run-updated") throw new Error("acknowledgement failed");
+  const next = await orchestration.resume(completed.id, acknowledged.run.version, authority, {
+    message: "Explain the evidence",
+  });
+  expect(next).toMatchObject({
+    kind: "run-updated",
+    run: { generation: 2, lifecycleStatus: "starting" },
+  });
+  expect(resume).toHaveBeenCalledWith(expect.objectContaining({ generation: 2 }), {
+    message: "Explain the evidence",
+  });
+  expect(persistence.getById(completed.id)?.result).toBeUndefined();
+  expect(persistence.getById(completed.id)?.resultDelivery).toBeUndefined();
+  persistence.rebuildFromJournal();
+  expect(persistence.getById(completed.id)).toMatchObject({
+    generation: 2,
+    resultAcknowledgement: { required: false, acknowledged: false },
+  });
+  expect(persistence.getById(completed.id)?.result).toBeUndefined();
+  expect(persistence.getById(completed.id)?.resultDelivery).toBeUndefined();
+  orchestration.onSessionSettled({
+    runId: completed.id,
+    outcome: { kind: "completed", responseText: "Second reply" },
+  });
+  persistence.rebuildFromJournal();
+  const followup = persistence.getById(completed.id);
+  expect(followup).toMatchObject({
+    lifecycleStatus: "completed",
+    generation: 2,
+    result: { reference: `octant://agent-run/${completed.id}/result/2` },
+    resultAcknowledgement: { required: true, acknowledged: false },
+  });
+  expect(persistence.resultText(completed.id)).toBe("Second reply");
+  expect(
+    readAgentRunResultText(harness.connection, {
+      runId: completed.id,
+      reference: completed.result.reference,
+    }),
+  ).toBe("First reply");
+  const rebuilt = new AgentRunProjection();
+  const replay = harness.store.replayAll(100);
+  if (replay.status !== "ok") throw new Error("replay failed");
+  for (const event of replay.events) rebuilt.apply(harness.connection, event);
+  expect(rebuilt.getById(completed.id)).toEqual(followup);
+  if (followup === undefined) throw new Error("missing follow-up");
+  expect(
+    persistence.applyCommand({
+      kind: "settle-agent-run-result-delivery",
+      runId: completed.id,
+      expectedVersion: followup.version,
+      generation: 1,
+      outcome: "delivered",
+    }),
+  ).toMatchObject({ kind: "run-command-failed" });
+  expect(
+    persistence.applyCommand({
+      kind: "settle-agent-run-result-delivery",
+      runId: completed.id,
+      expectedVersion: followup.version,
+      generation: 2,
+      outcome: "delivered",
+    }),
+  ).toMatchObject({ kind: "run-updated" });
+});
+
+it("keeps completion unchanged when follow-up resume evidence, authority or capacity is unavailable", async () => {
+  const resume = vi.fn();
+  const checkResume = vi.fn((): { status: "ready" } | { status: "refused"; message: string } => ({
+    status: "refused",
+    message: "No compatible cursor",
+  }));
+  const capacity = createInMemoryCapacityPort();
+  const reserve = vi.spyOn(capacity, "tryReserve");
+  const { orchestration, persistence, approvals } = createHarness(capacity, true, {
+    start: vi.fn(),
+    resume,
+    checkResume,
+    stop: async () => undefined,
+  });
+  const admitted = orchestration.admit({
+    command: requestCommand(),
+    parentAuthority: authority,
+    confirmed: true,
+    liveAuthority: authority,
+  });
+  if (admitted.kind !== "run-accepted") throw new Error("admission failed");
+  orchestration.start(admitted.run.id, admitted.run.version, authority);
+  orchestration.onSessionSettled({
+    runId: admitted.run.id,
+    outcome: { kind: "completed", responseText: "Keep this reply" },
+  });
+  const finished = persistence.getById(admitted.run.id);
+  if (finished === undefined) throw new Error("completion failed");
+  const delivered = persistence.applyCommand({
+    kind: "settle-agent-run-result-delivery",
+    runId: finished.id,
+    expectedVersion: finished.version,
+    generation: finished.generation ?? 1,
+    outcome: "delivered",
+  });
+  if (delivered.kind !== "run-updated") throw new Error("delivery failed");
+  const completed = delivered.run;
+  reserve.mockClear();
+  expect(
+    await orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
+  ).toMatchObject({ kind: "run-command-failed" });
+  expect(reserve).not.toHaveBeenCalled();
+  checkResume.mockReturnValue({ status: "ready" });
+  expect(await orchestration.resume(completed.id, completed.version, authority)).toMatchObject({
+    kind: "run-command-failed",
+  });
+  approvals.isCurrent = () => false;
+  expect(
+    await orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
+  ).toMatchObject({ kind: "run-command-failed" });
+  approvals.isCurrent = () => true;
+  reserve.mockReturnValue({ status: "queued", scope: "host", reason: "full" });
+  expect(
+    await orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
+  ).toMatchObject({ kind: "run-command-failed", reason: "limit-reached" });
+  expect(persistence.getById(completed.id)).toEqual(completed);
+  expect(resume).not.toHaveBeenCalled();
+});
+
+it("refuses completed-child follow-ups at the existing unfinished-child admission limit", async () => {
+  const resume = vi.fn();
+  const { orchestration, persistence } = createHarness(undefined, true, {
+    start: vi.fn(),
+    resume,
+    checkResume: () => ({ status: "ready" }),
+    stop: async () => undefined,
+  });
+  const admitted = orchestration.admit({
+    command: requestCommand(),
+    parentAuthority: authority,
+    confirmed: true,
+    liveAuthority: authority,
+  });
+  if (admitted.kind !== "run-accepted") throw new Error("admission failed");
+  orchestration.start(admitted.run.id, admitted.run.version, authority);
+  orchestration.onSessionSettled({
+    runId: admitted.run.id,
+    outcome: { kind: "completed", responseText: "Completed" },
+  });
+  const finished = persistence.getById(admitted.run.id);
+  if (finished === undefined) throw new Error("completion failed");
+  const delivered = persistence.applyCommand({
+    kind: "settle-agent-run-result-delivery",
+    runId: finished.id,
+    expectedVersion: finished.version,
+    generation: finished.generation ?? 1,
+    outcome: "delivered",
+  });
+  if (delivered.kind !== "run-updated") throw new Error("delivery failed");
+  const completed = delivered.run;
+  for (let i = 0; i < 16; i++) {
+    const requested = persistence.requestRun({
+      command: requestCommand(
+        decodeAgentRunRequestId(`bbbbbbbb-bbbb-4bbb-8bbb-${i.toString(16).padStart(12, "0")}`),
+      ),
+      parentAuthority: authority,
+      confirmed: true,
+    });
+    expect(requested.kind).toBe("run-accepted");
+  }
+  expect(
+    await orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
+  ).toMatchObject({ kind: "run-command-failed", reason: "limit-reached" });
+  expect(persistence.getById(completed.id)).toEqual(completed);
+  expect(resume).not.toHaveBeenCalled();
+});
+
+it.each(["workspace-refused", "stale-version", "authority-revoked", "accepted"] as const)(
+  "rechecks a completed child's async preflight before mutation: %s",
+  async (scenario) => {
+    let finish:
+      | ((value: { status: "ready" } | { status: "refused"; message: string }) => void)
+      | undefined;
+    const readiness = new Promise<{ status: "ready" } | { status: "refused"; message: string }>(
+      (resolve) => {
+        finish = resolve;
+      },
+    );
+    let bound = false;
+    const acquired = vi.fn();
+    const resume = vi.fn(() => {
+      void Promise.resolve().then(() => acquired(bound));
+    });
+    const capacity = createInMemoryCapacityPort();
+    const reserve = vi.spyOn(capacity, "tryReserve");
+    const harness = createHarness(capacity, true, {
+      start: vi.fn(),
+      resume,
+      checkResume: () => readiness,
+      stop: async () => undefined,
+    });
+    const admitted = harness.orchestration.admit({
+      command: requestCommand(),
+      parentAuthority: authority,
+      liveAuthority: authority,
+      confirmed: true,
+    });
+    if (admitted.kind !== "run-accepted") throw new Error("Expected admitted child");
+    harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
+    harness.orchestration.onSessionSettled({
+      runId: admitted.run.id,
+      outcome: { kind: "completed", responseText: "Retained original reply" },
+    });
+    const completed = harness.persistence.getById(admitted.run.id);
+    if (completed === undefined) throw new Error("Expected completed child");
+    const delivered = harness.persistence.applyCommand({
+      kind: "settle-agent-run-result-delivery",
+      runId: completed.id,
+      expectedVersion: completed.version,
+      generation: completed.generation ?? 1,
+      outcome: "delivered",
+    });
+    if (delivered.kind !== "run-updated") throw new Error("Expected delivered result");
+    reserve.mockClear();
+    const accepted = vi.fn(() => {
+      bound = true;
+    });
+    let live: AgentRunAuthority | undefined = authority;
+    const pending = harness.orchestration.resume(completed.id, delivered.run.version, authority, {
+      message: "Continue with the evidence",
+      resolveLiveAuthority: () => live,
+      onExecutionAccepted: accepted,
+    });
+    expect(harness.persistence.getById(completed.id)).toEqual(delivered.run);
+    expect(reserve).not.toHaveBeenCalled();
+    if (scenario === "stale-version")
+      harness.persistence.applyCommand({
+        kind: "acknowledge-agent-run-result",
+        runId: completed.id,
+        expectedVersion: delivered.run.version,
+      });
+    if (scenario === "authority-revoked") live = undefined;
+    const before = harness.persistence.getById(completed.id);
+    const events = () =>
+      harness.connection.prepare("SELECT * FROM event_journal ORDER BY global_sequence").all();
+    const beforeEvents = events();
+    finish?.(
+      scenario === "workspace-refused"
+        ? { status: "refused", message: "Original workspace is gone" }
+        : { status: "ready" },
+    );
+    const result = await pending;
+    if (scenario === "accepted") {
+      expect(result).toMatchObject({
+        kind: "run-updated",
+        run: { generation: 2, lifecycleStatus: "starting" },
+      });
+      expect(accepted).toHaveBeenCalledOnce();
+      expect(acquired).toHaveBeenCalledExactlyOnceWith(true);
+    } else {
+      expect(result).toMatchObject({
+        kind: "run-command-failed",
+        reason: scenario === "stale-version" ? "stale-version" : "unsupported-transition",
+      });
+      expect(harness.persistence.getById(completed.id)).toEqual(before);
+      expect(events()).toEqual(beforeEvents);
+      expect(reserve).not.toHaveBeenCalled();
+      expect(resume).not.toHaveBeenCalled();
+      expect(accepted).not.toHaveBeenCalled();
+    }
+  },
+);
