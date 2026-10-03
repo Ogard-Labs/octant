@@ -571,8 +571,13 @@ describe("WindowChrome", () => {
     // so the dock and dialog stay workspace-opaque under every theme.
     expect(cssRule(".right-utility-dock")).toContain("background: var(--oct-bg);");
     expect(cssRule(".octant-dialog__popup")).toContain("background: var(--oct-bg);");
-    expect(cssRule(".environment-checkout", 1)).toContain("border: 1px solid var(--oct-hairline);");
-    expect(cssRule(".thread-environment-dock__meta")).toContain(
+    // The Environment's boundary is its header card now, not the checkout block.
+    expect(cssRule(".thread-environment-dock__header", 1)).toContain(
+      "border: 1px solid var(--oct-hairline);",
+    );
+    // The meta line mixes the branch with the folder; only the folder is an
+    // identifier, so only it takes the identifier face.
+    expect(cssRule(".thread-environment-dock__place", 1)).toContain(
       "font-family: var(--oct-font-mono);",
     );
 
@@ -588,7 +593,10 @@ describe("WindowChrome", () => {
     expect(styles).toContain("@media (prefers-reduced-transparency: reduce)");
     expect(styles).toContain("@media (prefers-contrast: more)");
     expect(styles).toContain(".shell--material-translucent.shell-frame > .sidebar");
-    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(".environment-checkout");
+    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(
+      ".thread-environment-dock__header",
+    );
+    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(".environment-card__rows");
     expect(cssRule('.project-row[data-active="true"]', 1)).toContain(
       "background: var(--octant-control-hover);",
     );
@@ -624,7 +632,8 @@ describe("WindowChrome", () => {
     }
     const row = cssRule(".environment-row");
     expect(row).not.toContain("background");
-    expect(cssRule(".environment-group__body")).toContain("32px;");
+    // An open row's body starts under the row's label, past its icon tile.
+    expect(cssRule(".environment-group__body")).toContain("var(--environment-tile-size)");
     expect(cssRule(".environment-git-group__error")).toContain("color: var(--oct-muted);");
     expect(cssRule(".environment-git-group__error")).not.toMatch(/warn|yellow/i);
     expect(styles).not.toContain(".thread-environment-disclosure");
