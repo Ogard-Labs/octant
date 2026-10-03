@@ -1830,3 +1830,70 @@ it.each(["unsent", "uncertain"] as const)(
     connection.close();
   },
 );
+
+it("preserves an unsent follow-up for genuine resume after provider acquisition fails", async () => {
+  const path = databasePath();
+  let connection = openSqlite(path);
+  applyMigrations(connection, MIGRATIONS, () => now);
+  let run = agentRun();
+  const durable = new AgentRunSessionStore({ connection, getById: () => run });
+  const provider = fakeProvider({ resumable: true });
+  const first = createAgentRunSessionRuntime(
+    runtimeOptions(provider, {
+      sessionStore: durable.sessions,
+      supportsResume: () => true,
+    }),
+  );
+  const finished = settled(first.start(run));
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+  await provider.emit({ kind: "completed", sessionId });
+  await finished;
+  run = { ...run, lifecycleStatus: "completed" };
+  const acquire = vi.fn(() =>
+    Effect.fail({ category: "provider-failed" as const, message: "Transport unavailable" }),
+  );
+  const failedRuntime = createAgentRunSessionRuntime(
+    runtimeOptions(provider, {
+      resolveDriver: () => ({ ...provider.driver, acquire }),
+      sessionStore: durable.sessions,
+      supportsResume: () => true,
+    }),
+  );
+  const message = "Continue with the accepted follow-up, without repeating the original task";
+  const prepared = failedRuntime.prepareResume?.(run, { message });
+  if (prepared === undefined) throw new Error("Missing continuation preparation");
+  run = { ...run, lifecycleStatus: "starting", generation: 2 };
+  const outcome = await settled(prepared.start(run));
+  expect(acquire).toHaveBeenCalledOnce();
+  expect(outcome).toMatchObject({
+    kind: "interrupted",
+    reason: expect.stringContaining("follow-up-not-sent"),
+  });
+  expect(durable.sessions.read(run)).toMatchObject({
+    pendingContinuation: { generation: 2, message, state: "unsent" },
+  });
+  run = { ...run, lifecycleStatus: "interrupted" };
+  connection.close();
+  connection = openSqlite(path);
+  const restored = new AgentRunSessionStore({ connection, getById: () => run });
+  const recoveredProvider = fakeProvider({ resumable: true });
+  const recovered = createAgentRunSessionRuntime(
+    runtimeOptions(recoveredProvider, {
+      sessionStore: restored.sessions,
+      supportsResume: () => true,
+    }),
+  );
+  expect(await recovered.checkResume?.(run)).toEqual({ status: "ready" });
+  const handle = recovered.resume?.(run);
+  if (handle === undefined) throw new Error("Missing resumed session");
+  await vi.waitFor(() => expect(recoveredProvider.turns).toHaveLength(1));
+  expect(recoveredProvider.starts).toEqual([]);
+  expect(recoveredProvider.resumes).toMatchObject([
+    { sessionId, resumeCursor: { value: "private-provider-session" } },
+  ]);
+  expect(recoveredProvider.turns[0]?.prompt).toBe(message);
+  await recoveredProvider.emit({ kind: "completed", sessionId });
+  await settled(handle);
+  expect(restored.sessions.read(run)).not.toHaveProperty("pendingContinuation");
+  connection.close();
+});

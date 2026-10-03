@@ -2404,6 +2404,12 @@ export function startOctantServer(
         uuid: randomUUID,
       });
     const agentRunRouteDependencies: AgentRunRouteDependencies = {
+      listTargets: (parent) =>
+        agentRunEligibleTargets(
+          parent.parentRoute.projectId === undefined
+            ? undefined
+            : decodeProjectId(parent.parentRoute.projectId),
+        ),
       onExecutionAccepted: onAgentRunExecutionAccepted,
       windowAuthorityStore,
       persistence: agentRunPersistence,

@@ -42,6 +42,7 @@ import {
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import { isAgentRunTargetEligible, type AgentsToolTarget } from "./agentRunDelegation";
 import type { AgentRunControlParentFacts } from "./agentRunControlService";
 import type { AgentRunControlAdmissionDependencies } from "./agentRunControlAdmission";
 import type { AgentRunOrchestrationService } from "./agentRunOrchestrationService";
@@ -59,6 +60,7 @@ const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 
 export interface AgentRunRouteDependencies {
+  readonly listTargets: (parent: AgentRunControlParentFacts) => ReadonlyArray<AgentsToolTarget>;
   readonly onExecutionAccepted?: AgentRunControlAdmissionDependencies["onExecutionAccepted"];
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly persistence: AgentRunPersistenceService;
@@ -909,14 +911,37 @@ async function mutateLiveRun(
     });
     return json(result, result.kind === "run-command-failed" ? 409 : 200, origin);
   }
+  if (action === "resume" && !isAgentRunTargetEligible(run, dependencies.listTargets(parent))) {
+    return json(
+      {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message:
+          "The child's provider, model or reasoning choice is no longer available for this parent.",
+      },
+      409,
+      origin,
+    );
+  }
   const result =
     action === "retry"
       ? dependencies.orchestration.retry(runId, expectedVersion, parent.liveAuthority)
       : await dependencies.orchestration.resume(runId, expectedVersion, parent.liveAuthority, {
           ...(message === undefined ? {} : { message }),
-          resolveLiveAuthority: () =>
-            dependencies.authorizeCreation({ parentThreadId: run.parentThreadId, windowId })
-              ?.liveAuthority,
+          resolveLiveAuthority: () => {
+            const currentParent = dependencies.authorizeCreation({
+              parentThreadId: run.parentThreadId,
+              windowId,
+            });
+            if (
+              currentParent === undefined ||
+              currentParent.parentMode !== run.routingReceipt.mode ||
+              currentParent.parentRoute.projectId !== run.routingReceipt.projectId ||
+              !isAgentRunTargetEligible(run, dependencies.listTargets(currentParent))
+            )
+              return undefined;
+            return currentParent.liveAuthority;
+          },
           onExecutionAccepted: (accepted) =>
             dependencies.onExecutionAccepted?.({ run: accepted, windowId, operation: "resume" }),
         });
