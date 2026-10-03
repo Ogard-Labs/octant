@@ -514,10 +514,39 @@
 
 /* Thread tools are the ones reached for most, so they get two wide tiles a
    row; Workspace and Devices fit as many narrow tiles as the dock is wide. */
+/* Workspace and Devices are reached for less, so their tiles are compact: the
+   icon plate beside the name, two a row at the dock's default width of about
+   250px. Three narrow stacked tiles did not fit there and fell back to two
+   tall ones, which pushed Devices below the fold. auto-fill keeps a lone tile
+   at one column's width instead of stretching it across the dock. */
 .dock-work-map__tiles {
   display: grid;
   gap: var(--oct-space-2);
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+}
+
+.dock-work-map__tiles[data-columns="fit"] .dock-work-map__item {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
+}
+
+/* A smaller plate and a name that may take a second line: at two a row,
+   "Pull requests" and "Android emulator" were cut to "Pull req…" beside the
+   full-size plate. */
+.dock-work-map__tiles[data-columns="fit"] .dock-tile {
+  width: 20px;
+  height: 20px;
+}
+
+.dock-work-map__tiles[data-columns="fit"] .dock-work-map__name {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  line-height: var(--oct-leading-tight);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .dock-work-map__tiles[data-columns="two"] {
