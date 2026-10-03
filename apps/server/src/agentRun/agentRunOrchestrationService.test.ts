@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,12 +13,15 @@ import {
   decodeAgentRunId,
   decodeAgentRunParentThreadId,
   decodeAgentRunRequestId,
+  decodeNativeHarnessSlotCandidate,
   type AgentRunAuthority,
   type AgentRunCommand,
   type AgentRunRoutingReceipt,
   type AgentRunWorkspaceReceipt,
 } from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
+import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
+import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -35,6 +39,7 @@ import { AgentRunProjection } from "./agentRunProjection";
 import {
   AgentRunOrchestrationError,
   AgentRunOrchestrationService,
+  type AgentRunParentSessionPort,
   type AgentRunProcessSupervisorPort,
   createInMemoryCapacityPort,
 } from "./agentRunOrchestrationService";
@@ -229,15 +234,18 @@ function createHarness(
   capacity = createInMemoryCapacityPort(),
   withProcesses = true,
   processOverride?: AgentRunProcessSupervisorPort,
+  parentSessions?: AgentRunParentSessionPort,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-orch-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3")) as SqliteConnection;
   applyMigrations(connection, MIGRATIONS, () => now);
-  const registry = new EventRegistry()
-    .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
-    .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
-    .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged);
+  const registry = registerNativeHarnessEvents(
+    new EventRegistry()
+      .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
+      .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
+      .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged),
+  );
   const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
   const journal = new Journal({ connection, registry, projections, clock: () => now });
   let n = 0;
@@ -278,6 +286,7 @@ function createHarness(
     worktree,
     approvals,
     ...(processes === undefined ? {} : { processes }),
+    ...(parentSessions === undefined ? {} : { parentSessions }),
   });
   return { orchestration, persistence, capacity, approvals, store, connection, journal };
 }
@@ -1084,17 +1093,69 @@ describe("AgentRun dependency graphs", () => {
 
   function graphHarness() {
     const starts: string[] = [];
-    const harness = createHarness(createInMemoryCapacityPort(), true, {
+    const processes: AgentRunProcessSupervisorPort = {
       start: (run) => {
         starts.push(String(run.id));
       },
       stop: async () => undefined,
+    };
+    let sessions: NativeHarnessSessionStore | undefined;
+    // The rule the host wires: a paused session, or one a restart left
+    // needing a check, holds its children.
+    const parentSessions: AgentRunParentSessionPort = {
+      isHeld: (parentThreadId) => {
+        const status = sessions?.read(String(parentThreadId))?.session.status;
+        return (
+          status === "paused-by-user" ||
+          status === "paused-by-advisor" ||
+          status === "recovery-required"
+        );
+      },
+    };
+    const harness = createHarness(createInMemoryCapacityPort(), true, processes, parentSessions);
+    sessions = new NativeHarnessSessionStore({
+      journal: harness.journal,
+      uuid: randomUUID,
+      actor,
+      clock: () => now,
+    });
+    sessions.ensure({
+      threadId: String(ids.thread),
+      mode: "chat",
+      leadSlotId: "default" as never,
+      lead: decodeNativeHarnessSlotCandidate({
+        hostId: "00000000-0000-4000-8000-0000000000aa",
+        providerInstanceId: ids.provider,
+        modelId: "frontier-large",
+      }),
     });
     const scheduler = new AgentRunDependencyScheduler({
       agentRuns: harness.persistence,
       orchestration: harness.orchestration,
     });
-    harness.journal.subscribeCommitted((append) => scheduler.onCommittedAppend(append));
+    const unsubscribe = harness.journal.subscribeCommitted((append) =>
+      scheduler.onCommittedAppend(append),
+    );
+    /** What host boot does: interrupt live runs, then a fresh service and scheduler. */
+    const restart = () => {
+      unsubscribe();
+      harness.persistence.reconcileAfterRestart();
+      const orchestration = new AgentRunOrchestrationService({
+        persistence: harness.persistence,
+        capacity: createInMemoryCapacityPort(),
+        worktree: { isVerifiedIsolation: () => true, isParentCheckout: () => false },
+        approvals: { isCurrent: () => true },
+        processes,
+        parentSessions,
+      });
+      const restarted = new AgentRunDependencyScheduler({
+        agentRuns: harness.persistence,
+        orchestration,
+      });
+      harness.journal.subscribeCommitted((append) => restarted.onCommittedAppend(append));
+      restarted.start();
+      return orchestration;
+    };
     const admit = (requestId: (typeof requestIds)[number], dependsOn?: ReadonlyArray<string>) => {
       const admitted = harness.orchestration.admit({
         command: {
@@ -1113,7 +1174,7 @@ describe("AgentRun dependency graphs", () => {
       harness.orchestration.start(admitted.id, admitted.version, authority);
       return admitted.id;
     };
-    return { ...harness, starts, scheduler, admit, run };
+    return { ...harness, starts, scheduler, admit, run, restart, sessions };
   }
 
   it("parks a run that waits on siblings without starting it, and starts it once all completed", async () => {
@@ -1185,6 +1246,55 @@ describe("AgentRun dependency graphs", () => {
       lifecycleStatus: "waiting",
       recoveryReason: AGENT_RUN_DEPENDENCY_WAITING_REASON,
     });
+  });
+
+  it("holds a run parked before a restart even once its dependencies complete, until a person resumes it", async () => {
+    const { persistence, starts, admit, run, restart } = graphHarness();
+    const first = run(requestIds[0]);
+    const dependent = admit(requestIds[1], [String(first)]);
+    // The old host finishes what it already noticed before it goes away.
+    await settle();
+
+    const orchestration = restart();
+    const interrupted = persistence.getById(first);
+    if (interrupted === undefined) throw new Error("The dependency is gone.");
+    orchestration.retry(first, interrupted.version, authority);
+    orchestration.onSessionSettled({
+      runId: first,
+      outcome: { kind: "completed", responseText: "first finding" },
+    });
+    await settle();
+
+    // The parent's session is idle, so only the restart holds the run back.
+    expect(persistence.getById(first)?.lifecycleStatus).toBe("completed");
+    expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("waiting");
+    expect(starts).not.toContain(String(dependent.id));
+
+    const parked = persistence.getById(dependent.id);
+    if (parked === undefined) throw new Error("The dependent is gone.");
+    orchestration.resume(dependent.id, parked.version, authority);
+    expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("starting");
+    expect(starts).toContain(String(dependent.id));
+  });
+
+  it("starts no child while its parent's session is paused, and starts it once the session resumes", async () => {
+    const { persistence, orchestration, starts, admit, run, sessions } = graphHarness();
+    const first = run(requestIds[0]);
+    const dependent = admit(requestIds[1], [String(first)]);
+    sessions.pause(String(ids.thread), "paused-by-user", "Checking the plan.");
+
+    orchestration.onSessionSettled({
+      runId: first,
+      outcome: { kind: "completed", responseText: "first finding" },
+    });
+    await settle();
+    expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("waiting");
+    expect(starts).not.toContain(String(dependent.id));
+
+    sessions.resume(String(ids.thread));
+    await settle();
+    expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("starting");
+    expect(starts).toContain(String(dependent.id));
   });
 });
 

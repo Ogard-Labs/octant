@@ -507,8 +507,9 @@ export class AgentRunPersistenceService {
       // journaled usage limit holds no live execution either — its session
       // already ended on the limit and the reset fact rides the aggregate —
       // so the wait, and any recovery opt-in bound to it, survives restart.
-      // A run parked on its dependencies never started either; the dependency
-      // scheduler re-evaluates it at boot.
+      // A run parked on its dependencies never started either; it stays
+      // parked, and the orchestration service holds it until a person or its
+      // parent's resumed session lets it go.
       if (
         run.lifecycleStatus === "waiting" &&
         (agentRunPoolRouteWaitingReason(run.routingReceipt) !== undefined ||

@@ -2015,6 +2015,18 @@ export function startOctantServer(
       },
       approvals: { isCurrent: () => true },
       processes: agentRunProcessSupervisor,
+      parentSessions: {
+        // The same rule `delegate` refuses by: a paused session, or one a
+        // restart left needing a check, starts no child until it is resumed.
+        isHeld: (parentThreadId) => {
+          const status = nativeHarnessSessions?.read(String(parentThreadId))?.session.status;
+          return (
+            status === "paused-by-user" ||
+            status === "paused-by-advisor" ||
+            status === "recovery-required"
+          );
+        },
+      },
     });
     let snapshotCanvasImpl: NonNullable<AgentRunRouteDependencies["snapshotCanvas"]> = () => ({
       kind: "denied",

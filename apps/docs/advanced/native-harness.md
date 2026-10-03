@@ -45,8 +45,9 @@ tool calls included, and picks it up again after Octant restarts.
 **Pause** — on the harness card, the phone panel, or `/pause` in the terminal —
 lets the turn that is running finish, along with any helpers it already
 started, and starts nothing new: the next message is refused, the lead cannot
-start another helper, and a goal loop on the thread is paused too. **Resume**
-lifts it (resume the goal loop from its own panel).
+start another helper, a helper waiting for other helpers to finish stays
+waiting, and a goal loop on the thread is paused too. **Resume** lifts it
+(resume the goal loop from its own panel).
 
 If Octant restarts while a turn is running, or while the lead was waiting for
 your answer to a question or an approval, the thread shows **Needs a check
@@ -56,6 +57,10 @@ thread's model endpoint is still on, that a Code thread's checkout has been
 checked again since the restart (opening the thread does that), and that a
 Work Project's folder is still where it was, and says what is missing if not; then it records the cut-off turn and
 any question nobody can answer anymore as settled, and the thread runs again.
+
+A helper that was waiting for other helpers when Octant stopped stays waiting
+after the restart, even once they finish. Resuming the thread lets it go, or
+press **Resume** on the helper's own page in the **Agents** dock tool.
 
 If Octant stops while a tool is running, the model is told on its next turn
 that the call was interrupted. A tool that only reads, such as `read` or
