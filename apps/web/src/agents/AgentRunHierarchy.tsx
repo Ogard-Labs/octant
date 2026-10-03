@@ -6,6 +6,7 @@ import {
 import {
   AgentRunClientFailure,
   type AgentRunClient,
+  type AgentRunParentSummaryResponse,
 } from "@octant/client-runtime/agent-run-client";
 import {
   AgentRunSettingsClientFailure,
@@ -13,7 +14,9 @@ import {
 } from "@octant/client-runtime/agent-run-settings-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
+import { ObservedChildDetail, observedChildSelectionId } from "./ObservedChildActivity";
 import { AgentRunDetail } from "./AgentRunDetail";
 import { buildAgentHierarchyModel, isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
 import { useAgentRunControlCommands } from "./useAgentRunControlCommands";
@@ -35,11 +38,13 @@ export function AgentRunHierarchy(props: {
   readonly requestedRunId?: string;
   readonly onRequestedRunHandled?: () => void;
 }) {
-  const [entries, setEntries] = useState<
-    Awaited<ReturnType<AgentRunClient["parentSummary"]>>["entries"]
-  >([]);
+  const [read, setRead] = useState<AgentRunParentSummaryResponse>();
+  const currentRead = read?.parentThreadId === props.parentThreadId ? read : undefined;
+  const entries = currentRead?.entries ?? [];
+  const observations = currentRead?.observations ?? [];
   const [status, setStatus] = useState<"loading" | "ready" | "refreshing" | "error">("loading");
   const [errorMessage, setErrorMessage] = useState<string>();
+  const [summaryReconnecting, setSummaryReconnecting] = useState(false);
   const [posture, setPosture] = useState<AgentRunCreationPosture | undefined>(
     props.creationPosture,
   );
@@ -57,11 +62,14 @@ export function AgentRunHierarchy(props: {
     setSelectedRunId(undefined);
     if (props.requestedRunId !== undefined) onRequestedRunHandled.current?.();
   };
-  // The live conversation streams only while its page is open.
-  const conversationState = useAgentRunConversation(
-    props.client,
-    selectedRunId === undefined ? undefined : decodeAgentRunId(selectedRunId),
+  // Only an identity resolved from the managed list may open a conversation.
+  // Observation selection keys are presentation-only and never decoded as runs.
+  const selectedEntry = entries.find((entry) => String(entry.runId) === selectedRunId);
+  const selectedObservation = observations.find(
+    (child) => observedChildSelectionId(child) === selectedRunId,
   );
+  // The live conversation streams only while its page is open.
+  const conversationState = useAgentRunConversation(props.client, selectedEntry?.runId);
 
   // Reads overlap: the beat below does not wait for the one before it, and a
   // refresh can land mid-beat. An older answer arriving last replaced a newer
@@ -74,7 +82,8 @@ export function AgentRunHierarchy(props: {
     const summary = await props.client.parentSummary(props.parentThreadId);
     if (read < shownRead.current) return;
     shownRead.current = read;
-    setEntries(summary.entries);
+    setRead(summary);
+    setSummaryReconnecting(false);
   }, [props.client, props.parentThreadId]);
   // A read still out when the panel closes or moves to another thread answers
   // for a list no longer shown.
@@ -105,19 +114,18 @@ export function AgentRunHierarchy(props: {
     void refresh();
   }, [refresh]);
 
-  // The summary has no push channel, so a child that finished while the panel
-  // sat open kept reading "starting" until the person clicked something. While
-  // any child is still active, read the summary again on a short beat; once
-  // every child has settled the panel stops asking.
-  const anyActive = entries.some((entry) => isActiveAgentHierarchyStatus(entry.lifecycleStatus));
+  // The summary has no push channel. An idle panel still reads occasionally:
+  // a provider can report its first child after the panel was opened.
+  const anyActive = [...entries, ...observations].some((entry) =>
+    isActiveAgentHierarchyStatus(entry.lifecycleStatus),
+  );
   useEffect(() => {
-    if (!anyActive) return;
-    const timer = window.setInterval(() => {
-      // A missed beat is retried by the next one; the explicit refresh path
-      // owns the visible error.
-      void readSummary().catch(() => undefined);
-    }, ACTIVE_CHILD_REFRESH_MS);
-    return () => window.clearInterval(timer);
+    return scheduleVisibleInterval(
+      () => {
+        void readSummary().catch(() => setSummaryReconnecting(true));
+      },
+      anyActive ? ACTIVE_CHILD_REFRESH_MS : 30_000,
+    );
   }, [anyActive, readSummary]);
 
   useEffect(() => {
@@ -222,7 +230,7 @@ export function AgentRunHierarchy(props: {
   if (status === "loading") {
     return <ShellState state="loading" title="Loading agents" />;
   }
-  if (status === "error" && entries.length === 0) {
+  if (status === "error" && entries.length + observations.length === 0) {
     return (
       <ShellState
         action={{ label: "Retry Agents", onClick: () => void refresh() }}
@@ -236,16 +244,33 @@ export function AgentRunHierarchy(props: {
   }
 
   const effectivePosture = posture ?? "ask";
-  const error =
-    errorMessage === undefined ? null : (
-      <p className="code-thread-workspace__error" role="alert">
-        {errorMessage}
-      </p>
-    );
+  const error = (
+    <>
+      {summaryReconnecting ? (
+        <p className="agent-hierarchy__banner" role="status">
+          Reconnecting. Showing the last child activity and results reported.
+        </p>
+      ) : null}
+      {errorMessage === undefined ? null : (
+        <p className="code-thread-workspace__error" role="alert">
+          {errorMessage}
+        </p>
+      )}
+    </>
+  );
   const selectedRow =
     selectedRunId === undefined
       ? undefined
       : [...model.working, ...model.finished].find((row) => row.runId === selectedRunId);
+
+  if (selectedObservation !== undefined) {
+    return (
+      <>
+        {error}
+        <ObservedChildDetail child={selectedObservation} onBack={leaveSelectedRun} />
+      </>
+    );
+  }
 
   if (selectedRow !== undefined) {
     return (
@@ -281,6 +306,8 @@ export function AgentRunHierarchy(props: {
       <AgentHierarchyPanel
         creationPosture={effectivePosture}
         entries={entries}
+        observations={observations}
+        observationsTruncated={currentRead?.observationsTruncated === true}
         onOpen={setSelectedRunId}
         reconnecting={status === "refreshing"}
       />

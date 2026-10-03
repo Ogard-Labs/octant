@@ -276,25 +276,38 @@ names the state and claims no elapsed time. See
 
 ### Welcome and composer
 
-A thread's subagents sit in their own card tucked behind the composer's
-top edge — narrower than the composer by one inset on each side, its lower edge
-hidden under the composer, rising from behind it on arrival — so they read as
-work beside the message rather than part of it. The card starts collapsed and
-remembers the viewer's fold choice. Its head names the total and reported states,
-including failed, waiting, and results needing review; task-plan completion is
-never counted as child completion. View all opens the full Agents list even when
-every child has finished. Expansion previews at most three active or unreviewed
-children in host order; longer history stays in Environment and Agents. Rows show
-the task, semantic status, execution model when recorded, and age explicitly
-labeled as time since the last update, not total execution time. A recorded
-recovery or review reason can accompany the row; no latest activity is inferred
-from a task title or assistant prose. Rows open the child in Agents. Stop appears
-on hover or focus only for active children; Stop all asks first and names the
-active scope. Headers and rows wrap at narrow widths, disclosures work with the
-keyboard and retain visible focus, and expanded lists have bounded height.
-There is no strip above the
-transcript. A cross-context notice takes the same place behind the composer and wins while
-it shows.
+A thread's subagents sit in an inset card attached above the composer's message
+surface. The card participates in normal layout so expansion cannot cover the
+preceding task list or transcript. Cross-context notices share the same flow;
+they never hide failed children or results needing review. The card starts
+collapsed and remembers the viewer's fold choice. Its head names the total,
+prioritizing failed, waiting, review-needed and unknown states over redundant
+activity counts. A truncated list identifies its count as listed children.
+Task-plan completion is never counted as child completion. View all opens the
+full Agents list even when every child has finished. Expansion previews at most
+three active or unresolved children; longer history stays in Environment and
+Agents. Compact rows show task, semantic status, recorded model and available
+activity. Age is explicitly time since the last update or first observation,
+never inferred execution duration. Raw identifiers and workspace paths belong
+in details. Rows open the child in Agents. Only managed active children offer
+Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
+narrow widths, disclosures work with the keyboard and retain visible focus,
+and expanded lists have bounded height.
+
+Provider-observed children remain separate from managed runs. Their detail shows
+reported activity, observation timing, available lineage and explicit partial,
+truncated or conflicting history. An unknown model stays unknown. Observations
+have no managed conversation, execution controls, workspace authority or result
+acknowledgement.
+
+Managed result previews identify their execution generation and recorded model.
+The result detail leads with the reported summary, files, checks and blockers;
+exact run, parent, provider and workspace attribution is available in a separate
+disclosure. Earlier generations keep their own attribution and evidence. Missing
+or truncated results stay explicit. Provider-reported files remain unverified;
+recorded tool output is inspectable without claiming that tool completion means
+a check passed. File review availability is explicit, and evidence references
+are disclosed on request rather than presented as unsupported navigation links.
 
 A reply's suggested follow-ups sit as outline chips at the top of the
 thread composer, inside its surface, with a quiet "Next" label and a dismiss

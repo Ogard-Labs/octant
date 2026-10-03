@@ -1,3 +1,5 @@
+import type { AgentRunResultPacket } from "@octant/contracts";
+
 export interface AgentHierarchyInputRoute {
   readonly requestedProviderInstanceId: string;
   readonly requestedModelId: string;
@@ -9,6 +11,8 @@ export interface AgentHierarchyInputRoute {
 }
 
 export interface AgentHierarchyInputEntry {
+  readonly resultPackets?: ReadonlyArray<AgentRunResultPacket>;
+  readonly resultsTruncated?: boolean;
   readonly runId: string;
   readonly parentRunId?: string;
   readonly role: string;
@@ -44,6 +48,8 @@ export interface AgentHierarchyInputEntry {
 }
 
 export interface AgentHierarchyRow {
+  readonly resultPackets?: ReadonlyArray<AgentRunResultPacket>;
+  readonly resultsTruncated?: boolean;
   readonly runId: string;
   readonly parentRunId?: string;
   readonly depth: number;
@@ -141,6 +147,8 @@ function toRow(entry: AgentHierarchyInputEntry, depth: number): AgentHierarchyRo
     ...(entry.usageLimit === undefined ? {} : { usageLimit: entry.usageLimit }),
     ...(entry.usageResume === undefined ? {} : { usageResume: entry.usageResume }),
     ...(entry.result === undefined ? {} : { result: entry.result }),
+    ...(entry.resultPackets === undefined ? {} : { resultPackets: entry.resultPackets }),
+    ...(entry.resultsTruncated === undefined ? {} : { resultsTruncated: entry.resultsTruncated }),
     ...(entry.route === undefined
       ? {}
       : { model: entry.route.executionModelId, routeLabel: routeLabel(entry.route) }),
