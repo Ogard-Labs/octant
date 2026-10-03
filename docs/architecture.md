@@ -526,11 +526,18 @@ Children can form a dependency graph. A run admitted with `dependsOn` (up to
 eight existing sibling runs of the same parent thread) parks as Waiting under
 `waiting-on-dependencies`: it holds no capacity slot, the capacity queue never
 starts it, and a restart leaves it parked. `AgentRunDependencyScheduler` asks
-the orchestration service to settle it on every committed status change and
-once at boot, through the pure `decideAgentRunDependencies`. When every
-dependency completed, the run starts (or joins the capacity queue if no slot is
-free) and receives each dependency's reply as a context block; a reply that is
-gone fails the start closed. A dependency that failed or was cancelled fails
+the orchestration service to settle it on every committed status change, when
+the parent thread's harness session is resumed, and once at boot, through the
+pure `decideAgentRunDependencies`. When every dependency completed, the run
+starts (or joins the capacity queue if no slot is free) and receives each
+dependency's reply as a context block; a reply that is gone fails the start
+closed. A ready run is held instead while its parent's harness session is
+paused or `recovery-required` (the same rule that refuses a new `delegate`),
+and a restart never starts one on its own: every run already parked when the
+host boots stays parked, even once its dependencies complete, until a person
+resumes it or resumes the parent's session; a person's resume of the run
+itself is refused while the parent's session is held. The hold lives in the
+orchestration service and is rebuilt the same way at every boot. A dependency that failed or was cancelled fails
 the dependent without running it (`dependency-failed: <id>`); an interrupted
 dependency does not, because a retry can still complete it. A run cannot be
 admitted on a sibling that already failed or was cancelled, and since only

@@ -97,6 +97,9 @@ export function agentRunRecoveryLabel(recoveryReason: string | undefined): strin
   if (recoveryReason === "host-restart") return "Recovered after host restart";
   if (recoveryReason === "journal-replay") return "Recovered after journal replay";
   if (recoveryReason === "provider-reconnect") return "Waiting after provider reconnect";
+  if (recoveryReason === "restart-without-resumable-execution") {
+    return "Stopped by a host restart. Retry to run it again.";
+  }
   return recoveryReason;
 }
 

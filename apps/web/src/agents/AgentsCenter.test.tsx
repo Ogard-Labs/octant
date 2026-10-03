@@ -93,6 +93,7 @@ describe("AgentsCenter", () => {
     expect(screen.queryByRole("button", { name: /^Resume$/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Retry$/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Steer$/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Stopped by a host restart. Retry to run it again.")).toBeVisible();
   });
 
   it("shows a loading state while the center query is in flight", () => {
