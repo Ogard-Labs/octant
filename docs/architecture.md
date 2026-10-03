@@ -810,7 +810,19 @@ flowchart LR
   of the journal — transcript, evidence, and provenance, named with the
   instant it was taken. Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
-  journal are listed as omissions. See `docs/decisions/0036`. User-facing
+  journal are listed as omissions. A local owner can also take one
+  `octant.host-export/1` cut of what this host holds: a thread bundle for
+  every thread of every mode, Projects, Project memory, Canvases, a
+  non-secret settings summary, usage export rows, and retention windows
+  with purge tombstones. That call is a host-control read on the loopback
+  route chain. A remote principal and a paired device are refused, and the
+  remote forward list does not carry the path. The same forbidden-key walk
+  runs over the assembled cut. Large stores are read and written in bounded
+  pages, so a transcript, usage row, or tombstone table is not loaded all
+  at once; each page is walked before it is written. The cut names what it
+  leaves out — credentials, filesystem paths, attachment bytes, raw
+  provider payloads, unsent drafts, paired-device keys, and window
+  capabilities — and why. See `docs/decisions/0036`. User-facing
   drafts of the privacy notice, sub-processor position, data-residency
   statement, DPA template, SCC position, and EULA governing-law placeholders
   live in `apps/docs/advanced/` and are marked pending legal review; they

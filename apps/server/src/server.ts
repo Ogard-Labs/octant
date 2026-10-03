@@ -771,6 +771,7 @@ import {
 } from "./hostControlRoutes";
 import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
+import { createLiveHostExportService } from "./hostExportService";
 import { ChatAttachmentStore } from "./chat/chatAttachmentStore";
 import { createPrivateListenerLifecycleController } from "./remote/privateListenerLifecycleController";
 import { resolvePrivateListenerHostIdentity } from "./remote/privateListenerHostIdentity";
@@ -9016,6 +9017,42 @@ export function startOctantServer(
           byteLength: receipt.byteLength,
         };
       },
+      hostExport: createLiveHostExportService({
+        hostId: LOCAL_HOST_ID,
+        clock: () => new Date().toISOString(),
+        threads: threadExportService,
+        connection: persistence.connection,
+        listWorkThreadIds: () => workThreadProjection.list().map((thread) => String(thread.id)),
+        listProjects: () =>
+          persistence.readProjects().map((project) => ({
+            projectId: project.id,
+            name: project.name,
+            type: project.type,
+            lifecycle: project.lifecycle,
+            ...(project.type === "chat" ? {} : { canonicalRoot: project.binding.canonicalRoot }),
+          })),
+        listProjectIds: () => persistence.readProjects().map((project) => String(project.id)),
+        readProjectMemory: (projectId) => persistence.readProjectMemory(decodeProjectId(projectId)),
+        listCanvases: () =>
+          [...persistence.canvasProjection.snapshot().values()].map((entry) => ({
+            canvasId: entry.canvasId,
+            projectId: entry.currentVersion.definition.provenance.projectId,
+            mode: entry.currentVersion.definition.provenance.mode,
+            title: entry.currentVersion.definition.title,
+            updatedAt: entry.updatedAt,
+            definition: entry.currentVersion.definition,
+          })),
+        readSettings: () => {
+          const shell = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+          const themeMode = persistence.readThemeSettings()?.settings.mode;
+          return {
+            chatEnabled: shell.chatEnabled,
+            workEnabled: shell.workEnabled,
+            themeMode: themeMode ?? "unknown",
+            ...(shell.streamReplies === undefined ? {} : { streamReplies: shell.streamReplies }),
+          };
+        },
+      }),
     });
     return yield* Effect.acquireRelease(
       Effect.tryPromise({
