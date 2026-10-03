@@ -3,6 +3,7 @@ import type { AgentRunProcessSupervisorPort } from "./agentRunOrchestrationServi
 import { AgentRunProcessSupervisorError } from "./agentRunProcessSupervisor";
 import {
   isAgentRunSessionDeath,
+  AgentRunSessionError,
   type AgentRunSessionHandle,
   type AgentRunSessionOutcome,
   type AgentRunSessionPort,
@@ -63,13 +64,32 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
   }
 
   start(run: AgentRun): AgentRunSessionHandle {
+    return this.#start(run);
+  }
+
+  resume(run: AgentRun, input?: { readonly message?: string }): AgentRunSessionHandle {
+    if (this.#port.resume === undefined)
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "This execution cannot resume its saved conversation. Use Retry for a fresh session.",
+      );
+    return this.#start(run, input ?? {});
+  }
+
+  #start(run: AgentRun, continuation?: { readonly message?: string }): AgentRunSessionHandle {
     if (this.#sessions.has(run.id)) {
       throw new AgentRunProcessSupervisorError(
         "duplicate",
         "AgentRun already owns a supervised managed session.",
       );
     }
-    const handle = this.#port.start(run);
+    const handle =
+      continuation === undefined ? this.#port.start(run) : this.#port.resume?.(run, continuation);
+    if (handle === undefined)
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "This execution cannot resume its saved conversation. Use Retry for a fresh session.",
+      );
     const owned: OwnedSession = {
       runId: run.id,
       handle,
@@ -144,6 +164,15 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
     // awaited already removed itself, so only a stale entry is cleared here.
     if (!owned.settled) this.#settle(owned, { kind: "cancelled" });
     else if (this.#sessions.get(runId) === owned) this.#sessions.delete(runId);
+  }
+
+  async steer(input: {
+    readonly runId: AgentRunId;
+    readonly message: string;
+  }): Promise<"steered" | "unsupported"> {
+    const owned = this.#sessions.get(input.runId);
+    if (owned === undefined || owned.stopping || owned.settled) return "unsupported";
+    return this.#port.steer?.(input) ?? "unsupported";
   }
 
   activeRunIds(): ReadonlyArray<AgentRunId> {
