@@ -1,5 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
-import type { DiscoveryClient } from "@octant/client-runtime/discovery-client";
+import {
+  DiscoveryClientFailure,
+  type DiscoveryClient,
+} from "@octant/client-runtime/discovery-client";
 import type { DiscoverySnapshot } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { useDiscoveryController } from "./useDiscoveryController";
@@ -61,5 +64,27 @@ describe("useDiscoveryController", () => {
 
     expect(result.current.snapshot).toEqual(snapshot);
     expect(result.current.scanning).toBe(false);
+  });
+
+  it("stops scanning and says why when the host never answers the scan", async () => {
+    const client: DiscoveryClient = {
+      scan: vi.fn(() =>
+        Promise.reject(
+          new DiscoveryClientFailure(
+            "timeout",
+            "The provider scan took too long to answer. Try again.",
+          ),
+        ),
+      ),
+      connect: vi.fn(),
+    };
+    const { result } = renderHook(() => useDiscoveryController({ client }));
+
+    await act(async () => {
+      await result.current.scan();
+    });
+
+    expect(result.current.scanning).toBe(false);
+    expect(result.current.message).toBe("The provider scan took too long to answer. Try again.");
   });
 });

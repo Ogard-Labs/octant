@@ -11,7 +11,8 @@ import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
-import { SettingsSection } from "../settings/primitives";
+import { SettingRow, SettingsSection } from "../settings/primitives";
+import { settingId } from "../settings/registry";
 import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -45,6 +46,39 @@ const JOB_LABELS: Readonly<Record<NativeHarnessJob, string>> = {
   advisor: "Advisor",
   custom: "Custom",
 };
+
+/**
+ * What each built-in slot is for, in the words the Jobs list uses. The meanings
+ * follow the slot design: Planner on `plan`, Reviewer on `slow`, Explorer and
+ * Researcher on `task`, titles, summaries and compaction on `smol`, image
+ * understanding on `vision`, and the supervisor on `advisor`.
+ */
+const SLOT_PRESENTATION: Readonly<Record<string, { label: string; meaning: string }>> = {
+  default: {
+    label: "Main model",
+    meaning:
+      "Leads each thread and does the implementing. Roles with no model of their own use it.",
+  },
+  plan: { label: "Planning", meaning: "Works out the approach before the work starts." },
+  slow: {
+    label: "Careful review",
+    meaning: "A stronger, slower model that reviews finished work.",
+  },
+  task: {
+    label: "Research and tasks",
+    meaning: "Helper agents that explore the code and look things up.",
+  },
+  smol: {
+    label: "Quick jobs",
+    meaning: "A small, fast model for titles, summaries, and shortening long context.",
+  },
+  vision: { label: "Images", meaning: "Reads screenshots and other images." },
+  advisor: { label: "Advisor", meaning: "Reviews each reply and steps in when a turn goes wrong." },
+};
+
+function slotPresentation(id: string): { label: string; meaning: string } {
+  return SLOT_PRESENTATION[id] ?? { label: id, meaning: "A custom role." };
+}
 
 /**
  * Settings → Octant Harness → Model slots. A slot is an ordered list of models; jobs
@@ -137,7 +171,9 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
         ...(next === undefined ? [] : [next]),
       ],
     });
-  const firstProvider = props.providers[0];
+  // A provider with no observed models cannot fill a slot, so it must not be
+  // the reason a button silently does nothing.
+  const assignableProvider = props.providers.find((option) => option.models.length > 0);
   const hasSavedRouting =
     draft.slots.some((slot) => slot.candidates.length > 0) || draft.jobSlots.length > 0;
 
@@ -160,29 +196,53 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
         ) : (
           <div className="settings-panel__body">
             <p className="native-harness-panel__lead">
-              The first model in each role is preferred; the others are fallbacks. An empty role
-              uses <code>default</code> and shows a warning.
+              Each role is a list of models: the first is preferred and the rest are fallbacks. A
+              role with no model uses the {slotPresentation("default").label} and shows a warning.
             </p>
             <div className="native-harness-slots">
               {slotIds.map((id) => {
                 const slot = slotFor(id);
+                const { label, meaning } = slotPresentation(id);
                 return (
                   <div className="native-harness-slot" key={id}>
-                    <div className="native-harness-slot__head">
-                      <code>{id}</code>
-                      <span className="native-harness-slot__count">
-                        {slot === undefined
-                          ? "unconfigured"
+                    <SettingRow
+                      description={
+                        id === "default" || slot !== undefined
+                          ? meaning
+                          : `${meaning} Until set, it uses the ${slotPresentation("default").label}.`
+                      }
+                      label={label}
+                      scope="app"
+                      settingId={settingId(`harness-slot-${id}`)}
+                    >
+                      <span className="oct-meta native-harness-slot__count">
+                        {slot === undefined || slot.candidates.length === 0
+                          ? "Not set"
                           : `${slot.candidates.length} model${slot.candidates.length === 1 ? "" : "s"}`}
                       </span>
-                      {firstProvider === undefined ? null : (
+                      {assignableProvider === undefined ? (
+                        props.onOpenProviders === undefined ? null : (
+                          <OctantButton
+                            onClick={props.onOpenProviders}
+                            size="sm"
+                            variant="secondary"
+                          >
+                            Connect a provider
+                          </OctantButton>
+                        )
+                      ) : (
                         <OctantButton
+                          aria-label={
+                            slot === undefined || slot.candidates.length === 0
+                              ? `Choose a model for ${label}`
+                              : `Add a fallback model for ${label}`
+                          }
                           onClick={() => {
-                            const model = firstProvider.models[0];
+                            const model = assignableProvider.models[0];
                             if (model === undefined) return;
                             const candidate = {
                               hostId: props.hostId as never,
-                              providerInstanceId: firstProvider.instanceId as never,
+                              providerInstanceId: assignableProvider.instanceId as never,
                               modelId: model.id as never,
                             };
                             setSlot(id, {
@@ -193,10 +253,12 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                           size="sm"
                           variant="secondary"
                         >
-                          Add model
+                          {slot === undefined || slot.candidates.length === 0
+                            ? "Choose model"
+                            : "Add fallback"}
                         </OctantButton>
                       )}
-                    </div>
+                    </SettingRow>
                     {(slot?.candidates ?? []).map((candidate, index) => {
                       const provider = props.providers.find(
                         (option) => option.instanceId === String(candidate.providerInstanceId),
@@ -207,7 +269,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                             {index === 0 ? "primary" : `fallback ${index}`}
                           </span>
                           <OctantSelectField
-                            aria-label={`${id} model ${index + 1} provider`}
+                            aria-label={`${label}, model ${index + 1} provider`}
                             onValueChange={(value) => {
                               const next = props.providers.find(
                                 (option) => option.instanceId === value,
@@ -235,7 +297,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                             value={String(candidate.providerInstanceId)}
                           />
                           <OctantSelectField
-                            aria-label={`${id} model ${index + 1}`}
+                            aria-label={`${label}, model ${index + 1}`}
                             onValueChange={(value) => {
                               if (slot === undefined) return;
                               setSlot(id, {
@@ -253,7 +315,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                             value={String(candidate.modelId)}
                           />
                           <OctantButton
-                            aria-label={`Remove ${id} model ${index + 1}`}
+                            aria-label={`Remove ${label}, model ${index + 1}`}
                             onClick={() => {
                               if (slot === undefined) return;
                               const candidates = slot.candidates.filter((_, at) => at !== index);
@@ -296,7 +358,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                           ],
                         })
                       }
-                      options={slotIds.map((id) => ({ id, label: id }))}
+                      options={slotIds.map((id) => ({ id, label: slotPresentation(id).label }))}
                       value={String(bound)}
                     />
                   </div>
