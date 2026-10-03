@@ -79,6 +79,7 @@ export * from "./projectView";
 export * from "./sidebarThreadStatus";
 export * from "./settings";
 export * from "./providers";
+export * from "./hostOAuth";
 export * from "./providerDiscovery";
 export * from "./providerUsageLimits";
 export * from "./shell";
