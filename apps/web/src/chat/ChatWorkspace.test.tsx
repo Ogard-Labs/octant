@@ -1,4 +1,4 @@
-import { queueTestHost } from "../messageQueue/queueTestHost";
+import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import { decodeChatAttachment } from "@octant/contracts/chat";
 import type { ThreadMessageQueueResult } from "@octant/contracts";
 import {

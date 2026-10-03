@@ -7,7 +7,7 @@ import {
 } from "@octant/contracts";
 import { ThreadMessageQueue } from "./ThreadMessageQueue";
 import { useThreadMessageQueue } from "./useThreadMessageQueue";
-import { queueTestHost } from "./queueTestHost";
+import { queueTestHost } from "./queueTestHost.test-fixture";
 
 const threadId = "11111111-1111-4111-8111-111111111111";
 describe("compact message queue controls", () => {

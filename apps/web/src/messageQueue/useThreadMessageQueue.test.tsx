@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { decodeMentionableThreadId, type ThreadMessageQueueResult } from "@octant/contracts";
 import { useThreadMessageQueue } from "./useThreadMessageQueue";
-import { queueTestHost } from "./queueTestHost";
+import { queueTestHost } from "./queueTestHost.test-fixture";
 
 const threadId = "11111111-1111-4111-8111-111111111111";
 describe("host-owned follow-up queues", () => {

@@ -21,7 +21,7 @@ export function createThreadMessageQueueClient(options: {
   const base = options.serverUrl.replace(/\/$/, "");
   const headers = { "x-octant-window-capability": options.windowCapability };
   async function json(path: string, init: RequestInit): Promise<unknown> {
-    const response = await request(`${base}/api/thread-message-queue${path}`, {
+    const response = await request(`${base}${path}`, {
       signal: AbortSignal.timeout(15000),
       ...init,
     });
@@ -32,7 +32,7 @@ export function createThreadMessageQueueClient(options: {
     read: async (scope) => {
       const query = new URLSearchParams({ mode: scope.mode, threadId: String(scope.threadId) });
       const result = decodeThreadMessageQueueReadResult(
-        await json(`?${query}`, { headers, cache: "no-store" }),
+        await json(`/api/thread-message-queue?${query}`, { headers, cache: "no-store" }),
       );
       if (result.status === "refused") throw new Error(`Queue unavailable: ${result.reason}.`);
       const snapshot = result.snapshot;
@@ -46,7 +46,7 @@ export function createThreadMessageQueueClient(options: {
     },
     execute: async (command) => {
       const result = decodeThreadMessageQueueResult(
-        await json("/commands", {
+        await json("/api/thread-message-queue/commands", {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(command),

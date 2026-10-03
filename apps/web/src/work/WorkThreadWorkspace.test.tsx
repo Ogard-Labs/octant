@@ -1,4 +1,4 @@
-import { queueTestHost } from "../messageQueue/queueTestHost";
+import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import {
   decodeWorkThreadTranscript,
   decodeWorkAttachmentReference,
