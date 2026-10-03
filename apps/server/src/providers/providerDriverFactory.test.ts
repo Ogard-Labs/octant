@@ -6,6 +6,7 @@ import {
 import { BUNDLED_PROVIDER_DRIVER_PLUGINS } from "@octant/plugin-host/provider-drivers";
 import { DISCOVERY_DESCRIPTORS } from "@octant/provider-sdk/discovery";
 import { isAcpHostProfileDriver } from "@octant/provider-sdk/driver-plugins";
+import { providerKeepsConversation } from "@octant/domain";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
@@ -268,6 +269,17 @@ describe("makeProviderDriver", () => {
       );
       expect(fixture.openCodeStart).not.toHaveBeenCalled();
       expect(fixture.codexStart).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["opencode", "codex", "claude", "pi", "kilo", "devin", "ollama"] as const)(
+    "agrees with the shared rule on whether %s keeps the conversation itself",
+    (kind) => {
+      // The renderer's picker reads providerKeepsConversation to know which
+      // switches a started Chat or Work thread can take; it must say what the
+      // driver the host actually builds says.
+      const driver = makeProviderDriver(provider(kind), factoryFixture().options);
+      expect(driver.conversationOwnership === "provider").toBe(providerKeepsConversation(kind));
     },
   );
 
