@@ -1662,7 +1662,9 @@ it("resumes a completed child's next generation while preserving journaled prior
   const completed = persistence.getById(admitted.run.id);
   if (completed?.result === undefined) throw new Error("completion failed");
   expect(
-    orchestration.resume(completed.id, completed.version, authority, { message: "Too early" }),
+    await orchestration.resume(completed.id, completed.version, authority, {
+      message: "Too early",
+    }),
   ).toMatchObject({
     kind: "run-command-failed",
     message: "Collect the current result or wait for delivery to the parent before following up.",
