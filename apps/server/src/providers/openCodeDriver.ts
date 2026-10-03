@@ -195,8 +195,7 @@ function resultData<A>(result: { readonly data: A | undefined }): A {
 }
 
 const BETA_API_TIMEOUT_MS = 5_000;
-const BETA_INCOMPATIBILITY_MESSAGE =
-  "OpenCode 2 preview is discovery-only: its API cannot carry Octant's session permission rules yet.";
+const BETA_INCOMPATIBILITY_MESSAGE = "OpenCode 2 is listing only, turns not yet supported.";
 const MCP_PROBE_TIMEOUT_MS = 5_000;
 
 /**
@@ -237,6 +236,154 @@ function diagnosticVersionToken(version: string | undefined): string | undefined
 
 function betaRequestOptions() {
   return { throwOnError: true as const, signal: AbortSignal.timeout(BETA_API_TIMEOUT_MS) };
+}
+
+interface BetaProviderRecord {
+  readonly id?: string;
+  readonly name?: string;
+  readonly disabled?: boolean;
+  readonly activation?: string;
+}
+
+interface BetaModelRecord {
+  readonly id?: string;
+  readonly providerID?: string;
+  readonly name?: string;
+  readonly enabled?: boolean;
+  readonly status?: "alpha" | "beta" | "deprecated" | "active";
+  readonly capabilities?: {
+    readonly tools?: boolean;
+    readonly input?: ReadonlyArray<string>;
+    readonly output?: ReadonlyArray<string>;
+  };
+  readonly limit?: {
+    readonly context?: number;
+    readonly output?: number;
+  };
+}
+
+function betaRecords(value: unknown): ReadonlyArray<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || !("data" in value)) return [];
+  const data = value.data;
+  return Array.isArray(data)
+    ? data.filter(
+        (item): item is Record<string, unknown> => typeof item === "object" && item !== null,
+      )
+    : [];
+}
+
+function betaString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * The 2.x catalogue is split across provider and model routes. Fold both into
+ * the legacy provider shape the probe already normalizes, so a version-selected
+ * runtime does not grow a second listing seam.
+ */
+export function adaptBetaOpenCodeCatalogue(
+  providersBody: unknown,
+  modelsBody: unknown,
+): { readonly all: ReadonlyArray<Provider>; readonly connected: ReadonlyArray<string> } {
+  const providers = betaRecords(providersBody).flatMap((provider) => {
+    const id = betaString(provider.id);
+    if (id === undefined) return [];
+    const record: BetaProviderRecord = {
+      id,
+      disabled: provider.disabled === true,
+    };
+    const name = betaString(provider.name);
+    const activation = betaString(provider.activation);
+    return [
+      {
+        ...record,
+        ...(name === undefined ? {} : { name }),
+        ...(activation === undefined ? {} : { activation }),
+      },
+    ];
+  });
+  const disabled = new Set(
+    providers
+      .filter(
+        (provider) =>
+          provider.id !== undefined &&
+          (provider.disabled === true || provider.activation === "disabled"),
+      )
+      .map((provider) => provider.id ?? ""),
+  );
+  const names = new Map(
+    providers
+      .filter((provider) => provider.id !== undefined)
+      .map((provider) => [provider.id ?? "", provider.name ?? provider.id ?? ""]),
+  );
+  const grouped = new Map<string, Provider["models"]>();
+  for (const record of betaRecords(modelsBody)) {
+    const model = record as BetaModelRecord;
+    const id = betaString(model.id);
+    const providerID = betaString(model.providerID);
+    if (id === undefined || providerID === undefined || model.enabled === false) continue;
+    if (disabled.has(providerID)) continue;
+    const input = new Set(model.capabilities?.input ?? []);
+    const output = new Set(model.capabilities?.output ?? []);
+    const legacy: Provider["models"][string] = {
+      id,
+      providerID,
+      name: betaString(model.name) ?? id,
+      api: { id, url: "", npm: "" },
+      capabilities: {
+        temperature: false,
+        reasoning: output.has("reasoning"),
+        attachment: input.has("image") || input.has("pdf") || input.has("audio"),
+        toolcall: model.capabilities?.tools === true,
+        input: {
+          text: input.has("text"),
+          audio: input.has("audio"),
+          image: input.has("image"),
+          video: input.has("video"),
+          pdf: input.has("pdf"),
+        },
+        output: {
+          text: output.has("text"),
+          audio: output.has("audio"),
+          image: output.has("image"),
+          video: output.has("video"),
+          pdf: output.has("pdf"),
+        },
+        interleaved: false,
+      },
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: {
+        context: model.limit?.context ?? 0,
+        output: model.limit?.output ?? 0,
+      },
+      status: model.status ?? "active",
+      options: {},
+      headers: {},
+      release_date: "",
+    };
+    grouped.set(providerID, { ...grouped.get(providerID), [id]: legacy });
+  }
+  const all = [...grouped.entries()].map(([id, models]) => ({
+    id,
+    name: names.get(id) ?? id,
+    source: "api" as const,
+    env: [],
+    options: {},
+    models,
+  }));
+  return { all, connected: all.map((provider) => provider.id) };
+}
+
+async function readBetaCatalogue(client: ReturnType<typeof createOpencodeClient>) {
+  const providers = resultData(await client.v2.provider.list({}, betaRequestOptions()));
+  const models = resultData(await client.v2.model.list({}, betaRequestOptions()));
+  return adaptBetaOpenCodeCatalogue(providers, models);
+}
+
+function missingHealthRoute(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("cause" in error)) return false;
+  const cause = error.cause;
+  return typeof cause === "object" && cause !== null && "status" in cause && cause.status === 404;
 }
 
 function awaitOpenCodeMcpAttestation(bridge: OpenCodeManagedToolsBridge): Promise<boolean> {
@@ -289,17 +436,31 @@ export function makeOfficialOpenCodeClient(
     headers: { authorization: server.authorization },
   });
   return {
-    health: async () =>
-      beta
-        ? {
-            ...resultData(await client.v2.health.get(betaRequestOptions())),
-            version: server.version ?? "unknown",
-          }
-        : resultData(await client.global.health({ throwOnError: true })),
+    health: async () => {
+      if (!beta) return resultData(await client.global.health({ throwOnError: true }));
+      try {
+        return {
+          ...resultData(await client.v2.health.get(betaRequestOptions())),
+          version: server.version ?? "unknown",
+        };
+      } catch (error) {
+        // 2.0.22 no longer serves /api/health. The process already attested
+        // readiness and version before this client was constructed.
+        if (!missingHealthRoute(error)) throw error;
+        return { healthy: true as const, version: server.version ?? "unknown" };
+      }
+    },
     providers: async () => {
-      if (beta)
-        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
-      return resultData(await client.provider.list({}, { throwOnError: true }));
+      if (!beta) return resultData(await client.provider.list({}, { throwOnError: true }));
+      // The 2.x server answers 200 with an empty catalogue until it finishes
+      // loading providers. A single read at readiness is the empty result.
+      const deadline = Date.now() + BETA_API_TIMEOUT_MS;
+      let catalogue = await readBetaCatalogue(client);
+      while (catalogue.all.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        catalogue = await readBetaCatalogue(client);
+      }
+      return catalogue;
     },
     subscribe: async (signal) =>
       beta
@@ -449,6 +610,12 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               clock(),
               runtime.isolatedConfiguration === true && mcpAccepted,
             );
+            if (runtime.runtime === "beta" && normalized.models.length > 0) {
+              return {
+                ...normalized,
+                message: BETA_INCOMPATIBILITY_MESSAGE,
+              };
+            }
             if (
               process.platform === "linux" &&
               normalized.models.length > 0 &&

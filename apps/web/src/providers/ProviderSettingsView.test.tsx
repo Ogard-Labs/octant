@@ -2054,11 +2054,9 @@ describe("ProviderSettingsView", () => {
     );
     const card = screen.getByRole("article", { name: "Existing CLI" });
     const details = within(card).getByLabelText("Incompatibility details");
-    expect(within(card).getByText(/Use a supported OpenCode 1.x runtime/i)).toBeVisible();
+    expect(within(card).getByText(/Review the listed models/i)).toBeVisible();
     expect(
-      within(details).getByText(
-        "Host check: This OpenCode runtime is discovery-only and cannot carry Octant's session permission rules yet.",
-      ),
+      within(details).getByText("Host check: OpenCode 2 is listing only, turns not yet supported."),
     ).toBeVisible();
     expect(within(details).getByText("Version: v0.0.0-beta-18721")).toBeVisible();
   });
