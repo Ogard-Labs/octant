@@ -453,8 +453,25 @@ export class AgentRunOrchestrationService {
         message: "The parent thread is paused. Resume it first, and this run continues.",
       };
     }
+    if (run !== undefined && run.version !== expectedVersion) {
+      return {
+        kind: "run-command-failed",
+        reason: "stale-version",
+        message: `Expected version ${expectedVersion}, got ${run.version}`,
+      };
+    }
+    if (run !== undefined) this.#assertAuthorityWithinLiveAuthority(run.authority, liveAuthority);
     // A person resuming the run is the release a restart waits for.
     this.#heldSinceRestart.delete(runId);
+    if (
+      run?.lifecycleStatus === "waiting" &&
+      run.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON
+    ) {
+      // A dependency-parked child has never opened a provider session. Keep
+      // dependency and capacity admission rather than requiring a saved cursor.
+      this.releaseDependencyWait(runId);
+      return { kind: "run-updated", run: this.#persistence.getById(runId) ?? run };
+    }
     return this.#start(runId, expectedVersion, liveAuthority, input ?? {});
   }
 
