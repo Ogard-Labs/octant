@@ -1,3 +1,4 @@
+import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
   decodeChatAttemptQuestion,
@@ -1147,6 +1148,19 @@ export class ChatTurnRunner {
                     citationIds: [...currentAttempt.citationIds, citationId],
                     updatedAt: updatedAt(),
                   };
+                  yield* input.persistAttempt(currentAttempt);
+                  return;
+                }
+                if (
+                  event.kind === "child-agent-activity" &&
+                  event.instanceId === input.providerInstanceId
+                ) {
+                  const childObservations = recordProviderChildObservation(
+                    currentAttempt.childObservations,
+                    event,
+                  );
+                  if (childObservations === currentAttempt.childObservations) return;
+                  currentAttempt = { ...currentAttempt, childObservations, updatedAt: updatedAt() };
                   yield* input.persistAttempt(currentAttempt);
                   return;
                 }

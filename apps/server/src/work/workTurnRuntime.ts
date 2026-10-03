@@ -1,3 +1,4 @@
+import type { ProviderChildActivityEvent } from "@octant/contracts";
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
   MAX_PROVIDER_CONTEXT_BLOCKS,
@@ -60,6 +61,7 @@ export interface WorkTurnRuntimePort {
     readonly onDelta?: (response: string) => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
+    readonly onChildActivity?: (event: ProviderChildActivityEvent) => void;
     readonly onRequestSettled?: (
       input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
       release: () => void,
@@ -102,6 +104,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     readonly onDelta?: (response: string) => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
+    readonly onChildActivity?: (event: ProviderChildActivityEvent) => void;
     readonly onRequestSettled?: (
       input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
       release: () => void,
@@ -157,6 +160,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       readonly onDelta?: (response: string) => void;
       /** The provider's restated task list, whole, whenever it moves. */
       readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
+      readonly onChildActivity?: (event: ProviderChildActivityEvent) => void;
       readonly onRequestSettled?: (
         input: {
           readonly providerSessionId: ProviderSessionId;
@@ -257,6 +261,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > MAX_EVENTS) return;
                 if (event.kind === "usage") input.onUsage?.(event);
+                if (event.kind === "child-agent-activity") input.onChildActivity?.(event);
                 if (event.kind === "text-delta") {
                   response = appendBoundedResponse(response, event.text);
                   input.onDelta?.(response);

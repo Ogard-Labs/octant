@@ -8,6 +8,7 @@ import {
   ReplayCursor,
   decodeCodeEvidenceReference,
   decodeCodeOperationEvent,
+  decodeProviderRuntimeEvent,
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeProviderInstanceId,
@@ -110,6 +111,42 @@ describe("CodeOperationEventStore", () => {
       nextCursor: 2,
     });
     reopened.connection.close();
+  });
+
+  it("retains the normalized child identity in Code journal replay without granting a run", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const report = decodeProviderRuntimeEvent({
+      kind: "child-agent-activity",
+      instanceId: "00000000-0000-4000-8000-000000000001",
+      sessionId: "00000000-0000-4000-8000-000000000002",
+      correlationId: "00000000-0000-4000-8000-000000000003",
+      sequence: 1,
+      occurredAt: now,
+      childAgentId: "provider-child",
+      status: "running",
+      summary: "Reviewing",
+      modelId: "child-model",
+    });
+    if (report.kind !== "child-agent-activity") throw new Error("Invalid fixture");
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: {
+        kind: "child-activity",
+        childId: report.childAgentId,
+        state: report.status,
+        summary: report.summary,
+        observation: report,
+      },
+    });
+    expect(createStore(fixture.journal).historyForThread(threadId)).toMatchObject({
+      status: "ok",
+      frames: [{ event: { observation: report } }],
+    });
+    expect(store.historyForThread(otherThreadId)).toMatchObject({ status: "ok", frames: [] });
+    fixture.connection.close();
   });
 
   it("collects every Code operation frame for one thread for board history", () => {

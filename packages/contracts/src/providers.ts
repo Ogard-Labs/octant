@@ -1724,6 +1724,61 @@ const ProviderRuntimeEventFields = {
   occurredAt: UtcTimestamp,
 } as const;
 
+/** A provider report is observation only; it carries no execution authority. */
+export const ProviderChildActivityEvent = Schema.Struct({
+  ...ProviderRuntimeEventFields,
+  kind: Schema.Literal("child-agent-activity"),
+  childAgentId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  parentChildAgentId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
+  modelId: Schema.optional(ProviderModelId),
+  task: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  status: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
+  summary: Schema.NonEmptyTrimmedString,
+}).annotations(strict);
+export type ProviderChildActivityEvent = typeof ProviderChildActivityEvent.Type;
+
+export const MAX_PROVIDER_CHILD_OBSERVATIONS = 16;
+export const MAX_PROVIDER_CHILD_HISTORY = 8;
+export const ProviderChildObservation = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  sessionId: ProviderSessionId,
+  childAgentId: ProviderChildActivityEvent.fields.childAgentId,
+  parentChildAgentId: ProviderChildActivityEvent.fields.parentChildAgentId,
+  modelId: Schema.optional(ProviderModelId),
+  task: ProviderChildActivityEvent.fields.task,
+  lifecycleStatus: Schema.Literal(
+    "starting",
+    "running",
+    "waiting",
+    "completed",
+    "failed",
+    "unknown",
+  ),
+  latestSummary: Schema.String.pipe(Schema.maxLength(512)),
+  firstObservedAt: UtcTimestamp,
+  updatedAt: UtcTimestamp,
+  historyStatus: Schema.Literal("partial", "truncated", "conflicted"),
+  history: Schema.Array(
+    Schema.Struct({
+      sequence: Schema.Int.pipe(Schema.positive()),
+      occurredAt: UtcTimestamp,
+      status: ProviderChildActivityEvent.fields.status,
+      summary: Schema.String.pipe(Schema.maxLength(512)),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(MAX_PROVIDER_CHILD_HISTORY)),
+}).annotations(strict);
+export type ProviderChildObservation = typeof ProviderChildObservation.Type;
+export const ProviderChildObservationState = Schema.Struct({
+  children: Schema.Array(ProviderChildObservation).pipe(
+    Schema.maxItems(MAX_PROVIDER_CHILD_OBSERVATIONS),
+  ),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type ProviderChildObservationState = typeof ProviderChildObservationState.Type;
+export const decodeProviderChildObservationState = Schema.decodeUnknownSync(
+  ProviderChildObservationState,
+);
+
 export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -1839,13 +1894,7 @@ export const ProviderRuntimeEvent = Schema.Union(
     status: Schema.Literal("pending", "in-progress", "completed", "failed"),
     summary: Schema.NonEmptyTrimmedString,
   }).annotations(strict),
-  Schema.Struct({
-    ...ProviderRuntimeEventFields,
-    kind: Schema.Literal("child-agent-activity"),
-    childAgentId: Schema.NonEmptyTrimmedString,
-    status: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
-    summary: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+  ProviderChildActivityEvent,
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("approval-request"),

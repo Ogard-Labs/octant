@@ -16,6 +16,27 @@ Octant-harness parent can use a provider-harness child and the reverse. You watc
 the **Agents** dock tool, but you do not start them there; a subagent a person
 started by hand would have no agent to hand its result back to.
 
+## Observations and result evidence
+
+Managed children retain their existing controls. A provider-owned child report,
+when a provider supports it, is a read-only observation with its own identity and
+bounded activity history. Unknown model or history stays unknown. Observations
+cannot be messaged, cancelled, steered, or resumed through managed-child controls.
+The current bundled adapters keep native children disabled or unsupported, so
+there is no verified native-child observation support from those adapters.
+
+A result belongs to one child, execution generation, provider/model and workspace.
+Follow-ups preserve earlier generations. The child’s reported summary is separate
+from recorded lifecycle blockers, provider-reported file changes, and tools the
+host actually executed. File reports are unverified; a tool return is not proof
+that tests passed. Missing and truncated evidence is shown explicitly. A completed
+child does not establish review, merge, deployment, or completion of its parent.
+
+File reports currently have no recorded generation-specific review snapshot.
+Review is unavailable for those reports; opening the parent’s current checkout
+would show different evidence. Tool records retain bounded output for inspection.
+Deleting the parent’s content removes these records and earlier result text.
+
 ## Availability
 
 Subagent infrastructure — contracts, journaling, projection, the

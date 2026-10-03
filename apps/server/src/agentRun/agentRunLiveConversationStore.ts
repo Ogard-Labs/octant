@@ -3,6 +3,7 @@ import {
   MAX_AGENT_RUN_CONVERSATION_ENTRIES,
   MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS,
   type AgentRunConversationEntry,
+  type ProviderChildActivityEvent,
   type AgentRunConversationReadStatus,
   type AgentRunId,
   type UtcTimestamp,
@@ -88,6 +89,39 @@ export class AgentRunLiveConversationStore {
 
   appendStatus(runId: AgentRunId, text: string, occurredAt: UtcTimestamp): void {
     this.#append(runId, text, occurredAt, "status");
+  }
+
+  appendChildActivity(
+    runId: AgentRunId,
+    event: ProviderChildActivityEvent,
+    generation: number,
+  ): void {
+    const state = this.#state(runId);
+    if (state === undefined || state.status !== "live" || this.#closed) return;
+    const boundedEvent = { ...event, summary: event.summary.slice(0, 512) };
+    if (boundedEvent.summary.length < event.summary.length) state.truncated = true;
+    if (
+      state.entries.some(
+        (entry) =>
+          entry.childActivity?.instanceId === event.instanceId &&
+          entry.childActivity.sessionId === event.sessionId &&
+          entry.childActivity.sequence === event.sequence &&
+          JSON.stringify(entry.childActivity) === JSON.stringify(boundedEvent),
+      )
+    )
+      return;
+    const entry: AgentRunConversationEntry = {
+      sequence: state.nextSequence++,
+      kind: "status",
+      text: event.summary.slice(0, 512),
+      occurredAt: event.occurredAt,
+      generation,
+      childActivity: boundedEvent,
+    };
+    state.entries.push(entry);
+    state.bytes += entryBytes(entry);
+    this.#trim(state);
+    this.#publish(runId);
   }
 
   #append(

@@ -1,3 +1,4 @@
+import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import {
   AgentRunId,
@@ -266,6 +267,7 @@ export const ChatAttempt = Schema.Struct({
    * matrix states instead of this field implying.
    */
   tasks: Schema.optional(ThreadTaskProgressList),
+  childObservations: Schema.optional(ProviderChildObservationState),
   /**
    * A question the provider asked mid-turn and is blocked on, journaled so the
    * transcript can show it again after a reload. Present only while the turn
