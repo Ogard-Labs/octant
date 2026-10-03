@@ -128,6 +128,7 @@ export async function admitAgentRunControlRequest(
   let admittedWorkspace: AgentRunWorkspaceReceipt | undefined;
   if (dependencies.workspace !== undefined) {
     const admitted = await prepareAdmittedControlWorkspace({
+      requestId: String(controlRequest.requestId),
       windowId: input.windowId,
       parent: creationAuthority,
       role: controlRequest.role,

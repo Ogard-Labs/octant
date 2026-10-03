@@ -24,6 +24,37 @@ const ids = {
 };
 
 describe("AgentRunWorkspaceReceiptStore", () => {
+  it("keeps legacy Code receipts readable but never reuses them for a new child", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-ws-"));
+    directories.push(directory);
+    const store = new AgentRunWorkspaceReceiptStore({
+      dataDirectory: directory,
+      uuid: () => ids.receipt,
+    });
+    const now = 1_700_000_000_000;
+    await store.issue({
+      parentThreadId: ids.thread,
+      windowId: ids.window,
+      mode: "code",
+      confirmed: true,
+      now,
+    });
+    const restarted = new AgentRunWorkspaceReceiptStore({ dataDirectory: directory });
+    expect(await restarted.load(ids.receipt)).toMatchObject({
+      mode: "code",
+      parentThreadId: ids.thread,
+    });
+    expect(
+      await restarted.findReusable({
+        requestId: "22222222-2222-4222-8222-222222222222",
+        parentThreadId: ids.thread,
+        windowId: ids.window,
+        mode: "code",
+        now,
+      }),
+    ).toBeUndefined();
+  });
+
   it("issues, loads, and reuses an unexpired Work grant without exposing it as consumed", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-ws-"));
     directories.push(directory);

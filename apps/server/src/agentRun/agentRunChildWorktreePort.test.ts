@@ -1,70 +1,264 @@
-import { describe, expect, it } from "vitest";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import {
-  createAgentRunChildWorktreePort,
-  deriveAgentRunChildWorktreeThreadId,
-} from "./agentRunChildWorktreePort";
+  decodeProviderInstanceId,
+  decodeProviderModelId,
+  type AgentRunAuthority,
+} from "@octant/contracts";
+import { afterEach, describe, expect, it } from "vitest";
+import { ManagedRootGrantStore } from "../code/managedRootGrantStore";
+import { createManagedWorktreeNodePorts } from "../code/managedWorktreeNodePorts";
+import { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
+import { ManagedWorktreeService } from "../code/managedWorktreeService";
+import { createAgentRunChildWorktreePort } from "./agentRunChildWorktreePort";
+import { prepareAdmittedControlWorkspace } from "./agentRunControlService";
+import { AgentRunWorkspaceReceiptStore } from "./agentRunWorkspaceReceiptStore";
+import { AgentRunWorkspaceService } from "./agentRunWorkspaceService";
 
+const execFileAsync = promisify(execFile);
+const directories: string[] = [];
 const parentThreadId = "33333333-3333-4333-8333-333333333333";
-const repositoryId = `repo_${"a".repeat(64)}`;
+const requestId = "22222222-2222-4222-8222-222222222222";
+const siblingRequestId = "22222222-2222-4222-8222-222222222223";
+const windowId = "11111111-1111-4111-8111-111111111111";
+const projectId = "77777777-7777-4777-8777-777777777777";
+const bindingRevisionId = "88888888-8888-4888-8888-888888888888";
+const signal = new AbortController().signal;
 
-describe("createAgentRunChildWorktreePort", () => {
-  it("reuses an isolated ready worktree and refuses the parent checkout", async () => {
-    const childThreadId = deriveAgentRunChildWorktreeThreadId(parentThreadId);
-    const isolatedPath = `/workspace/.octant-worktrees/${repositoryId}/${childThreadId}`;
-    const receipt = {
-      version: 1 as const,
-      receiptId: "66666666-6666-4666-8666-666666666666",
-      repositoryId,
-      threadId: childThreadId,
-      checkoutId: "60000000-0000-4000-8000-000000000002",
-      canonicalRepositoryPath: "/workspace/repository",
-      canonicalWorktreePath: isolatedPath,
-      branchIntent: "octant/agent-run/child",
-      refIntent: "refs/heads/octant/agent-run/child",
-      expectedHead: "a".repeat(40),
-      state: "ready" as const,
-      createdAt: "2026-08-01T15:00:00.000Z",
-      updatedAt: "2026-08-01T15:00:00.000Z",
+afterEach(async () => {
+  await Promise.all(
+    directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
+});
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "octant-child-workspaces-"));
+  directories.push(root);
+  const repository = join(root, "repository");
+  await execFileAsync("git", ["init", "-b", "main", repository]);
+  await writeFile(join(repository, "shared.txt"), "committed\n");
+  await execFileAsync("git", ["-C", repository, "add", "shared.txt"]);
+  await execFileAsync("git", [
+    "-C",
+    repository,
+    "-c",
+    "user.name=Octant Test",
+    "-c",
+    "user.email=test@octant.local",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-m",
+    "fixture",
+  ]);
+  const repositoryRoot = await realpath(repository);
+  const ports = createManagedWorktreeNodePorts();
+  const observed = await ports.repository.observe(repositoryRoot, signal);
+  if (observed.status !== "available") throw new Error("repository fixture unavailable");
+  const managedReceipts = new ManagedWorktreeReceiptStore({ dataDirectory: join(root, "data") });
+  const service = new ManagedWorktreeService({
+    grants: new ManagedRootGrantStore(),
+    receipts: managedReceipts,
+    ...ports,
+    authority: { observeCleanupEligibility: async () => ({ status: "unavailable" }) },
+  });
+  const port = createAgentRunChildWorktreePort({
+    service,
+    repository: ports.repository,
+    loadReceipt: (id) => managedReceipts.load(id),
+    findActive: (lookup) => managedReceipts.findActive(lookup),
+  });
+  const workspaceReceipts = new AgentRunWorkspaceReceiptStore({
+    dataDirectory: join(root, "data"),
+  });
+  const workspace = new AgentRunWorkspaceService({
+    receipts: workspaceReceipts,
+    childWorktree: port,
+  });
+  const parent = {
+    threadId: parentThreadId,
+    mode: "code" as const,
+    projectId,
+    bindingRevisionId,
+    checkoutRoot: repositoryRoot,
+  };
+  const code = {
+    projectId,
+    bindingRevisionId,
+    repositoryId: observed.repositoryId,
+    repositoryRoot,
+    parentCheckoutRoot: repositoryRoot,
+    branchIntent: "octant/agent-run/child",
+    startPoint: observed.checkout.head,
+    sourceBranch: "main",
+    sourceMode: "local" as const,
+  };
+  return { root, port, workspace, workspaceReceipts, managedReceipts, parent, code };
+}
+
+describe("Code child workspace ownership", () => {
+  it("replays a prepared request after receipt expiry without allocating another checkout", async () => {
+    const f = await fixture();
+    const input = { requestId, windowId, parent: f.parent, code: f.code };
+    const first = await f.workspace.prepare(input);
+    await f.workspaceReceipts.forgetExpired(Number.MAX_SAFE_INTEGER);
+    const restarted = new AgentRunWorkspaceService({
+      receipts: new AgentRunWorkspaceReceiptStore({ dataDirectory: join(f.root, "data") }),
+      childWorktree: f.port,
+    });
+    expect(await restarted.prepare(input)).toEqual(first);
+  });
+
+  it("admits concurrent siblings separately and replays only the same authorized child", async () => {
+    const f = await fixture();
+    const authority: AgentRunAuthority = {
+      filesystem: true,
+      shell: true,
+      git: true,
+      network: true,
+      tools: true,
+      subagents: true,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
     };
-    const port = createAgentRunChildWorktreePort({
-      service: {
-        planCreation: async () => ({
-          status: "planned",
-          repositoryId,
-          targetPath: isolatedPath,
-          parent: { canonicalPath: "/workspace", identity: { device: "1", inode: "2" } },
-          branchIntent: "octant/agent-run/child",
-          startPoint: "a".repeat(40),
-          grant: { grantId: "70000000-0000-4000-8000-000000000007", expiresAt: 1 },
-        }),
-        create: async () => ({ status: "ready", targetPath: isolatedPath, receipt }),
-      } as never,
-      loadReceipt: async () => receipt,
-      findActive: async () => receipt,
+    const input = {
+      requestId,
+      windowId,
+      workspace: f.workspace,
+      role: "implementation" as const,
+      parent: {
+        parentMode: "code" as const,
+        parentAuthority: authority,
+        liveAuthority: authority,
+        workspaceParent: f.parent,
+        codeWorkspace: f.code,
+        parentRoute: {
+          providerInstanceId: decodeProviderInstanceId("44444444-4444-4444-8444-444444444444"),
+          modelId: decodeProviderModelId("fixture"),
+        },
+      },
+    };
+    const [first, replay, sibling] = await Promise.all([
+      prepareAdmittedControlWorkspace(input),
+      prepareAdmittedControlWorkspace(input),
+      prepareAdmittedControlWorkspace({ ...input, requestId: siblingRequestId }),
+    ]);
+    expect(first.status).toBe("admitted");
+    expect(replay).toEqual(first);
+    expect(sibling.status).toBe("admitted");
+    expect(sibling).not.toEqual(first);
+  });
+
+  it("refuses sibling, stale, parent-checkout and unavailable receipts before admission", async () => {
+    const f = await fixture();
+    const prepared = await f.workspace.prepare({
+      requestId,
+      windowId,
+      parent: f.parent,
+      code: f.code,
     });
-    const prepared = await port.prepare({
-      parentThreadId,
-      windowId: "11111111-1111-4111-8111-111111111111",
-      projectId: "77777777-7777-4777-8777-777777777777",
-      bindingRevisionId: "88888888-8888-4888-8888-888888888888",
-      repositoryId,
-      repositoryRoot: "/workspace/repository",
-      parentCheckoutRoot: "/workspace/repository",
-      branchIntent: "octant/agent-run/child",
-      startPoint: "a".repeat(40),
-      sourceBranch: "main",
-      sourceMode: "local",
-    });
-    expect(prepared).toMatchObject({
-      status: "prepared",
-      worktreeRoot: isolatedPath,
+    if (prepared.status !== "prepared" || prepared.workspace.kind !== "code-worktree")
+      throw new Error("expected workspace");
+    const worktreeReceiptId = String(prepared.workspace.worktreeReceiptId);
+    const confirm = { requestId, windowId, parent: f.parent, worktreeReceiptId };
+    expect((await f.workspace.confirm(confirm)).status).toBe("confirmed");
+    expect(
+      await f.workspace.confirm({
+        ...confirm,
+        parent: { ...f.parent, projectId: "99999999-9999-4999-8999-999999999999" },
+      }),
+    ).toEqual({ status: "refused", reason: "foreign-project" });
+    expect(await f.workspace.confirm({ ...confirm, requestId: siblingRequestId })).toEqual({
+      status: "refused",
+      reason: "foreign-thread",
     });
     expect(
-      await port.confirm({
-        worktreeReceiptId: receipt.receiptId,
+      await f.workspace.admit({
+        ...confirm,
+        requestId: siblingRequestId,
+        requested: {
+          kind: "code-worktree",
+          mode: "code",
+          worktreeReceiptId: prepared.workspace.worktreeReceiptId,
+        },
+        role: "implementation",
+      }),
+    ).toEqual({ status: "refused", reason: "foreign-thread" });
+    expect(
+      await f.workspace.confirm({
+        ...confirm,
+        parent: { ...f.parent, bindingRevisionId: "99999999-9999-4999-8999-999999999999" },
+      }),
+    ).toEqual({ status: "refused", reason: "stale" });
+    expect(
+      await f.port.confirm({
+        requestId: siblingRequestId,
         parentThreadId,
-        parentCheckoutRoot: isolatedPath,
+        parentCheckoutRoot: f.code.parentCheckoutRoot,
+        repositoryId: f.code.repositoryId,
+        repositoryRoot: f.code.repositoryRoot,
+        startingRevision: f.code.startPoint,
+        worktreeReceiptId,
+      }),
+    ).toEqual({ status: "refused", reason: "foreign-thread" });
+    const receipt = await f.managedReceipts.load(worktreeReceiptId);
+    if (receipt === undefined) throw new Error("expected managed receipt");
+    expect(
+      await f.workspace.confirm({
+        ...confirm,
+        parent: { ...f.parent, checkoutRoot: receipt.canonicalWorktreePath },
       }),
     ).toEqual({ status: "refused", reason: "parent-checkout" });
+    await rm(receipt.canonicalWorktreePath, { recursive: true });
+    expect(await f.workspace.confirm(confirm)).toEqual({
+      status: "refused",
+      reason: "unavailable",
+    });
+    const grant = await f.workspaceReceipts.load(worktreeReceiptId);
+    if (grant === undefined) throw new Error("expected preparation receipt");
+    await f.workspaceReceipts.save({ ...grant, expiresAt: 0 });
+    expect(await f.workspace.confirm(confirm)).toEqual({ status: "refused", reason: "expired" });
+  });
+
+  it("allocates different sibling checkouts and reuses only the same admitted request", async () => {
+    const f = await fixture();
+    await writeFile(join(f.code.repositoryRoot, "shared.txt"), "parent uncommitted\n");
+    const prepare = (id: string) =>
+      f.workspace.prepare({ requestId: id, windowId, parent: f.parent, code: f.code });
+    const first = await prepare(requestId);
+    const sibling = await prepare(siblingRequestId);
+    expect(first.status).toBe("prepared");
+    expect(sibling.status).toBe("prepared");
+    if (
+      first.status !== "prepared" ||
+      first.workspace.kind !== "code-worktree" ||
+      sibling.status !== "prepared" ||
+      sibling.workspace.kind !== "code-worktree"
+    )
+      throw new Error("expected child workspaces");
+    expect(sibling.workspace.worktreeReceiptId).not.toBe(first.workspace.worktreeReceiptId);
+    expect(await prepare(requestId)).toEqual(first);
+    const [one, two] = await Promise.all([
+      f.managedReceipts.load(String(first.workspace.worktreeReceiptId)),
+      f.managedReceipts.load(String(sibling.workspace.worktreeReceiptId)),
+    ]);
+    if (one === undefined || two === undefined) throw new Error("expected managed receipts");
+    expect(one.canonicalWorktreePath).not.toBe(two.canonicalWorktreePath);
+    expect(one.branchIntent).not.toBe(two.branchIntent);
+    expect(one.expectedHead).toBe(f.code.startPoint);
+    expect(two.source?.resolvedHead).toBe(f.code.startPoint);
+    expect(await readFile(join(one.canonicalWorktreePath, "shared.txt"), "utf8")).toBe(
+      "committed\n",
+    );
+    await writeFile(join(one.canonicalWorktreePath, "shared.txt"), "first child only\n");
+    expect(await readFile(join(two.canonicalWorktreePath, "shared.txt"), "utf8")).toBe(
+      "committed\n",
+    );
+    expect(await readFile(join(f.code.repositoryRoot, "shared.txt"), "utf8")).toBe(
+      "parent uncommitted\n",
+    );
   });
 });
