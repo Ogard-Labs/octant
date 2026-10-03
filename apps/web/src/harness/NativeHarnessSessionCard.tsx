@@ -4,6 +4,7 @@ import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
+import { nativeHarnessSessionHeld, nativeHarnessStatusLabel } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
@@ -46,6 +47,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
   const requestGeneration = useRef(0);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<string>();
   const [draftAnswer, setDraftAnswer] = useState("");
 
   const load = useCallback(async () => {
@@ -137,12 +139,15 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
     if (view === null || view === undefined || busy) return;
     setBusy(true);
     try {
-      const paused = view.session.status !== "running" && view.session.status !== "idle";
-      await props.client.command(props.threadId, {
-        kind: paused ? "resume-native-harness-session" : "pause-native-harness-session",
+      const held = nativeHarnessSessionHeld(view.session.status);
+      const result = await props.client.command(props.threadId, {
+        kind: held ? "resume-native-harness-session" : "pause-native-harness-session",
         sessionId: view.session.id,
         expectedVersion: view.session.version,
       });
+      // A resume the host refused says what stands in the way; dropping it
+      // would leave a button that silently does nothing.
+      setRefusal(result.kind === "native-harness-session-refused" ? result.message : undefined);
       await load();
     } finally {
       setBusy(false);
@@ -155,7 +160,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
     return error === undefined ? null : <p role="alert">{error}</p>;
   }
   if (view === null) return null;
-  const paused = view.session.status !== "running" && view.session.status !== "idle";
+  const paused = nativeHarnessSessionHeld(view.session.status);
 
   return (
     <section aria-label="Native harness" className="native-harness-card">
@@ -164,7 +169,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
         <span
           className={`native-harness-card__status native-harness-card__status--${view.session.status}`}
         >
-          {view.session.status}
+          {nativeHarnessStatusLabel(view.session.status)}
         </span>
         <OctantButton
           disabled={busy}
@@ -177,6 +182,11 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
       </div>
       {view.session.detail === undefined ? null : (
         <p className="native-harness-card__detail">{view.session.detail}</p>
+      )}
+      {refusal === undefined ? null : (
+        <p className="native-harness-card__detail" role="alert">
+          {refusal}
+        </p>
       )}
       {pendingApproval === undefined ? null : (
         <section aria-label="Approval requested" className="native-harness-question">

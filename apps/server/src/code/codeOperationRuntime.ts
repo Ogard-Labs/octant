@@ -353,6 +353,8 @@ export interface CodeOperationRuntimeOptions {
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
+    /** Every turn's end, whatever its outcome. */
+    readonly turnEnded?: (scope: NativeHarnessTurnScope) => void;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
     ) => Promise<void>;
@@ -2351,6 +2353,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }
       })
       .finally(() => {
+        this.#options.nativeHarness?.turnEnded?.(harnessScope);
         if (this.#active.get(String(active.thread.id)) === active)
           this.#active.delete(String(active.thread.id));
       });

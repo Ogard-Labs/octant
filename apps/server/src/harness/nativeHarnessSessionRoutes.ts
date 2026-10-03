@@ -24,7 +24,7 @@ const PREFIX = "/api/native-harness/sessions/";
 
 export interface NativeHarnessSessionRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
-  readonly store: Pick<NativeHarnessSessionStore, "read" | "pause" | "resume">;
+  readonly store: Pick<NativeHarnessSessionStore, "read" | "pause" | "resume" | "turnInFlight">;
   /** The thread's follow-up suggestions, which the session view shows but does not own. */
   readonly followUps: FollowUpSuggestionActionDependencies;
   /** Whether this window may read and steer the thread; never a body field. */
@@ -36,6 +36,17 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly threadId: string;
     readonly windowId: string;
   }) => void;
+  /**
+   * What stands in the way of lifting a recovery, in words a person can act
+   * on: the thread's folder or model is gone or unusable. Empty when it may
+   * resume. Asked only for `recovery-required`; a plain pause re-admits the
+   * same thread it paused.
+   */
+  readonly recoveryBlockers?: (input: {
+    readonly threadId: string;
+  }) => Promise<ReadonlyArray<string>>;
+  /** Stops what would start new work on its own while the session is paused. */
+  readonly onPaused?: (input: { readonly threadId: string }) => void;
   readonly decideApproval?: (input: {
     readonly threadId: string;
     readonly approvalId: string;
@@ -147,8 +158,30 @@ export function createNativeHarnessSessionRouteHandler(
         if (view.session.status !== "running" && view.session.status !== "idle") {
           return json(refusedCommand("not-running"), 409, origin);
         }
-        dependencies.store.pause(threadId, "paused-by-user", "Paused by the user.");
+        // A pause drains: the turn running now and the helpers it started
+        // finish, and nothing new is admitted until a person resumes.
+        dependencies.store.pause(
+          threadId,
+          "paused-by-user",
+          dependencies.store.turnInFlight(threadId)
+            ? "Paused by the user. The current turn will finish; nothing new starts."
+            : "Paused by the user.",
+        );
+        dependencies.onPaused?.({ threadId });
       } else if (command.kind === "resume-native-harness-session") {
+        if (view.session.status === "recovery-required") {
+          const blockers = (await dependencies.recoveryBlockers?.({ threadId })) ?? [];
+          if (blockers.length > 0) {
+            return json(
+              refusedCommand(
+                "not-ready",
+                `Not ready to resume: ${blockers.join(" ")}`.slice(0, 512),
+              ),
+              409,
+              origin,
+            );
+          }
+        }
         if (!dependencies.store.resume(threadId)) {
           return json(refusedCommand("not-paused"), 409, origin);
         }
@@ -268,10 +301,11 @@ function refusedCommand(
     NativeHarnessSessionCommandResult,
     { kind: "native-harness-session-refused" }
   >["reason"],
+  message?: string,
 ): NativeHarnessSessionCommandResult {
   return {
     kind: "native-harness-session-refused",
     reason,
-    message: `The harness session command was refused: ${reason}.`,
+    message: message ?? `The harness session command was refused: ${reason}.`,
   };
 }

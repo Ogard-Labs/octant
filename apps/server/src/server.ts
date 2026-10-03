@@ -300,6 +300,7 @@ import { GitObservationPort } from "./code/gitObservationPort";
 import { GitMutationPort } from "./code/gitMutationPort";
 import { codeThreadTurns } from "./code/codeForkPoint";
 import { seedCodeForkHarnessSession } from "./harness/nativeHarnessFork";
+import { nativeHarnessRecoveryBlockers } from "./harness/nativeHarnessRecovery";
 import { GitService } from "./code/gitService";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
 import { GhRepositoryCataloguePort } from "./github/ghRepositoryCataloguePort";
@@ -1851,6 +1852,8 @@ export function startOctantServer(
         nativeHarnessObserver?.admitTurn(scope) ?? { kind: "admitted" as const },
       turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) =>
         nativeHarnessObserver?.turnStarted(scope),
+      turnEnded: (scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0]) =>
+        nativeHarnessObserver?.turnEnded(scope),
       turnCompleted: async (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) => {
         try {
           threadFollowUpSuggestions.recordReply({
@@ -5325,6 +5328,43 @@ export function startOctantServer(
         },
         pause: (...args) => nativeHarnessSessionsLive.pause(...args),
         resume: (...args) => nativeHarnessSessionsLive.resume(...args),
+        turnInFlight: (threadId) => nativeHarnessSessionsLive.turnInFlight(threadId),
+      },
+      // A goal loop schedules its own rounds, so a pause must stop it too;
+      // it stays paused until a person resumes the loop itself.
+      onPaused: ({ threadId }) => {
+        const loop = goalLoopService.read(threadId).loop;
+        if (loop?.status !== "running") return;
+        void goalLoopService
+          .execute({ kind: "pause-goal-loop", threadId, expectedVersion: loop.version })
+          .catch(() => undefined);
+      },
+      recoveryBlockers: async ({ threadId }) => {
+        const view = nativeHarnessSessionsLive.read(threadId);
+        if (view === undefined) return [];
+        return nativeHarnessRecoveryBlockers(
+          {
+            providerInstance: (id) => persistence.readProviderInstance(id),
+            codeCheckout: (id) => {
+              try {
+                const thread = persistence.readCodeThread(decodeCodeThreadId(id));
+                return thread === undefined
+                  ? undefined
+                  : persistence.readCodeCheckout(thread.checkoutId);
+              } catch {
+                return undefined;
+              }
+            },
+            project: (id) => persistence.readProject(id),
+            directory: async (path) => {
+              const isDirectory = await statFromDisk(path)
+                .then((entry) => entry.isDirectory())
+                .catch(() => false);
+              return isDirectory ? await realpath(path).catch(() => undefined) : undefined;
+            },
+          },
+          view,
+        );
       },
       followUps: followUpActions,
       answerQuestion: ({ threadId, questionId, answer }) =>

@@ -1162,6 +1162,13 @@ export type NativeHarnessQuestionAnswerResult = typeof NativeHarnessQuestionAnsw
 
 // ── Session ──────────────────────────────────────────────────────────────────
 
+/**
+ * `recovery-required` is what a restart leaves when it cut a turn off or
+ * dropped a question the lead was waiting on. It admits nothing, like a
+ * pause, and only a resume that rechecks the thread's folder and model and
+ * settles what was lost clears it — a restart never picks work back up on
+ * its own.
+ */
 export const NativeHarnessSessionStatus = Schema.Literal(
   "idle",
   "running",
@@ -1170,6 +1177,7 @@ export const NativeHarnessSessionStatus = Schema.Literal(
   "paused-by-user",
   "budget-limited",
   "failed",
+  "recovery-required",
 );
 export type NativeHarnessSessionStatus = typeof NativeHarnessSessionStatus.Type;
 
@@ -1240,6 +1248,7 @@ export const NativeHarnessSessionCommandResult = Schema.Union(
       "not-paused",
       "not-running",
       "not-authorized",
+      "not-ready",
     ),
     message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   }).annotations(strict),
@@ -1296,6 +1305,7 @@ export const NATIVE_HARNESS_SESSION_EVENT_NAMES = {
   started: "native-harness-session-started@1",
   turnStarted: "native-harness-turn-started@1",
   turnCompleted: "native-harness-turn-completed@1",
+  turnSettled: "native-harness-turn-settled@1",
   routeDecided: "native-harness-route-decided@1",
   contextReduced: "native-harness-context-reduced@1",
   advisorIntervened: "native-harness-advisor-intervened@1",

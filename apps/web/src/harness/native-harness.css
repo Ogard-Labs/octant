@@ -92,7 +92,8 @@
 .native-harness-card__status--paused-by-advisor,
 .native-harness-card__status--paused-by-user,
 .native-harness-card__status--budget-limited,
-.native-harness-card__status--failed {
+.native-harness-card__status--failed,
+.native-harness-card__status--recovery-required {
   background: color-mix(in srgb, var(--color-destructive) 25%, transparent);
 }
 

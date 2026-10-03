@@ -79,6 +79,40 @@ describe("NativeHarnessSessionCard", () => {
     expect(screen.getByText(/fell back to spare after rate-limited/)).toBeVisible();
   });
 
+  it("names a restart's recovery and says why a resume was refused", async () => {
+    const recovering = view();
+    const held = {
+      ...recovering,
+      session: {
+        ...recovering.session,
+        status: "recovery-required" as const,
+        detail: "Octant restarted while a turn was running. Check what it did, then resume.",
+      },
+    };
+    const client = {
+      session: vi.fn(async () => held),
+      command: vi.fn(async () => ({
+        kind: "native-harness-session-refused" as const,
+        reason: "not-ready" as const,
+        message: "Not ready to resume: The thread's checkout is no longer available.",
+      })),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(),
+    };
+    render(<NativeHarnessSessionCard client={client} threadId={threadId} />);
+    await waitFor(() => expect(screen.getByText("Needs a check after restart")).toBeVisible());
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Resume" }));
+
+    expect(client.command).toHaveBeenCalledWith(
+      threadId,
+      expect.objectContaining({ kind: "resume-native-harness-session" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Not ready to resume: The thread's checkout is no longer available.",
+    );
+  });
+
   it("shows the lead's pending question and sends the picked option as the answer", async () => {
     const question = {
       id: "00000000-0000-4000-8000-000000000051",

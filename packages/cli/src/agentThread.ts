@@ -385,7 +385,11 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
       if (response.status !== 200) {
         return { kind: "refused", message: refusalMessage(response, "The host refused the turn.") };
       }
-      return { kind: "sent" };
+      // A turn the host refused before it began — a paused run, a missing
+      // checkout — still answers 200, with the refusal as the result. Taking
+      // that for "sent" printed the thread's previous reply as if it were new.
+      const refusal = codeTurnRefusal(response.body);
+      return refusal === undefined ? { kind: "sent" } : { kind: "refused", message: refusal };
     },
     interrupt: async () => {
       const [current, page] = await Promise.all([view(), conversation()]);
@@ -773,4 +777,20 @@ function projectHolding<
     })
     .sort((a, b) => b.root.length - a.root.length);
   return holding[0]?.entry;
+}
+
+/** The reason a Code turn was refused before it started, or undefined when it started. */
+function codeTurnRefusal(body: unknown): string | undefined {
+  if (typeof body !== "object" || body === null) return undefined;
+  const result = body as {
+    readonly kind?: unknown;
+    readonly state?: unknown;
+    readonly failure?: { readonly message?: unknown };
+  };
+  const refused =
+    result.kind === "operation-failed" ||
+    (result.kind === "provider-turn-state" && result.state === "failed");
+  if (!refused) return undefined;
+  const message = result.failure?.message;
+  return typeof message === "string" && message.length > 0 ? message : "The host refused the turn.";
 }

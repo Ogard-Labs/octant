@@ -19,6 +19,7 @@ function port(
     readonly persistence?: Parameters<typeof createNativeHarnessDelegatePort>[0]["persistence"];
     readonly now?: () => number;
     readonly sleep?: (ms: number) => Promise<void>;
+    readonly sessionStatus?: string;
   } = {},
 ) {
   return createNativeHarnessDelegatePort(
@@ -60,7 +61,14 @@ function port(
       ...(overrides.now === undefined ? {} : { now: overrides.now }),
       ...(overrides.sleep === undefined ? {} : { sleep: overrides.sleep }),
       router: { resolve: () => ({ kind: "unroutable" }) as never },
-      sessions: { ensure: () => ({}) as never, recordRouteDecision: () => undefined },
+      sessions: {
+        ensure: () => ({}) as never,
+        recordRouteDecision: () => undefined,
+        read: () =>
+          overrides.sessionStatus === undefined
+            ? undefined
+            : ({ session: { status: overrides.sessionStatus } } as never),
+      },
       uuid: () => "00000000-0000-4000-8000-000000000098",
     },
     scope,
@@ -77,6 +85,17 @@ describe("native harness delegate port", () => {
     });
     expect(outcome).toMatchObject({ status: "refused", reason: "creation-posture-off" });
     expect(touched).toEqual([]);
+  });
+
+  it("starts no new helper while the run is paused, even with helpers on", async () => {
+    for (const sessionStatus of ["paused-by-user", "paused-by-advisor", "recovery-required"]) {
+      const outcome = await port("automatic", [], { sessionStatus }).start({
+        role: "research",
+        task: "Look",
+        includeParentContext: false,
+      });
+      expect(outcome).toMatchObject({ status: "refused", reason: "session-paused" });
+    }
   });
 
   it("admits through the shared path under Automatic and reports its refusal honestly", async () => {

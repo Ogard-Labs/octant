@@ -31,7 +31,7 @@ export interface NativeHarnessDelegatePortOptions {
     "parentSummary" | "resultText" | "getById"
   >;
   readonly router: Pick<NativeHarnessRouter, "resolve">;
-  readonly sessions: Pick<NativeHarnessSessionStore, "ensure" | "recordRouteDecision">;
+  readonly sessions: Pick<NativeHarnessSessionStore, "ensure" | "recordRouteDecision" | "read">;
   readonly uuid: () => string;
   /** Injectable so tests drive `wait` without real time passing. */
   readonly now?: () => number;
@@ -96,6 +96,20 @@ export function createNativeHarnessDelegatePort(
           status: "refused",
           reason: "creation-posture-off",
           message: "Subagents are turned off in Settings → Octant Harness → Helper agents.",
+        };
+      }
+      // A paused run finishes what it started and starts nothing new — a
+      // helper included — until a person resumes it.
+      const status = options.sessions.read(scope.parentThreadId)?.session.status;
+      if (
+        status === "paused-by-user" ||
+        status === "paused-by-advisor" ||
+        status === "recovery-required"
+      ) {
+        return {
+          status: "refused",
+          reason: "session-paused",
+          message: "This run is paused, so no new helper starts until it is resumed.",
         };
       }
       let controlRequest: AgentRunControlRequest;

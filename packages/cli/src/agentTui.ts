@@ -541,7 +541,9 @@ class AgentScreen {
     const statusColor =
       status === "running"
         ? p.success
-        : status.startsWith("paused") || status === "budget-limited"
+        : status.startsWith("paused") ||
+            status === "budget-limited" ||
+            status === "recovery-required"
           ? p.warning
           : status === "failed"
             ? p.danger

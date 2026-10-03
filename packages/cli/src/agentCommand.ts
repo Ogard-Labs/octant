@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline";
+import { nativeHarnessStatusLabel } from "@octant/domain";
 import {
   decodeNativeHarnessRoutingSettings,
   decodeNativeHarnessFollowUpActivationResult,
@@ -792,7 +793,7 @@ function printSession(
   stdout: RunAgentCliCommandInput["stdout"],
 ): void {
   stdout.write(
-    `Session ${view.session.status} · lead ${String(view.session.lead.modelId)} on ${String(view.session.leadSlotId)} · ${view.session.turnsRun} turns · ${view.session.cutovers} context cuts\n`,
+    `Session ${nativeHarnessStatusLabel(view.session.status)} · lead ${String(view.session.lead.modelId)} on ${String(view.session.leadSlotId)} · ${view.session.turnsRun} turns · ${view.session.cutovers} context cuts\n`,
   );
   if (view.session.detail !== undefined) stdout.write(`  ${view.session.detail}\n`);
   for (const route of view.routes.slice(-5)) {
