@@ -74,6 +74,7 @@ const TARGETS: ReadonlyArray<AgentsToolTarget> = [
 function tool(
   options: {
     posture?: "off" | "automatic";
+    noRouting?: boolean;
     tainted?: boolean;
     targets?: ReadonlyArray<AgentsToolTarget>;
     admitted?: {
@@ -135,6 +136,28 @@ function tool(
       parentThreadId: ids.thread,
       listTargets: () => options.targets ?? TARGETS,
       isTainted: () => options.tainted ?? false,
+      ...(options.noRouting
+        ? {}
+        : {
+            routing: {
+              router: {
+                resolve: () =>
+                  ({
+                    kind: "primary",
+                    job: "researcher",
+                    slotId: "default",
+                    decidedAt: "2026-10-03T10:00:00.000Z",
+                    rejected: [],
+                    candidate: {
+                      hostId: "00000000-0000-4000-8000-0000000000aa",
+                      providerInstanceId: ids.provider,
+                      modelId: "gpt-4o",
+                    },
+                  }) as never,
+              },
+              recordDecision: () => undefined,
+            },
+          }),
       authorizeCancel: options.authorizeCancel ?? (() => true),
       uuid: () => "00000000-0000-4000-8000-0000000000ee",
       sleep: () => Promise.resolve(),
@@ -213,6 +236,32 @@ describe("agents managed tools", () => {
       runId: ids.run,
       lifecycleStatus: "running",
     });
+  });
+
+  it("refuses an unavailable role route instead of silently inheriting the parent", async () => {
+    const { set } = tool({ noRouting: true });
+    const outcome = await call(set, {
+      operation: "delegate",
+      task: "Look",
+      reasoning: "high",
+    });
+    expect(outcome.result).toMatchObject({
+      status: "refused",
+      reason: "delegate-routing-unavailable",
+    });
+  });
+
+  it("rejects a foreign dependency before workspace or child admission", async () => {
+    const { set, calls } = tool({ runs: [queuedRun({ parentThreadId: "foreign" as never })] });
+    const outcome = await call(set, {
+      operation: "delegate",
+      task: "Look",
+      after: [ids.run],
+      providerInstanceId: String(ids.provider),
+      modelId: "gpt-4o",
+    });
+    expect(outcome.result).toMatchObject({ status: "refused", reason: "dependency-not-found" });
+    expect(calls).not.toContain("admit");
   });
 
   it("keeps a delegation awaiting person confirmation queued instead of starting it", async () => {

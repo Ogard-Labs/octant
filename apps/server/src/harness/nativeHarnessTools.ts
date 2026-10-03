@@ -1,3 +1,9 @@
+import type {
+  AgentRunDelegationResult,
+  AgentRunDelegationInput,
+  agentRunDelegationCapabilities,
+} from "../agentRun/agentRunDelegation";
+import type { AgentRunParentSummaryRoute } from "../agentRun/agentRunProjection";
 import {
   decodeUtcTimestamp,
   MAX_NATIVE_HARNESS_TOOL_DETAIL,
@@ -68,9 +74,7 @@ export interface NativeHarnessWebSearchResult {
   readonly snippet: string;
 }
 
-export type NativeHarnessDelegateStart =
-  | { readonly status: "accepted"; readonly runId: string; readonly lifecycleStatus: string }
-  | { readonly status: "refused"; readonly reason: string; readonly message?: string };
+export type NativeHarnessDelegateStart = AgentRunDelegationResult;
 
 export interface NativeHarnessDelegateChild {
   readonly runId: string;
@@ -78,6 +82,8 @@ export interface NativeHarnessDelegateChild {
   readonly task: string;
   readonly lifecycleStatus: string;
   readonly resultAvailable: boolean;
+  readonly route?: AgentRunParentSummaryRoute;
+  readonly reasoning?: string;
   /** The runs this child waits for, when it was started with `after`. */
   readonly after?: ReadonlyArray<string>;
   /** Why a child is waiting, failed, or was interrupted. */
@@ -95,12 +101,8 @@ export type NativeHarnessDelegateCollect =
  * behind it, and a refusal comes back as a value the model can read.
  */
 export interface NativeHarnessDelegatePort {
-  start(input: {
-    readonly role: "research" | "implementation" | "review" | "custom";
-    readonly task: string;
-    readonly includeParentContext: boolean;
-    readonly after?: ReadonlyArray<string> | undefined;
-  }): Promise<NativeHarnessDelegateStart>;
+  capabilities(): Promise<ReturnType<typeof agentRunDelegationCapabilities>>;
+  start(input: AgentRunDelegationInput): Promise<NativeHarnessDelegateStart>;
   status(): Promise<ReadonlyArray<NativeHarnessDelegateChild>>;
   collect(runId: string): Promise<NativeHarnessDelegateCollect>;
   /**
@@ -504,11 +506,17 @@ async function execute(
     case "delegate": {
       const input = args as NativeHarnessDelegateArguments;
       const port = ports.delegate!;
+      if (input.operation === "capabilities") return ok(await port.capabilities());
       if (input.operation === "start") {
         const started = await port.start({
           role: input.role,
           task: input.task,
           includeParentContext: input.includeParentContext === true,
+          ...(input.providerInstanceId === undefined
+            ? {}
+            : { providerInstanceId: input.providerInstanceId }),
+          ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
+          ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
           ...(input.after === undefined ? {} : { after: input.after.map(String) }),
         });
         return started.status === "accepted"
