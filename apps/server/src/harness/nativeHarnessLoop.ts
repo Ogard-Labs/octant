@@ -236,16 +236,26 @@ export function createNativeHarnessConnection(
         for (const note of notes) note.resolve("unsupported");
         return undefined;
       }
+      // Fitting can omit earlier queued notes. Object identity also keeps
+      // distinct notes with identical text from acknowledging one another.
+      const retained = notes.flatMap((note, index) => {
+        const message = messages[index];
+        if (message === undefined || !request.history.includes(message)) {
+          note.resolve("unsupported");
+          return [];
+        }
+        return [{ note, message }];
+      });
       try {
-        for (const message of messages) {
+        for (const { message } of retained) {
           options.transcripts.append(state.transcriptId, message);
           state.messages.push(message);
         }
       } catch (error) {
-        for (const note of notes) note.resolve("unsupported");
+        for (const { note } of retained) note.resolve("unsupported");
         throw error;
       }
-      for (const note of notes) note.resolve("steered");
+      for (const { note } of retained) note.resolve("steered");
       return request;
     };
 

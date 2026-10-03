@@ -585,6 +585,8 @@ answered. The composer signals pending child input and opens its detail view.
 Live child steering is optional on a provider connection. Codex uses its
 current-turn steering command; Octant's harness inserts a note after a complete
 tool-results step or response and persists it before acknowledging delivery.
+Only notes retained in the fitted provider request are recorded and acknowledged;
+notes omitted to fit the context limit are refused.
 Unsupported steering is reported as such; a saved note alone is not evidence
 that the running child received it.
 
