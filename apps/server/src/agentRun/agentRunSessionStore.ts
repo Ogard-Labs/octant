@@ -22,6 +22,13 @@ const SessionRecord = Schema.Struct({
   sessionId: ProviderSessionId,
   resumeCursor: Schema.optional(ProviderResumeCursor),
   workspaceIdentity: Schema.optional(Schema.NonEmptyString.pipe(Schema.maxLength(256))),
+  reviewBaseline: Schema.optional(
+    Schema.Struct({
+      generation: Schema.Int.pipe(Schema.positive()),
+      tree: Schema.optional(Schema.String.pipe(Schema.pattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/))),
+      workspaceIdentity: Schema.NonEmptyString.pipe(Schema.maxLength(256)),
+    }),
+  ),
   pendingContinuation: Schema.optional(
     Schema.Struct({
       generation: Schema.Int.pipe(Schema.positive()),

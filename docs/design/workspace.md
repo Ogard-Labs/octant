@@ -186,6 +186,13 @@ their normalized provider capability supplies an equivalent host-authorized
 read; a host-retained final reply stays readable after completion. See
 [decisions/0050-bounded-live-child-conversation.md](../decisions/0050-bounded-live-child-conversation.md).
 
+Saved child-generation file comparisons open in the existing Review tool from
+Agents result history. The selection carries the parent, managed child and
+generation, never a filesystem path or the parent's live checkout. Changing the
+active thread clears that selection. Saved comparisons use the normal read-only
+diff renderer, expose capture/truncation facts, and offer a return to the thread's
+ordinary Review views.
+
 ## Boards and integrations
 
 Work and Code have server-authoritative thread boards

@@ -557,8 +557,30 @@ characters; tool output is bounded to 2,048 characters. File paths outside the a
 make the section truncated. Provider file reports are explicitly unverified;
 host tool returns remain an unknown check outcome even when their output says
 a test passed. No result implies parent delivery, review, merge, or deployment.
-Generation-specific review snapshots are not currently recorded for these reports,
-so review is explicitly unavailable; a parent checkout is never substituted.
+Writable managed Code children capture their isolated workspace before execution
+and after confirmed provider teardown through the host's Git checkpoint port.
+The same path covers Octant Harness and provider harnesses. The private session
+record preserves the original tree and workspace identity across waits and retries
+within one generation; a new follow-up generation starts its own comparison.
+Git captures include tracked and non-ignored untracked files without changing the
+real index, HEAD, or branch. Captures describe observed workspace changes, not proof
+that the child alone authored them.
+
+A settled comparison retains at most 128 paths and 65,536 diff characters, with a
+120,000-character serialized ceiling, in subject-owned content beside the result.
+Comparison captures create no Git refs, so a crash cannot leave pinned source
+content behind. The retained diff remains readable after later edits or Git object
+collection; collection before comparison can make the capture unavailable. A resumed generation
+whose original tree was collected cannot substitute its current midpoint and
+reports review unavailable. Waiting generations can advance their snapshot at the
+next settlement; completed generations keep their original comparison. Failed
+captures invalidate an earlier partial comparison for that same generation.
+Review reads accept only the managed run and generation, check current parent and
+child read authority, and never resolve a client-supplied filesystem path. Summary
+polling carries metadata only. The existing Review surface opens the saved diff
+without checkout mutation or parent-file navigation. Chat, Work, Plan, legacy
+sessions without a baseline, and unavailable captures report review unavailable;
+a parent checkout is never substituted.
 Parent and child scope checks precede reads, streams recheck scope before each
 frame, and a parent purge removes all generations' text and evidence. Nested
 observations retain the authorized root thread and identify their managed parent

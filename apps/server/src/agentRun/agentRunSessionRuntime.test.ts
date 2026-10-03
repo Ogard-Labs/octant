@@ -1363,6 +1363,167 @@ describe("durable child provider identity", () => {
     expect(counted.recordTerminal).toHaveBeenCalledOnce();
   });
 
+  it.each(["openai-compatible", "codex"] as const)(
+    "captures the verified generation around %s execution and after teardown",
+    async (kind) => {
+      const provider = fakeProvider();
+      const base = agentRun({
+        authority: { ...authority, filesystem: true, git: true, executionPolicy: "approval-gated" },
+        workspaceReceipt: {
+          kind: "code-worktree",
+          mode: "code",
+          projectId: "88888888-8888-4888-8888-888888888888" as never,
+          checkoutRoot: "/repo",
+          worktreeRoot: "/child",
+          verified: true,
+        },
+      });
+      const run = {
+        ...base,
+        routingReceipt: {
+          ...base.routingReceipt,
+          executionResolution: {
+            ...base.routingReceipt.executionResolution,
+            effectivePermissions: {
+              ...base.routingReceipt.executionResolution.effectivePermissions,
+              filesystem: true,
+              git: true,
+            },
+          },
+        },
+      };
+      const review = {
+        capturedAt: now as never,
+        baseTree: "a".repeat(40),
+        resultTree: "b".repeat(40),
+        diff: "retained generation",
+        changedPaths: ["file.txt"],
+        truncated: false,
+      };
+      const finish = vi.fn(async () => {
+        expect(provider.stops).toHaveLength(1);
+        return review;
+      });
+      const begin = vi.fn(
+        async (
+          input: Parameters<
+            NonNullable<AgentRunSessionRuntimeOptions["reviewCapture"]>["begin"]
+          >[0],
+        ) => {
+          expect(input.checkoutRoot).toBe("/child");
+          expect(provider.acquired).toHaveLength(0);
+          expect(await input.authorize(new AbortController().signal)).toBe(true);
+          return { baseTree: review.baseTree, finish };
+        },
+      );
+      const runtime = createAgentRunSessionRuntime(
+        runtimeOptions(provider, {
+          resolveDriver: () => ({ ...provider.driver, kind }),
+          verifyCodeWorkspace: async () => ({ status: "verified", identity: "child-identity" }),
+          canCaptureReview: () => true,
+          reviewCapture: { begin },
+        }),
+      );
+      const done = settled(runtime.start(run));
+      await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+      await provider.emit({ kind: "text-delta", sessionId, text: "Completed", occurredAt: now });
+      await provider.emit({ kind: "completed", sessionId });
+      expect(await done).toMatchObject({ kind: "completed", evidence: { review } });
+      expect(begin).toHaveBeenCalledOnce();
+      expect(finish).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("keeps the original generation baseline through a saved native resume", async () => {
+    const connection = openSqlite(databasePath());
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const base = agentRun({
+      authority: { ...authority, filesystem: true, git: true, executionPolicy: "approval-gated" },
+      workspaceReceipt: {
+        kind: "code-worktree",
+        mode: "code",
+        projectId: "88888888-8888-4888-8888-888888888888" as never,
+        checkoutRoot: "/repo",
+        worktreeRoot: "/child",
+        verified: true,
+      },
+    });
+    let run = {
+      ...base,
+      routingReceipt: {
+        ...base.routingReceipt,
+        executionResolution: {
+          ...base.routingReceipt.executionResolution,
+          effectivePermissions: {
+            ...base.routingReceipt.executionResolution.effectivePermissions,
+            filesystem: true,
+            git: true,
+          },
+        },
+      },
+    };
+    const store = new AgentRunSessionStore({ connection, getById: () => run });
+    const baseline = "a".repeat(40);
+    const begin = vi.fn(
+      async (
+        input: Parameters<NonNullable<AgentRunSessionRuntimeOptions["reviewCapture"]>["begin"]>[0],
+      ) => ({
+        baseTree: input.baseTree ?? baseline,
+        finish: async () => undefined,
+        release: async () => undefined,
+      }),
+    );
+    const provider = fakeProvider({ resumable: true });
+    const shared = {
+      sessionStore: store.sessions,
+      supportsResume: () => true,
+      verifyCodeWorkspace: async () => ({
+        status: "verified" as const,
+        identity: "child-identity",
+      }),
+      canCaptureReview: () => true,
+      reviewCapture: { begin },
+    };
+    const first = createAgentRunSessionRuntime(runtimeOptions(provider, shared));
+    const done = settled(first.start(run));
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    await first.stop(run.id);
+    await done;
+    run = { ...run, lifecycleStatus: "interrupted" };
+    expect(store.sessions.read(run)?.reviewBaseline).toMatchObject({
+      generation: 1,
+      tree: baseline,
+    });
+    const nextProvider = fakeProvider({ resumable: true });
+    const next = createAgentRunSessionRuntime(runtimeOptions(nextProvider, shared));
+    const resumed = next.resume?.(run);
+    if (resumed === undefined) throw new Error("No continuation");
+    await vi.waitFor(() => expect(nextProvider.turns).toHaveLength(1));
+    expect(begin.mock.calls[1]?.[0].baseTree).toBe(baseline);
+    await next.stop(run.id);
+    await settled(resumed);
+    const replacement = fakeProvider({ resumable: true });
+    const retried = createAgentRunSessionRuntime(
+      runtimeOptions(replacement, {
+        ...shared,
+        verifyCodeWorkspace: async () => ({
+          status: "verified",
+          identity: "replacement-directory",
+        }),
+      }),
+    );
+    const replaced = settled(retried.start(run));
+    await vi.waitFor(() => expect(replacement.turns).toHaveLength(1));
+    expect(begin).toHaveBeenCalledTimes(2);
+    expect(store.sessions.read(run)?.reviewBaseline).toEqual({
+      generation: 1,
+      workspaceIdentity: "replacement-directory",
+    });
+    await retried.stop(run.id);
+    await replaced;
+    connection.close();
+  });
+
   it("refuses a Code start before provider acquisition without a live workspace verifier", async () => {
     const provider = fakeProvider();
     const counted = countingScheduler();

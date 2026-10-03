@@ -1,6 +1,7 @@
 import { isAbsolute, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { boundedToolResultJson } from "../providers/toolResultJson";
+import type { AgentRunReviewCapture, AgentRunReviewCaptureLease } from "./agentRunReviewCapture";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
   decodeCapacityReservationId,
@@ -176,6 +177,8 @@ export interface AgentRunSessionInteractions {
 }
 
 export interface AgentRunSessionRuntimeOptions {
+  readonly reviewCapture?: AgentRunReviewCapture;
+  readonly canCaptureReview?: (run: AgentRun) => boolean;
   readonly interactions?: AgentRunSessionInteractions;
   readonly sessionStore?: AgentRunSessionStatePort;
   /** Live host ownership, independent of HEAD so a child can resume after committing. */
@@ -492,8 +495,20 @@ export function createAgentRunSessionRuntime(
     })();
 
     const providerSessionId = previous?.sessionId ?? decodeProviderSessionId(options.uuid());
+    const retainedReview =
+      run.workspaceReceipt.kind === "code-worktree" ? options.sessionStore?.read(run) : undefined;
     const record: AgentRunSessionRecord = {
       ...(previous ?? { sessionId: providerSessionId, binding }),
+      ...(retainedReview?.reviewBaseline === undefined
+        ? retainedReview === undefined
+          ? {}
+          : {
+              reviewBaseline: {
+                generation: run.generation ?? 1,
+                workspaceIdentity: retainedReview.workspaceIdentity ?? "unavailable",
+              },
+            }
+        : { reviewBaseline: retainedReview.reviewBaseline }),
       ...(continuation !== undefined &&
       run.lifecycleStatus === "completed" &&
       continuation.message !== undefined
@@ -577,6 +592,7 @@ export function createAgentRunSessionRuntime(
       providerSessionId,
     } = prepared;
     let record = prepared.record;
+    let reviewCapture: AgentRunReviewCaptureLease | undefined;
     let appManagedTools: AppManagedToolSet | undefined;
     try {
       if (sessions.has(run.id))
@@ -605,6 +621,68 @@ export function createAgentRunSessionRuntime(
         record = { ...record, workspaceIdentity: observed.identity };
         if (options.sessionStore !== undefined && !options.sessionStore.write(run, record))
           return refusal;
+        const baseline =
+          record.reviewBaseline?.generation === (run.generation ?? 1)
+            ? record.reviewBaseline
+            : undefined;
+        const knowsBeginning =
+          baseline === undefined
+            ? previous === undefined || record.pendingContinuation?.state === "unsent"
+            : baseline.tree !== undefined && baseline.workspaceIdentity === observed.identity;
+        // Persist even a missing baseline: a retry cannot relabel its midpoint as
+        // the beginning of a generation whose earlier capture was unavailable.
+        record = {
+          ...record,
+          reviewBaseline: {
+            generation: run.generation ?? 1,
+            workspaceIdentity: observed.identity,
+            ...(knowsBeginning && baseline?.tree !== undefined ? { tree: baseline.tree } : {}),
+          },
+        };
+        const baselineWritable = options.sessionStore?.write(run, record) ?? true;
+        if (
+          knowsBeginning &&
+          baselineWritable &&
+          authority.filesystem &&
+          authority.git &&
+          authority.executionPolicy !== "plan" &&
+          options.canCaptureReview?.(run) === true
+        ) {
+          try {
+            reviewCapture = await options.reviewCapture?.begin(
+              {
+                checkoutRoot: run.workspaceReceipt.worktreeRoot,
+                runId: String(run.id),
+                executionPolicy: authority.executionPolicy,
+                ...(baseline?.tree === undefined ? {} : { baseTree: baseline.tree }),
+                authorize: async (captureSignal) => {
+                  if (options.canCaptureReview?.(run) !== true) return false;
+                  const current = await options.verifyCodeWorkspace?.({
+                    run,
+                    signal: captureSignal,
+                  });
+                  return current?.status === "verified" && current.identity === observed.identity;
+                },
+              },
+              signal,
+            );
+            if (reviewCapture !== undefined) {
+              record = {
+                ...record,
+                reviewBaseline: {
+                  generation: run.generation ?? 1,
+                  workspaceIdentity: observed.identity,
+                  tree: reviewCapture.baseTree,
+                },
+              };
+              if (options.sessionStore !== undefined && !options.sessionStore.write(run, record)) {
+                reviewCapture = undefined;
+              }
+            }
+          } catch {
+            // Checkpoint availability must not turn a runnable child into a failure.
+          }
+        }
         return undefined;
       } catch {
         return refusal;
@@ -789,7 +867,32 @@ export function createAgentRunSessionRuntime(
       ),
       { signal: controller.signal },
     ).then(
-      (exit) => end(outcomeFromExit(exit)),
+      async (exit) => {
+        let outcome = outcomeFromExit(exit);
+        try {
+          // Teardown has completed before this promise resolves. An unconfirmed
+          // provider shutdown cannot supply a final generation comparison.
+          const review =
+            shutdown.unconfirmed === undefined
+              ? await reviewCapture?.finish(AbortSignal.timeout(10_000))
+              : undefined;
+          if (run.workspaceReceipt.kind === "code-worktree")
+            outcome = {
+              ...outcome,
+              evidence: {
+                ...(outcome.evidence ?? {
+                  files: { status: "unavailable", items: [] },
+                  checks: { status: "unavailable", items: [] },
+                }),
+                ...(review === undefined ? {} : { review }),
+              },
+            };
+        } catch {
+          // Missing capture is explicit in results and never changes execution success.
+        } finally {
+          end(outcome);
+        }
+      },
       (error: unknown) => end({ kind: "interrupted", reason: boundedReason(error) }),
     );
 

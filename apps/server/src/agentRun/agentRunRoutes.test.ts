@@ -991,9 +991,10 @@ describe("agentRunRoutes", () => {
     expect(body.entries[0]?.task).toBe("Summarize");
   });
 
-  it("refuses child data when parent access remains but child scope is denied", async () => {
+  it.each(["parent", "child"])("refuses child data when %s scope is denied", async (scope) => {
     const { handler, persistence, token, liveConversations } = createHandler({
-      authorizeCancellation: () => false,
+      authorizeCancellation: () => scope !== "child",
+      authorizeParentThread: () => scope !== "parent",
     });
     const accepted = persistence.requestRun({
       command: {
@@ -1014,11 +1015,15 @@ describe("agentRunRoutes", () => {
     if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
     const readResults = vi.spyOn(persistence, "resultPackets");
     const readConversation = vi.spyOn(liveConversations, "read");
-    for (const route of ["results", "conversation", "conversation/stream"]) {
+    const readReview = vi.spyOn(persistence, "reviewSnapshot");
+    for (const route of ["review", "results", "conversation", "conversation/stream"]) {
       const response = await handler(
-        new Request(`http://127.0.0.1/api/agent-runs/${route}?runId=${accepted.run.id}`, {
-          headers: { "x-octant-window-capability": token },
-        }),
+        new Request(
+          `http://127.0.0.1/api/agent-runs/${route}?runId=${accepted.run.id}${route === "review" ? "&generation=1" : ""}`,
+          {
+            headers: { "x-octant-window-capability": token },
+          },
+        ),
       );
       expect(response?.status).toBe(403);
     }
@@ -1027,7 +1032,9 @@ describe("agentRunRoutes", () => {
         headers: { "x-octant-window-capability": token },
       }),
     );
-    expect(await summary?.json()).toMatchObject({ entries: [], observations: [] });
+    if (scope === "parent") expect(summary?.status).toBe(403);
+    else expect(await summary?.json()).toMatchObject({ entries: [], observations: [] });
+    expect(readReview).not.toHaveBeenCalled();
     expect(readResults).not.toHaveBeenCalled();
     expect(readConversation).not.toHaveBeenCalled();
   });
@@ -1089,6 +1096,60 @@ describe("agentRunRoutes", () => {
         headers: { "x-octant-window-capability": token },
       }),
     );
+    const review = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/review?runId=${accepted.run.id}&generation=1`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(review?.status).toBe(200);
+    expect(await review?.json()).toMatchObject({
+      runId: accepted.run.id,
+      generation: 1,
+      status: "unavailable",
+    });
+    const invalid = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/review?runId=${accepted.run.id}&generation=-1`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(invalid?.status).toBe(400);
+    const snapshot = {
+      capturedAt: "2026-10-03T20:00:00.000Z",
+      baseTree: "a".repeat(40),
+      resultTree: "b".repeat(40),
+      diff: "private captured diff",
+      changedPaths: ["file.txt"],
+      truncated: false,
+    };
+    persistence.applyCommand({
+      kind: "start-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: accepted.run.version,
+    });
+    persistence.applyCommand({
+      kind: "mark-agent-run-running",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 1) as never,
+    });
+    const completion = persistence.applyCommand({
+      kind: "complete-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 2) as never,
+      result: { reference: `octant://agent-run/${accepted.run.id}/result`, truncated: false },
+      resultText: "Completed",
+      resultEvidence: {
+        files: { status: "unavailable", items: [] },
+        checks: { status: "unavailable", items: [] },
+        review: snapshot as never,
+      },
+    });
+    expect(completion.kind).toBe("run-updated");
+    const captured = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/review?runId=${accepted.run.id}&generation=1`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(await captured?.json()).toMatchObject({ status: "available", snapshot });
     expect(results?.status).toBe(200);
     expect(await results?.json()).toMatchObject({
       runId: accepted.run.id,

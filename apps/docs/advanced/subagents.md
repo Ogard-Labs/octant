@@ -32,10 +32,20 @@ host actually executed. File reports are unverified; a tool return is not proof
 that tests passed. Missing and truncated evidence is shown explicitly. A completed
 child does not establish review, merge, deployment, or completion of its parent.
 
-File reports currently have no recorded generation-specific review snapshot.
-Review is unavailable for those reports; opening the parent’s current checkout
-would show different evidence. Tool records retain bounded output for inspection.
-Deleting the parent’s content removes these records and earlier result text.
+For writable Code children, **Review changes** opens the host's saved comparison
+for that generation in **Review**. It includes committed changes and non-ignored
+new files from the child's own workspace. Later follow-ups keep separate
+comparisons. Captured file links open this saved diff; they do not open the
+parent's current files. Review identifies partial or binary content and offers no
+staging or discard controls for saved child results.
+
+A waiting child can update its comparison when it settles again. If its original
+baseline is missing after a restart or Git cleanup, review is unavailable rather
+than showing only the resumed portion. Chat, Work and Plan children have no Git
+review capture. Failed captures and older sessions without a baseline also show
+review unavailable. Provider file reports remain separate, unverified claims.
+Tool records retain bounded output for inspection. Deleting the parent's content
+removes saved comparisons, tool records and earlier result text.
 
 ## Availability
 

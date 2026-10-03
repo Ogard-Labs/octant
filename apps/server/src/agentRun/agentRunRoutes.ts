@@ -1,5 +1,9 @@
 import { observedChildren } from "./agentObservedChildren";
-import { decodeAgentRunResultsResponse, type AgentObservedChild } from "@octant/contracts";
+import {
+  decodeAgentRunResultsResponse,
+  decodeAgentRunReviewResponse,
+  type AgentObservedChild,
+} from "@octant/contracts";
 import {
   decodeAgentRunCenterQuery,
   decodeAgentRunId,
@@ -248,6 +252,42 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
           observations: observations.slice(0, 64),
           observationsTruncated: observationsTruncated || observations.length > 64,
         },
+        200,
+        origin,
+      );
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/agent-runs/review") {
+      let runId: AgentRunId;
+      const generation = Number(url.searchParams.get("generation"));
+      try {
+        runId = decodeAgentRunId(url.searchParams.get("runId") ?? "");
+        if (!Number.isSafeInteger(generation) || generation < 1)
+          throw new Error("Invalid generation");
+      } catch {
+        return failure("AgentRun review identity is invalid.", 400, origin);
+      }
+      const run = dependencies.persistence.getById(runId);
+      if (
+        run === undefined ||
+        !(await dependencies.authorizeParentThread({
+          parentThreadId: run.parentThreadId,
+          windowId: authenticatedWindowId,
+        })) ||
+        !dependencies.authorizeCancellation({ run, windowId: authenticatedWindowId })
+      ) {
+        return failure("AgentRun review is not authorized for this run.", 403, origin);
+      }
+      const snapshot = dependencies.persistence.reviewSnapshot(runId, generation);
+      return json(
+        decodeAgentRunReviewResponse({
+          runId,
+          parentThreadId: run.parentThreadId,
+          generation,
+          ...(snapshot === undefined
+            ? { status: "unavailable" }
+            : { status: "available", snapshot }),
+        }),
         200,
         origin,
       );

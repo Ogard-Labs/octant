@@ -570,6 +570,43 @@ describe("AgentRunOrchestrationService", () => {
     expect(statuses.indexOf(child.run.id)).toBeLessThan(statuses.indexOf(parent.run.id));
   });
 
+  it("persists the final review returned while leaf-first cancellation stops a child", async () => {
+    const review = {
+      capturedAt: now as never,
+      baseTree: "a".repeat(40),
+      resultTree: "b".repeat(40),
+      diff: "final cancelled changes",
+      changedPaths: ["file.txt"],
+      truncated: false,
+    };
+    const { orchestration, persistence } = createHarness(undefined, true, {
+      start: () => undefined,
+      stop: async (runId) => {
+        orchestration.onSessionSettled({
+          runId,
+          outcome: {
+            kind: "cancelled",
+            evidence: {
+              review,
+              files: { status: "unavailable", items: [] },
+              checks: { status: "unavailable", items: [] },
+            },
+          },
+        });
+      },
+    });
+    const admitted = orchestration.admit({
+      command: requestCommand(),
+      parentAuthority: authority,
+      confirmed: true,
+      liveAuthority: authority,
+    });
+    if (admitted.kind !== "run-accepted") throw new Error("Admission failed");
+    const result = await orchestration.cancelLeafFirst({ runId: admitted.run.id, scope: "self" });
+    expect(result[0]?.kind).toBe("run-updated");
+    expect(persistence.reviewSnapshot(admitted.run.id, 1)).toEqual(review);
+  });
+
   it("keeps the run and its reservation live when process termination is not confirmed", async () => {
     const capacity = createInMemoryCapacityPort();
     const release = vi.spyOn(capacity, "release");

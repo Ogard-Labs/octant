@@ -1,6 +1,8 @@
 import {
   decodeAgentRunAdmittedContext,
   decodeAgentRunResultEvidence,
+  decodeAgentRunReviewSnapshot,
+  type AgentRunReviewSnapshot,
   type AgentRunResultEvidence,
   decodeAgentRunResultText,
   decodeContextSubjectRef,
@@ -241,6 +243,29 @@ export function writeAgentRunResultEvidence(
   const subject = agentRunContentSubject(input.run);
   if (isDeletingOrPurgedSubject(connection, subject)) return;
   const next = decodeAgentRunResultEvidence(input.evidence);
+  if (next.review !== undefined) {
+    // Waiting/resumed attempts advance this generation's comparison atomically
+    // with settlement. Completed generations cannot execute again under this key.
+    connection
+      .prepare(`INSERT INTO agent_run_content_store
+      (content_id, run_id, subject_type, subject_id, content_kind, body_text, created_at)
+      VALUES (?, ?, ?, ?, 'result-review', ?, ?) ON CONFLICT(content_id) DO UPDATE SET body_text = excluded.body_text
+      WHERE run_id = excluded.run_id AND subject_type = excluded.subject_type AND subject_id = excluded.subject_id AND content_kind = excluded.content_kind`)
+      .run(
+        `${input.reference}:review`,
+        String(input.run.id),
+        subject.aggregateType,
+        subject.aggregateId,
+        JSON.stringify(next.review),
+        input.createdAt,
+      );
+  }
+  if (next.review === undefined)
+    connection
+      .prepare(
+        "DELETE FROM agent_run_content_store WHERE content_id = ? AND run_id = ? AND content_kind = 'result-review'",
+      )
+      .run(`${input.reference}:review`, String(input.run.id));
   const prior = readAgentRunResultEvidence(connection, {
     runId: input.run.id,
     reference: input.reference,
@@ -315,4 +340,12 @@ export function readAgentRunResultEvidence(
     "result-evidence",
   );
   return body === undefined ? undefined : decodeAgentRunResultEvidence(JSON.parse(body));
+}
+
+export function readAgentRunReviewSnapshot(
+  connection: SqliteConnection,
+  input: { readonly runId: AgentRunId; readonly reference: string },
+): AgentRunReviewSnapshot | undefined {
+  const body = read(connection, `${input.reference}:review`, String(input.runId), "result-review");
+  return body === undefined ? undefined : decodeAgentRunReviewSnapshot(JSON.parse(body));
 }

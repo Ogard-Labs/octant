@@ -601,6 +601,77 @@ describe("AgentRunPersistenceService", () => {
     expect(JSON.stringify(packet).length).toBeLessThan(131072);
   });
 
+  it.each(["resume-agent-run", "interrupt-agent-run"] as const)(
+    "invalidates a waiting comparison when %s cannot provide a final capture",
+    (kind) => {
+      const harness = createHarness();
+      const command = requestCommand();
+      const admitted = harness.service.requestRun({
+        command: {
+          ...command,
+          routingReceipt: { ...command.routingReceipt, mode: "code" },
+          workspaceReceipt: {
+            kind: "code-worktree",
+            mode: "code",
+            projectId: "88888888-8888-4888-8888-888888888888" as never,
+            checkoutRoot: "/repo",
+            worktreeRoot: "/child",
+            verified: true,
+          },
+        },
+        parentAuthority,
+        confirmed: true,
+      });
+      if (admitted.kind !== "run-accepted") throw new Error(JSON.stringify(admitted));
+      const runId = admitted.run.id;
+      harness.service.applyCommand({
+        kind: "start-agent-run",
+        runId,
+        expectedVersion: admitted.run.version,
+      });
+      harness.service.applyCommand({
+        kind: "mark-agent-run-running",
+        runId,
+        expectedVersion: (admitted.run.version + 1) as never,
+      });
+      const review = {
+        capturedAt: now as never,
+        baseTree: "a".repeat(40),
+        resultTree: "b".repeat(40),
+        diff: "earlier waiting changes",
+        changedPaths: ["file.txt"],
+        truncated: false,
+      };
+      const waiting = harness.service.applyCommand(
+        {
+          kind: "wait-agent-run",
+          runId,
+          expectedVersion: (admitted.run.version + 2) as never,
+          recoveryReason: "Waiting",
+        },
+        {
+          review,
+          files: { status: "unavailable", items: [] },
+          checks: { status: "unavailable", items: [] },
+        },
+      );
+      if (waiting.kind !== "run-updated") throw new Error("Not waiting");
+      expect(harness.service.reviewSnapshot(runId, 1)).toEqual(review);
+      const next = harness.service.applyCommand({
+        kind,
+        runId,
+        expectedVersion: waiting.run.version,
+        ...(kind === "interrupt-agent-run" ? { recoveryReason: "Host restarted" } : {}),
+      } as never);
+      expect(next.kind).toBe("run-updated");
+      harness.service.rebuildFromJournal();
+      expect(harness.service.reviewSnapshot(runId, 1)).toBeUndefined();
+      expect(harness.service.resultPackets(runId).packets[0]?.files.reviewStatus).toBe(
+        "unavailable",
+      );
+    },
+  );
+
   it("keeps earlier result generations through follow-ups, replay and content purge", () => {
     const harness = createHarness();
     const accepted = harness.service.requestRun({
@@ -610,6 +681,14 @@ describe("AgentRunPersistenceService", () => {
     });
     if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
     const runId = accepted.run.id;
+    const review = {
+      capturedAt: now as never,
+      baseTree: "a".repeat(40),
+      resultTree: "b".repeat(40),
+      changedPaths: ["src/first.ts"],
+      truncated: false,
+      diff: "diff --git a/src/first.ts b/src/first.ts\n-private before\n+private after\n",
+    };
     const version = () => {
       const run = harness.service.getById(runId);
       if (run === undefined) throw new Error("Missing run");
@@ -628,6 +707,7 @@ describe("AgentRunPersistenceService", () => {
       result: { reference: `octant://agent-run/${runId}/result`, truncated: false },
       resultText: "Agent claims all checks pass.",
       resultEvidence: {
+        review,
         files: {
           status: "recorded",
           items: [
@@ -691,7 +771,19 @@ describe("AgentRunPersistenceService", () => {
       [2, "Second response."],
     ]);
     expect(packets[0]?.files.items[0]?.path).toBe("src/first.ts");
-    expect(packets[0]?.files.reviewStatus).toBe("unavailable");
+    expect(packets[0]?.files.reviewStatus).toBe("available");
+    expect(packets[0]?.review).toMatchObject({
+      baseTree: review.baseTree,
+      changedPaths: review.changedPaths,
+    });
+    expect(JSON.stringify(packets)).not.toContain("private after");
+    expect(harness.service.reviewSnapshot(runId, 1)).toEqual(review);
+    expect(harness.service.reviewSnapshot(runId, 2)).toBeUndefined();
+    expect(harness.service.reviewSnapshot(runId, 999)).toBeUndefined();
+    expect(harness.service.reviewSnapshot(ids.request as never, 1)).toBeUndefined();
+    expect(
+      JSON.stringify(harness.connection.prepare("SELECT * FROM event_journal").all()),
+    ).not.toContain("private after");
     expect(packets[0]?.checks.items[0]?.outcome).toBe("unknown");
     expect(packets[0]?.checks.items[0]?.toolExecution?.output).toBe("Actual recorded output");
     expect(packets[1]?.files.status).toBe("unavailable");
@@ -707,7 +799,7 @@ describe("AgentRunPersistenceService", () => {
       run: accepted.run,
       reference: `octant://agent-run/${runId}/result`,
       createdAt: later,
-      evidence: { files: first.files, checks: first.checks },
+      evidence: { files: first.files, checks: first.checks, review },
     });
     expect(
       harness.connection
@@ -717,6 +809,7 @@ describe("AgentRunPersistenceService", () => {
         .all(),
     ).toEqual([]);
     harness.service.rebuildFromJournal();
+    expect(harness.service.reviewSnapshot(runId, 1)).toBeUndefined();
     expect(
       harness.service
         .resultPackets(runId)
