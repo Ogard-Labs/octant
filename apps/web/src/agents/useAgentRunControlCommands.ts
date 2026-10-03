@@ -21,7 +21,11 @@ export interface AgentRunControlCommands {
     readonly message: string;
   }): Promise<string | undefined>;
   retry(input: { readonly runId: string; readonly version: number }): Promise<string | undefined>;
-  resume(input: { readonly runId: string; readonly version: number }): Promise<string | undefined>;
+  resume(input: {
+    readonly runId: string;
+    readonly version: number;
+    readonly message?: string;
+  }): Promise<string | undefined>;
 }
 
 export function useAgentRunControlCommands(
@@ -97,7 +101,11 @@ export function useAgentRunControlCommands(
               })
             : action === "retry"
               ? await client.retry({ runId, expectedVersion: input.version })
-              : await client.resume({ runId, expectedVersion: input.version });
+              : await client.resume({
+                  runId,
+                  expectedVersion: input.version,
+                  ...(input.message === undefined ? {} : { message: input.message }),
+                });
         if (result.kind === "run-command-failed") {
           return agentRunCommandFailureMessage(result);
         }
