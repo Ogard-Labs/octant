@@ -98,6 +98,7 @@ import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/co
 import type { OctantHostBridge } from "../../shell/hostBridge";
 import { boundsInsideViewport } from "../../browser/useNativeBrowserSurface";
 import { observeComposerPlacement } from "../codeWorkspaceApprovals";
+import { OctantAlert } from "../../ui/base/OctantAlert";
 
 export interface CodeComposerAdapterProps {
   /** The person's name from their profile, for the greeting on the hero. */
@@ -957,13 +958,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         {props.beneath}
 
         {props.errorMessage !== undefined ? (
-          <p className="code-composer-adapter__error" role="alert">
+          <OctantAlert className="code-composer-adapter__error" tone="danger">
             {props.errorMessage}
-          </p>
+          </OctantAlert>
         ) : sendNotice !== undefined ? (
-          <p className="code-composer-adapter__error" role="alert">
+          <OctantAlert className="code-composer-adapter__error" tone="danger">
             {sendNotice}
-          </p>
+          </OctantAlert>
         ) : null}
         {props.creating ? (
           <div>

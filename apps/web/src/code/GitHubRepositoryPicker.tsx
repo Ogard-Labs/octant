@@ -9,6 +9,7 @@ import type {
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { parseGithubRepositoryReference } from "./githubRepositoryReference";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * The searchable, paginated, keyboard-operable GitHub
@@ -308,9 +309,9 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
         </OctantButton>
       </form>
       {linkError === undefined ? null : (
-        <p className="github-picker__note" role="alert">
+        <OctantAlert className="github-picker__note" tone="warning">
           {linkError}
-        </p>
+        </OctantAlert>
       )}
       <div className="github-picker__toolbar">
         <OctantInput
@@ -338,7 +339,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
 
       {catalogue.kind === "error" ? (
         <>
-          <p role="alert">{catalogue.message}</p>
+          <OctantAlert tone="warning">{catalogue.message}</OctantAlert>
           <OctantButton
             onClick={() => void loadPage(trimmedQuery)}
             size="sm"
@@ -352,7 +353,9 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
 
       {catalogue.kind === "unavailable" ? (
         <>
-          <p role="alert">{catalogue.remediation ?? UNAVAILABLE_FALLBACKS[catalogue.reason]}</p>
+          <OctantAlert tone="warning">
+            {catalogue.remediation ?? UNAVAILABLE_FALLBACKS[catalogue.reason]}
+          </OctantAlert>
           <OctantButton
             onClick={() => void loadPage(trimmedQuery)}
             size="sm"

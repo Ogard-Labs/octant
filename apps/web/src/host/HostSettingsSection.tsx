@@ -36,6 +36,7 @@ import { FederatedHostsLifecyclePanel } from "./FederatedHostsLifecyclePanel";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { HostDataMap } from "@octant/contracts/host-data-map";
 import { HostDataMapView } from "./HostDataMap";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * The Settings host card for one local or headless
@@ -770,9 +771,9 @@ function Identifier({ children }: { readonly children: string }) {
 function BackupOutcomeView({ outcome }: { readonly outcome: HostBackupOutcome }) {
   if (outcome.kind === "failed") {
     return (
-      <p className="settings-section-line" role="alert">
+      <OctantAlert className="settings-section-line" tone="warning">
         The backup was not created ({outcome.code}). Check the host logs.
-      </p>
+      </OctantAlert>
     );
   }
   return (

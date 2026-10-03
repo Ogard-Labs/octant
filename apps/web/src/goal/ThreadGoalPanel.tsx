@@ -150,6 +150,7 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
         </form>
       ) : null}
       {controller.commandMessage === undefined ? null : (
+        /* ui-boundary-exception: inline-field-error */
         <p className="thread-goal__command-error" role="alert">
           <AlertTriangle aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>{controller.commandMessage}</span>

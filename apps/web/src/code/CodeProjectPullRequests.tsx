@@ -17,6 +17,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { relativeTimeLabel } from "../lib/relativeTime";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface CodeProjectPullRequestsProps {
   readonly load: (query: CodeProjectPullRequestQuery) => Promise<CodeProjectPullRequestView>;
@@ -212,9 +213,9 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
 
       {view === undefined ? (
         workspace.status === "error" ? (
-          <p className="code-project-pull-requests__status" role="alert">
+          <OctantAlert className="code-project-pull-requests__status" tone="warning">
             {workspace.message}
-          </p>
+          </OctantAlert>
         ) : null
       ) : !hasProjects ? (
         dock ? (
@@ -256,9 +257,9 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       ) : null}
       {view !== undefined && hasProjects && !onGitHub && workspace.status === "error" ? (
         // A check that failed must not read as "still not on GitHub".
-        <p className="code-project-pull-requests__status" role="alert">
+        <OctantAlert className="code-project-pull-requests__status" tone="warning">
           {workspace.message}
-        </p>
+        </OctantAlert>
       ) : null}
       {view === undefined || !hasProjects || !onGitHub ? null : (
         <>
@@ -271,9 +272,9 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             {truncationCopy(view, dock)}
           </p>
           {workspace.status === "error" ? (
-            <p className="code-project-pull-requests__status" role="alert">
+            <OctantAlert className="code-project-pull-requests__status" tone="warning">
               {workspace.message}
-            </p>
+            </OctantAlert>
           ) : null}
           {visibleRows.length === 0 && normalizedSearch !== "" ? (
             <SurfaceEmpty

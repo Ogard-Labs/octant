@@ -14,6 +14,7 @@ import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import "./agent-hierarchy.css";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 // The description says what the choice does, not what it was meant to do.
 // Subagents start only when the thread's agent delegates part of its work, so
@@ -115,9 +116,9 @@ export function AgentRunSettingsPanel(props: {
   }
   if (status === "error") {
     return (
-      <p className="agent-run-settings-panel__error" role="alert">
+      <OctantAlert className="agent-run-settings-panel__error" tone="danger">
         {message ?? "Agents settings are unavailable."}
-      </p>
+      </OctantAlert>
     );
   }
 

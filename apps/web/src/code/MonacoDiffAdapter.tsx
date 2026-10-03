@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { EditorTypographyProjection } from "@octant/theme/typography";
 import { useTypographyProjection } from "../theme/TypographyProvider";
 import type { MonacoDiffRuntime, MonacoDiffSession } from "./MonacoEditorAdapter";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface MonacoDiffAdapterProps {
   readonly ariaLabel: string;
@@ -73,7 +74,9 @@ export function MonacoDiffAdapter(props: MonacoDiffAdapterProps) {
     <>
       <section aria-label={props.ariaLabel} className="code-diff-pane__editor" ref={element} />
       {runtimeUnavailable ? (
-        <p role="alert">The Code editor engine is unavailable. Retry this tab.</p>
+        <OctantAlert tone="warning">
+          The Code editor engine is unavailable. Retry this tab.
+        </OctantAlert>
       ) : null}
     </>
   );

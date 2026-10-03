@@ -245,6 +245,7 @@ function SpeechEndpointForm(props: SpeechEndpointFormProps) {
           : " You can also enter another supported model ID."}
       </p>
       {problem === undefined ? null : (
+        /* ui-boundary-exception: inline-field-error */
         <p className="provider-settings__field-guidance" role="alert">
           {problem}
         </p>

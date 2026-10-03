@@ -19,6 +19,7 @@ import type { ProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import type { ZenLiveThreadCard } from "./ZenThreadElement";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 const ZenCodeThreadWorkspace = lazy(() =>
   import("../code/CodeThreadWorkspace").then(({ CodeThreadWorkspace }) => ({
@@ -182,9 +183,9 @@ function ZenChatCardSurface(props: {
   if (controller.status === "disconnected" && controller.activeView === undefined) {
     return (
       <div className="zen-thread-element__unreachable">
-        <p role="alert">
+        <OctantAlert tone="warning">
           {controller.errorMessage ?? "This thread could not be reached from the focus zone."}
-        </p>
+        </OctantAlert>
         <OctantButton onClick={controller.retry} size="sm" type="button" variant="secondary">
           Try again
         </OctantButton>

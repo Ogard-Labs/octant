@@ -8,6 +8,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ShellState } from "../shell/ShellState";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 const MonacoDiffAdapter = lazy(() =>
   import("../code/MonacoDiffAdapter").then((module) => ({ default: module.MonacoDiffAdapter })),
@@ -71,12 +72,12 @@ export function CommitDetail(props: {
         <code title={props.oid}>{props.oid.slice(0, 10)}</code>
       </div>
       {message === undefined ? null : (
-        <div className="git-history__notice" role="alert">
+        <OctantAlert className="git-history__notice" tone="warning">
           {message}
           <OctantButton variant="ghost" onClick={() => setRetry((value) => value + 1)}>
             Retry
           </OctantButton>
-        </div>
+        </OctantAlert>
       )}
       {detail === undefined ? (
         message === undefined ? (

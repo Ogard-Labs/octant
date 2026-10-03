@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { EditorTypographyProjection } from "@octant/theme/typography";
 import { useTypographyProjection } from "../theme/TypographyProvider";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface MonacoAdapterSession {
   readonly dispose: () => void;
@@ -126,7 +127,9 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
         tabIndex={0}
       />
       {runtimeUnavailable ? (
-        <p role="alert">The Code editor engine is unavailable. Retry this tab.</p>
+        <OctantAlert tone="warning">
+          The Code editor engine is unavailable. Retry this tab.
+        </OctantAlert>
       ) : null}
     </>
   );

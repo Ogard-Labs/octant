@@ -20,6 +20,7 @@ import {
   projectColorMenuValue,
 } from "./ProjectTile";
 import { ProjectSpendCeilingSection } from "../usage/ProjectSpendCeilingSection";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ProjectOverviewProps {
   readonly allowRootRelink?: boolean;
@@ -234,12 +235,12 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <strong>{props.project.binding.canonicalRoot}</strong>
             </div>
             {unavailable ? (
-              <div className="project-overview__warning" role="alert">
+              <OctantAlert className="project-overview__warning" tone="warning">
                 <div className="project-overview__warning-copy">
                   <strong>{archived ? "Unavailable while archived" : "Relink required"}</strong>
                   <p>{props.availability?.reason}</p>
                 </div>
-              </div>
+              </OctantAlert>
             ) : (
               <span className="project-overview__availability">
                 {archived

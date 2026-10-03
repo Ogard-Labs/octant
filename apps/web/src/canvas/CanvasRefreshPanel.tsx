@@ -284,6 +284,7 @@ function RefreshStatus(props: { readonly run: RefreshRun }) {
             ? "Refresh cancelled."
             : run.reason;
   return (
+    /* ui-boundary-exception: compact-status */
     <p
       className="canvas-refresh__status"
       data-run={run.kind}

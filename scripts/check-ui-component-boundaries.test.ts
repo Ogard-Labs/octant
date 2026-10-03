@@ -3,6 +3,7 @@ import {
   findFormValidationOwnerViolations,
   findRawControlBoundaryViolations,
   findRawControlInventory,
+  findRawLiveRegionViolations,
   findUiComponentBoundaryViolations,
   findWrongAdapterBoundaryViolations,
 } from "./check-ui-component-boundaries";
@@ -197,5 +198,62 @@ describe("UI component boundary check", () => {
           'export function Board() { return <OctantInput type="search" />;\nreturn <OctantCheckbox type="checkbox" />; }',
       }),
     ).toEqual([]);
+  });
+
+  it("rejects a raw alert outside the shared recipes", () => {
+    expect(
+      findRawLiveRegionViolations({
+        "apps/web/src/shell/DockModuleBoundary.tsx":
+          'export function Boundary() { return <p role="alert">Unavailable.</p>; }',
+      }),
+    ).toEqual([
+      'apps/web/src/shell/DockModuleBoundary.tsx:1 renders raw role="alert" on <p>; use OctantAlert, OctantToast, OctantDialog, or OctantConfirmDialog, or record an exception.',
+    ]);
+  });
+
+  it("accepts a recorded field-error exception and recipe owners", () => {
+    const fieldError = [
+      "export function Picker() {",
+      "  return (",
+      "    /* ui-boundary-exception: inline-field-error */",
+      '    <p id="path-error" role="alert">Choose a folder.</p>',
+      "  );",
+      "}",
+    ].join("\n");
+    const panel = [
+      "export function Picker() {",
+      "  return (",
+      "    /* ui-boundary-exception: non-modal-panel */",
+      '    <OctantCard role="dialog" />',
+      "  );",
+      "}",
+    ].join("\n");
+    expect(
+      findRawLiveRegionViolations({
+        "apps/web/src/projects/FolderPicker.tsx": fieldError,
+        "apps/web/src/ui/base/OctantToast.tsx":
+          'export function Toast() { return <div role={tone === "danger" ? "alert" : "status"} />; }',
+        "apps/web/src/shell/ShellState.tsx":
+          'export function ShellState() { return <OctantEmptyRoot role="alert" />; }',
+        "apps/web/src/App.tsx":
+          "if (document.querySelector(\"[role='dialog'], [role='menu']\") !== null) return;",
+      }),
+    ).toEqual([]);
+    expect(
+      findRawLiveRegionViolations({
+        "apps/web/src/zen/ZenThreadPicker.tsx": panel,
+      }),
+    ).toEqual([]);
+  });
+
+  it("rejects a raw dialog that is not a recorded exception", () => {
+    expect(
+      findRawLiveRegionViolations({
+        "apps/web/src/zen/ZenThreadPicker.tsx":
+          'export function Picker() { return <OctantCard role="dialog" />; }',
+      }),
+    ).toEqual([
+      'apps/web/src/zen/ZenThreadPicker.tsx:1 renders raw role="dialog" on <OctantCard>; use OctantAlert, OctantToast, OctantDialog, or OctantConfirmDialog, or record an exception.',
+    ]);
   });
 });

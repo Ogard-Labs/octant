@@ -21,6 +21,7 @@ import { useState } from "react";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 const REVIEW_STATE_LABELS: Record<CodePullRequestReviewOpinion["state"], string> = {
   approved: "Approved",
@@ -286,7 +287,7 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
           </OctantButton>
         </div>
       )}
-      {failure === undefined ? null : <p role="alert">{failure}</p>}
+      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
     </section>
   );
 }

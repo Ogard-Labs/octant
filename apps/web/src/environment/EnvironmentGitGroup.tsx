@@ -3,6 +3,7 @@ import { ChevronRight, FileDiff, Files, GitBranch } from "lucide-react";
 import type { CodeEnvironmentControllerStatus } from "./useCodeEnvironmentController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { EnvironmentTile } from "./EnvironmentGroup";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface EnvironmentGitGroupProps {
   /**
@@ -35,9 +36,9 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
   if (props.status !== "ready" || props.observation === undefined) {
     return (
       <div className="environment-git-group__state">
-        <p className="environment-git-group__error" role="alert">
+        <OctantAlert className="environment-git-group__error" tone="danger">
           {reason ?? "Repository environment is unavailable."}
-        </p>
+        </OctantAlert>
         <WayOut {...(props.action === undefined ? {} : { action: props.action })} />
       </div>
     );
@@ -46,9 +47,9 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
     return (
       <div className="environment-git-group__state">
         <strong>{props.observation.projectName}</strong>
-        <p className="environment-git-group__error" role="alert">
+        <OctantAlert className="environment-git-group__error" tone="danger">
           {props.observation.reason}
-        </p>
+        </OctantAlert>
         <WayOut {...(props.action === undefined ? {} : { action: props.action })} />
       </div>
     );

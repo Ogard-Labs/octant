@@ -8,6 +8,7 @@ import type {
 import { MessagesSquare } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface SideChatPanelProps {
   /** The workspace thread this Side Chat asks about, if one is open. */
@@ -142,7 +143,7 @@ function renderBody(state: SideChatState, props: SideChatPanelProps, retry: () =
   if (state.kind === "unavailable") {
     return (
       <div className="side-chat__empty">
-        <p role="alert">{state.reason}</p>
+        <OctantAlert tone="warning">{state.reason}</OctantAlert>
         <OctantButton onClick={retry} size="sm" type="button" variant="secondary">
           Try again
         </OctantButton>

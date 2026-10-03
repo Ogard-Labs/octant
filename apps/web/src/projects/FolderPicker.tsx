@@ -13,6 +13,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface FolderPickerProps {
   readonly client: FolderBrowseClient;
@@ -287,9 +288,9 @@ export function FolderPicker(props: FolderPickerProps) {
         ) : null}
       </div>
       {errorMessage === undefined || status === "error" ? null : (
-        <p className="folder-picker__error" role="alert">
+        <OctantAlert className="folder-picker__error" tone="danger">
           {errorMessage}
-        </p>
+        </OctantAlert>
       )}
       {props.mode === "code" && props.showGitInit !== false ? (
         <label className="folder-picker__git-init" htmlFor="folder-picker-initialize-git">

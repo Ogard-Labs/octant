@@ -7,6 +7,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface WorkResearchPanelProps {
   readonly briefs: ReadonlyArray<WorkResearchBriefView>;
@@ -174,9 +175,9 @@ function NewBriefForm(props: {
         New research brief
       </OctantButton>
       {message === undefined ? null : (
-        <p className="work-research__new-brief-error" role="alert">
+        <OctantAlert className="work-research__new-brief-error" tone="danger">
           {message}
-        </p>
+        </OctantAlert>
       )}
     </form>
   );
@@ -417,9 +418,9 @@ function AddSourceForm(props: {
         Add source
       </OctantButton>
       {message === undefined ? null : (
-        <p className="work-research__source-form-error" role="alert">
+        <OctantAlert className="work-research__source-form-error" tone="danger">
           {message}
-        </p>
+        </OctantAlert>
       )}
     </form>
   );
@@ -462,9 +463,9 @@ function RevokeSourceButton(props: {
         Revoke
       </OctantButton>
       {message === undefined ? null : (
-        <span className="work-research__source-revoke-error" role="alert">
+        <OctantAlert className="work-research__source-revoke-error" tone="danger">
           {message}
-        </span>
+        </OctantAlert>
       )}
     </>
   );
@@ -554,9 +555,9 @@ function EvidenceForm(props: {
         Record evidence
       </OctantButton>
       {message === undefined ? null : (
-        <p className="work-research__evidence-form-error" role="alert">
+        <OctantAlert className="work-research__evidence-form-error" tone="danger">
           {message}
-        </p>
+        </OctantAlert>
       )}
     </form>
   );
@@ -653,9 +654,9 @@ function ClaimForm(props: {
         Add claim
       </OctantButton>
       {message === undefined ? null : (
-        <p className="work-research__claim-form-error" role="alert">
+        <OctantAlert className="work-research__claim-form-error" tone="danger">
           {message}
-        </p>
+        </OctantAlert>
       )}
     </form>
   );
@@ -695,9 +696,9 @@ function FinalizeReportButton(props: {
         Finalize report
       </OctantButton>
       {message === undefined ? null : (
-        <p className="work-research__finalize-error" role="alert">
+        <OctantAlert className="work-research__finalize-error" tone="danger">
           {message}
-        </p>
+        </OctantAlert>
       )}
     </div>
   );

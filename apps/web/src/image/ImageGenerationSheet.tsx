@@ -12,6 +12,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ImageGenerationDraft {
   readonly profile: ImageGenerationProfileView;
@@ -270,7 +271,9 @@ export function ImageGenerationSheet(props: ImageGenerationSheetProps) {
                       : (job.safetyRefusal ?? job.failure?.message ?? "Failed.")}
             </p>
           )}
-          {props.errorMessage === undefined ? null : <p role="alert">{props.errorMessage}</p>}
+          {props.errorMessage === undefined ? null : (
+            <OctantAlert tone="warning">{props.errorMessage}</OctantAlert>
+          )}
         </>
       )}
       <div className="row">

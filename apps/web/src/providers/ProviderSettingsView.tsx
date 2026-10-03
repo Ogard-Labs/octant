@@ -45,6 +45,7 @@ import {
 } from "./ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "./ProviderSettingsList";
 import type { TransientProviderCredential } from "./useProviderController";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ProviderSettingsViewProps {
   readonly status: "loading" | "ready" | "disconnected";
@@ -360,9 +361,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           </OctantButton>
         ) : null}
         {props.message === undefined ? null : (
-          <p className="provider-settings__alert" role="alert">
+          <OctantAlert className="provider-settings__alert" tone="warning">
             {props.message}
-          </p>
+          </OctantAlert>
         )}
       </div>
       {props.discovery}

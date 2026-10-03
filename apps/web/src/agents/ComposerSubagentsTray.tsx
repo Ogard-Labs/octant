@@ -11,6 +11,7 @@ import {
 import { SubagentStatusIcon, subagentElapsedLabel, subagentStatusWord } from "./subagentStatus";
 import { useChildRunStatus } from "./useChildRunStatus";
 import "./agent-hierarchy.css";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * One thread's subagents, read for the composer of the pane that shows it.
@@ -185,9 +186,9 @@ export function SubagentsTray(props: SubagentsTrayProps) {
         </p>
       ) : null}
       {props.errorMessage === undefined ? null : (
-        <p className="composer-subagents__notice" role="alert">
+        <OctantAlert className="composer-subagents__notice" tone="warning">
           {props.errorMessage}
-        </p>
+        </OctantAlert>
       )}
     </div>
   );

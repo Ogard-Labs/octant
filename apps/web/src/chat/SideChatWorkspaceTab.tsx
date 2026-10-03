@@ -10,6 +10,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { ChatWorkspace } from "./ChatWorkspace";
 import { SideChatPanel } from "./SideChatPanel";
 import { useChatController, type ChatReadCursorStore } from "./useChatController";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * The provider facts a sidecar's Chat surface reads. Narrowed on purpose: the
@@ -74,10 +75,10 @@ export function SideChatWorkspaceTab(props: SideChatWorkspaceTabProps) {
         // thread as the restored one.
         tab.sidecarThreadId !== undefined &&
         String(tab.sidecarThreadId) !== String(sidecarThreadId) ? (
-          <p className="side-chat__empty" role="alert">
+          <OctantAlert className="side-chat__empty" tone="warning">
             This tab&rsquo;s Side Chat conversation no longer exists. Close the tab and open Side
             Chat again from the thread.
-          </p>
+          </OctantAlert>
         ) : (
           <SideChatSidecarSurface
             key={String(sidecarThreadId)}
@@ -137,9 +138,9 @@ function SideChatSidecarSurface(props: {
   if (controller.status === "disconnected" && controller.activeView === undefined) {
     return (
       <div className="side-chat__empty">
-        <p role="alert">
+        <OctantAlert tone="warning">
           {controller.errorMessage ?? "This Side Chat conversation could not be opened."}
-        </p>
+        </OctantAlert>
         <OctantButton onClick={controller.retry} size="sm" type="button" variant="secondary">
           Try again
         </OctantButton>

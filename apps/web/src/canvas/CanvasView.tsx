@@ -3,6 +3,7 @@ import type { CanvasActionRuntime } from "./canvasActionRuntime";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { decodeCanvasForRender } from "./canvasRuntime";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface CanvasViewProps {
   readonly input: unknown;
@@ -25,10 +26,10 @@ export function CanvasView({
   const gate = decodeCanvasForRender(input);
   if (!gate.ok) {
     return (
-      <div role="alert" className="canvas-view__denied">
+      <OctantAlert className="canvas-view__denied" tone="warning">
         <h2>Unable to render canvas</h2>
         <p>The canvas did not pass the safety check, so its content was not rendered.</p>
-      </div>
+      </OctantAlert>
     );
   }
   return (

@@ -10,6 +10,7 @@ import type { AppleSimulatorLiveFrame } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { AppleSimulatorLiveFrameView } from "./AppleSimulatorLiveFrame";
 import type { AppleSimulatorLiveScreen } from "./useAppleSimulatorLiveScreen";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export type AppleWorkbenchStatus =
   | "loading"
@@ -131,9 +132,9 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
         />
       )}
       {props.actionMessage === undefined ? null : (
-        <p className="apple-workbench__action-message" role="alert">
+        <OctantAlert className="apple-workbench__action-message" tone="warning">
           {props.actionMessage}
-        </p>
+        </OctantAlert>
       )}
       <SimulatorList
         busy={props.busy === true}
@@ -230,9 +231,9 @@ function AppleDevicePane(
         </p>
       ) : null}
       {props.actionMessage === undefined ? null : (
-        <p className="apple-workbench__action-message" role="alert">
+        <OctantAlert className="apple-workbench__action-message" tone="warning">
           {props.actionMessage}
-        </p>
+        </OctantAlert>
       )}
       <DeviceRail
         busy={props.busy === true}
@@ -327,6 +328,7 @@ function AppleWorkbenchState(
       {device ? null : <span className="apple-workbench__eyebrow">Apple development</span>}
       <LiveFrame {...props} chrome={device ? "device" : "workbench"} />
       <h1>{title}</h1>
+      /* ui-boundary-exception: compact-status */
       <p role={props.status === "failed" ? "alert" : undefined}>{message}</p>
       {props.onRetry === undefined || props.status === "loading" ? null : (
         <OctantButton onClick={props.onRetry} type="button" variant="outline">

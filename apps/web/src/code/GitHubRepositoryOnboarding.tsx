@@ -12,6 +12,7 @@ import { decodeBindingReceiptId } from "@octant/contracts/projects";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { GITHUB_VISIBILITY_LABELS, GitHubRepositoryPicker } from "./GitHubRepositoryPicker";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * The managed-clone flow that turns a GitHub repository into one ordinary
@@ -401,7 +402,9 @@ function FlowBody(props: FlowBodyProps) {
     case "refused":
       return (
         <div className="github-onboarding__body">
-          <p role="alert">{phase.remediation ?? REFUSAL_FALLBACKS[phase.reason]}</p>
+          <OctantAlert tone="warning">
+            {phase.remediation ?? REFUSAL_FALLBACKS[phase.reason]}
+          </OctantAlert>
           <div className="github-onboarding__actions">
             {props.onBackToDestination === undefined ? null : (
               <OctantButton
@@ -427,9 +430,9 @@ function FlowBody(props: FlowBodyProps) {
     case "failed":
       return (
         <div className="github-onboarding__body">
-          <p role="alert">
+          <OctantAlert tone="warning">
             {phase.operation.failure?.remediation ?? "The managed clone did not complete."}
-          </p>
+          </OctantAlert>
           <p className="github-onboarding__note">
             Failure code: {phase.operation.failure?.code ?? "unavailable"}. No partial checkout was
             attached; any staging remains quarantined on the host.
@@ -499,10 +502,10 @@ function FlowBody(props: FlowBodyProps) {
     case "project-failed":
       return (
         <div className="github-onboarding__body">
-          <p role="alert">
+          <OctantAlert tone="warning">
             Project creation failed. The verified checkout remains on the host and is never deleted;
             retry now or attach it again later.
-          </p>
+          </OctantAlert>
           <div className="github-onboarding__actions">
             <OctantButton
               onClick={() => props.onRetryProjectCreation(phase.receipt, phase.operation)}
