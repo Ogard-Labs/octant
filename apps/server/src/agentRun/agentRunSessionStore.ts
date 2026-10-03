@@ -22,6 +22,13 @@ const SessionRecord = Schema.Struct({
   sessionId: ProviderSessionId,
   resumeCursor: Schema.optional(ProviderResumeCursor),
   workspaceIdentity: Schema.optional(Schema.NonEmptyString.pipe(Schema.maxLength(256))),
+  pendingContinuation: Schema.optional(
+    Schema.Struct({
+      generation: Schema.Int.pipe(Schema.positive()),
+      message: Schema.NonEmptyString.pipe(Schema.maxLength(4096)),
+      state: Schema.Literal("unsent", "delivery-unknown"),
+    }),
+  ),
 });
 const decodeSessionRecord = Schema.decodeUnknownSync(SessionRecord);
 const ProviderIdentityRecord = Schema.Struct({

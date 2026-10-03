@@ -492,6 +492,27 @@ export class ProviderCapacityScheduler {
     return record.reservation;
   }
 
+  /** Return an admitted slot when the owner proves provider execution never started. */
+  releaseUnstarted(reservationId: CapacityReservationId): {
+    readonly reservation: CapacityReservation;
+    readonly dispatched: ReadonlyArray<CapacityReservation>;
+  } {
+    const record = this.#knownReservation(reservationId);
+    if (record.reservation.state === "released" && !record.countsCapacity)
+      return { reservation: record.reservation, dispatched: [] };
+    if (record.reservation.state !== "reserved")
+      reject("invalid-transition", "Only a reserved, unstarted execution can return its capacity.");
+    record.reservation = this.#transitionAt(record.reservation, "released", this.#now());
+    record.concurrent = false;
+    record.countsCapacity = false;
+    record.dispatched = false;
+    record.terminalSignature = "cancelled:";
+    return {
+      reservation: record.reservation,
+      dispatched: this.drain(record.request.providerInstanceId).dispatched,
+    };
+  }
+
   recordTerminal(signal: CapacityTerminalSignal): {
     readonly reservation: CapacityReservation;
     readonly dispatched: ReadonlyArray<CapacityReservation>;

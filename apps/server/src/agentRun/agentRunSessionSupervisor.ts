@@ -5,6 +5,7 @@ import {
   isAgentRunSessionDeath,
   AgentRunSessionError,
   type AgentRunSessionHandle,
+  type AgentRunPreparedResume,
   type AgentRunResumeReadiness,
   type AgentRunSessionOutcome,
   type AgentRunSessionPort,
@@ -94,7 +95,28 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
     return this.#start(run, input ?? {});
   }
 
-  #start(run: AgentRun, continuation?: { readonly message?: string }): AgentRunSessionHandle {
+  prepareResume(
+    run: AgentRun,
+    input?: { readonly message?: string },
+  ): AgentRunPreparedResume | undefined {
+    if (this.#sessions.has(run.id))
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "This child still owns an active session.",
+      );
+    const prepared = this.#port.prepareResume?.(run, input);
+    if (prepared === undefined) return undefined;
+    return {
+      start: (started) => this.#start(started, input ?? {}, prepared),
+      release: prepared.release,
+    };
+  }
+
+  #start(
+    run: AgentRun,
+    continuation?: { readonly message?: string },
+    prepared?: AgentRunPreparedResume,
+  ): AgentRunSessionHandle {
     if (this.#sessions.has(run.id)) {
       throw new AgentRunProcessSupervisorError(
         "duplicate",
@@ -102,7 +124,11 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
       );
     }
     const handle =
-      continuation === undefined ? this.#port.start(run) : this.#port.resume?.(run, continuation);
+      prepared !== undefined
+        ? prepared.start(run)
+        : continuation === undefined
+          ? this.#port.start(run)
+          : this.#port.resume?.(run, continuation);
     if (handle === undefined)
       throw new AgentRunSessionError(
         "resume-unavailable",

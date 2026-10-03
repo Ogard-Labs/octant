@@ -119,9 +119,14 @@ describe("AgentsCenter", () => {
     expect(resume).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
     await act(async () =>
-      finish?.({ kind: "run-command-failed", message: "Saved session is unavailable." }),
+      finish?.({
+        kind: "run-command-failed",
+        message: "This follow-up exceeds the current spend ceiling.",
+      }),
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent("Saved session is unavailable.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This follow-up exceeds the current spend ceiling.",
+    );
     expect(screen.getByRole("textbox", { name: "Follow-up message" })).toHaveValue(
       "  Keep my draft.  ",
     );
