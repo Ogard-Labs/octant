@@ -67,6 +67,7 @@ export interface AgentRunEventStoreOptions {
 }
 
 export interface AppendAgentRunStatusChangedInput {
+  readonly generation?: number;
   readonly runId: AgentRunId;
   readonly fromStatus: AgentRunLifecycleStatus;
   readonly toStatus: AgentRunLifecycleStatus;
@@ -249,6 +250,7 @@ export class AgentRunEventStore {
         runId,
         fromStatus: input.fromStatus,
         toStatus: input.toStatus,
+        ...(input.generation === undefined ? {} : { generation: input.generation }),
         version: input.version,
         ...(input.recoveryReason === undefined ? {} : { recoveryReason: input.recoveryReason }),
         ...(input.result === undefined ? {} : { result: input.result }),

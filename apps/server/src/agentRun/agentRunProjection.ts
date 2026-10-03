@@ -98,6 +98,7 @@ export interface ListAgentRunCenterCandidatesInput {
 }
 
 export interface AgentRunStatusApplyInput {
+  readonly generation?: number;
   readonly runId: AgentRunId;
   readonly fromStatus: AgentRunLifecycleStatus;
   readonly toStatus: AgentRunLifecycleStatus;
@@ -182,6 +183,7 @@ export class AgentRunProjection implements Projection {
         runId: payload.runId,
         fromStatus: payload.fromStatus,
         toStatus: payload.toStatus,
+        ...(payload.generation === undefined ? {} : { generation: payload.generation }),
         version: payload.version,
         updatedAt: event.occurredAt as UtcTimestamp,
         ...(payload.recoveryReason === undefined ? {} : { recoveryReason: payload.recoveryReason }),
@@ -236,7 +238,12 @@ export class AgentRunProjection implements Projection {
     if (existing.lifecycleStatus !== input.fromStatus && existing.version + 1 === input.version) {
       // Allow only if versions still advance; otherwise ignore inconsistent out-of-order.
     }
+    const generation = input.generation ?? existing.generation ?? 1;
+    const newGeneration = generation > (existing.generation ?? 1);
     const {
+      result: previousResult,
+      resultDelivery: previousDelivery,
+      usageResume: previousUsageResume,
       recoveryReason: _previousRecoveryReason,
       usage: _previousUsage,
       usageLimit: _previousUsageLimit,
@@ -244,6 +251,14 @@ export class AgentRunProjection implements Projection {
     } = existing;
     const next = decodeAgentRun({
       ...runWithoutRecoveryReason,
+      generation,
+      ...(!newGeneration && previousResult !== undefined ? { result: previousResult } : {}),
+      ...(!newGeneration && previousDelivery !== undefined
+        ? { resultDelivery: previousDelivery }
+        : {}),
+      ...(!newGeneration && previousUsageResume !== undefined
+        ? { usageResume: previousUsageResume }
+        : {}),
       lifecycleStatus: input.toStatus,
       version: input.version,
       updatedAt: input.updatedAt,
@@ -253,7 +268,9 @@ export class AgentRunProjection implements Projection {
       ...(input.result === undefined ? {} : { result: input.result }),
       ...(input.usage === undefined ? {} : { usage: input.usage }),
       ...(input.usageLimit === undefined ? {} : { usageLimit: input.usageLimit }),
-      resultAcknowledgement: input.resultAcknowledgement ?? existing.resultAcknowledgement,
+      resultAcknowledgement: newGeneration
+        ? { required: false, acknowledged: false }
+        : (input.resultAcknowledgement ?? existing.resultAcknowledgement),
     });
     this.#index(next);
   }

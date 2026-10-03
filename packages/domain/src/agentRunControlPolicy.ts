@@ -166,18 +166,23 @@ export function assertAgentRunRetryAllowed(run: AgentRun, expectedVersion: Aggre
 export function assertAgentRunResumeAllowed(
   run: AgentRun,
   expectedVersion: AggregateVersion,
+  message?: string,
 ): void {
   assertExpectedVersion(run, expectedVersion);
-  if (run.lifecycleStatus === "waiting") return;
-  if (run.lifecycleStatus !== "interrupted") {
-    reject("unsupported-transition", "Only a waiting or resumable interrupted child can resume.");
-  }
-  if (run.recoveryReason === "restart-without-resumable-execution") {
-    reject(
-      "unsupported-transition",
-      "This child has no resume evidence after restart; retry it instead.",
-    );
-  }
+  // Cursor/capability evidence is checked by the runtime before continuation;
+  // a restart's historical reason cannot prove that durable evidence is absent.
+  if (run.lifecycleStatus === "waiting" || run.lifecycleStatus === "interrupted") return;
+  if (
+    run.lifecycleStatus === "completed" &&
+    message !== undefined &&
+    message.trim().length > 0 &&
+    message.length <= 4096
+  )
+    return;
+  reject(
+    "unsupported-transition",
+    "Resume requires a waiting/interrupted child or an explicit completed-child follow-up.",
+  );
 }
 
 /**

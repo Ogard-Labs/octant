@@ -1414,9 +1414,17 @@ describe("durable child provider identity", () => {
           verifyCodeWorkspace: async () => ({ status: "verified", identity: "original-directory" }),
         }),
       );
-      expect(second.checkResume?.(run)).toEqual({ status: "ready" });
+      expect(second.checkResume?.({ ...run, lifecycleStatus: "completed" })).toEqual({
+        status: "ready",
+      });
+      expect(second.checkResume?.({ ...run, lifecycleStatus: "cancelled" })).toMatchObject({
+        status: "refused",
+      });
       expect(provider.acquired).toHaveLength(1);
-      const continued = second.resume?.(run, { message: "Add the regression evidence" });
+      const continued = second.resume?.(
+        { ...run, generation: 2 },
+        { message: "Add the regression evidence" },
+      );
       expect(continued).toBeDefined();
       await vi.waitFor(() => expect(provider.turns).toHaveLength(2));
       expect(provider.resumes).toEqual([
@@ -1436,6 +1444,7 @@ describe("durable child provider identity", () => {
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(provider, { supportsResume: () => true }),
     );
+    expect(runtime.checkResume?.(agentRun())).toMatchObject({ status: "refused" });
     expect(() => runtime.resume?.(agentRun())).toThrow("Retry");
     expect(provider.acquired).toEqual([]);
   });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeAgentRunControlRequest,
+  decodeAgentRunResumeRequest,
   decodeAgentRunCreationRequest,
   decodeAgentRunWorkspaceHandle,
 } from "./agentRunCreationRequest";
@@ -259,4 +260,20 @@ describe("AgentRunCreationRequest", () => {
       }),
     ).toThrow();
   });
+});
+
+it("accepts a legacy resume or bounded explicit follow-up without accepting authority fields", () => {
+  const request = { runId: ids.request, expectedVersion: 4 };
+  expect(decodeAgentRunResumeRequest(request).message).toBeUndefined();
+  expect(decodeAgentRunResumeRequest({ ...request, message: "Continue" }).message).toBe("Continue");
+  for (const message of ["", " ", "x".repeat(4097)]) {
+    expect(() => decodeAgentRunResumeRequest({ ...request, message })).toThrow();
+  }
+  expect(() =>
+    decodeAgentRunResumeRequest({
+      ...request,
+      message: "Continue",
+      authority: base.requestedAuthority,
+    }),
+  ).toThrow();
 });

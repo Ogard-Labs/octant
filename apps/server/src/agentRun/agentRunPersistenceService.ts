@@ -24,6 +24,7 @@ import {
 import {
   AGENT_RUN_DEPENDENCY_WAITING_REASON,
   AgentRunPolicyRejected,
+  assertAgentRunCapacityAvailable,
   agentRunPoolRouteWaitingReason,
   assertAgentRunUsageResumeCancellable,
   assertAgentRunUsageResumeSchedulable,
@@ -219,6 +220,13 @@ export class AgentRunPersistenceService {
     const current = this.#projection.getById(runId);
     let next: AgentRun;
     try {
+      if (command.kind === "resume-agent-run" && current?.lifecycleStatus === "completed") {
+        const counts = this.#projection.activeCounts();
+        assertAgentRunCapacityAvailable({
+          activeGlobal: counts.global,
+          activeForParent: counts.byParent.get(current.parentThreadId) ?? 0,
+        });
+      }
       next = evaluateAgentRunCommand(current, command, this.#now());
     } catch (error) {
       return policyFailure(error);
@@ -296,6 +304,7 @@ export class AgentRunPersistenceService {
         runId: next.id,
         fromStatus,
         toStatus: next.lifecycleStatus,
+        generation: next.generation ?? 1,
         version: next.version,
         expectedVersion: command.expectedVersion,
         occurredAt: next.updatedAt,
@@ -321,6 +330,7 @@ export class AgentRunPersistenceService {
       runId: next.id,
       fromStatus,
       toStatus: next.lifecycleStatus,
+      generation: next.generation ?? 1,
       version: next.version,
       updatedAt: next.updatedAt,
       ...(next.recoveryReason === undefined ? {} : { recoveryReason: next.recoveryReason }),
@@ -553,6 +563,7 @@ export class AgentRunPersistenceService {
         runId: payload.runId,
         fromStatus: payload.fromStatus,
         toStatus: payload.toStatus,
+        ...(payload.generation === undefined ? {} : { generation: payload.generation }),
         version: payload.version,
         updatedAt: envelope.occurredAt as UtcTimestamp,
         ...(payload.recoveryReason === undefined ? {} : { recoveryReason: payload.recoveryReason }),

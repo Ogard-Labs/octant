@@ -196,7 +196,7 @@ describe("steer, retry, and resume authorization", () => {
     );
   });
 
-  it("resumes a waiting child and refuses a restart interruption that has no resume evidence", () => {
+  it("admits waiting and interrupted children for runtime resume evidence checks", () => {
     expect(() => assertAgentRunResumeAllowed(run("waiting"), 3 as never)).not.toThrow();
     expect(() =>
       assertAgentRunResumeAllowed(
@@ -209,7 +209,7 @@ describe("steer, retry, and resume authorization", () => {
         { ...run("interrupted"), recoveryReason: "restart-without-resumable-execution" },
         3 as never,
       ),
-    ).toThrow(AgentRunPolicyRejected);
+    ).not.toThrow();
   });
 });
 
