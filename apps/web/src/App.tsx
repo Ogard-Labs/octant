@@ -4325,6 +4325,28 @@ function LaunchedShell(
             (thread) => String(thread.id) === dockThread.threadId,
           );
     const thread = codeThread ?? workThread;
+    // Where the thread runs, read the same way the pane header's environment
+    // mark reads it: from the pane showing the thread. Labelling every thread
+    // with this computer's name told people remote work ran locally; when the
+    // pane cannot say, the card says nothing rather than guess.
+    const dockThreadSurface = findWorkspacePane(
+      controller.workspace.layouts[activeMode],
+      controller.workspace.activePaneIds[activeMode],
+    )?.surface;
+    const dockThreadHostId =
+      dockThreadSurface !== undefined &&
+      "threadId" in dockThreadSurface &&
+      String(dockThreadSurface.threadId) === dockThread.threadId
+        ? "hostId" in dockThreadSurface && dockThreadSurface.hostId !== undefined
+          ? String(dockThreadSurface.hostId)
+          : String(LOCAL_HOST_ID)
+        : undefined;
+    const dockThreadHost =
+      dockThreadHostId === undefined
+        ? undefined
+        : dockThreadHostId === String(LOCAL_HOST_ID)
+          ? (localHost?.displayName ?? localHostDisplayName())
+          : environmentNames.get(dockThreadHostId);
     const projectName =
       thread === undefined
         ? undefined
@@ -4364,6 +4386,7 @@ function LaunchedShell(
         {...(codeRow?.checkoutChip === undefined
           ? {}
           : { branchFallback: codeRow.checkoutChip.label })}
+        {...(dockThreadHost === undefined ? {} : { host: dockThreadHost })}
         loadBoard={loadCodeBoard}
         mode={mode}
         model={modelLabel}

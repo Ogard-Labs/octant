@@ -24,6 +24,7 @@ describe("the thread dock overview", () => {
         facts={{
           project: "Octant",
           checkout: { branch: "feature/dock-overview", worktree: true },
+          host: "This Mac",
           model: "Opus",
           access: "Ask for approvals",
           context: { label: "74k of 200k", percent: 37 },
@@ -35,11 +36,7 @@ describe("the thread dock overview", () => {
 
     const runningNow = screen.getByRole("region", { name: "Thread overview" });
     const sections = within(runningNow).getAllByRole("heading", { level: 2 });
-    expect(sections.map((heading) => heading.textContent)).toEqual([
-      "Running now",
-      "This thread",
-      "Changes",
-    ]);
+    expect(sections.map((heading) => heading.textContent)).toEqual(["Running now", "This thread"]);
 
     const row = screen.getByRole("button", { name: /Fix the flaky sync test/ });
     expect(within(row).getByText("Atlas")).toBeVisible();
@@ -48,10 +45,15 @@ describe("the thread dock overview", () => {
     expect(onOpenRunning).toHaveBeenCalledWith(running);
 
     const facts = within(screen.getByRole("region", { name: "Thread overview" }));
+    // The card names the Project, then the branch, and where it runs.
+    expect(facts.getByText("Octant")).toBeVisible();
     expect(facts.getByText("feature/dock-overview")).toBeVisible();
     expect(facts.getByText("Worktree")).toBeVisible();
+    expect(facts.getByText("This Mac")).toBeVisible();
+    expect(facts.getByText("Opus")).toBeVisible();
     expect(facts.getByText("Ask for approvals")).toBeVisible();
-    expect(facts.getByText("74k of 200k (37%)")).toBeVisible();
+    expect(facts.getByText("37%")).toBeVisible();
+    expect(facts.getByText("74k of 200k")).toBeVisible();
     expect(facts.getByRole("meter", { name: "Context used" })).toHaveAttribute(
       "aria-valuenow",
       "37",
@@ -60,7 +62,10 @@ describe("the thread dock overview", () => {
     expect(facts.getByText("+120")).toBeVisible();
     expect(facts.getByText("−8")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Open review" }));
+    // The Changes box is the way into Review, and still announces what it shows.
+    const review = screen.getByRole("button", { name: "Open review" });
+    expect(review).toHaveAccessibleDescription("+120 −8");
+    await user.click(review);
     expect(onOpenReview).toHaveBeenCalledOnce();
   });
 

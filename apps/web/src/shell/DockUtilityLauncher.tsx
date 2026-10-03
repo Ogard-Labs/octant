@@ -1,10 +1,9 @@
 import { GitPullRequest, Plus } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState, type Ref } from "react";
-import { useDismissOnOutsidePointer } from "../lib/useDismissOnOutsidePointer";
+import { useState } from "react";
 import { DockToolIcon } from "./dockToolIcons";
 import { groupDockTools } from "./dockToolGroups";
-import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantPopover } from "../ui/base/OctantPopover";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
 export interface DockUtilityLauncherSurface {
@@ -34,22 +33,6 @@ export interface DockUtilityLauncherProps {
 
 export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
   const [open, setOpen] = useState(false);
-  const disclosureId = useId();
-  const trigger = useRef<HTMLButtonElement>(null);
-  const firstAction = useRef<HTMLButtonElement>(null);
-  const region = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (open) firstAction.current?.focus();
-  }, [open]);
-
-  const dismiss = useCallback(() => setOpen(false), []);
-  useDismissOnOutsidePointer(open, dismiss, region);
-
-  function close() {
-    setOpen(false);
-    trigger.current?.focus();
-  }
 
   // A subject whose remaining tools are all gated away has nothing to offer,
   // and a permanently greyed-out plus reads as a broken control rather than as
@@ -57,76 +40,71 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
   const references = props.references ?? [];
   if (props.surfaces.length === 0 && references.length === 0) return null;
 
+  // The menu hangs from the plus in a portal. The in-flow menu was clipped by
+  // the dock's right edge, and the workaround that pinned it to the toolbar put
+  // it far from the button that opened it; the popover's collision handling
+  // keeps it under the plus and still inside the window.
   return (
-    <span className="dock-utility-launcher" ref={region}>
-      <IconButton
-        aria-controls={disclosureId}
-        aria-expanded={open}
-        icon={Plus}
-        label="Add tool"
-        onClick={() => setOpen((current) => !current)}
-        ref={trigger}
-      />
-      {open ? (
-        <span
-          className="workspace-disclosure dock-utility-launcher__disclosure"
-          id={disclosureId}
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            event.preventDefault();
-            close();
+    <span className="dock-utility-launcher">
+      <OctantPopover
+        align="start"
+        className="dock-utility-launcher__menu"
+        onOpenChange={setOpen}
+        open={open}
+        side="bottom"
+        title="Add tool"
+        trigger={<Plus aria-hidden="true" size={16} strokeWidth={1.5} />}
+        triggerClassName="shell-icon-button"
+        triggerLabel="Add tool"
+        triggerVariant="ghost-icon"
+      >
+        <DockToolLaunchList
+          onOpen={(surface) => {
+            props.onOpen(surface);
+            setOpen(false);
           }}
-        >
-          <DockToolLaunchList
-            firstAction={firstAction}
-            onOpen={(surface) => {
-              props.onOpen(surface);
-              close();
-            }}
-            surfaces={props.surfaces}
-          />
-          {references.length === 0 ? null : (
-            <>
-              <span className="workspace-disclosure__caption">Relevant to this thread</span>
-              {references.map((reference) => (
-                <OctantButton
-                  className="workspace-disclosure__action window-no-drag"
-                  key={reference.id}
-                  onClick={() => {
-                    reference.onOpen();
-                    close();
-                  }}
-                  type="button"
-                  variant="ghost"
-                >
-                  <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
-                  <span className="dock-utility-launcher__reference">
-                    <span>{reference.label}</span>
-                    {reference.detail === undefined ? null : (
-                      <span className="dock-utility-launcher__reference-detail">
-                        {reference.detail}
-                      </span>
-                    )}
-                  </span>
-                </OctantButton>
-              ))}
-            </>
-          )}
-        </span>
-      ) : null}
+          surfaces={props.surfaces}
+        />
+        {references.length === 0 ? null : (
+          <>
+            <span className="workspace-disclosure__caption">Relevant to this thread</span>
+            {references.map((reference) => (
+              <OctantButton
+                className="workspace-disclosure__action window-no-drag"
+                key={reference.id}
+                onClick={() => {
+                  reference.onOpen();
+                  setOpen(false);
+                }}
+                type="button"
+                variant="ghost"
+              >
+                <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
+                <span className="dock-utility-launcher__reference">
+                  <span>{reference.label}</span>
+                  {reference.detail === undefined ? null : (
+                    <span className="dock-utility-launcher__reference-detail">
+                      {reference.detail}
+                    </span>
+                  )}
+                </span>
+              </OctantButton>
+            ))}
+          </>
+        )}
+      </OctantPopover>
     </span>
   );
 }
 
 export function DockToolLaunchList(props: {
-  readonly firstAction?: Ref<HTMLButtonElement>;
   readonly onOpen: (surface: RightUtilityDockSurfaceId) => void;
   readonly surfaces: ReadonlyArray<DockUtilityLauncherSurface>;
 }) {
   const groups = groupDockTools(props.surfaces);
   return (
     <>
-      {groups.map((group, groupIndex) => (
+      {groups.map((group) => (
         <span
           aria-label={groups.length > 1 ? group.label : undefined}
           className="dock-utility-launcher__group"
@@ -136,12 +114,11 @@ export function DockToolLaunchList(props: {
           {groups.length > 1 ? (
             <span className="dock-utility-launcher__group-title">{group.label}</span>
           ) : null}
-          {group.surfaces.map((surface, index) => (
+          {group.surfaces.map((surface) => (
             <OctantButton
               className="workspace-disclosure__action window-no-drag"
               key={surface.id}
               onClick={() => props.onOpen(surface.id)}
-              ref={groupIndex === 0 && index === 0 ? props.firstAction : undefined}
               type="button"
               variant="ghost"
             >

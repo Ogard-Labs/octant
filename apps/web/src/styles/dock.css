@@ -169,25 +169,19 @@
   gap: 2px;
 }
 
-/* The launcher is the dock's own body, so its rows share the tab strip's
-   left edge: the body keeps the strip's 8px inset instead of the 16px a
-   tool's content gets, and each row's icon then lands under the tab icon. */
+/* The overview is a column of cards, so the body keeps a 12px inset: a card
+   draws its own edge, and that edge needs room on both sides. */
 .right-utility-dock__content:has(> .dock-start) {
-  padding: 0 var(--oct-space-2) var(--oct-space-3);
+  padding: 0 var(--oct-space-3) var(--oct-space-3);
   overflow-y: auto;
 }
 
-/* The overview and the launcher are one scrolling column. The launcher stays
-   whole beneath the overview, so a tool is never further than a scroll away,
-   and a hairline is all that separates the two. */
+/* The overview and the tools are one scrolling column. The tools stay whole
+   beneath the overview, so a tool is never further than a scroll away. */
 .dock-start {
   display: grid;
   align-content: start;
-}
-
-.dock-start > .dock-overview + .dock-work-map {
-  margin-top: var(--oct-space-2);
-  border-top: 1px solid var(--oct-hairline);
+  gap: var(--oct-space-4);
 }
 
 .dock-overview {
@@ -205,9 +199,7 @@
 }
 
 .dock-overview__section + .dock-overview__section {
-  margin-top: var(--oct-space-2);
-  padding-top: var(--oct-space-2);
-  border-top: 1px solid var(--oct-hairline);
+  margin-top: var(--oct-space-4);
 }
 
 .dock-overview__label {
@@ -304,92 +296,188 @@
   white-space: nowrap;
 }
 
-.dock-overview__facts {
-  display: grid;
-  gap: var(--oct-space-1);
-  margin: 0;
+/* The card's caption shares the card's edge, not the running list's row inset. */
+.dock-overview__label:has(+ .dock-thread-card) {
+  padding-inline: var(--oct-space-1);
 }
 
-.dock-overview__fact {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  align-items: baseline;
-  gap: var(--oct-space-2);
-  padding: 0 var(--oct-space-2);
-  border-inline: 1px solid transparent;
-}
-
-.dock-overview__fact-label {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.dock-overview__fact-value {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-1) var(--oct-space-2);
-  min-width: 0;
-  margin: 0;
-}
-
-.dock-overview__value {
-  min-width: 0;
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-sm);
-  overflow-wrap: anywhere;
-}
-
-.dock-overview__chip {
-  max-width: 100%;
-  overflow: hidden;
-  padding: 0 var(--oct-space-2);
-  border-radius: var(--oct-radius-sm);
+/* A small icon plate: a soft fill and a hairline, one step above the card it
+   sits on. The thread card's header and every tool tile share it. */
+.dock-tile {
+  display: inline-grid;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  place-items: center;
   background: var(--oct-fg-soft);
-  color: var(--oct-fg-2);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  line-height: 20px;
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-muted);
+}
+
+.dock-thread-card {
+  display: grid;
+  gap: var(--oct-space-3);
+  min-width: 0;
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+}
+
+.dock-thread-card__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.dock-thread-card__title {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 2px;
+}
+
+.dock-thread-card__project {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dock-overview__meter {
-  flex: 1 0 100%;
-  height: 4px;
-  overflow: hidden;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-fg-soft);
-}
-
-.dock-overview__meter::before {
-  display: block;
-  width: var(--dock-overview-fill, 0%);
-  height: 100%;
-  border-radius: inherit;
-  background: var(--oct-muted);
-  content: "";
-}
-
-.dock-overview__changes {
+/* Branch, then where it runs, on one line. Only the branch name yields when
+   the dock is narrow; a host name is short and worth keeping whole. */
+.dock-thread-card__meta {
   display: flex;
-  flex-wrap: wrap;
+  min-width: 0;
   align-items: center;
-  gap: var(--oct-space-1) var(--oct-space-2);
-  padding: 0 var(--oct-space-2);
-  border-inline: 1px solid transparent;
-}
-
-.dock-overview__diffstat {
-  display: inline-flex;
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-1);
   color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
 }
 
-.dock-overview__review {
-  margin-left: auto;
+.dock-thread-card__branch-mark {
+  flex: none;
+}
+
+.dock-thread-card__segment {
+  flex: none;
+  white-space: nowrap;
+}
+
+.dock-thread-card__segment[data-segment="branch"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-thread-card__separator {
+  flex: none;
+}
+
+.dock-thread-card__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--oct-space-2);
+  margin: 0;
+}
+
+.dock-thread-card__fact {
+  display: grid;
+  align-content: start;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  padding: var(--oct-space-2);
+  background: var(--oct-fg-soft);
+  border-radius: var(--oct-radius-sm);
+}
+
+.dock-thread-card__fact-label {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.dock-thread-card__fact-value {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+}
+
+.dock-thread-card__value {
+  min-width: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.dock-thread-card__detail {
+  min-width: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.dock-thread-card__context {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.dock-thread-card__ring {
+  display: block;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  overflow: visible;
+}
+
+/* A neutral groove with the used arc in the muted ink: the Default style
+   carries no hue, and the figure beside the ring says the exact share. */
+.dock-thread-card__ring-track {
+  stroke: color-mix(in oklab, var(--oct-fg) 16%, transparent);
+  stroke-width: 2.5;
+}
+
+.dock-thread-card__ring-used {
+  stroke: var(--oct-muted);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+}
+
+/* The Changes box opens Review, so it is a button laid out as the other
+   boxes; the box around it (the fact) carries the fill. */
+.dock-thread-card__fact:has(> .dock-thread-card__fact-value > .dock-thread-card__changes) {
+  padding: 0;
+}
+
+.dock-thread-card__fact:has(> .dock-thread-card__fact-value > .dock-thread-card__changes)
+  > .dock-thread-card__fact-label {
+  padding: var(--oct-space-2) var(--oct-space-2) 0;
+}
+
+.dock-thread-card__changes {
+  display: grid;
+  width: 100%;
+  height: auto;
+  gap: 2px;
+  justify-content: stretch;
+  justify-items: start;
+  padding: 0 var(--oct-space-2) var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  text-align: left;
+  white-space: normal;
+}
+
+.dock-thread-card__changes:hover,
+.dock-thread-card__changes:focus-visible {
+  background: var(--octant-control-hover);
 }
 
 .dock-work-map {
@@ -409,49 +497,92 @@
 
 .dock-work-map__groups {
   display: grid;
-  gap: 0;
-  padding-top: var(--oct-space-2);
+  gap: var(--oct-space-4);
 }
 
 .dock-work-map__list {
   display: grid;
-  gap: 0;
-}
-
-.dock-work-map__list + .dock-work-map__list {
-  margin-top: var(--oct-space-2);
-  padding-top: var(--oct-space-2);
-  border-top: 1px solid var(--oct-hairline);
+  gap: var(--oct-space-2);
 }
 
 .dock-work-map__group-title {
-  padding: var(--oct-space-1) var(--oct-space-2);
+  padding: 0 var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
-/* A launcher row: the tool's icon and its name on one 32px line. */
-.dock-work-map__item {
-  display: flex;
-  height: 32px;
-  align-items: center;
-  justify-content: flex-start;
+/* Thread tools are the ones reached for most, so they get two wide tiles a
+   row; Workspace and Devices fit as many narrow tiles as the dock is wide. */
+/* Workspace and Devices are reached for less, so their tiles are compact: the
+   icon plate beside the name, two a row at the dock's default width of about
+   250px. Three narrow stacked tiles did not fit there and fell back to two
+   tall ones, which pushed Devices below the fold. auto-fill keeps a lone tile
+   at one column's width instead of stretching it across the dock. */
+.dock-work-map__tiles {
+  display: grid;
   gap: var(--oct-space-2);
-  padding: 0 var(--oct-space-2);
-  border-radius: var(--oct-radius-sm);
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+}
+
+.dock-work-map__tiles[data-columns="fit"] .dock-work-map__item {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
+}
+
+/* A smaller plate and a name that may take a second line: at two a row,
+   "Pull requests" and "Android emulator" were cut to "Pull req…" beside the
+   full-size plate. */
+.dock-work-map__tiles[data-columns="fit"] .dock-tile {
+  width: 20px;
+  height: 20px;
+}
+
+.dock-work-map__tiles[data-columns="fit"] .dock-work-map__name {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  line-height: var(--oct-leading-tight);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.dock-work-map__tiles[data-columns="two"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* A tool tile: the icon plate over the tool's name, on a card. Hover and
+   keyboard focus move the surface one step and nothing else: no accent, no
+   ring. */
+.dock-work-map__item {
+  display: grid;
+  /* The button recipe's size step fixes a control height, which clipped the
+     name under the icon plate and let neighbouring tiles overlap. */
+  height: auto;
+  min-width: 0;
+  align-content: start;
+  /* The recipe centres its contents; without this the icon plate sat centred
+     over the name's width instead of at the tile's start edge. */
+  justify-content: stretch;
+  justify-items: start;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
   font-weight: var(--oct-weight-regular);
   text-align: left;
 }
 
-.dock-work-map__item > svg {
-  flex: 0 0 auto;
-  width: var(--oct-icon-md);
-  height: var(--oct-icon-md);
-  color: var(--oct-muted);
+.dock-work-map__item:hover,
+.dock-work-map__item:focus-visible {
+  background: var(--octant-control-hover);
 }
 
 .dock-work-map__name {
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg-2);
@@ -512,11 +643,12 @@
   margin-left: 2px;
 }
 
-.dock-utility-launcher__disclosure {
-  top: calc(100% + 4px);
-  right: auto;
-  left: 0;
+/* The menu is a portal popup under the plus: a plain list that sizes to its
+   longest label, with the popup recipe's roomy padding tightened to the rows'. */
+.dock-utility-launcher__menu {
+  display: grid;
   min-width: 176px;
+  padding: var(--oct-space-1);
 }
 
 .dock-utility-launcher__group {
@@ -533,24 +665,6 @@
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-weight: 500;
-}
-
-/* The right dock clips at its own edge, and with two tabs open the plus sits
-   far enough right that a menu hung from it ran past that edge and lost its
-   labels. There the menu hangs from the bar instead, flush with the dock's
-   right edge, so it always opens inside the dock. */
-.right-utility-dock__toolbar {
-  position: relative;
-}
-
-.right-utility-dock__toolbar .dock-utility-launcher {
-  position: static;
-}
-
-.right-utility-dock__toolbar .dock-utility-launcher__disclosure {
-  top: calc(100% + var(--oct-space-1));
-  right: var(--oct-space-2);
-  left: auto;
 }
 
 /* Scroll and padding come from .dock-body. */
