@@ -25,6 +25,10 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 
 const ACTIVE_CHILD_REFRESH_MS = 2_000;
 
+export type AgentRunViewRequest =
+  | { readonly kind: "list" }
+  | { readonly kind: "child"; readonly runId: string };
+
 export function AgentRunHierarchy(props: {
   readonly client: AgentRunClient;
   readonly parentThreadId: AgentRunParentThreadId;
@@ -32,12 +36,11 @@ export function AgentRunHierarchy(props: {
   /** Fetches the server-authoritative posture, so a list turned off says so. */
   readonly settingsClient?: AgentRunSettingsClient;
   /**
-   * A subagent someone asked to see from elsewhere — a row in the composer's
-   * tray. The tool opens on its page, and reports the request handled once
-   * the reader goes back to the list, so the tool opens on the list again.
+   * A fresh request for each navigation from another surface, including
+   * repeated requests for the list after selecting a child inside the tool.
    */
-  readonly requestedRunId?: string;
-  readonly onRequestedRunHandled?: () => void;
+  readonly requestedView?: AgentRunViewRequest;
+  readonly onRequestedViewHandled?: () => void;
 }) {
   const [read, setRead] = useState<AgentRunParentSummaryResponse>();
   const currentRead = read?.parentThreadId === props.parentThreadId ? read : undefined;
@@ -49,19 +52,21 @@ export function AgentRunHierarchy(props: {
   const [posture, setPosture] = useState<AgentRunCreationPosture | undefined>(
     props.creationPosture,
   );
-  const [selectedRunId, setSelectedRunId] = useState<string | undefined>(props.requestedRunId);
-  const onRequestedRunHandled = useRef(props.onRequestedRunHandled);
-  onRequestedRunHandled.current = props.onRequestedRunHandled;
+  const [selectedRunId, setSelectedRunId] = useState<string | undefined>(
+    props.requestedView?.kind === "child" ? props.requestedView.runId : undefined,
+  );
+  const onRequestedViewHandled = useRef(props.onRequestedViewHandled);
+  onRequestedViewHandled.current = props.onRequestedViewHandled;
   // The request stands until the reader leaves the page it opened. Clearing it
   // on arrival lost it: the dock re-keys the tool body when the new tab gets
   // its id, and the remounted tool, finding no request, opened on the list.
   useEffect(() => {
-    if (props.requestedRunId === undefined) return;
-    setSelectedRunId(props.requestedRunId);
-  }, [props.requestedRunId]);
+    if (props.requestedView === undefined) return;
+    setSelectedRunId(props.requestedView.kind === "child" ? props.requestedView.runId : undefined);
+  }, [props.requestedView]);
   const leaveSelectedRun = () => {
     setSelectedRunId(undefined);
-    if (props.requestedRunId !== undefined) onRequestedRunHandled.current?.();
+    if (props.requestedView !== undefined) onRequestedViewHandled.current?.();
   };
   // Only an identity resolved from the managed list may open a conversation.
   // Observation selection keys are presentation-only and never decoded as runs.

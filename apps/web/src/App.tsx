@@ -308,6 +308,7 @@ import { RightUtilityDock } from "./shell/RightUtilityDock";
 import { ProjectReviewModule as DockProjectPullRequestReviewTool } from "./dockModules/ProjectReviewModule";
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
+import type { AgentRunViewRequest } from "./agents/AgentRunHierarchy";
 import {
   MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
@@ -1017,11 +1018,10 @@ function LaunchedShell(
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);
   const [addAgentInvokedByThread, setAddAgentInvokedByThread] = useState(() => new Set<string>());
-  // The subagent a composer tray row asked the Agents tool to open, for the
-  // thread it was asked on. The tool clears it once it has opened there.
-  const [requestedSubagent, setRequestedSubagent] = useState<{
+  // Retain the destination across dock remounts until Back or another request.
+  const [requestedAgentView, setRequestedAgentView] = useState<{
     readonly threadKey: string;
-    readonly runId: string;
+    readonly view: AgentRunViewRequest;
   }>();
   // Documents a turn wrote, per thread, and which the dock already offered.
   // Session-local presentation: nothing here is authority, and a reopened
@@ -2943,10 +2943,10 @@ function LaunchedShell(
         key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
-        {...(requestedSubagent?.threadKey === dockThreadKey
+        {...(requestedAgentView?.threadKey === dockThreadKey
           ? {
-              requestedAgentRunId: requestedSubagent.runId,
-              onAgentRunRequestHandled: () => setRequestedSubagent(undefined),
+              requestedAgentView: requestedAgentView.view,
+              onAgentViewRequestHandled: () => setRequestedAgentView(undefined),
             }
           : {})}
         nativeHarnessClient={nativeHarnessClient}
@@ -3062,7 +3062,10 @@ function LaunchedShell(
       next.add(dockThreadKey);
       return next;
     });
-    setRequestedSubagent(runId === undefined ? undefined : { threadKey: dockThreadKey, runId });
+    setRequestedAgentView({
+      threadKey: dockThreadKey,
+      view: runId === undefined ? { kind: "list" } : { kind: "child", runId },
+    });
     openDockTab("agents");
   }
   function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
