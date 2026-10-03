@@ -64,6 +64,26 @@ describe("native harness tools", () => {
     }
   });
 
+  it("requires an explicit version and bounded message to follow up a child", () => {
+    const input = {
+      operation: "follow-up",
+      runId: turn,
+      expectedVersion: 4,
+      message: "Compare the results",
+    };
+    expect(decodeNativeHarnessToolArguments("delegate", input)).toEqual(input);
+    for (const invalid of [
+      { ...input, expectedVersion: undefined },
+      { ...input, expectedVersion: 0 },
+      { ...input, expectedVersion: 1.5 },
+      { ...input, message: undefined },
+      { ...input, message: " " },
+      { ...input, message: "x".repeat(4097) },
+      { ...input, providerInstanceId: lead.providerInstanceId },
+    ])
+      expect(() => decodeNativeHarnessToolArguments("delegate", invalid)).toThrow();
+  });
+
   it("a truncated tool result always says how much was omitted and where to continue", () => {
     expect(
       decodeNativeHarnessToolResultBounds({

@@ -1,5 +1,7 @@
 import type {
   AgentRunDelegationResult,
+  AgentRunFollowUpInput,
+  AgentRunFollowUpResult,
   AgentRunDelegationInput,
   agentRunDelegationCapabilities,
 } from "../agentRun/agentRunDelegation";
@@ -82,6 +84,8 @@ export interface NativeHarnessDelegateChild {
   readonly task: string;
   readonly lifecycleStatus: string;
   readonly resultAvailable: boolean;
+  readonly version?: number;
+  readonly generation?: number;
   readonly route?: AgentRunParentSummaryRoute;
   readonly reasoning?: string;
   /** The runs this child waits for, when it was started with `after`. */
@@ -91,8 +95,19 @@ export interface NativeHarnessDelegateChild {
 }
 
 export type NativeHarnessDelegateCollect =
-  | { readonly status: "completed"; readonly text: string; readonly truncated: boolean }
-  | { readonly status: "not-ready"; readonly lifecycleStatus: string }
+  | {
+      readonly status: "completed";
+      readonly text: string;
+      readonly truncated: boolean;
+      readonly version?: number;
+      readonly generation?: number;
+    }
+  | {
+      readonly status: "not-ready";
+      readonly lifecycleStatus: string;
+      readonly version?: number;
+      readonly generation?: number;
+    }
   | { readonly status: "refused"; readonly reason: string };
 
 /**
@@ -103,6 +118,7 @@ export type NativeHarnessDelegateCollect =
 export interface NativeHarnessDelegatePort {
   capabilities(): Promise<ReturnType<typeof agentRunDelegationCapabilities>>;
   start(input: AgentRunDelegationInput): Promise<NativeHarnessDelegateStart>;
+  followUp?(input: AgentRunFollowUpInput): Promise<AgentRunFollowUpResult>;
   status(): Promise<ReadonlyArray<NativeHarnessDelegateChild>>;
   collect(runId: string): Promise<NativeHarnessDelegateCollect>;
   /**
@@ -522,6 +538,15 @@ async function execute(
         return started.status === "accepted"
           ? ok(started)
           : refused(started.reason, started.message);
+      }
+      if (input.operation === "follow-up") {
+        if (port.followUp === undefined) return refused("follow-up-unavailable");
+        const result = await port.followUp({
+          runId: input.runId,
+          expectedVersion: input.expectedVersion,
+          message: input.message,
+        });
+        return result.status === "accepted" ? ok(result) : refused(result.reason, result.message);
       }
       if (input.operation === "status") {
         return ok({ children: await port.status() });

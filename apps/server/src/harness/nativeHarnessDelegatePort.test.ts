@@ -5,15 +5,19 @@ import {
   decodeNativeHarnessRouteDecision,
   NATIVE_HARNESS_BUILT_IN_SLOTS,
   type NativeHarnessSlotCandidate,
+  decodeAggregateVersion,
   decodeProviderContextBlock,
   decodeProjectId,
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunCommand,
+  type AgentRunCommandResult,
   type NativeHarnessRouteDecision,
 } from "@octant/contracts";
 import { createAgentsManagedTools } from "../agentRun/agentRunManagedTools";
 import type { AgentRunControlAdmissionDependencies } from "../agentRun/agentRunControlAdmission";
+import type { AgentRunParentSummaryEntry } from "../agentRun/agentRunProjection";
+import type { AgentRunOrchestrationService } from "../agentRun/agentRunOrchestrationService";
 import { NativeHarnessRouter } from "./nativeHarnessRouter";
 import { createNativeHarnessDelegatePort } from "./nativeHarnessDelegatePort";
 
@@ -70,7 +74,7 @@ function port(
         },
       },
       persistence: overrides.persistence ?? {
-        parentSummary: () => [],
+        parentSummary: (): ReadonlyArray<AgentRunParentSummaryEntry> => [],
         resultText: () => undefined,
         getById: () => undefined,
       },
@@ -209,10 +213,20 @@ function delegationPair(
     foreignDependency?: boolean;
     tainted?: boolean;
     paused?: boolean;
+    posture?: "off" | "ask" | "automatic";
+    unauthorized?: boolean;
+    parentAuthority?: AgentRunAuthority;
+    liveAuthority?: AgentRunAuthority;
+    run?: Partial<AgentRun>;
+    noResume?: boolean;
+    resumeResult?: AgentRunCommandResult;
   } = {},
 ) {
   const commands: AgentRunCommand[] = [];
   let currentParent: NativeHarnessSlotCandidate = routeLead;
+  const resumes: Parameters<AgentRunOrchestrationService["resume"]>[] = [];
+  const accepted: unknown[] = [];
+  const authorizations: unknown[] = [];
   const decisions: NativeHarnessRouteDecision[] = [];
   const projectId = decodeProjectId("00000000-0000-4000-8000-0000000000bb");
   const admitted = {
@@ -221,6 +235,16 @@ function delegationPair(
     lifecycleStatus: "waiting",
     version: 1,
     recoveryReason: "waiting-on-dependencies",
+    executionKind: "octant-managed",
+    role: "research",
+    authority: allowedAuthority,
+    routingReceipt: {
+      mode: "chat",
+      projectId,
+      selectedProviderInstanceId: routeChild.providerInstanceId,
+      selectedModelId: routeChild.modelId,
+    },
+    ...options.run,
   } as AgentRun;
   const admission: AgentRunControlAdmissionDependencies = {
     persistence: { getByRequestId: () => undefined },
@@ -230,21 +254,29 @@ function delegationPair(
         return { kind: "run-accepted", run: admitted };
       },
     },
-    settings: { current: () => ({ creationPosture: "automatic" }) },
+    settings: { current: () => ({ creationPosture: options.posture ?? "automatic" }) },
     providerReadiness: { isReady: () => true },
     uuid: () => "00000000-0000-4000-8000-000000000099",
-    authorizeCreation: () => ({
-      parentMode: "chat",
-      parentAuthority: allowedAuthority,
-      liveAuthority: allowedAuthority,
-      workspaceParent: { threadId: scope.parentThreadId, mode: "chat" },
-      parentRoute: {
-        providerInstanceId: currentParent.providerInstanceId,
-        modelId: currentParent.modelId,
-        ...(currentParent.reasoning === undefined ? {} : { reasoning: currentParent.reasoning }),
-        projectId,
-      },
-    }),
+    onExecutionAccepted: (input) => {
+      accepted.push(input);
+    },
+    authorizeCreation: (input) => {
+      authorizations.push(input);
+      return options.unauthorized
+        ? undefined
+        : {
+            parentMode: "chat",
+            parentAuthority: options.parentAuthority ?? allowedAuthority,
+            liveAuthority: options.liveAuthority ?? allowedAuthority,
+            workspaceParent: { threadId: scope.parentThreadId, mode: "chat" },
+            parentRoute: {
+              providerInstanceId: currentParent.providerInstanceId,
+              modelId: currentParent.modelId,
+              ...(currentParent.reasoning === undefined ? {} : { reasoning: currentParent.reasoning }),
+              projectId,
+            },
+          };
+    },
     nativeEvidence: () => ({
       claimedNativeSupport: "unsupported",
       workspace: false,
@@ -264,10 +296,32 @@ function delegationPair(
     getById: () =>
       ({
         ...admitted,
-        parentThreadId: options.foreignDependency ? "foreign" : scope.parentThreadId,
+        parentThreadId: options.foreignDependency ? "foreign" : admitted.parentThreadId,
       }) as AgentRun,
-    parentSummary: () => [],
-    resultText: () => undefined,
+    parentSummary: (): ReadonlyArray<AgentRunParentSummaryEntry> => [
+      {
+        runId: admitted.id,
+        requestId: admitted.requestId,
+        parentThreadId: admitted.parentThreadId,
+        executionKind: admitted.executionKind,
+        usageQuality: "provider-reported",
+        resultAcknowledgement: { required: false, acknowledged: false },
+        route: {
+          requestedProviderInstanceId: routeChild.providerInstanceId,
+          requestedModelId: routeChild.modelId,
+          executionProviderInstanceId: routeChild.providerInstanceId,
+          executionModelId: routeChild.modelId,
+          poolDerived: false,
+        },
+        version: admitted.version,
+        updatedAt: admitted.updatedAt,
+        role: admitted.role,
+        task: "Look",
+        lifecycleStatus: admitted.lifecycleStatus,
+        ...(admitted.result === undefined ? {} : { result: admitted.result }),
+      },
+    ],
+    resultText: () => "prior reply",
   };
   const router = new NativeHarnessRouter({
     store: {
@@ -333,6 +387,25 @@ function delegationPair(
       start: () => {
         throw new Error("Dependency-parked child must not start");
       },
+      ...(options.noResume
+        ? {}
+        : {
+            resume: (
+              ...input: Parameters<AgentRunOrchestrationService["resume"]>
+            ): AgentRunCommandResult => {
+              resumes.push(input);
+              if (options.resumeResult !== undefined) return options.resumeResult;
+              return {
+                kind: "run-updated",
+                run: {
+                  ...admitted,
+                  lifecycleStatus: "starting",
+                  version: decodeAggregateVersion(admitted.version + 1),
+                  generation: (admitted.generation ?? 1) + 1,
+                },
+              };
+            },
+          }),
     },
     persistence,
     uuid: () => "00000000-0000-4000-8000-000000000098",
@@ -375,8 +448,23 @@ function delegationPair(
     setParentTarget: (candidate: NativeHarnessSlotCandidate) => {
       currentParent = candidate;
     },
+    resumes,
+    accepted,
+    authorizations,
     native,
     managed,
+    followUp: async (
+      transport: "native" | "managed",
+      input: { runId: string; expectedVersion: number; message: string },
+    ) =>
+      transport === "native"
+        ? native.followUp?.(input)
+        : (
+            await managed.execute({
+              name: "octant_agents",
+              inputJson: JSON.stringify({ operation: "follow-up", ...input }),
+            })
+          ).result,
     start: async (transport: "native" | "managed", input: Parameters<typeof native.start>[0]) =>
       transport === "native"
         ? native.start(input)
@@ -581,4 +669,132 @@ describe("delegation parity", () => {
       targetSelection: { explicit: true, roleSlots: true },
     });
   });
+});
+
+describe("completed child follow-up parity", () => {
+  for (const transport of ["native", "managed"] as const) {
+    it(`${transport} refuses a follow-up outside the current parent policy or child state`, async () => {
+      const cases: ReadonlyArray<readonly [Parameters<typeof delegationPair>[0], string]> = [
+        [{ posture: "off" }, "creation-posture-off"],
+        [{ posture: "ask" }, "creation-posture-off"],
+        [{ paused: true }, "session-paused"],
+        [{ tainted: true }, "delegate-tainted"],
+        [{ unauthorized: true }, "unauthorized"],
+        [{ parentAuthority: { ...allowedAuthority, subagents: false } }, "unauthorized"],
+        [{ liveAuthority: { ...allowedAuthority, tools: false } }, "authority-widening"],
+        [{ excludedChild: true }, "delegate-target-unavailable"],
+        [{ run: { parentThreadId: "foreign" as AgentRun["parentThreadId"] } }, "run-not-found"],
+        [{ run: { version: 2 as AgentRun["version"] } }, "stale-version"],
+        [{ run: { lifecycleStatus: "cancelled" } }, "unsupported-transition"],
+        [{ run: { executionKind: "provider-native" } }, "unsupported-transition"],
+        [{ noResume: true }, "follow-up-unavailable"],
+      ];
+      for (const [options, reason] of cases) {
+        const pair = delegationPair({
+          ...options,
+          run: { lifecycleStatus: "completed", ...options?.run },
+        });
+        expect(
+          await pair.followUp(transport, {
+            runId: dependencyId,
+            expectedVersion: 1,
+            message: "Continue",
+          }),
+        ).toMatchObject({ status: "refused", reason });
+        expect(pair.resumes).toEqual([]);
+        expect(pair.accepted).toEqual([]);
+        expect(pair.commands).toEqual([]);
+      }
+    });
+    it(`${transport} returns a resume refusal without binding a new execution`, async () => {
+      const pair = delegationPair({
+        run: { lifecycleStatus: "completed" },
+        resumeResult: {
+          kind: "run-command-failed",
+          reason: "limit-reached",
+          message: "No child slot is available.",
+        },
+      });
+      expect(
+        await pair.followUp(transport, {
+          runId: dependencyId,
+          expectedVersion: 1,
+          message: "Continue",
+        }),
+      ).toEqual({
+        status: "refused",
+        reason: "limit-reached",
+        message: "No child slot is available.",
+      });
+      expect(pair.resumes).toHaveLength(1);
+      expect(pair.accepted).toEqual([]);
+      expect(pair.commands).toEqual([]);
+    });
+    it(`${transport} reports the version and generation attached to the collected result`, async () => {
+      const pair = delegationPair({
+        run: {
+          lifecycleStatus: "completed",
+          generation: 2,
+          result: { truncated: false } as AgentRun["result"],
+        },
+      });
+      const status =
+        transport === "native"
+          ? await pair.native.status()
+          : (
+              await pair.managed.execute({
+                name: "octant_agents",
+                inputJson: JSON.stringify({ operation: "status" }),
+              })
+            ).result;
+      expect(
+        transport === "native" ? status : (status as { children: unknown[] }).children,
+      ).toEqual([expect.objectContaining({ runId: dependencyId, version: 1, generation: 2 })]);
+      const collected =
+        transport === "native"
+          ? await pair.native.collect(dependencyId)
+          : (
+              await pair.managed.execute({
+                name: "octant_agents",
+                inputJson: JSON.stringify({ operation: "wait", runId: dependencyId }),
+              })
+            ).result;
+      expect(collected).toMatchObject({
+        status: "completed",
+        version: 1,
+        generation: 2,
+        text: "prior reply",
+      });
+    });
+    it(`${transport} continues the same child with an explicit message and current version`, async () => {
+      const pair = delegationPair({ run: { lifecycleStatus: "completed" } });
+      const input = {
+        runId: dependencyId,
+        expectedVersion: 1,
+        message: "Compare that finding with the second source.",
+      };
+      expect(await pair.followUp(transport, input)).toMatchObject({
+        status: "accepted",
+        runId: dependencyId,
+        lifecycleStatus: "starting",
+        generation: 2,
+        version: 2,
+      });
+      expect(pair.resumes).toEqual([
+        [dependencyId, 1, allowedAuthority, { message: input.message }],
+      ]);
+      expect(pair.authorizations).toEqual([
+        { parentThreadId: scope.parentThreadId, windowId: scope.windowId },
+      ]);
+      expect(pair.accepted).toEqual([
+        {
+          run: expect.objectContaining({ id: dependencyId, lifecycleStatus: "starting" }),
+          windowId: scope.windowId,
+          operation: "resume",
+        },
+      ]);
+      expect(pair.commands).toEqual([]);
+      expect(pair.decisions).toEqual([]);
+    });
+  }
 });

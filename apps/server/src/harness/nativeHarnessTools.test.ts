@@ -8,7 +8,11 @@ import { GoalService } from "../goal/goalService";
 import { InMemoryGoalStore } from "../goal/goalService.test-support";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
-import { createNativeHarnessTools, type NativeHarnessToolPorts } from "./nativeHarnessTools";
+import {
+  createNativeHarnessTools,
+  type NativeHarnessToolPorts,
+  type NativeHarnessDelegatePort,
+} from "./nativeHarnessTools";
 
 const uuid = (() => {
   let counter = 0;
@@ -90,6 +94,55 @@ describe("native harness tools", () => {
       "edit",
       "write",
     ]);
+  });
+
+  it("forwards a versioned child follow-up and refuses hosts without that capability", async () => {
+    const inputs: unknown[] = [];
+    const delegate: NativeHarnessDelegatePort = {
+      capabilities: async () => {
+        throw new Error("unexpected capabilities read");
+      },
+      start: async () => {
+        throw new Error("must not start a new child");
+      },
+      status: async () => [],
+      collect: async () => ({ status: "refused", reason: "run-not-found" }),
+      wait: async () => ({ finished: true, children: [] }),
+    };
+    const input = {
+      operation: "follow-up",
+      runId: "00000000-0000-4000-8000-000000000001",
+      expectedVersion: 7,
+      message: "Check the conclusion",
+    };
+    const unsupported = await fixture({}, { delegate });
+    expect((await call(unsupported.tools, "delegate", input)).result).toMatchObject({
+      error: "follow-up-unavailable",
+    });
+    const supported = await fixture(
+      {},
+      {
+        delegate: {
+          ...delegate,
+          followUp: async (request) => {
+            inputs.push(request);
+            return {
+              status: "accepted",
+              runId: request.runId,
+              version: 8,
+              generation: 2,
+              lifecycleStatus: "starting",
+            };
+          },
+        },
+      },
+    );
+    expect((await call(supported.tools, "delegate", input)).result).toMatchObject({
+      status: "accepted",
+      version: 8,
+      generation: 2,
+    });
+    expect(inputs).toEqual([{ runId: input.runId, expectedVersion: 7, message: input.message }]);
   });
 
   it("refuses a tool the model invented without consulting any port", async () => {
