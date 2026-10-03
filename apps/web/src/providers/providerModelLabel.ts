@@ -12,10 +12,18 @@ export function providerModelLabel(
   const group = groups.find(
     (candidate) => String(candidate.instance.id) === String(turn.providerInstanceId),
   );
-  const model = group?.sections
-    .flatMap((section) => section.models)
-    .find((candidate) => String(candidate.model.id) === String(turn.modelId));
   const providerLabel = group?.instance.displayName ?? String(turn.providerInstanceId);
-  const modelLabel = model?.model.displayName ?? String(turn.modelId);
-  return `${providerLabel} — ${modelLabel}`;
+  return `${providerLabel} — ${modelDisplayName(groups, turn)}`;
+}
+
+/** The model alone, for a divider that must not read as a provider change. */
+export function modelDisplayName(
+  groups: ReadonlyArray<PickerGroup>,
+  turn: { readonly providerInstanceId: unknown; readonly modelId: unknown },
+): string {
+  const model = groups
+    .find((candidate) => String(candidate.instance.id) === String(turn.providerInstanceId))
+    ?.sections.flatMap((section) => section.models)
+    .find((candidate) => String(candidate.model.id) === String(turn.modelId));
+  return model?.model.displayName ?? String(turn.modelId);
 }

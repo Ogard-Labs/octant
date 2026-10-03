@@ -1936,6 +1936,40 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
+  it("labels a model-only switch as a model switch rather than a provider handoff", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+            {
+              id: "turn:assistant-two",
+              role: "assistant",
+              text: "The second pass is complete.",
+              providerInstanceId: providerId,
+              modelId: alternateModelId,
+              status: "completed",
+            },
+          ],
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("separator", { name: /model switch/i })).toHaveTextContent(
+      `Switched to ${String(alternateModelId)}`,
+    );
+    expect(screen.queryByText(/provider handoff/i)).not.toBeInTheDocument();
+  });
+
   it("does not invent a provider handoff for an app-authored assistant message", () => {
     render(
       <CodeThreadWorkspace
