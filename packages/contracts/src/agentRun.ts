@@ -309,9 +309,28 @@ export type AgentRunResultText = typeof AgentRunResultText.Type;
  * The text is deliberately absent: it is stored, not journaled, and a run whose
  * parent thread was deleted keeps this identity with nothing behind it.
  */
+export const AgentRunReviewMetadata = Schema.Struct({
+  capturedAt: UtcTimestamp,
+  baseTree: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40,64}$/)),
+  resultTree: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40,64}$/)),
+  changedPaths: Schema.Array(Schema.NonEmptyString.pipe(Schema.maxLength(2048))).pipe(
+    Schema.maxItems(128),
+  ),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export const AgentRunReviewSnapshot = Schema.Struct({
+  ...AgentRunReviewMetadata.fields,
+  diff: Schema.String.pipe(Schema.maxLength(65_536)),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((value) => JSON.stringify(value).length <= 120_000));
+export type AgentRunReviewSnapshot = typeof AgentRunReviewSnapshot.Type;
+export const decodeAgentRunReviewSnapshot = Schema.decodeUnknownSync(AgentRunReviewSnapshot);
+
 export const AgentRunResultEvidence = Schema.Struct({
+  review: Schema.optional(AgentRunReviewSnapshot),
   files: Schema.Struct({
-    reviewStatus: Schema.optional(Schema.Literal("unavailable")),
+    reviewStatus: Schema.optional(Schema.Literal("available", "unavailable")),
     status: Schema.Literal("recorded", "unavailable", "truncated"),
     items: Schema.Array(
       Schema.Struct({
