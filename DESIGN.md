@@ -276,17 +276,23 @@ names the state and claims no elapsed time. See
 
 ### Welcome and composer
 
-A thread's working subagents sit in their own card tucked behind the composer's
+A thread's subagents sit in their own card tucked behind the composer's
 top edge — narrower than the composer by one inset on each side, its lower edge
 hidden under the composer, rising from behind it on arrival — so they read as
-work beside the message rather than part of it. Only running subagents show
-there; finished ones, reviewed or not, are listed in Environment and Agents, so
-a thread that delegates a lot never grows a tall card. The head ("Subagents ·
-N working") folds the card to a one-line tab and the fold is remembered per
-viewer; open, the rows are 24px and scroll past three. A row (status icon, the
-task on one line, "Working · 12s") opens that subagent in the Agents tool, and
-Stop appears on hover or focus. Stopping one named subagent acts at once; Stop
-all asks first and names how many it reaches. There is no strip above the
+work beside the message rather than part of it. The card starts collapsed and
+remembers the viewer's fold choice. Its head names the total and reported states,
+including failed, waiting, and results needing review; task-plan completion is
+never counted as child completion. View all opens the full Agents list even when
+every child has finished. Expansion previews at most three active or unreviewed
+children in host order; longer history stays in Environment and Agents. Rows show
+the task, semantic status, execution model when recorded, and age explicitly
+labeled as time since the last update, not total execution time. A recorded
+recovery or review reason can accompany the row; no latest activity is inferred
+from a task title or assistant prose. Rows open the child in Agents. Stop appears
+on hover or focus only for active children; Stop all asks first and names the
+active scope. Headers and rows wrap at narrow widths, disclosures work with the
+keyboard and retain visible focus, and expanded lists have bounded height.
+There is no strip above the
 transcript. A cross-context notice takes the same place behind the composer and wins while
 it shows.
 
@@ -1213,6 +1219,13 @@ journaled plan. It appears only when a real plan exists, shows proposed review
 or `Step n / total`, and opens a popover with title, step states, evidence, and
 start/finish/reopen/drop actions when approved. It must not invent progress from
 assistant prose or display an empty plan form.
+
+The provider's recorded task list is a separate, initially collapsed group. Its
+header keeps completed/total progress and failed or waiting counts visible while
+folded. An unfinished list after a settled turn says Incomplete; it does not
+claim that the agent is still running. Expansion shows the recorded ordered
+steps in a bounded, scrollable list. Neither this list nor the journaled plan
+borrows progress, completion, or authority from the subagent group.
 
 Responsive breakpoints are 560px, 720px, and 920px. Below 920px the right dock
 is removed rather than squeezing the transcript unreadably. Below 720px split
