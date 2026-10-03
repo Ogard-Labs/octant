@@ -102,4 +102,41 @@ describe("drawing a preview of an artifact", () => {
     // guard is what protects the contract if that ever stops being true.
     expect(renderArtifactThumbnail(definition(many)).length).toBeLessThanOrEqual(4_096);
   });
+
+  it("draws a login sequence and an order state machine as static pictures", () => {
+    const sequence = {
+      blockId: "login",
+      schemaVersion: 1,
+      kind: "sequence",
+      participants: [
+        { participantId: "person", label: "Person" },
+        { participantId: "auth", label: "Auth" },
+      ],
+      messages: [{ messageId: "submit", from: "person", to: "auth", label: "Submit credentials" }],
+    } as unknown as CanvasBlock;
+    const state = {
+      blockId: "order",
+      schemaVersion: 1,
+      kind: "state",
+      states: [
+        { stateId: "start", label: "Start", role: "initial" },
+        { stateId: "placed", label: "Placed" },
+        { stateId: "closed", label: "Closed", role: "final" },
+      ],
+      transitions: [{ transitionId: "place", source: "start", target: "placed", label: "place" }],
+    } as unknown as CanvasBlock;
+
+    const sequenceMarkup = renderArtifactThumbnail(definition([sequence], "Login"));
+    const stateMarkup = renderArtifactThumbnail(definition([state], "Order"));
+
+    expect(sequenceMarkup.startsWith("<svg")).toBe(true);
+    expect(stateMarkup.startsWith("<svg")).toBe(true);
+    expect(sequenceMarkup).toContain("Submit credentials");
+    expect(sequenceMarkup).toContain("Person");
+    expect(stateMarkup).toContain("Placed");
+    expect(stateMarkup).toContain("Closed");
+    expect(sequenceMarkup).not.toMatch(/<\s*script/i);
+    expect(stateMarkup).not.toMatch(/<\s*script/i);
+    expect(sequenceMarkup).not.toBe(stateMarkup);
+  });
 });

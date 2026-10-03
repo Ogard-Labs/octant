@@ -1,4 +1,5 @@
 import { CANVAS_SCHEMA_VERSION, type CanvasDefinition } from "@octant/contracts/canvas";
+import { loginSequenceExample, orderStateExample } from "@octant/domain";
 import { decodeCanvasActionBlock, type CanvasActionBlock } from "@octant/contracts/canvas-actions";
 
 const ids = {
@@ -145,6 +146,8 @@ export const canvasFixture = {
       ],
       edges: [{ edgeId: "a-b", source: "a", target: "b" }],
     },
+    loginSequenceExample,
+    orderStateExample,
     {
       ...base,
       blockId: "code-1",

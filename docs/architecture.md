@@ -290,6 +290,13 @@ nudge is journaled through `/api/canvas/layout-revise` as a new immutable
 stamps itself, whatever actor the request names, admitted by the
 pure `admitCanvasDiagramLayoutRevision` policy (target must be a diagram,
 every moved node must exist, the sequence must be the head, budgets stand).
+Beside that generic node-and-edge diagram, a `sequence` block is participants,
+ordered messages, activations, and notes, and a `state` block is states that
+may nest by parent id, labeled transitions, and initial and final roles. Both
+use the diagram node and edge budgets. Layout is deterministic. Participants
+and states are node comment anchors; messages and transitions are edge comment
+anchors. Static export draws both through the same artifact SVG path as the
+other blocks.
 Agent revisions and user layout share one history; a stale drag is refused and
 the renderer reloads rather than overwriting a newer version. Only the head
 version is editable. The route is host-window only; a paired browser reads

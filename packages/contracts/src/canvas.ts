@@ -207,6 +207,8 @@ export const CanvasBlockKind = Schema.Literal(
   "chart",
   "timeline",
   "diagram",
+  "sequence",
+  "state",
   "code-excerpt",
   "pseudocode",
   "diff",
@@ -442,6 +444,96 @@ export const CanvasDiagramBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasDiagramBlock = typeof CanvasDiagramBlock.Type;
 
+/**
+ * A sequence diagram beside the generic node/edge board.
+ *
+ * Participants and messages use the board's node and edge identifiers so a
+ * comment can anchor to either. Activations span messages in order on one
+ * participant's lifeline. Notes are annotations, not a second graph. The
+ * arrays are bounded by the diagram budgets: participants are nodes, messages
+ * are edges, notes are groups.
+ */
+export const CanvasSequenceParticipant = Schema.Struct({
+  participantId: CanvasNodeId,
+  label: CanvasLabel,
+}).annotations(strict);
+export type CanvasSequenceParticipant = typeof CanvasSequenceParticipant.Type;
+
+export const CanvasSequenceMessage = Schema.Struct({
+  messageId: CanvasEdgeId,
+  from: CanvasNodeId,
+  to: CanvasNodeId,
+  label: CanvasLabel,
+}).annotations(strict);
+export type CanvasSequenceMessage = typeof CanvasSequenceMessage.Type;
+
+export const CanvasSequenceActivation = Schema.Struct({
+  activationId: boundedToken("CanvasActivationId"),
+  participantId: CanvasNodeId,
+  startMessageId: CanvasEdgeId,
+  endMessageId: CanvasEdgeId,
+}).annotations(strict);
+export type CanvasSequenceActivation = typeof CanvasSequenceActivation.Type;
+
+export const CanvasSequenceNote = Schema.Struct({
+  noteId: boundedToken("CanvasNoteId"),
+  text: CanvasLabel,
+  participantId: Schema.optional(CanvasNodeId),
+  afterMessageId: Schema.optional(CanvasEdgeId),
+}).annotations(strict);
+export type CanvasSequenceNote = typeof CanvasSequenceNote.Type;
+
+export const CanvasSequenceBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("sequence"),
+  participants: Schema.Array(CanvasSequenceParticipant).pipe(
+    Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES),
+  ),
+  messages: Schema.Array(CanvasSequenceMessage).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_EDGES)),
+  activations: Schema.optional(
+    Schema.Array(CanvasSequenceActivation).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
+  ),
+  notes: Schema.optional(
+    Schema.Array(CanvasSequenceNote).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_GROUPS)),
+  ),
+}).annotations(strict);
+export type CanvasSequenceBlock = typeof CanvasSequenceBlock.Type;
+
+/**
+ * A state diagram beside the generic node/edge board.
+ *
+ * Nesting is a parent id rather than a nested object, so a transition list
+ * stays inside the Canvas depth budget. States are nodes and transitions are
+ * edges, under the same budgets as a board. A transition names itself; an
+ * initial or final state is a role, not a second block.
+ */
+export const CanvasStateRole = Schema.Literal("initial", "final");
+export type CanvasStateRole = typeof CanvasStateRole.Type;
+
+export const CanvasStateNode = Schema.Struct({
+  stateId: CanvasNodeId,
+  label: CanvasLabel,
+  role: Schema.optional(CanvasStateRole),
+  parentId: Schema.optional(CanvasNodeId),
+}).annotations(strict);
+export type CanvasStateNode = typeof CanvasStateNode.Type;
+
+export const CanvasStateTransition = Schema.Struct({
+  transitionId: CanvasEdgeId,
+  source: CanvasNodeId,
+  target: CanvasNodeId,
+  label: CanvasLabel,
+}).annotations(strict);
+export type CanvasStateTransition = typeof CanvasStateTransition.Type;
+
+export const CanvasStateBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("state"),
+  states: Schema.Array(CanvasStateNode).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
+  transitions: Schema.Array(CanvasStateTransition).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_EDGES)),
+}).annotations(strict);
+export type CanvasStateBlock = typeof CanvasStateBlock.Type;
+
 const CanvasLineNumber = Schema.Int.pipe(Schema.positive());
 
 export const CanvasCodeExcerptBlock = Schema.Struct({
@@ -643,6 +735,8 @@ export const CanvasBlock = Schema.Union(
   CanvasChartBlock,
   CanvasTimelineBlock,
   CanvasDiagramBlock,
+  CanvasSequenceBlock,
+  CanvasStateBlock,
   CanvasCodeExcerptBlock,
   CanvasPseudocodeBlock,
   CanvasDiffBlock,
