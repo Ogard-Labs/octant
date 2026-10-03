@@ -1,3 +1,4 @@
+import { isAbsolute, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -9,6 +10,7 @@ import {
   decodeUtcTimestamp,
   type AgentRun,
   type AgentRunAuthority,
+  type AgentRunResultEvidence,
   type AgentRunContextSnapshotId,
   type AgentRunId,
   type CapacityReservationId,
@@ -227,6 +229,10 @@ export interface AgentRunSessionRuntimeOptions {
     readonly kind: "task" | "follow-up" | "resume" | "steering" | "answer";
     readonly text: string;
     readonly occurredAt: UtcTimestamp;
+  }) => void;
+  readonly onChildActivity?: (input: {
+    readonly run: AgentRun;
+    readonly event: Extract<ProviderRuntimeEvent, { kind: "child-agent-activity" }>;
   }) => void;
   readonly onTextDelta?: (input: {
     readonly runId: AgentRunId;
@@ -760,6 +766,7 @@ export function createAgentRunSessionRuntime(
           shutdownTimeoutMs,
           shutdown,
           onTextDelta: options.onTextDelta,
+          onChildActivity: options.onChildActivity,
           onUserMessage: options.onUserMessage,
           interactions: options.interactions,
           onSessionEnding: () => {
@@ -1060,6 +1067,7 @@ interface ManagedSessionInput {
   readonly shutdownTimeoutMs: number;
   readonly shutdown: SessionShutdown;
   readonly onTextDelta?: AgentRunSessionRuntimeOptions["onTextDelta"];
+  readonly onChildActivity?: AgentRunSessionRuntimeOptions["onChildActivity"];
   readonly onUserMessage?: AgentRunSessionRuntimeOptions["onUserMessage"];
   readonly interactions: AgentRunSessionRuntimeOptions["interactions"];
   readonly onConnectionReady: (
@@ -1073,6 +1081,10 @@ interface ManagedSessionInput {
 interface ManagedSessionState {
   outcome: AgentRunSessionOutcome | undefined;
   responseText: string;
+  fileReports: Array<AgentRunResultEvidence["files"]["items"][number]>;
+  toolExecutions: Array<AgentRunResultEvidence["checks"]["items"][number]>;
+  filesTruncated: boolean;
+  toolsTruncated: boolean;
   inputTokens: number;
   outputTokens: number;
   sawUsage: boolean;
@@ -1101,6 +1113,10 @@ function runManagedSession(
       const state: ManagedSessionState = {
         outcome: undefined,
         responseText: "",
+        fileReports: [],
+        toolExecutions: [],
+        filesTruncated: false,
+        toolsTruncated: false,
         inputTokens: 0,
         outputTokens: 0,
         sawUsage: false,
@@ -1163,6 +1179,7 @@ function runManagedSession(
           onSuccess: (outcome: AgentRunSessionOutcome) => outcome,
         }),
       );
+      const evidence = sessionEvidence(state);
       if (finished === "timed-out") {
         // Deliberately not recorded on `state.outcome`: the provider never
         // reported a terminal event, so the shutdown below must still interrupt
@@ -1171,11 +1188,41 @@ function runManagedSession(
         return {
           kind: "interrupted",
           reason: "Managed AgentRun turn exceeded its runtime deadline.",
+          ...(evidence === undefined ? {} : { evidence }),
         };
       }
-      return finished;
+      return { ...finished, ...(evidence === undefined ? {} : { evidence }) };
     }),
   );
+}
+
+function sessionEvidence(state: ManagedSessionState): AgentRunResultEvidence | undefined {
+  if (
+    state.fileReports.length === 0 &&
+    state.toolExecutions.length === 0 &&
+    !state.filesTruncated &&
+    !state.toolsTruncated
+  )
+    return undefined;
+  return {
+    files: {
+      status: state.filesTruncated
+        ? "truncated"
+        : state.fileReports.length > 0
+          ? "recorded"
+          : "unavailable",
+      items: state.fileReports,
+      reviewStatus: "unavailable",
+    },
+    checks: {
+      status: state.toolsTruncated
+        ? "truncated"
+        : state.toolExecutions.length > 0
+          ? "recorded"
+          : "unavailable",
+      items: state.toolExecutions,
+    },
+  };
 }
 
 /**
@@ -1403,6 +1450,43 @@ function collectSessionEvents(
               };
               return;
             }
+            if (event.kind === "file-change" && event.instanceId === input.providerInstanceId) {
+              const path = isAbsolute(event.path)
+                ? relative(input.projectRoot, event.path)
+                : event.path;
+              if (
+                path.length === 0 ||
+                path.length > 2048 ||
+                path.includes("\\") ||
+                path.includes("\0") ||
+                path.split("/").includes("..") ||
+                isAbsolute(path)
+              ) {
+                state.filesTruncated = true;
+                return;
+              }
+              const reference = `octant://agent-run/${String(input.run.id)}/generation/${input.run.generation ?? 1}/provider/${event.sessionId}/${event.sequence}`;
+              if (state.fileReports.some((report) => report.reference === reference)) return;
+              if (state.fileReports.length >= 32) {
+                state.filesTruncated = true;
+                return;
+              }
+              state.fileReports.push({
+                path,
+                change: event.change,
+                reference,
+                source: "provider-reported",
+                verified: false,
+              });
+              return;
+            }
+            if (
+              event.kind === "child-agent-activity" &&
+              event.instanceId === input.providerInstanceId
+            ) {
+              input.onChildActivity?.({ run: input.run, event });
+              return;
+            }
             if (event.kind === "text-delta") {
               const delta = publishableTextDelta(event);
               if (delta === undefined) return;
@@ -1547,6 +1631,22 @@ function collectSessionEvents(
                 }
               });
               if (executionSignal.aborted) return;
+              const output = boundedToolResultJson(execution.result);
+              if (state.toolExecutions.length >= 32) state.toolsTruncated = true;
+              else
+                state.toolExecutions.push({
+                  label: `Tool execution: ${event.toolName.slice(0, 255)}`,
+                  outcome: "unknown",
+                  source: "host-recorded",
+                  reference: `octant://agent-run/${String(input.run.id)}/generation/${input.run.generation ?? 1}/tool/${event.sessionId}/${event.sequence}`,
+                  toolExecution: {
+                    toolName: event.toolName.slice(0, 255),
+                    requestId: event.requestId.slice(0, 255),
+                    isError: execution.isError === true,
+                    output: output.slice(0, 2048),
+                    truncated: output.length > 2048,
+                  },
+                });
               yield* connection.answerTool({
                 sessionId: input.sessionId,
                 requestId: event.requestId,

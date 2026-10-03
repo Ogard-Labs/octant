@@ -568,6 +568,40 @@ reuse its verified receipt. The host checks the actual Git worktree inventory
 and records the starting commit. Children start from committed source; the
 parent checkout's uncommitted edits are not copied into a child worktree.
 
+Provider-owned child reports are read-only observations through the existing
+`child-agent-activity` SDK event. Chat attempts, Work turn updates, Code operation
+frames, and managed-child conversations retain the normalized facts in their
+existing journals or purgeable content. Identity includes the mode, root thread,
+optional managed parent, provider instance, session, and provider child ID.
+An observation never receives an AgentRun ID, workspace grant, or managed control.
+Missing child model or task metadata stays unknown; the lead model is not a
+substitute. Status is the provider's last report, not proof of a live process.
+Replay is idempotent; conflicting reported identities become unknown, and missing
+or circular child lineage is excluded. Each source retains at most 16 observed
+children and eight history entries per child, with explicit partial/truncated
+history. Parent reads include at most 64 observations. No current in-tree adapter
+advertises native-child observation support: their existing child-disable and
+provenance gates remain in force. SDK fixture coverage does not establish
+real-provider native-child acceptance.
+
+Child result packets retain at most 16 generations, including the current
+generation's availability, immutable execution target and workspace receipt.
+The reported summary is a bounded 4,096-character view of the generation's
+existing result content. Lifecycle blockers come from recorded settlement facts.
+Normalized file-change reports and host-executed tool returns are stored beside
+the generation's reply, atomically with settlement, in the same subject-owned
+content store. Each section retains at most 32 records and 60,000 serialized
+characters; tool output is bounded to 2,048 characters. File paths outside the admitted workspace are omitted and
+make the section truncated. Provider file reports are explicitly unverified;
+host tool returns remain an unknown check outcome even when their output says
+a test passed. No result implies parent delivery, review, merge, or deployment.
+Generation-specific review snapshots are not currently recorded for these reports,
+so review is explicitly unavailable; a parent checkout is never substituted.
+Parent and child scope checks precede reads, streams recheck scope before each
+frame, and a parent purge removes all generations' text and evidence. Nested
+observations retain the authorized root thread and identify their managed parent
+separately. Result reads do not consume or acknowledge delivery.
+
 Managed children retain a private provider-session cursor and a bounded,
 purgeable conversation alongside their journaled lifecycle. A cursor is bound
 to the run, provider, model, workspace, context, and authority. Resume uses that

@@ -1,3 +1,5 @@
+import { agentRunResultReference } from "@octant/domain/agent-run-policy";
+import type { AgentRunResultEvidence } from "@octant/contracts";
 import {
   AggregateId,
   AggregateVersion,
@@ -28,6 +30,7 @@ import { Schema } from "effect";
 import {
   writeAgentRunAdmittedContext,
   writeAgentRunResultText,
+  writeAgentRunResultEvidence,
 } from "../persistence/agentRunContentStore";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
@@ -85,6 +88,7 @@ export interface AppendAgentRunStatusChangedInput {
    * is, and written by the same transaction as the event that names it.
    */
   readonly resultText?: string;
+  readonly resultEvidence?: AgentRunResultEvidence;
   /** The run this status change belongs to; owns the stored reply text. */
   readonly run?: AgentRun;
   /** Provider-reported token counts; journaled with completion. */
@@ -293,19 +297,28 @@ export class AgentRunEventStore {
             },
           ],
         },
-        completion === undefined
+        completion === undefined && input.resultEvidence === undefined
           ? {}
           : {
               // The reply is the parent thread's content, so it is stored
               // rather than journaled — by this same transaction, so a journal
               // can never record Completed without the reply behind it.
-              beforeEvents: (connection) =>
-                writeAgentRunResultText(connection, {
-                  run: completion.run,
-                  reference: completion.reference,
-                  text: completion.text,
-                  createdAt: input.occurredAt,
-                }),
+              beforeEvents: (connection) => {
+                if (input.resultEvidence !== undefined && input.run !== undefined)
+                  writeAgentRunResultEvidence(connection, {
+                    run: input.run,
+                    reference: agentRunResultReference(input.run.id, input.run.generation),
+                    evidence: input.resultEvidence,
+                    createdAt: input.occurredAt,
+                  });
+                if (completion !== undefined)
+                  writeAgentRunResultText(connection, {
+                    run: completion.run,
+                    reference: completion.reference,
+                    text: completion.text,
+                    createdAt: input.occurredAt,
+                  });
+              },
             },
       );
     } catch (error) {

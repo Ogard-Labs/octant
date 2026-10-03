@@ -1,3 +1,4 @@
+import { observedChildren } from "./agentRun/agentObservedChildren";
 import { createLocalUsageHistoryCheckpointStore } from "./persistence/localUsageHistoryCheckpointStore";
 import { createLocalUsageHistoryLastReadStore } from "./persistence/localUsageHistoryLastReadStore";
 import { createSelectedExtensionResolver } from "./extensions/selectedExtensions";
@@ -2216,6 +2217,8 @@ export function startOctantServer(
           agentRunLiveConversations.begin(runId, { resume: resumed }),
         onUserMessage: ({ runId, kind, text, occurredAt }) =>
           agentRunLiveConversations.appendStatus(runId, `${kind}: ${text}`, occurredAt),
+        onChildActivity: ({ run, event }) =>
+          agentRunLiveConversations.appendChildActivity(run.id, event, run.generation ?? 1),
         onTextDelta: ({ runId, text, occurredAt }) =>
           agentRunLiveConversations.appendText(runId, text, occurredAt),
         onSessionSettled: ({ runId, outcome }) => {
@@ -2512,6 +2515,59 @@ export function startOctantServer(
         uuid: randomUUID,
       });
     const agentRunRouteDependencies: AgentRunRouteDependencies = {
+      readObservations: ({ parentThreadId }) => {
+        const chat = persistence.readChatThread(decodeChatThreadId(String(parentThreadId)));
+        const work = workThreadProjection.read(decodeWorkThreadId(String(parentThreadId)));
+        const code = persistence.readCodeThread(decodeCodeThreadId(String(parentThreadId)));
+        if ([chat, work, code].filter((thread) => thread !== undefined).length !== 1) {
+          return { observations: [], observationsTruncated: false };
+        }
+        if (chat !== undefined) {
+          const view = persistence.readChatThreadView(chat.id);
+          return observedChildren({
+            parentThreadId,
+            mode: "chat",
+            states:
+              view?.turns
+                .slice(-64)
+                .flatMap((turn) =>
+                  turn.attempts.flatMap((attempt) =>
+                    attempt.childObservations === undefined ? [] : [attempt.childObservations],
+                  ),
+                ) ?? [],
+            truncated: (view?.turns.length ?? 0) > 64,
+          });
+        }
+        if (work !== undefined) {
+          const turns = workTurnProjection.listForThread(work.id);
+          return observedChildren({
+            parentThreadId,
+            mode: "work",
+            states: turns
+              .slice(-64)
+              .flatMap((turn) =>
+                turn.childObservations === undefined ? [] : [turn.childObservations],
+              ),
+            truncated: turns.length > 64,
+          });
+        }
+        const history = codeBoardEventStore.historyForThread(
+          decodeCodeThreadId(String(parentThreadId)),
+        );
+        return observedChildren({
+          parentThreadId,
+          mode: "code",
+          truncated: history.status !== "ok",
+          events:
+            history.status !== "ok"
+              ? []
+              : history.frames.flatMap((frame) =>
+                  frame.event.kind === "child-activity" && frame.event.observation !== undefined
+                    ? [frame.event.observation]
+                    : [],
+                ),
+        });
+      },
       listTargets: (parent) =>
         agentRunEligibleTargets(
           parent.parentRoute.projectId === undefined
@@ -9961,6 +10017,12 @@ function authorizeAgentRunParentThread(input: {
   const workspace = input.persistence.readWindowWorkspace(input.windowId as WindowId)?.workspace;
   if (workspace === undefined) return false;
   const threadId = String(input.parentThreadId);
+  if (
+    input.persistence.connection
+      .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
+      .get(threadId) !== undefined
+  )
+    return false;
 
   const chatContext = workspace.contextByMode.chat;
   let chatThread;

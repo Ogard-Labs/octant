@@ -847,6 +847,13 @@ describe("CodeTurnRunner", () => {
       ),
     );
 
+    expect(
+      observed.find((entry) => entry.category === "child-activity")?.childObservation,
+    ).toMatchObject({
+      kind: "child-agent-activity",
+      childAgentId: "child-1",
+      instanceId: authorityThread.providerInstanceId,
+    });
     expect(observed.map((entry) => entry.category)).toEqual([
       "tool",
       "approval",

@@ -733,19 +733,25 @@ export class AgentRunOrchestrationService {
       case "completed":
         return this.#recordSessionCompletion(current, outcome);
       case "waiting":
-        return this.#persistence.applyCommand({
-          kind: "wait-agent-run",
-          runId: current.id,
-          expectedVersion,
-          recoveryReason: boundedRecoveryReason(outcome.reason),
-        });
+        return this.#persistence.applyCommand(
+          {
+            kind: "wait-agent-run",
+            runId: current.id,
+            expectedVersion,
+            recoveryReason: boundedRecoveryReason(outcome.reason),
+          },
+          outcome.evidence,
+        );
       case "cancelled":
-        return this.#persistence.applyCommand({
-          kind: "cancel-agent-run",
-          runId: current.id,
-          expectedVersion,
-          scope: "self",
-        });
+        return this.#persistence.applyCommand(
+          {
+            kind: "cancel-agent-run",
+            runId: current.id,
+            expectedVersion,
+            scope: "self",
+          },
+          outcome.evidence,
+        );
       case "failed":
         if (outcome.failure.usageLimit !== undefined) {
           // The provider's own protocol signal says this stop is a usage
@@ -753,31 +759,40 @@ export class AgentRunOrchestrationService {
           // never Failed, which would report a bounded wait as a dead run and
           // would offer Retry where the honest action is waiting out the
           // reset. Every other failure keeps the honest terminal state.
-          return this.#persistence.applyCommand({
-            kind: "wait-agent-run",
+          return this.#persistence.applyCommand(
+            {
+              kind: "wait-agent-run",
+              runId: current.id,
+              expectedVersion,
+              recoveryReason: boundedRecoveryReason(
+                `${outcome.failure.category}: ${outcome.failure.message}`,
+              ),
+              usageLimit: outcome.failure.usageLimit,
+            },
+            outcome.evidence,
+          );
+        }
+        return this.#persistence.applyCommand(
+          {
+            kind: "fail-agent-run",
             runId: current.id,
             expectedVersion,
             recoveryReason: boundedRecoveryReason(
               `${outcome.failure.category}: ${outcome.failure.message}`,
             ),
-            usageLimit: outcome.failure.usageLimit,
-          });
-        }
-        return this.#persistence.applyCommand({
-          kind: "fail-agent-run",
-          runId: current.id,
-          expectedVersion,
-          recoveryReason: boundedRecoveryReason(
-            `${outcome.failure.category}: ${outcome.failure.message}`,
-          ),
-        });
+          },
+          outcome.evidence,
+        );
       case "interrupted":
-        return this.#persistence.applyCommand({
-          kind: "interrupt-agent-run",
-          runId: current.id,
-          expectedVersion,
-          recoveryReason: boundedRecoveryReason(outcome.reason),
-        });
+        return this.#persistence.applyCommand(
+          {
+            kind: "interrupt-agent-run",
+            runId: current.id,
+            expectedVersion,
+            recoveryReason: boundedRecoveryReason(outcome.reason),
+          },
+          outcome.evidence,
+        );
     }
   }
 
@@ -867,6 +882,7 @@ export class AgentRunOrchestrationService {
         truncated: reply.truncated,
       },
       resultText: reply.text,
+      ...(outcome.evidence === undefined ? {} : { resultEvidence: outcome.evidence }),
       ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
     });
   }

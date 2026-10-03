@@ -145,3 +145,4 @@ export * from "./simulatorDevice";
 export * from "./gitHistory";
 
 export * from "./threadMessageQueue";
+export * from "./agentObservation";
