@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Queue, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   decodeAgentRunParentThreadId,
   decodeEventActor,
@@ -56,6 +56,7 @@ import { createAgentRunRouteHandler } from "./agentRunRoutes";
 import {
   createAgentRunSessionRuntime,
   createRecordedAgentRunContextSnapshotPort,
+  type AgentRunSessionRuntimeOptions,
 } from "./agentRunSessionRuntime";
 import { AgentRunSessionStore } from "./agentRunSessionStore";
 import { AgentRunSessionSupervisor } from "./agentRunSessionSupervisor";
@@ -146,9 +147,13 @@ function fixtureDriver(harness: Harness, released: Promise<void>) {
           subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (start: ProviderSessionStart) => {
             started.push(start);
-            return Effect.succeed({ sessionId: start.sessionId });
+            return Effect.succeed({
+              sessionId: start.sessionId,
+              resumeCursor: { driverKind: "codex" as const, value: "fixture-native-session" },
+            });
           },
-          resume: () => Effect.die("Fresh fixture children must not resume an existing session."),
+          resume: (input) =>
+            Effect.succeed({ sessionId: input.sessionId, resumeCursor: input.resumeCursor }),
           send: (turn) =>
             Effect.promise(() => released).pipe(
               Effect.flatMap(() =>
@@ -186,7 +191,11 @@ function fixtureDriver(harness: Harness, released: Promise<void>) {
   return { driver, acquired, started };
 }
 
-function fixture(parentHarness: Harness, childHarness: Harness) {
+function fixture(
+  parentHarness: Harness,
+  childHarness: Harness,
+  spendCeiling?: AgentRunSessionRuntimeOptions["spendCeiling"],
+) {
   const directory = mkdtempSync(join(tmpdir(), "octant-cross-harness-"));
   const connection = openSqlite(join(directory, "events.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => now);
@@ -215,6 +224,12 @@ function fixture(parentHarness: Harness, childHarness: Harness) {
     connection,
     getById: (id) => persistence.getById(id),
   });
+  const providerCapacity = makeProviderCapacityScheduler({
+    now: () => Date.parse(now),
+    random: () => 0.5,
+    maxRetryJitterMs: 0,
+    ambiguousReservationTtlMs: 60_000,
+  });
   const runtime = createAgentRunSessionRuntime({
     resolveDriver: (id) =>
       String(id) === String(ids.octant)
@@ -223,12 +238,9 @@ function fixture(parentHarness: Harness, childHarness: Harness) {
           ? provider.driver
           : undefined,
     sessionStore: sessionStore.sessions,
-    capacityScheduler: makeProviderCapacityScheduler({
-      now: () => Date.parse(now),
-      random: () => 0.5,
-      maxRetryJitterMs: 0,
-      ambiguousReservationTtlMs: 60_000,
-    }),
+    supportsResume: (id) => String(id) === String(ids.provider),
+    ...(spendCeiling === undefined ? {} : { spendCeiling }),
+    capacityScheduler: providerCapacity,
     context: createRecordedAgentRunContextSnapshotPort({
       getById: (id) => persistence.getById(id),
       readAdmittedContext: () => undefined,
@@ -442,6 +454,20 @@ function fixture(parentHarness: Harness, childHarness: Harness) {
   });
   return {
     persistence,
+    runtime,
+    orchestration,
+    providerCapacity,
+    sessionStore,
+    journalRows: () =>
+      connection.prepare("SELECT * FROM event_journal ORDER BY global_sequence").all(),
+    resume: (runId: string, expectedVersion: number, message: string) =>
+      route(
+        new Request("http://127.0.0.1/api/agent-runs/resume", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": tokens.own },
+          body: JSON.stringify({ runId, expectedVersion, message }),
+        }),
+      ),
     direct,
     provider,
     deliveries,
@@ -592,3 +618,117 @@ describe("cross-harness delegation with fixture provider transports", () => {
     },
   );
 });
+
+it("keeps a completed child's reply and generation when spend admission refuses its follow-up", async () => {
+  const admit = vi
+    .fn()
+    .mockReturnValue({ status: "admitted", reservedTokens: 100, reservations: [] });
+  const settle = vi.fn();
+  const subject = fixture("provider harness", "provider harness", { admit, settle });
+  try {
+    await subject.delegate("Remember the original result");
+    subject.release();
+    await vi.waitFor(() =>
+      expect([...subject.persistence.snapshot().values()][0]?.lifecycleStatus).toBe("completed"),
+    );
+    const completed = [...subject.persistence.snapshot().values()][0];
+    if (completed === undefined) throw new Error("Expected completed child");
+    const consumed = subject.persistence.applyCommand({
+      kind: "settle-agent-run-result-delivery",
+      runId: completed.id,
+      expectedVersion: completed.version,
+      generation: completed.generation ?? 1,
+      outcome: "consumed",
+    });
+    if (consumed.kind !== "run-updated") throw new Error("Expected consumed result");
+    expect(await subject.runtime.checkResume?.(consumed.run)).toEqual({ status: "ready" });
+    const saved = subject.sessionStore.sessions.read(consumed.run);
+    expect(saved?.resumeCursor?.value).toBe("fixture-native-session");
+    const rows = subject.journalRows();
+    const refusal = "This follow-up exceeds the current spend ceiling.";
+    admit.mockReturnValue({ status: "refused", refusal: { message: refusal } });
+    const message = "Continue with the second source";
+    const response = await subject.resume(consumed.run.id, consumed.run.version, message);
+    expect(await response?.json()).toMatchObject({ kind: "run-command-failed", message: refusal });
+    expect(response?.status).toBe(409);
+    expect(subject.persistence.getById(consumed.run.id)).toEqual(consumed.run);
+    expect(subject.journalRows()).toEqual(rows);
+    expect(subject.sessionStore.sessions.read(consumed.run)).toEqual(saved);
+    expect(subject.provider.acquired).toHaveLength(1);
+    expect(subject.persistence.resultText(consumed.run.id)).toContain(
+      "Remember the original result",
+    );
+  } finally {
+    await subject.close();
+  }
+});
+
+it.each(["stale-version", "journal-failure"] as const)(
+  "releases prepared continuation spend and capacity after %s without abandoning the reply",
+  async (failure) => {
+    const admit = vi
+      .fn()
+      .mockReturnValue({ status: "admitted", reservedTokens: 100, reservations: [] });
+    const settle = vi.fn();
+    const subject = fixture("provider harness", "provider harness", { admit, settle });
+    try {
+      await subject.delegate("Retain this first reply");
+      subject.release();
+      await vi.waitFor(() =>
+        expect([...subject.persistence.snapshot().values()][0]?.lifecycleStatus).toBe("completed"),
+      );
+      const completed = [...subject.persistence.snapshot().values()][0];
+      if (completed === undefined) throw new Error("Expected completed child");
+      const consumed = subject.persistence.applyCommand({
+        kind: "settle-agent-run-result-delivery",
+        runId: completed.id,
+        expectedVersion: completed.version,
+        generation: completed.generation ?? 1,
+        outcome: "consumed",
+      });
+      if (consumed.kind !== "run-updated") throw new Error("Expected consumed result");
+      const rows = subject.journalRows();
+      const capacity = subject.providerCapacity.snapshot(ids.provider);
+      const beforeSettled = settle.mock.calls.length;
+      const message = "Follow-up preserved for retry";
+      vi.spyOn(subject.persistence, "applyCommand").mockImplementationOnce(() => {
+        if (failure === "journal-failure") throw new Error("Journal unavailable");
+        return {
+          kind: "run-command-failed",
+          reason: "stale-version",
+          message: "Version changed before commit",
+        };
+      });
+      const pending = subject.orchestration.resume(
+        completed.id,
+        consumed.run.version,
+        liveAuthority,
+        { message },
+      );
+      if (failure === "journal-failure")
+        await expect(pending).rejects.toThrow("Journal unavailable");
+      else
+        expect(await pending).toMatchObject({
+          kind: "run-command-failed",
+          reason: "stale-version",
+        });
+      expect(subject.persistence.getById(completed.id)).toEqual(consumed.run);
+      expect(subject.journalRows()).toEqual(rows);
+      expect(subject.providerCapacity.snapshot(ids.provider)).toEqual(capacity);
+      expect(settle).toHaveBeenCalledTimes(beforeSettled + 1);
+      expect(subject.provider.acquired).toHaveLength(1);
+      const response = await subject.resume(completed.id, consumed.run.version, message);
+      expect(response?.status).toBe(200);
+      await vi.waitFor(() =>
+        expect(subject.persistence.getById(completed.id)).toMatchObject({
+          lifecycleStatus: "completed",
+          generation: 2,
+        }),
+      );
+      expect(subject.persistence.resultText(completed.id)).toContain(message);
+      expect(subject.provider.acquired).toHaveLength(2);
+    } finally {
+      await subject.close();
+    }
+  },
+);
