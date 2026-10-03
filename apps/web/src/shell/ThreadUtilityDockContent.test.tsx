@@ -112,8 +112,8 @@ describe("thread utility dock content", () => {
             }),
           } as never
         }
-        onAgentRunRequestHandled={vi.fn()}
-        requestedAgentRunId={runId}
+        onAgentViewRequestHandled={vi.fn()}
+        requestedAgentView={{ kind: "child", runId }}
         surface="agents"
       />,
     );

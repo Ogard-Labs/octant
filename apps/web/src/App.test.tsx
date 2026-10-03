@@ -15,6 +15,8 @@ import type { NavigatorAssistantClient } from "@octant/client-runtime/navigator-
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import { decodeAgentRunId } from "@octant/contracts/agent-run";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import { applyWorkspaceOperation } from "@octant/domain/shell-policy";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -2860,6 +2862,82 @@ describe("App", () => {
     expect(within(dock).queryByRole("button", { name: "Delivery" })).not.toBeInTheDocument();
     expect(within(dock).getByRole("button", { name: "Agents" })).toBeVisible();
   });
+
+  it.each(["composer tray", "Agents list"])(
+    "returns an already-open child from the %s to the full list on every View all request",
+    async (openedFrom) => {
+      const user = userEvent.setup();
+      const runId = decodeAgentRunId("30000000-0000-4000-8000-000000000003");
+      const finishedRunId = decodeAgentRunId("30000000-0000-4000-8000-000000000004");
+      const agentRunClient: AgentRunClient = {
+        parentSummary: vi.fn(async (parentThreadId) => ({
+          parentThreadId,
+          entries: [
+            { runId, task: "Inspect parser", lifecycleStatus: "running" },
+            { runId: finishedRunId, task: "Earlier review", lifecycleStatus: "completed" },
+          ].map((entry) => ({
+            ...entry,
+            parentThreadId,
+            requestId: String(entry.runId),
+            role: "review",
+            executionKind: "octant-managed",
+            usageQuality: "unavailable",
+            resultAcknowledgement: { required: false, acknowledged: false },
+            version: 1,
+            updatedAt: "2026-09-26T19:00:35.599Z",
+          })),
+        })),
+        conversation: vi.fn(async () => {
+          throw new Error("No live transcript in this fixture");
+        }),
+        center: vi.fn(),
+        snapshotCanvas: vi.fn(),
+        acknowledge: vi.fn(),
+        cancel: vi.fn(),
+        steer: vi.fn(),
+        retry: vi.fn(),
+        resume: vi.fn(),
+        usageResume: vi.fn(),
+      };
+      render(
+        <App
+          agentRunClient={agentRunClient}
+          codeClient={codes()}
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projects()}
+          projectWindowCapability={projectWindowCapability}
+          shellClient={client(codeShellBootstrap())}
+        />,
+      );
+
+      const tray = await screen.findByRole("group", { name: "Subagents" });
+      if (openedFrom === "composer tray") {
+        await user.click(within(tray).getByRole("button", { name: /Subagents,.*Show them/ }));
+        await user.click(within(tray).getByRole("button", { name: /Inspect parser.*Opens it/ }));
+      } else {
+        await showRightUtilityDock(user);
+        const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
+        await user.click(within(dock).getByRole("button", { name: "Agents" }));
+        await user.click(await within(dock).findByRole("button", { name: /Inspect parser/ }));
+      }
+
+      const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
+      expect(await within(dock).findByRole("region", { name: "Subagent" })).toBeVisible();
+      for (let request = 0; request < 2; request += 1) {
+        await user.click(
+          within(tray).getByRole("button", { name: "View all 2 subagents in Agents" }),
+        );
+        expect(await within(dock).findByRole("region", { name: "Subagents" })).toBeVisible();
+        expect(within(dock).queryByRole("region", { name: "Subagent" })).not.toBeInTheDocument();
+        expect(within(dock).getByRole("button", { name: /Earlier review/ })).toBeVisible();
+        await user.click(within(dock).getByRole("button", { name: /Inspect parser/ }));
+        expect(await within(dock).findByRole("region", { name: "Subagent" })).toBeVisible();
+      }
+      expect(agentRunClient.conversation).toHaveBeenCalledWith(runId);
+      expect(agentRunClient.cancel).not.toHaveBeenCalled();
+    },
+  );
 
   it("offers Plan only when the thread has a current plan artifact", async () => {
     const user = userEvent.setup();

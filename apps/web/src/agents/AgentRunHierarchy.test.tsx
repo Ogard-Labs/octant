@@ -78,7 +78,7 @@ describe("AgentRunHierarchy", () => {
       <AgentRunHierarchy
         client={client}
         parentThreadId={parentThreadId}
-        requestedRunId={`observation:${child.observationId}`}
+        requestedView={{ kind: "child", runId: `observation:${child.observationId}` }}
       />,
     );
     await screen.findByRole("region", { name: "Observed child" });
@@ -372,7 +372,11 @@ describe("AgentRunHierarchy", () => {
       })),
     });
     const view = render(
-      <AgentRunHierarchy client={client} parentThreadId={parentThreadId} requestedRunId={runId} />,
+      <AgentRunHierarchy
+        client={client}
+        parentThreadId={parentThreadId}
+        requestedView={{ kind: "child", runId }}
+      />,
     );
     await user.click(await screen.findByRole("button", { name: "Follow up" }));
     await user.type(screen.getByRole("textbox", { name: "Follow-up message" }), "First draft");
@@ -381,7 +385,7 @@ describe("AgentRunHierarchy", () => {
       <AgentRunHierarchy
         client={client}
         parentThreadId={parentThreadId}
-        requestedRunId={secondRunId}
+        requestedView={{ kind: "child", runId: secondRunId }}
       />,
     );
     await user.click(await screen.findByRole("button", { name: "Follow up" }));
@@ -806,7 +810,7 @@ describe("AgentRunHierarchy", () => {
 
   it("stays on the subagent another surface asked for, even when the tool remounts, until the reader goes back", async () => {
     const user = userEvent.setup();
-    const onRequestedRunHandled = vi.fn();
+    const onRequestedViewHandled = vi.fn();
     const client = emptyClient({
       parentSummary: vi.fn(async () => ({
         parentThreadId,
@@ -816,9 +820,9 @@ describe("AgentRunHierarchy", () => {
     const tool = () => (
       <AgentRunHierarchy
         client={client}
-        onRequestedRunHandled={onRequestedRunHandled}
+        onRequestedViewHandled={onRequestedViewHandled}
         parentThreadId={parentThreadId}
-        requestedRunId={String(runId)}
+        requestedView={{ kind: "child", runId: String(runId) }}
       />
     );
     const first = render(tool());
@@ -827,9 +831,9 @@ describe("AgentRunHierarchy", () => {
     first.unmount();
     render(tool());
     expect(await screen.findByRole("region", { name: "Subagent" })).toBeVisible();
-    expect(onRequestedRunHandled).not.toHaveBeenCalled();
+    expect(onRequestedViewHandled).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Back to subagents" }));
-    expect(onRequestedRunHandled).toHaveBeenCalledTimes(1);
+    expect(onRequestedViewHandled).toHaveBeenCalledTimes(1);
   });
 });
