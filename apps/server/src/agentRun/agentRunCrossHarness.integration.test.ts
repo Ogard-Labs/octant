@@ -21,6 +21,7 @@ import {
 import type {
   ProviderAcquireInput,
   ProviderDriver,
+  ProviderSessionResume,
   ProviderSessionStart,
 } from "@octant/provider-sdk/driver";
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
@@ -30,6 +31,7 @@ import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
 import { createNativeHarnessTools } from "../harness/nativeHarnessTools";
 import { MemoryNativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
+import type { NativeHarnessRequest } from "../harness/nativeHarnessTransport";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -103,6 +105,9 @@ const liveAuthority: AgentRunAuthority = {
 function fixtureDriver(harness: Harness, released: Promise<void>) {
   const acquired: ProviderAcquireInput[] = [];
   const started: ProviderSessionStart[] = [];
+  const resumed: ProviderSessionResume[] = [];
+  const requests: NativeHarnessRequest[] = [];
+  const transcripts = new MemoryNativeHarnessTranscriptStore();
   const target = candidates[harness];
   const driver: ProviderDriver = {
     kind: harness === "Octant Harness" ? "openai-compatible" : "codex",
@@ -116,7 +121,7 @@ function fixtureDriver(harness: Harness, released: Promise<void>) {
           driverKind: "openai-compatible",
           projectRoot: input.projectRoot,
           mode: "chat",
-          transcripts: new MemoryNativeHarnessTranscriptStore(),
+          transcripts,
           admitTurn: () => undefined,
           clock: () => now,
           correlationId: randomUUID,
@@ -124,9 +129,14 @@ function fixtureDriver(harness: Harness, released: Promise<void>) {
             open: async () => ({
               fits: () => true,
               send: async (request, stream) => {
+                requests.push({
+                  ...request,
+                  history: request.history.map((message) => ({ ...message })),
+                });
                 await released;
                 const text = `Fixture direct reply: ${request.history.at(-1)?.text}`;
                 stream.onEvent({ kind: "text-delta", text });
+                stream.onEvent({ kind: "usage", inputTokens: 20, outputTokens: 10 });
                 return { text, toolCalls: [] };
               },
               release: () => undefined,
@@ -138,6 +148,10 @@ function fixtureDriver(harness: Harness, released: Promise<void>) {
             start: (start: ProviderSessionStart) => {
               started.push(start);
               return connection.start(start);
+            },
+            resume: (input: ProviderSessionResume) => {
+              resumed.push(input);
+              return connection.resume(input);
             },
           })),
         );
@@ -152,8 +166,10 @@ function fixtureDriver(harness: Harness, released: Promise<void>) {
               resumeCursor: { driverKind: "codex" as const, value: "fixture-native-session" },
             });
           },
-          resume: (input) =>
-            Effect.succeed({ sessionId: input.sessionId, resumeCursor: input.resumeCursor }),
+          resume: (input: ProviderSessionResume) => {
+            resumed.push(input);
+            return Effect.succeed({ sessionId: input.sessionId, resumeCursor: input.resumeCursor });
+          },
           send: (turn) =>
             Effect.promise(() => released).pipe(
               Effect.flatMap(() =>
@@ -168,10 +184,20 @@ function fixtureDriver(harness: Harness, released: Promise<void>) {
                     text: `Fixture provider reply: ${turn.prompt}`,
                   }),
                   decodeProviderRuntimeEvent({
-                    kind: "completed",
+                    kind: "usage",
                     instanceId: target.providerInstanceId,
                     sessionId: turn.sessionId,
                     sequence: 2,
+                    correlationId: randomUUID(),
+                    occurredAt: now,
+                    inputTokens: 20,
+                    outputTokens: 10,
+                  }),
+                  decodeProviderRuntimeEvent({
+                    kind: "completed",
+                    instanceId: target.providerInstanceId,
+                    sessionId: turn.sessionId,
+                    sequence: 3,
                     correlationId: randomUUID(),
                     occurredAt: now,
                   }),
@@ -188,7 +214,7 @@ function fixtureDriver(harness: Harness, released: Promise<void>) {
       });
     },
   };
-  return { driver, acquired, started };
+  return { driver, acquired, started, resumed, requests };
 }
 
 function fixture(
@@ -238,7 +264,8 @@ function fixture(
           ? provider.driver
           : undefined,
     sessionStore: sessionStore.sessions,
-    supportsResume: (id) => String(id) === String(ids.provider),
+    supportsResume: (id) =>
+      String(id) === String(ids.provider) || String(id) === String(ids.octant),
     ...(spendCeiling === undefined ? {} : { spendCeiling }),
     capacityScheduler: providerCapacity,
     context: createRecordedAgentRunContextSnapshotPort({
@@ -485,6 +512,11 @@ function fixture(
           modelId: target.modelId,
         }),
       }),
+    followUp: (runId: string, expectedVersion: number, message: string) =>
+      tools.execute({
+        name: parentHarness === "Octant Harness" ? "delegate" : "octant_agents",
+        inputJson: JSON.stringify({ operation: "follow-up", runId, expectedVersion, message }),
+      }),
     acknowledge: (runId: string, expectedVersion: number, foreign = false) =>
       route(
         new Request("http://127.0.0.1/api/agent-runs/acknowledge", {
@@ -513,7 +545,7 @@ describe("cross-harness delegation with fixture provider transports", () => {
     ["provider harness", "Octant Harness"],
     ["provider harness", "provider harness"],
   ] as const)(
-    "%s delegates independent children to %s and settles results only for their parent",
+    "%s delegates independent children to %s and follows up in their saved sessions",
     async (parent, child) => {
       const subject = fixture(parent, child);
       try {
@@ -612,6 +644,96 @@ describe("cross-harness delegation with fixture provider transports", () => {
         subject.delivery.start();
         await Promise.resolve();
         expect(subject.deliveries).toHaveLength(1);
+
+        const original = runs[0];
+        if (original === undefined) throw new Error("Expected first child");
+        const completed = subject.persistence.getById(original.id);
+        if (completed === undefined) throw new Error("Completed child missing after replay");
+        const saved = subject.sessionStore.sessions.read(completed);
+        if (saved?.resumeCursor === undefined) throw new Error("Completed child has no cursor");
+        const firstReply = subject.persistence.resultText(completed.id);
+        const message = "Compare the first result with this follow-up evidence";
+        const followedUp = await subject.followUp(completed.id, completed.version, message);
+        expect(followedUp, subject.persistence.getById(completed.id)?.recoveryReason).toMatchObject(
+          {
+            result: {
+              status: "accepted",
+              runId: completed.id,
+              generation: 2,
+              lifecycleStatus: "starting",
+            },
+          },
+        );
+        await expect
+          .poll(() => subject.persistence.getById(completed.id))
+          .toMatchObject({
+            id: completed.id,
+            requestId: completed.requestId,
+            parentThreadId: completed.parentThreadId,
+            lifecycleStatus: "completed",
+            generation: 2,
+            authority: completed.authority,
+            routingReceipt: completed.routingReceipt,
+            resultAcknowledgement: { required: true, acknowledged: false },
+          });
+        const continued = subject.persistence.getById(completed.id);
+        if (continued === undefined) throw new Error("Continued child missing");
+        expect(continued.resultDelivery).toBeUndefined();
+        expect(subject.persistence.snapshot().size).toBe(2);
+        expect(subject.sessionStore.sessions.read(continued)).toEqual(saved);
+        expect(subject.persistence.resultText(continued.id)).toContain(message);
+        expect(subject.persistence.resultText(continued.id)).not.toBe(firstReply);
+        expect(selected.started).toHaveLength(2);
+        expect(selected.resumed).toEqual([
+          expect.objectContaining({
+            sessionId: saved.sessionId,
+            resumeCursor: saved.resumeCursor,
+            modelId: subject.target.modelId,
+            executionPolicy: "plan",
+          }),
+        ]);
+        expect(selected.acquired).toHaveLength(3);
+        expect(selected.acquired.at(-1)?.instanceId).toBe(subject.target.providerInstanceId);
+        expect(unused.acquired).toHaveLength(0);
+        if (child === "Octant Harness") {
+          expect(selected.requests.at(-1)?.modelId).toBe(subject.target.modelId);
+          expect(selected.requests.at(-1)?.history).toEqual([
+            { role: "user", text: expect.stringContaining(original.task) },
+            { role: "assistant", text: firstReply },
+            { role: "user", text: message },
+          ]);
+        }
+        subject.delivery.start();
+        await expect
+          .poll(() => subject.persistence.getById(continued.id))
+          .toMatchObject({ generation: 2, resultDelivery: { outcome: "delivered" } });
+        expect(subject.deliveries).toHaveLength(2);
+        expect(subject.deliveries[1]).toMatchObject({
+          parent: String(ids.thread),
+          mark: {
+            runId: continued.id,
+            runIds: [continued.id],
+            runGenerations: [{ runId: continued.id, generation: 2 }],
+          },
+          prompt: expect.stringContaining(message),
+        });
+        const delivered = subject.persistence.getById(continued.id);
+        if (delivered === undefined) throw new Error("Follow-up delivery missing");
+        expect((await subject.acknowledge(delivered.id, delivered.version, true))?.status).toBe(
+          403,
+        );
+        expect(subject.persistence.getById(delivered.id)?.resultAcknowledgement.acknowledged).toBe(
+          false,
+        );
+        expect((await subject.acknowledge(delivered.id, delivered.version))?.status).toBe(200);
+        subject.persistence.rebuildFromJournal();
+        expect(subject.persistence.getById(delivered.id)?.resultAcknowledgement.acknowledged).toBe(
+          true,
+        );
+        expect(subject.persistence.parentSummary(ids.foreignThread)).toEqual([]);
+        subject.delivery.start();
+        await Promise.resolve();
+        expect(subject.deliveries).toHaveLength(2);
       } finally {
         await subject.close();
       }
