@@ -155,7 +155,14 @@ instruction in its existing conversation. The parent agent can do the same
 through either delegation tool. The provider must support genuine resume; if
 it cannot, start a new delegation from the parent. Cancelled children cannot
 continue. The earlier conversation stays available, and the new reply needs
-its own acknowledgement.
+its own acknowledgement. The previous reply must reach the parent or be
+collected before a follow-up starts. Checking status does not collect it; an
+oversized reply remains available when a tool cannot return it completely.
+If capacity or the spend ceiling refuses a follow-up, the completed reply and
+your draft stay available so you can retry. Once accepted, the follow-up is saved
+with the child. Recovery sends an unsent follow-up as written; if delivery is
+uncertain, Octant says so and preserves it for inspection rather than silently
+sending it again.
 
 When the lead includes parent context, the child receives a bounded, attributed
 selection of accepted prompts and completed replies. Missing or omitted text

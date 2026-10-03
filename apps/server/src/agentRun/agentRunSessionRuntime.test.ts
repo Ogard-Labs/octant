@@ -19,8 +19,6 @@ import {
   type ProviderContextBlock,
   type ProviderExecutionPolicy,
   type ProviderTurnInput,
-  type ProviderSessionId,
-  type ProviderResumeCursor,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
@@ -1683,6 +1681,7 @@ describe("child continuation authority and recovery", () => {
   it("releases admission reservations if private session storage cannot be written", () => {
     const provider = fakeProvider();
     const counted = countingScheduler();
+    const release = vi.spyOn(counted.capacityScheduler, "releaseUnstarted");
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(provider, {
         capacityScheduler: counted.capacityScheduler,
@@ -1695,7 +1694,7 @@ describe("child continuation authority and recovery", () => {
       }),
     );
     expect(() => runtime.start(agentRun())).toThrow();
-    expect(counted.recordTerminal).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
     expect(provider.acquired).toEqual([]);
   });
 });
@@ -1810,3 +1809,78 @@ it("keeps an accepted steering acknowledgement when the session ends before the 
   await runtime.stop(run.id);
   expect(await acknowledged).toBe("steered");
 });
+
+it.each(["unsent", "uncertain"] as const)(
+  "recovers a committed child follow-up after reopening private state: %s delivery",
+  async (phase) => {
+    const path = databasePath();
+    let connection = openSqlite(path);
+    applyMigrations(connection, MIGRATIONS, () => now);
+    let run = agentRun();
+    const durable = new AgentRunSessionStore({ connection, getById: () => run });
+    const provider = fakeProvider({ resumable: true });
+    const first = createAgentRunSessionRuntime(
+      runtimeOptions(provider, { sessionStore: durable.sessions, supportsResume: () => true }),
+    );
+    const finished = settled(first.start(run));
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    await provider.emit({ kind: "completed", sessionId });
+    await finished;
+    run = { ...run, lifecycleStatus: "completed" };
+    const message = "Preserve this exact accepted follow-up across the crash";
+    const preparation = first.prepareResume?.(run, { message });
+    expect(preparation).toBeDefined();
+    expect(durable.sessions.read(run)).toMatchObject({
+      sessionId,
+      pendingContinuation: { generation: 2, message, state: "unsent" },
+    });
+    // The lifecycle commit survived, but the process ended before launching its
+    // prepared session. The new host gets new in-memory capacity and driver state.
+    run = { ...run, lifecycleStatus: "interrupted", generation: 2 };
+    connection.close();
+    connection = openSqlite(path);
+    const restored = new AgentRunSessionStore({ connection, getById: () => run });
+    const resumedProvider = fakeProvider({
+      resumable: true,
+      ...(phase === "uncertain" ? { wedge: "send" as const } : {}),
+    });
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(resumedProvider, {
+        sessionStore: restored.sessions,
+        supportsResume: () => true,
+      }),
+    );
+    const resumed = runtime.resume?.(run);
+    if (resumed === undefined) throw new Error("Expected saved continuation");
+    await vi.waitFor(() => expect(resumedProvider.turns).toHaveLength(1));
+    expect(resumedProvider.turns[0]?.prompt).toBe(message);
+    expect(resumedProvider.resumes[0]).toMatchObject({
+      sessionId,
+      resumeCursor: { value: "private-provider-session" },
+    });
+    if (phase === "uncertain") {
+      expect(restored.sessions.read(run)).toMatchObject({
+        pendingContinuation: { generation: 2, message, state: "delivery-unknown" },
+      });
+      await runtime.stop(run.id);
+      const third = createAgentRunSessionRuntime(
+        runtimeOptions(fakeProvider({ resumable: true }), {
+          sessionStore: restored.sessions,
+          supportsResume: () => true,
+        }),
+      );
+      expect(await third.checkResume?.(run)).toMatchObject({
+        status: "refused",
+        message: expect.stringContaining("may already have reached"),
+      });
+      expect(restored.sessions.read(run)).toMatchObject({ pendingContinuation: { message } });
+    } else {
+      await resumedProvider.emit({ kind: "completed", sessionId });
+      await settled(resumed);
+      expect(restored.sessions.read(run)).not.toHaveProperty("pendingContinuation");
+    }
+    purgeAgentRunSubjectContent(connection, agentRunContentSubject(run));
+    expect(restored.sessions.read(run)).toBeUndefined();
+    connection.close();
+  },
+);

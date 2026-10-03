@@ -393,6 +393,7 @@ import {
 } from "./agentRun/agentRunSessionRuntime";
 import { AgentRunSessionSupervisor } from "./agentRun/agentRunSessionSupervisor";
 import { AgentRunSessionStore } from "./agentRun/agentRunSessionStore";
+import { createAgentRunClaudeResumeIdentityPort } from "./agentRun/agentRunClaudeResumeIdentity";
 import { AgentRunLiveConversationStore } from "./agentRun/agentRunLiveConversationStore";
 import { createFolderBrowseRouteHandler } from "./folderBrowseRoutes";
 import { createLinkedThreadRouteHandler } from "./linkedThread/linkedThreadRoutes";
@@ -2163,11 +2164,25 @@ export function startOctantServer(
         },
         // `configuredDriverOptions` is declared later in this scope; the closure
         // only runs when a child starts, long after boot, so the reference is safe.
-        resolveDriver: (providerInstanceId) => {
+        resolveDriver: (providerInstanceId, run) => {
           const instance = persistence.readProviderInstance(providerInstanceId);
           if (instance === undefined || !instance.enabled) return undefined;
           try {
-            return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+            return makeConfiguredProviderDriver(instance, {
+              ...configuredDriverOptions,
+              ...(instance.driverKind === "claude"
+                ? {
+                    claudeResumeIdentityPort: createAgentRunClaudeResumeIdentityPort({
+                      run,
+                      store: agentRunSessionStore,
+                      isProviderAvailable: (id) => {
+                        const current = persistence.readProviderInstance(id);
+                        return current?.enabled === true && current.driverKind === "claude";
+                      },
+                    }),
+                  }
+                : {}),
+            });
           } catch {
             return undefined;
           }
@@ -4026,8 +4041,13 @@ export function startOctantServer(
       isProviderExecutableAvailable,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
-      clearResumeIdentities: (instanceId) =>
-        claudeResumeIdentityStore.removeProvider(instanceId, new AbortController().signal),
+      clearResumeIdentities: async (instanceId) => {
+        const signal = new AbortController().signal;
+        await Promise.all([
+          claudeResumeIdentityStore.removeProvider(instanceId, signal),
+          agentRunSessionStore.removeProviderIdentities(instanceId, signal),
+        ]);
+      },
       clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
       driver: (instance) =>
         attachWorkRequestRuntime(
