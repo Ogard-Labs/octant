@@ -136,7 +136,16 @@ on that selected host against its configured binary; no updater command or
 shell authority is sent to the renderer. Stop active sessions before updating.
 Unsupported or unverified
 commands stay unavailable. Octant never silently replaces a CLI or updates
-providers without an explicit action. On a headless
+providers without an explicit action. OpenCode is not updated by that
+provider-owned command. **Settings → Providers & Models** shows the installed
+and available versions of Octant's managed OpenCode copy and an **Update**
+action. Update checks the same managed tool channel as device tools, verifies
+the registry integrity hash, stages the release, and keeps the previous copy
+if the new one does not start. A failure says why. Update writes only inside
+Octant's managed location. It never replaces an OpenCode you installed
+elsewhere. **Use Octant's copy** appears only after you agree, and it switches
+this provider to the managed executable instead of overwriting your other
+install. On a headless
 host, use the provider's device/non-interactive login when available; no
 desktop browser window is required by the architecture.
 

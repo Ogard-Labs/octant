@@ -551,7 +551,8 @@ describe("provider CLI update policy", () => {
     expect(providerCliUpdateArgs("kimi-code")).toEqual(["upgrade"]);
     expect(providerCliUpdateArgs("codex")).toEqual(["update"]);
     expect(providerCliUpdateArgs("claude")).toEqual(["update"]);
-    expect(providerCliUpdateArgs("opencode")).toEqual(["upgrade"]);
+    expect(providerCliUpdateArgs("opencode")).toBeUndefined();
+    expect(supportsProviderCliUpdate("opencode")).toBe(false);
     expect(supportsProviderCliUpdate("copilot")).toBe(true);
     expect(supportsProviderCliUpdate("gemini")).toBe(false);
     expect(supportsProviderCliUpdate("goose")).toBe(false);
