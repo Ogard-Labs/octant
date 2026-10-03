@@ -1542,10 +1542,10 @@ describe("managed child continuation", () => {
   });
 });
 
-it("releases the continuation slot if its starting event cannot be persisted", () => {
+it("starts another capacity waiter without restarting a continuation whose resume cannot be persisted", () => {
   const start = vi.fn();
   const resume = vi.fn();
-  const capacity = createInMemoryCapacityPort();
+  const capacity = createInMemoryCapacityPort(() => ({ perThread: 1, onHost: 1 }));
   const release = vi.spyOn(capacity, "release");
   const harness = createHarness(capacity, true, { start, resume, stop: async () => undefined });
   const admitted = harness.orchestration.admit({
@@ -1561,12 +1561,50 @@ it("releases the continuation slot if its starting event cannot be persisted", (
     outcome: { kind: "waiting", reason: "Provider wait" },
   });
   if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
-  vi.spyOn(harness.persistence, "applyCommand").mockImplementationOnce(() => {
+  // A saved continuation can itself be capacity-eligible. It must not be
+  // mistaken for a fresh start when its resume transaction fails.
+  const resuming = harness.persistence.applyCommand({
+    kind: "resume-agent-run",
+    runId: waited.run.id,
+    expectedVersion: waited.run.version,
+  });
+  if (resuming.kind !== "run-updated") throw new Error("Fixture did not resume");
+  const continuation = harness.persistence.applyCommand({
+    kind: "wait-agent-run",
+    runId: resuming.run.id,
+    expectedVersion: resuming.run.version,
+    recoveryReason: "provider-capacity-saturated",
+  });
+  if (continuation.kind !== "run-updated") throw new Error("Fixture did not park");
+  const blocker = capacity.tryReserve({
+    runId: decodeAgentRunId(randomUUID()),
+    parentThreadId: otherThread,
+    providerInstanceId: ids.provider,
+  });
+  if (blocker.status !== "reserved") throw new Error("Fixture did not reserve the slot");
+  const next = harness.orchestration.admit({
+    command: requestCommand(ids.requestChild),
+    parentAuthority: authority,
+    liveAuthority: authority,
+    confirmed: true,
+  });
+  if (next.kind !== "run-updated") throw new Error("Fixture did not queue the next child");
+  expect(next.run).toMatchObject({
+    lifecycleStatus: "waiting",
+    recoveryReason: "provider-capacity-saturated",
+  });
+  capacity.release(blocker.reservationId);
+  // The journal fails once after Resume reserved the freed slot; subsequent
+  // writes can admit the independent waiter normally.
+  vi.spyOn(harness.journal, "append").mockImplementationOnce(() => {
     throw new Error("Journal unavailable");
   });
-  expect(() => harness.orchestration.resume(waited.run.id, waited.run.version, authority)).toThrow(
-    "Journal unavailable",
-  );
+  expect(() =>
+    harness.orchestration.resume(continuation.run.id, continuation.run.version, authority),
+  ).toThrow("Journal unavailable");
   expect(resume).not.toHaveBeenCalled();
-  expect(release).toHaveBeenCalledTimes(2);
+  expect(release).toHaveBeenCalledTimes(3);
+  expect(harness.persistence.getById(continuation.run.id)).toEqual(continuation.run);
+  expect(harness.persistence.getById(next.run.id)?.lifecycleStatus).toBe("starting");
+  expect(start.mock.calls.map(([run]) => run.id)).toEqual([admitted.run.id, next.run.id]);
 });
