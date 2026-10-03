@@ -33,7 +33,7 @@ import { CodeAttachmentGallery, type CodeAttachmentReader } from "../code/CodeAt
 import type { CodeAttachmentReference } from "@octant/contracts";
 import { CodeCheckoutProvider } from "./CodeCheckoutContext";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
-import { EnvironmentGroup } from "./EnvironmentGroup";
+import { EnvironmentCard, EnvironmentGroup } from "./EnvironmentGroup";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
 import { countGroupedLocalServerListenersByScope } from "./localServerGroups";
 import { LocalServersGroup } from "./LocalServersGroup";
@@ -198,6 +198,44 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       <ThreadEnvironmentPanel
         {...(props.active === undefined ? {} : { active: props.active })}
         open={environmentOpen}
+        headerContent={
+          <section className="environment-checkout" aria-label="Checkout">
+            <EnvironmentGitGroup
+              {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
+              {...(controller.errorMessage === undefined
+                ? {}
+                : { errorMessage: controller.errorMessage })}
+              {...(controller.observation === undefined
+                ? {}
+                : { observation: controller.observation })}
+              {...(props.onOpenChanges === undefined ? {} : { onOpenChanges: props.onOpenChanges })}
+              status={controller.status}
+            />
+            {props.onOpenGit === undefined && props.onCreatePullRequest === undefined ? null : (
+              // The two things a checkout's facts lead to, side by side under
+              // them; as full-width rows they read as two more facts.
+              <div className="environment-checkout__actions">
+                {props.onOpenGit === undefined ? null : (
+                  <OctantButton onClick={props.onOpenGit} size="sm" type="button" variant="outline">
+                    <GitCommitHorizontal aria-hidden="true" size={14} />
+                    <span>Commit or push</span>
+                  </OctantButton>
+                )}
+                {props.onCreatePullRequest === undefined ? null : (
+                  <OctantButton
+                    onClick={props.onCreatePullRequest}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <GitPullRequest aria-hidden="true" size={14} />
+                    <span>Create pull request</span>
+                  </OctantButton>
+                )}
+              </div>
+            )}
+          </section>
+        }
         summary={{
           identity: projection.identity,
           ...(readyObservation === undefined
@@ -216,178 +254,146 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           ...(runningServerCounts === undefined ? {} : { runningServerCounts }),
         }}
       >
-        <section className="environment-checkout" aria-label="Checkout">
-          <EnvironmentGitGroup
-            {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
-            {...(controller.errorMessage === undefined
-              ? {}
-              : { errorMessage: controller.errorMessage })}
-            {...(controller.observation === undefined
-              ? {}
-              : { observation: controller.observation })}
-            {...(props.onOpenChanges === undefined ? {} : { onOpenChanges: props.onOpenChanges })}
-            status={controller.status}
-          />
-          {props.onOpenGit === undefined && props.onCreatePullRequest === undefined ? null : (
-            // The two things a checkout's facts lead to, side by side under
-            // them; as full-width rows they read as two more facts.
-            <div className="environment-checkout__actions">
-              {props.onOpenGit === undefined ? null : (
-                <OctantButton onClick={props.onOpenGit} size="sm" type="button" variant="outline">
-                  <GitCommitHorizontal aria-hidden="true" size={14} />
-                  <span>Commit or push</span>
-                </OctantButton>
-              )}
-              {props.onCreatePullRequest === undefined ? null : (
-                <OctantButton
-                  onClick={props.onCreatePullRequest}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  <GitPullRequest aria-hidden="true" size={14} />
-                  <span>Create pull request</span>
-                </OctantButton>
-              )}
-            </div>
-          )}
-        </section>
-        {/* One list, one row grammar: what is live on this checkout first,
-            then what the thread is set to, then what it has cost. */}
+        {/* Two captioned cards, one row grammar: what is live on this checkout
+            first, then what the thread delivers and what it has cost. */}
         <div className="environment-list">
-          <EnvironmentGroup
-            icon={Server}
-            onOpenChange={setServersOpen}
-            open={serversOpen ?? (runningServerCounts?.currentCheckout ?? 0) > 0}
-            {...(localServers.snapshot === undefined
-              ? {}
-              : {
-                  summary: serverSummary(runningServerCounts),
-                })}
-            title="Local servers"
-          >
-            <LocalServersGroup
-              controller={localServers}
-              {...(props.onOpenLocalServer === undefined
-                ? {}
-                : { onOpenTarget: props.onOpenLocalServer })}
-              {...(props.onCopyLocalServerUrl === undefined
-                ? {}
-                : { onCopyUrl: props.onCopyLocalServerUrl })}
-              {...(localServersAvailable
+          <EnvironmentCard caption="Running">
+            <EnvironmentGroup
+              icon={Server}
+              onOpenChange={setServersOpen}
+              open={serversOpen ?? (runningServerCounts?.currentCheckout ?? 0) > 0}
+              {...(localServers.snapshot === undefined
                 ? {}
                 : {
-                    unavailableReason:
-                      localServersSection?.unavailableReason ??
-                      "Open a repository Project to view local servers.",
+                    summary: serverSummary(runningServerCounts),
                   })}
-            />
-          </EnvironmentGroup>
-          {props.agentRunClient === undefined ? null : (
-            <EnvironmentSubagents
-              client={props.agentRunClient}
-              {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
-              threadId={String(props.tab.threadId)}
-            />
-          )}
-          <ThreadActivityEnvironment />
-          {pullRequestClient === undefined || props.project === undefined ? null : (
-            <EnvironmentPullRequests
-              enabled={environmentOpen}
-              load={(query) => pullRequestClient.queryProjectPullRequests(query)}
-              projectId={props.project.id}
-              refresh={(command) => pullRequestClient.refreshProjectPullRequests(command)}
-              {...(props.onOpenPullRequests === undefined
-                ? {}
-                : { onOpenAll: props.onOpenPullRequests })}
-              {...(props.onSelectPullRequest === undefined
-                ? {}
-                : { onSelectRow: props.onSelectPullRequest })}
-              threadId={String(props.tab.threadId)}
-            />
-          )}
-          {(props.sources?.length ?? 0) === 0 ? null : (
-            <EnvironmentGroup
-              icon={Paperclip}
-              title="Sources"
-              summary={String(props.sources?.length ?? 0)}
-              defaultOpen
+              title="Local servers"
             >
-              <CodeAttachmentGallery
-                attachments={props.sources ?? []}
-                threadId={props.tab.threadId}
-                {...(props.sourceClient === undefined ? {} : { client: props.sourceClient })}
+              <LocalServersGroup
+                controller={localServers}
+                {...(props.onOpenLocalServer === undefined
+                  ? {}
+                  : { onOpenTarget: props.onOpenLocalServer })}
+                {...(props.onCopyLocalServerUrl === undefined
+                  ? {}
+                  : { onCopyUrl: props.onCopyLocalServerUrl })}
+                {...(localServersAvailable
+                  ? {}
+                  : {
+                      unavailableReason:
+                        localServersSection?.unavailableReason ??
+                        "Open a repository Project to view local servers.",
+                    })}
               />
             </EnvironmentGroup>
-          )}
-          {props.deliveryOutcome === undefined ||
-          threadVersion === undefined ||
-          props.onExecute === undefined ? null : (
-            <EnvironmentGroup
-              icon={Target}
-              summary={deliveryOutcomeLabel(props.deliveryOutcome)}
-              title="Delivers"
-            >
-              {/* Decision 0003 makes the outcome the reader's to confirm, and the
+            {props.agentRunClient === undefined ? null : (
+              <EnvironmentSubagents
+                client={props.agentRunClient}
+                {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+                threadId={String(props.tab.threadId)}
+              />
+            )}
+            <ThreadActivityEnvironment />
+          </EnvironmentCard>
+          <EnvironmentCard caption="Delivery">
+            {pullRequestClient === undefined || props.project === undefined ? null : (
+              <EnvironmentPullRequests
+                enabled={environmentOpen}
+                load={(query) => pullRequestClient.queryProjectPullRequests(query)}
+                projectId={props.project.id}
+                refresh={(command) => pullRequestClient.refreshProjectPullRequests(command)}
+                {...(props.onOpenPullRequests === undefined
+                  ? {}
+                  : { onOpenAll: props.onOpenPullRequests })}
+                {...(props.onSelectPullRequest === undefined
+                  ? {}
+                  : { onSelectRow: props.onSelectPullRequest })}
+                threadId={String(props.tab.threadId)}
+              />
+            )}
+            {(props.sources?.length ?? 0) === 0 ? null : (
+              <EnvironmentGroup
+                icon={Paperclip}
+                title="Sources"
+                summary={String(props.sources?.length ?? 0)}
+                defaultOpen
+              >
+                <CodeAttachmentGallery
+                  attachments={props.sources ?? []}
+                  threadId={props.tab.threadId}
+                  {...(props.sourceClient === undefined ? {} : { client: props.sourceClient })}
+                />
+              </EnvironmentGroup>
+            )}
+            {props.deliveryOutcome === undefined ||
+            threadVersion === undefined ||
+            props.onExecute === undefined ? null : (
+              <EnvironmentGroup
+                icon={Target}
+                summary={deliveryOutcomeLabel(props.deliveryOutcome)}
+                title="Delivers"
+              >
+                {/* Decision 0003 makes the outcome the reader's to confirm, and the
                 host has accepted a confirmation all along — nothing ever sent
                 one, so a thread carried whatever its first prompt read as. */}
-              <CodeDeliveryOutcomeSelector
-                onChange={(outcomeKind) => {
-                  void props.onExecute?.({
-                    kind: "confirm-code-delivery-outcome",
-                    threadId: props.tab.threadId,
-                    expectedVersion: threadVersion,
-                    outcomeKind,
-                  });
-                }}
-                value={props.deliveryOutcome}
+                <CodeDeliveryOutcomeSelector
+                  onChange={(outcomeKind) => {
+                    void props.onExecute?.({
+                      kind: "confirm-code-delivery-outcome",
+                      threadId: props.tab.threadId,
+                      expectedVersion: threadVersion,
+                      outcomeKind,
+                    });
+                  }}
+                  value={props.deliveryOutcome}
+                />
+              </EnvironmentGroup>
+            )}
+            {workingDirectory === undefined ||
+            threadVersion === undefined ||
+            props.onExecute === undefined ? null : (
+              <EnvironmentGroup
+                icon={FolderOpen}
+                summary={workingFolderLabel(workingDirectory)}
+                title="Working folder"
+              >
+                <ChangeWorkingFolder
+                  value={workingDirectory}
+                  onApply={async (nextWorkingDirectory) => {
+                    const result = await props.onExecute?.({
+                      kind: "change-code-thread-working-directory",
+                      threadId: props.tab.threadId,
+                      expectedVersion: threadVersion,
+                      workingDirectory: nextWorkingDirectory,
+                    });
+                    if (
+                      result === undefined ||
+                      !("kind" in result) ||
+                      result.kind !== "thread-updated"
+                    ) {
+                      throw new Error("Code working directory was not updated.");
+                    }
+                    await controller.refresh();
+                  }}
+                />
+              </EnvironmentGroup>
+            )}
+            {props.usageDashboardClient === undefined &&
+            props.spendCeilingClient === undefined ? null : (
+              <ThreadUsagePanel
+                client={props.usageDashboardClient}
+                subjectType="code-thread"
+                subjectId={String(props.tab.threadId)}
+                {...(props.project === undefined ? {} : { projectId: String(props.project.id) })}
+                {...(props.spendCeilingClient === undefined
+                  ? {}
+                  : { spendCeilingClient: props.spendCeilingClient })}
+                {...(props.onOpenUsageDashboard === undefined
+                  ? {}
+                  : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
               />
-            </EnvironmentGroup>
-          )}
-          {workingDirectory === undefined ||
-          threadVersion === undefined ||
-          props.onExecute === undefined ? null : (
-            <EnvironmentGroup
-              icon={FolderOpen}
-              summary={workingFolderLabel(workingDirectory)}
-              title="Working folder"
-            >
-              <ChangeWorkingFolder
-                value={workingDirectory}
-                onApply={async (nextWorkingDirectory) => {
-                  const result = await props.onExecute?.({
-                    kind: "change-code-thread-working-directory",
-                    threadId: props.tab.threadId,
-                    expectedVersion: threadVersion,
-                    workingDirectory: nextWorkingDirectory,
-                  });
-                  if (
-                    result === undefined ||
-                    !("kind" in result) ||
-                    result.kind !== "thread-updated"
-                  ) {
-                    throw new Error("Code working directory was not updated.");
-                  }
-                  await controller.refresh();
-                }}
-              />
-            </EnvironmentGroup>
-          )}
-          {props.usageDashboardClient === undefined &&
-          props.spendCeilingClient === undefined ? null : (
-            <ThreadUsagePanel
-              client={props.usageDashboardClient}
-              subjectType="code-thread"
-              subjectId={String(props.tab.threadId)}
-              {...(props.project === undefined ? {} : { projectId: String(props.project.id) })}
-              {...(props.spendCeilingClient === undefined
-                ? {}
-                : { spendCeilingClient: props.spendCeilingClient })}
-              {...(props.onOpenUsageDashboard === undefined
-                ? {}
-                : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
-            />
-          )}
+            )}
+          </EnvironmentCard>
         </div>
       </ThreadEnvironmentPanel>
       <div className="code-thread-environment__content">

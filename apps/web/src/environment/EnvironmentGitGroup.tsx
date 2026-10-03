@@ -2,6 +2,7 @@ import type { CodeEnvironmentObservation } from "@octant/contracts";
 import { ChevronRight, FileDiff, Files, GitBranch } from "lucide-react";
 import type { CodeEnvironmentControllerStatus } from "./useCodeEnvironmentController";
 import { OctantButton } from "../ui/base/OctantButton";
+import { EnvironmentTile } from "./EnvironmentGroup";
 
 export interface EnvironmentGitGroupProps {
   /**
@@ -58,11 +59,13 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
   const separateWorktree = observation.worktreeRoot !== observation.repositoryRoot;
   const changesLine = (
     <>
-      <FileDiff aria-hidden="true" className="environment-git-group__icon" size={16} />
-      <span className="environment-git-group__label">
-        {observation.changes === "clean" ? "No uncommitted changes" : "Uncommitted changes"}
+      <EnvironmentTile icon={FileDiff} />
+      <span className="environment-git-group__text">
+        <span className="environment-git-group__label">
+          {observation.changes === "clean" ? "No uncommitted changes" : "Uncommitted changes"}
+        </span>
+        <ChangeCount observation={observation} />
       </span>
-      <ChangeCount observation={observation} />
     </>
   );
 
@@ -79,7 +82,7 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
           className="environment-git-group__changes environment-changes-action"
           onClick={props.onOpenChanges}
           type="button"
-          variant="ghost"
+          variant="bare"
         >
           {changesLine}
           <ChevronRight

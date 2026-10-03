@@ -3,6 +3,7 @@ import { deriveChatEnvironmentProjection } from "@octant/domain/shell-policy";
 import type { ReactNode } from "react";
 import type { ChatController } from "../chat/useChatController";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import { EnvironmentCard } from "./EnvironmentGroup";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
@@ -60,28 +61,30 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
           {...(project === undefined ? {} : { project })}
           unavailableMessage={projection.identity.detail}
         />
-        {props.agentRunClient === undefined ? null : (
-          <EnvironmentSubagents
-            client={props.agentRunClient}
-            {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
-            threadId={String(props.tab.threadId)}
-          />
-        )}
-        {props.usageDashboardClient === undefined &&
-        props.spendCeilingClient === undefined ? null : (
-          <ThreadUsagePanel
-            client={props.usageDashboardClient}
-            subjectType="chat-thread"
-            subjectId={String(props.tab.threadId)}
-            {...(projectId === undefined ? {} : { projectId: String(projectId) })}
-            {...(props.spendCeilingClient === undefined
-              ? {}
-              : { spendCeilingClient: props.spendCeilingClient })}
-            {...(props.onOpenUsageDashboard === undefined
-              ? {}
-              : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
-          />
-        )}
+        <EnvironmentCard>
+          {props.agentRunClient === undefined ? null : (
+            <EnvironmentSubagents
+              client={props.agentRunClient}
+              {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+              threadId={String(props.tab.threadId)}
+            />
+          )}
+          {props.usageDashboardClient === undefined &&
+          props.spendCeilingClient === undefined ? null : (
+            <ThreadUsagePanel
+              client={props.usageDashboardClient}
+              subjectType="chat-thread"
+              subjectId={String(props.tab.threadId)}
+              {...(projectId === undefined ? {} : { projectId: String(projectId) })}
+              {...(props.spendCeilingClient === undefined
+                ? {}
+                : { spendCeilingClient: props.spendCeilingClient })}
+              {...(props.onOpenUsageDashboard === undefined
+                ? {}
+                : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
+            />
+          )}
+        </EnvironmentCard>
       </ThreadEnvironmentPanel>
       <div className="thread-environment-wrapper__content">{props.children}</div>
     </div>
