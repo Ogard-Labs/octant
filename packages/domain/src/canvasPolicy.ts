@@ -4,6 +4,9 @@ import {
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_DEPTH,
   CANVAS_MAX_IMAGES,
+  CANVAS_MAX_MOCKUP_DEPTH,
+  CANVAS_MAX_MOCKUP_NODES,
+  CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_PAYLOAD_BYTES,
   CANVAS_MAX_SERIES,
   CANVAS_MAX_TABLE_ROWS,
@@ -48,7 +51,12 @@ export type CanvasPolicyRejectionCode =
   | "dangling-plan-dependency"
   | "plan-dependency-cycle"
   | "dangling-diagram-ref"
-  | "state-nesting-cycle";
+  | "state-nesting-cycle"
+  | "mockup-depth-exceeded"
+  | "mockup-node-budget-exceeded"
+  | "mockup-text-budget-exceeded"
+  | "dangling-mockup-parent"
+  | "mockup-nesting-cycle";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -283,6 +291,7 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       messages?: unknown;
       states?: unknown;
       transitions?: unknown;
+      title?: unknown;
     };
     if (block.kind === "image") imageCount += 1;
     if (
@@ -315,6 +324,23 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       }
       if (Array.isArray(edges) && edges.length > CANVAS_MAX_DIAGRAM_EDGES) {
         return "edge-budget-exceeded";
+      }
+    }
+    if (block.kind === "mockup") {
+      if (typeof block.title === "string" && block.title.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
+        return "mockup-text-budget-exceeded";
+      }
+      if (Array.isArray(block.nodes) && block.nodes.length > CANVAS_MAX_MOCKUP_NODES) {
+        return "mockup-node-budget-exceeded";
+      }
+      if (Array.isArray(block.nodes)) {
+        for (const node of block.nodes) {
+          if (typeof node !== "object" || node === null) continue;
+          const label = (node as { label?: unknown }).label;
+          if (typeof label === "string" && label.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
+            return "mockup-text-budget-exceeded";
+          }
+        }
       }
     }
   }
@@ -414,6 +440,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
 
     if (block.kind === "sequence") validateSequence(block);
     if (block.kind === "state") validateState(block);
+    if (block.kind === "mockup") validateMockup(block);
   }
 }
 
@@ -557,6 +584,67 @@ function validateState(block: Extract<CanvasBlock, { readonly kind: "state" }>):
         "dangling-edge",
         `Canvas state diagram ${block.blockId} has a transition to a missing state.`,
       );
+    }
+  }
+}
+
+/**
+ * A mockup's nodes name their parent. A chain longer than the depth limit, a
+ * parent the block does not hold, or a cycle would draw a screen inside itself.
+ */
+function validateMockup(block: Extract<CanvasBlock, { readonly kind: "mockup" }>): void {
+  if (block.title.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
+    reject(
+      "mockup-text-budget-exceeded",
+      `Canvas mockup ${block.blockId} has a title longer than ${CANVAS_MAX_MOCKUP_TEXT_LENGTH} characters.`,
+    );
+  }
+  if (block.nodes.length > CANVAS_MAX_MOCKUP_NODES) {
+    reject(
+      "mockup-node-budget-exceeded",
+      `Canvas mockup ${block.blockId} has more than ${CANVAS_MAX_MOCKUP_NODES} nodes.`,
+    );
+  }
+  const nodes = new Map<string, string | undefined>();
+  for (const node of block.nodes) {
+    const id = String(node.nodeId);
+    if (nodes.has(id)) {
+      reject("duplicate-node-id", `Canvas mockup ${block.blockId} has duplicate nodes.`);
+    }
+    if (node.label.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
+      reject(
+        "mockup-text-budget-exceeded",
+        `Canvas mockup ${block.blockId} has text longer than ${CANVAS_MAX_MOCKUP_TEXT_LENGTH} characters.`,
+      );
+    }
+    nodes.set(id, node.parentId === undefined ? undefined : String(node.parentId));
+  }
+  for (const [id, parentId] of nodes) {
+    if (parentId !== undefined && !nodes.has(parentId)) {
+      reject(
+        "dangling-mockup-parent",
+        `Canvas mockup ${block.blockId} nests a node it does not hold.`,
+      );
+    }
+    const seen = new Set<string>([id]);
+    let current = parentId;
+    let depth = 1;
+    while (current !== undefined) {
+      if (seen.has(current)) {
+        reject(
+          "mockup-nesting-cycle",
+          `Canvas mockup ${block.blockId} nests a node inside itself.`,
+        );
+      }
+      seen.add(current);
+      depth += 1;
+      if (depth > CANVAS_MAX_MOCKUP_DEPTH) {
+        reject(
+          "mockup-depth-exceeded",
+          `Canvas mockup ${block.blockId} nests nodes deeper than ${CANVAS_MAX_MOCKUP_DEPTH}.`,
+        );
+      }
+      current = nodes.get(current);
     }
   }
 }

@@ -147,7 +147,14 @@ describe("createCanvasAgentTools", () => {
     expect(description).toContain('"write a plan" uses implementation-plan');
     expect(description).toContain('"review this PR" uses code-review');
     expect(description).toContain('"summarise research" uses research-brief');
-    expect(JSON.stringify(outcome.result)).not.toContain("mockup");
+    const recipes = (
+      outcome.result as {
+        recipes: ReadonlyArray<{ skeleton: ReadonlyArray<{ kind: string }> }>;
+      }
+    ).recipes;
+    expect(recipes.some((recipe) => recipe.skeleton.some((block) => block.kind === "mockup"))).toBe(
+      false,
+    );
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -307,6 +314,75 @@ describe("createCanvasAgentTools", () => {
     });
     expect(refused.isError).toBe(true);
     expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets an agent create and then revise a settings screen mockup from the example describe returns", async () => {
+    const { create, revise, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["mockup"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const example = result.examples?.[0];
+    expect(example).toMatchObject({
+      kind: "mockup",
+      device: "desktop",
+      title: "Settings",
+    });
+    const block = decodeCanvasBlock(example);
+    expect(block.kind).toBe("mockup");
+    if (block.kind !== "mockup") throw new Error("Settings example is not a mockup.");
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Settings",
+        blocks: [example],
+      }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Settings" }),
+      expect.anything(),
+      expect.anything(),
+      [block],
+    );
+
+    const revisedBlock = {
+      ...example,
+      device: "phone",
+      nodes: [
+        ...block.nodes,
+        {
+          nodeId: "portrait",
+          component: "image-placeholder",
+          label: "Avatar",
+          parentId: "profile",
+        },
+      ],
+    };
+    const revised = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId: "canvas-1",
+        expectedSequence: 1,
+        title: "Settings",
+        blocks: [revisedBlock],
+      }),
+    });
+    expect(revised.isError).not.toBe(true);
+    expect(revise).toHaveBeenCalledWith(
+      expect.objectContaining({ canvasId: "canvas-1", expectedSequence: 1 }),
+      expect.anything(),
+      expect.anything(),
+      [expect.objectContaining({ kind: "mockup", device: "phone" })],
+    );
   });
 
   it.each([

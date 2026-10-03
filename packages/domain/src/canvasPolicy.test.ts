@@ -4,6 +4,9 @@ import {
   CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_IMAGES,
+  CANVAS_MAX_MOCKUP_DEPTH,
+  CANVAS_MAX_MOCKUP_NODES,
+  CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_SERIES,
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
@@ -544,6 +547,84 @@ describe("sequence and state diagram validation", () => {
           ]),
         ),
       "node-budget-exceeded",
+    );
+  });
+});
+
+function mockupNode(nodeId: string, parentId?: string, label = "Row") {
+  return {
+    nodeId,
+    component: "text" as const,
+    label,
+    ...(parentId === undefined ? {} : { parentId }),
+  };
+}
+
+function mockup(blockId: string, nodes: ReadonlyArray<ReturnType<typeof mockupNode>>) {
+  return {
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "mockup" as const,
+    device: "phone" as const,
+    title: "Settings",
+    nodes,
+  };
+}
+
+describe("mockup limits", () => {
+  it("accepts a settings screen within the depth, node, and text limits", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          mockup("settings", [
+            mockupNode("window"),
+            mockupNode("header", "window", "Settings"),
+            mockupNode("row", "header", "Display name"),
+          ]),
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects a mockup nested deeper than the depth limit", () => {
+    const nodes = [mockupNode("n0")];
+    for (let index = 1; index <= CANVAS_MAX_MOCKUP_DEPTH; index += 1) {
+      nodes.push(mockupNode(`n${String(index)}`, `n${String(index - 1)}`));
+    }
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([mockup("deep", nodes)])),
+      "mockup-depth-exceeded",
+    );
+  });
+
+  it("rejects a mockup with more nodes than the node limit", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            mockup(
+              "wide",
+              Array.from({ length: CANVAS_MAX_MOCKUP_NODES + 1 }, (_, index) =>
+                mockupNode(`n${String(index)}`),
+              ),
+            ),
+          ]),
+        ),
+      "mockup-node-budget-exceeded",
+    );
+  });
+
+  it("rejects a mockup label longer than the text limit", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            mockup("long", [
+              mockupNode("name", undefined, "x".repeat(CANVAS_MAX_MOCKUP_TEXT_LENGTH + 1)),
+            ]),
+          ]),
+        ),
+      "mockup-text-budget-exceeded",
     );
   });
 });
