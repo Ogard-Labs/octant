@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { NativeHarnessRoutingSettings } from "@octant/contracts";
 import { NativeHarnessRoutingPanel } from "./NativeHarnessRoutingPanel";
@@ -100,28 +101,78 @@ describe("NativeHarnessRoutingPanel slot rows", () => {
     expect(onOpenProviders).toHaveBeenCalledOnce();
   });
 
-  it("assigns the first available model when an unset slot is filled", async () => {
+  const providers = [
+    {
+      instanceId: "endpoint-1",
+      label: "Local endpoint",
+      models: [
+        { id: "model-a", label: "Model A" },
+        { id: "model-b", label: "Model B" },
+      ],
+    },
+  ];
+
+  it("leaves a new model choice empty and unsaved until the person picks one", async () => {
+    const user = userEvent.setup();
+    const updateRouting = vi.fn();
     render(
       <NativeHarnessRoutingPanel
-        client={{ routing: vi.fn(async () => savedJobs), updateRouting: vi.fn() }}
+        client={{ routing: vi.fn(async () => savedJobs), updateRouting }}
         hostId={hostId}
-        providers={[
-          {
-            instanceId: "endpoint-1",
-            label: "Local endpoint",
-            models: [{ id: "model-a", label: "Model A" }],
-          },
-        ]}
+        providers={providers}
       />,
     );
 
-    await waitFor(() =>
-      expect(screen.getByRole("group", { name: "Planning setting" })).toBeVisible(),
+    await user.click(await screen.findByRole("button", { name: "Choose a model for Planning" }));
+
+    expect(screen.getByRole("combobox", { name: "Planning, model 1 provider" })).toHaveTextContent(
+      "Choose a provider",
     );
-    await screen.getByRole("button", { name: "Choose a model for Planning" }).click();
-    expect(
-      await screen.findByRole("combobox", { name: "Planning, model 1 provider" }),
-    ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Add a fallback model for Planning" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Planning, model 1" })).toHaveTextContent(
+      "Choose a model",
+    );
+    expect(screen.getByRole("button", { name: "Save slots" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Save slots" }));
+    expect(updateRouting).not.toHaveBeenCalled();
+  });
+
+  it("saves the provider and model the person picked, not the provider's first model", async () => {
+    const user = userEvent.setup();
+    const updateRouting = vi.fn(async () => ({
+      kind: "routing-settings" as const,
+      settings: savedJobs,
+    }));
+    render(
+      <NativeHarnessRoutingPanel
+        client={{ routing: vi.fn(async () => savedJobs), updateRouting }}
+        hostId={hostId}
+        providers={providers}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Choose a model for Planning" }));
+    await user.click(screen.getByRole("combobox", { name: "Planning, model 1 provider" }));
+    await user.click(await screen.findByRole("option", { name: "Local endpoint" }));
+    expect(screen.getByRole("combobox", { name: "Planning, model 1" })).toHaveTextContent(
+      "Choose a model",
+    );
+    expect(screen.getByRole("button", { name: "Save slots" })).toBeDisabled();
+
+    await user.click(screen.getByRole("combobox", { name: "Planning, model 1" }));
+    await user.click(await screen.findByRole("option", { name: "Model B" }));
+    await user.click(screen.getByRole("button", { name: "Save slots" }));
+
+    expect(updateRouting).toHaveBeenCalledWith({
+      configuration: {
+        slots: [
+          {
+            id: "plan",
+            candidates: [{ hostId, providerInstanceId: "endpoint-1", modelId: "model-b" }],
+          },
+        ],
+        jobSlots: savedJobs.configuration.jobSlots,
+      },
+      expectedVersion: savedJobs.version,
+    });
   });
 });

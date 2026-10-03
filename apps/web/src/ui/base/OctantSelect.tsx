@@ -124,7 +124,11 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
           className={cn("window-no-drag", props.triggerClassName, props.className)}
           {...(props.id === undefined ? {} : { id: props.id })}
         >
-          <SelectValue placeholder={props.placeholder}>{selectedOption?.label}</SelectValue>
+          {/* The recipe encodes "" as a real value, so Base UI never sees an empty
+              selection; show the placeholder whenever no option matches. */}
+          <SelectValue placeholder={props.placeholder}>
+            {selectedOption?.label ?? props.placeholder}
+          </SelectValue>
         </SelectTrigger>
         <SelectPortal>
           <SelectPositioner
