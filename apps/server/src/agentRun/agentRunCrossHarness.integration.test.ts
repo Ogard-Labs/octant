@@ -474,7 +474,8 @@ function fixture(
     orchestration,
     liveConversations: new AgentRunLiveConversationStore(),
     authorizeCreation,
-    authorizeCancellation: () => false,
+    authorizeCancellation: ({ run, windowId }) =>
+      String(run.parentThreadId) === String(ids.thread) && windowId === String(ids.window),
     authorizeParentThread: ({ parentThreadId, windowId }) =>
       String(parentThreadId) === String(ids.thread) && windowId === String(ids.window),
     resolveCenterContext: () => ({ parentThreadTitle: "Fixture parent" }),

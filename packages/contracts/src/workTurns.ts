@@ -1,3 +1,4 @@
+import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
@@ -202,6 +203,7 @@ export const WorkTurnState = Schema.Struct({
   wroteFiles: Schema.optional(WorkTurnWrittenFiles),
   /** The provider's own task list for this turn, restated whole as it moves. */
   tasks: Schema.optional(ThreadTaskProgressList),
+  childObservations: Schema.optional(ProviderChildObservationState),
   /**
    * Set only on a turn the host started to deliver a finished subagent run's
    * result; journaled with the turn's acceptance so replay keeps the mark.
@@ -379,6 +381,7 @@ export const WorkTurnUpdated = Schema.Struct({
   wroteFiles: Schema.optional(WorkTurnWrittenFiles),
   failure: Schema.optional(WorkTurnFailure),
   tasks: Schema.optional(ThreadTaskProgressList),
+  childObservations: Schema.optional(ProviderChildObservationState),
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type WorkTurnUpdated = typeof WorkTurnUpdated.Type;

@@ -1,3 +1,4 @@
+import { decodeAgentRunId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { createAgentRunClient, AgentRunClientFailure } from "./agentRunClient";
 
@@ -5,6 +6,27 @@ const parentThreadId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const runId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 describe("agentRunClient", () => {
+  it("reads generation packets through the authenticated result route and refuses a different child", async () => {
+    let returnedRunId = runId;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toContain(`/api/agent-runs/results?runId=${runId}`);
+      expect(init?.headers).toMatchObject({ "x-octant-window-capability": "cap" });
+      return Response.json({ runId: returnedRunId, packets: [], truncated: false });
+    });
+    const client = createAgentRunClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "cap",
+    });
+    expect(await client.results?.(decodeAgentRunId(runId))).toEqual({
+      runId,
+      packets: [],
+      truncated: false,
+    });
+    returnedRunId = parentThreadId;
+    await expect(client.results?.(decodeAgentRunId(runId))).rejects.toThrow("malformed");
+  });
+
   it("loads the Agents Center through the authenticated route", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

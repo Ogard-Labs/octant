@@ -1,3 +1,5 @@
+import { observedChildren } from "./agentObservedChildren";
+import { decodeAgentRunResultsResponse, type AgentObservedChild } from "@octant/contracts";
 import {
   decodeAgentRunCenterQuery,
   decodeAgentRunId,
@@ -60,6 +62,14 @@ const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 
 export interface AgentRunRouteDependencies {
+  readonly readObservations?: (input: {
+    readonly parentThreadId: AgentRunParentThreadId;
+    readonly windowId: string;
+  }) => {
+    readonly observations: ReadonlyArray<AgentObservedChild>;
+    readonly observationsTruncated: boolean;
+  };
+
   readonly listTargets: (parent: AgentRunControlParentFacts) => ReadonlyArray<AgentsToolTarget>;
   readonly onExecutionAccepted?: AgentRunControlAdmissionDependencies["onExecutionAccepted"];
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -198,8 +208,74 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
       ) {
         return failure("AgentRun parent summary is not authorized for this thread.", 403, origin);
       }
-      const entries = dependencies.persistence.parentSummary(parentThreadId);
-      return json({ parentThreadId, entries: serializeEntries(entries) }, 200, origin);
+      const entries = dependencies.persistence.parentSummary(parentThreadId, (run) =>
+        dependencies.authorizeCancellation({ run, windowId: authenticatedWindowId }),
+      );
+      const root = dependencies.readObservations?.({
+        parentThreadId,
+        windowId: authenticatedWindowId,
+      });
+      const observations = [...(root?.observations ?? [])];
+      let observationsTruncated = root?.observationsTruncated ?? false;
+      for (const entry of entries) {
+        const run = dependencies.persistence.getById(entry.runId);
+        if (run === undefined) continue;
+        const conversation = dependencies.liveConversations.read({ runId: run.id });
+        const nested = observedChildren({
+          parentThreadId,
+          mode: run.routingReceipt.mode,
+          parentRunId: run.id,
+          events:
+            conversation?.entries.flatMap((item) =>
+              item.childActivity === undefined ? [] : [item.childActivity],
+            ) ?? [],
+          truncated: conversation?.truncated ?? false,
+        });
+        observations.push(...nested.observations);
+        observationsTruncated ||= nested.observationsTruncated;
+      }
+      return json(
+        {
+          parentThreadId,
+          entries: serializeEntries(entries).map((entry) => {
+            const results = dependencies.persistence.resultPackets(entry.runId);
+            return {
+              ...entry,
+              resultPackets: results.packets,
+              resultsTruncated: results.truncated,
+            };
+          }),
+          observations: observations.slice(0, 64),
+          observationsTruncated: observationsTruncated || observations.length > 64,
+        },
+        200,
+        origin,
+      );
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/agent-runs/results") {
+      let runId: AgentRunId;
+      try {
+        runId = decodeAgentRunId(url.searchParams.get("runId") ?? "");
+      } catch {
+        return failure("AgentRun result runId is invalid.", 400, origin);
+      }
+      const run = dependencies.persistence.getById(runId);
+      if (
+        run === undefined ||
+        !dependencies.authorizeCancellation({ run, windowId: authenticatedWindowId }) ||
+        !(await dependencies.authorizeParentThread({
+          parentThreadId: run.parentThreadId,
+          windowId: authenticatedWindowId,
+        }))
+      ) {
+        return failure("AgentRun results are not authorized for this run.", 403, origin);
+      }
+      return json(
+        decodeAgentRunResultsResponse(dependencies.persistence.resultPackets(runId)),
+        200,
+        origin,
+      );
     }
 
     if (request.method === "GET" && url.pathname === "/api/agent-runs/conversation") {
@@ -378,6 +454,7 @@ async function handleConversation(
   const run = dependencies.persistence.getById(runId);
   if (
     run === undefined ||
+    !dependencies.authorizeCancellation({ run, windowId }) ||
     !(await dependencies.authorizeParentThread({
       parentThreadId: run.parentThreadId,
       windowId,
@@ -435,6 +512,7 @@ async function handleConversationStream(
   const run = dependencies.persistence.getById(runId);
   if (
     run === undefined ||
+    !dependencies.authorizeCancellation({ run, windowId }) ||
     !(await dependencies.authorizeParentThread({
       parentThreadId: run.parentThreadId,
       windowId,
@@ -443,7 +521,7 @@ async function handleConversationStream(
     return failure("AgentRun conversation stream is not authorized for this run.", 403, origin);
   }
 
-  const frames = conversationStreamFrames(dependencies, run, afterSequence, signal);
+  const frames = conversationStreamFrames(dependencies, run, afterSequence, signal, windowId);
   return conversationStreamResponse(frames, signal, origin);
 }
 
@@ -452,6 +530,7 @@ async function* conversationStreamFrames(
   run: AgentRun,
   afterSequence: number,
   signal: AbortSignal,
+  windowId: string,
 ): AsyncGenerator<AgentRunConversationStreamFrame> {
   const nativeLivePermitted = run.executionKind !== "provider-native";
   if (nativeLivePermitted) {
@@ -466,7 +545,16 @@ async function* conversationStreamFrames(
         afterSequence,
         signal,
       })) {
-        const latestRun = dependencies.persistence.getById(run.id) ?? run;
+        const latestRun = dependencies.persistence.getById(run.id);
+        if (
+          latestRun === undefined ||
+          !dependencies.authorizeCancellation({ run: latestRun, windowId }) ||
+          !(await dependencies.authorizeParentThread({
+            parentThreadId: latestRun.parentThreadId,
+            windowId,
+          }))
+        )
+          return;
         const lastSequence = snapshot.entries.at(-1)?.sequence;
         yield {
           kind: first ? "snapshot" : "delta",
@@ -625,9 +713,9 @@ async function handleCanvasSnapshot(
     mode: "all",
     parentThreadId,
   });
-  const items = candidates.map((candidate) =>
-    serializeCenterSummary(candidate, dependencies.resolveCenterContext),
-  );
+  const items = candidates
+    .filter((candidate) => dependencies.authorizeCancellation({ run: candidate.run, windowId }))
+    .map((candidate) => serializeCenterSummary(candidate, dependencies.resolveCenterContext));
   const forest = buildAgentRunForest(items);
   const thread = forest.threads[0];
   if (thread === undefined || items.length === 0) {
@@ -763,10 +851,11 @@ async function handleCenter(
   const authorized: AgentRunCenterCandidate[] = [];
   for (const candidate of candidates) {
     if (
-      await dependencies.authorizeParentThread({
+      dependencies.authorizeCancellation({ run: candidate.run, windowId }) &&
+      (await dependencies.authorizeParentThread({
         parentThreadId: candidate.run.parentThreadId,
         windowId,
-      })
+      }))
     ) {
       authorized.push(candidate);
     }
@@ -867,6 +956,7 @@ async function mutateLiveRun(
   const run = dependencies.persistence.getById(runId);
   if (
     run === undefined ||
+    !dependencies.authorizeCancellation({ run, windowId }) ||
     !(await dependencies.authorizeParentThread({
       parentThreadId: run.parentThreadId,
       windowId,
