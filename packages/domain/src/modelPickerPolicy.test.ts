@@ -18,6 +18,8 @@ import {
   modelCatalog,
   pickerCatalogs,
   pickerGroupCarriesAppManagedTools,
+  startedConversationPickerGroups,
+  startedThreadPickerGroups,
   type ModelPickerInput,
 } from "./modelPickerPolicy";
 import { isDraftSelectionSelectable, resolveDraftProviderSelection } from "./modelPickerPolicy";
@@ -720,6 +722,114 @@ describe("model picker policy", () => {
         input({ instances: [ready, unauth], observedByInstance }),
       );
       expect(groups.map((g) => g.instance.displayName)).toEqual(["Ready"]);
+    });
+  });
+
+  describe("startedConversationPickerGroups", () => {
+    const codex = codexInstance("00000000-0000-4000-8000-000000000121", "Codex");
+    const gateway = openAiInstance({
+      id: "00000000-0000-4000-8000-000000000122",
+      displayName: "Gateway",
+    });
+    const foundry = foundryInstance("00000000-0000-4000-8000-000000000123", "Foundry");
+    const models = [model({ id: "m-a", displayName: "A" }), model({ id: "m-b", displayName: "B" })];
+    const groups = buildModelPickerGroups(
+      input({
+        instances: [codex, gateway, foundry],
+        observedByInstance: new Map([
+          [codex.id, observed(codex.id, models)],
+          [gateway.id, observed(gateway.id, models)],
+          [foundry.id, observed(foundry.id, models)],
+        ]),
+      }),
+    );
+    const providers = (picked: ReturnType<typeof startedConversationPickerGroups>) =>
+      picked.map((group) => group.instance.displayName);
+
+    it("binds a thread whose provider keeps the conversation to that provider", () => {
+      const picked = startedConversationPickerGroups(groups, {
+        providerInstanceId: codex.id,
+        modelId: decodeProviderModelId("m-a"),
+      });
+      expect(providers(picked)).toEqual(["Codex"]);
+      expect(picked[0]?.sections.flatMap((section) => section.models)).toHaveLength(1);
+    });
+
+    it("offers no switch when the thread's provider is missing", () => {
+      expect(
+        startedConversationPickerGroups(groups, {
+          providerInstanceId: "00000000-0000-4000-8000-000000000199" as never,
+          modelId: decodeProviderModelId("m-a"),
+        }),
+      ).toEqual([]);
+    });
+
+    it("lets a host-held conversation move between host-held providers only", () => {
+      expect(
+        providers(
+          startedConversationPickerGroups(groups, {
+            providerInstanceId: gateway.id,
+            modelId: decodeProviderModelId("m-a"),
+          }),
+        ).toSorted(),
+      ).toEqual(["Foundry", "Gateway"]);
+    });
+  });
+
+  describe("startedThreadPickerGroups", () => {
+    const switching = openAiInstance({
+      id: "00000000-0000-4000-8000-000000000111",
+      displayName: "Switching",
+    });
+    const fixed = openAiInstance({
+      id: "00000000-0000-4000-8000-000000000112",
+      displayName: "Fixed",
+    });
+    const models = [model({ id: "m-a", displayName: "A" }), model({ id: "m-b", displayName: "B" })];
+    const groups = buildModelPickerGroups(
+      input({
+        instances: [switching, fixed],
+        observedByInstance: new Map([
+          [
+            switching.id,
+            observed(switching.id, models, {
+              capabilities: {
+                ...observed(switching.id, []).capabilities,
+                modelSwitch: "supported",
+              },
+            }),
+          ],
+          [fixed.id, observed(fixed.id, models)],
+        ]),
+      }),
+    );
+    const modelIds = (picked: ReturnType<typeof startedThreadPickerGroups>) =>
+      picked.flatMap((group) =>
+        group.sections.flatMap((section) =>
+          section.models.map((picker) => `${group.instance.displayName}:${picker.model.id}`),
+        ),
+      );
+
+    it("offers every model of the thread's provider when it can carry the session over", () => {
+      expect(
+        modelIds(
+          startedThreadPickerGroups(groups, {
+            providerInstanceId: switching.id,
+            modelId: decodeProviderModelId("m-a"),
+          }),
+        ),
+      ).toEqual(["Switching:m-a", "Switching:m-b"]);
+    });
+
+    it("keeps only the thread's own model when its provider cannot carry the session over", () => {
+      expect(
+        modelIds(
+          startedThreadPickerGroups(groups, {
+            providerInstanceId: fixed.id,
+            modelId: decodeProviderModelId("m-b"),
+          }),
+        ),
+      ).toEqual(["Fixed:m-b"]);
     });
   });
 

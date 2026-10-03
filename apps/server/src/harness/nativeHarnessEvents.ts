@@ -77,6 +77,26 @@ export const NativeHarnessSessionResumed = Schema.Struct({
 }).annotations(strict);
 
 /**
+ * A turn began. Journaled so a restart can tell a turn it cut off from one
+ * that finished: only a completed record or a settled frame closes it.
+ */
+export const NativeHarnessTurnStarted = Schema.Struct({
+  sessionId: NativeHarnessSessionId,
+  startedAt: UtcTimestamp,
+}).annotations(strict);
+
+/**
+ * A turn closed without a completed record: it `ended` (failed or was
+ * stopped) while the host ran, or it was `lost-in-restart`, settled by the
+ * resume that cleared the recovery it caused.
+ */
+export const NativeHarnessTurnSettled = Schema.Struct({
+  sessionId: NativeHarnessSessionId,
+  outcome: Schema.Literal("ended", "lost-in-restart"),
+  settledAt: UtcTimestamp,
+}).annotations(strict);
+
+/**
  * The journal frames the harness writes. Routing configuration and every
  * routing decision are frames, so a model switch is never silent; so are the
  * advisor's interventions, the follow-ups a turn suggested, and each context
@@ -116,6 +136,8 @@ export function registerNativeHarnessEvents(registry: EventRegistry): EventRegis
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalSettled, 1, NativeHarnessApprovalSettled)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.paused, 1, NativeHarnessSessionPaused)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed, 1, NativeHarnessSessionResumed)
+    .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.turnStarted, 1, NativeHarnessTurnStarted)
+    .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.turnSettled, 1, NativeHarnessTurnSettled)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringQueued, 1, NativeHarnessSteeringQueued)
     .register(
       NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringDelivered,

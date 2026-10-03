@@ -13,7 +13,11 @@ import {
   orderProviderModels,
   resolveCapabilitySupport,
 } from "./modelCatalogPolicy";
-import { isImageProfileDriverKind, isNativeHarnessDriverKind } from "./providerPolicy";
+import {
+  isImageProfileDriverKind,
+  isNativeHarnessDriverKind,
+  providerKeepsConversation,
+} from "./providerPolicy";
 
 const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
   codex: "Codex CLI",
@@ -230,6 +234,11 @@ export interface PickerGroup {
    * applies when a turn ships tools.
    */
   readonly verifiedToolModelIds?: ReadonlyArray<ProviderModelId>;
+  /**
+   * Whether the provider can carry a started thread's native session on to
+   * another of its models. Absent when the instance was never probed.
+   */
+  readonly modelSwitch?: ProviderCapabilitySupport;
   readonly unavailableCurrent?: PickerModel;
   /**
    * A model hidden in Settings but still bound to an existing draft/thread.
@@ -397,6 +406,9 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       executionHost: input.hostId ?? localExecutionHost,
       sections,
       appManagedTools: observed.capabilities.appManagedTools,
+      ...(observed.capabilities.modelSwitch === undefined
+        ? {}
+        : { modelSwitch: observed.capabilities.modelSwitch }),
       ...(observed.verifiedToolModelIds === undefined
         ? {}
         : { verifiedToolModelIds: observed.verifiedToolModelIds }),
@@ -551,6 +563,9 @@ function maybeAppendUnavailableCurrent(
     executionHost: input.hostId ?? localExecutionHost,
     sections: [],
     ...(observed === undefined ? {} : { appManagedTools: observed.capabilities.appManagedTools }),
+    ...(observed?.capabilities.modelSwitch === undefined
+      ? {}
+      : { modelSwitch: observed.capabilities.modelSwitch }),
     ...(observed?.verifiedToolModelIds === undefined
       ? {}
       : { verifiedToolModelIds: observed.verifiedToolModelIds }),
@@ -586,6 +601,56 @@ export function pickerGroupCarriesAppManagedTools(
     group.appManagedTools === "supported" ||
     (group.verifiedToolModelIds?.some((id) => String(id) === String(selection.modelId)) ?? false)
   );
+}
+
+/**
+ * The choices a started Code thread can actually take. Its conversation lives
+ * in the provider session it opened, so the host refuses a turn on another
+ * provider, and on another model unless the provider can carry the session
+ * over. Offering those choices let a person switch and then have every later
+ * message refused; the picker keeps only what the next turn will accept.
+ */
+export function startedThreadPickerGroups(
+  groups: ReadonlyArray<PickerGroup>,
+  selection: ModelPickerSelection,
+): ReadonlyArray<PickerGroup> {
+  const group = groups.find(
+    (candidate) => String(candidate.instance.id) === String(selection.providerInstanceId),
+  );
+  if (group === undefined) return [];
+  if (group.modelSwitch === "supported") return [group];
+  const sections = group.sections
+    .map((section) => ({
+      ...section,
+      models: section.models.filter(
+        (picker) => String(picker.model.id) === String(selection.modelId),
+      ),
+    }))
+    .filter((section) => section.models.length > 0);
+  return [{ ...group, sections }];
+}
+
+/**
+ * The choices a started Chat or Work thread can take. A provider that keeps
+ * the conversation itself binds the thread the way Code is bound; a thread
+ * whose history the host holds may move to any provider whose history the
+ * host also holds, but never into a provider-kept session, which the host
+ * refuses rather than silently start a second conversation.
+ */
+export function startedConversationPickerGroups(
+  groups: ReadonlyArray<PickerGroup>,
+  selection: ModelPickerSelection,
+): ReadonlyArray<PickerGroup> {
+  const current = groups.find(
+    (candidate) => String(candidate.instance.id) === String(selection.providerInstanceId),
+  );
+  // Chat and Work refuse a follow-up when the bound provider is unavailable, so
+  // a thread whose provider is missing has no switch to offer.
+  if (current === undefined) return [];
+  if (providerKeepsConversation(current.instance.driverKind)) {
+    return startedThreadPickerGroups(groups, selection);
+  }
+  return groups.filter((group) => !providerKeepsConversation(group.instance.driverKind));
 }
 
 export function filterModelPickerGroups(

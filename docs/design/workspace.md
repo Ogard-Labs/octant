@@ -80,12 +80,15 @@ Thread titles appear once in the title row. A thread pane's title row is its
 drag handle: an environment mark (a small neutral tile holding a laptop glyph
 when the thread runs on this computer, a cloud glyph and the host's name when
 it runs on another host), the title, a quiet chip naming the Project, and for
-Code a second chip naming the branch. The chips keep their width (each capped at 30% of the header) and the title truncates instead, so a long title never squeezes a chip to one letter;
+Code a second chip naming the branch. The chips keep their width (each capped at a fixed character count, not a share of the header) and the title truncates first (it shrinks much faster than the chips, with no fixed floor so a narrow pane keeps its status pill), so a long title never squeezes a chip to one letter and a short title never clips a chip beside empty space;
 the Project chip is omitted without a Project and the branch chip without a
 branch. While the host projects the thread as executing, a "Running" pill with
 a spinner follows them; it carries no elapsed time because the host does not
 report when the turn began. A surface that is not a thread shows no
 environment mark.
+At phone width (680px and below) the title row drops both chips so the title
+stays readable; the composer's context strip below the thread names the
+Project and branch there.
 The model stays in the composer, not the title row. The tile holds its glyph
 so a later per-environment icon can replace it in place. Tab
 geometry and close-control presentation are shared with dock tools under

@@ -1372,28 +1372,74 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
-  it("changes provider and model through the authoritative Code command", async () => {
+  it("offers a started thread only the models its next turn will accept", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    const switching = providerGroup();
+    const firstSection = switching.sections[0];
+    if (firstSection === undefined) throw new Error("Expected a section.");
+    const canSwitch = {
+      ...switching,
+      modelSwitch: "supported",
+      sections: [
+        {
+          ...firstSection,
+          models: [
+            ...firstSection.models,
+            { model: { id: "model-three", displayName: "Model Three" } },
+          ],
+        },
+      ],
+    } as never as PickerGroup;
+    const answered = [
+      { id: "reply", role: "assistant" as const, text: "Done.", status: "completed" as const },
+    ];
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({ execute, conversation: answered })}
+        providerGroups={[canSwitch, alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    // The conversation lives in this provider's session, so another provider
+    // is never offered; another of its models is, because it can carry over.
+    expect(screen.queryByRole("option", { name: "Remote Provider" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Model Two" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Model Three" }));
+    expect(execute).toHaveBeenCalledWith({
+      kind: "change-code-thread-provider",
+      threadId,
+      expectedVersion: 1,
+      providerInstanceId: providerId,
+      modelId: "model-three",
+    });
+
+    await user.keyboard("{Escape}");
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ execute, conversation: answered })}
+        providerGroups={[{ ...canSwitch, modelSwitch: "unsupported" }, alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    expect(screen.queryByRole("option", { name: "Model Three" })).not.toBeInTheDocument();
+  });
+
+  it("keeps every provider for a thread whose first turn never reached its provider", async () => {
+    const user = userEvent.setup();
     render(
       <CodeThreadWorkspace
-        controller={controller({ execute })}
+        controller={controller()}
         providerGroups={[providerGroup(), alternateProviderGroup()]}
         threadId={threadId}
       />,
     );
 
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    await user.click(screen.getByRole("option", { name: "Remote Provider" }));
-    await user.click(screen.getByRole("option", { name: "Model Two" }));
-
-    expect(execute).toHaveBeenCalledWith({
-      kind: "change-code-thread-provider",
-      threadId,
-      expectedVersion: 1,
-      providerInstanceId: alternateProviderId,
-      modelId: alternateModelId,
-    });
+    expect(screen.getByRole("option", { name: "Remote Provider" })).toBeInTheDocument();
   });
 
   it("shows the next turn's access and sends a narrower posture with the message", async () => {
@@ -1888,6 +1934,40 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByRole("separator", { name: /provider handoff/i })).toHaveTextContent(
       "Provider handoff",
     );
+  });
+
+  it("labels a model-only switch as a model switch rather than a provider handoff", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+            {
+              id: "turn:assistant-two",
+              role: "assistant",
+              text: "The second pass is complete.",
+              providerInstanceId: providerId,
+              modelId: alternateModelId,
+              status: "completed",
+            },
+          ],
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("separator", { name: /model switch/i })).toHaveTextContent(
+      `Switched to ${String(alternateModelId)}`,
+    );
+    expect(screen.queryByText(/provider handoff/i)).not.toBeInTheDocument();
   });
 
   it("does not invent a provider handoff for an app-authored assistant message", () => {

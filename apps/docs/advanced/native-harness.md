@@ -40,6 +40,23 @@ each reply, and each tool call the moment it finishes. A Code thread on a
 harness model therefore continues the same conversation on your next message,
 tool calls included, and picks it up again after Octant restarts.
 
+## Pausing and restarting
+
+**Pause** — on the harness card, the phone panel, or `/pause` in the terminal —
+lets the turn that is running finish, along with any helpers it already
+started, and starts nothing new: the next message is refused, the lead cannot
+start another helper, and a goal loop on the thread is paused too. **Resume**
+lifts it (resume the goal loop from its own panel).
+
+If Octant restarts while a turn is running, or while the lead was waiting for
+your answer to a question or an approval, the thread shows **Needs a check
+after restart** and refuses new work, so nothing picks up behind your back.
+Look at what the turn did, then press Resume. Resume first checks that the
+thread's model endpoint is still on, that a Code thread's checkout has been
+checked again since the restart (opening the thread does that), and that a
+Work Project's folder is still where it was, and says what is missing if not; then it records the cut-off turn and
+any question nobody can answer anymore as settled, and the thread runs again.
+
 If Octant stops while a tool is running, the model is told on its next turn
 that the call was interrupted. A tool that only reads, such as `read` or
 `grep`, is marked safe to call again. Anything else is marked as possibly
@@ -49,6 +66,13 @@ re-runs an interrupted call by itself.
 When a long conversation no longer fits the model's window, older tool
 results are left out of the request first, then whole earlier exchanges, with
 a note to the model. The saved conversation keeps everything.
+
+Forking a Code thread on a harness model gives the fork the model's own
+memory up to the reply you forked from — every message, tool call, and result
+— rather than a summary. Paths point at the fork's own folder, and secret
+values the thread uses are blanked. The fork starts without the source's goal,
+task list, notes, or approvals. If Octant cannot tell exactly where that reply
+ends in the saved conversation, the fork gets a written summary instead.
 
 ## Goals
 
@@ -165,6 +189,14 @@ reads the thread and cannot change it; in the terminal UI, `/back` returns to
 the thread. `/goal` shows the thread's goal, and `/goal revise <objective>`
 changes its objective. If another screen changed the goal first, nothing is
 overwritten: the terminal says so and shows the newer goal.
+
+`/fork` forks the thread at its last finished reply — a Code fork on its own
+worktree and branch, a Chat fork with the conversation so far — and
+`/checkpoint [name]` marks that reply. `/checkpoints` lists the marks, and
+`/restore N` starts a new thread from one; the thread you are in is never
+rewound. The terminal UI moves to the new thread; the line mode prints its id
+and the `octant agent --thread` command that continues it. Work threads have
+neither forks nor checkpoints yet, and the terminal says so.
 
 ## Questions
 

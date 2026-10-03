@@ -267,6 +267,7 @@ export class CodeTurnRunner {
             })
           : connection.resume({
               ...sessionOptions,
+              modelId: input.thread.modelId,
               resumeCursor: input.resumeCursor,
               tools: input.appManagedTools?.definitions ?? [],
             })

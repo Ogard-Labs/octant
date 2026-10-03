@@ -37,6 +37,22 @@
       type="image/png"
     />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <!-- The stylesheet names these files only after it downloads and parses, so
+         without the hints the first paint uses the system face and then swaps. -->
+    <link
+      rel="preload"
+      href="../../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="../../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <title>Octant</title>
   </head>
   <body>

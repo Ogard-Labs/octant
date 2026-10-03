@@ -209,7 +209,11 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       };
       const handle = yield* input.resumeCursor === undefined
         ? connection.start({ ...options, modelId: input.command.authority.modelId })
-        : connection.resume({ ...options, resumeCursor: input.resumeCursor });
+        : connection.resume({
+            ...options,
+            modelId: input.command.authority.modelId,
+            resumeCursor: input.resumeCursor,
+          });
       if (input.onSessionReady !== undefined) {
         yield* Effect.try({
           try: () => input.onSessionReady?.(handle),

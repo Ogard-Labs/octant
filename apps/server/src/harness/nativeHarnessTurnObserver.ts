@@ -30,7 +30,7 @@ export type NativeHarnessTurnAdmission =
   | { readonly kind: "admitted" }
   | {
       readonly kind: "paused";
-      readonly status: "paused-by-advisor" | "paused-by-user";
+      readonly status: "paused-by-advisor" | "paused-by-user" | "recovery-required";
       readonly detail: string;
     };
 
@@ -105,21 +105,42 @@ export class NativeHarnessTurnObserver {
   /**
    * A paused session refuses the next turn until a person resumes it. The
    * advisor pauses when someone must decide before work continues; letting
-   * the next prompt through would make that decision by default.
+   * the next prompt through would make that decision by default. A session a
+   * restart left needing recovery refuses the same way, so nothing picks up
+   * after a restart until a person has looked.
    */
   admitTurn(scope: NativeHarnessTurnScope): NativeHarnessTurnAdmission {
     if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return { kind: "admitted" };
     const session = this.#options.sessions.read(scope.threadId)?.session;
-    if (session?.status === "paused-by-advisor" || session?.status === "paused-by-user") {
+    if (
+      session?.status === "paused-by-advisor" ||
+      session?.status === "paused-by-user" ||
+      session?.status === "recovery-required"
+    ) {
       return {
         kind: "paused",
         status: session.status,
         detail:
           session.detail ??
-          (session.status === "paused-by-advisor" ? "The advisor paused this run." : "Paused."),
+          (session.status === "paused-by-advisor"
+            ? "The advisor paused this run."
+            : session.status === "recovery-required"
+              ? "Octant restarted mid-run. Resume once you have checked the thread."
+              : "Paused."),
       };
     }
     return { kind: "admitted" };
+  }
+
+  /**
+   * Every turn ends here, whatever its outcome. A completed turn is already
+   * closed by its record; this closes one that failed or was stopped, so a
+   * pause waiting for it knows it is done and a restart does not mistake it
+   * for one it cut off.
+   */
+  turnEnded(scope: NativeHarnessTurnScope): void {
+    if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return;
+    this.#options.sessions.settleTurn(scope.threadId);
   }
 
   turnStarted(scope: NativeHarnessTurnScope): void {

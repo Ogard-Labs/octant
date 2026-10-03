@@ -98,7 +98,7 @@ export async function commandMobileNativeHarnessSession(input: {
   readonly kind: "pause-native-harness-session" | "resume-native-harness-session";
   readonly sessionId: string;
   readonly expectedVersion: number;
-}): Promise<boolean> {
+}): Promise<{ readonly ok: true } | { readonly ok: false; readonly message?: string }> {
   const response = await input.transport.authenticatedFetch({
     method: "POST",
     path: `/api/native-harness/sessions/${encodeURIComponent(input.threadId)}/commands`,
@@ -109,7 +109,13 @@ export async function commandMobileNativeHarnessSession(input: {
     }),
     contentType: "application/json",
   });
-  return response.ok;
+  if (response.ok) return { ok: true };
+  // A refused resume names what stands in the way; the phone says it too.
+  const body = (await response.json().catch(() => undefined)) as
+    | { readonly message?: unknown }
+    | undefined;
+  const message = body?.message;
+  return typeof message === "string" && message.length > 0 ? { ok: false, message } : { ok: false };
 }
 
 export async function decideMobileNativeHarnessApproval(input: {

@@ -798,6 +798,69 @@ describe("CodeOperationRuntime", () => {
     },
   );
 
+  it.each([true, false])(
+    "carries the conversation on after a switch to another model of the same provider only when it can: %s",
+    async (canSwitch) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        supportsModelSwitch: canSwitch,
+      });
+      try {
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(84),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
+        await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+        await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
+        fixture.setThread(decodeCodeThread({ ...thread(), modelId: "model-b", version: 2 }));
+        const nextPrompt = storedEvidence(86, "main");
+        fixture.evidenceValues.set(nextPrompt.contentId, "main");
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(85),
+          threadId,
+          checkoutId,
+          sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000085"),
+          prompt: nextPrompt,
+        });
+        if (canSwitch) {
+          await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+          expect(connection.start).toHaveBeenCalledOnce();
+          expect(connection.resume).toHaveBeenCalledWith(
+            expect.objectContaining({
+              sessionId,
+              modelId: "model-b",
+              resumeCursor: { driverKind: "codex", value: "native-code-session" },
+            }),
+          );
+          const frames = await fixture.runtime.subscribe(
+            windowId,
+            threadId,
+            operationId(85),
+            0,
+            20,
+          );
+          expect(frames.map((frame) => frame.event)).toContainEqual(
+            expect.objectContaining({ kind: "provider-session-ready", modelId: "model-b" }),
+          );
+        } else {
+          expect(connection.resume).not.toHaveBeenCalled();
+          expect(connection.send).toHaveBeenCalledTimes(1);
+        }
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
   it("adds fixed Browser guidance when the task explicitly selects Browser", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const provider = providerConnection(queue);
@@ -2693,6 +2756,8 @@ function runtimeFixture(options: {
   supportsAppManagedTools?: boolean;
   /** Whether the provider natively serves ACP client capabilities. */
   supportsAcpClientCapabilities?: boolean;
+  /** Whether the provider can carry a session on to another of its models. */
+  supportsModelSwitch?: boolean;
   terminalExit?: { readonly exitCode: number };
   pullRequestPort?: Parameters<typeof createCodeOperationRuntime>[0]["pullRequestPort"];
   pullRequestTarget?: boolean;
@@ -2838,6 +2903,9 @@ function runtimeFixture(options: {
                 supportsAcpClientCapabilities: () => options.supportsAcpClientCapabilities ?? false,
               }),
         }),
+    ...(options.supportsModelSwitch === undefined
+      ? {}
+      : { supportsModelSwitch: () => options.supportsModelSwitch ?? false }),
     credentialResolver: { resolve: async () => options.credential },
     resolvePullRequestTarget: async () =>
       options.pullRequestTarget === true

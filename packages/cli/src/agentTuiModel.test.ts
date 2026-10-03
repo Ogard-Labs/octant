@@ -68,7 +68,7 @@ describe("agent terminal UI model", () => {
 
   it("sums the footer from the harness session and takes its colours from the app theme", () => {
     expect(statusLineFrom(thread, session)).toBe(
-      "running · frontier-large · 1 turns · 1.2k in · 300 out",
+      "Running · frontier-large · 1 turns · 1.2k in · 300 out",
     );
     const dark = paletteFor("octant", "dark");
     const light = paletteFor("octant", "light");

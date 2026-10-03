@@ -21,7 +21,7 @@ import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { decodeProviderModelId } from "@octant/contracts/providers";
-import type { PickerGroup } from "@octant/domain";
+import { startedConversationPickerGroups, type PickerGroup } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
 import { useEffect, useRef, useState } from "react";
 import { useSteeredSend } from "../composer/useSteeredSend";
@@ -197,6 +197,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             attempt !== undefined && attempt.outcome !== "queued" && attempt.outcome !== "streaming"
           );
         }).length;
+  const chatStarted = view !== undefined && view.turns.some((turn) => turn.attempts.length > 0);
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false);
   const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
   const [toolApprovalBusy, setToolApprovalBusy] = useState(false);
@@ -1211,7 +1212,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           : { onCaretIndexChange: props.controller.setPendingDraftCaret })}
         isSending={isSending}
         hasPendingMessage={steered.pending !== undefined}
-        model={{ options: providerState.modelOptions, value: view.thread.modelId }}
+        model={{
+          // Without picker groups there is no ownership to reason about, so a
+          // started thread's fallback keeps only its own model.
+          options: chatStarted
+            ? providerState.modelOptions.filter(
+                (option) => option.id === String(view.thread.modelId),
+              )
+            : providerState.modelOptions,
+          value: view.thread.modelId,
+        }}
         onDraftChange={(draft, caretIndex) => {
           draftEditRevisionRef.current += 1;
           props.controller.setPendingDraft(draft, caretIndex);
@@ -1306,7 +1316,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         {...(props.providerGroups === undefined
           ? {}
           : {
-              providerGroups: props.providerGroups,
+              // Any earlier attempt ties the thread to its provider kind: the
+              // host checks the latest attempt whatever its outcome. See
+              // startedConversationPickerGroups for which moves stay open.
+              providerGroups: chatStarted
+                ? startedConversationPickerGroups(props.providerGroups, {
+                    providerInstanceId: view.thread.providerInstanceId,
+                    modelId: view.thread.modelId,
+                  })
+                : props.providerGroups,
               selectedProviderInstanceId: view.thread.providerInstanceId,
               selectedModelId: view.thread.modelId,
               onSelectModel: (selection: {
@@ -1462,7 +1480,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           />
         }
         provider={{
-          options: providerState.providerOptions,
+          options: chatStarted
+            ? providerState.providerOptions.filter(
+                (option) => option.id === String(view.thread.providerInstanceId),
+              )
+            : providerState.providerOptions,
           value: String(view.thread.providerInstanceId),
         }}
         research={{

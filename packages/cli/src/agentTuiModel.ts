@@ -1,6 +1,7 @@
 import type { NativeHarnessSessionView, ThreadGoal } from "@octant/contracts";
 import type { AgentThreadSnapshot } from "./agentThread";
 import { BUILT_IN_THEME_PRESET_IDS, resolveThemePresetTokens } from "@octant/theme";
+import { nativeHarnessStatusLabel } from "@octant/domain";
 
 /**
  * What the terminal UI shows, computed from the same thread and harness
@@ -225,7 +226,7 @@ export function statusLineFrom(
 ): string {
   const parts: string[] = [];
   if (session !== null && session !== undefined) {
-    parts.push(session.session.status);
+    parts.push(nativeHarnessStatusLabel(session.session.status));
     parts.push(String(session.session.lead.modelId));
     parts.push(`${session.session.turnsRun} turns`);
     if (session.session.cutovers > 0) parts.push(`${session.session.cutovers} context cuts`);
@@ -259,4 +260,9 @@ export function describeAgentGoal(goal: ThreadGoal): string {
   const met = criteria.filter((criterion) => criterion.status === "met").length;
   const progress = criteria.length === 0 ? "" : ` · ${met} of ${criteria.length} criteria met`;
   return `Goal (${goal.status}): ${goal.objective}${progress}`;
+}
+
+/** A checkpoint's default name: when it was marked, to the minute. */
+export function defaultCheckpointLabel(now: Date = new Date()): string {
+  return `Checkpoint ${now.toISOString().slice(0, 16).replace("T", " ")}`;
 }

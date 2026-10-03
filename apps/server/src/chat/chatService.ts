@@ -563,6 +563,8 @@ export interface ChatServiceOptions {
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
+    /** Every turn's end, whatever its outcome. */
+    readonly turnEnded?: (scope: NativeHarnessTurnScope) => void;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
@@ -3343,7 +3345,7 @@ export class ChatService {
         !previousNative ||
         previous.resumeCursor === undefined ||
         String(previous.providerInstanceId) !== String(thread.providerInstanceId) ||
-        previous.modelId !== thread.modelId)
+        (previous.modelId !== thread.modelId && probe.capabilities.modelSwitch !== "supported"))
     ) {
       throw new ChatServiceError({
         category: "unavailable",
@@ -4907,132 +4909,136 @@ export class ChatService {
         ...(input.thread.projectId === undefined ? {} : { projectId: input.thread.projectId }),
       };
       this.#nativeHarness?.turnStarted(harnessScope);
-      await Effect.runPromise(
-        Effect.scoped(
-          this.#turnRunner.run({
-            thread: input.thread,
-            attempt: input.attempt,
-            prompt: input.prompt,
-            context: [
-              ...(this.#nativeHarness?.contextFor(harnessScope) ?? []),
-              ...input.prepared.context.providerContext,
-            ],
-            ...(this.#nativeHarness === undefined
-              ? {}
-              : {
-                  onTurnCompleted: (completed) =>
-                    this.#nativeHarness!.turnCompleted({
-                      ...harnessScope,
-                      ...completed,
-                      contextSubject: input.prepared.context.subject,
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            this.#turnRunner.run({
+              thread: input.thread,
+              attempt: input.attempt,
+              prompt: input.prompt,
+              context: [
+                ...(this.#nativeHarness?.contextFor(harnessScope) ?? []),
+                ...input.prepared.context.providerContext,
+              ],
+              ...(this.#nativeHarness === undefined
+                ? {}
+                : {
+                    onTurnCompleted: (completed) =>
+                      this.#nativeHarness!.turnCompleted({
+                        ...harnessScope,
+                        ...completed,
+                        contextSubject: input.prepared.context.subject,
+                      }),
+                  }),
+              scratchRoot,
+              driver,
+              providerInstanceId,
+              serviceLimits: input.prepared.serviceLimits,
+              contextSubject: input.prepared.context.subject,
+              contextPlanId: input.prepared.context.snapshot.next.plan.id,
+              requestShape: "chat-turn",
+              varianceReserve: input.prepared.context.snapshot.next.plan.reserves.variance,
+              reservationId,
+              estimatedTokens: input.prepared.context.snapshot.next.plan.plannedInputTokens,
+              attachments: input.prepared.attachments,
+              researchEnabled: input.thread.researchEnabled,
+              researchRoute: input.prepared.researchRoute,
+              ...(input.prepared.appManagedTools === undefined
+                ? {}
+                : { appManagedTools: input.prepared.appManagedTools }),
+              ...(input.mode === "resume" ? { mode: "resume" as const } : {}),
+              ...(input.attempt.resumeCursor === undefined
+                ? {}
+                : { resumeCursor: input.attempt.resumeCursor }),
+              clock: () => this.#clock(),
+              signal: controller.signal,
+              persistAttempt: (attempt) =>
+                Effect.tryPromise({
+                  try: () => persistAttempt(attempt),
+                  catch: () =>
+                    decodeChatFailure({
+                      category: "unavailable",
+                      message: "Chat attempt persistence failed.",
                     }),
                 }),
-            scratchRoot,
-            driver,
-            providerInstanceId,
-            serviceLimits: input.prepared.serviceLimits,
-            contextSubject: input.prepared.context.subject,
-            contextPlanId: input.prepared.context.snapshot.next.plan.id,
-            requestShape: "chat-turn",
-            varianceReserve: input.prepared.context.snapshot.next.plan.reserves.variance,
-            reservationId,
-            estimatedTokens: input.prepared.context.snapshot.next.plan.plannedInputTokens,
-            attachments: input.prepared.attachments,
-            researchEnabled: input.thread.researchEnabled,
-            researchRoute: input.prepared.researchRoute,
-            ...(input.prepared.appManagedTools === undefined
-              ? {}
-              : { appManagedTools: input.prepared.appManagedTools }),
-            ...(input.mode === "resume" ? { mode: "resume" as const } : {}),
-            ...(input.attempt.resumeCursor === undefined
-              ? {}
-              : { resumeCursor: input.attempt.resumeCursor }),
-            clock: () => this.#clock(),
-            signal: controller.signal,
-            persistAttempt: (attempt) =>
-              Effect.tryPromise({
-                try: () => persistAttempt(attempt),
-                catch: () =>
-                  decodeChatFailure({
-                    category: "unavailable",
-                    message: "Chat attempt persistence failed.",
-                  }),
-              }),
-            persistProviderFailure: (attempt, failure) =>
-              Effect.tryPromise({
-                try: () => persistAttempt(attempt, failure, true),
-                catch: () =>
-                  decodeChatFailure({
-                    category: "unavailable",
-                    message: "Chat provider failure could not be persisted.",
-                  }),
-              }),
-            persistResponse: (text) =>
-              Effect.try({
-                try: () => {
-                  const content = this.#prepareContent(input.thread.id, "assistant", text);
-                  pendingContent.set(String(content.reference.contentId), content);
-                  return content.reference;
-                },
-                catch: () =>
-                  decodeChatFailure({
-                    category: "failed",
-                    message: "Chat transcript content is invalid.",
-                  }),
-              }),
-            persistCitation: (event, backend) =>
-              Effect.try({
-                try: () => {
-                  const citationId = decodeChatCitationId(this.#uuid());
-                  const snippet =
-                    event.snippet === undefined
-                      ? undefined
-                      : this.#prepareContent(input.thread.id, "snippet", event.snippet);
-                  const citation = decodeChatCitation({
-                    citationId,
-                    threadId: input.thread.id,
-                    turnId: input.turn.id,
-                    attemptId: input.attempt.id,
-                    sourceTitle: event.sourceTitle,
-                    sourceUrl: event.sourceUrl,
-                    backend,
-                    ...(snippet === undefined ? {} : { snippetRef: snippet.reference }),
-                    retrievedAt: decodeTimestamp(this.#clock()),
-                  });
-                  const version = readAggregateVersion(
-                    this.#persistence.connection,
-                    "chat-thread",
-                    input.thread.id,
-                  );
-                  this.#persistence.journal.append(
-                    {
-                      aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
-                      expectedVersion: version,
-                      events: [
-                        this.#pending("chat.citation-recorded@1", {
-                          kind: "citation-recorded",
-                          citation,
-                        }),
-                      ],
-                    },
-                    snippet === undefined
-                      ? undefined
-                      : {
-                          beforeEvents: (connection) =>
-                            this.#writePreparedContent(connection, snippet),
-                        },
-                  );
-                  return citationId;
-                },
-                catch: () =>
-                  decodeChatFailure({
-                    category: "unavailable",
-                    message: "Chat citation persistence failed.",
-                  }),
-              }),
-          }),
-        ),
-      );
+              persistProviderFailure: (attempt, failure) =>
+                Effect.tryPromise({
+                  try: () => persistAttempt(attempt, failure, true),
+                  catch: () =>
+                    decodeChatFailure({
+                      category: "unavailable",
+                      message: "Chat provider failure could not be persisted.",
+                    }),
+                }),
+              persistResponse: (text) =>
+                Effect.try({
+                  try: () => {
+                    const content = this.#prepareContent(input.thread.id, "assistant", text);
+                    pendingContent.set(String(content.reference.contentId), content);
+                    return content.reference;
+                  },
+                  catch: () =>
+                    decodeChatFailure({
+                      category: "failed",
+                      message: "Chat transcript content is invalid.",
+                    }),
+                }),
+              persistCitation: (event, backend) =>
+                Effect.try({
+                  try: () => {
+                    const citationId = decodeChatCitationId(this.#uuid());
+                    const snippet =
+                      event.snippet === undefined
+                        ? undefined
+                        : this.#prepareContent(input.thread.id, "snippet", event.snippet);
+                    const citation = decodeChatCitation({
+                      citationId,
+                      threadId: input.thread.id,
+                      turnId: input.turn.id,
+                      attemptId: input.attempt.id,
+                      sourceTitle: event.sourceTitle,
+                      sourceUrl: event.sourceUrl,
+                      backend,
+                      ...(snippet === undefined ? {} : { snippetRef: snippet.reference }),
+                      retrievedAt: decodeTimestamp(this.#clock()),
+                    });
+                    const version = readAggregateVersion(
+                      this.#persistence.connection,
+                      "chat-thread",
+                      input.thread.id,
+                    );
+                    this.#persistence.journal.append(
+                      {
+                        aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
+                        expectedVersion: version,
+                        events: [
+                          this.#pending("chat.citation-recorded@1", {
+                            kind: "citation-recorded",
+                            citation,
+                          }),
+                        ],
+                      },
+                      snippet === undefined
+                        ? undefined
+                        : {
+                            beforeEvents: (connection) =>
+                              this.#writePreparedContent(connection, snippet),
+                          },
+                    );
+                    return citationId;
+                  },
+                  catch: () =>
+                    decodeChatFailure({
+                      category: "unavailable",
+                      message: "Chat citation persistence failed.",
+                    }),
+                }),
+            }),
+          ),
+        );
+      } finally {
+        this.#nativeHarness?.turnEnded?.(harnessScope);
+      }
     } catch (error) {
       // A deliberate refusal throws a ChatServiceError with the category the
       // transcript can state; only an unexpected defect collapses to the

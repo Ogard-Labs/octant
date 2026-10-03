@@ -1508,7 +1508,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .workspace-pane__title {
-  flex: 0 1 auto;
+  flex: 0 8 auto;
   min-width: 0;
   overflow: hidden;
   font-size: var(--oct-text-sm);
@@ -1517,14 +1517,20 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   white-space: nowrap;
 }
 
-/* The Project the thread works in. Chips are short, so they keep their own
-   width and the title gives up room instead; a chip truncates only past 30%
-   of the handle. Shrinking the chips first, or in proportion to a long
-   title, left "octant…" and "m…", two chips that no longer named anything. */
+/* The Project the thread works in. Chips are short, so the title gives up
+   room first (it shrinks eight times as fast); a chip truncates only once the
+   title is mostly gone, or past its own cap. The title has no fixed minimum:
+   a 12ch floor clipped the Running pill off a 180px pane, since the grip
+   hides what overflows it. The
+   cap is in ch, not a share of the handle: the handle shrink-wraps its
+   content, so 30% of it clipped "octant-qa-code-repo" to "octant-qa-code-re…"
+   beside a short title with most of the header empty. Shrinking the chips
+   first, or in proportion to a long title, left "octant…" and "m…", two chips
+   that no longer named anything. */
 .workspace-pane__context {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: 30%;
+  max-width: 32ch;
   overflow: hidden;
   padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
@@ -1539,11 +1545,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 /* The branch is its own chip beside the Project's, in the identifier face so
    a branch name never reads as prose. It keeps its width like the Project
-   chip, under the same 30% cap. */
+   chip, under the same title-first shrinking and a cap of its own. */
 .workspace-pane__branch {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: 30%;
+  max-width: 28ch;
   overflow: hidden;
   padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
@@ -1555,6 +1561,16 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A phone header is about 340px wide: the two chips kept their widths and
+   left a thread title of "Reply …". The title is what names the pane, and the
+   Project and branch are still shown by the composer's context bar below. */
+@media (max-width: 680px) {
+  .workspace-pane__context,
+  .workspace-pane__branch {
+    display: none;
+  }
 }
 
 /* A turn is executing. The pill keeps its width while the chips shrink, so
@@ -4133,19 +4149,20 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   color: var(--octant-text-muted);
 }
 
-/* Catalogs occupy one scrollable row, leaving room for the model list. */
+/* Catalogs wrap onto as many short rows as they need, so every one is on
+   screen. A single sideways-scrolling row hid the later catalogs behind the
+   edge with nothing but a faint fade to say they existed, and a mouse without
+   a horizontal gesture could not reach them. Past three rows the block scrolls
+   so the model list keeps its room. */
 .composer-model-picker__catalogs {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   flex: 0 0 auto;
   gap: var(--oct-space-1);
   padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-2);
-  overflow-x: auto;
-  scrollbar-width: none;
+  max-height: calc(var(--oct-space-6) * 3 + var(--oct-space-1) * 4 + var(--oct-space-2));
+  overflow-y: auto;
   border-bottom: 1px solid var(--octant-border);
-  /* A chip cut off at the edge fades out instead of being sliced, so the
-     row reads as scrollable. Only the mask's alpha matters. */
-  mask-image: linear-gradient(to right, var(--oct-fg) calc(100% - 28px), transparent);
 }
 
 .composer-model-picker__catalog {
