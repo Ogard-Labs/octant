@@ -86,6 +86,9 @@ branch. While the host projects the thread as executing, a "Running" pill with
 a spinner follows them; it carries no elapsed time because the host does not
 report when the turn began. A surface that is not a thread shows no
 environment mark.
+At phone width (680px and below) the title row drops both chips so the title
+stays readable; the composer's context strip below the thread names the
+Project and branch there.
 The model stays in the composer, not the title row. The tile holds its glyph
 so a later per-environment icon can replace it in place. Tab
 geometry and close-control presentation are shared with dock tools under
