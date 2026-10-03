@@ -3722,7 +3722,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
     background: var(--octant-control-hover);
   }
 
-  .environment-checkout {
+  /* The Environment panel's boundaries moved from the checkout block to its
+     header and row cards; increased contrast has to follow them there. */
+  .environment-checkout,
+  .thread-environment-dock__header,
+  .environment-card__rows {
     border-color: var(--octant-border-strong);
   }
 }
