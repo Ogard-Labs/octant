@@ -108,106 +108,113 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
 
   let lastScanCandidates: DiscoveryCandidate[] = [];
 
+  // One scan at a time: every scan starts a version and sign-in read per
+  // installed runtime side by side, so overlapping requests from reusable
+  // window capabilities would multiply that burst. A request that arrives
+  // while one runs shares its result.
+  let inFlightScan: Promise<DiscoverySnapshot> | undefined;
+  const runScan = async (signal?: AbortSignal): Promise<DiscoverySnapshot> => {
+    const startTime = now();
+    const descriptors = discoverableDescriptorsForAdmittedDrivers(admittedDriverKinds);
+    const candidates: DiscoveryCandidate[] = [];
+    const searchedDirectories: Array<
+      NonNullable<DiscoverySnapshot["searchedDirectories"]>[number]
+    > = [];
+    let status: DiscoverySnapshot["status"] = "completed";
+    let message: string | undefined;
+
+    // Collect all search directories: sanitized PATH + approved locations
+    const pathDirs = [
+      ...new Set([
+        ...sanitizedPathDirs(environment.PATH ?? ""),
+        ...approvedHomeBinDirs(environment.HOME),
+      ]),
+    ];
+    const aliasTargets = await readAliasTargets(fs, environment.HOME, environment.SHELL, pathDirs);
+
+    // Each driver's probes stay serial (one driver can name several
+    // launchers), but the drivers run side by side. Probing them one after
+    // another made the scan the sum of every runtime's version and sign-in
+    // read: 7 to 17 s on a host with 17 runtimes, which Settings showed as a
+    // scan that never ended.
+    const scans = await Promise.all(
+      descriptors.map(async (descriptor) => {
+        try {
+          return await scanDescriptor(
+            descriptor,
+            pathDirs,
+            aliasTargets,
+            exec,
+            fs,
+            environment,
+            now,
+            startTime,
+            versionProbeConfinement,
+            signal,
+          );
+        } catch {
+          return undefined;
+        }
+      }),
+    );
+
+    for (const [index, found] of scans.entries()) {
+      const descriptor = descriptors[index];
+      if (descriptor === undefined) continue;
+      if (found === undefined) {
+        if (status === "completed") status = "partial";
+        continue;
+      }
+      candidates.push(...found.candidates.slice(0, MAX_CANDIDATES_PER_DRIVER));
+      searchedDirectories.push({
+        driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
+        directories: [...found.searchedDirectories],
+      });
+      if (found.outOfTime && status === "completed") {
+        status = "partial";
+        message = "Discovery scan exceeded its time budget.";
+      }
+    }
+    if (signal?.aborted) {
+      status = "cancelled";
+      message = "Discovery scan was cancelled.";
+    }
+
+    // Deduplicate by the launcher path the scan examined, not the canonical target.
+    const seen = new Set<string>();
+    const deduplicated = candidates.filter((candidate) => {
+      const key = candidate.discoveredPath ?? candidate.binaryPath;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const finalCandidates = deduplicated.slice(
+      0,
+      MAX_TOTAL_CANDIDATES,
+    ) as DiscoverySnapshot["candidates"];
+    lastScanCandidates = [...finalCandidates];
+    const snapshot: DiscoverySnapshot = {
+      hostId: hostId as DiscoverySnapshot["hostId"],
+      candidates: finalCandidates,
+      scannedAt: new Date(now()).toISOString() as DiscoverySnapshot["scannedAt"],
+      scanDurationMs: now() - startTime,
+      status,
+      ...(searchedDirectories.length > 0 ? { searchedDirectories } : {}),
+      ...(message !== undefined ? { message: message as DiscoverySnapshot["message"] } : {}),
+    };
+    return snapshot;
+  };
+
   return {
     getLastScanCandidates() {
       return lastScanCandidates;
     },
-    async scan(signal?: AbortSignal): Promise<DiscoverySnapshot> {
-      const startTime = now();
-      const descriptors = discoverableDescriptorsForAdmittedDrivers(admittedDriverKinds);
-      const candidates: DiscoveryCandidate[] = [];
-      const searchedDirectories: Array<
-        NonNullable<DiscoverySnapshot["searchedDirectories"]>[number]
-      > = [];
-      let status: DiscoverySnapshot["status"] = "completed";
-      let message: string | undefined;
-
-      // Collect all search directories: sanitized PATH + approved locations
-      const pathDirs = [
-        ...new Set([
-          ...sanitizedPathDirs(environment.PATH ?? ""),
-          ...approvedHomeBinDirs(environment.HOME),
-        ]),
-      ];
-      const aliasTargets = await readAliasTargets(
-        fs,
-        environment.HOME,
-        environment.SHELL,
-        pathDirs,
-      );
-
-      // Each driver's probes stay serial (one driver can name several
-      // launchers), but the drivers run side by side. Probing them one after
-      // another made the scan the sum of every runtime's version and sign-in
-      // read: 7 to 17 s on a host with 17 runtimes, which Settings showed as a
-      // scan that never ended.
-      const scans = await Promise.all(
-        descriptors.map(async (descriptor) => {
-          try {
-            return await scanDescriptor(
-              descriptor,
-              pathDirs,
-              aliasTargets,
-              exec,
-              fs,
-              environment,
-              now,
-              startTime,
-              versionProbeConfinement,
-              signal,
-            );
-          } catch {
-            return undefined;
-          }
-        }),
-      );
-
-      for (const [index, found] of scans.entries()) {
-        const descriptor = descriptors[index];
-        if (descriptor === undefined) continue;
-        if (found === undefined) {
-          if (status === "completed") status = "partial";
-          continue;
-        }
-        candidates.push(...found.candidates.slice(0, MAX_CANDIDATES_PER_DRIVER));
-        searchedDirectories.push({
-          driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
-          directories: [...found.searchedDirectories],
-        });
-        if (found.outOfTime && status === "completed") {
-          status = "partial";
-          message = "Discovery scan exceeded its time budget.";
-        }
-      }
-      if (signal?.aborted) {
-        status = "cancelled";
-        message = "Discovery scan was cancelled.";
-      }
-
-      // Deduplicate by the launcher path the scan examined, not the canonical target.
-      const seen = new Set<string>();
-      const deduplicated = candidates.filter((candidate) => {
-        const key = candidate.discoveredPath ?? candidate.binaryPath;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
+    scan(signal?: AbortSignal): Promise<DiscoverySnapshot> {
+      inFlightScan ??= runScan(signal).finally(() => {
+        inFlightScan = undefined;
       });
-
-      const finalCandidates = deduplicated.slice(
-        0,
-        MAX_TOTAL_CANDIDATES,
-      ) as DiscoverySnapshot["candidates"];
-      lastScanCandidates = [...finalCandidates];
-      const snapshot: DiscoverySnapshot = {
-        hostId: hostId as DiscoverySnapshot["hostId"],
-        candidates: finalCandidates,
-        scannedAt: new Date(now()).toISOString() as DiscoverySnapshot["scannedAt"],
-        scanDurationMs: now() - startTime,
-        status,
-        ...(searchedDirectories.length > 0 ? { searchedDirectories } : {}),
-        ...(message !== undefined ? { message: message as DiscoverySnapshot["message"] } : {}),
-      };
-      return snapshot;
+      return inFlightScan;
     },
   };
 }

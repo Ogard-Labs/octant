@@ -137,6 +137,34 @@ describe("discoveryClient", () => {
     }
   });
 
+  it("keeps a host error that arrives after the deadline instead of calling it a timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const lateError = vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 40_000));
+        return new Response(JSON.stringify({ category: "invalid", message: "Bad scan request." }), {
+          status: 400,
+        });
+      }) as unknown as typeof globalThis.fetch;
+      const client = createDiscoveryClient({
+        baseUrl: "http://127.0.0.1:3000",
+        fetch: lateError,
+        windowCapability: "test-cap",
+        timeoutMs: 30_000,
+      });
+      const outcome = client.scan().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(40_000);
+      const failure = (await outcome) as DiscoveryClientFailure;
+      expect(failure.category).toBe("invalid");
+      expect(failure.message).toBe("Bad scan request.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("leaves a slow provider connect running instead of reporting it failed", async () => {
     vi.useFakeTimers();
     try {

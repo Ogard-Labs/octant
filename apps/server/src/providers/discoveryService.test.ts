@@ -836,6 +836,28 @@ describe("discoveryService", () => {
     ]);
   }, 2_000);
 
+  it("runs one scan for overlapping requests instead of one burst each", async () => {
+    const fs = makeFakeFs(new Map([["/usr/local/bin/codex", { file: true }]]));
+    let versionReads = 0;
+    const exec: DiscoveryExecPort = async (_file, args) => {
+      if (args.join(" ") === "--version") versionReads += 1;
+      return { stdout: args.join(" ") === "--version" ? "1.0.0\n" : "Logged in", stderr: "" };
+    };
+    const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
+      exec,
+      fs,
+      environment: baseEnvironment,
+      now: () => 1753430400000,
+    });
+
+    const [first, second] = await Promise.all([service.scan(), service.scan()]);
+    expect(second).toBe(first);
+    expect(versionReads).toBe(1);
+    await service.scan();
+    expect(versionReads).toBe(2);
+  });
+
   it("does not discover a runtime whose provider-driver plugin is not admitted", async () => {
     const fs = makeFakeFs(
       new Map([

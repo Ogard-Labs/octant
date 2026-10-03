@@ -73,6 +73,9 @@ export function createDiscoveryClient(options: DiscoveryClientOptions): Discover
  */
 const REQUEST_TIMEOUT_MS = 45_000;
 
+/** Thrown by a read the timeout aborted, so only that read becomes a timeout. */
+const REQUEST_CUT_OFF: unique symbol = Symbol("discovery request cut off");
+
 async function request<T>(
   fetch: typeof globalThis.fetch,
   url: string,
@@ -82,15 +85,14 @@ async function request<T>(
 ): Promise<T> {
   if (timeoutMs === undefined) return readResponse(fetch, url, init, decode);
   const controller = new AbortController();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await readResponse(fetch, url, { ...init, signal: controller.signal }, decode);
   } catch (error) {
-    if (timedOut) {
+    // Only a request the timer actually cut off is a timeout. A host error or
+    // undecodable body that merely finished after the deadline keeps its own
+    // category and message.
+    if (error === REQUEST_CUT_OFF) {
       throw new DiscoveryClientFailure(
         "timeout",
         "The provider scan took too long to answer. Try again.",
@@ -112,12 +114,14 @@ async function readResponse<T>(
   try {
     response = await fetch(url, init);
   } catch {
+    if (init.signal?.aborted === true) throw REQUEST_CUT_OFF;
     throw new DiscoveryClientFailure("unavailable", "Discovery service is unavailable.");
   }
   let body: unknown;
   try {
     body = await response.json();
   } catch {
+    if (init.signal?.aborted === true) throw REQUEST_CUT_OFF;
     throw new DiscoveryClientFailure("protocol", "Discovery service returned an invalid response.");
   }
   if (!response.ok) {
