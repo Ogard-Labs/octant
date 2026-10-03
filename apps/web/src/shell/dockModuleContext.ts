@@ -1,5 +1,6 @@
 import type { WorkFileOpenRequest } from "../work/WorkFilesPanel";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
+import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -39,6 +40,9 @@ export interface ThreadUtilityDockContentProps {
   readonly requestedAgentView?: AgentRunViewRequest;
   /** Clears that request when the reader returns from a child's detail. */
   readonly onAgentViewRequestHandled?: () => void;
+  readonly requestedAgentReview?: AgentResultReviewRequest;
+  readonly onAgentReviewBack?: () => void;
+  readonly onReviewAgentChanges?: (request: AgentResultReviewRequest) => void;
   readonly nativeHarnessClient?: NativeHarnessClient;
   readonly appleProjectPath?: string;
   readonly appleToolchainClient?: AppleToolchainClient;

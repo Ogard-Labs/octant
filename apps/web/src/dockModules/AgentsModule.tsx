@@ -11,6 +11,7 @@ type Props = Pick<
   | "nativeHarnessClient"
   | "onAgentViewRequestHandled"
   | "requestedAgentView"
+  | "onReviewAgentChanges"
   | "subject"
 >;
 
@@ -29,6 +30,9 @@ export default function AgentsModule(props: Props) {
       <AgentRunHierarchy
         client={props.agentRunClient}
         parentThreadId={decodeAgentRunParentThreadId(props.subject.threadId)}
+        {...(props.subject.mode !== "code" || props.onReviewAgentChanges === undefined
+          ? {}
+          : { onReviewChanges: props.onReviewAgentChanges })}
         {...(props.requestedAgentView === undefined
           ? {}
           : { requestedView: props.requestedAgentView })}

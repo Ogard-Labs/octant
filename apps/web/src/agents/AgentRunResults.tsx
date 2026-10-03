@@ -4,6 +4,7 @@ import { useId, useState, type ReactNode } from "react";
 import { Markdown } from "../markdown/Markdown";
 import { OctantButton } from "../ui/base/OctantButton";
 import { subagentStatusWord } from "./subagentStatus";
+import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 
 export function latestResultPacket(
   packets: ReadonlyArray<AgentRunResultPacket>,
@@ -44,6 +45,7 @@ export function AgentResultPreview(props: { readonly packet: AgentRunResultPacke
 export function AgentRunResults(props: {
   readonly packets: ReadonlyArray<AgentRunResultPacket> | undefined;
   readonly truncated: boolean;
+  readonly onReviewChanges?: (request: AgentResultReviewRequest) => void;
 }) {
   const latest = latestResultPacket(props.packets ?? []);
   return (
@@ -62,6 +64,9 @@ export function AgentRunResults(props: {
             key={packet.generation}
             packet={packet}
             initiallyOpen={packet.generation === latest?.generation}
+            {...(props.onReviewChanges === undefined
+              ? {}
+              : { onReviewChanges: props.onReviewChanges })}
           />
         ))
       )}
@@ -72,10 +77,16 @@ export function AgentRunResults(props: {
 function ResultPacket(props: {
   readonly packet: AgentRunResultPacket;
   readonly initiallyOpen: boolean;
+  readonly onReviewChanges?: (request: AgentResultReviewRequest) => void;
 }) {
   const [open, setOpen] = useState(props.initiallyOpen);
   const contentId = useId();
   const packet = props.packet;
+  const canReview =
+    packet.workspace.kind === "code-worktree" &&
+    packet.files.reviewStatus === "available" &&
+    packet.review !== undefined &&
+    props.onReviewChanges !== undefined;
   return (
     <section aria-label={`Generation ${packet.generation} result`} className="agent-result">
       <OctantButton
@@ -109,19 +120,45 @@ function ResultPacket(props: {
           <h4>Files</h4>
           <p>
             {packet.files.status === "unavailable"
-              ? "Files unavailable"
+              ? "File reports unavailable."
               : packet.files.items.length === 0
-                ? "No files recorded."
+                ? "No files reported."
                 : "Provider reported · unverified"}
           </p>
           {packet.files.status === "truncated" ? <p>File list is truncated.</p> : null}
-          {packet.files.reviewStatus === "unavailable" ? <p>File review unavailable.</p> : null}
+          {canReview ? (
+            <OctantButton
+              variant="secondary"
+              size="sm"
+              onClick={() => props.onReviewChanges?.({ packet })}
+            >
+              Review changes
+            </OctantButton>
+          ) : (
+            <p>File review unavailable.</p>
+          )}
           <ul>
             {packet.files.items.map((file, index) => (
               <li key={`${file.reference}:${index}`}>
                 <p>
-                  {file.path} · {file.change}
+                  {canReview && packet.review?.changedPaths.includes(file.path) ? (
+                    <OctantButton
+                      className="agent-result__file"
+                      variant="link"
+                      size="xs"
+                      aria-label={`Review ${file.path}`}
+                      onClick={() => props.onReviewChanges?.({ packet, filePath: file.path })}
+                    >
+                      {file.path}
+                    </OctantButton>
+                  ) : (
+                    file.path
+                  )}{" "}
+                  · {file.change}
                 </p>
+                {canReview && !packet.review?.changedPaths.includes(file.path) ? (
+                  <p>Not listed in captured changes.</p>
+                ) : null}
                 <EvidenceReference label="File reference" reference={file.reference} />
               </li>
             ))}
@@ -174,7 +211,7 @@ function ResultPacket(props: {
             <p>
               Execution: {packet.executionKind} · Recorded: {packet.occurredAt}
             </p>
-            <p>{workspaceLabel(packet)}</p>
+            <p>{agentResultWorkspaceLabel(packet)}</p>
           </ResultDisclosure>
         </div>
       ) : null}
@@ -223,7 +260,7 @@ function evidenceCount(
     : `${label}: ${evidence.items.length} recorded${evidence.status === "truncated" ? " · list truncated" : ""}`;
 }
 
-function workspaceLabel(packet: AgentRunResultPacket): string {
+export function agentResultWorkspaceLabel(packet: AgentRunResultPacket): string {
   const workspace = packet.workspace;
   if (workspace.kind === "chat-virtual") return "Workspace: virtual chat; no filesystem workspace.";
   if (workspace.kind === "work-root")

@@ -489,6 +489,14 @@
   font-size: var(--oct-text-xs);
 }
 
+.agent-result__file {
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
 .agent-result__evidence {
   display: grid;
   gap: var(--oct-space-1);

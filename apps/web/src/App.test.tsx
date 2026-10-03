@@ -16,7 +16,8 @@ import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { decodeAgentRunId } from "@octant/contracts/agent-run";
+import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
+import { resultPacketFixture } from "./agents/agentActivityFixtures";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import { applyWorkspaceOperation } from "@octant/domain/shell-policy";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -2938,6 +2939,131 @@ describe("App", () => {
       expect(agentRunClient.cancel).not.toHaveBeenCalled();
     },
   );
+
+  it("opens each child's captured generation in Review without reading or opening the parent checkout", async () => {
+    const user = userEvent.setup();
+    const packet = resultPacketFixture({
+      parentThreadId: decodeAgentRunParentThreadId(String(codeThreadId)),
+    });
+    const reviewMetadata = {
+      capturedAt: packet.occurredAt,
+      baseTree: "a".repeat(40),
+      resultTree: "b".repeat(40),
+      changedPaths: ["src/parser.ts"],
+      truncated: false,
+    };
+    const packets = [1, 2].map((generation) => ({
+      ...packet,
+      generation,
+      review: reviewMetadata,
+      files: {
+        ...packet.files,
+        reviewStatus: "available" as const,
+        items:
+          generation === 2
+            ? []
+            : [
+                ...packet.files.items,
+                {
+                  path: "reported-only.ts",
+                  change: "modified" as const,
+                  reference: "report",
+                  source: "provider-reported" as const,
+                  verified: false as const,
+                },
+              ],
+      },
+    }));
+    const review = vi.fn<NonNullable<AgentRunClient["review"]>>(async (runId, generation) => ({
+      runId,
+      parentThreadId: packet.parentThreadId,
+      generation,
+      status: "available",
+      snapshot: {
+        ...reviewMetadata,
+        diff: `diff --git a/src/parser.ts b/src/parser.ts\n--- a/src/parser.ts\n+++ b/src/parser.ts\n@@ -1 +1 @@\n-before\n+captured generation ${generation}\n`,
+      },
+    }));
+    const agentRunClient: AgentRunClient = {
+      review,
+      parentSummary: vi.fn(async (parentThreadId) => ({
+        parentThreadId,
+        entries: [
+          {
+            runId: packet.runId,
+            parentThreadId,
+            requestId: "captured-review",
+            task: "Review parser",
+            role: "review",
+            lifecycleStatus: "completed",
+            executionKind: "octant-managed",
+            usageQuality: "unavailable",
+            resultAcknowledgement: { required: true, acknowledged: false },
+            version: 1,
+            updatedAt: packet.occurredAt,
+            resultPackets: packets,
+          },
+        ],
+      })),
+      conversation: vi.fn(async () => {
+        throw new Error("No live transcript in this fixture");
+      }),
+      center: vi.fn(),
+      snapshotCanvas: vi.fn(),
+      acknowledge: vi.fn(),
+      cancel: vi.fn(),
+      steer: vi.fn(),
+      retry: vi.fn(),
+      resume: vi.fn(),
+      usageResume: vi.fn(),
+    };
+    const codeApi = codes();
+    const executeOperation = vi.spyOn(codeApi, "executeOperation");
+    render(
+      <App
+        agentRunClient={agentRunClient}
+        codeClient={codeApi}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+    const tray = await screen.findByRole("group", { name: "Subagents" });
+    await user.click(within(tray).getByRole("button", { name: /View all/ }));
+    const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
+    await user.click(await within(dock).findByRole("button", { name: /Review parser/ }));
+    await user.click(within(dock).getByRole("button", { name: /Generation 1/ }));
+    const earlier = within(dock).getByRole("region", { name: "Generation 1 result" });
+    expect(
+      within(earlier).queryByRole("button", { name: /reported-only.ts/ }),
+    ).not.toBeInTheDocument();
+    await user.click(within(earlier).getByRole("button", { name: "Review src/parser.ts" }));
+    expect(
+      await within(dock).findByRole("heading", { name: "Generation 1 changes" }),
+    ).toBeVisible();
+    expect(
+      await within(dock).findByRole("table", { name: "Diff for src/parser.ts" }),
+    ).toHaveTextContent("captured generation 1");
+    expect(within(dock).getByRole("tab", { name: "Review" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await user.click(within(dock).getByRole("button", { name: "Back to subagent" }));
+    const latest = await within(dock).findByRole("region", { name: "Generation 2 result" });
+    await user.click(within(latest).getByRole("button", { name: "Review changes" }));
+    expect(
+      await within(dock).findByRole("table", { name: "Diff for src/parser.ts" }),
+    ).toHaveTextContent("captured generation 2");
+    expect(review).toHaveBeenNthCalledWith(1, packet.runId, 1);
+    expect(review).toHaveBeenLastCalledWith(packet.runId, 2);
+    expect(
+      within(dock).queryByRole("button", { name: /^(Open|Discard|Stage|Commit|Working tree)/ }),
+    ).not.toBeInTheDocument();
+    expect(executeOperation).not.toHaveBeenCalled();
+    expect(agentRunClient.acknowledge).not.toHaveBeenCalled();
+  });
 
   it("offers Plan only when the thread has a current plan artifact", async () => {
     const user = userEvent.setup();

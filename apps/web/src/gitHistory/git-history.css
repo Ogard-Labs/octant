@@ -239,3 +239,13 @@
 .git-history__table tr[data-selected="true"] {
   background: var(--oct-selection);
 }
+
+.agent-review .git-history__toolbar {
+  flex-wrap: wrap;
+  font-size: var(--oct-text-detail);
+  color: var(--oct-muted);
+}
+.agent-review .git-history__commit-header,
+.agent-review .git-history__notice {
+  overflow-wrap: anywhere;
+}

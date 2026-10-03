@@ -41,6 +41,7 @@ export const dockModules: Readonly<
         "nativeHarnessClient",
         "onAgentViewRequestHandled",
         "requestedAgentView",
+        "onReviewAgentChanges",
         "subject",
       ]),
     ),
@@ -105,6 +106,9 @@ export const dockModules: Readonly<
     createElement(
       ReviewModule,
       inputs(props, [
+        "agentRunClient",
+        "requestedAgentReview",
+        "onAgentReviewBack",
         "codeController",
         "hostBridge",
         "onOpenFile",
