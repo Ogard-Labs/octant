@@ -318,23 +318,52 @@ export class AgentRunOrchestrationService {
             "This execution cannot resume a saved child session. Use Retry for a fresh session.",
         };
       }
-      if (current.lifecycleStatus !== "waiting" && current.lifecycleStatus !== "interrupted") {
+      if (
+        current.lifecycleStatus !== "waiting" &&
+        current.lifecycleStatus !== "interrupted" &&
+        current.lifecycleStatus !== "completed"
+      ) {
         return {
           kind: "run-command-failed",
           reason: "unsupported-transition",
-          message: "Only waiting or interrupted children can resume.",
+          message: "Only waiting, interrupted or completed children can resume.",
+        };
+      }
+      if (
+        current.lifecycleStatus === "completed" &&
+        (continuation.message === undefined ||
+          continuation.message.trim().length === 0 ||
+          continuation.message.length > 4096)
+      ) {
+        return {
+          kind: "run-command-failed",
+          reason: "unsupported-transition",
+          message: "A completed child requires an explicit follow-up message.",
         };
       }
       const readiness = this.#processes.checkResume?.(current);
-      if (readiness?.status === "refused") {
+      if (
+        readiness?.status === "refused" ||
+        (current.lifecycleStatus === "completed" && readiness === undefined)
+      ) {
         return {
           kind: "run-command-failed",
           reason: "unsupported-transition",
-          message: readiness.message,
+          message:
+            readiness?.status === "refused"
+              ? readiness.message
+              : "This execution cannot verify a saved conversation for a completed child.",
         };
       }
     }
     if (!this.#approvals.isCurrent({ runId, authority: liveAuthority })) {
+      if (isAgentRunTerminalStatus(current.lifecycleStatus)) {
+        return {
+          kind: "run-command-failed",
+          reason: "unsupported-transition",
+          message: "The child approval or extension grant has changed.",
+        };
+      }
       if (current.lifecycleStatus === "queued") {
         return this.#persistence.applyCommand({
           kind: "interrupt-agent-run",
@@ -376,6 +405,7 @@ export class AgentRunOrchestrationService {
     try {
       started = this.#persistence.applyCommand({
         kind: continuation === undefined ? "start-agent-run" : "resume-agent-run",
+        ...(continuation?.message === undefined ? {} : { message: continuation.message }),
         runId,
         expectedVersion: expectedVersion as never,
       });
@@ -769,7 +799,7 @@ export class AgentRunOrchestrationService {
       runId: current.id,
       expectedVersion: current.version as never,
       result: {
-        reference: agentRunResultReference(current.id),
+        reference: agentRunResultReference(current.id, current.generation),
         truncated: reply.truncated,
       },
       resultText: reply.text,

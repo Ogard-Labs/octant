@@ -530,3 +530,21 @@ describe("agentRun pool-derived route receipts", () => {
     expect(response.items).toHaveLength(1);
   });
 });
+
+it("decodes legacy result events and binds new delivery commands to a positive result generation", () => {
+  const event = { runId: ids.run, fromStatus: "completed", toStatus: "starting", version: 5 };
+  expect(decodeAgentRunStatusChanged(event).generation).toBeUndefined();
+  expect(decodeAgentRunStatusChanged({ ...event, generation: 2 }).generation).toBe(2);
+  const command = {
+    kind: "settle-agent-run-result-delivery",
+    runId: ids.run,
+    expectedVersion: 7,
+    outcome: "delivered",
+  };
+  expect(decodeAgentRunCommand(command).kind).toBe("settle-agent-run-result-delivery");
+  expect(decodeAgentRunCommand({ ...command, generation: 2 })).toMatchObject({ generation: 2 });
+  for (const generation of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    expect(() => decodeAgentRunStatusChanged({ ...event, generation })).toThrow();
+    expect(() => decodeAgentRunCommand({ ...command, generation })).toThrow();
+  }
+});

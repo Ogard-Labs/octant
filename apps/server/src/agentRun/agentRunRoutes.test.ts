@@ -42,10 +42,12 @@ import {
 } from "./agentRunEventStore";
 import {
   AgentRunOrchestrationService,
+  type AgentRunProcessSupervisorPort,
   createInMemoryCapacityPort,
 } from "./agentRunOrchestrationService";
 import { AgentRunPersistenceService } from "./agentRunPersistenceService";
 import { AgentRunProjection } from "./agentRunProjection";
+import { AgentRunSessionStore } from "./agentRunSessionStore";
 import { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
 import { AgentRunSessionError } from "./agentRunSessionPort";
 import { createAgentRunRouteHandler, type AgentRunRouteDependencies } from "./agentRunRoutes";
@@ -155,6 +157,7 @@ function createHandler(
   options: {
     readonly onExecutionAccepted?: AgentRunControlAdmissionDependencies["onExecutionAccepted"];
     readonly resume?: (run: AgentRun) => unknown;
+    readonly processes?: AgentRunProcessSupervisorPort;
     readonly authorizeCancellation?: (input: { readonly run: AgentRun }) => boolean;
     readonly authorizeCreation?: () => boolean;
     readonly authorizeParentThread?: (input: {
@@ -224,7 +227,7 @@ function createHandler(
     capacity: options.capacity ?? createInMemoryCapacityPort(),
     worktree: { isVerifiedIsolation: () => false, isParentCheckout: () => true },
     approvals: { isCurrent: () => true },
-    processes: {
+    processes: options.processes ?? {
       start: () => undefined,
       stop: async () => undefined,
       ...(options.resume === undefined ? {} : { resume: options.resume }),
@@ -487,6 +490,86 @@ describe("agentRunRoutes", () => {
     liveConversations.complete(accepted.run.id);
     await expect(readFrame()).resolves.toMatchObject({ kind: "delta", status: "complete" });
     await expect(reader.read()).resolves.toMatchObject({ done: true });
+  });
+
+  it("re-reads durable terminal history for the final stream snapshot after reload", async () => {
+    const { handler, persistence, liveConversations, token, connection } = createHandler();
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Remember the conversation",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    if (accepted.kind !== "run-accepted") throw new Error("admission failed");
+    let current = accepted.run;
+    for (const kind of [
+      "start-agent-run",
+      "mark-agent-run-running",
+      "complete-agent-run",
+    ] as const) {
+      const identity = { runId: current.id, expectedVersion: current.version };
+      const result = persistence.applyCommand(
+        kind === "complete-agent-run"
+          ? {
+              ...identity,
+              kind,
+              result: { reference: `octant://agent-run/${current.id}/result`, truncated: false },
+              resultText: "Final answer",
+            }
+          : { ...identity, kind },
+      );
+      if (result.kind !== "run-updated") throw new Error("transition failed");
+      current = result.run;
+    }
+    const store = new AgentRunSessionStore({
+      connection,
+      getById: (id) => persistence.getById(id),
+    });
+    const writing = new AgentRunLiveConversationStore({ persistence: store.conversations });
+    writing.begin(current.id);
+    for (let i = 0; i < 160; i++) writing.appendText(current.id, `History ${i}`, now as never);
+    writing.complete(current.id);
+    const reloaded = new AgentRunLiveConversationStore({ persistence: store.conversations });
+    const read = vi
+      .spyOn(liveConversations, "read")
+      .mockImplementation((input) => reloaded.read(input));
+    vi.spyOn(liveConversations, "subscribe").mockImplementation((input) =>
+      reloaded.subscribe(input),
+    );
+    const headers = { "x-octant-window-capability": token };
+    const snapshot = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation?runId=${current.id}`, { headers }),
+    );
+    const expected = await snapshot?.json();
+    expect(expected).toMatchObject({ status: "complete", truncated: true });
+    // The retained view becomes available between the initial live probe and final disclosure.
+    read.mockReturnValueOnce(undefined);
+    const stream = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation/stream?runId=${current.id}`, {
+        headers,
+      }),
+    );
+    const frame = JSON.parse((await stream?.text()) ?? "null");
+    expect(frame).toMatchObject({ ...expected, kind: "snapshot" });
+    expect(frame.entries.length).toBeGreaterThan(1);
+    const ordinary = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation/stream?runId=${current.id}`, {
+        headers,
+      }),
+    );
+    expect(JSON.parse((await ordinary?.text()) ?? "null")).toMatchObject({
+      ...expected,
+      kind: "snapshot",
+    });
   });
 
   it("authorizes conversation streams from the run parent before opening a listener", async () => {
@@ -1854,6 +1937,55 @@ describe("agentRunRoutes", () => {
     expect(body.run.lifecycleStatus).toBe("starting");
   });
 
+  it("requires an authorized explicit message to resume a completed child at a new generation", async () => {
+    let authorized = true;
+    const resume = vi.fn();
+    const { handler, token, persistence, orchestration, create } = createHandler({
+      authorizeParentThread: () => authorized,
+      processes: {
+        start: vi.fn(),
+        resume,
+        checkResume: () => ({ status: "ready" }),
+        stop: async () => undefined,
+      },
+    });
+    const run = await startedRun(create);
+    orchestration.onSessionSettled({
+      runId: run.id,
+      outcome: { kind: "completed", responseText: "First answer" },
+    });
+    const completed = persistence.getById(run.id);
+    if (completed === undefined) throw new Error("missing completion");
+    const post = (body: Record<string, unknown>) =>
+      handler(
+        new Request("http://127.0.0.1/api/agent-runs/resume", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": token },
+          body: JSON.stringify(body),
+        }),
+      );
+    const base = { runId: run.id, expectedVersion: completed.version };
+    expect((await post(base))?.status).toBe(400);
+    expect((await post({ ...base, message: " " }))?.status).toBe(400);
+    expect((await post({ ...base, message: "x".repeat(4097) }))?.status).toBe(400);
+    authorized = false;
+    expect((await post({ ...base, message: "Continue" }))?.status).toBe(403);
+    authorized = true;
+    expect((await post({ ...base, expectedVersion: 1, message: "Continue" }))?.status).toBe(409);
+    expect(persistence.getById(run.id)).toEqual(completed);
+    const response = await post({ ...base, message: "Explain this answer" });
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      kind: "run-updated",
+      run: { id: run.id, generation: 2, lifecycleStatus: "starting" },
+    });
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({ generation: 2 }), {
+      message: "Explain this answer",
+    });
+    expect((await post({ ...base, message: "duplicate" }))?.status).toBe(409);
+    expect(resume).toHaveBeenCalledOnce();
+  });
+
   it("resumes a waiting child and refuses a restart interruption without resume evidence", async () => {
     const { handler, token, persistence, create } = createHandler();
     const run = await startedRun(create);
@@ -1871,7 +2003,7 @@ describe("agentRunRoutes", () => {
         body: JSON.stringify({ runId: run.id, expectedVersion: interrupted?.version }),
       }),
     );
-    expect(response?.status).toBe(400);
+    expect(response?.status).toBe(409);
     expect(await response!.json()).toMatchObject({ kind: "run-command-failed" });
   });
 });
