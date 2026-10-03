@@ -186,6 +186,7 @@ function withProbe(
 }
 
 function openFixture(options?: {
+  readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly nativeConversation?: boolean;
   readonly driver?: ProviderDriver;
   /** Reports distinct provider facts per instance, for cross-provider routing. */
@@ -584,6 +585,9 @@ function openFixture(options?: {
 
   const attachmentStore = new ChatAttachmentStore(dataDirectory);
   const service = new ChatService({
+    ...(options?.beforeAttachmentPurge === undefined
+      ? {}
+      : { beforeAttachmentPurge: options.beforeAttachmentPurge }),
     attachmentStore,
     persistence,
     dataDirectory,
@@ -5289,6 +5293,124 @@ describe("ChatService", () => {
       citation: { threadId: first.thread.id },
     });
     expect(frames.some((frame) => frame.event.kind === "settings-updated")).toBe(false);
+  });
+
+  it("releases queued attachment ownership before deleting the thread without holding admission", async () => {
+    let waitingAdmission: Promise<void> | undefined;
+    const beforeAttachmentPurge = vi.fn(async (threadId: ChatThreadId) => {
+      expect(persistence.readChatThread(threadId)?.lifecycle).toBe("deleting");
+      expect(attachmentStore.isQueued(threadId, decodeChatAttachmentId(ids.attachment))).toBe(true);
+      expect(waitingAdmission).toBeDefined();
+      // Queue purge waits for its in-flight admit, which must acquire Chat's admission lock.
+      await waitingAdmission;
+      expect(
+        await attachmentStore.releaseQueued(threadId, "queued-message", {
+          disposition: "draft",
+        }),
+      ).toEqual({ status: "ok" });
+    });
+    const { service, attachmentStore, persistence, dataDirectory } = openFixture({
+      beforeAttachmentPurge,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Delete queued draft",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "queued.txt",
+      mediaType: "text/plain",
+      bytes: new TextEncoder().encode("queued bytes"),
+    });
+    expect(
+      attachmentStore.claimQueued(created.thread.id, "queued-message", [
+        {
+          chatThreadId: upload.threadId,
+          chatAttachmentId: upload.id,
+          displayName: upload.displayName,
+          size: upload.byteLength,
+          hash: upload.digest,
+          finalizedAt: upload.createdAt,
+        },
+      ]),
+    ).toEqual({ status: "ok" });
+    const expectedVersion = service.read(created.thread.id).thread.version;
+    const unsubscribe = persistence.journal.subscribeCommitted((append) => {
+      if (!append.events.some((event) => event.eventName === "chat.deletion-requested@1")) return;
+      waitingAdmission = expect(
+        service.execute({
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion,
+          prompt: "Waiting queued send",
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    });
+    try {
+      await expect(
+        service.execute({
+          kind: "delete-chat-thread",
+          threadId: created.thread.id,
+          expectedVersion: service.read(created.thread.id).thread.version,
+        }),
+      ).resolves.toMatchObject({ kind: "deleted" });
+      expect(beforeAttachmentPurge).toHaveBeenCalledExactlyOnceWith(created.thread.id);
+      expect(persistence.readChatThread(created.thread.id)?.lifecycle).toBe("deleted");
+      expect(() =>
+        accessSync(join(dataDirectory, "threads", String(created.thread.id)), constants.F_OK),
+      ).toThrow();
+    } finally {
+      unsubscribe();
+      await waitingAdmission;
+    }
+  }, 2_000);
+
+  it("keeps deletion retryable when queued attachment cleanup fails", async () => {
+    const beforeAttachmentPurge = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("Queue cleanup unavailable"))
+      .mockResolvedValue(undefined);
+    const { service, persistence, dataDirectory } = openFixture({ beforeAttachmentPurge });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Retry deletion",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "draft.txt",
+      mediaType: "text/plain",
+      bytes: new TextEncoder().encode("retained until cleanup"),
+    });
+    await expect(
+      service.execute({
+        kind: "delete-chat-thread",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(persistence.readChatThread(created.thread.id)?.lifecycle).toBe("deleting");
+    expect(persistence.readChatThreadView(created.thread.id)?.attachments).toContainEqual(upload);
+    expect(
+      readFileSync(
+        join(
+          dataDirectory,
+          "threads",
+          String(created.thread.id),
+          String(upload.id),
+          "finalized.bin",
+        ),
+        "utf8",
+      ),
+    ).toBe("retained until cleanup");
+    await service.recoverPendingDeletions();
+    expect(beforeAttachmentPurge).toHaveBeenCalledTimes(2);
+    expect(persistence.readChatThread(created.thread.id)?.lifecycle).toBe("deleted");
   });
 
   it("blocks access after deletion is requested and purges managed content before deleted", async () => {

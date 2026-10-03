@@ -81,6 +81,11 @@ export interface ThreadMessageQueueAttachmentOptions {
     threadId: typeof ChatThreadId.Type,
     attachmentId: typeof ChatAttachmentId.Type,
   ) => ChatAttachment | undefined;
+  /** Rechecks turn and queue ownership under Chat admission before journaling and deleting bytes. */
+  readonly discardChatAttachment?: (
+    threadId: typeof ChatThreadId.Type,
+    attachmentId: typeof ChatAttachmentId.Type,
+  ) => Promise<void>;
   readonly isTurnOwned: (
     mode: ThreadMessageQueueResource["scope"]["mode"],
     threadId: ThreadMessageQueueResource["scope"]["threadId"],
@@ -240,10 +245,14 @@ export function createThreadMessageQueueAttachments(
   const release: ThreadMessageQueueModePort["release"] = async (input) => {
     const context = parse(input);
     if (context === undefined) return { status: "refused" };
+    const discardChatAttachment =
+      context.mode === "chat" && input.reason === "removed"
+        ? options.discardChatAttachment
+        : undefined;
     const disposition: QueuedAttachmentRelease<string> =
       input.reason === "accepted"
         ? { disposition: "turn" }
-        : input.reason === "rollback"
+        : input.reason === "rollback" || discardChatAttachment !== undefined
           ? { disposition: "draft" }
           : {
               disposition: "removed",
@@ -256,7 +265,28 @@ export function createThreadMessageQueueAttachments(
         : context.mode === "code"
           ? await options.codeStore.releaseQueued(context.threadId, owner, disposition)
           : await options.workStore.releaseQueued(context.threadId, owner, disposition);
-    return result.status === "ok" ? { status: "released" } : { status: "refused" };
+    if (result.status !== "ok") return { status: "refused" };
+    if (context.mode === "chat" && discardChatAttachment !== undefined) {
+      // The service owns Chat's journal and bytes. Keep bytes until it can recheck admission.
+      try {
+        for (const ref of context.attachments) {
+          const attachment = options.readChatAttachment(context.threadId, ref.chatAttachmentId);
+          if (
+            attachment === undefined ||
+            attachment.status === "purged" ||
+            attachment.turnId !== undefined ||
+            options.chatStore.isQueued(context.threadId, ref.chatAttachmentId) ||
+            options.isTurnOwned("chat", input.scope.threadId, ref.chatAttachmentId)
+          )
+            continue;
+          await discardChatAttachment(context.threadId, ref.chatAttachmentId);
+        }
+      } catch {
+        // The queue keeps private context until metadata cleanup can be retried.
+        return { status: "refused" };
+      }
+    }
+    return { status: "released" };
   };
 
   return {

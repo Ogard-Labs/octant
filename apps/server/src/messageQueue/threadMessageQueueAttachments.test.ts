@@ -14,11 +14,14 @@ import {
   decodeWorkThreadId,
   type ChatAttachment,
 } from "@octant/contracts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
 import { CodeAttachmentStore } from "../code/codeAttachmentStore";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
-import { createThreadMessageQueueAttachments } from "./threadMessageQueueAttachments";
+import {
+  createThreadMessageQueueAttachments,
+  type ThreadMessageQueueAttachmentOptions,
+} from "./threadMessageQueueAttachments";
 import {
   MAX_THREAD_MESSAGE_QUEUE_PRIVATE_CONTEXT_BYTES,
   type ThreadMessageQueueResource,
@@ -44,11 +47,12 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-function stores() {
+function stores(options?: Pick<ThreadMessageQueueAttachmentOptions, "discardChatAttachment">) {
   const chatStore = new ChatAttachmentStore(root);
   const workStore = new WorkAttachmentStore(root);
   const codeStore = new CodeAttachmentStore(root);
   const adapter = createThreadMessageQueueAttachments({
+    ...options,
     chatStore,
     codeStore,
     workStore,
@@ -77,8 +81,11 @@ function resource(mode: Mode): ThreadMessageQueueResource {
   };
 }
 
-async function staged(mode: Mode) {
-  const current = stores();
+async function staged(
+  mode: Mode,
+  options?: Pick<ThreadMessageQueueAttachmentOptions, "discardChatAttachment">,
+) {
+  const current = stores(options);
   const bytes = new Uint8Array([1, 2, 3]);
   const input = resource(mode);
   const reference =
@@ -285,4 +292,91 @@ it("refuses Chat references belonging to another thread before acquiring ownersh
     status: "refused",
   });
   expect(pinned(restarted, "chat")).toBe(false);
+});
+
+it("keeps removed Chat metadata cleanup retryable across restart without deleting bytes ahead of the journal", async () => {
+  let refuse = true;
+  let cleanupStore: ChatAttachmentStore | undefined;
+  const discardChatAttachment = vi.fn(async () => {
+    if (cleanupStore === undefined) throw new Error("Expected active Chat store.");
+    expect(
+      cleanupStore.isQueued(decodeChatThreadId(thread), decodeChatAttachmentId(attachment)),
+    ).toBe(false);
+    await expect(access(initial.bytesPath)).resolves.toBeUndefined();
+    if (refuse) throw new Error("Chat journal unavailable");
+    chatMetadata = chatMetadata.map((ref) => decodeChatAttachment({ ...ref, status: "purged" }));
+    await cleanupStore.remove(decodeChatThreadId(thread), decodeChatAttachmentId(attachment));
+  });
+  const initial = await staged("chat", { discardChatAttachment });
+  cleanupStore = initial.chatStore;
+  expect(await initial.adapter.release({ ...initial.input, reason: "removed" })).toEqual({
+    status: "refused",
+  });
+  expect(discardChatAttachment).toHaveBeenCalledExactlyOnceWith(
+    decodeChatThreadId(thread),
+    decodeChatAttachmentId(attachment),
+  );
+  expect(chatMetadata[0]?.status).toBe("finalized");
+  const restarted = stores({ discardChatAttachment });
+  cleanupStore = restarted.chatStore;
+  expect(restarted.adapter.retain({ ...initial.input, reason: "restore" })).toMatchObject({
+    status: "retained",
+  });
+  refuse = false;
+  expect(await restarted.adapter.release({ ...initial.input, reason: "removed" })).toEqual({
+    status: "released",
+  });
+  expect(chatMetadata[0]?.status).toBe("purged");
+  await expect(access(initial.bytesPath)).rejects.toThrow();
+  expect(await restarted.adapter.release({ ...initial.input, reason: "removed" })).toEqual({
+    status: "released",
+  });
+  expect(discardChatAttachment).toHaveBeenCalledTimes(2);
+});
+
+it.each(["accepted", "purged", "rollback"] as const)(
+  "leaves Chat metadata to its lifecycle owner when released as %s",
+  async (reason) => {
+    const discardChatAttachment = vi.fn(async () => {});
+    const initial = await staged("chat", { discardChatAttachment });
+    expect(await initial.adapter.release({ ...initial.input, reason })).toEqual({
+      status: "released",
+    });
+    expect(discardChatAttachment).not.toHaveBeenCalled();
+  },
+);
+
+it("leaves turn-owned Chat metadata and bytes intact when a queued item is removed", async () => {
+  const discardChatAttachment = vi.fn(async () => {});
+  const initial = await staged("chat", { discardChatAttachment });
+  turnOwned = true;
+  expect(await initial.adapter.release({ ...initial.input, reason: "removed" })).toEqual({
+    status: "released",
+  });
+  expect(discardChatAttachment).not.toHaveBeenCalled();
+  expect(chatMetadata[0]?.status).toBe("finalized");
+  await expect(access(initial.bytesPath)).resolves.toBeUndefined();
+});
+
+it("does not discard Chat metadata claimed by a later queue message during a cleanup retry", async () => {
+  const discardChatAttachment = vi
+    .fn<() => Promise<void>>()
+    .mockRejectedValueOnce(new Error("Journal unavailable"));
+  const initial = await staged("chat", { discardChatAttachment });
+  expect(await initial.adapter.release({ ...initial.input, reason: "removed" })).toEqual({
+    status: "refused",
+  });
+  expect(
+    initial.adapter.retain({
+      ...resource("chat"),
+      messageId: decodeThreadQueueMessageId("60000000-0000-4000-8000-000000000002"),
+      reason: "enqueue",
+    }),
+  ).toMatchObject({ status: "retained" });
+  expect(await initial.adapter.release({ ...initial.input, reason: "removed" })).toEqual({
+    status: "released",
+  });
+  expect(discardChatAttachment).toHaveBeenCalledTimes(1);
+  expect(pinned(initial, "chat")).toBe(true);
+  await expect(access(initial.bytesPath)).resolves.toBeUndefined();
 });

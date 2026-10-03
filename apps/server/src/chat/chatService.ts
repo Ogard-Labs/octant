@@ -499,6 +499,7 @@ interface PreparedChatContent {
 
 export interface ChatServiceOptions {
   readonly attachmentStore?: ChatAttachmentStore;
+  readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly persistence: PersistenceService;
   readonly dataDirectory: string;
   readonly uuid: () => string;
@@ -764,6 +765,7 @@ export class ChatService {
     ChatServiceOptions["gatherMultiModelRuntimeFacts"]
   >;
   readonly #attachmentStore: ChatAttachmentStore;
+  readonly #beforeAttachmentPurge: ChatServiceOptions["beforeAttachmentPurge"];
   readonly #scratchStore: ChatScratchStore;
   readonly #turnRunner: ChatTurnRunner;
   readonly #researchRouter: ResearchRouter;
@@ -819,6 +821,7 @@ export class ChatService {
       ((input) => this.#probeMultiModelRuntimeFacts(input.pool));
     this.#attachmentStore =
       options.attachmentStore ?? new ChatAttachmentStore(options.dataDirectory);
+    this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
     this.#researchRouter = options.researchRouter;
     if (options.providerRuntimeRegistry !== undefined) {
@@ -1210,9 +1213,9 @@ export class ChatService {
             this.#cancelUsageResume(command),
           );
         case "delete-chat-thread":
-          return await this.#withThreadAdmission(command.threadId, () =>
-            this.#requestDeletion(command),
-          );
+          await this.#withThreadAdmission(command.threadId, () => this.#requestDeletion(command));
+          // Queue cleanup can wait for an admission that needs this thread lock.
+          return await this.finalizePendingDeletion(command.threadId);
         default:
           throw new ChatServiceError({
             category: "invalid",
@@ -1446,6 +1449,7 @@ export class ChatService {
         });
       }
     }
+    await this.#beforeAttachmentPurge?.(threadId);
     await this.#attachmentStore.purgeThread(threadId);
     await this.#scratchStore.purge(threadId);
     purgeThreadContent(this.#persistence.connection, String(threadId));
@@ -3277,7 +3281,7 @@ export class ChatService {
 
   async #requestDeletion(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "delete-chat-thread" }>,
-  ): Promise<ChatCommandResult> {
+  ): Promise<void> {
     const thread = this.#persistence.readChatThread(command.threadId);
     if (thread === undefined) {
       throw new ChatServiceError({
@@ -3311,7 +3315,6 @@ export class ChatService {
         }),
       ],
     });
-    return await this.finalizePendingDeletion(thread.id);
   }
 
   async #prepareTurnExecution(
