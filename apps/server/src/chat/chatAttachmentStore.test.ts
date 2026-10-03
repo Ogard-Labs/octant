@@ -611,3 +611,89 @@ describe("purgeThread", () => {
     await store.purgeThread(nonExistent);
   });
 });
+
+describe("queued attachment ownership", () => {
+  const owner = "queued-message-1";
+  async function finalized(threadId: ChatThreadId, attachmentId: ChatAttachmentId) {
+    return store.finalize(
+      await store.stage({
+        chatThreadId: threadId,
+        chatAttachmentId: attachmentId,
+        displayName: "queued.txt",
+        bytes: new Uint8Array([1, 2, 3]),
+      }),
+    );
+  }
+
+  it("keeps a recovered queue's bytes despite the normal abandoned-upload sweep", async () => {
+    const threadId = makeThreadId(20);
+    const attachmentId = makeAttachmentId(20);
+    const ref = await finalized(threadId, attachmentId);
+    store = new ChatAttachmentStore(root);
+    expect(store.restoreQueuedOwnership(threadId, owner, [ref])).toEqual({ status: "ok" });
+    await store.recover({ isFinalizedAttachmentReferenced: () => false });
+    await expect(store.remove(threadId, attachmentId)).rejects.toThrow("queued");
+    await expect(store.purgeThread(threadId)).rejects.toThrow("queued");
+    expect(await store.prepareQueued(threadId, owner)).toEqual({ status: "ok" });
+    expect(
+      await store.releaseQueued(threadId, owner, {
+        disposition: "removed",
+        isTurnOwned: () => true,
+      }),
+    ).toEqual({ status: "ok" });
+    expect(store.isQueued(threadId, attachmentId)).toBe(false);
+    await expect(store.read(ref)).resolves.toHaveLength(3);
+  });
+
+  it("rolls back a failed enqueue reservation without leaking pins or removing its bytes", async () => {
+    const threadId = makeThreadId(21);
+    const attachmentId = makeAttachmentId(21);
+    const ref = await finalized(threadId, attachmentId);
+    expect(store.claimQueued(threadId, owner, [ref])).toEqual({ status: "ok" });
+    expect(store.claimQueued(threadId, owner, [ref])).toEqual({ status: "ok" });
+    expect(await store.releaseQueued(threadId, owner, { disposition: "draft" })).toEqual({
+      status: "ok",
+    });
+    expect(await store.releaseQueued(threadId, owner, { disposition: "draft" })).toEqual({
+      status: "ok",
+    });
+    await expect(store.read(ref)).resolves.toHaveLength(3);
+    await store.remove(threadId, attachmentId);
+    await expect(store.read(ref)).rejects.toThrow();
+  });
+
+  it("refuses replacing pinned bytes and refuses corrupt recovered attachments", async () => {
+    const threadId = makeThreadId(22);
+    const attachmentId = makeAttachmentId(22);
+    const ref = await finalized(threadId, attachmentId);
+    expect(store.restoreQueuedOwnership(threadId, owner, [ref])).toEqual({ status: "ok" });
+    await expect(finalized(threadId, attachmentId)).rejects.toThrow("queued");
+    await writeFile(
+      join(root, "threads", threadId, attachmentId, "finalized.bin"),
+      new Uint8Array([9, 9, 9]),
+    );
+    expect(await store.prepareQueued(threadId, owner)).toEqual({
+      status: "refused",
+      reason: "unavailable",
+    });
+    expect(
+      await store.releaseQueued(threadId, owner, {
+        disposition: "removed",
+        isTurnOwned: () => false,
+      }),
+    ).toEqual({ status: "ok" });
+    await expect(store.read(ref)).rejects.toThrow();
+  });
+
+  it("refuses a claim that races an already started removal", async () => {
+    const threadId = makeThreadId(23);
+    const attachmentId = makeAttachmentId(23);
+    const ref = await finalized(threadId, attachmentId);
+    const removing = store.remove(threadId, attachmentId);
+    expect(store.claimQueued(threadId, owner, [ref])).toEqual({
+      status: "refused",
+      reason: "busy",
+    });
+    await removing;
+  });
+});

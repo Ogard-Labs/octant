@@ -461,6 +461,8 @@ interface PreparedChatTurn {
 }
 
 export interface ChatServiceExecutionContext {
+  /** Host-only revalidation after asynchronous preparation, before durable admission. */
+  readonly admissionCurrent?: () => boolean;
   /**
    * A renderer window the caller speaks for; absent for host-owned callers
    * (usage-limit recovery) that have no window to attach.
@@ -496,6 +498,7 @@ interface PreparedChatContent {
 }
 
 export interface ChatServiceOptions {
+  readonly attachmentStore?: ChatAttachmentStore;
   readonly persistence: PersistenceService;
   readonly dataDirectory: string;
   readonly uuid: () => string;
@@ -814,7 +817,8 @@ export class ChatService {
     this.#gatherMultiModelRuntimeFacts =
       options.gatherMultiModelRuntimeFacts ??
       ((input) => this.#probeMultiModelRuntimeFacts(input.pool));
-    this.#attachmentStore = new ChatAttachmentStore(options.dataDirectory);
+    this.#attachmentStore =
+      options.attachmentStore ?? new ChatAttachmentStore(options.dataDirectory);
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
     this.#researchRouter = options.researchRouter;
     if (options.providerRuntimeRegistry !== undefined) {
@@ -1231,6 +1235,12 @@ export class ChatService {
     threadId: ChatThreadId,
   ): Promise<ChatAttachment> {
     this.#requireActiveThread(threadId);
+    if (this.#attachmentStore.isQueued(threadId, input.attachmentId)) {
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Attachment belongs to a queued message.",
+      });
+    }
     if (input.bytes.byteLength === 0) {
       throw new ChatServiceError({
         category: "invalid",
@@ -1325,6 +1335,13 @@ export class ChatService {
     const attachmentId = decodeChatAttachmentId(rawAttachmentId);
     return await this.#withThreadAdmission(threadId, async () => {
       this.#requireActiveThread(threadId);
+      // Refuse before the metadata event: retaining bytes cannot undo a purged projection.
+      if (this.#attachmentStore.isQueued(threadId, attachmentId)) {
+        throw new ChatServiceError({
+          category: "invalid",
+          message: "Attachment belongs to a queued message.",
+        });
+      }
       const row = this.#persistence.connection
         .prepare("SELECT attachment_json FROM chat_attachment_projection WHERE attachment_id = ?")
         .get(String(attachmentId)) as { readonly attachment_json: string } | undefined;
@@ -1565,6 +1582,7 @@ export class ChatService {
       (attachment) =>
         attachment.status === "finalized" &&
         attachment.turnId === undefined &&
+        !this.#attachmentStore.isQueued(attachment.threadId, attachment.id) &&
         !referencedByThread.get(String(attachment.threadId))?.has(String(attachment.id)),
     );
     await this.#attachmentStore.recover({
@@ -1575,6 +1593,7 @@ export class ChatService {
           String(attachment.threadId) === String(threadId) &&
           attachment.status === "finalized" &&
           (attachment.turnId !== undefined ||
+            this.#attachmentStore.isQueued(threadId, attachmentId) ||
             referencedByThread.get(String(threadId))?.has(String(attachmentId)) === true)
         );
       },
@@ -2172,6 +2191,12 @@ export class ChatService {
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
+      if (executionContext?.admissionCurrent?.() === false) {
+        throw new ChatServiceError({
+          category: "unauthorized",
+          message: "Queued Chat admission was revoked during preparation.",
+        });
+      }
       this.#persistence.journal.append(
         {
           aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
