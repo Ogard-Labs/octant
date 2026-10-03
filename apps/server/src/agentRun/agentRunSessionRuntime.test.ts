@@ -22,7 +22,12 @@ import {
   type ProviderSessionId,
   type ProviderResumeCursor,
 } from "@octant/contracts";
-import type { ProviderAcquireInput, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderAcquireInput,
+  ProviderDriver,
+  ProviderSessionStart,
+  ProviderSessionResume,
+} from "@octant/provider-sdk/driver";
 import {
   makeProviderCapacityScheduler,
   makeUnobservedProviderCapacityFacts,
@@ -230,13 +235,11 @@ interface FakeProvider {
   readonly driver: ProviderDriver;
   readonly acquired: ProviderAcquireInput[];
   readonly executionPolicies: ProviderExecutionPolicy[];
+  readonly starts: ProviderSessionStart[];
   readonly turns: ProviderTurnInput[];
   readonly answeredApprovals: ReadonlyArray<{ readonly approved: boolean }>;
   readonly answeredTools: ReadonlyArray<{ readonly isError?: boolean }>;
-  readonly resumes: Array<{
-    readonly sessionId: ProviderSessionId;
-    readonly resumeCursor: ProviderResumeCursor;
-  }>;
+  readonly resumes: ProviderSessionResume[];
   readonly answeredQuestions: Array<{ readonly answer: string }>;
   readonly steered: string[];
   readonly interrupts: string[];
@@ -264,6 +267,7 @@ function fakeProvider(options?: {
   const queue = Effect.runSync(Queue.unbounded<never>());
   const acquired: ProviderAcquireInput[] = [];
   const executionPolicies: ProviderExecutionPolicy[] = [];
+  const starts: ProviderSessionStart[] = [];
   const turns: ProviderTurnInput[] = [];
   const answeredApprovals: { readonly approved: boolean }[] = [];
   const answeredTools: { readonly isError?: boolean }[] = [];
@@ -278,16 +282,14 @@ function fakeProvider(options?: {
   };
   const connection = {
     subscribe: Effect.succeed(Stream.fromQueue(queue)),
-    start: (input: { readonly executionPolicy: ProviderExecutionPolicy }) => {
+    start: (input: ProviderSessionStart) => {
+      starts.push(input);
       executionPolicies.push(input.executionPolicy);
       return wedge === "start"
         ? Effect.never
         : Effect.succeed({ sessionId, ...(options?.resumable ? { resumeCursor: cursor } : {}) });
     },
-    resume: (input: {
-      readonly sessionId: ProviderSessionId;
-      readonly resumeCursor: ProviderResumeCursor;
-    }) => {
+    resume: (input: ProviderSessionResume) => {
       resumes.push(input);
       return Effect.succeed({
         sessionId: options?.changedResumeIdentity ? providerInstanceId : input.sessionId,
@@ -351,6 +353,7 @@ function fakeProvider(options?: {
     } as unknown as ProviderDriver,
     acquired,
     executionPolicies,
+    starts,
     turns,
     answeredApprovals,
     answeredTools,
@@ -1380,7 +1383,7 @@ describe("durable child provider identity", () => {
       const path = databasePath();
       let connection = openSqlite(path);
       applyMigrations(connection, MIGRATIONS, () => now);
-      const run = agentRun(
+      const base = agentRun(
         mode === "code"
           ? {
               workspaceReceipt: {
@@ -1394,11 +1397,14 @@ describe("durable child provider identity", () => {
             }
           : undefined,
       );
+      const run = { ...base, routingReceipt: { ...base.routingReceipt, rawReasoning: "high" } };
+      const modelOptionValues = { [mode === "chat" ? "reasoning" : "effort"]: "high" };
       const durable = new AgentRunSessionStore({ connection, getById: () => run });
       const provider = fakeProvider({ resumable: true });
       const options = runtimeOptions(provider, {
         sessionStore: durable.sessions,
         supportsResume: () => true,
+        resolveModelOptionValues: () => modelOptionValues,
         verifyCodeWorkspace: async () => ({ status: "verified", identity: "original-directory" }),
       });
       const first = createAgentRunSessionRuntime(options);
@@ -1407,6 +1413,7 @@ describe("durable child provider identity", () => {
       await provider.emit({ kind: "text-delta", sessionId, text: "First report", occurredAt: now });
       await provider.emit({ kind: "completed", sessionId });
       expect((await result).kind).toBe("completed");
+      expect(provider.starts[0]?.modelOptionValues).toEqual(modelOptionValues);
       const recorded = durable.sessions.read(run);
       expect(recorded?.resumeCursor?.value).toBe("private-provider-session");
       connection.close();
@@ -1416,9 +1423,16 @@ describe("durable child provider identity", () => {
         runtimeOptions(provider, {
           sessionStore: restored.sessions,
           supportsResume: () => true,
+          resolveModelOptionValues: () => modelOptionValues,
           verifyCodeWorkspace: async () => ({ status: "verified", identity: "original-directory" }),
         }),
       );
+      const unavailable = createAgentRunSessionRuntime(
+        runtimeOptions(provider, { sessionStore: restored.sessions, supportsResume: () => true }),
+      );
+      expect(
+        await unavailable.checkResume?.({ ...run, lifecycleStatus: "completed" }),
+      ).toMatchObject({ status: "refused" });
       expect(await second.checkResume?.({ ...run, lifecycleStatus: "completed" })).toEqual({
         status: "ready",
       });
@@ -1433,7 +1447,11 @@ describe("durable child provider identity", () => {
       expect(continued).toBeDefined();
       await vi.waitFor(() => expect(provider.turns).toHaveLength(2));
       expect(provider.resumes).toEqual([
-        expect.objectContaining({ sessionId, resumeCursor: recorded?.resumeCursor }),
+        expect.objectContaining({
+          sessionId,
+          resumeCursor: recorded?.resumeCursor,
+          modelOptionValues,
+        }),
       ]);
       expect(provider.turns[1]?.prompt).toBe("Add the regression evidence");
       expect(provider.turns[1]?.context).toEqual([]);
@@ -1443,6 +1461,15 @@ describe("durable child provider identity", () => {
       connection.close();
     },
   );
+
+  it("refuses an unavailable reasoning choice before acquiring a provider", () => {
+    const base = agentRun();
+    const run = { ...base, routingReceipt: { ...base.routingReceipt, rawReasoning: "high" } };
+    const provider = fakeProvider();
+    const runtime = createAgentRunSessionRuntime(runtimeOptions(provider));
+    expect(() => runtime.start(run)).toThrow("selected reasoning");
+    expect(provider.acquired).toEqual([]);
+  });
 
   it("refuses resume without a recoverable cursor, without invoking a replacement start", async () => {
     const provider = fakeProvider();
