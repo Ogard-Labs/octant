@@ -11,8 +11,11 @@ import {
   MANAGED_TOOLS,
   commitManagedTool,
   isManagedToolRelease,
+  isInsideManagedToolLocation,
   latestManagedToolRelease,
   managedToolReleaseFromResponse,
+  platformPackageName,
+  resolveManagedToolRelease,
   maxSatisfyingVersion,
   planDependencyClosure,
   readInstalledManagedTool,
@@ -312,5 +315,121 @@ describe("Managed tool release channel", () => {
     expect(nested.map((row) => row.destination).sort()).toEqual(
       ["node_modules/shared", "node_modules/b/node_modules/shared"].sort(),
     );
+  });
+
+  it("puts OpenCode on the managed channel and resolves the host platform package", async () => {
+    const descriptor = MANAGED_TOOLS.find((entry) => entry.tool === "opencode");
+    expect(descriptor?.packageName).toBe("@opencode/cli");
+    expect(descriptor?.runtime).toBe("executable");
+    expect(descriptor?.shipInApp).toBe(false);
+    expect(descriptor?.entrypoint).toBe("bin/opencode");
+    const platformPackage = platformPackageName(
+      descriptor ?? serveSimDescriptor,
+      "darwin",
+      "arm64",
+    );
+    expect(platformPackage).toBe("@opencode/cli-darwin-arm64");
+    const pinned = BUNDLED_MANAGED_TOOL_RELEASES.find(
+      (release) => release.packageName === "@opencode/cli",
+    );
+    expect(pinned).toBeDefined();
+    if (pinned !== undefined) expect(isManagedToolRelease(pinned)).toBe(true);
+    if (descriptor === undefined) throw new Error("OpenCode descriptor missing");
+    const upstream = {
+      packageName: "@opencode/cli",
+      version: "2.0.22",
+      url: "https://registry.npmjs.org/@opencode/cli/-/cli-2.0.22.tgz",
+      integrity: "sha512-AAAA",
+    };
+    const fetchJson: ManagedFetch = (url, signal) => {
+      void signal;
+      expect(url).toBe("https://registry.npmjs.org/@opencode/cli-darwin-arm64/2.0.22");
+      return Promise.resolve(
+        new TextEncoder().encode(
+          JSON.stringify({
+            version: "2.0.22",
+            dist: {
+              tarball:
+                "https://registry.npmjs.org/@opencode/cli-darwin-arm64/-/cli-darwin-arm64-2.0.22.tgz",
+              integrity: "sha512-AAAA",
+            },
+          }),
+        ),
+      );
+    };
+    const resolved = await resolveManagedToolRelease(
+      descriptor,
+      upstream,
+      fetchJson,
+      new AbortController().signal,
+      { platform: "darwin", arch: "arm64" },
+    );
+    expect(resolved.packageName).toBe("@opencode/cli-darwin-arm64");
+    expect(resolved.version).toBe("2.0.22");
+    expect(isManagedToolRelease(resolved)).toBe(true);
+  });
+
+  it("refuses a release whose hash does not match and keeps the installed copy", async () => {
+    const descriptor = MANAGED_TOOLS.find((entry) => entry.tool === "opencode");
+    if (descriptor === undefined) throw new Error("OpenCode descriptor missing");
+    const platformPackage =
+      platformPackageName(descriptor, "darwin", "arm64") ?? "@opencode/cli-darwin-arm64";
+    const good = await makePackageTarball("cli-darwin-arm64", "2.0.21", {
+      "package.json": packageJson(platformPackage, "2.0.21", {}),
+      "bin/opencode": "#!/bin/sh\nprintf '2.0.21\\n'\n",
+    });
+    const bad = await makePackageTarball("cli-darwin-arm64", "2.0.22", {
+      "package.json": packageJson(platformPackage, "2.0.22", {}),
+      "bin/opencode": "#!/bin/sh\nprintf '2.0.22\\n'\n",
+    });
+    const fileBase = platformPackage.slice(platformPackage.lastIndexOf("/") + 1);
+    const root = await mkdtemp(join(tmpdir(), "octant-opencode-release-"));
+    const outside = join(tmpdir(), `octant-opencode-outside-${Date.now()}`);
+    await writeFile(outside, "user-installed\n");
+    try {
+      const staged = await stageManagedTool(
+        descriptor,
+        {
+          packageName: platformPackage,
+          version: "2.0.21",
+          url: `https://registry.npmjs.org/${platformPackage}/-/${fileBase}-2.0.21.tgz`,
+          integrity: sha512Integrity(good),
+        },
+        root,
+        async (url) => {
+          if (url.endsWith("2.0.21.tgz")) return good;
+          throw new Error(`unexpected fetch ${url}`);
+        },
+        new AbortController().signal,
+      );
+      await commitManagedTool(root, staged);
+      await expect(
+        stageManagedTool(
+          descriptor,
+          {
+            packageName: platformPackage,
+            version: "2.0.22",
+            url: `https://registry.npmjs.org/${platformPackage}/-/${fileBase}-2.0.22.tgz`,
+            integrity: "sha512-AAAA",
+          },
+          root,
+          async () => bad,
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow("Tool archive hash does not match.");
+      expect((await readInstalledManagedTool(descriptor, root))?.version).toBe("2.0.21");
+      expect(await readFile(outside, "utf8")).toBe("user-installed\n");
+      expect(isInsideManagedToolLocation(root, outside)).toBe(false);
+      await expect(
+        commitManagedTool(root, {
+          version: "2.0.22",
+          path: outside,
+          entrypoint: outside,
+        }),
+      ).rejects.toThrow("Tool activation path is invalid.");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { force: true });
+    }
   });
 });

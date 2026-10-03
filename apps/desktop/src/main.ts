@@ -2915,11 +2915,13 @@ function installIpcHandlers(): void {
       };
     return managedToolService.status();
   });
-  ipcMain.handle(IPC_CHANNELS.managedToolsCheckUpdates, async (event) => {
+  ipcMain.handle(IPC_CHANNELS.managedToolsCheckUpdates, async (event, tool: unknown) => {
     ownedTopLevelWindowContext(event);
     if (managedToolService === undefined)
       throw new Error("Managed tools are unavailable for this host.");
-    return managedToolService.checkUpdates();
+    if (tool !== undefined && typeof tool !== "string")
+      throw new TypeError("Invalid managed tool.");
+    return managedToolService.checkUpdates(tool);
   });
   ipcMain.handle(IPC_CHANNELS.managedToolsConfigure, async (event, settings) => {
     ownedTopLevelWindowContext(event);

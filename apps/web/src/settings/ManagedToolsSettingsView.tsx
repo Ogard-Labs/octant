@@ -96,7 +96,7 @@ export function ManagedToolsSettingsView(props: { readonly bridge?: ManagedTools
     }
   }
   const supported = status?.supported === true;
-  const tools = status?.tools ?? [];
+  const tools = (status?.tools ?? []).filter((tool) => tool.tool !== "opencode");
   return (
     <section
       aria-label="Device tools"

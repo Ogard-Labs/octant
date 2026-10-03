@@ -1,13 +1,17 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createManagedToolService } from "./managedToolService";
-import { BUNDLED_MANAGED_TOOL_RELEASES, MANAGED_TOOLS } from "./managedToolRelease";
+import {
+  BUNDLED_MANAGED_TOOL_RELEASES,
+  MANAGED_TOOLS,
+  platformPackageName,
+} from "./managedToolRelease";
 
 const execFile = promisify(execFileCallback);
 
@@ -71,7 +75,7 @@ describe("managed tool service", () => {
     bundledDirectory = await mkdtemp(join(tmpdir(), "octant-managed-tools-bundled-"));
     for (const descriptor of platformTools) {
       const tool = join(bundledDirectory, descriptor.tool);
-      await mkdir(join(tool, "dist"), { recursive: true });
+      await mkdir(dirname(join(tool, descriptor.entrypoint)), { recursive: true });
       await writeFile(join(tool, descriptor.entrypoint), "process.exit(0);\n");
     }
   });
@@ -232,6 +236,105 @@ describe("managed tool service", () => {
       expect(spec?.args[0]).toBe(entrypoint);
     } finally {
       await service.close();
+    }
+  });
+
+  it("keeps the previous OpenCode release when the new one does not start", async () => {
+    const descriptor = MANAGED_TOOLS.find((entry) => entry.tool === "opencode");
+    if (descriptor === undefined) throw new Error("OpenCode descriptor missing");
+    const platformPackage = platformPackageName(descriptor, process.platform, process.arch);
+    if (platformPackage === undefined) throw new Error("OpenCode has no build for this host");
+    const nextVersion = "2.0.23";
+    const fileBase = platformPackage.slice(platformPackage.lastIndexOf("/") + 1);
+    const tarball = await makePackageTarball(fileBase, nextVersion, {
+      "package.json": JSON.stringify({ name: platformPackage, version: nextVersion }),
+      "bin/opencode": "#!/bin/sh\nexit 1\n",
+    });
+    const tarballUrl = `https://registry.npmjs.org/${platformPackage}/-/${fileBase}-${nextVersion}.tgz`;
+    const metaUrl = `https://registry.npmjs.org/@opencode/cli/-/cli-${nextVersion}.tgz`;
+    const outside = join(directory, "user-opencode");
+    await writeFile(outside, "user-installed\n");
+    const versionDocument = () => {
+      const encoded = latestDocument(platformPackage, nextVersion, tarball, tarballUrl);
+      const parsed = JSON.parse(new TextDecoder().decode(encoded)) as {
+        versions: Record<string, unknown>;
+      };
+      const version = parsed.versions[nextVersion];
+      if (version === undefined) throw new Error("fixture version missing");
+      return new TextEncoder().encode(JSON.stringify(version));
+    };
+    const service = makeService(async (url: string) => {
+      if (url === "https://registry.npmjs.org/@opencode/cli")
+        return latestDocument("@opencode/cli", nextVersion, tarball, metaUrl);
+      if (url === `https://registry.npmjs.org/${platformPackage}/${nextVersion}`)
+        return versionDocument();
+      if (url === tarballUrl) return tarball;
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    try {
+      await service.configure({ automaticUpdates: false });
+      const status = await service.checkUpdates("opencode");
+      const tool = status.tools.find((entry) => entry.tool === "opencode");
+      expect(tool?.update).toBe("failed");
+      expect(tool?.message).toBe(
+        "The new tool did not start. The previous verified tool is retained.",
+      );
+      expect(tool?.version).toBe(
+        BUNDLED_MANAGED_TOOL_RELEASES.find((release) => release.packageName === "@opencode/cli")
+          ?.version,
+      );
+      expect(tool?.installed).toBe(false);
+      const spec = await service.launchSpec("opencode", ["--version"]);
+      expect(spec?.command).toBe(join(bundledDirectory, "opencode", descriptor.entrypoint));
+      expect(spec?.env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+      expect(await readFile(outside, "utf8")).toBe("user-installed\n");
+    } finally {
+      await service.close();
+      await rm(outside, { force: true });
+    }
+  });
+
+  it("keeps the previous OpenCode release when verification fails and says why", async () => {
+    const descriptor = MANAGED_TOOLS.find((entry) => entry.tool === "opencode");
+    if (descriptor === undefined) throw new Error("OpenCode descriptor missing");
+    const platformPackage = platformPackageName(descriptor, process.platform, process.arch);
+    if (platformPackage === undefined) throw new Error("OpenCode has no build for this host");
+    const nextVersion = "2.0.24";
+    const fileBase = platformPackage.slice(platformPackage.lastIndexOf("/") + 1);
+    const tarball = await makePackageTarball(fileBase, nextVersion, {
+      "package.json": JSON.stringify({ name: platformPackage, version: nextVersion }),
+      "bin/opencode": "#!/bin/sh\nexit 0\n",
+    });
+    const tarballUrl = `https://registry.npmjs.org/${platformPackage}/-/${fileBase}-${nextVersion}.tgz`;
+    const metaUrl = `https://registry.npmjs.org/@opencode/cli/-/cli-${nextVersion}.tgz`;
+    const lying = latestDocument(platformPackage, nextVersion, tarball, tarballUrl);
+    const document = JSON.parse(new TextDecoder().decode(lying)) as {
+      versions: Record<string, { dist: { integrity: string } }>;
+    };
+    const versionDoc = document.versions[nextVersion];
+    if (versionDoc === undefined) throw new Error("fixture version missing");
+    versionDoc.dist.integrity = "sha512-AAAA";
+    const outside = join(directory, "user-opencode");
+    await writeFile(outside, "user-installed\n");
+    const service = makeService(async (url: string) => {
+      if (url === "https://registry.npmjs.org/@opencode/cli")
+        return latestDocument("@opencode/cli", nextVersion, tarball, metaUrl);
+      if (url === `https://registry.npmjs.org/${platformPackage}/${nextVersion}`)
+        return new TextEncoder().encode(JSON.stringify(versionDoc));
+      if (url === tarballUrl) return tarball;
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    try {
+      await service.configure({ automaticUpdates: false });
+      const status = await service.checkUpdates("opencode");
+      const tool = status.tools.find((entry) => entry.tool === "opencode");
+      expect(tool?.update).toBe("failed");
+      expect(tool?.message).toBe("Tool archive hash does not match.");
+      expect(tool?.installed).toBe(false);
+      expect(await readFile(outside, "utf8")).toBe("user-installed\n");
+    } finally {
+      await service.close();
+      await rm(outside, { force: true });
     }
   });
 });
