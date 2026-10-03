@@ -70,6 +70,12 @@ export type AgentRunResumeReadiness =
   | { readonly status: "ready" }
   | { readonly status: "refused"; readonly message: string };
 
+/** Resources reserved before lifecycle admission; release is safe after start or refusal. */
+export interface AgentRunPreparedResume {
+  readonly start: (run: AgentRun) => AgentRunSessionHandle;
+  readonly release: () => void;
+}
+
 /**
  * Provider-agnostic seam between AgentRun supervision and whatever actually
  * executes a managed child. Keeping the supervisor behind this interface is
@@ -81,6 +87,11 @@ export interface AgentRunSessionPort {
   readonly checkResume?: (
     run: AgentRun,
   ) => AgentRunResumeReadiness | Promise<AgentRunResumeReadiness>;
+  /** Resolves synchronous execution prerequisites and reserves resources without launching. */
+  readonly prepareResume?: (
+    run: AgentRun,
+    input?: { readonly message?: string },
+  ) => AgentRunPreparedResume;
   /**
    * Starts one managed session. Implementations resolve every start-time
    * dependency before returning and throw {@link AgentRunSessionError} when one

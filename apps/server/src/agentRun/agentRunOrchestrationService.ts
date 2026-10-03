@@ -21,6 +21,7 @@ import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
 import {
   AgentRunSessionError,
   type AgentRunSessionOutcome,
+  type AgentRunPreparedResume,
   type AgentRunResumeReadiness,
 } from "./agentRunSessionPort";
 
@@ -85,6 +86,10 @@ export interface AgentRunProcessSupervisorPort {
   readonly checkResume?: (
     run: AgentRun,
   ) => AgentRunResumeReadiness | Promise<AgentRunResumeReadiness>;
+  readonly prepareResume?: (
+    run: AgentRun,
+    input?: { readonly message?: string },
+  ) => AgentRunPreparedResume | undefined;
   readonly start: (run: AgentRun) => unknown;
   /** Continues a saved provider conversation; absent means only explicit fresh retry is available. */
   readonly resume?: (run: AgentRun, input?: { readonly message?: string }) => unknown;
@@ -372,80 +377,107 @@ export class AgentRunOrchestrationService {
         recoveryReason: "approval-or-extension-drift",
       });
     }
-    let reservedForResume = false;
-    if (continuation !== undefined) {
-      if (!this.#reservations.has(runId)) {
-        const reservation = this.#capacity.tryReserve({
-          runId,
-          parentThreadId: current.parentThreadId,
-          providerInstanceId: String(
-            effectiveAgentRunExecutionTarget(current.routingReceipt).providerInstanceId,
-          ),
-        });
-        if (reservation.status === "queued") {
-          return {
-            kind: "run-command-failed",
-            reason: "limit-reached",
-            message:
-              "The child cannot resume until a concurrency slot is free. Its saved conversation is unchanged.",
-          };
-        }
-        this.#reservations.set(runId, reservation.reservationId);
-        reservedForResume = true;
-      }
-    }
-    let started: AgentRunCommandResult;
+    let prepared: AgentRunPreparedResume | undefined;
     try {
-      started = this.#persistence.applyCommand({
-        kind: continuation === undefined ? "start-agent-run" : "resume-agent-run",
-        ...(continuation?.message === undefined ? {} : { message: continuation.message }),
-        runId,
-        expectedVersion: expectedVersion as never,
-      });
-    } catch (error) {
-      if (reservedForResume) {
-        const reservationId = this.#reservations.get(runId);
-        if (reservationId !== undefined) this.#capacity.release(reservationId);
-        this.#reservations.delete(runId);
-        // The freed slot belongs to other waiters. This unchanged continuation
-        // must not enter the fresh-start path after its resume failed to persist.
-        this.#dequeueCapacityWaiter(runId);
-      }
-      throw error;
-    }
-    if (
-      this.#processes === undefined ||
-      started.kind !== "run-updated" ||
-      started.run.lifecycleStatus !== "starting"
-    ) {
-      if (reservedForResume) this.#releaseReservation(runId);
-      return started;
-    }
-    try {
-      // A run that waited after an earlier settlement is live again, so that
-      // settlement must no longer suppress this incarnation's death report.
-      this.#settledSessions.delete(started.run.id);
-      if (continuation === undefined) this.#processes.start(started.run);
-      else {
-        this.#processes.resume?.(
-          started.run,
+      if (continuation !== undefined)
+        prepared = this.#processes?.prepareResume?.(
+          current,
           continuation.message === undefined ? {} : { message: continuation.message },
         );
-        continuation.onExecutionAccepted?.(started.run);
-      }
-      return started;
     } catch (error) {
-      if (continuation !== undefined && error instanceof AgentRunSessionError) {
-        const waited = this.#persistence.applyCommand({
-          kind: "wait-agent-run",
-          runId: started.run.id,
-          expectedVersion: started.run.version,
-          recoveryReason: boundedRecoveryReason(`${error.reason}: ${error.message}`),
-        });
-        this.#releaseReservation(started.run.id);
-        return waited;
+      if (error instanceof AgentRunSessionError)
+        return {
+          kind: "run-command-failed",
+          reason:
+            error.reason === "spend-ceiling-exhausted" || error.reason === "capacity-unavailable"
+              ? "limit-reached"
+              : "unsupported-transition",
+          message: error.message,
+        };
+      throw error;
+    }
+    try {
+      let reservedForResume = false;
+      if (continuation !== undefined) {
+        if (!this.#reservations.has(runId)) {
+          const reservation = this.#capacity.tryReserve({
+            runId,
+            parentThreadId: current.parentThreadId,
+            providerInstanceId: String(
+              effectiveAgentRunExecutionTarget(current.routingReceipt).providerInstanceId,
+            ),
+          });
+          if (reservation.status === "queued") {
+            return {
+              kind: "run-command-failed",
+              reason: "limit-reached",
+              message:
+                "The child cannot resume until a concurrency slot is free. Its saved conversation is unchanged.",
+            };
+          }
+          this.#reservations.set(runId, reservation.reservationId);
+          reservedForResume = true;
+        }
       }
-      return this.onProcessDeath(started.run.id, started.run.version);
+      let started: AgentRunCommandResult;
+      try {
+        started = this.#persistence.applyCommand({
+          kind: continuation === undefined ? "start-agent-run" : "resume-agent-run",
+          ...(continuation?.message === undefined ? {} : { message: continuation.message }),
+          runId,
+          expectedVersion: expectedVersion as never,
+        });
+      } catch (error) {
+        if (reservedForResume) {
+          const reservationId = this.#reservations.get(runId);
+          if (reservationId !== undefined) this.#capacity.release(reservationId);
+          this.#reservations.delete(runId);
+          // The freed slot belongs to other waiters. This unchanged continuation
+          // must not enter the fresh-start path after its resume failed to persist.
+          this.#dequeueCapacityWaiter(runId);
+        }
+        throw error;
+      }
+      if (
+        this.#processes === undefined ||
+        started.kind !== "run-updated" ||
+        started.run.lifecycleStatus !== "starting"
+      ) {
+        prepared?.release();
+        if (reservedForResume) this.#releaseReservation(runId);
+        return started;
+      }
+      try {
+        // A run that waited after an earlier settlement is live again, so that
+        // settlement must no longer suppress this incarnation's death report.
+        this.#settledSessions.delete(started.run.id);
+        if (continuation === undefined) this.#processes.start(started.run);
+        else {
+          if (prepared !== undefined) prepared.start(started.run);
+          else
+            this.#processes.resume?.(
+              started.run,
+              continuation.message === undefined ? {} : { message: continuation.message },
+            );
+          continuation.onExecutionAccepted?.(started.run);
+        }
+        return started;
+      } catch (error) {
+        prepared?.release();
+        if (continuation !== undefined && error instanceof AgentRunSessionError) {
+          const waited = this.#persistence.applyCommand({
+            kind: "wait-agent-run",
+            runId: started.run.id,
+            expectedVersion: started.run.version,
+            recoveryReason: boundedRecoveryReason(`${error.reason}: ${error.message}`),
+          });
+          this.#releaseReservation(started.run.id);
+          return waited;
+        }
+        return this.onProcessDeath(started.run.id, started.run.version);
+      }
+    } finally {
+      prepared?.release();
     }
   }
 

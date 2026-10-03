@@ -189,7 +189,10 @@ export interface AgentRunSessionRuntimeOptions {
   /** Maps the admitted reasoning choice to the current model's declared option key. */
   readonly resolveModelOptionValues?: (run: AgentRun) => ProviderModelOptionValues | undefined;
   /** Resolves the configured driver for a provider instance, or undefined. */
-  readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
+  readonly resolveDriver: (
+    providerInstanceId: ProviderInstanceId,
+    run: AgentRun,
+  ) => ProviderDriver | undefined;
   readonly capacityScheduler: ProviderCapacityScheduler;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
@@ -325,7 +328,7 @@ export function createAgentRunSessionRuntime(
       );
     }
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
-    const driver = options.resolveDriver(target.providerInstanceId);
+    const driver = options.resolveDriver(target.providerInstanceId, run);
     clampAgentRunSessionAuthority(run);
     const projectRoot = resolveProjectRoot(run, options.scratchRoot);
     if (
@@ -354,10 +357,19 @@ export function createAgentRunSessionRuntime(
       );
     }
     modelOptionsFor(run);
+    if (
+      run.lifecycleStatus !== "completed" &&
+      previous.pendingContinuation?.generation === (run.generation ?? 1) &&
+      previous.pendingContinuation.state === "delivery-unknown"
+    )
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "The saved follow-up may already have reached the provider. Review the child conversation before starting a new delegation; it will not be silently resent.",
+      );
     return previous;
   };
 
-  const startSession = (run: AgentRun, continuation?: { readonly message?: string }) => {
+  const prepareSession = (run: AgentRun, continuation?: { readonly message?: string }) => {
     if (sessions.has(run.id))
       throw new AgentRunSessionError(
         "provider-unavailable",
@@ -368,7 +380,7 @@ export function createAgentRunSessionRuntime(
     // widened since admission, and a child must never gain from that.
     const authority = clampAgentRunSessionAuthority(run);
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
-    const driver = options.resolveDriver(target.providerInstanceId);
+    const driver = options.resolveDriver(target.providerInstanceId, run);
     if (driver === undefined) {
       throw new AgentRunSessionError(
         "provider-unavailable",
@@ -390,10 +402,25 @@ export function createAgentRunSessionRuntime(
     const modelOptionValues = modelOptionsFor(run);
     const binding = childSessionBinding(run, driver, projectRoot);
     const previous = continuation === undefined ? undefined : savedConversation(run);
+    const pendingInput =
+      previous?.pendingContinuation?.generation === (run.generation ?? 1)
+        ? previous.pendingContinuation
+        : undefined;
+    if (
+      run.lifecycleStatus !== "completed" &&
+      pendingInput !== undefined &&
+      continuation?.message !== undefined &&
+      continuation.message !== pendingInput.message
+    )
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "Resume the saved unsent follow-up before replacing its message.",
+      );
     const prompt =
       continuation === undefined
         ? run.task
         : (continuation.message ??
+          pendingInput?.message ??
           "Continue the existing task from the saved conversation. Check what already completed before repeating work.");
     if (prompt.trim().length === 0 || (continuation !== undefined && prompt.length > 4096)) {
       throw new AgentRunSessionError(
@@ -459,10 +486,23 @@ export function createAgentRunSessionRuntime(
     })();
 
     const providerSessionId = previous?.sessionId ?? decodeProviderSessionId(options.uuid());
-    let record: AgentRunSessionRecord = previous ?? { sessionId: providerSessionId, binding };
+    const record: AgentRunSessionRecord = {
+      ...(previous ?? { sessionId: providerSessionId, binding }),
+      ...(continuation !== undefined &&
+      run.lifecycleStatus === "completed" &&
+      continuation.message !== undefined
+        ? {
+            pendingContinuation: {
+              generation: (run.generation ?? 1) + 1,
+              message: continuation.message,
+              state: "unsent" as const,
+            },
+          }
+        : {}),
+    };
     try {
       if (
-        run.workspaceReceipt.kind !== "code-worktree" &&
+        (run.workspaceReceipt.kind !== "code-worktree" || continuation !== undefined) &&
         options.sessionStore !== undefined &&
         !options.sessionStore.write(run, record)
       ) {
@@ -472,13 +512,78 @@ export function createAgentRunSessionRuntime(
         );
       }
     } catch {
-      options.capacityScheduler.recordTerminal({ reservationId, outcome: "interrupted" });
+      options.capacityScheduler.releaseUnstarted(reservationId);
       if (spendReservationId !== undefined)
         options.spendCeiling?.settle({ reservationId: spendReservationId });
       throw new AgentRunSessionError(
         "resume-unavailable",
         "The child session cannot be persisted under its parent thread.",
       );
+    }
+    let owned = false;
+    return {
+      authority,
+      target,
+      driver,
+      projectRoot,
+      context,
+      modelOptionValues,
+      previous,
+      prompt,
+      reservationId,
+      spendReservationId,
+      providerSessionId,
+      record,
+      claim: () => {
+        if (owned)
+          throw new AgentRunSessionError(
+            "resume-unavailable",
+            "This child continuation preparation is no longer available.",
+          );
+        owned = true;
+      },
+      release: () => {
+        if (owned) return;
+        owned = true;
+        options.capacityScheduler.releaseUnstarted(reservationId);
+        if (spendReservationId !== undefined)
+          options.spendCeiling?.settle({ reservationId: spendReservationId });
+      },
+    };
+  };
+
+  const startSession = (
+    run: AgentRun,
+    continuation?: { readonly message?: string },
+    prepared = prepareSession(run, continuation),
+  ) => {
+    const {
+      authority,
+      target,
+      driver,
+      projectRoot,
+      context,
+      modelOptionValues,
+      previous,
+      prompt,
+      reservationId,
+      spendReservationId,
+      providerSessionId,
+    } = prepared;
+    let record = prepared.record;
+    let appManagedTools: AppManagedToolSet | undefined;
+    try {
+      if (sessions.has(run.id))
+        throw new AgentRunSessionError(
+          "provider-unavailable",
+          "This child already owns a live session.",
+        );
+      appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
+      options.capacityScheduler.markRunning(reservationId);
+      prepared.claim();
+    } catch (error) {
+      prepared.release();
+      throw error;
     }
     const verifyWorkspace = async (signal: AbortSignal): Promise<string | undefined> => {
       if (run.workspaceReceipt.kind !== "code-worktree") return undefined;
@@ -506,6 +611,22 @@ export function createAgentRunSessionRuntime(
       record = { ...record, resumeCursor: cursor };
       try {
         return options.sessionStore?.write(run, record) ?? true;
+      } catch {
+        return false;
+      }
+    };
+
+    const recordContinuation = (state: "delivery-unknown" | "delivered"): boolean => {
+      if (record.pendingContinuation?.generation !== (run.generation ?? 1)) return true;
+      const { pendingContinuation, ...withoutPending } = record;
+      const next =
+        state === "delivery-unknown"
+          ? { ...record, pendingContinuation: { ...pendingContinuation, state } }
+          : withoutPending;
+      try {
+        if (options.sessionStore?.write(run, next) !== true) return false;
+        record = next;
+        return true;
       } catch {
         return false;
       }
@@ -582,7 +703,8 @@ export function createAgentRunSessionRuntime(
                 kind:
                   continuation === undefined
                     ? "task"
-                    : continuation.message === undefined
+                    : continuation.message === undefined &&
+                        record.pendingContinuation?.generation !== (run.generation ?? 1)
                       ? "resume"
                       : "follow-up",
                 text: prompt,
@@ -594,6 +716,7 @@ export function createAgentRunSessionRuntime(
           },
           resumeCursor: previous?.resumeCursor,
           recordCursor,
+          recordContinuation,
           requireResumeCursor: options.supportsResume?.(target.providerInstanceId) === true,
           maxEvents,
           timeoutMs,
@@ -640,9 +763,7 @@ export function createAgentRunSessionRuntime(
                 : "unsupported";
             };
           },
-          ...(options.appManagedTools === undefined
-            ? {}
-            : { appManagedTools: options.appManagedTools({ run, authority, projectRoot }) }),
+          ...(appManagedTools === undefined ? {} : { appManagedTools }),
         }),
       ),
       { signal: controller.signal },
@@ -701,6 +822,13 @@ export function createAgentRunSessionRuntime(
               : "The saved child conversation could not be verified.",
         };
       }
+    },
+    prepareResume: (run, input) => {
+      const prepared = prepareSession(run, input ?? {});
+      return {
+        start: (started) => startSession(started, input ?? {}, prepared),
+        release: prepared.release,
+      };
     },
     start: (run) => startSession(run),
     resume: (run, input) => startSession(run, input ?? {}),
@@ -857,7 +985,6 @@ function reserveCapacity(input: {
         `Provider capacity is unavailable for this AgentRun: ${submission.reason}.`,
       );
     }
-    input.capacityScheduler.markRunning(reservationId);
     return reservationId;
   } catch (error) {
     if (error instanceof ProviderCapacitySchedulerRejected) {
@@ -889,6 +1016,7 @@ interface ManagedSessionInput {
   readonly onSessionReady: () => void;
   readonly resumeCursor: ProviderResumeCursor | undefined;
   readonly recordCursor: (cursor: ProviderResumeCursor | undefined) => boolean;
+  readonly recordContinuation: (state: "delivery-unknown" | "delivered") => boolean;
   readonly requireResumeCursor: boolean;
   readonly maxEvents: number;
   readonly timeoutMs: number;
@@ -1090,14 +1218,19 @@ function runSessionTurn(
     const collected = yield* subscribeThenSend({
       connection,
       consume: (events) => collectSessionEvents(connection, events, input, state, toolAbort),
-      send: connection.send({
-        sessionId: input.sessionId,
-        prompt: input.prompt,
-        context: [...input.context],
-        // A managed child gets no attachments; its tools are whatever the
-        // host composed from the run's own clamped authority, or none.
-        attachments: [],
-        tools: [...(input.appManagedTools?.definitions ?? [])],
+      send: Effect.suspend(() => {
+        if (!input.recordContinuation("delivery-unknown"))
+          return Effect.fail({
+            category: "stale-resume",
+            message: "The follow-up could not be recorded before provider delivery.",
+          } satisfies ProviderFailure);
+        return connection.send({
+          sessionId: input.sessionId,
+          prompt: input.prompt,
+          context: [...input.context],
+          attachments: [],
+          tools: [...(input.appManagedTools?.definitions ?? [])],
+        });
       }),
     });
 
@@ -1413,6 +1546,9 @@ function collectSessionEvents(
               // A provider that completes without a visible reply produced no
               // result to return to the parent; reporting completion would be a
               // fabricated success.
+              // Some adapters acknowledge a local input queue before native
+              // history is durable. Completion proves this turn was received.
+              input.recordContinuation("delivered");
               state.outcome =
                 state.responseText.trim().length === 0
                   ? {

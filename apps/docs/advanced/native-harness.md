@@ -139,7 +139,9 @@ Both tools can collect replies and send a bounded follow-up to a completed
 child, using its current version. A follow-up resumes the same conversation
 and produces a new result to acknowledge. It never starts a fresh session
 silently. The child status reports the identity and version needed for the
-next request.
+next request. The earlier reply must reach the parent or be explicitly collected
+first. Status inspection does not consume replies, and collection refuses an
+oversized response without marking it consumed.
 Whether one may start at all is **Let the agent start subagents** under
 **Settings → Octant Harness → Helper agents**: on by default, and when it is
 off the lead is told subagents are turned off and does the work itself.

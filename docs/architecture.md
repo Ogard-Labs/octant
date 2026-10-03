@@ -582,12 +582,30 @@ and a bounded message; native resume support, saved identity, current authority,
 workspace, capacity, and spend are rechecked. Code workspace ownership and the
 saved physical identity are verified asynchronously before a new generation
 starts; current version and exact-window authority are checked again after
-that wait. An accepted execution binds its window before provider acquisition.
-The child keeps its identity and
-conversation, while a new result generation gets its own delivery and
+that wait. Execution preparation reserves spend and provider capacity before the
+lifecycle commit, and releases both when the commit or host admission refuses.
+A synchronous admission refusal leaves the completed generation, prior result,
+and follow-up draft unchanged. An accepted execution binds its window before
+provider acquisition. One accepted completed-child follow-up is staged in its
+private session record before the lifecycle commit, bound to that session and
+the next generation; an uncommitted future generation cannot replay it. Recovery
+resumes an unsent message verbatim. The record is marked uncertain before send
+and cleared on confirmed completion; an uncertain delivery refuses automatic
+resending and asks the caller to inspect the retained conversation. This is one
+continuation input, not an editable work queue.
+The child keeps its identity and conversation, while a new result generation gets its own delivery and
 acknowledgement. Legacy delivery marks cover generation 1 only. A cancelled
 child cannot continue, and unsupported continuation never becomes a silent
-fresh start.
+fresh start. The prior result must first reach its parent or be explicitly
+collected; a refused follow-up keeps that result available. Status reads do not
+consume replies. Only complete replies that fit the tool response bound are
+consumed by explicit collection or single-child wait.
+
+Managed Claude children persist the identity written by the adapter in private,
+purgeable child content, bound to the admitted child and saved session. This
+contains no credentials and is removed with parent content or provider removal.
+The existing adapter still verifies the exact identity and native history;
+a saved cursor alone cannot reconstruct missing proof.
 
 Children can form a dependency graph. A run admitted with `dependsOn` (up to
 eight existing sibling runs of the same parent thread) parks as Waiting under
