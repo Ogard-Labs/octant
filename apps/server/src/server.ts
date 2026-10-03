@@ -41,6 +41,7 @@ import {
   decodeWorkThreadId,
   ThreadCreationRootId,
   decodeThreadWorkingDirectory,
+  decodeThreadMessageQueueScope,
   decodeCodeWorktreeRef,
   decodeCodeWorktreeSourcePreview,
   decodeWindowId,
@@ -79,6 +80,10 @@ import { assistantTranscript } from "./chat/assistantTranscript";
 import { ChatService, ChatServiceError } from "./chat/chatService";
 import { UsageResumeService } from "./usage/usageResumeService";
 import { createUsageResumePorts } from "./usage/usageResumePorts";
+import { ThreadMessageQueueService } from "./messageQueue/threadMessageQueueService";
+import { createThreadMessageQueuePort } from "./messageQueue/threadMessageQueuePorts";
+import { createThreadMessageQueueAttachments } from "./messageQueue/threadMessageQueueAttachments";
+import { createThreadMessageQueueRouteHandler } from "./messageQueue/threadMessageQueueRoutes";
 import { ResearchRouter } from "./chat/research/researchRouter";
 import { SearxngClient } from "./chat/research/searxngClient";
 import { ThreadWorkService } from "./chat/threadWorkService";
@@ -1785,9 +1790,13 @@ export function startOctantServer(
     let activeComputerUseTools: ComputerUseToolService | undefined;
     let workRequestRuntime: WorkRequestRuntime | undefined;
     let revokeShellWindow: ((windowId: WindowId) => void) | undefined;
+    let revokeQueuedMessages: ((windowId: WindowId) => Promise<void>) | undefined;
     const windowAuthorityStore = new WindowAuthorityStore(
       (windowId) => {
         revokeShellWindow?.(windowId);
+        void revokeQueuedMessages?.(windowId).catch(() =>
+          console.error("Queued message authority could not be revoked."),
+        );
         codeApprovalStore.revokeWindow(windowId);
         simulatorInputGrants.revokeWindow(String(windowId));
         androidInputGrants.revokeWindow(String(windowId));
@@ -2978,6 +2987,7 @@ export function startOctantServer(
     const codeEvidence = new CodeEvidenceStore({ connection: persistence.connection });
     const codeAttachments = new CodeAttachmentStore(persistence.dataDirectory);
     const workAttachments = new WorkAttachmentStore(persistence.dataDirectory);
+    const chatAttachmentStore = new ChatAttachmentStore(persistence.dataDirectory);
     // Listing reads directory entries under the bound checkout and needs no
     // file helper, so it is available even when the helper transport is not.
     const codeFileListing = new CodeFileListingService();
@@ -5617,7 +5627,14 @@ export function startOctantServer(
       return createSideChatSourceTools({ source, authorize });
     };
     let imageJobService!: ImageJobService;
+    let purgeQueuedChatMessages: ((threadId: ChatThreadId) => Promise<void>) | undefined;
     const chatService = new ChatService({
+      attachmentStore: chatAttachmentStore,
+      beforeAttachmentPurge: async (threadId) => {
+        if (purgeQueuedChatMessages === undefined)
+          throw new Error("Queued attachment cleanup is not available.");
+        await purgeQueuedChatMessages(threadId);
+      },
       agentRuns: agentRunPersistence,
       resolveComputerUseTools: ({ windowId, thread, selection }) =>
         computerToolsFor(
@@ -5847,9 +5864,6 @@ export function startOctantServer(
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     yield* Effect.promise(() => chatService.reapStaleProviderSessions({ staleAfterMs: 0 }));
-    yield* Effect.promise(() => chatService.recoverManagedAttachments());
-    yield* Effect.promise(() => codeAttachments.recover());
-    yield* Effect.promise(() => workAttachments.recover());
     const generatedImageStore = new GeneratedImageStore(persistence.dataDirectory);
     yield* Effect.promise(() =>
       generatedImageStore.recover({
@@ -5876,7 +5890,6 @@ export function startOctantServer(
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
-    yield* Effect.promise(() => chatService.recoverPendingDeletions());
     const linkedThreadService = createLinkedThreadRuntime({
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       chat: chatService,
@@ -6666,6 +6679,120 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     };
+    const queueAttachments = createThreadMessageQueueAttachments({
+      chatStore: chatAttachmentStore,
+      codeStore: codeAttachments,
+      workStore: workAttachments,
+      readChatAttachment: (threadId, attachmentId) =>
+        persistence
+          .readChatThreadView(decodeChatThreadId(threadId))
+          ?.attachments.find((attachment) => String(attachment.id) === String(attachmentId)),
+      discardChatAttachment: (threadId, attachmentId) =>
+        chatService.discardAttachment(threadId, attachmentId).then(() => undefined),
+      isTurnOwned: (mode, threadId, attachmentId) => {
+        if (mode === "chat")
+          return (
+            persistence
+              .readChatThreadView(decodeChatThreadId(threadId))
+              ?.turns.some((turn) =>
+                turn.attachmentIds.some((id) => String(id) === String(attachmentId)),
+              ) ?? false
+          );
+        if (mode === "work")
+          return workTurnProjection
+            .listForThread(decodeWorkThreadId(threadId))
+            .some((turn) =>
+              turn.attachments?.some(
+                (attachment) => String(attachment.attachmentId) === String(attachmentId),
+              ),
+            );
+        return (
+          persistence.connection
+            .prepare(`
+          SELECT 1 FROM event_journal AS event,
+            json_each(event.payload_json, '$.event.attachments') AS attachment
+          WHERE event.event_name = 'code.operation-event-recorded@1'
+            AND json_extract(event.payload_json, '$.threadId') = ?
+            AND json_extract(event.payload_json, '$.event.kind') = 'conversation-turn-started'
+            AND json_extract(attachment.value, '$.attachmentId') = ? LIMIT 1
+        `)
+            .get(String(threadId), String(attachmentId)) !== undefined
+        );
+      },
+    });
+    const threadMessageQueue = new ThreadMessageQueueService({
+      connection: persistence.connection,
+      journal: persistence.journal,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+      port: createThreadMessageQueuePort({
+        persistence,
+        journal: persistence.journal,
+        chat: chatService,
+        work: {
+          readThread: (id) => workThreadProjection.read(id),
+          listTurns: (id) => workTurnProjection.listForThread(id),
+          startFirstTurn: (windowId, command, admissionOptions) =>
+            workTurnService.startFirstTurn(windowId, command, admissionOptions),
+        },
+        code: routeCodeService,
+        isModeEnabled: (mode) =>
+          enabledModes(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes(mode),
+        isWindowLive: (windowId) =>
+          windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
+        canAccess: (windowId, mode, projectId) => {
+          if (mode === "chat")
+            return projectId === undefined || persistence.readProject(projectId)?.type === "chat";
+          if (projectId === undefined) return false;
+          return mode === "code"
+            ? canAccessCodeProject(windowId, projectId)
+            : windowHoldsProject(windowId, projectId, mode);
+        },
+        effectiveCodeThread: (windowId, thread) =>
+          codeSessionAuthority.effectiveThread(windowId, thread),
+        attachments: queueAttachments,
+      }),
+    });
+    yield* Effect.promise(() => threadMessageQueue.recover());
+    revokeQueuedMessages = (windowId) => threadMessageQueue.revokeWindow(windowId);
+    purgeQueuedChatMessages = async (threadId) => {
+      const result = await threadMessageQueue.purgeThread(
+        decodeThreadMessageQueueScope({ mode: "chat", threadId }),
+      );
+      if (result.status !== "released")
+        throw new Error("Queued attachments could not be released.");
+    };
+    yield* Effect.promise(() => chatService.recoverPendingDeletions());
+    // Accepted queue items retain images before draft recovery removes uploads
+    // whose composer disappeared during the previous host process.
+    yield* Effect.promise(() => chatService.recoverManagedAttachments());
+    yield* Effect.promise(() => codeAttachments.recover());
+    yield* Effect.promise(() => workAttachments.recover());
+    const advanceMessageQueue = () => {
+      void threadMessageQueue
+        .tick()
+        .catch(() => console.error("The message queue could not advance."));
+    };
+    const unsubscribeMessageQueue = persistence.journal.subscribeCommitted((append) => {
+      void threadMessageQueue
+        .onCommittedAppend(append)
+        .catch(() => console.error("The message queue could not process a thread change."));
+    });
+    const messageQueueTimer = setInterval(advanceMessageQueue, 1000);
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        clearInterval(messageQueueTimer);
+        unsubscribeMessageQueue();
+        threadMessageQueue.dispose();
+        await threadMessageQueue.awaitIdle();
+      }),
+    );
+    const threadMessageQueueRoutes = createThreadMessageQueueRouteHandler({
+      service: threadMessageQueue,
+      windowAuthorityStore,
+    });
     // Host-owned recovery for provider usage-limited stops: the journal record
     // is the opt-in, the projection rebuilds what is armed after a restart, and
     // every reset fires through the mode's ordinary turn admission.
@@ -8768,6 +8895,7 @@ export function startOctantServer(
       (await providerUsageLimitsRoutes(request)) ??
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??
+      (await threadMessageQueueRoutes(request)) ??
       (await threadCheckpointRoutes(request)) ??
       (await scaffoldRoutes(request)) ??
       (await workspacePresetRoutes(request)) ??
@@ -8952,7 +9080,6 @@ export function startOctantServer(
     // Registered on the loopback chain only — never inside
     // dispatchProductRoutes — so the remote gateway's product dispatch can
     // never reach host lifecycle authority even if route policy regressed.
-    const chatAttachmentStore = new ChatAttachmentStore(persistence.dataDirectory);
     const threadRetention = new ThreadRetentionService({
       connection: persistence.connection,
       journal: persistence.journal,
@@ -8968,6 +9095,11 @@ export function startOctantServer(
         workThreadProjection.forget(threadId as never);
       },
       purgeThreadArtifacts: async ({ mode, threadId }) => {
+        const released = await threadMessageQueue.purgeThread(
+          decodeThreadMessageQueueScope({ mode, threadId }),
+        );
+        if (released.status !== "released")
+          throw new Error("Queued attachments could not be purged.");
         if (mode === "chat") await chatAttachmentStore.purgeThread(threadId as never);
         await agentMessageService.purgeThread(threadId);
         try {

@@ -100,23 +100,26 @@ export class ThreadMessageQueueService {
         snapshot: this.#store.snapshot(command.scope),
       });
       if (this.#disposed) return refused("authority-revoked");
+      const receipt = this.#store.receipt(command.requestId);
+      const previous =
+        command.kind === "enqueue" ? this.#store.identity(command.messageId) : undefined;
       const inspection = await this.#inspect({
         scope: command.scope,
         windowId,
-        intent: command.kind,
+        // A retry observes the committed receipt even if the thread since completed.
+        // Read authority is still required; this does not renew dispatch authority.
+        intent: receipt !== undefined || previous !== undefined ? "read" : command.kind,
         ...(command.kind === "enqueue" ? { payload: command.payload } : {}),
       });
       if (inspection.status === "held") return refused(inspection.reason);
       if (this.#purging.has(queueId(command.scope)) || this.#store.purged(command.scope))
         return refused("thread-unavailable");
       const id = queueId(command.scope);
-      const receipt = this.#store.receipt(command.requestId);
       if (receipt !== undefined)
         return receipt.queue_id === id && receipt.fingerprint === queueFingerprint(command)
           ? result("duplicate")
           : refused("invalid-payload");
       if (command.kind === "enqueue") {
-        const previous = this.#store.identity(command.messageId);
         if (previous !== undefined)
           return previous.queue_id === id &&
             previous.fingerprint ===

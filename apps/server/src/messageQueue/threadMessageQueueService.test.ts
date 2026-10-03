@@ -51,7 +51,7 @@ function port() {
   }));
   const commit = vi.fn<ThreadMessageQueueModePort["commit"]>();
   return {
-    inspect: vi.fn(async () => inspection),
+    inspect: vi.fn<ThreadMessageQueueModePort["inspect"]>(async () => inspection),
     admit,
     reconcile,
     retain,
@@ -369,6 +369,26 @@ describe("durable ordinary thread queue", () => {
         }),
       ),
     ).toMatchObject({ status: "refused", reason: "invalid-payload" });
+  });
+  it("acknowledges a stored command after the thread stops admitting new turns", async () => {
+    const f = fixture();
+    const queued = enqueue();
+    await f.service.execute(windowId, queued);
+    f.p.inspect.mockImplementation(async (input) =>
+      input.intent === "read"
+        ? { status: "ready", binding: "binding" }
+        : { status: "held", reason: "thread-unavailable" },
+    );
+    expect((await f.service.execute(windowId, queued)).status).toBe("duplicate");
+    expect(await f.service.execute(windowId, enqueue(1))).toMatchObject({
+      status: "refused",
+      reason: "thread-unavailable",
+    });
+    f.p.inspect.mockResolvedValue({ status: "held", reason: "unauthorized" });
+    expect(await f.service.execute(windowId, queued)).toMatchObject({
+      status: "refused",
+      reason: "unauthorized",
+    });
   });
   it("does not write an admission result after synchronous disposal", async () => {
     const f = fixture();

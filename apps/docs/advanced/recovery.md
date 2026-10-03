@@ -50,6 +50,17 @@ tombstone rather than leaving a hole with no explanation.
 - **Threads**: reconnect resumes from bounded live cursors. If a cursor belongs
   to an older host process or fell outside replay, the client reloads the
   authoritative transcript before applying more updates.
+- **Queued messages**: once Octant acknowledges a queued message, the host
+  retains it and its attachments when you close the conversation. You can
+  inspect, edit, reorder or remove pending messages from the queue. Normal
+  completion starts the next message. A stopped or failed turn, changed access
+  or unavailable attachment holds the queue and explains why. After a host
+  restart, review the retained messages and choose **Resume queue**. Octant
+  checks current access again and never blindly repeats an uncertain send.
+  If you changed the provider, model or access settings, restore the original
+  settings before resuming, or remove and resubmit the message. Queue controls
+  are available in authenticated local windows; paired remote clients do not
+  support them yet.
 - **Settings**: a failed settings command restores the last authoritative
   value and announces the failure.
 - **Zen**: when state cannot be decoded, **Recover Zen** restores the main
