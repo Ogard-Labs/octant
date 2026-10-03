@@ -309,6 +309,7 @@ import {
 import { createContextRouteHandler } from "./contextRoutes";
 import { GitEnvironmentPort } from "./gitEnvironmentPort";
 import { GitObservationPort } from "./code/gitObservationPort";
+import { createAgentRunReviewCapture } from "./agentRun/agentRunReviewCapture";
 import { GitMutationPort } from "./code/gitMutationPort";
 import { codeThreadTurns } from "./code/codeForkPoint";
 import { seedCodeForkHarnessSession } from "./harness/nativeHarnessFork";
@@ -2016,6 +2017,11 @@ export function startOctantServer(
     // the run rather than inherited from the parent thread at execution time.
     const agentRunSessionSupervisor = new AgentRunSessionSupervisor({
       port: createAgentRunSessionRuntime({
+        reviewCapture: createAgentRunReviewCapture(),
+        canCaptureReview: (run) => {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(String(run.parentThreadId)));
+          return thread?.lifecycle === "active" && thread.executionPolicy !== "plan";
+        },
         capacityScheduler,
         spendCeiling,
         sessionStore: agentRunSessionStore.sessions,

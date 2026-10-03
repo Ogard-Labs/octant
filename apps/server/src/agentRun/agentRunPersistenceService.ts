@@ -3,6 +3,7 @@ import {
   MAX_AGENT_RESULT_PACKETS,
   type AgentRunResultsResponse,
   type AgentRunResultEvidence,
+  type AgentRunReviewSnapshot,
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
   USAGE_RESUME_SETTLED,
@@ -42,6 +43,7 @@ import {
 import {
   readAgentRunResultText,
   readAgentRunResultEvidence,
+  readAgentRunReviewSnapshot,
 } from "../persistence/agentRunContentStore";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
@@ -308,11 +310,21 @@ export class AgentRunPersistenceService {
       };
     }
 
+    // A new attempt or an unobserved settlement cannot keep advertising a
+    // previous waiting snapshot as this generation's final comparison.
+    const evidence =
+      (command.kind === "complete-agent-run" ? command.resultEvidence : resultEvidence) ??
+      (next.workspaceReceipt.kind === "code-worktree"
+        ? {
+            files: { status: "unavailable" as const, items: [] },
+            checks: { status: "unavailable" as const, items: [] },
+          }
+        : undefined);
     try {
       this.#store.appendStatusChanged({
         runId: next.id,
         run: next,
-        ...(resultEvidence === undefined ? {} : { resultEvidence }),
+        ...(evidence === undefined ? {} : { resultEvidence: evidence }),
         fromStatus,
         toStatus: next.lifecycleStatus,
         generation: next.generation ?? 1,
@@ -496,6 +508,20 @@ export class AgentRunPersistenceService {
     });
   }
 
+  reviewSnapshot(runId: AgentRunId, generation: number): AgentRunReviewSnapshot | undefined {
+    const current = this.#projection.getById(runId);
+    const retained =
+      ((current?.generation ?? 1) === generation && current !== undefined) ||
+      this.#projection
+        .resultHistory(runId)
+        .runs.some((run) => (run.generation ?? 1) === generation);
+    if (!retained) return undefined;
+    return readAgentRunReviewSnapshot(this.#connection, {
+      runId,
+      reference: agentRunResultReference(runId, generation),
+    });
+  }
+
   resultPackets(runId: AgentRunId): AgentRunResultsResponse {
     const history = this.#projection.resultHistory(runId);
     const current = this.#projection.getById(runId);
@@ -522,8 +548,20 @@ export class AgentRunPersistenceService {
           runId,
           reference: agentRunResultReference(runId, run.generation),
         });
+        const review = this.reviewSnapshot(runId, run.generation ?? 1);
+        const metadata =
+          review === undefined
+            ? undefined
+            : {
+                capturedAt: review.capturedAt,
+                baseTree: review.baseTree,
+                resultTree: review.resultTree,
+                changedPaths: review.changedPaths,
+                truncated: review.truncated,
+              };
         return {
           runId,
+          ...(metadata === undefined ? {} : { review: metadata }),
           parentThreadId: run.parentThreadId,
           generation: run.generation ?? 1,
           providerInstanceId: target.providerInstanceId,
@@ -542,10 +580,9 @@ export class AgentRunPersistenceService {
               run.result?.truncated === true ||
               (text?.length ?? 0) > MAX_AGENT_RESULT_SUMMARY_CHARACTERS,
           },
-          files: evidence?.files ?? {
-            status: "unavailable",
-            items: [],
-            reviewStatus: "unavailable",
+          files: {
+            ...(evidence?.files ?? { status: "unavailable" as const, items: [] }),
+            reviewStatus: review === undefined ? ("unavailable" as const) : ("available" as const),
           },
           checks: evidence?.checks ?? { status: "unavailable", items: [] },
           blockers:

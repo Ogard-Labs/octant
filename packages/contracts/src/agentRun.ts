@@ -311,8 +311,8 @@ export type AgentRunResultText = typeof AgentRunResultText.Type;
  */
 export const AgentRunReviewMetadata = Schema.Struct({
   capturedAt: UtcTimestamp,
-  baseTree: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40,64}$/)),
-  resultTree: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40,64}$/)),
+  baseTree: Schema.String.pipe(Schema.pattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)),
+  resultTree: Schema.String.pipe(Schema.pattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)),
   changedPaths: Schema.Array(Schema.NonEmptyString.pipe(Schema.maxLength(2048))).pipe(
     Schema.maxItems(128),
   ),

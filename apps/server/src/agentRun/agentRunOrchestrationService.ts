@@ -7,6 +7,7 @@ import type {
   AgentRunId,
   AgentRunParentThreadId,
   AgentRunWorkspaceReceipt,
+  AgentRunResultEvidence,
 } from "@octant/contracts";
 import { DEFAULT_AGENT_RUN_CONCURRENCY, MAX_AGENT_RUN_RESULT_CHARACTERS } from "@octant/contracts";
 import {
@@ -161,7 +162,7 @@ export class AgentRunOrchestrationService {
    */
   readonly #settledSessions = new Set<AgentRunId>();
   /** Runs currently being stopped by {@link cancelLeafFirst}. */
-  readonly #cancelling = new Set<AgentRunId>();
+  readonly #cancelling = new Map<AgentRunId, AgentRunResultEvidence | undefined>();
 
   constructor(options: AgentRunOrchestrationServiceOptions) {
     this.#persistence = options.persistence;
@@ -646,13 +647,15 @@ export class AgentRunOrchestrationService {
       const run = this.#persistence.getById(id);
       if (run === undefined) continue;
       if (isAgentRunTerminalStatus(run.lifecycleStatus)) continue;
+      let cancellationEvidence: AgentRunResultEvidence | undefined;
       if (this.#processes !== undefined) {
         // A managed session settles `cancelled` while this stop is still
         // awaited. Marking the run here is what lets that settlement defer to
         // this loop, which owns the leaf-first ordering and the reservation.
-        this.#cancelling.add(id);
+        this.#cancelling.set(id, undefined);
         try {
           await this.#processes.stop(id);
+          cancellationEvidence = this.#cancelling.get(id);
         } catch {
           results.push({
             kind: "run-command-failed",
@@ -666,12 +669,15 @@ export class AgentRunOrchestrationService {
       }
       this.#releaseReservation(id);
       results.push(
-        this.#persistence.applyCommand({
-          kind: "cancel-agent-run",
-          runId: id,
-          expectedVersion: run.version as never,
-          scope: "self",
-        }),
+        this.#persistence.applyCommand(
+          {
+            kind: "cancel-agent-run",
+            runId: id,
+            expectedVersion: run.version as never,
+            scope: "self",
+          },
+          cancellationEvidence,
+        ),
       );
     }
     return results;
@@ -714,7 +720,10 @@ export class AgentRunOrchestrationService {
     if (current === undefined) return undefined;
     if (isAgentRunTerminalStatus(current.lifecycleStatus)) return undefined;
     if (this.#settledSessions.has(input.runId)) return undefined;
-    if (input.outcome.kind === "cancelled" && this.#cancelling.has(input.runId)) return undefined;
+    if (input.outcome.kind === "cancelled" && this.#cancelling.has(input.runId)) {
+      this.#cancelling.set(input.runId, input.outcome.evidence);
+      return undefined;
+    }
 
     this.#releaseReservation(input.runId);
     let recorded: AgentRunCommandResult;

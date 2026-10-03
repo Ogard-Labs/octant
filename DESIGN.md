@@ -306,8 +306,12 @@ exact run, parent, provider and workspace attribution is available in a separate
 disclosure. Earlier generations keep their own attribution and evidence. Missing
 or truncated results stay explicit. Provider-reported files remain unverified;
 recorded tool output is inspectable without claiming that tool completion means
-a check passed. File review availability is explicit, and evidence references
-are disclosed on request rather than presented as unsupported navigation links.
+a check passed. A recorded Code generation offers Review changes and links its
+captured paths into the existing Review surface. The saved comparison identifies
+the child, generation, workspace and capture time; its partial and binary content
+states stay explicit. It offers no staging, discard or parent-checkout editor
+controls. Unavailable capture stays unavailable. Evidence references are disclosed
+on request rather than presented as unsupported navigation links.
 
 A reply's suggested follow-ups sit as outline chips at the top of the
 thread composer, inside its surface, with a quiet "Next" label and a dismiss
