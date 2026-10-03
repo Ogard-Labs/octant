@@ -568,8 +568,8 @@ export function acknowledgeAgentRunResult(
  * Journals how a finished run's result reached its parent. A delivery is
  * owed only for a genuinely final outcome — `interrupted` runs may still be
  * retried, so they carry no delivery until their retry's own terminal state
- * lands — and each result generation settles at most once, so delivery retried after a
- * crash can never mark the same result twice.
+ * lands. Successful delivery or consumption settles a generation once; explicit
+ * collection can recover a failed or invalidated attempt without losing its journal history.
  */
 export function settleAgentRunResultDelivery(
   run: AgentRun,
@@ -590,7 +590,13 @@ export function settleAgentRunResultDelivery(
   ) {
     reject("invalid-delivery", "Only a finally-finished AgentRun can settle result delivery.");
   }
-  if (run.resultDelivery !== undefined) {
+  if (
+    run.resultDelivery !== undefined &&
+    !(
+      outcome === "consumed" &&
+      (run.resultDelivery.outcome === "failed" || run.resultDelivery.outcome === "invalidated")
+    )
+  ) {
     reject("invalid-delivery", "AgentRun result delivery is already settled.");
   }
   return {

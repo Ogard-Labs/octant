@@ -848,6 +848,68 @@ describe("completed child follow-ups", () => {
     }
   });
 
+  it("only replaces an unsuccessful delivery with explicit consumption of the current generation", () => {
+    for (const previousOutcome of ["failed", "invalidated", "delivered", "consumed"] as const) {
+      const completed = baseRun({
+        generation: 2,
+        lifecycleStatus: "completed",
+        result: completedResult,
+        resultDelivery: { outcome: previousOutcome, settledAt: now as never },
+      });
+      const before = structuredClone(completed);
+      for (const outcome of ["failed", "invalidated", "delivered", "consumed"] as const) {
+        const command = {
+          kind: "settle-agent-run-result-delivery" as const,
+          runId: completed.id,
+          expectedVersion: completed.version,
+          generation: 2,
+          outcome,
+        };
+        if (
+          outcome === "consumed" &&
+          (previousOutcome === "failed" || previousOutcome === "invalidated")
+        ) {
+          const consumed = evaluateAgentRunCommand(completed, command, now as never);
+          expect(consumed).toMatchObject({
+            generation: 2,
+            version: completed.version + 1,
+            resultDelivery: { outcome: "consumed" },
+          });
+          expect(() =>
+            evaluateAgentRunCommand(
+              consumed,
+              {
+                ...command,
+                expectedVersion: consumed.version,
+              },
+              now as never,
+            ),
+          ).toThrow("already settled");
+        } else {
+          expect(() => evaluateAgentRunCommand(completed, command, now as never)).toThrow(
+            "already settled",
+          );
+        }
+      }
+      for (const generation of [undefined, 1]) {
+        expect(() =>
+          evaluateAgentRunCommand(
+            completed,
+            {
+              kind: "settle-agent-run-result-delivery",
+              runId: completed.id,
+              expectedVersion: completed.version,
+              ...(generation === undefined ? {} : { generation }),
+              outcome: "consumed",
+            },
+            now as never,
+          ),
+        ).toThrow("different child result generation");
+      }
+      expect(completed).toEqual(before);
+    }
+  });
+
   it("keeps each result identity distinct and refuses settlement for a previous generation", () => {
     const current = baseRun({ generation: 2, lifecycleStatus: "running" });
     expect(() =>

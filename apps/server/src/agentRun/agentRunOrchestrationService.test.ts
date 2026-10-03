@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { collectAgentRunResult } from "./agentRunDelegation";
 import { readAgentRunResultText } from "../persistence/agentRunContentStore";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1665,7 +1666,8 @@ it("starts another capacity waiter without restarting a continuation whose resum
   expect(start.mock.calls.map(([run]) => run.id)).toEqual([admitted.run.id, next.run.id]);
 });
 
-it("resumes a completed child's next generation while preserving journaled prior replies", async () => {
+it("collects after failed delivery before following up and preserves both journaled settlements", async () => {
+  const outcome = "failed" as const;
   const resume = vi.fn();
   const harness = createHarness(undefined, true, {
     start: vi.fn(),
@@ -1699,17 +1701,48 @@ it("resumes a completed child's next generation while preserving journaled prior
   expect(persistence.getById(completed.id)).toEqual(completed);
   expect(persistence.resultText(completed.id)).toBe("First reply");
   expect(resume).not.toHaveBeenCalled();
-  const delivered = persistence.applyCommand({
+  const undelivered = persistence.applyCommand({
     kind: "settle-agent-run-result-delivery",
     runId: completed.id,
     expectedVersion: completed.version,
-    outcome: "delivered",
+    outcome,
   });
-  if (delivered.kind !== "run-updated") throw new Error("delivery failed");
+  if (undelivered.kind !== "run-updated") throw new Error("delivery settlement failed");
+  expect(
+    await orchestration.resume(completed.id, undelivered.run.version, authority, {
+      message: "Still too early",
+    }),
+  ).toMatchObject({ kind: "run-command-failed" });
+  expect(persistence.getById(completed.id)).toEqual(undelivered.run);
+  const collected = collectAgentRunResult(persistence, undelivered.run, "First reply");
+  expect(collected).toMatchObject({
+    status: "completed",
+    text: "First reply",
+    generation: 1,
+    version: undelivered.run.version + 1,
+  });
+  persistence.rebuildFromJournal();
+  const consumed = persistence.getById(completed.id);
+  if (consumed === undefined) throw new Error("missing collected run");
+  expect(consumed).toMatchObject({
+    version: undelivered.run.version + 1,
+    resultDelivery: { outcome: "consumed" },
+    result: completed.result,
+  });
+  expect(persistence.resultText(completed.id)).toBe("First reply");
+  const settlementReplay = harness.store.replayAll(100);
+  if (settlementReplay.status !== "ok") throw new Error("settlement replay failed");
+  const settlements = settlementReplay.events
+    .filter((event) => event.eventName === AGENT_RUN_RESULT_DELIVERY_SETTLED)
+    .map((event) => Schema.decodeUnknownSync(AgentRunResultDeliverySettled)(event.payload));
+  expect(settlements).toMatchObject([
+    { version: undelivered.run.version, delivery: { outcome } },
+    { version: consumed.version, delivery: { outcome: "consumed" } },
+  ]);
   const acknowledged = persistence.applyCommand({
     kind: "acknowledge-agent-run-result",
     runId: completed.id,
-    expectedVersion: delivered.run.version,
+    expectedVersion: consumed.version,
   });
   if (acknowledged.kind !== "run-updated") throw new Error("acknowledgement failed");
   const next = await orchestration.resume(completed.id, acknowledged.run.version, authority, {
