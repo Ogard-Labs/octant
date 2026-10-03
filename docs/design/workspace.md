@@ -152,9 +152,13 @@ thread as a context-aware dock tab opened from the dock tab strip or Add tool. I
 Subagents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every
-other AgentRun control stay. The thread's running subagents also show as a card
-tucked behind its composer, whose rows open the Agents dock on that subagent;
-finished ones, reviewed or not, stay in Environment and Agents. See
+other AgentRun control stay. A compact, collapsible Subagents card sits above
+the composer in normal layout. Its counts keep failures, waits and unreviewed
+results visible while collapsed; expansion previews up to three active or
+unresolved children. Rows open the corresponding detail in Agents, and View all
+keeps completed history reachable. Provider-observed children carry an explicit
+observation-only label and no managed controls. Task-plan progress remains a
+separate disclosure. See
 [DESIGN.md](../../DESIGN.md#welcome-and-composer).
 The Agents dock is a list and a page, and it shows and controls subagents
 without starting them: only the thread's agent starts one, through the Octant
