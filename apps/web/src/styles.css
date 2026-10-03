@@ -1509,7 +1509,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .workspace-pane__title {
   flex: 0 8 auto;
-  min-width: 12ch;
+  min-width: 0;
   overflow: hidden;
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
@@ -1518,8 +1518,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 /* The Project the thread works in. Chips are short, so the title gives up
-   room first (it shrinks eight times as fast and stops at 12ch); a chip
-   truncates only once the title is down to that, or past its own cap. The
+   room first (it shrinks eight times as fast); a chip truncates only once the
+   title is mostly gone, or past its own cap. The title has no fixed minimum:
+   a 12ch floor clipped the Running pill off a 180px pane, since the grip
+   hides what overflows it. The
    cap is in ch, not a share of the handle: the handle shrink-wraps its
    content, so 30% of it clipped "octant-qa-code-repo" to "octant-qa-code-re…"
    beside a short title with most of the header empty. Shrinking the chips
