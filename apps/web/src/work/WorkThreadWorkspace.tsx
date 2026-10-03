@@ -460,6 +460,20 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const completionLocked = thread?.completionConfirmed === true;
   const messageQueue = useThreadMessageQueue({
     mode: "work",
+    hostId: props.hostId,
+    draft: {
+      text: composerDraft.text,
+      revision: composerDraft.revisionFor(String(props.threadId)),
+      clear: composerDraft.clear,
+    },
+    onRecoveredRefused: async (command) => {
+      if (command.kind !== "enqueue" || command.payload.mode !== "work") return;
+      await Promise.allSettled(
+        (command.payload.attachmentIds ?? []).map((attachmentId) =>
+          props.turnClient?.discardAttachment(props.threadId, attachmentId),
+        ),
+      );
+    },
     threadId: String(props.threadId),
     serverUrl: props.serverUrl,
     windowCapability: props.windowCapability,
@@ -1101,8 +1115,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 extensionDraft.clear();
               }
             },
+            discardUploadedAttachments,
+            { text: promptText, revision: draftRevision },
           );
-          if (result === "refused") await discardUploadedAttachments();
           return result === "accepted";
         }
         const started = await props.turnClient.startFirstTurn({

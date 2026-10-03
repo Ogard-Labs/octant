@@ -1,3 +1,9 @@
+import {
+  asQueueReceiptStorage,
+  markQueueDraftChanged,
+  purgeQueueReceipts,
+} from "../messageQueue/threadMessageQueueReceipts";
+
 /**
  * Unsent composer drafts live on the client that typed them.
  *
@@ -123,6 +129,15 @@ export function createComposerThreadDraftStore(
   const revisions = new Map<string, number>();
   const listeners = new Set<() => void>();
 
+  function purgeReceipts(
+    keep: (scope: { readonly mode: string; readonly threadId: string }) => boolean,
+  ): ComposerDraftPersistResult | undefined {
+    if (purgeQueueReceipts(keep, asQueueReceiptStorage(storage))) return undefined;
+    persistError = COMPOSER_DRAFT_REMOVE_FAILED_NOTE;
+    notify();
+    return { status: "unpersisted", reason: "remove-failed" };
+  }
+
   function bump(key: string): void {
     revisions.set(key, (revisions.get(key) ?? 0) + 1);
   }
@@ -205,9 +220,10 @@ export function createComposerThreadDraftStore(
   return {
     read: (mode, threadId) => snapshot.get(composerDraftRecordKey(mode, threadId)),
     write: (mode, threadId, draft) => {
+      const receiptSaved = markQueueDraftChanged(mode, threadId, asQueueReceiptStorage(storage));
       const key = composerDraftRecordKey(mode, threadId);
       const normalized = normalizeDraft(draft);
-      return persistMerged((next) => {
+      const result = persistMerged((next) => {
         if (normalized === undefined) {
           if (!next.has(key) && !snapshot.has(key)) return [];
           next.delete(key);
@@ -225,14 +241,27 @@ export function createComposerThreadDraftStore(
         next.set(key, normalized);
         return [key];
       });
+      if (!receiptSaved) {
+        persistError = COMPOSER_DRAFT_WRITE_FAILED_NOTE;
+        notify();
+        return { status: "unpersisted", reason: "write-failed" };
+      }
+      return result;
     },
     clear: (mode, threadId) => {
+      const receiptSaved = markQueueDraftChanged(mode, threadId, asQueueReceiptStorage(storage));
       const key = composerDraftRecordKey(mode, threadId);
-      return persistMerged((next) => {
+      const result = persistMerged((next) => {
         if (!next.has(key) && !snapshot.has(key)) return [];
         next.delete(key);
         return [key];
       });
+      if (!receiptSaved) {
+        persistError = COMPOSER_DRAFT_REMOVE_FAILED_NOTE;
+        notify();
+        return { status: "unpersisted", reason: "remove-failed" };
+      }
+      return result;
     },
     markStagedDropped: (mode, threadId) => {
       const key = composerDraftRecordKey(mode, threadId);
@@ -244,6 +273,8 @@ export function createComposerThreadDraftStore(
       });
     },
     purgeThread: (threadId) => {
+      const refused = purgeReceipts((scope) => scope.threadId !== threadId);
+      if (refused !== undefined) return refused;
       const suffix = `:${threadId}`;
       return persistMerged((next) => {
         const changed: string[] = [];
@@ -258,6 +289,8 @@ export function createComposerThreadDraftStore(
     dropUnknownThreads: (mode, knownThreadIds) => {
       const prefix = `${mode}:`;
       const known = new Set(knownThreadIds);
+      const refused = purgeReceipts((scope) => scope.mode !== mode || known.has(scope.threadId));
+      if (refused !== undefined) return refused;
       return persistMerged((next) => {
         const changed: string[] = [];
         for (const key of new Set([...next.keys(), ...snapshot.keys()])) {
@@ -270,12 +303,15 @@ export function createComposerThreadDraftStore(
         return changed;
       });
     },
-    clearAll: () =>
-      persistMerged((next) => {
+    clearAll: () => {
+      const refused = purgeReceipts(() => false);
+      if (refused !== undefined) return refused;
+      return persistMerged((next) => {
         const changed = [...new Set([...next.keys(), ...snapshot.keys()])];
         next.clear();
         return changed;
-      }),
+      });
+    },
     revision: (mode, threadId) => revisions.get(composerDraftRecordKey(mode, threadId)) ?? 0,
     persistError: () => persistError,
     subscribe: (listener) => {

@@ -89,6 +89,9 @@ export function useCodeAttachments(input: {
   const detached = useRef<ReadonlyArray<DetachedCodeAttachment>>([]);
   const inFlight = useRef(0);
   const queueClaims = useRef(new Set<string>());
+  const mounted = useRef(true);
+  const activeThread = useRef(threadId);
+  activeThread.current = threadId;
 
   const apply = useCallback(
     (next: (list: ReadonlyArray<StagedCodeAttachment>) => ReadonlyArray<StagedCodeAttachment>) => {
@@ -113,8 +116,10 @@ export function useCodeAttachments(input: {
     setMessage(undefined);
   }, [apply, forget, threadId]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       for (const previewUrl of previews.current) URL.revokeObjectURL(previewUrl);
       previews.current.clear();
       const inFlight = detached.current.filter((entry) => entry.inFlight);
@@ -128,9 +133,8 @@ export function useCodeAttachments(input: {
           .catch(() => undefined);
       }
       detached.current = inFlight;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const attach = useCallback(
     async (files: ReadonlyArray<File>) => {
@@ -302,7 +306,17 @@ export function useCodeAttachments(input: {
       return entries;
     },
     releaseQueueClaim: (entries) => {
-      for (const entry of entries) queueClaims.current.delete(String(entry.reference.attachmentId));
+      for (const entry of entries) {
+        if (!queueClaims.current.delete(String(entry.reference.attachmentId))) continue;
+        if (
+          threadId === undefined ||
+          (mounted.current && String(activeThread.current) === String(threadId))
+        )
+          continue;
+        void client
+          .discardAttachment(threadId, entry.reference.attachmentId)
+          .catch(() => undefined);
+      }
     },
     acceptQueueClaim: (entries) => {
       const ids = new Set(entries.map((entry) => String(entry.reference.attachmentId)));

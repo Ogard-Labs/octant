@@ -115,36 +115,55 @@ describe("Work host queue", () => {
     expect(clients.turnClient.discardAttachment).not.toHaveBeenCalled();
   });
 
-  it("keeps files with the draft and releases uploads after a definite queue refusal", async () => {
-    const host = queueTestHost();
-    const clients = queuedWorkClients();
-    const user = userEvent.setup();
-    host.execute.mockImplementation(async (command) => ({
-      status: "refused",
-      requestId: command.requestId,
-      reason: "authority-revoked",
-    }));
-    render(
-      <WorkThreadWorkspace
-        initialThread={workThread()}
-        messageQueueClient={host}
-        {...clients}
-        threadId={threadId}
-        title="Draft brief"
-      />,
-    );
-    const composer = await screen.findByLabelText("Work prompt");
-    await user.type(composer, "Keep this");
-    fireEvent.paste(composer, {
-      clipboardData: { files: [new File(["image"], "kept.png", { type: "image/png" })], items: [] },
-    });
-    await screen.findByAltText("kept.png");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-    await waitFor(() => expect(clients.turnClient.discardAttachment).toHaveBeenCalledOnce());
-    expect(composer).toHaveValue("Keep this");
-    expect(screen.getByAltText("kept.png")).toBeVisible();
-    expect(clients.turnClient.startFirstTurn).not.toHaveBeenCalled();
-  });
+  it.each([false, true])(
+    "keeps files with the draft and releases uploads after a definite queue refusal on retry=%s",
+    async (retry) => {
+      const host = queueTestHost();
+      const clients = queuedWorkClients();
+      const user = userEvent.setup();
+      if (retry) host.execute.mockRejectedValueOnce(new Error("offline"));
+      host.execute.mockImplementation(async (command) => ({
+        status: "refused",
+        requestId: command.requestId,
+        reason: "queue-full",
+      }));
+      render(
+        <WorkThreadWorkspace
+          initialThread={workThread()}
+          messageQueueClient={host}
+          {...clients}
+          threadId={threadId}
+          title="Draft brief"
+        />,
+      );
+      const composer = await screen.findByLabelText("Work prompt");
+      await user.type(composer, "Keep this");
+      fireEvent.paste(composer, {
+        clipboardData: {
+          files: [new File(["image"], "kept.png", { type: "image/png" })],
+          items: [],
+        },
+      });
+      await screen.findByAltText("kept.png");
+      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      if (retry) {
+        await screen.findByText(/host has not confirmed/);
+        fireEvent.paste(composer, {
+          clipboardData: {
+            files: [new File(["later"], "later.png", { type: "image/png" })],
+            items: [],
+          },
+        });
+        await screen.findByAltText("later.png");
+        await user.click(screen.getByRole("button", { name: "Check queue" }));
+        expect(screen.getByAltText("later.png")).toBeVisible();
+      }
+      await waitFor(() => expect(clients.turnClient.discardAttachment).toHaveBeenCalledOnce());
+      expect(composer).toHaveValue("Keep this");
+      expect(screen.getByAltText("kept.png")).toBeVisible();
+      expect(clients.turnClient.startFirstTurn).not.toHaveBeenCalled();
+    },
+  );
 
   it("retains the draft when an older host has no queue route", async () => {
     const clients = queuedWorkClients();

@@ -226,6 +226,25 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const draftEditRevisionRef = useRef(0);
   const messageQueue = useThreadMessageQueue({
     mode: "chat",
+    hostId: props.hostId,
+    draft: {
+      text: props.controller.pendingDraft,
+      revision: draftEditRevisionRef.current,
+      clear: () => props.controller.setPendingDraft(""),
+    },
+    onRecoveredRefused: async (command) => {
+      if (
+        command.kind !== "enqueue" ||
+        command.payload.mode !== "chat" ||
+        activeThreadId === undefined
+      )
+        return;
+      await Promise.allSettled(
+        (command.payload.attachmentIds ?? []).map((attachmentId) =>
+          props.controller.discard({ threadId: activeThreadId, attachmentId }),
+        ),
+      );
+    },
     threadId: activeThreadId === undefined ? undefined : String(activeThreadId),
     serverUrl: props.serverUrl,
     windowCapability: props.windowCapability,
@@ -1279,8 +1298,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 consumeContext({ ...context, threadMentionIds });
                 if (draftEditRevisionRef.current === revision) props.controller.setPendingDraft("");
               },
+              restoreClaim,
+              { text: draft, revision },
             );
-            if (result === "refused") restoreClaim();
             return result === "accepted";
           } catch {
             restoreClaim();

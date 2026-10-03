@@ -417,6 +417,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const messageQueue = useThreadMessageQueue({
     mode: "code",
+    hostId: props.hostId,
+    draft: {
+      text: draft,
+      revision: draftRevisionRef.current,
+      clear: () => {
+        setDraft("");
+        props.controller.setPendingDraft?.("");
+      },
+    },
+    onRecoveredRefused: async (command) => {
+      if (command.kind !== "enqueue" || command.payload.mode !== "code") return;
+      await Promise.allSettled(
+        (command.payload.attachmentIds ?? []).map((attachmentId) =>
+          props.attachmentClient?.discardAttachment(props.threadId, attachmentId),
+        ),
+      );
+    },
     threadId: String(props.threadId),
     serverUrl: props.serverUrl,
     windowCapability: props.windowCapability,
@@ -694,7 +711,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           attachments.releaseQueueClaim(captured);
           return;
         }
-        const result = await messageQueue.enqueue(
+        await messageQueue.enqueue(
           {
             mode: "code",
             prompt: draft,
@@ -716,8 +733,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               extensionDraft.clear();
             }
           },
+          () => attachments.releaseQueueClaim(captured),
+          { text: draft, revision: draftRevision },
         );
-        if (result === "refused") attachments.releaseQueueClaim(captured);
       } catch {
         attachments.releaseQueueClaim(captured);
         setSendNotice("This message could not be queued. Your draft is kept.");

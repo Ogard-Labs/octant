@@ -113,6 +113,60 @@ describe("Code host queue", () => {
     expect(attachments.discardAttachment).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    "releases only captured images after retry refusal with composer closed=%s",
+    async (closed) => {
+      const host = queueTestHost();
+      host.execute.mockRejectedValueOnce(new Error("offline"));
+      const response = Promise.withResolvers<ThreadMessageQueueResult>();
+      host.execute.mockImplementationOnce(() => response.promise);
+      const user = userEvent.setup();
+      const attachments: CodeAttachmentClient = {
+        putAttachment: vi.fn(async (input) => ({
+          attachmentId: input.attachmentId,
+          displayName: input.displayName,
+          mediaType: input.mediaType,
+          byteLength: input.bytes.byteLength,
+          digest: "a".repeat(64),
+        })),
+        discardAttachment: vi.fn(async () => undefined),
+        attachment: vi.fn(),
+      };
+      const { unmount } = render(
+        <CodeThreadWorkspace
+          messageQueueClient={host}
+          attachmentClient={attachments}
+          controller={controller({ turnStatus: "running" })}
+          threadId={threadId}
+        />,
+      );
+      const composer = screen.getByLabelText("Follow-up message");
+      await user.type(composer, "First");
+      pasteImage(composer, "first.png");
+      await screen.findByAltText("first.png");
+      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      await screen.findByText(/host has not confirmed/);
+      pasteImage(composer, "later.png");
+      await screen.findByAltText("later.png");
+      await user.click(screen.getByRole("button", { name: "Check queue" }));
+      const command = host.execute.mock.calls[0]?.[0];
+      if (command?.kind !== "enqueue") throw new Error("Expected enqueue");
+      if (closed) unmount();
+      await act(async () => {
+        response.resolve({ status: "refused", requestId: command.requestId, reason: "queue-full" });
+      });
+      if (!closed) {
+        await user.click(screen.getByRole("button", { name: "Remove first.png" }));
+        expect(screen.getByAltText("later.png")).toBeVisible();
+      }
+      await waitFor(() => expect(attachments.discardAttachment).toHaveBeenCalledOnce());
+      expect(attachments.discardAttachment).toHaveBeenCalledWith(
+        threadId,
+        command.payload.attachmentIds?.[0],
+      );
+    },
+  );
+
   it("refuses to persist a one-shot access selection in the queue", async () => {
     const host = queueTestHost();
     const user = userEvent.setup();

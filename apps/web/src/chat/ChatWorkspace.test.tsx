@@ -652,6 +652,74 @@ describe("Chat host queue", () => {
     expect(screen.getByLabelText("Message")).toHaveValue("New draft");
   });
 
+  it.each(["refused", "conflict"] as const)(
+    "restores captured images after an uncertain enqueue is retried and %s",
+    async (status) => {
+      const host = queueTestHost();
+      host.execute.mockRejectedValueOnce(new Error("offline"));
+      host.execute.mockImplementationOnce(async (command) =>
+        status === "refused"
+          ? { status, requestId: command.requestId, reason: "queue-full" }
+          : { status, requestId: command.requestId, snapshot: host.snapshot(command.scope) },
+      );
+      const user = userEvent.setup();
+      const upload = vi.fn<ChatController["upload"]>(async (input) =>
+        decodeChatAttachment({
+          id: input.attachmentId,
+          threadId: input.threadId,
+          displayName: input.displayName,
+          mediaType: input.mediaType,
+          byteLength: input.bytes.byteLength,
+          digest: "a".repeat(64),
+          status: "finalized",
+          createdAt: now,
+        }),
+      );
+      const base = controllerFixture({ upload });
+      function Harness() {
+        const [draft, setDraft] = useState("First");
+        return (
+          <ChatWorkspace
+            messageQueueClient={host}
+            providerSnapshot={providerSnapshot()}
+            controller={{
+              ...base,
+              activeView: viewWithAttempt("streaming"),
+              pendingDraft: draft,
+              setPendingDraft: setDraft,
+            }}
+          />
+        );
+      }
+      const { unmount } = render(<Harness />);
+      await user.upload(
+        screen.getByLabelText("Choose attachment file"),
+        new File(["first"], "first.png", { type: "image/png" }),
+      );
+      await screen.findByText("first.png");
+      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      await screen.findByText(/host has not confirmed/);
+      await user.clear(screen.getByLabelText("Message"));
+      await user.type(screen.getByLabelText("Message"), "New draft");
+      await user.upload(
+        screen.getByLabelText("Choose attachment file"),
+        new File(["later"], "later.png", { type: "image/png" }),
+      );
+      await screen.findByText("later.png");
+      await user.click(screen.getByRole("button", { name: "Check queue" }));
+      expect(screen.getByLabelText("Message")).toHaveValue("New draft");
+      expect(base.discard).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      const command = host.execute.mock.calls[2]?.[0];
+      if (command?.kind !== "enqueue") throw new Error("Expected new enqueue");
+      expect(command.payload.attachmentIds).toEqual(
+        upload.mock.calls.map(([input]) => input.attachmentId),
+      );
+      unmount();
+      expect(base.discard).not.toHaveBeenCalled();
+    },
+  );
+
   it("disables queue submission when this host does not offer a durable queue", async () => {
     render(
       <ChatWorkspace
