@@ -1,4 +1,8 @@
 import {
+  MAX_AGENT_RESULT_SUMMARY_CHARACTERS,
+  MAX_AGENT_RESULT_PACKETS,
+  type AgentRunResultsResponse,
+  type AgentRunResultEvidence,
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
   USAGE_RESUME_SETTLED,
@@ -24,6 +28,7 @@ import {
 import {
   AGENT_RUN_DEPENDENCY_WAITING_REASON,
   AgentRunPolicyRejected,
+  agentRunResultReference,
   assertAgentRunCapacityAvailable,
   agentRunPoolRouteWaitingReason,
   assertAgentRunUsageResumeCancellable,
@@ -34,7 +39,10 @@ import {
   isAgentRunActiveStatus,
   isAgentRunTerminalStatus,
 } from "@octant/domain";
-import { readAgentRunResultText } from "../persistence/agentRunContentStore";
+import {
+  readAgentRunResultText,
+  readAgentRunResultEvidence,
+} from "../persistence/agentRunContentStore";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
@@ -214,6 +222,7 @@ export class AgentRunPersistenceService {
 
   applyCommand(
     command: Exclude<AgentRunCommand, { kind: "request-agent-run" }>,
+    resultEvidence?: AgentRunResultEvidence,
   ): AgentRunCommandResult {
     const runId =
       "runId" in command ? decodeAgentRunId(command.runId) : decodeAgentRunId(this.#uuid());
@@ -302,6 +311,8 @@ export class AgentRunPersistenceService {
     try {
       this.#store.appendStatusChanged({
         runId: next.id,
+        run: next,
+        ...(resultEvidence === undefined ? {} : { resultEvidence }),
         fromStatus,
         toStatus: next.lifecycleStatus,
         generation: next.generation ?? 1,
@@ -317,7 +328,9 @@ export class AgentRunPersistenceService {
           ? {
               result: command.result,
               resultText: command.resultText,
-              run: next,
+              ...(command.resultEvidence === undefined
+                ? {}
+                : { resultEvidence: command.resultEvidence }),
               ...(next.usage === undefined ? {} : { usage: next.usage }),
             }
           : {}),
@@ -450,9 +463,16 @@ export class AgentRunPersistenceService {
    * and reports no text, so a reader is told the reply is gone rather than
    * handed an empty one.
    */
-  parentSummary(parentThreadId: AgentRunParentThreadId): ReadonlyArray<AgentRunParentSummaryEntry> {
+  parentSummary(
+    parentThreadId: AgentRunParentThreadId,
+    canRead: (run: AgentRun) => boolean = () => true,
+  ): ReadonlyArray<AgentRunParentSummaryEntry> {
     return this.#projection
       .parentSummary(decodeAgentRunParentThreadId(parentThreadId))
+      .filter((entry) => {
+        const run = this.getById(entry.runId);
+        return run !== undefined && canRead(run);
+      })
       .map((entry) => {
         if (entry.result === undefined) return entry;
         const resultText = this.resultText(entry.runId);
@@ -474,6 +494,76 @@ export class AgentRunPersistenceService {
       runId: run.id,
       reference: run.result.reference,
     });
+  }
+
+  resultPackets(runId: AgentRunId): AgentRunResultsResponse {
+    const history = this.#projection.resultHistory(runId);
+    const current = this.#projection.getById(runId);
+    const runs =
+      current === undefined
+        ? history.runs
+        : [
+            ...history.runs.filter((run) => (run.generation ?? 1) !== (current.generation ?? 1)),
+            current,
+          ];
+    return {
+      runId,
+      truncated: history.truncated || runs.length > MAX_AGENT_RESULT_PACKETS,
+      packets: runs.slice(-MAX_AGENT_RESULT_PACKETS).map((run) => {
+        const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+        const text =
+          run.result === undefined
+            ? undefined
+            : readAgentRunResultText(this.#connection, {
+                runId,
+                reference: run.result.reference,
+              });
+        const evidence = readAgentRunResultEvidence(this.#connection, {
+          runId,
+          reference: agentRunResultReference(runId, run.generation),
+        });
+        return {
+          runId,
+          parentThreadId: run.parentThreadId,
+          generation: run.generation ?? 1,
+          providerInstanceId: target.providerInstanceId,
+          modelId: target.modelId,
+          executionKind: run.executionKind,
+          workspace: run.workspaceReceipt,
+          lifecycleStatus: run.lifecycleStatus,
+          occurredAt: run.updatedAt,
+          reportedSummary: {
+            status: text === undefined ? "unavailable" : "available",
+            ...(run.result === undefined ? {} : { reference: run.result.reference }),
+            ...(text === undefined
+              ? {}
+              : { text: text.slice(0, MAX_AGENT_RESULT_SUMMARY_CHARACTERS) }),
+            truncated:
+              run.result?.truncated === true ||
+              (text?.length ?? 0) > MAX_AGENT_RESULT_SUMMARY_CHARACTERS,
+          },
+          files: evidence?.files ?? {
+            status: "unavailable",
+            items: [],
+            reviewStatus: "unavailable",
+          },
+          checks: evidence?.checks ?? { status: "unavailable", items: [] },
+          blockers:
+            run.recoveryReason === undefined
+              ? { status: "unavailable", items: [] }
+              : {
+                  status: "recorded",
+                  items: [
+                    {
+                      text: run.recoveryReason,
+                      source: "lifecycle",
+                      reference: `octant://agent-run/${String(run.id)}/version/${run.version}`,
+                    },
+                  ],
+                },
+        };
+      }),
+    };
   }
 
   getById(runId: AgentRunId): AgentRun | undefined {

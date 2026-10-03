@@ -559,8 +559,10 @@ describe("createAgentRunSessionRuntime", () => {
   it("ignores malformed provider events and keeps a throwing observer from failing the run", async () => {
     const provider = fakeProvider();
     const deltas: string[] = [];
+    const observations: unknown[] = [];
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(provider, {
+        onChildActivity: (input) => observations.push(input),
         onTextDelta: ({ text }) => {
           deltas.push(text);
           throw new Error("observer failed");
@@ -572,6 +574,10 @@ describe("createAgentRunSessionRuntime", () => {
     await provider.emit({
       kind: "child-agent-activity",
       sessionId,
+      instanceId: providerInstanceId,
+      sequence: 1,
+      correlationId: "82000000-0000-4000-8000-000000000071",
+      occurredAt: now,
       childAgentId: "child-1",
       status: "running",
       summary: "secret native transcript",
@@ -580,7 +586,86 @@ describe("createAgentRunSessionRuntime", () => {
     await provider.emit({ kind: "completed", sessionId });
     await expect(outcome).resolves.toMatchObject({ kind: "completed", responseText: "visible" });
     expect(deltas).toEqual(["visible"]);
+    expect(observations).toMatchObject([
+      { run: { id: runId }, event: { childAgentId: "child-1", kind: "child-agent-activity" } },
+    ]);
   });
+
+  it.each(["completed", "failed"] as const)(
+    "records bounded reports and host tool returns on %s without inferring checks",
+    async (terminal) => {
+      const provider = fakeProvider();
+      const runtime = createAgentRunSessionRuntime(
+        runtimeOptions(provider, {
+          appManagedTools: () => ({
+            definitions: [{ name: "read_notes", description: "Read notes", inputSchema: {} }],
+            execute: async () => ({ result: { text: "All tests pass", exitCode: 0 } }),
+          }),
+        }),
+      );
+      const outcome = settled(runtime.start(agentRun()));
+      await provider.emit({
+        kind: "file-change",
+        sessionId,
+        instanceId: providerInstanceId,
+        sequence: 1,
+        path: "src/notes.ts",
+        change: "modified",
+        occurredAt: now,
+      });
+      await provider.emit({
+        kind: "file-change",
+        sessionId,
+        instanceId: providerInstanceId,
+        sequence: 2,
+        path: "/another/workspace/secret.ts",
+        change: "modified",
+        occurredAt: now,
+      });
+      await provider.emit({
+        kind: "tool-request",
+        sessionId,
+        instanceId: providerInstanceId,
+        sequence: 3,
+        requestId: "tool-1",
+        toolName: "read_notes",
+        inputJson: "{}",
+        occurredAt: now,
+      });
+      await provider.emit({ kind: "text-delta", sessionId, text: "All tests pass. Deployed." });
+      await provider.emit(
+        terminal === "completed"
+          ? { kind: "completed", sessionId }
+          : {
+              kind: "failed",
+              sessionId,
+              failure: { category: "provider-failed", message: "Stopped" },
+            },
+      );
+      const result = await outcome;
+      expect(result).toMatchObject({
+        kind: terminal,
+        evidence: {
+          files: {
+            status: "truncated",
+            items: [{ path: "src/notes.ts", source: "provider-reported", verified: false }],
+          },
+          checks: {
+            status: "recorded",
+            items: [
+              {
+                label: "Tool execution: read_notes",
+                outcome: "unknown",
+                source: "host-recorded",
+                toolExecution: { toolName: "read_notes", isError: false },
+              },
+            ],
+          },
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain("another/workspace");
+    },
+  );
 
   it("runs the child as an in-process provider session under the clamped authority", async () => {
     const provider = fakeProvider({

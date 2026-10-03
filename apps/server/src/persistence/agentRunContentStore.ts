@@ -1,5 +1,7 @@
 import {
   decodeAgentRunAdmittedContext,
+  decodeAgentRunResultEvidence,
+  type AgentRunResultEvidence,
   decodeAgentRunResultText,
   decodeContextSubjectRef,
   type AgentRun,
@@ -65,6 +67,14 @@ export function agentRunContentSubject(run: AgentRun): ContextSubjectRef {
   });
 }
 
+function isPurgedSubject(connection: SqliteConnection, subject: ContextSubjectRef): boolean {
+  return (
+    connection
+      .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ? AND mode || '-thread' = ?")
+      .get(subject.aggregateId, subject.aggregateType) !== undefined
+  );
+}
+
 function write(
   connection: SqliteConnection,
   input: {
@@ -76,6 +86,7 @@ function write(
     readonly createdAt: string;
   },
 ): void {
+  if (isPurgedSubject(connection, input.subject)) return;
   connection
     .prepare(`
       INSERT INTO agent_run_content_store (
@@ -204,4 +215,93 @@ export function purgeAgentRunSubjectContent(
   connection
     .prepare("DELETE FROM agent_run_content_store WHERE subject_type = ? AND subject_id = ?")
     .run(subject.aggregateType, subject.aggregateId);
+}
+
+/** Generation evidence uses the completion reference and the same subject purge as its reply. */
+export function writeAgentRunResultEvidence(
+  connection: SqliteConnection,
+  input: {
+    readonly run: AgentRun;
+    readonly reference: string;
+    readonly evidence: AgentRunResultEvidence;
+    readonly createdAt: string;
+  },
+): void {
+  const subject = agentRunContentSubject(input.run);
+  if (isPurgedSubject(connection, subject)) return;
+  const next = decodeAgentRunResultEvidence(input.evidence);
+  const prior = readAgentRunResultEvidence(connection, {
+    runId: input.run.id,
+    reference: input.reference,
+  });
+  const files = [
+    ...new Map(
+      [...(prior?.files.items ?? []), ...next.files.items].map((item) => [item.reference, item]),
+    ).values(),
+  ];
+  const checks = [
+    ...new Map(
+      [...(prior?.checks.items ?? []), ...next.checks.items].map((item) => [item.reference, item]),
+    ).values(),
+  ];
+  // Each section keeps room for the other inside the content store's row limit.
+  const retainedFiles = files.slice(0, 32);
+  const retainedChecks = checks.slice(0, 32);
+  while (JSON.stringify(retainedFiles).length > 60_000) retainedFiles.pop();
+  while (JSON.stringify(retainedChecks).length > 60_000) retainedChecks.pop();
+  const merged = decodeAgentRunResultEvidence({
+    files: {
+      status:
+        retainedFiles.length < files.length ||
+        prior?.files.status === "truncated" ||
+        next.files.status === "truncated"
+          ? "truncated"
+          : files.length
+            ? "recorded"
+            : "unavailable",
+      items: retainedFiles,
+      reviewStatus: "unavailable",
+    },
+    checks: {
+      status:
+        retainedChecks.length < checks.length ||
+        prior?.checks.status === "truncated" ||
+        next.checks.status === "truncated"
+          ? "truncated"
+          : checks.length
+            ? "recorded"
+            : "unavailable",
+      items: retainedChecks,
+    },
+  });
+  connection
+    .prepare(`INSERT INTO agent_run_content_store
+    (content_id, run_id, subject_type, subject_id, content_kind, body_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(content_id) DO UPDATE SET body_text = excluded.body_text
+    WHERE run_id = excluded.run_id AND subject_type = excluded.subject_type AND subject_id = excluded.subject_id AND content_kind = excluded.content_kind`)
+    .run(
+      `${input.reference}:evidence`,
+      String(input.run.id),
+      subject.aggregateType,
+      subject.aggregateId,
+      "result-evidence",
+      JSON.stringify(merged),
+      input.createdAt,
+    );
+}
+
+export function readAgentRunResultEvidence(
+  connection: SqliteConnection,
+  input: {
+    readonly runId: AgentRunId;
+    readonly reference: string;
+  },
+): AgentRunResultEvidence | undefined {
+  const body = read(
+    connection,
+    `${input.reference}:evidence`,
+    String(input.runId),
+    "result-evidence",
+  );
+  return body === undefined ? undefined : decodeAgentRunResultEvidence(JSON.parse(body));
 }

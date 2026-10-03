@@ -1,4 +1,9 @@
-import type { AgentRun, AgentRunId, ProviderFailure } from "@octant/contracts";
+import type {
+  AgentRun,
+  AgentRunId,
+  AgentRunResultEvidence,
+  ProviderFailure,
+} from "@octant/contracts";
 
 /**
  * Why a managed AgentRun could not be started at all.
@@ -36,7 +41,7 @@ export class AgentRunSessionError extends Error {
  * generating and expects input is `waiting`, and an end we cannot classify is
  * `interrupted` — never silently upgraded to completion.
  */
-export type AgentRunSessionOutcome =
+export type AgentRunSessionOutcome = (
   | {
       readonly kind: "completed";
       readonly responseText: string;
@@ -48,7 +53,8 @@ export type AgentRunSessionOutcome =
   | { readonly kind: "waiting"; readonly reason: string }
   | { readonly kind: "cancelled" }
   | { readonly kind: "failed"; readonly failure: ProviderFailure }
-  | { readonly kind: "interrupted"; readonly reason: string };
+  | { readonly kind: "interrupted"; readonly reason: string }
+) & { readonly evidence?: AgentRunResultEvidence };
 
 export interface AgentRunSessionHandle {
   readonly runId: AgentRunId;
