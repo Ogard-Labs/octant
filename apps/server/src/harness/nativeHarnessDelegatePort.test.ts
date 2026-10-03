@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_NATIVE_HARNESS_ROUTING_SETTINGS,
   decodeNativeHarnessSlotCandidate,
+  decodeNativeHarnessRouteDecision,
+  NATIVE_HARNESS_BUILT_IN_SLOTS,
+  type NativeHarnessSlotCandidate,
   decodeProviderContextBlock,
   decodeProjectId,
   type AgentRun,
@@ -196,6 +200,11 @@ const allowedAuthority: AgentRunAuthority = {
 function delegationPair(
   options: {
     emptySlot?: boolean;
+    configuredChildOnly?: boolean;
+    unavailableChild?: boolean;
+    unavailableParent?: boolean;
+    excludedParent?: boolean;
+    circuitOpen?: boolean;
     excludedChild?: boolean;
     foreignDependency?: boolean;
     tainted?: boolean;
@@ -203,6 +212,7 @@ function delegationPair(
   } = {},
 ) {
   const commands: AgentRunCommand[] = [];
+  let currentParent: NativeHarnessSlotCandidate = routeLead;
   const decisions: NativeHarnessRouteDecision[] = [];
   const projectId = decodeProjectId("00000000-0000-4000-8000-0000000000bb");
   const admitted = {
@@ -229,8 +239,9 @@ function delegationPair(
       liveAuthority: allowedAuthority,
       workspaceParent: { threadId: scope.parentThreadId, mode: "chat" },
       parentRoute: {
-        providerInstanceId: routeLead.providerInstanceId,
-        modelId: routeLead.modelId,
+        providerInstanceId: currentParent.providerInstanceId,
+        modelId: currentParent.modelId,
+        ...(currentParent.reasoning === undefined ? {} : { reasoning: currentParent.reasoning }),
         projectId,
       },
     }),
@@ -264,7 +275,9 @@ function delegationPair(
         ({
           configuration: {
             slots: options.emptySlot ? [] : [{ id: "default", candidates: [routeLead] }],
-            jobSlots: [{ job: "researcher", slotId: "default" }],
+            jobSlots: options.emptySlot
+              ? DEFAULT_NATIVE_HARNESS_ROUTING_SETTINGS.configuration.jobSlots
+              : [{ job: "researcher", slotId: "default" }],
           },
           version: 1,
           updatedAt: "2026-10-03T10:00:00.000Z",
@@ -275,17 +288,39 @@ function delegationPair(
               configuration: {
                 slots: options.emptySlot
                   ? []
-                  : [{ id: "default", candidates: [routeChild, routeLead] }],
+                  : [
+                      {
+                        id: "default",
+                        candidates: options.configuredChildOnly
+                          ? [routeChild]
+                          : [routeChild, routeLead],
+                      },
+                    ],
                 jobSlots: [],
               },
             } as never)
           : undefined,
     },
-    isReady: () => true,
+    isReady: (candidate) =>
+      !(
+        options.unavailableChild && candidate.providerInstanceId === routeChild.providerInstanceId
+      ) &&
+      !(options.unavailableParent && candidate.providerInstanceId === routeLead.providerInstanceId),
     now: () => Date.parse("2026-10-03T10:00:00.000Z"),
   });
+  if (options.circuitOpen) {
+    for (let index = 0; index < 5; index += 1)
+      router.reportFailure({
+        slotId: NATIVE_HARNESS_BUILT_IN_SLOTS.default,
+        candidate: routeChild,
+        reason: "server-error",
+      });
+  }
   const listTargets = () =>
-    [routeLead, ...(options.excludedChild ? [] : [routeChild])].map((candidate) => ({
+    [
+      ...(options.excludedParent ? [] : [routeLead]),
+      ...(options.excludedChild ? [] : [routeChild]),
+    ].map((candidate) => ({
       providerInstanceId: String(candidate.providerInstanceId),
       modelIds: [String(candidate.modelId)],
       displayName: String(candidate.modelId),
@@ -337,6 +372,9 @@ function delegationPair(
   return {
     commands,
     decisions,
+    setParentTarget: (candidate: NativeHarnessSlotCandidate) => {
+      currentParent = candidate;
+    },
     native,
     managed,
     start: async (transport: "native" | "managed", input: Parameters<typeof native.start>[0]) =>
@@ -406,9 +444,86 @@ describe("delegation parity", () => {
         candidate: routeLead,
       });
     });
-    it(`${transport} delegation refuses empty routes, foreign dependencies and a role outside Chat`, async () => {
+    it(`${transport} delegation inherits its authorized parent when no role or default slot is configured`, async () => {
+      const pair = delegationPair({ emptySlot: true });
+      expect(await pair.start(transport, { role: "research", task: "Look" })).toMatchObject({
+        status: "accepted",
+        target: { providerInstanceId: routeLead.providerInstanceId, modelId: routeLead.modelId },
+        route: {
+          kind: "inherited-parent",
+          requestedSlotId: "task",
+          candidate: {
+            hostId: "local",
+            providerInstanceId: routeLead.providerInstanceId,
+            modelId: routeLead.modelId,
+          },
+        },
+      });
+      expect(pair.decisions[0]).toMatchObject({ kind: "inherited-parent", rejected: [] });
+      expect(pair.decisions[0]).not.toHaveProperty("slotId");
+      expect(decodeNativeHarnessRouteDecision(pair.decisions[0])).toEqual(pair.decisions[0]);
+      expect(pair.commands).toHaveLength(1);
+    });
+    it(`${transport} delegation inherits the current authorized target and reasoning instead of a captured lead`, async () => {
+      const pair = delegationPair({ emptySlot: true });
+      pair.setParentTarget({ ...routeChild, reasoning: "low" });
+      expect(await pair.start(transport, { role: "research", task: "Look" })).toMatchObject({
+        status: "accepted",
+        target: {
+          providerInstanceId: routeChild.providerInstanceId,
+          modelId: routeChild.modelId,
+          reasoning: "low",
+        },
+        route: {
+          kind: "inherited-parent",
+          candidate: { modelId: routeChild.modelId, reasoning: "low" },
+        },
+      });
+      expect(pair.commands[0]).toMatchObject({ routingReceipt: { rawReasoning: "low" } });
+      expect(
+        await pair.start(transport, { role: "research", task: "Look again", reasoning: "high" }),
+      ).toMatchObject({
+        status: "accepted",
+        target: { modelId: routeChild.modelId, reasoning: "high" },
+      });
+    });
+    it(`${transport} delegation cannot inherit an unavailable or policy-excluded parent or unsupported reasoning`, async () => {
+      for (const options of [{ excludedParent: true }, { unavailableParent: true }, {}]) {
+        const pair = delegationPair({ ...options, emptySlot: true });
+        const input =
+          options.excludedParent || options.unavailableParent
+            ? { role: "research" as const, task: "Look" }
+            : { role: "research" as const, task: "Look", reasoning: "not-supported" };
+        expect(await pair.start(transport, input)).toMatchObject({
+          status: "refused",
+          reason: "delegate-route-no-eligible-candidate",
+        });
+        expect(pair.decisions[0]).toMatchObject({
+          kind: "unroutable",
+          rejected: [{ candidate: { modelId: routeLead.modelId } }],
+        });
+        expect(pair.commands).toEqual([]);
+      }
+    });
+    it(`${transport} delegation never escapes a configured unavailable, denied or circuit-open route through its parent`, async () => {
+      for (const options of [
+        { unavailableChild: true },
+        { excludedChild: true },
+        { circuitOpen: true },
+      ]) {
+        const pair = delegationPair({ ...options, configuredChildOnly: true });
+        expect(await pair.start(transport, { role: "research", task: "Look" })).toMatchObject({
+          status: "refused",
+          reason: options.circuitOpen
+            ? "delegate-route-circuit-open"
+            : "delegate-route-no-eligible-candidate",
+        });
+        expect(pair.decisions[0]).toMatchObject({ kind: "unroutable" });
+        expect(pair.commands).toEqual([]);
+      }
+    });
+    it(`${transport} delegation refuses foreign dependencies and a role outside Chat`, async () => {
       for (const [options, input, reason] of [
-        [{ emptySlot: true }, { role: "research", task: "Look" }, "delegate-route-slot-empty"],
         [
           { foreignDependency: true },
           { role: "research", task: "Look", after: [dependencyId] },
