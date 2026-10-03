@@ -51,13 +51,19 @@ server-authoritative switch, **Let the agent start subagents**: on (the
 default) or off. **Settings → Octant Harness → Model slots** configures shared
 role routing for both Octant and provider harnesses; Projects can override it.
 
-A thread's working subagents show in a small card behind its composer in
-Chat, Work, and Code: one row each with its task and "Working · 12s". Click the
-card's head to fold it to a tab; Octant remembers that. Hover or focus a row to
-**Stop** it; **Stop all** asks first and cancels only that thread's subagents.
-Choosing a row opens the **Agents** dock tool on that subagent. Finished
-subagents leave the card: **Environment → Subagents** lists every one, working
-and finished, and marks results you have not reviewed **To review**.
+A thread's subagents appear in a compact card above its composer in Chat,
+Work, and Code. It starts collapsed and remembers your choice. Its counts keep
+failed, waiting and unreviewed children visible. Expand it to preview up to
+three active or unresolved children with their task, status, model and last
+reported activity. **View all** opens the full **Agents** list, including finished
+children. A row opens that child's detail. **Stop** acts on one managed child;
+**Stop all** asks first and cancels only this thread's managed children.
+Observation-only rows have no execution controls. **Environment → Subagents**
+also lists managed children and marks results you have not reviewed **To review**.
+
+When the agent reports a task list, its separate collapsed header shows completed
+steps and failed or waiting counts. Expand it to read the steps. Task progress
+does not indicate that subagents or the parent delivery are complete.
 
 The **Agents** dock tool lists the thread's subagents under **Working** and
 **Finished** and marks results you have not reviewed with **Needs review**. On
