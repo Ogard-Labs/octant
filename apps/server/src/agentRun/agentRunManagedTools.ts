@@ -12,6 +12,7 @@ import type { AgentRunControlAdmissionDependencies } from "./agentRunControlAdmi
 import {
   agentRunDelegationCapabilities,
   followUpAgentRunDelegation,
+  recordAgentRunResultConsumption,
   startAgentRunDelegation,
   type AgentRunDelegationRouting,
   type AgentsToolTarget,
@@ -28,7 +29,8 @@ export interface AgentsManagedToolsOptions {
   readonly persistence: Pick<
     AgentRunPersistenceService,
     "parentSummary" | "getById" | "resultText"
-  >;
+  > &
+    Partial<Pick<AgentRunPersistenceService, "applyCommand">>;
   readonly mode: OctantMode;
   readonly windowId: string;
   readonly parentThreadId: string;
@@ -130,6 +132,8 @@ type AgentsToolFailure =
   | "invalid-agents-input"
   | "delegate-tainted"
   | "delegate-target-unavailable"
+  | "result-unavailable"
+  | "result-delivery-unavailable"
   | "run-not-found"
   | "cancel-unauthorized";
 
@@ -309,6 +313,13 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
           status: "ok",
           children: children.map((entry) => {
             const run = options.persistence.getById(entry.runId);
+            const consumed =
+              entry.resultText !== undefined &&
+              run !== undefined &&
+              String(run.parentThreadId) === options.parentThreadId &&
+              entry.version === run.version
+                ? recordAgentRunResultConsumption(options.persistence, run)
+                : undefined;
             return {
               runId: String(entry.runId),
               role: entry.role,
@@ -317,8 +328,15 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
               resultAvailable: entry.result !== undefined,
               ...(run === undefined
                 ? {}
-                : { version: run.version, generation: run.generation ?? 1 }),
-              ...(entry.resultText === undefined ? {} : { resultText: entry.resultText }),
+                : {
+                    version: consumed?.status === "settled" ? consumed.run.version : run.version,
+                    generation: run.generation ?? 1,
+                  }),
+              ...(entry.resultText === undefined
+                ? {}
+                : consumed?.status === "settled"
+                  ? { resultText: entry.resultText }
+                  : { resultUnavailableReason: "result-delivery-unavailable" }),
               ...(run?.dependsOn === undefined ? {} : { after: run.dependsOn.map(String) }),
               ...(run?.routingReceipt?.rawReasoning === undefined
                 ? {}
@@ -372,12 +390,15 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
           if (isTerminal(run.lifecycleStatus)) {
             if (run.lifecycleStatus === "completed" && run.result !== undefined) {
               const text = options.persistence.resultText(run.id);
+              if (text === undefined) return failure("result-unavailable");
+              const consumed = recordAgentRunResultConsumption(options.persistence, run);
+              if (consumed.status === "refused") return failure("result-delivery-unavailable");
               return answer({
                 status: "completed",
                 runId: String(run.id),
-                version: run.version,
+                version: consumed.run.version,
                 generation: run.generation ?? 1,
-                ...(text === undefined ? {} : { text }),
+                text,
                 truncated: run.result.truncated,
               });
             }

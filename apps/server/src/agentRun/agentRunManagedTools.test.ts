@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeProviderInstanceId,
+  decodeUtcTimestamp,
   decodeProviderModelId,
   type AgentRun,
   type AgentRunAuthority,
 } from "@octant/contracts";
+import { evaluateAgentRunCommand } from "@octant/domain";
 import type { AgentRunNativeCapabilityEvidence } from "@octant/domain/agent-run-control-policy";
 import { createAgentsManagedTools, type AgentsToolTarget } from "./agentRunManagedTools";
 import type { AgentRunControlParentFacts } from "./agentRunControlService";
@@ -87,6 +89,7 @@ function tool(
   } = {},
 ) {
   const calls: string[] = [];
+  const runs = [...(options.runs ?? [])];
   return {
     calls,
     set: createAgentsManagedTools({
@@ -128,7 +131,17 @@ function tool(
       },
       persistence: {
         parentSummary: () => options.summary ?? [],
-        getById: (runId) => options.runs?.find((run) => String(run.id) === String(runId)),
+        getById: (runId) => runs.find((run) => String(run.id) === String(runId)),
+        applyCommand: (command) => {
+          const index = runs.findIndex((run) => String(run.id) === String(command.runId));
+          const run = evaluateAgentRunCommand(
+            runs[index],
+            command,
+            decodeUtcTimestamp("2026-10-03T12:00:00.000Z"),
+          );
+          runs[index] = run;
+          return { kind: "run-updated", run };
+        },
         resultText: (runId) => (String(runId) === ids.run ? "child reply" : undefined),
       },
       mode: "chat",
@@ -315,6 +328,7 @@ describe("agents managed tools", () => {
 
   it("lists only this thread's children on status", async () => {
     const { set } = tool({
+      runs: [queuedRun({ lifecycleStatus: "completed", generation: 2 })],
       summary: [
         {
           runId: ids.run as never,
@@ -349,6 +363,8 @@ describe("agents managed tools", () => {
           lifecycleStatus: "completed",
           resultAvailable: true,
           resultText: "child reply",
+          version: 2,
+          generation: 2,
         },
       ],
     });

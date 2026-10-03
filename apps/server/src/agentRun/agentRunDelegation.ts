@@ -434,3 +434,27 @@ export async function followUpAgentRunDelegation(
     throw error;
   }
 }
+
+/** Record exactly the reply generation returned by a parent tool, before disclosing it. */
+export function recordAgentRunResultConsumption(
+  persistence: Pick<AgentRunPersistenceService, "getById"> &
+    Partial<Pick<AgentRunPersistenceService, "applyCommand">>,
+  run: AgentRun,
+): { readonly status: "settled"; readonly run: AgentRun } | { readonly status: "refused" } {
+  if (run.resultDelivery !== undefined) return { status: "settled", run };
+  const result = persistence.applyCommand?.({
+    kind: "settle-agent-run-result-delivery",
+    runId: run.id,
+    expectedVersion: run.version,
+    generation: run.generation ?? 1,
+    outcome: "consumed",
+  });
+  const current = result?.kind === "run-updated" ? result.run : persistence.getById(run.id);
+  if (
+    current !== undefined &&
+    (current.generation ?? 1) === (run.generation ?? 1) &&
+    current.resultDelivery !== undefined
+  )
+    return { status: "settled", run: current };
+  return { status: "refused" };
+}
