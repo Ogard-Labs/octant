@@ -2,6 +2,8 @@ import {
   decodeAgentRunCommandResult,
   decodeAgentObservedChild,
   decodeAgentRunResultsResponse,
+  decodeAgentRunReviewResponse,
+  type AgentRunReviewResponse,
   type AgentObservedChild,
   type AgentRunResultPacket,
   type AgentRunResultsResponse,
@@ -128,6 +130,7 @@ export interface AgentRunCenterQueryInput {
 
 export interface AgentRunClient {
   results?(runId: AgentRunId): Promise<AgentRunResultsResponse>;
+  review?(runId: AgentRunId, generation: number): Promise<AgentRunReviewResponse>;
   center(input?: AgentRunCenterQueryInput): Promise<AgentRunCenterResponse>;
   conversation(runId: AgentRunId, afterSequence?: number): Promise<AgentRunConversationResponse>;
   /**
@@ -199,6 +202,20 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
         return decodeAgentRunCenterResponse(body);
       } catch {
         throw new AgentRunClientFailure("unavailable", "AgentRun center response is malformed.");
+      }
+    },
+    async review(runId, generation) {
+      const url = new URL("/api/agent-runs/review", options.baseUrl);
+      url.searchParams.set("runId", String(runId));
+      url.searchParams.set("generation", String(generation));
+      const body = await requestJson(options.fetch, url.toString(), { method: "GET", headers });
+      try {
+        const result = decodeAgentRunReviewResponse(body);
+        if (String(result.runId) !== String(runId) || result.generation !== generation)
+          throw new Error("Review identity mismatch");
+        return result;
+      } catch {
+        throw new AgentRunClientFailure("unavailable", "AgentRun review is malformed.");
       }
     },
     async results(runId) {
