@@ -491,6 +491,43 @@
   font-size: var(--oct-text-xs);
 }
 
+.canvas-block__kind-diagram .canvas-block__diagram-svg {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
+
+.canvas-block__sequence-lifeline {
+  stroke: var(--oct-chart-axis);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.canvas-block__sequence-activation {
+  fill: var(--oct-fg-soft);
+  stroke: var(--oct-chart-axis);
+  stroke-width: 1;
+}
+
+.canvas-block__diagram-arrow {
+  fill: var(--oct-chart-axis);
+}
+
+.canvas-block__state-initial {
+  fill: var(--oct-fg);
+}
+
+.canvas-block__state-final {
+  fill: none;
+  stroke: var(--oct-fg);
+  stroke-width: 1.5;
+}
+
+.canvas-block__state-header {
+  fill: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .canvas-block__code-head {
   display: flex;
   justify-content: space-between;
