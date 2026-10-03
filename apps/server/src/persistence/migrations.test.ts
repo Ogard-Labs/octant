@@ -77,10 +77,11 @@ describe("applyMigrations", () => {
       const before = connection.prepare("SELECT * FROM event_journal").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
+        currentVersion: 68,
         appliedVersions: [
           24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
           46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
+          68,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(
@@ -138,11 +139,11 @@ describe("applyMigrations", () => {
 
     try {
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
+        currentVersion: 68,
         appliedVersions: [
           1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
           26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
-          48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
+          48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68,
         ],
       });
 
@@ -448,11 +449,11 @@ describe("applyMigrations", () => {
         .run("existing-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
+        currentVersion: 68,
         appliedVersions: [
           5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
           29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
-          51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
+          51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68,
         ],
       });
       expect(
@@ -490,11 +491,11 @@ describe("applyMigrations", () => {
         .run("kimi-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
+        currentVersion: 68,
         appliedVersions: [
           11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
           33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54,
-          55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
+          55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68,
         ],
       });
       expect(
@@ -541,11 +542,11 @@ describe("applyMigrations", () => {
         .run("anthropic-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
+        currentVersion: 68,
         appliedVersions: [
           13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
           35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56,
-          57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
+          57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68,
         ],
       });
       expect(
@@ -583,10 +584,10 @@ describe("applyMigrations", () => {
         .run("foundry-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
+        currentVersion: 68,
         appliedVersions: [
           45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66,
-          67,
+          67, 68,
         ],
       });
       expect(
@@ -624,8 +625,8 @@ describe("applyMigrations", () => {
         .run("grok-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
-        appliedVersions: [56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67],
+        currentVersion: 68,
+        appliedVersions: [56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68],
       });
       expect(() =>
         connection
@@ -664,8 +665,8 @@ describe("applyMigrations", () => {
         .run("glm-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
-        appliedVersions: [57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67],
+        currentVersion: 68,
+        appliedVersions: [57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68],
       });
       expect(() =>
         connection
@@ -716,8 +717,8 @@ describe("applyMigrations", () => {
       const before = connection.prepare("SELECT * FROM event_journal").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
-        appliedVersions: [58, 59, 60, 61, 62, 63, 64, 65, 66, 67],
+        currentVersion: 68,
+        appliedVersions: [58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(before);
       expect(
@@ -771,8 +772,8 @@ describe("applyMigrations", () => {
       expect(() => insertImage.run("openai-image-provider", "openai-image")).toThrow();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
-        appliedVersions: [64, 65, 66, 67],
+        currentVersion: 68,
+        appliedVersions: [64, 65, 66, 67, 68],
       });
       const insertImageAfter = connection.prepare(`
         INSERT INTO provider_instance_projection (
@@ -822,11 +823,11 @@ describe("applyMigrations", () => {
       const providerBefore = connection.prepare("SELECT * FROM provider_instance_projection").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
+        currentVersion: 68,
         appliedVersions: [
           6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
           29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
-          51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
+          51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(
@@ -848,7 +849,7 @@ describe("applyMigrations", () => {
       const before = connection.prepare("SELECT * FROM schema_migrations").all();
 
       expect(applyMigrations(connection, MIGRATIONS, () => "2099-01-01T00:00:00.000Z")).toEqual({
-        currentVersion: 67,
+        currentVersion: 68,
         appliedVersions: [],
       });
       expect(connection.prepare("SELECT * FROM schema_migrations").all()).toEqual(before);
@@ -901,11 +902,11 @@ describe("applyMigrations", () => {
       const projectBefore = connection.prepare("SELECT * FROM project_projection").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 67,
+        currentVersion: 68,
         appliedVersions: [
           8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
           31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
-          53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
+          53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(
@@ -1103,7 +1104,7 @@ it("preserves admitted context and results while adding purgeable child sessions
       .prepare("INSERT INTO agent_run_content_store VALUES (?, ?, ?, ?, ?, ?, ?)")
       .run("result", "run", "code-thread", "parent", "result", "Existing reply", clock());
     const previous = connection.prepare("SELECT * FROM agent_run_content_store").all();
-    expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
+    expect(applyMigrations(connection, MIGRATIONS.slice(0, 67), clock)).toEqual({
       currentVersion: 67,
       appliedVersions: [67],
     });
@@ -1115,6 +1116,48 @@ it("preserves admitted context and results while adding purgeable child sessions
           .run(kind, "run", "code-thread", "parent", kind, "{}", clock()),
       ).not.toThrow();
     }
+  } finally {
+    connection.close();
+  }
+});
+
+it("preserves child content while admitting private provider identities", () => {
+  const connection = openTemporaryDatabase();
+  try {
+    applyMigrations(connection, MIGRATIONS.slice(0, 67), clock);
+    for (const kind of ["admitted-context", "result", "managed-session", "managed-conversation"]) {
+      connection
+        .prepare("INSERT INTO agent_run_content_store VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(kind, "run", "code-thread", "parent", kind, "{}", clock());
+    }
+    const previous = connection
+      .prepare("SELECT * FROM agent_run_content_store ORDER BY content_id")
+      .all();
+    applyMigrations(connection, MIGRATIONS, clock);
+    expect(
+      connection.prepare("SELECT * FROM agent_run_content_store ORDER BY content_id").all(),
+    ).toEqual(previous);
+    expect(() =>
+      connection
+        .prepare("INSERT INTO agent_run_content_store VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(
+          "identity",
+          "run",
+          "code-thread",
+          "parent",
+          "managed-provider-identity",
+          "{}",
+          clock(),
+        ),
+    ).not.toThrow();
+    expect(
+      connection
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'agent_run_content_subject_idx'",
+        )
+        .get(),
+    ).toBeDefined();
+    expect(applyMigrations(connection, MIGRATIONS, clock).appliedVersions).toEqual([]);
   } finally {
     connection.close();
   }
