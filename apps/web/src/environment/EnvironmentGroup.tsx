@@ -1,6 +1,45 @@
 import { ChevronRight, type LucideIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+
+/**
+ * The glyph tile every Environment row leads with. The glyph is decoration:
+ * the row's title names it.
+ */
+export function EnvironmentTile(props: { readonly icon: LucideIcon }) {
+  return (
+    <span aria-hidden="true" className="environment-tile">
+      <props.icon size={14} strokeWidth={1.7} />
+    </span>
+  );
+}
+
+/**
+ * A captioned card of Environment rows, the Settings kit's grouped card: one
+ * surface, hairlines between its rows. Rows used to float on the panel with
+ * nothing to say which belonged together.
+ */
+export function EnvironmentCard(props: {
+  /** Absent for a card that needs no heading of its own. */
+  readonly caption?: string;
+  readonly children: ReactNode;
+}) {
+  const captionId = useId();
+  return (
+    <div
+      aria-labelledby={props.caption === undefined ? undefined : captionId}
+      className="environment-card"
+      role={props.caption === undefined ? undefined : "group"}
+    >
+      {props.caption === undefined ? null : (
+        <p className="environment-card__caption" id={captionId}>
+          {props.caption}
+        </p>
+      )}
+      <div className="environment-card__rows">{props.children}</div>
+    </div>
+  );
+}
 
 export interface EnvironmentGroupProps {
   readonly title: string;
@@ -46,16 +85,9 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
           className="environment-group__header window-no-drag"
           onClick={toggle}
           type="button"
-          variant="link"
+          variant="bare"
         >
-          {props.icon === undefined ? null : (
-            <props.icon
-              aria-hidden="true"
-              className="environment-group__icon"
-              size={16}
-              strokeWidth={1.7}
-            />
-          )}
+          {props.icon === undefined ? null : <EnvironmentTile icon={props.icon} />}
           <span className="environment-group__title">{props.title}</span>
           {props.summary === undefined ? null : (
             <span className="environment-group__summary"> {props.summary}</span>

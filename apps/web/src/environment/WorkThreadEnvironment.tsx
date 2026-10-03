@@ -4,7 +4,7 @@ import type { WorkThread, ProjectSummary, WorkspaceTab } from "@octant/contracts
 import { deriveWorkEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useEffect, useState, type ReactNode } from "react";
 import { FolderOpen, Repeat } from "lucide-react";
-import { EnvironmentGroup } from "./EnvironmentGroup";
+import { EnvironmentCard, EnvironmentGroup } from "./EnvironmentGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
@@ -99,65 +99,69 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
             : { workingLocation: String(thread.workingDirectory ?? ".") }),
         }}
       >
-        {props.agentRunClient === undefined ? null : (
-          <EnvironmentSubagents
-            client={props.agentRunClient}
-            {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
-            threadId={String(props.tab.threadId)}
-          />
-        )}
-        {props.usageDashboardClient === undefined &&
-        props.spendCeilingClient === undefined ? null : (
-          <ThreadUsagePanel
-            client={props.usageDashboardClient}
-            subjectType="work-thread"
-            subjectId={String(props.tab.threadId)}
-            {...(project === undefined ? {} : { projectId: String(project.id) })}
-            {...(props.spendCeilingClient === undefined
-              ? {}
-              : { spendCeilingClient: props.spendCeilingClient })}
-            {...(props.onOpenUsageDashboard === undefined
-              ? {}
-              : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
-          />
-        )}
-        {props.goalClient === undefined ? null : (
-          /* Setting a Goal has no effect on an ordinary turn: nothing reads the
+        <EnvironmentCard>
+          {props.agentRunClient === undefined ? null : (
+            <EnvironmentSubagents
+              client={props.agentRunClient}
+              {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+              threadId={String(props.tab.threadId)}
+            />
+          )}
+          {props.usageDashboardClient === undefined &&
+          props.spendCeilingClient === undefined ? null : (
+            <ThreadUsagePanel
+              client={props.usageDashboardClient}
+              subjectType="work-thread"
+              subjectId={String(props.tab.threadId)}
+              {...(project === undefined ? {} : { projectId: String(project.id) })}
+              {...(props.spendCeilingClient === undefined
+                ? {}
+                : { spendCeilingClient: props.spendCeilingClient })}
+              {...(props.onOpenUsageDashboard === undefined
+                ? {}
+                : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
+            />
+          )}
+          {props.goalClient === undefined ? null : (
+            /* Setting a Goal has no effect on an ordinary turn: nothing reads the
              objective until a loop runs it as the prompt of each round. It is
              an autopilot control, so it lives behind a disclosure that mounts
              only when opened rather than greeting every new task with a form. */
-          <EnvironmentGroup icon={Repeat} title="Keep working on this unattended">
-            <ThreadGoalPanel
-              client={props.goalClient}
-              {...(props.goalLoopClient === undefined ? {} : { loopClient: props.goalLoopClient })}
-              threadId={String(props.tab.threadId)}
-            />
-          </EnvironmentGroup>
-        )}
-        {thread === undefined ? null : (
-          <EnvironmentGroup
-            icon={FolderOpen}
-            summary={workingFolderLabel(thread.workingDirectory ?? ".")}
-            title="Working folder"
-          >
-            <ChangeWorkingFolder
-              value={thread.workingDirectory ?? "."}
-              onApply={async (workingDirectory) => {
-                const result = await props.threadClient.execute({
-                  kind: "change-work-thread-working-directory",
-                  threadId: thread.id,
-                  expectedVersion: thread.version,
-                  workingDirectory,
-                });
-                if ("kind" in result && result.kind === "thread-updated") {
-                  setThread(result.thread);
-                  return;
-                }
-                throw new Error("Work working directory was not updated.");
-              }}
-            />
-          </EnvironmentGroup>
-        )}
+            <EnvironmentGroup icon={Repeat} title="Keep working on this unattended">
+              <ThreadGoalPanel
+                client={props.goalClient}
+                {...(props.goalLoopClient === undefined
+                  ? {}
+                  : { loopClient: props.goalLoopClient })}
+                threadId={String(props.tab.threadId)}
+              />
+            </EnvironmentGroup>
+          )}
+          {thread === undefined ? null : (
+            <EnvironmentGroup
+              icon={FolderOpen}
+              summary={workingFolderLabel(thread.workingDirectory ?? ".")}
+              title="Working folder"
+            >
+              <ChangeWorkingFolder
+                value={thread.workingDirectory ?? "."}
+                onApply={async (workingDirectory) => {
+                  const result = await props.threadClient.execute({
+                    kind: "change-work-thread-working-directory",
+                    threadId: thread.id,
+                    expectedVersion: thread.version,
+                    workingDirectory,
+                  });
+                  if ("kind" in result && result.kind === "thread-updated") {
+                    setThread(result.thread);
+                    return;
+                  }
+                  throw new Error("Work working directory was not updated.");
+                }}
+              />
+            </EnvironmentGroup>
+          )}
+        </EnvironmentCard>
       </ThreadEnvironmentPanel>
       <div className="code-thread-environment__content">{props.children}</div>
     </div>

@@ -794,8 +794,8 @@ reading above it and both ends named below. Popovers, menus, dialogs, and hover 
 the floating surface and the overlay shadow, and have exactly one 1px hairline
 edge: the overlay shadow carries it for menus and popovers, and the shared
 dialog draws it as a border. A feature stylesheet sizes and places a popup and
-never sets its fill, border, or shadow. Environment stays flat on its owning surface, and a
-Settings section is a hairline-ringed card on the page, not a floating object. Frosted material is limited to native/optional sidebar
+never sets its fill, border, or shadow. Environment's cards on the dock and a Settings section on the page are
+hairline-ringed cards, not floating objects. Frosted material is limited to native/optional sidebar
 translucency and the floating activity picture-in-picture; reduced
 transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
 
@@ -1096,25 +1096,28 @@ for another subject never makes unavailable chrome visible.
 
 Environment is a right-dock tool, opened from the dock's tab strip or Add tool
 and nowhere else; the title band carries no second Environment button. It reads
-top to bottom in three parts. The header names what the thread works in: the
-name on its own line, then the branch and the home-relative folder in mono,
-with the full summary (working folder, running servers) kept as one sentence
-for assistive technology. One bordered card follows — the only bordered object
-in the tool — saying what the checkout holds (Uncommitted changes with its
-added and removed counts, opening Review; No uncommitted changes when clean),
-a detached HEAD or separate worktree when true, and Commit or push and Create
-pull request as two equal buttons. Everything else is one list with one row
-grammar: a 16px glyph, the name, the row's state right-aligned, and a trailing
-chevron where the row opens (an up-right arrow where it opens another tool).
-Rows are 36px, lift their ink on hover rather than taking a fill, and an open
-row's content starts under its name. Order: Local servers (open by default
-only when this checkout is serving something), Subagents (one row with its
-working / to review / done counts that opens the Agents tool — reading and
-steering a subagent belongs there), Computer use, Pull requests, Sources,
-Delivers, Working folder, and Usage (closed by default; totals, the one-line
-token ceiling form, and Open Usage dashboard inside). Other servers stay behind
-a nested disclosure; none are stopped or removed by hiding them. It stays on
-the dock's own background. Sources list the current thread's journaled image attachments when present.
+top to bottom as cards in the Settings kit's grouped-card look: one header card,
+then two captioned cards of rows. The header card names what the thread works
+in: the name on its own line, then the branch glyph, the branch, a dot, and the
+home-relative folder in mono, with the full summary (working folder, running
+servers) kept as one sentence for assistive technology. Inside it, an inner
+soft box says what the checkout holds (a file-diff glyph tile, Uncommitted
+changes with its added and removed counts under it, and a chevron, opening
+Review; No uncommitted changes when clean), a detached HEAD or separate
+worktree when true, and Commit or push and Create pull request sit under it as
+two equal buttons. The rows follow in two cards, Running (Local servers, open by
+default only when this checkout is serving something; Subagents, one row with
+its working / to review / done counts that opens the Agents tool — reading and
+steering a subagent belongs there; Computer use) and Delivery (Pull requests,
+Sources, Delivers, Working folder, and Usage, closed by default; totals, the
+one-line token ceiling form, and Open Usage dashboard inside). A card with no
+rows to show is omitted with its caption. Every row has one grammar: a 26px
+glyph tile, the name, the row's state as a small neutral pill, and a trailing
+chevron where the row opens (a row's own action, such as All pull requests,
+wraps under it when the dock is narrow rather than squeezing the pill). Rows are 44px, lift their ink on hover
+rather than taking a fill, and an open row's content starts under its name.
+Other servers stay behind a nested disclosure; none are stopped or removed by
+hiding them. The cards sit one step above the dock's own background. Sources list the current thread's journaled image attachments when present.
 Computer use offers Picture in Picture show/hide for the same live activity
 preview that floats over the main conversation. The preview never occupies
 Environment, and hiding it never stops its session. Browser stop and computer-use

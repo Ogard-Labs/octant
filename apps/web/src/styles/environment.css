@@ -1,12 +1,13 @@
 /*
- * The Environment tool reads top to bottom: what the thread works in (the
- * header), what that checkout holds and what to do about it (one card), then
- * one list of rows that all share a grammar — glyph, name, the row's state at
- * the trailing edge, and a chevron where the row opens. It had been built from
- * a dozen rule sets across the root stylesheet: a header with a state pill, a
- * four-row table that repeated the header, groups whose titles sat behind a
- * leading chevron, rows with a glyph beside groups without one, and a Usage
- * section open by default with its form. Every rule for it now lives here.
+ * The Environment tool reads top to bottom as cards: what the thread works in
+ * and what its checkout holds (the header card), then captioned cards of rows
+ * — Running, then Delivery — in the Settings kit's grouped-card look. Every
+ * row shares one grammar: a glyph tile, the name, the row's state as a pill at
+ * the trailing edge, and a chevron where the row opens. It had been a dozen
+ * rule sets across the root stylesheet: a header with a state pill, a four-row
+ * table that repeated the header, rows floating on the panel with nothing to
+ * say which belonged together, and a Usage section open by default with its
+ * form. Every rule for it now lives here.
  */
 
 .thread-environment-dock-host,
@@ -21,18 +22,38 @@
 }
 
 .thread-environment-dock {
+  /* One step above the dock's own fill: a card on the panel. The tile and the
+     pill sit a step above the card. Both follow the theme's text colour so the
+     Default style stays monochrome in light and dark. */
+  --environment-card-fill: color-mix(in oklab, var(--oct-fg) 3%, var(--oct-bg));
+  --environment-soft-fill: color-mix(in oklab, var(--oct-fg) 5%, transparent);
+  --environment-tile-fill: color-mix(in oklab, var(--oct-fg) 8%, transparent);
+  --environment-tile-size: 26px;
+  --environment-row-inset: var(--oct-space-3);
+
   display: flex;
   flex-direction: column;
   font-family: var(--oct-font-display);
 }
 
-/* Name on its own line; the branch and the folder under it. The branch keeps
-   its width before the folder does, since it is the one that changes. */
+/* The header card: name on its own line, the branch and the folder under it,
+   then the checkout's changes and the two things to do about them. The branch
+   keeps its width before the folder does, since it is the one that changes. */
 .thread-environment-dock__header {
   display: grid;
   min-width: 0;
+  gap: var(--oct-space-3);
+  margin: var(--oct-space-3) var(--oct-space-3) 0;
+  padding: var(--oct-space-3);
+  background: var(--environment-card-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+}
+
+.thread-environment-dock__identity {
+  display: grid;
+  min-width: 0;
   gap: var(--oct-space-1);
-  padding: var(--oct-space-4) var(--oct-space-4) var(--oct-space-3);
 }
 
 .thread-environment-dock__name {
@@ -50,16 +71,15 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-1);
   color: var(--oct-muted);
-  font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   line-height: 16px;
 }
 
 .thread-environment-dock__branch {
   display: inline-flex;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   max-width: 60%;
   align-items: center;
@@ -80,60 +100,85 @@
   white-space: nowrap;
 }
 
+.thread-environment-dock__separator {
+  flex: none;
+}
+
+/* The folder is an identifier, so it takes the identifier face. */
 .thread-environment-dock__place {
   flex: 1 1 auto;
+  font-family: var(--oct-font-mono);
 }
 
 .thread-environment-dock__body {
   display: grid;
   align-content: start;
-  gap: var(--oct-space-3);
-  padding: 0 var(--oct-space-2) var(--oct-space-4);
+  gap: var(--oct-space-4);
+  padding: var(--oct-space-4) var(--oct-space-3);
 }
 
-/* The checkout card: the one bordered object in the tool, because it is the
-   one thing here the reader acts on every turn. */
+/* What the header card's checkout holds, as one inner box, and what to do
+   about it. */
 .environment-checkout {
   display: grid;
   min-width: 0;
-  gap: var(--oct-space-1);
-  padding: var(--oct-space-1);
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-sm);
+  gap: var(--oct-space-2);
 }
 
 .environment-git-group {
   display: grid;
   min-width: 0;
+  gap: var(--oct-space-1);
 }
 
 .environment-git-group__changes {
   display: flex;
   width: 100%;
   min-width: 0;
-  height: auto;
-  min-height: 36px;
+  min-height: 44px;
   align-items: center;
   justify-content: flex-start;
   gap: var(--oct-space-2);
   margin: 0;
-  padding: 0 var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-2) var(--oct-space-2);
+  background: var(--environment-soft-fill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-regular);
   text-align: left;
 }
 
-.environment-git-group__icon,
+/* The box answers the pointer by lifting its ink, like the rows: a filled
+   hover on a box that is never selected read as a pressed one. */
+.environment-changes-action:hover .environment-git-group__chevron,
+.environment-changes-action:focus-visible .environment-git-group__chevron {
+  color: var(--oct-fg-2);
+}
+
+.environment-changes-action:focus-visible .environment-git-group__label {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
 .environment-git-group__chevron {
   flex: none;
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
   color: var(--oct-muted);
 }
 
-.environment-git-group__label {
+.environment-git-group__text {
+  display: grid;
   flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px;
+}
+
+.environment-git-group__label {
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -142,7 +187,6 @@
    checkout bar uses for the same figures. */
 .environment-git-group__diffstat {
   display: inline-flex;
-  flex: none;
   gap: var(--oct-space-2);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
@@ -182,7 +226,6 @@
   display: grid;
   gap: var(--oct-space-2);
   margin: 0;
-  padding: var(--oct-space-2);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
@@ -204,7 +247,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-2);
 }
 
 .environment-checkout__actions > * {
@@ -212,32 +254,78 @@
   min-width: max-content;
 }
 
-/* The button recipe shrinks an unsized glyph to 13px, so glyphs inside a
-   row button stood narrower than the same glyph in a plain row and the names
-   beside them fell out of line by 2px. */
-.environment-group__icon,
-.environment-row__icon,
-.environment-git-group__icon {
-  width: var(--oct-icon-md);
-  height: var(--oct-icon-md);
+/* The glyph tile every row leads with. The glyph is decoration; the row's
+   title names it. */
+.environment-tile {
+  display: grid;
+  flex: none;
+  width: var(--environment-tile-size);
+  height: var(--environment-tile-size);
+  place-items: center;
+  color: var(--oct-fg-2);
+  background: var(--environment-tile-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-sm);
 }
 
-.environment-group__chevron,
-.environment-row__trailing,
-.environment-git-group__chevron {
+.environment-tile > svg {
   width: var(--oct-icon-sm);
   height: var(--oct-icon-sm);
 }
 
-/* The list. */
+.environment-group__chevron,
+.environment-row__trailing {
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
+}
+
+/* The cards. */
 .environment-list {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: var(--oct-space-4);
 }
 
-/* One row grammar for a group's toggle, a row that opens another tool, and
-   a row with nothing to open. */
+.environment-card {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+}
+
+/* A card whose rows all declined to render (no Project, no client) is gone,
+   caption and all, rather than an empty box under a heading. */
+.environment-card:has(> .environment-card__rows:empty) {
+  display: none;
+}
+
+.environment-card__caption {
+  margin: 0;
+  padding-inline: var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.environment-card__rows {
+  display: grid;
+  min-width: 0;
+  background: var(--environment-card-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+}
+
+/* A hairline between rows, inset from the card's edges rather than running to
+   them, painted the way the Settings cards paint theirs so a row needs no
+   border of its own. */
+.environment-card__rows > * + * {
+  background-image: linear-gradient(var(--oct-hairline), var(--oct-hairline));
+  background-repeat: no-repeat;
+  background-position: var(--environment-row-inset) 0;
+  background-size: calc(100% - 2 * var(--environment-row-inset)) 1px;
+}
+
+/* One row grammar for a group's toggle, a row that opens another tool, and a
+   row with nothing to open. */
 .environment-group__header,
 .environment-link,
 .environment-row {
@@ -245,23 +333,17 @@
   width: 100%;
   min-width: 0;
   height: auto;
-  min-height: 36px;
+  min-height: 44px;
   align-items: center;
   justify-content: flex-start;
   gap: var(--oct-space-2);
-  padding: 0 var(--oct-space-2);
+  padding: var(--oct-space-2) var(--environment-row-inset);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-regular);
   letter-spacing: normal;
   text-align: left;
   text-transform: none;
-}
-
-.environment-group__icon,
-.environment-row__icon {
-  flex: none;
-  color: var(--oct-muted);
 }
 
 /* Rows answer the pointer by lifting their ink, not with a fill: an open row
@@ -277,19 +359,19 @@
   text-decoration: none;
 }
 
-.environment-group__header:hover .environment-group__icon,
+.environment-group__header:hover .environment-tile,
 .environment-group__header:hover .environment-group__chevron,
 .environment-group__header:hover .environment-group__summary,
-.environment-link:hover .environment-row__icon,
+.environment-link:hover .environment-tile,
 .environment-link:hover .environment-row__trailing,
 .environment-link:hover .environment-row__detail,
-.environment-group__header:focus-visible .environment-group__icon,
+.environment-group__header:focus-visible .environment-tile,
 .environment-group__header:focus-visible .environment-group__chevron,
 .environment-group__header:focus-visible .environment-group__summary,
-.environment-link:focus-visible .environment-row__icon,
+.environment-link:focus-visible .environment-tile,
 .environment-link:focus-visible .environment-row__trailing,
 .environment-link:focus-visible .environment-row__detail {
-  color: var(--oct-fg-2);
+  color: var(--oct-fg);
 }
 
 .environment-group__header:focus-visible .environment-group__title,
@@ -307,17 +389,22 @@
   font-weight: var(--oct-weight-regular);
 }
 
-/* The state yields before the name does, and ends where every other row's
-   state ends, just short of the chevron column. */
+/* The state is a small neutral pill. It yields before the name does, and ends
+   where every other row's state ends, just short of the chevron column. */
 .environment-group__summary,
 .environment-row__detail {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   margin-inline-start: auto;
+  padding: 0 var(--oct-space-2);
   overflow: hidden;
-  color: var(--oct-muted);
+  color: var(--oct-fg-2);
+  background: var(--environment-soft-fill);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-pill);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
+  line-height: 20px;
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -359,20 +446,27 @@
   min-width: 0;
 }
 
+/* The head wraps so a row's action drops under it instead of squeezing the
+   state pill: in a 300px dock "Not on GitHub" was cut to "Not on Git…" beside
+   "All pull requests". */
 .environment-group__head {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   align-items: center;
-  gap: var(--oct-space-1);
+  gap: 0 var(--oct-space-1);
 }
 
 .environment-group__head > .environment-group__header {
   flex: 1 1 auto;
+  width: auto;
 }
 
 .environment-group__head-action {
   display: inline-flex;
   flex: none;
+  margin-inline-start: auto;
+  padding-inline-end: var(--oct-space-2);
 }
 
 /* An open row's content starts under its name, not under its glyph. */
@@ -381,7 +475,8 @@
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-3) 32px;
+  padding: 0 var(--oct-space-2) var(--oct-space-3)
+    calc(var(--environment-row-inset) + var(--environment-tile-size) + var(--oct-space-2));
 }
 
 /* A group inside an open row (Other servers) is a plain disclosure there. */
@@ -480,5 +575,15 @@
 @media (prefers-reduced-motion: reduce) {
   .environment-group__chevron {
     transition: none;
+  }
+}
+
+/* Increased contrast strengthens the card outlines. It lives here, after the
+   cards' own border shorthands: this sheet loads after styles.css, so an
+   override there was reset to the hairline by these same-specificity rules. */
+@media (prefers-contrast: more) {
+  .thread-environment-dock__header,
+  .environment-card__rows {
+    border-color: var(--octant-border-strong);
   }
 }

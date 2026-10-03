@@ -21,6 +21,12 @@ export interface ThreadEnvironmentPanelProps {
   readonly summary: ThreadEnvironmentSummaryFacts;
   readonly open: boolean;
   readonly active?: boolean;
+  /**
+   * What the header card's facts lead to: the checkout's changes and the two
+   * actions on them. They sit inside the card so the name, the place and the
+   * state of the work read as one object.
+   */
+  readonly headerContent?: ReactNode;
   readonly children?: ReactNode;
 }
 
@@ -66,33 +72,39 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       className="thread-environment-dock"
       data-environment-status={props.summary.identity.status}
     >
-      {/* The dock strip's tab already says Environment; the header names
+      {/* The dock strip's tab already says Environment; the header card names
           what the thread works in — the name on its own line, then where:
-          the branch and the folder. It had carried the name, the branch and a
-          Changes pill, and the section under it then listed the branch and
-          the repository again. Whether the checkout has changes is the
-          Changes card's to say. */}
-      <header className="thread-environment-dock__header" title={sentence}>
+          the branch and the folder — and holds what that checkout has
+          changed. It had carried the name, the branch and a Changes pill, and
+          the section under it then listed the branch and the repository
+          again. */}
+      <header className="thread-environment-dock__header">
         <h2 className="visually-hidden">Environment</h2>
         {/* The whole summary stays one sentence for assistive technology;
             the visible parts are its layout. */}
         <span className="visually-hidden">{sentence}</span>
-        <span aria-hidden="true" className="thread-environment-dock__name">
-          {props.summary.identity.label}
-        </span>
-        {headline.branch === undefined && headline.place === undefined ? null : (
-          <span aria-hidden="true" className="thread-environment-dock__meta">
-            {headline.branch === undefined ? null : (
-              <span className="thread-environment-dock__branch">
-                <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
-                <span>{headline.branch}</span>
-              </span>
-            )}
-            {headline.place === undefined ? null : (
-              <span className="thread-environment-dock__place">{headline.place}</span>
-            )}
+        <div className="thread-environment-dock__identity" title={sentence}>
+          <span aria-hidden="true" className="thread-environment-dock__name">
+            {props.summary.identity.label}
           </span>
-        )}
+          {headline.branch === undefined && headline.place === undefined ? null : (
+            <span aria-hidden="true" className="thread-environment-dock__meta">
+              {headline.branch === undefined ? null : (
+                <span className="thread-environment-dock__branch">
+                  <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <span>{headline.branch}</span>
+                </span>
+              )}
+              {headline.branch === undefined || headline.place === undefined ? null : (
+                <span className="thread-environment-dock__separator">·</span>
+              )}
+              {headline.place === undefined ? null : (
+                <span className="thread-environment-dock__place">{headline.place}</span>
+              )}
+            </span>
+          )}
+        </div>
+        {props.headerContent}
       </header>
       <div className="thread-environment-dock__body">{props.children}</div>
     </section>

@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import { PictureInPicture2 } from "lucide-react";
+import { EnvironmentTile } from "../environment/EnvironmentGroup";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface ThreadActivityPreviewState {
@@ -20,12 +21,7 @@ export function ThreadActivityEnvironment() {
   // greyed out for every thread with no session, which read as broken.
   return (
     <section aria-label="Computer use" className="environment-row environment-activity">
-      <PictureInPicture2
-        aria-hidden="true"
-        className="environment-row__icon"
-        size={16}
-        strokeWidth={1.7}
-      />
+      <EnvironmentTile icon={PictureInPicture2} />
       <h3 className="environment-row__title">Computer use</h3>
       {preview.available ? (
         <OctantButton
