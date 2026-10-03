@@ -3,6 +3,7 @@ export * from "./bundledProviderDrivers";
 export * from "./capabilityMentions";
 export * from "./activation";
 export * from "./canvasSkillContributions";
+export * from "./canvasExportContributions";
 export * from "./addressing";
 export * from "./collisions";
 export * from "./composer";

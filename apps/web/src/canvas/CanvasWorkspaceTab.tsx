@@ -42,6 +42,8 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
+import type { CanvasExportOfferList } from "@octant/contracts/canvas-export";
+import { CanvasExportPanel } from "./CanvasExportPanel";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 import {
   CanvasRefreshPanel,
@@ -56,7 +58,7 @@ import { CanvasView } from "./CanvasView";
 import { CanvasVersionCompare } from "./CanvasVersionCompare";
 import { CanvasWorkspaceTabActions } from "./CanvasWorkspaceTabActions";
 
-const CANVAS_TOOL_DIALOGS = ["refine", "refresh", "share"] as const;
+const CANVAS_TOOL_DIALOGS = ["refine", "refresh", "share", "export"] as const;
 type CanvasToolDialog = (typeof CANVAS_TOOL_DIALOGS)[number];
 
 export interface CanvasWorkspaceTabProps {
@@ -89,6 +91,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const [expectedSequence, setExpectedSequence] = useState(1);
   const [refreshSkills, setRefreshSkills] = useState<ReadonlyArray<CanvasRefreshSkillOption>>([]);
   const [shares, setShares] = useState<CanvasShareOverview | undefined>(undefined);
+  const [exportOffers, setExportOffers] = useState<CanvasExportOfferList | undefined>(undefined);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [focusedBlockId, setFocusedBlockId] = useState<string | undefined>(undefined);
   const [commentThreads, setCommentThreads] = useState<ReadonlyArray<CanvasCommentThread>>([]);
@@ -191,6 +194,16 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     }
   }, [props.client, props.tab.canvasId]);
 
+  const loadExportOffers = useCallback(async () => {
+    const exportOffersLoader = props.client?.exportOffers;
+    if (exportOffersLoader === undefined) return;
+    try {
+      setExportOffers(await exportOffersLoader(props.tab.canvasId));
+    } catch {
+      setExportOffers(undefined);
+    }
+  }, [props.client, props.tab.canvasId]);
+
   const loadHistory = useCallback(async () => {
     if (props.client === undefined) return;
     const outcome = await props.client.history(props.tab.canvasId);
@@ -220,15 +233,17 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     setSelectedVersionId(undefined);
     setMessage("Loading canvas…");
     setShares(undefined);
+    setExportOffers(undefined);
     void loadCanvas().then(() => {
       if (!alive) return;
       void loadHistory();
       void loadShares();
+      void loadExportOffers();
     });
     return () => {
       alive = false;
     };
-  }, [props.client, props.tab.canvasId, loadCanvas, loadHistory, loadShares]);
+  }, [props.client, props.tab.canvasId, loadCanvas, loadHistory, loadShares, loadExportOffers]);
 
   const handleRevise = useCallback(
     async (request: CanvasReviseRequest) => {
@@ -557,6 +572,11 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     ...(shares !== undefined && selectedVersionId !== undefined
       ? [{ label: "Share…", value: "share" }]
       : []),
+    ...(exportOffers !== undefined &&
+    selectedVersionId !== undefined &&
+    String(selectedVersionId) === String(exportOffers.versionId)
+      ? [{ label: "Export…", value: "export" }]
+      : []),
   ];
 
   const openCommentsOn = (blockId: string | undefined) => {
@@ -767,6 +787,24 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             onShare={handleShare}
             overview={shares}
             versionId={selectedVersionId}
+          />
+        ) : null}
+      </OctantDialog>
+      <OctantDialog
+        className="canvas-workspace-tab__share-dialog"
+        describedBy="canvas-export-description"
+        label="Export canvas"
+        labelledBy="canvas-export-title"
+        onClose={() => setDialog(undefined)}
+        open={dialog === "export"}
+      >
+        {exportOffers !== undefined &&
+        props.client?.prepareExport !== undefined &&
+        props.client.decideExport !== undefined ? (
+          <CanvasExportPanel
+            offers={exportOffers}
+            onDecide={props.client.decideExport}
+            onPrepare={props.client.prepareExport}
           />
         ) : null}
       </OctantDialog>

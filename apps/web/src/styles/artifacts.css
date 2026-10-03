@@ -79,6 +79,13 @@
 
 .artifact-card {
   display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.artifact-card__export {
+  align-self: flex-start;
+  margin: 0.25rem 0.25rem 0.5rem;
 }
 
 .artifact-card__button {
