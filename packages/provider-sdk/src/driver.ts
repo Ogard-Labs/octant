@@ -168,6 +168,11 @@ export interface ProviderConnection {
     input: ProviderSessionResume,
   ) => Effect.Effect<ProviderSessionHandle, ProviderFailure>;
   readonly send: (input: ProviderTurnInput) => Effect.Effect<void, ProviderFailure>;
+  /** Delivers a person-authored note to the current turn without starting another turn. */
+  readonly steer?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly message: string;
+  }) => Effect.Effect<"steered" | "unsupported", ProviderFailure>;
   readonly interrupt: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly stop: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly answerApproval: (input: ProviderApprovalAnswer) => Effect.Effect<void, ProviderFailure>;

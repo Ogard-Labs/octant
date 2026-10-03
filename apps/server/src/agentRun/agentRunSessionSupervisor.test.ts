@@ -658,3 +658,32 @@ describe("AgentRunSessionSupervisor", () => {
     expect(persistence.getById(admitted.run.id)?.version).toBe(reconciled?.version);
   });
 });
+
+it("supervises a resumed child without taking the fresh-start path", async () => {
+  const fake = createFakeSessionPort();
+  const start = vi.fn(fake.port.start);
+  const resume = vi.fn((child: AgentRun) => fake.port.start(child));
+  const steer = vi.fn(async () => "steered" as const);
+  const supervisor = new AgentRunSessionSupervisor({
+    port: { ...fake.port, start, resume, steer },
+  });
+  supervisor.resume(run, { message: "Continue from the recorded state" });
+  expect(start).not.toHaveBeenCalled();
+  expect(resume).toHaveBeenCalledWith(run, { message: "Continue from the recorded state" });
+  expect(supervisor.activeRunIds()).toEqual([run.id]);
+  await expect(supervisor.steer({ runId: run.id, message: "Check the result" })).resolves.toBe(
+    "steered",
+  );
+  await supervisor.stop(run.id);
+  await expect(supervisor.steer({ runId: run.id, message: "Late note" })).resolves.toBe(
+    "unsupported",
+  );
+  expect(steer).toHaveBeenCalledOnce();
+});
+
+it("refuses unsupported session continuation without starting a fresh child", () => {
+  const fake = createFakeSessionPort();
+  const supervisor = new AgentRunSessionSupervisor({ port: fake.port });
+  expect(() => supervisor.resume(run)).toThrow("Retry");
+  expect(fake.started).toEqual([]);
+});

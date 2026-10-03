@@ -141,6 +141,10 @@ const TurnStartResult = Schema.Struct({ turn: TurnReference });
 export type CodexTurnResult = typeof TurnStartResult.Type;
 export const decodeTurnStartResult = decode(TurnStartResult);
 
+const TurnSteerResult = Schema.Struct({ turnId: Schema.NonEmptyString });
+export type CodexTurnSteerResult = typeof TurnSteerResult.Type;
+export const decodeTurnSteerResult = decode(TurnSteerResult);
+
 const TurnInterruptResult = Schema.Struct({});
 export type CodexTurnInterruptResult = typeof TurnInterruptResult.Type;
 export const decodeTurnInterruptResult = (value: unknown): CodexTurnInterruptResult => {

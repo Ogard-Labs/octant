@@ -7,6 +7,7 @@ import {
   type OctantMode,
   type ProjectId,
   type NativeHarnessSlotCandidate,
+  type NativeHarnessInteractionSource,
 } from "@octant/contracts";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
@@ -60,6 +61,7 @@ export class NativeHarnessQuestionStore {
     readonly mode: OctantMode;
     readonly projectId?: ProjectId | undefined;
     readonly lead: NativeHarnessSlotCandidate;
+    readonly source?: NativeHarnessInteractionSource;
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
     readonly signal?: AbortSignal | undefined;
@@ -74,6 +76,7 @@ export class NativeHarnessQuestionStore {
     const questionId = decodeNativeHarnessQuestionId(this.#options.uuid());
     const question = decodeNativeHarnessQuestion({
       id: questionId,
+      ...(input.source === undefined ? {} : { source: input.source }),
       prompt: input.prompt,
       options: input.options,
       status: "pending",

@@ -30,6 +30,12 @@ import { AgentRunOrchestrationError } from "./agentRunOrchestrationService";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
 
 export interface AgentRunControlAdmissionDependencies {
+  /** Binds this accepted execution to the exact authorized window; never called by reads. */
+  readonly onExecutionAccepted?: (input: {
+    readonly run: AgentRun;
+    readonly windowId: string;
+    readonly operation: "admission" | "resume" | "retry";
+  }) => void;
   readonly persistence: Pick<AgentRunPersistenceService, "getByRequestId">;
   readonly orchestration: Pick<AgentRunOrchestrationService, "admit">;
   readonly settings: {
@@ -128,6 +134,7 @@ export async function admitAgentRunControlRequest(
   let admittedWorkspace: AgentRunWorkspaceReceipt | undefined;
   if (dependencies.workspace !== undefined) {
     const admitted = await prepareAdmittedControlWorkspace({
+      requestId: String(controlRequest.requestId),
       windowId: input.windowId,
       parent: creationAuthority,
       role: controlRequest.role,
@@ -190,6 +197,13 @@ export async function admitAgentRunControlRequest(
       liveAuthority: creationAuthority.liveAuthority,
       confirmed: input.confirmed,
     });
+    if ("run" in result) {
+      dependencies.onExecutionAccepted?.({
+        run: result.run,
+        windowId: input.windowId,
+        operation: "admission",
+      });
+    }
     return { kind: "admitted", result, liveAuthority: creationAuthority.liveAuthority };
   } catch (error) {
     if (error instanceof AgentRunOrchestrationError) {

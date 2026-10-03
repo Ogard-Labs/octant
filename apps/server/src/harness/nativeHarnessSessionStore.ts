@@ -546,6 +546,18 @@ export class NativeHarnessSessionStore {
    */
   #requireRecoveryAfterRestart(): void {
     for (const [threadId, record] of this.#records) {
+      // Child sessions cannot keep a pending transport request across a host
+      // restart. A late answer must never be delivered to their next session.
+      for (const approval of record.approvals.filter(
+        (entry) => entry.source !== undefined && entry.status === "pending",
+      )) {
+        this.settleApproval(threadId, approval.id, { status: "expired" });
+      }
+      for (const question of record.questions.filter(
+        (entry) => entry.source !== undefined && entry.status === "pending",
+      )) {
+        this.settleQuestion(threadId, question.id, { status: "expired" });
+      }
       const cutOff = this.#turnsInFlight.has(threadId);
       const waiting =
         record.approvals.some((entry) => entry.status === "pending") ||

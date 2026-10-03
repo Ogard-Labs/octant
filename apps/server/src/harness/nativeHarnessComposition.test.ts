@@ -22,6 +22,77 @@ const thread = {
 } as unknown as CodeThread;
 
 describe("native harness composition", () => {
+  it.each([true, false])(
+    "offers child questions through either harness and refuses tools after authority is revoked (%s)",
+    async (isHarness) => {
+      let authorized = true;
+      const ask = vi.fn(async () => ({
+        status: "answered" as const,
+        answer: "Use the existing design",
+      }));
+      const composition = createNativeHarnessComposition({
+        isChildAuthorityCurrent: () => authorized,
+        authority: {
+          resolve: () => authority,
+          service: new ToolCallAuthorityService({
+            resolveGrantedAuthority: () => authority,
+            resolveLiveFacts: () => ({
+              providerAppManagedTools: "supported",
+              host: { computerUseEnabled: false },
+              executionPolicy: "plan",
+              approvalSatisfied: false,
+              externalContentIngested: false,
+            }),
+          }),
+        },
+        isHarnessProvider: () => isHarness,
+        childInteractions: () => ({ askUser: ask }),
+        hostId: authority.hostId,
+        readThreadTaint: () => false,
+        recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+        uuid: () => "00000000-0000-4000-8000-000000000099",
+        clock: () => "2026-10-03T00:00:00.000Z",
+      });
+      const tools = composition.forAgentRun({
+        run: {
+          id: thread.id,
+          parentThreadId: "parent",
+          routingReceipt: { mode: "chat", selectedProviderInstanceId: thread.providerInstanceId },
+          workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+        } as never,
+        authority: {
+          filesystem: false,
+          shell: false,
+          git: false,
+          network: false,
+          tools: true,
+          subagents: false,
+          executionPolicy: "plan",
+          permissionPersistence: "current-session",
+        },
+        projectRoot: "/unused",
+      });
+      expect(tools?.definitions.map((tool) => tool.name)).toEqual(["ask-user"]);
+      expect(
+        await tools?.execute({
+          name: "ask-user",
+          inputJson: JSON.stringify({ prompt: "Which design?", options: [] }),
+          signal: new AbortController().signal,
+        }),
+      ).toMatchObject({ result: { answer: "Use the existing design" } });
+      expect(ask).toHaveBeenCalledOnce();
+      authorized = false;
+      expect(
+        await tools?.execute({
+          name: "ask-user",
+          inputJson: JSON.stringify({ prompt: "Too late?", options: [] }),
+          signal: new AbortController().signal,
+        }),
+      ).toMatchObject({ isError: true });
+      expect(ask).toHaveBeenCalledOnce();
+    },
+  );
+
   it("offers web search on the next turn after SearXNG is set and follows a changed endpoint", async () => {
     let searxngBaseUrl: string | undefined;
     const fetch = vi.fn(
@@ -34,6 +105,7 @@ describe("native harness composition", () => {
         ),
     );
     const composition = createNativeHarnessComposition({
+      isChildAuthorityCurrent: () => true,
       authority: {
         resolve: () => authority,
         service: new ToolCallAuthorityService({

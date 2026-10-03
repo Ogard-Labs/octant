@@ -71,7 +71,7 @@ import type { ProviderDriver, ProviderLocalUsageHistorySource } from "@octant/pr
 import {
   authorizeAgentRunCreation,
   layoutContainsAgentRunThread,
-  scheduledAgentRunLiveAuthority,
+  boundAgentRunLiveAuthority,
 } from "./agentRun/authorizeAgentRunCreation";
 import { Data, Effect, Schema, Scope } from "effect";
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
@@ -260,7 +260,11 @@ import {
   type FileHelperProcessTransport,
 } from "./code/fileHelperProcessTransport";
 import { FileOperationPort } from "./code/fileOperationPort";
-import { createManagedWorktreeNodePorts, listWorktreeRefs } from "./code/managedWorktreeNodePorts";
+import {
+  createManagedWorktreeNodePorts,
+  listWorktreeRefs,
+  observeManagedWorktreeExecutionIdentity,
+} from "./code/managedWorktreeNodePorts";
 import {
   ManagedWorktreeService,
   type ManagedWorktreeRepositoryPort,
@@ -361,12 +365,11 @@ import type { AgentRunControlAdmissionDependencies } from "./agentRun/agentRunCo
 import { createAgentsManagedTools } from "./agentRun/agentRunManagedTools";
 import {
   createAgentRunChildWorktreePort,
-  deriveAgentRunChildWorktreeThreadId,
+  resolveAgentRunChildWorktreeThreadId,
   resolveAgentRunCodeWorkspaceContext,
 } from "./agentRun/agentRunChildWorktreePort";
 import { AgentRunWorkspaceReceiptStore } from "./agentRun/agentRunWorkspaceReceiptStore";
 import { AgentRunWorkspaceService } from "./agentRun/agentRunWorkspaceService";
-import type { AgentRunChildWorktreePort } from "./agentRun/agentRunWorkspaceService";
 import { AgentRunSettingsStore } from "./agentRun/agentRunSettingsStore";
 import { createAgentRunSettingsRouteHandler } from "./agentRun/agentRunSettingsRoutes";
 import type { AgentRunRouteDependencies } from "./agentRun/agentRunRoutes";
@@ -375,6 +378,7 @@ import {
   createRecordedAgentRunContextSnapshotPort,
 } from "./agentRun/agentRunSessionRuntime";
 import { AgentRunSessionSupervisor } from "./agentRun/agentRunSessionSupervisor";
+import { AgentRunSessionStore } from "./agentRun/agentRunSessionStore";
 import { AgentRunLiveConversationStore } from "./agentRun/agentRunLiveConversationStore";
 import { createFolderBrowseRouteHandler } from "./folderBrowseRoutes";
 import { createLinkedThreadRouteHandler } from "./linkedThread/linkedThreadRoutes";
@@ -649,6 +653,8 @@ import { SideTaskStore } from "./sideTasks/sideTaskStore";
 import { createSideTaskTools } from "./sideTasks/sideTaskTools";
 import { NativeHarnessApprovalStore } from "./harness/nativeHarnessApprovals";
 import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
+import { createAgentRunInteractions } from "./agentRun/agentRunInteractions";
+import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
 import { NativeHarnessTurnObserver } from "./harness/nativeHarnessTurnObserver";
 import { fetchPublicUrl, PublicFetchRefused } from "./harness/nativeHarnessWebFetch";
@@ -1762,6 +1768,37 @@ export function startOctantServer(
     });
     let browserToolApprovalService: BrowserToolApprovalService | undefined;
     const codeSessionAuthority = new CodeSessionAuthorityStore();
+    const agentRunExecutionWindows = new Map<
+      AgentRun["requestId"],
+      {
+        readonly windowId: WindowId;
+        readonly parentThreadId: AgentRun["parentThreadId"];
+      }
+    >();
+    const onAgentRunExecutionAccepted: NonNullable<
+      AgentRunControlAdmissionDependencies["onExecutionAccepted"]
+    > = ({ run, windowId, operation }) => {
+      if (run.routingReceipt.mode !== "code") return;
+      const previous = agentRunExecutionWindows.get(run.requestId);
+      if (
+        previous !== undefined &&
+        (operation === "admission" ||
+          String(previous.parentThreadId) !== String(run.parentThreadId))
+      )
+        return;
+      agentRunExecutionWindows.set(run.requestId, {
+        windowId: decodeWindowId(windowId),
+        parentThreadId: run.parentThreadId,
+      });
+    };
+    const agentRunParentAuthority = (run: AgentRun) =>
+      boundAgentRunLiveAuthority({
+        persistence,
+        run,
+        executionWindows: agentRunExecutionWindows,
+        codeSessionAuthority,
+        windowAuthorityStore,
+      });
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
     let projectBrowserService: ProjectBrowserService | undefined;
@@ -1794,6 +1831,10 @@ export function startOctantServer(
         extensionToolApprovalService.revokeWindow(windowId);
         browserToolApprovalService?.revokeWindow(windowId);
         codeSessionAuthority.revokeWindow(windowId);
+        for (const [requestId, binding] of agentRunExecutionWindows) {
+          if (String(binding.windowId) === String(windowId))
+            agentRunExecutionWindows.delete(requestId);
+        }
         activeCodeService?.revokeWindow?.(windowId);
         void browserAutomationService?.revokeWindow(windowId);
         void projectBrowserService?.revokeWindow(windowId);
@@ -1825,6 +1866,7 @@ export function startOctantServer(
     let nativeHarnessSessions: NativeHarnessSessionStore | undefined;
     let nativeHarnessObserver: NativeHarnessTurnObserver | undefined;
     let nativeHarnessQuestions: NativeHarnessQuestionStore | undefined;
+    let agentRunInteractions: ReturnType<typeof createAgentRunInteractions> | undefined;
     // Follow-up suggestions ride the same per-turn hooks as the harness, but
     // on every provider: any model can end a reply with the block, and the
     // chips it becomes are the thread's, not the harness session's.
@@ -1892,7 +1934,9 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
-    const agentRunChildWorktree: { current: AgentRunChildWorktreePort | undefined } = {
+    const agentRunChildWorktree: {
+      current: ReturnType<typeof createAgentRunChildWorktreePort> | undefined;
+    } = {
       current: undefined,
     };
     const agentRunWorkspace = new AgentRunWorkspaceService({
@@ -1919,7 +1963,13 @@ export function startOctantServer(
       settle: ((input: Parameters<SpendCeilingService["settle"]>[0]) =>
         spendCeilingHolder.service!.settle(input)) as SpendCeilingService["settle"],
     };
-    const agentRunLiveConversations = new AgentRunLiveConversationStore();
+    const agentRunSessionStore = new AgentRunSessionStore({
+      connection: persistence.connection,
+      getById: (runId) => agentRunPersistence.getById(runId),
+    });
+    const agentRunLiveConversations = new AgentRunLiveConversationStore({
+      persistence: agentRunSessionStore.conversations,
+    });
     // Managed subagent execution. A managed child runs as an in-process
     // provider session, not a spawned process, so authority is re-derived from
     // the run rather than inherited from the parent thread at execution time.
@@ -1927,7 +1977,60 @@ export function startOctantServer(
       port: createAgentRunSessionRuntime({
         capacityScheduler,
         spendCeiling,
-        appManagedTools: (input) => nativeHarnessComposition?.forAgentRun(input),
+        sessionStore: agentRunSessionStore.sessions,
+        verifyCodeWorkspace: async ({ run, signal }) => {
+          const workspace = run.workspaceReceipt;
+          const refused = {
+            status: "refused",
+            reason:
+              "The child's managed Code workspace is unavailable or its parent binding changed.",
+          } as const;
+          if (workspace.kind !== "code-worktree" || agentRunChildWorktree.current === undefined)
+            return refused;
+          const thread = persistence.readCodeThread(decodeCodeThreadId(String(run.parentThreadId)));
+          const project =
+            thread === undefined ? undefined : persistence.readProject(thread.projectId);
+          if (
+            thread?.lifecycle !== "active" ||
+            project?.type !== "code" ||
+            project.lifecycle !== "active" ||
+            String(project.id) !== String(workspace.projectId) ||
+            project.binding.canonicalRoot !== workspace.checkoutRoot ||
+            String(project.bindingHistory.at(-1)?.revisionId) !== String(thread.bindingRevisionId)
+          )
+            return refused;
+          const { code } = await resolveAgentRunPrepareCode(persistence, managedWorktreeReceipts, {
+            mode: "code",
+            threadId: String(run.parentThreadId),
+          });
+          if (code === undefined) return refused;
+          return agentRunChildWorktree.current.verifyExecution({
+            requestId: String(run.requestId),
+            parentThreadId: String(run.parentThreadId),
+            repositoryId: code.repositoryId,
+            repositoryRoot: code.repositoryRoot,
+            parentCheckoutRoot: code.parentCheckoutRoot,
+            worktreeRoot: workspace.worktreeRoot,
+            signal,
+          });
+        },
+        supportsResume: (providerInstanceId) =>
+          providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.resume ===
+          "supported",
+        appManagedTools: (input) => {
+          const target = effectiveAgentRunExecutionTarget(input.run.routingReceipt);
+          const observed = providerRuntimeRegistry.observedState(target.providerInstanceId);
+          const carriesTools =
+            observed?.capabilities.appManagedTools === "supported" ||
+            observed?.verifiedToolModelIds?.some(
+              (model) => String(model) === String(target.modelId),
+            ) === true;
+          return carriesTools ? nativeHarnessComposition?.forAgentRun(input) : undefined;
+        },
+        interactions: {
+          approve: (input) => agentRunInteractions?.approve(input) ?? Promise.resolve(false),
+          askUser: (input) => agentRunInteractions?.askUser(input) ?? Promise.resolve(undefined),
+        },
         // `configuredDriverOptions` is declared later in this scope; the closure
         // only runs when a child starts, long after boot, so the reference is safe.
         resolveDriver: (providerInstanceId) => {
@@ -1964,7 +2067,10 @@ export function startOctantServer(
           scheduler: capacityScheduler,
           now: () => new Date().toISOString() as UtcTimestamp,
         }),
-        onSessionStarted: ({ runId }) => agentRunLiveConversations.begin(runId),
+        onSessionStarted: ({ runId, resumed }) =>
+          agentRunLiveConversations.begin(runId, { resume: resumed }),
+        onUserMessage: ({ runId, kind, text, occurredAt }) =>
+          agentRunLiveConversations.appendStatus(runId, `${kind}: ${text}`, occurredAt),
         onTextDelta: ({ runId, text, occurredAt }) =>
           agentRunLiveConversations.appendText(runId, text, occurredAt),
         onSessionSettled: ({ runId, outcome }) => {
@@ -2036,6 +2142,7 @@ export function startOctantServer(
     // Harness `delegate` tool. No HTTP route starts a subagent: a child a
     // person started by hand had no agent to hand its result back to.
     const agentRunAdmission: AgentRunControlAdmissionDependencies = {
+      onExecutionAccepted: onAgentRunExecutionAccepted,
       persistence: agentRunPersistence,
       orchestration: agentRunOrchestration,
       settings: agentRunSettingsStore,
@@ -2115,45 +2222,11 @@ export function startOctantServer(
         }
         return { parentCandidate, runtimeFacts: [...factsByKey.values()] };
       },
-      workspace: {
-        prepare: async ({ windowId, parent, code }) =>
-          agentRunWorkspace.prepare({
-            windowId,
-            parent:
-              parent.mode === "code"
-                ? {
-                    ...parent,
-                    ...(await resolveAgentRunParentCheckout(
-                      persistence,
-                      managedWorktreeReceipts,
-                      parent.threadId,
-                    )),
-                  }
-                : parent,
-            ...(code === undefined
-              ? await resolveAgentRunPrepareCode(persistence, managedWorktreeReceipts, parent)
-              : { code: code }),
-          }),
-        confirm: ({ windowId, parent, worktreeReceiptId }) =>
-          agentRunWorkspace.confirm({ windowId, parent, worktreeReceiptId }),
-        admit: async ({ windowId, requested, role, parent }) =>
-          agentRunWorkspace.admit({
-            windowId,
-            requested,
-            role,
-            parent:
-              parent.mode === "code"
-                ? {
-                    ...parent,
-                    ...(await resolveAgentRunParentCheckout(
-                      persistence,
-                      managedWorktreeReceipts,
-                      parent.threadId,
-                    )),
-                  }
-                : parent,
-          }),
-      },
+      workspace: createAgentRunControlWorkspace(
+        agentRunWorkspace,
+        (threadId) => resolveAgentRunParentCheckout(persistence, managedWorktreeReceipts, threadId),
+        (parent) => resolveAgentRunPrepareCode(persistence, managedWorktreeReceipts, parent),
+      ),
       // A child that asked to be admitted with its parent's context is given
       // the parent thread's own recent conversation, read through the very
       // Chat view that thread already shows. `authorizeCreation` above has
@@ -2236,6 +2309,7 @@ export function startOctantServer(
         uuid: randomUUID,
       });
     const agentRunRouteDependencies: AgentRunRouteDependencies = {
+      onExecutionAccepted: onAgentRunExecutionAccepted,
       windowAuthorityStore,
       persistence: agentRunPersistence,
       liveConversations: agentRunLiveConversations,
@@ -2255,12 +2329,14 @@ export function startOctantServer(
           parentThreadId,
           windowId,
         }),
-      resolveCenterContext: ({ parentThreadId, mode }) =>
+      resolveCenterContext: ({ parentThreadId, mode, requestId, workspaceReceipt }) =>
         resolveAgentRunCenterContext({
           persistence,
           workThreadProjection,
           parentThreadId,
           mode,
+          requestId,
+          workspaceReceipt,
         }),
       snapshotCanvas: (input) => snapshotCanvasImpl(input),
     };
@@ -3615,6 +3691,8 @@ export function startOctantServer(
     });
     agentRunChildWorktree.current = createAgentRunChildWorktreePort({
       service: managedWorktreeService,
+      repository: managedWorktreePorts.repository,
+      observeExecutionIdentity: observeManagedWorktreeExecutionIdentity,
       loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
       findActive: (lookup) => managedWorktreeReceipts.findActive(lookup),
     });
@@ -5249,7 +5327,7 @@ export function startOctantServer(
       // Code threads already have an inline question surface; the same
       // question shows there so the answer can come from the thread itself.
       onAsked: ({ threadId, mode, question }) => {
-        if (mode !== "code") return;
+        if (mode !== "code" || question.source !== undefined) return;
         codeOperationRuntime?.raiseHarnessQuestion?.({
           threadId,
           questionId: String(question.id),
@@ -5263,6 +5341,29 @@ export function startOctantServer(
       sessions: nativeHarnessSessionsLive,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+    });
+    agentRunInteractions = createAgentRunInteractions({
+      getById: (id) => agentRunPersistence.getById(id),
+      approvals: nativeHarnessApprovals,
+      questions: nativeHarnessQuestionsLive,
+      providerName: (id) => persistence.readProviderInstance(id)?.displayName,
+      parentAuthority: agentRunParentAuthority,
+      parentLead: (run) => {
+        const id = String(run.parentThreadId);
+        const parent =
+          run.routingReceipt.mode === "chat"
+            ? persistence.readChatThread(decodeChatThreadId(id))
+            : run.routingReceipt.mode === "work"
+              ? workThreadProjection.read(decodeWorkThreadId(id))
+              : persistence.readCodeThread(decodeCodeThreadId(id));
+        return parent?.lifecycle === "active"
+          ? {
+              hostId: run.routingReceipt.hostId,
+              providerInstanceId: parent.providerInstanceId,
+              modelId: parent.modelId,
+            }
+          : undefined;
+      },
     });
     const nativeHarnessRoutingRoutes = createNativeHarnessRoutingRouteHandler({
       windowAuthorityStore,
@@ -5427,6 +5528,8 @@ export function startOctantServer(
       goals: goalService,
       questions: nativeHarnessQuestionsLive,
       approvals: nativeHarnessApprovals,
+      childInteractions: (run) => agentRunInteractions?.toolsFor(run) ?? {},
+      isChildAuthorityCurrent: (run) => agentRunInteractions?.isCurrent(run) === true,
       activity: nativeHarnessSessionsLive,
       delegate: (scope) =>
         createNativeHarnessDelegatePort(
@@ -6727,7 +6830,7 @@ export function startOctantServer(
         },
         agentRun: {
           readRun: (runId) => agentRunPersistence.getById(runId),
-          liveAuthority: (run) => scheduledAgentRunLiveAuthority({ persistence, run }),
+          liveAuthority: agentRunParentAuthority,
           resume: (runId, expectedVersion, liveAuthority) =>
             agentRunOrchestration.resume(runId, expectedVersion, liveAuthority),
           applySettled: (settled) => agentRunPersistence.applyUsageResumeSettled(settled),
@@ -9402,14 +9505,29 @@ function resolveAgentRunCenterContext(input: {
   readonly workThreadProjection: WorkThreadProjection;
   readonly parentThreadId: AgentRunParentThreadId;
   readonly mode: OctantMode;
+  readonly requestId: AgentRun["requestId"];
+  readonly workspaceReceipt: AgentRun["workspaceReceipt"];
 }): { readonly parentThreadTitle: string; readonly childThreadId?: CodeThreadId } {
   const threadId = String(input.parentThreadId);
   const title = resolveAgentRunParentThreadTitle(input);
+  const thread =
+    input.mode === "code"
+      ? input.persistence.readCodeThread(decodeCodeThreadId(threadId))
+      : undefined;
+  const childThreadId =
+    thread !== undefined &&
+    input.workspaceReceipt.kind === "code-worktree" &&
+    String(thread.projectId) === String(input.workspaceReceipt.projectId)
+      ? resolveAgentRunChildWorktreeThreadId({
+          parentThreadId: threadId,
+          requestId: String(input.requestId),
+          repositoryId: String(thread.repositoryId),
+          workspace: input.workspaceReceipt,
+        })
+      : undefined;
   return {
     parentThreadTitle: title ?? "Thread",
-    ...(input.mode === "code"
-      ? { childThreadId: decodeCodeThreadId(deriveAgentRunChildWorktreeThreadId(threadId)) }
-      : {}),
+    ...(childThreadId === undefined ? {} : { childThreadId }),
   };
 }
 
@@ -9481,6 +9599,54 @@ export function admittedParentChatContext(
     }
   }
   return blocks.slice(-MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS);
+}
+
+export function createAgentRunControlWorkspace(
+  workspace: AgentRunWorkspaceService,
+  resolveParentCheckout: (threadId: string) => ReturnType<typeof resolveAgentRunParentCheckout>,
+  resolvePrepareCode: (
+    parent: Parameters<typeof resolveAgentRunPrepareCode>[2],
+  ) => ReturnType<typeof resolveAgentRunPrepareCode>,
+): NonNullable<AgentRunControlAdmissionDependencies["workspace"]> {
+  return {
+    prepare: async ({ requestId, windowId, parent, code }) =>
+      workspace.prepare({
+        requestId,
+        windowId,
+        parent:
+          parent.mode === "code"
+            ? {
+                ...parent,
+                ...(await resolveParentCheckout(parent.threadId)),
+              }
+            : parent,
+        ...(code === undefined ? await resolvePrepareCode(parent) : { code: code }),
+      }),
+    confirm: async ({ requestId, windowId, parent, worktreeReceiptId }) =>
+      workspace.confirm({
+        requestId,
+        windowId,
+        worktreeReceiptId,
+        parent:
+          parent.mode === "code"
+            ? { ...parent, ...(await resolveParentCheckout(parent.threadId)) }
+            : parent,
+      }),
+    admit: async ({ requestId, windowId, requested, role, parent }) =>
+      workspace.admit({
+        requestId,
+        windowId,
+        requested,
+        role,
+        parent:
+          parent.mode === "code"
+            ? {
+                ...parent,
+                ...(await resolveParentCheckout(parent.threadId)),
+              }
+            : parent,
+      }),
+  };
 }
 
 async function resolveAgentRunParentCheckout(

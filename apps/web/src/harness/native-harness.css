@@ -72,6 +72,13 @@
   background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
 }
 
+.native-harness-question__detail {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
 .native-harness-card__head h3,
 .native-harness-card h4 {
   flex: 1;

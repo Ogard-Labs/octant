@@ -195,6 +195,10 @@ function fixture(
       calls.push({ method: "turn/start", input: value });
       return input.turnStart?.() ?? { turn: { id: "turn-1", status: "inProgress" } };
     },
+    turnSteer: async (value) => {
+      calls.push({ method: "turn/steer", input: value });
+      return { turnId: value.expectedTurnId };
+    },
     turnInterrupt: async (value) => {
       calls.push({ method: "turn/interrupt", input: value });
     },
@@ -879,6 +883,36 @@ describe("Codex driver probe and runtime lifecycle", () => {
 });
 
 describe("Codex thread and turn lifecycle", () => {
+  it("steers only the currently active turn and leaves the session and authority unchanged", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    try {
+      await startSession(acquired.connection);
+      const steer = () =>
+        Effect.runPromise(
+          acquired.connection.steer?.({ sessionId, message: "Check only the changed files" }) ??
+            Effect.succeed("unsupported"),
+        );
+      expect(await steer()).toBe("unsupported");
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "Review", attachments: [], tools: [] }),
+      );
+      expect(await steer()).toBe("steered");
+      expect(f.calls.at(-1)).toEqual({
+        method: "turn/steer",
+        input: {
+          threadId: "thread-1",
+          expectedTurnId: "turn-1",
+          input: [{ type: "text", text: "Check only the changed files", text_elements: [] }],
+        },
+      });
+      expect(f.calls.filter((call) => call.method === "turn/start")).toHaveLength(1);
+      expect(f.calls.filter((call) => call.method === "thread/start")).toHaveLength(1);
+    } finally {
+      await acquired.close();
+    }
+  });
+
   it("rejects a started thread outside the exact normalized Project root without retaining state", async () => {
     const f = fixture({
       threadStart: async (value) => ({
