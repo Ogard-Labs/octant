@@ -4364,6 +4364,7 @@ function LaunchedShell(
         {...(codeRow?.checkoutChip === undefined
           ? {}
           : { branchFallback: codeRow.checkoutChip.label })}
+        host={localHost?.displayName ?? localHostDisplayName()}
         loadBoard={loadCodeBoard}
         mode={mode}
         model={modelLabel}

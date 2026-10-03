@@ -15,6 +15,8 @@ export interface DockThreadOverviewContentProps {
   readonly model?: string | undefined;
   readonly access?: string | undefined;
   readonly context?: DockThreadFacts["context"] | undefined;
+  /** The display name of the host the thread runs on. */
+  readonly host?: string | undefined;
   /** Whether the thread's own row says it runs on a worktree of the Project. */
   readonly worktree?: boolean | undefined;
   /** The branch the row names, used when the board has not answered yet. */
@@ -52,6 +54,7 @@ export function DockThreadOverviewContent(props: DockThreadOverviewContentProps)
     ...(props.model === undefined ? {} : { model: props.model }),
     ...(props.access === undefined ? {} : { access: props.access }),
     ...(props.context === undefined ? {} : { context: props.context }),
+    ...(props.host === undefined ? {} : { host: props.host }),
   };
   return (
     <DockThreadOverview

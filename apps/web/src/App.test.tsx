@@ -4862,10 +4862,9 @@ describe("App", () => {
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await user.click(within(dock).getByRole("button", { name: "Browser" }));
     await user.click(within(dock).getByRole("button", { name: "Add tool" }));
-    const browserActions = within(dock).getAllByRole("button", { name: "Browser" });
-    const addBrowser = browserActions.at(-1);
-    if (addBrowser === undefined) throw new Error("Expected the Browser add action.");
-    await user.click(addBrowser);
+    // The menu hangs from the plus in a portal, outside the dock's own region.
+    const addTool = await screen.findByRole("dialog", { name: "Add tool" });
+    await user.click(within(addTool).getByRole("button", { name: "Browser" }));
 
     expect(within(dock).getByRole("tab", { name: "Browser 1" })).toBeVisible();
     expect(within(dock).getByRole("tab", { name: "Browser 2" })).toHaveAttribute(
@@ -4906,7 +4905,11 @@ describe("App", () => {
     expect(within(dock).getByRole("button", { name: "Terminal" })).toBeVisible();
 
     await user.click(within(panel).getByRole("button", { name: "Add tool" }));
-    await user.click(within(panel).getByRole("button", { name: "Review" }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Add tool" })).getByRole("button", {
+        name: "Review",
+      }),
+    );
     expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
     expect(within(panel).getByRole("tab", { name: "Review" })).toHaveAttribute(
       "aria-selected",
@@ -4941,7 +4944,11 @@ describe("App", () => {
     const panel = await screen.findByRole("region", { name: "Bottom panel" });
     expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
     await user.click(within(panel).getByRole("button", { name: "Add tool" }));
-    await user.click(within(panel).getByRole("button", { name: "Review" }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Add tool" })).getByRole("button", {
+        name: "Review",
+      }),
+    );
 
     expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
     expect(within(panel).getByRole("tab", { name: "Review" })).toHaveAttribute(

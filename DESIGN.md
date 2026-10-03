@@ -1054,21 +1054,31 @@ offer never moves focus from the composer, a rewrite never reopens a tab, and a
 tab the person closed stays closed. Document
 reads the file through the same host-authorized open the editor uses and
 renders Markdown with the preview's own viewer. With no open tab, the dock
-opens on a compact thread overview above the tool launcher, three sections
-separated by hairlines and each omitted when the window has nothing to put in
-it: Running now lists the other threads the window knows are working (any mode,
-at most five, newest first, never the thread on screen), each as a spinner,
-title, a neutral Project dot and name, and age, and opens that thread; This
-thread gives label/value rows for Project, Checkout (a mono branch chip, plus
-Worktree when the thread runs in one), Model, Access, and Context (used of
-total with a thin bar, from the composer meter's own source); Changes (Code
-only, from the board's observed changed files, never a stale observation) gives
-the file count with +/- totals and an Open review button for the Review tool.
-Every row is a fact the window already holds; an unknown value is left out, not
-shown as a placeholder. Below it, the launcher shows only capability-valid
-tool rows, grouped under Thread tools, Workspace, and Devices when more than
-one group has a tool; the head's Add tool action appears once a tab is open, since with
-none open the body is already the list of tools to add. The bottom panel uses
+opens on a thread overview above the tool tiles, sections spaced apart and each
+omitted when the window has nothing to put in it: Running now lists the other
+threads the window knows are working (any mode, at most five, newest first,
+never the thread on screen), each as a spinner, title, a neutral Project dot and
+name, and age, and opens that thread. This thread is one raised card: a header
+with a folder icon plate, the Project name, and a meta line of the branch (with
+Worktree when the thread runs in one) and the host it runs on; under it a two
+by two grid of fact boxes on a soft inner fill, each a small muted label over a
+medium-weight value: Model, Access, Context (a neutral ring beside the share,
+with used of total under it, from the composer meter's own source), and Changes
+(Code only, from the board's observed changed files, never a stale observation;
+`+`/`-` totals in diff colours over the file count). The Changes box is the
+button that opens the Review tool. Every box is a fact the window already
+holds; an unknown value is left out, not shown as a placeholder. Below the card,
+the tools are tiles, not a list: a small muted caption per group (Thread tools,
+Workspace, Devices, shown when more than one group has a tool), then a grid of
+cards each holding a 26px icon plate over the tool's name. Thread tools run two
+columns; the other groups fit as many columns as the dock's width allows, with a
+minimum tile of 88px. A tile changes its surface on hover and keyboard focus and
+nothing else: no accent, no ring. Only capability-valid tools appear. The head's
+Add tool action appears once a tab is open, since with none open the body is
+already the tiles to add. Add tool opens a menu in a portal anchored to the plus
+that was clicked, aligned to its start edge and kept inside the window by
+collision handling; it takes focus on its first tool, closes on Escape or an
+outside press, and returns focus to the plus. The bottom panel uses
 the same compact tool-tab and Add tool model for Review, Terminal, Browser,
 Files, and Side chat where supported. Selecting a tool removes that presentation from the other
 region; Terminal immediately attaches or starts and preserves one server

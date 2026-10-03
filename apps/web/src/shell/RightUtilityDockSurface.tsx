@@ -185,23 +185,27 @@ function DockWorkMap(props: {
               {groups.length > 1 ? (
                 <span className="dock-work-map__group-title">{group.label}</span>
               ) : null}
-              {group.surfaces.map((surface) => (
-                // One line per tool, what it opens on hover. With a sentence
-                // under every name the list ran two lines a row and the one a
-                // person wanted took reading the whole column.
-                <OctantButton
-                  aria-label={surface.label}
-                  className="dock-work-map__item"
-                  key={surface.id}
-                  onClick={() => props.onOpen(surface.id)}
-                  title={workMapDetail(surface.id)}
-                  type="button"
-                  variant="ghost"
-                >
-                  <DockToolIcon surface={surface.id} />
-                  <span className="dock-work-map__name">{surface.label}</span>
-                </OctantButton>
-              ))}
+              <div className="dock-work-map__tiles" data-columns={group.columns}>
+                {group.surfaces.map((surface) => (
+                  // The name alone sits under the icon, with what it opens on
+                  // hover. With a sentence under every name each tile grew tall
+                  // and the one a person wanted took reading the whole grid.
+                  <OctantButton
+                    aria-label={surface.label}
+                    className="dock-work-map__item"
+                    key={surface.id}
+                    onClick={() => props.onOpen(surface.id)}
+                    title={workMapDetail(surface.id)}
+                    type="button"
+                    variant="bare"
+                  >
+                    <span aria-hidden="true" className="dock-tile">
+                      <DockToolIcon surface={surface.id} />
+                    </span>
+                    <span className="dock-work-map__name">{surface.label}</span>
+                  </OctantButton>
+                ))}
+              </div>
             </div>
           ))}
         </div>

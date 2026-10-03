@@ -1,5 +1,5 @@
-import { LoaderCircle } from "lucide-react";
-import type { CSSProperties, ReactNode } from "react";
+import { Folder, GitBranch, LoaderCircle } from "lucide-react";
+import { Fragment, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { RunningThreadFact } from "./dockThreadOverviewModel";
 
@@ -9,6 +9,8 @@ export interface DockThreadFacts {
   readonly model?: string;
   readonly access?: string;
   readonly context?: { readonly label: string; readonly percent: number };
+  /** Where the thread runs, by the host's own display name. */
+  readonly host?: string;
 }
 
 export interface DockThreadChanges {
@@ -37,13 +39,21 @@ export interface DockThreadOverviewProps {
  */
 export function DockThreadOverview(props: DockThreadOverviewProps) {
   const facts = props.facts;
-  const hasFacts =
+  const meta = [
+    ...(facts.checkout?.branch === undefined
+      ? []
+      : [{ key: "branch", text: facts.checkout.branch }]),
+    ...(facts.checkout?.worktree === true ? [{ key: "worktree", text: "Worktree" }] : []),
+    ...(facts.host === undefined ? [] : [{ key: "host", text: facts.host }]),
+  ];
+  const hasThreadCard =
     facts.project !== undefined ||
-    facts.checkout !== undefined ||
+    meta.length > 0 ||
     facts.model !== undefined ||
     facts.access !== undefined ||
-    facts.context !== undefined;
-  if (props.running.length === 0 && !hasFacts && props.changes === undefined) return null;
+    facts.context !== undefined ||
+    props.changes !== undefined;
+  if (props.running.length === 0 && !hasThreadCard) return null;
 
   return (
     <div aria-label="Thread overview" className="dock-overview" role="region">
@@ -83,96 +93,156 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
           </ul>
         </section>
       )}
-      {hasFacts ? (
+      {hasThreadCard ? (
         <section aria-labelledby="dock-overview-thread" className="dock-overview__section">
           <h2 className="dock-overview__label" id="dock-overview-thread">
             This thread
           </h2>
-          <dl className="dock-overview__facts">
-            {facts.project === undefined ? null : (
-              <Fact label="Project">
-                <span className="dock-overview__value">{facts.project}</span>
-              </Fact>
-            )}
-            {facts.checkout === undefined ? null : (
-              <Fact label="Checkout">
-                {facts.checkout.branch === undefined ? null : (
-                  <span className="dock-overview__chip" title={facts.checkout.branch}>
-                    {facts.checkout.branch}
-                  </span>
-                )}
-                {facts.checkout.worktree ? (
-                  <span className="dock-overview__value">Worktree</span>
-                ) : null}
-              </Fact>
-            )}
-            {facts.model === undefined ? null : (
-              <Fact label="Model">
-                <span className="dock-overview__value">{facts.model}</span>
-              </Fact>
-            )}
-            {facts.access === undefined ? null : (
-              <Fact label="Access">
-                <span className="dock-overview__value">{facts.access}</span>
-              </Fact>
-            )}
-            {facts.context === undefined ? null : (
-              <Fact label="Context">
-                <span className="dock-overview__value">
-                  {`${facts.context.label} (${String(Math.round(facts.context.percent))}%)`}
+          <div className="dock-thread-card">
+            {facts.project === undefined && meta.length === 0 ? null : (
+              <div className="dock-thread-card__head">
+                <span aria-hidden="true" className="dock-tile">
+                  <Folder size={14} strokeWidth={1.5} />
                 </span>
-                <span
-                  aria-label="Context used"
-                  aria-valuemax={100}
-                  aria-valuemin={0}
-                  aria-valuenow={Math.round(Math.max(0, Math.min(100, facts.context.percent)))}
-                  className="dock-overview__meter"
-                  role="meter"
-                  style={
-                    {
-                      "--dock-overview-fill": `${String(Math.max(0, Math.min(100, facts.context.percent)))}%`,
-                    } as CSSProperties
-                  }
-                />
-              </Fact>
+                <div className="dock-thread-card__title">
+                  {facts.project === undefined ? null : (
+                    <span className="dock-thread-card__project" title={facts.project}>
+                      {facts.project}
+                    </span>
+                  )}
+                  {meta.length === 0 ? null : (
+                    <span className="dock-thread-card__meta">
+                      {facts.checkout?.branch === undefined ? null : (
+                        <GitBranch
+                          aria-hidden="true"
+                          className="dock-thread-card__branch-mark"
+                          size={12}
+                          strokeWidth={1.7}
+                        />
+                      )}
+                      {meta.map((segment, index) => (
+                        <Fragment key={segment.key}>
+                          {index === 0 ? null : (
+                            <span aria-hidden="true" className="dock-thread-card__separator">
+                              ·
+                            </span>
+                          )}
+                          <span
+                            className="dock-thread-card__segment"
+                            data-segment={segment.key}
+                            title={segment.text}
+                          >
+                            {segment.text}
+                          </span>
+                        </Fragment>
+                      ))}
+                    </span>
+                  )}
+                </div>
+              </div>
             )}
-          </dl>
-        </section>
-      ) : null}
-      {props.changes === undefined ? null : (
-        <section aria-labelledby="dock-overview-changes" className="dock-overview__section">
-          <h2 className="dock-overview__label" id="dock-overview-changes">
-            Changes
-          </h2>
-          <div className="dock-overview__changes">
-            <span className="dock-overview__value">
-              {`${props.changes.files.toLocaleString()} ${props.changes.files === 1 ? "file" : "files"}`}
-            </span>
-            <span className="dock-overview__diffstat">
-              <span>{`+${props.changes.insertions.toLocaleString()}`}</span>
-              <span>{`−${props.changes.deletions.toLocaleString()}`}</span>
-            </span>
-            <OctantButton
-              className="dock-overview__review"
-              onClick={props.changes.onOpenReview}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Open review
-            </OctantButton>
+            <dl className="dock-thread-card__facts">
+              {facts.model === undefined ? null : (
+                <Fact label="Model">
+                  <span className="dock-thread-card__value">{facts.model}</span>
+                </Fact>
+              )}
+              {facts.access === undefined ? null : (
+                <Fact label="Access">
+                  <span className="dock-thread-card__value">{facts.access}</span>
+                </Fact>
+              )}
+              {facts.context === undefined ? null : (
+                <Fact label="Context">
+                  <span className="dock-thread-card__context">
+                    <ContextRing percent={facts.context.percent} />
+                    <span className="dock-thread-card__value">
+                      {`${String(Math.round(facts.context.percent))}%`}
+                    </span>
+                  </span>
+                  <span className="dock-thread-card__detail">{facts.context.label}</span>
+                </Fact>
+              )}
+              {props.changes === undefined ? null : (
+                <Fact label="Changes">
+                  <OctantButton
+                    aria-describedby="dock-overview-changes-stat"
+                    aria-label="Open review"
+                    className="dock-thread-card__changes"
+                    onClick={props.changes.onOpenReview}
+                    type="button"
+                    variant="bare"
+                  >
+                    <span
+                      className="diffstat dock-thread-card__value"
+                      id="dock-overview-changes-stat"
+                    >
+                      <span className="add">{`+${props.changes.insertions.toLocaleString()}`}</span>{" "}
+                      <span className="del">{`−${props.changes.deletions.toLocaleString()}`}</span>
+                    </span>
+                    <span className="dock-thread-card__detail">
+                      {`${props.changes.files.toLocaleString()} ${props.changes.files === 1 ? "file" : "files"}`}
+                    </span>
+                  </OctantButton>
+                </Fact>
+              )}
+            </dl>
           </div>
         </section>
-      )}
+      ) : null}
     </div>
   );
 }
 
 function Fact(props: { readonly label: string; readonly children: ReactNode }) {
   return (
-    <div className="dock-overview__fact">
-      <dt className="dock-overview__fact-label">{props.label}</dt>
-      <dd className="dock-overview__fact-value">{props.children}</dd>
+    <div className="dock-thread-card__fact">
+      <dt className="dock-thread-card__fact-label">{props.label}</dt>
+      <dd className="dock-thread-card__fact-value">{props.children}</dd>
     </div>
+  );
+}
+
+const RING_SIZE = 20;
+const RING_RADIUS = 8;
+
+/**
+ * The window's fill as a gauge: a full neutral groove with the used share
+ * drawn clockwise from twelve o'clock. The composer's ring wears a hue; the
+ * dock stays monochrome, and the figure beside it carries the exact value.
+ */
+function ContextRing(props: { readonly percent: number }) {
+  const used = Math.max(0, Math.min(100, props.percent));
+  const centre = RING_SIZE / 2;
+  return (
+    <svg
+      aria-label="Context used"
+      aria-valuemax={100}
+      aria-valuemin={0}
+      aria-valuenow={Math.round(used)}
+      className="dock-thread-card__ring"
+      role="meter"
+      viewBox={`0 0 ${String(RING_SIZE)} ${String(RING_SIZE)}`}
+    >
+      <circle
+        className="dock-thread-card__ring-track"
+        cx={centre}
+        cy={centre}
+        fill="none"
+        r={RING_RADIUS}
+      />
+      {used > 0 ? (
+        <circle
+          className="dock-thread-card__ring-used"
+          cx={centre}
+          cy={centre}
+          fill="none"
+          pathLength={100}
+          r={RING_RADIUS}
+          strokeDasharray={`${String(used)} 100`}
+          transform={`rotate(-90 ${String(centre)} ${String(centre)})`}
+        />
+      ) : null}
+    </svg>
   );
 }
