@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SubagentsTray, ThreadSubagentsTray } from "./ComposerSubagentsTray";
 import type { AgentHierarchyInputEntry } from "./buildAgentHierarchyModel";
+import { observedChildFixture, resultPacketFixture } from "./agentActivityFixtures";
 
 const threadId = "11111111-1111-4111-8111-111111111111";
 
@@ -62,6 +63,42 @@ afterEach(() => {
 });
 
 describe("SubagentsTray", () => {
+  it("counts observed failures while folded and opens their read-only detail without a stop action", async () => {
+    const user = userEvent.setup();
+    const { onOpenSubagent } = renderTray([], {
+      observations: [observedChildFixture({ lifecycleStatus: "failed" })],
+      observationsTruncated: true,
+      storage: memoryStorage(),
+    });
+    const toggle = screen.getByRole("button", { name: /Subagents,/ });
+    expect(toggle).toHaveTextContent("1 listed · 1 failed");
+    expect(screen.getByText(/Earlier observed children/)).toBeVisible();
+    await user.click(toggle);
+    await user.click(
+      screen.getByRole("button", { name: /Inspect observed child: Inspect parser/ }),
+    );
+    expect(onOpenSubagent).toHaveBeenCalledWith("observation:provider-child");
+    expect(screen.queryByRole("button", { name: /Stop/ })).not.toBeInTheDocument();
+  });
+
+  it("previews the latest attributed result using that generation's model and reported evidence", () => {
+    renderTray([
+      {
+        ...entry("a", "completed", { required: true }),
+        resultPackets: [
+          resultPacketFixture({ generation: 1 }),
+          resultPacketFixture({ generation: 2, modelId: "second-model" }),
+        ],
+      },
+    ]);
+    const result = screen.getByText(/Generation 2 ·/);
+    expect(result).toHaveTextContent("second-model");
+    expect(result).not.toHaveTextContent("55555555-5555-4555-8555-555555555555");
+    expect(screen.getByText(/1 file reported · unverified/)).toBeVisible();
+    expect(screen.getByText(/Checks unavailable/)).toBeVisible();
+    expect(screen.queryByText(/first-model/)).not.toBeInTheDocument();
+  });
+
   it("shows a bounded preview with waiting, failed and review counts independent of running work", () => {
     vi.useFakeTimers({ now: Date.parse("2026-09-26T10:00:12.000Z"), shouldAdvanceTime: true });
     renderTray([
@@ -77,7 +114,7 @@ describe("SubagentsTray", () => {
     expect(rows).toHaveLength(3);
     const toggle = within(tray).getByRole("button", { name: /Subagents,/ });
     expect(toggle).toHaveTextContent("5 total");
-    expect(toggle).toHaveTextContent("1 failed · 1 waiting · 2 need review · 1 working");
+    expect(toggle).toHaveTextContent("1 failed · 1 waiting · 2 need review");
     expect(screen.getByRole("button", { name: "View all 5 subagents in Agents" })).toBeVisible();
     expect(within(tray).queryByText("Task e")).not.toBeInTheDocument();
   });
@@ -171,8 +208,8 @@ describe("SubagentsTray", () => {
 
     await user.click(screen.getByRole("button", { name: "Stop all" }));
     const confirm = screen.getByRole("group", { name: "Confirm stopping subagents" });
-    expect(confirm).toHaveTextContent("Stop all 2 active subagents on this thread?");
-    expect(confirm).toHaveTextContent("Only this thread's subagents are affected.");
+    expect(confirm).toHaveTextContent("Stop all 2 managed subagents on this thread?");
+    expect(confirm).toHaveTextContent("Only this thread's managed subagents are affected.");
     expect(onStopAll).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Keep running" }));
@@ -237,6 +274,7 @@ describe("ThreadSubagentsTray", () => {
     const client = {
       parentSummary: vi.fn(async () => ({
         parentThreadId: threadId,
+        observations: [observedChildFixture()],
         entries: [
           {
             ...entry("90000000-0000-4000-8000-000000000001", "running"),
@@ -272,6 +310,10 @@ describe("ThreadSubagentsTray", () => {
       }),
     );
     expect(onOpenSubagent).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000002");
+    await userEvent.click(
+      screen.getByRole("button", { name: /Inspect observed child: Inspect parser/ }),
+    );
+    expect(onOpenSubagent).toHaveBeenLastCalledWith("observation:provider-child");
     expect(
       screen.queryByRole("button", {
         name: "Stop subagent: Task 90000000-0000-4000-8000-000000000002",

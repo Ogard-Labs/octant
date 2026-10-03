@@ -1,3 +1,4 @@
+import type { AgentObservedChild } from "@octant/contracts";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
@@ -16,6 +17,8 @@ import {
   subagentNeedsReview,
   subagentStatusWord,
 } from "./subagentStatus";
+import { AgentResultPreview, latestResultPacket } from "./AgentRunResults";
+import { ObservedChildRow } from "./ObservedChildActivity";
 import { useChildRunStatus } from "./useChildRunStatus";
 import "./agent-hierarchy.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -55,6 +58,8 @@ export function ThreadSubagentsTray(props: {
       <SubagentsTray
         busy={subagents.busy}
         entries={subagents.entries}
+        observations={subagents.observations}
+        observationsTruncated={subagents.observationsTruncated}
         {...(subagents.errorMessage === undefined ? {} : { errorMessage: subagents.errorMessage })}
         {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
         onStop={(runId) => void subagents.cancelRun(runId)}
@@ -127,6 +132,8 @@ function ChildRunAttention(props: {
 }
 
 export interface SubagentsTrayProps {
+  readonly observations?: ReadonlyArray<AgentObservedChild>;
+  readonly observationsTruncated?: boolean;
   readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
   readonly onOpenSubagent?: (runId?: string) => void;
   /** Cancels one named subagent; it names its target, so it needs no confirmation. */
@@ -153,15 +160,24 @@ export function SubagentsTray(props: SubagentsTrayProps) {
   const storage = props.storage ?? browserStorage();
   const [open, setOpen] = useState(() => readOpen(storage));
   // The host's order, so a row does not jump as its status changes.
-  const working = props.entries.filter((entry) =>
-    isActiveAgentHierarchyStatus(entry.lifecycleStatus),
+  const working = props.entries.filter(
+    (entry) =>
+      entry.executionKind === "octant-managed" &&
+      isActiveAgentHierarchyStatus(entry.lifecycleStatus),
   );
   const outstanding = props.entries.filter(
     (entry) => isActiveAgentHierarchyStatus(entry.lifecycleStatus) || subagentNeedsReview(entry),
   );
-  const preview = outstanding.slice(0, 3);
+  const observations = props.observations ?? [];
+  const observedOutstanding = observations.filter((child) => child.lifecycleStatus !== "completed");
+  const candidates = [
+    ...outstanding.map((entry) => ({ kind: "managed" as const, entry })),
+    ...observedOutstanding.map((child) => ({ kind: "observed" as const, child })),
+  ];
+  const preview = candidates.slice(0, 3);
+  const total = props.entries.length + observations.length;
   const now = useNow(preview.length > 0 && open);
-  if (props.entries.length === 0 && props.errorMessage === undefined) return null;
+  if (total === 0 && props.errorMessage === undefined) return null;
 
   const toggle = () => {
     const next = !open;
@@ -169,7 +185,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
     setConfirming(false);
     writeOpen(storage, next);
   };
-  const count = trayStatus(props.entries);
+  const count = trayStatus(props.entries, observations, props.observationsTruncated === true);
 
   return (
     <div
@@ -195,7 +211,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
         </OctantButton>
         {props.onOpenSubagent === undefined ? null : (
           <OctantButton
-            aria-label={`View all ${props.entries.length} subagents in Agents`}
+            aria-label={`View all ${total} subagents in Agents`}
             className="composer-subagents__all"
             onClick={() => props.onOpenSubagent?.()}
             size="xs"
@@ -227,11 +243,11 @@ export function SubagentsTray(props: SubagentsTrayProps) {
               role="group"
             >
               <p>
-                Stop all {working.length} active subagents on this thread? Their work is cancelled
+                Stop all {working.length} managed subagents on this thread? Their work is cancelled
                 and cannot be resumed.
               </p>
               <p className="composer-subagents__confirm-scope">
-                Only this thread&apos;s subagents are affected. No other thread is stopped.
+                Only this thread&apos;s managed subagents are affected.
               </p>
               <div className="composer-subagents__confirm-actions">
                 <OctantButton
@@ -260,32 +276,50 @@ export function SubagentsTray(props: SubagentsTrayProps) {
 
           {preview.length > 0 ? (
             <ul className="composer-subagents__list">
-              {preview.map((entry) => (
-                <SubagentTrayRow
-                  busy={props.busy === true}
-                  entry={entry}
-                  key={entry.runId}
-                  now={now}
-                  {...(props.onOpenSubagent === undefined
-                    ? {}
-                    : { onOpenSubagent: props.onOpenSubagent })}
-                  onStop={props.onStop}
-                />
-              ))}
+              {preview.map((item) =>
+                item.kind === "managed" ? (
+                  <SubagentTrayRow
+                    busy={props.busy === true}
+                    entry={item.entry}
+                    key={item.entry.runId}
+                    now={now}
+                    {...(props.onOpenSubagent === undefined
+                      ? {}
+                      : { onOpenSubagent: props.onOpenSubagent })}
+                    onStop={props.onStop}
+                  />
+                ) : (
+                  <li
+                    key={`observed:${item.child.observationId}`}
+                    className="composer-subagents__row"
+                  >
+                    <ObservedChildRow
+                      child={item.child}
+                      now={now}
+                      {...(props.onOpenSubagent === undefined
+                        ? {}
+                        : { onOpen: props.onOpenSubagent })}
+                    />
+                  </li>
+                ),
+              )}
             </ul>
           ) : null}
-          {outstanding.length > preview.length ? (
+          {candidates.length > preview.length ? (
             <p className="composer-subagents__notice">
-              Showing {preview.length} of {outstanding.length} active or unreviewed subagents. Open
+              Showing {preview.length} of {candidates.length} active or unresolved subagents. Open
               Agents for the full list.
             </p>
           ) : null}
-          {outstanding.length === 0 ? (
+          {candidates.length === 0 ? (
             <p className="composer-subagents__notice">Finished subagents are listed in Agents.</p>
           ) : null}
         </div>
       ) : null}
 
+      {props.observationsTruncated ? (
+        <p className="composer-subagents__notice">Earlier observed children are not retained.</p>
+      ) : null}
       {props.reconnecting === true ? (
         <p className="composer-subagents__notice" role="status">
           Reconnecting. Showing the last status the host reported.
@@ -318,6 +352,7 @@ function SubagentTrayRow(props: {
   ]
     .filter((part) => part !== undefined)
     .join(" · ");
+  const result = latestResultPacket(entry.resultPackets ?? []);
   const reason = entry.recoveryReason ?? entry.resultAcknowledgement.followUpReason;
   return (
     <li className="composer-subagents__row">
@@ -334,12 +369,14 @@ function SubagentTrayRow(props: {
         <span className="composer-subagents__content">
           <span className="composer-subagents__task">{entry.task}</span>
           <span className="composer-subagents__meta">{meta}</span>
+          {result === undefined ? null : <AgentResultPreview packet={result} />}
           {reason === undefined ? null : (
             <span className="composer-subagents__reason">{reason}</span>
           )}
         </span>
       </OctantButton>
-      {isActiveAgentHierarchyStatus(entry.lifecycleStatus) ? (
+      {entry.executionKind === "octant-managed" &&
+      isActiveAgentHierarchyStatus(entry.lifecycleStatus) ? (
         <OctantIconButton
           className="composer-subagents__action"
           disabled={props.busy}
@@ -355,30 +392,46 @@ function SubagentTrayRow(props: {
   );
 }
 
-function trayStatus(entries: ReadonlyArray<AgentHierarchyInputEntry>): string {
+function trayStatus(
+  entries: ReadonlyArray<AgentHierarchyInputEntry>,
+  observations: ReadonlyArray<AgentObservedChild>,
+  truncated: boolean,
+): string {
+  const children = [...entries, ...observations];
   const count = (status: string) =>
-    entries.filter((entry) => entry.lifecycleStatus === status).length;
+    children.filter((child) => child.lifecycleStatus === status).length;
   const review = entries.filter(subagentNeedsReview).length;
-  const statuses = [
+  const failed = count("failed");
+  const waiting = count("waiting");
+  const stopped = count("interrupted") + count("cancelled");
+  const known = new Set([
     "failed",
+    "waiting",
     "interrupted",
     "cancelled",
-    "waiting",
     "queued",
     "starting",
     "running",
     "completed",
-  ];
-  const parts: string[] = [];
-  for (const status of statuses) {
-    if (status === "queued" && review > 0)
-      parts.push(`${review} ${review === 1 ? "needs" : "need"} review`);
-    const total = count(status);
-    if (total > 0) parts.push(`${total} ${status === "running" ? "working" : status}`);
-  }
-  const unknown = entries.filter((entry) => !statuses.includes(entry.lifecycleStatus)).length;
-  if (unknown > 0) parts.push(`${unknown} status unavailable`);
-  return [`${entries.length} total`, ...parts].join(" · ");
+  ]);
+  const unknown = children.filter((child) => !known.has(child.lifecycleStatus)).length;
+  const attention = [
+    failed > 0 ? `${failed} failed` : undefined,
+    waiting > 0 ? `${waiting} waiting` : undefined,
+    review > 0 ? `${review} ${review === 1 ? "needs" : "need"} review` : undefined,
+    stopped > 0 ? `${stopped} stopped` : undefined,
+    unknown > 0 ? `${unknown} status unavailable` : undefined,
+  ].filter((part) => part !== undefined);
+  const active = children.filter((child) =>
+    isActiveAgentHierarchyStatus(child.lifecycleStatus),
+  ).length;
+  const status =
+    attention.length > 0
+      ? attention.join(" · ")
+      : active > 0
+        ? `${active} active`
+        : `${count("completed")} completed`;
+  return `${children.length} ${truncated ? "listed" : "total"} · ${status}`;
 }
 
 function browserStorage(): Pick<Storage, "getItem" | "setItem"> | undefined {
