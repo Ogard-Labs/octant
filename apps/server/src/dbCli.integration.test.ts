@@ -219,6 +219,7 @@ describe("database CLI runtime composition", () => {
         { name: "thread-external-content-taint", lastSequence: 1, lag: 0 },
         { name: "usage-resume", lastSequence: 1, lag: 0 },
         { name: "spend-ceilings", lastSequence: 1, lag: 0 },
+        { name: "thread-message-queue", lastSequence: 1, lag: 0 },
       ],
     });
 

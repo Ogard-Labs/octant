@@ -834,6 +834,44 @@ flowchart LR
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
 
+- **Accepted message queue.** Chat, Work, and Code share a host-owned ordered
+  queue for messages the user submits while a turn runs. A successful enqueue
+  acknowledges durable storage; the renderer then relinquishes the submitted
+  draft and attachment ownership without clearing newer edits. Queue metadata,
+  ordering and delivery identities are journaled. Prompt bodies, selected
+  context and trusted attachment metadata stay in purgeable private storage.
+  Versioned edit, reorder and removal commands detect concurrent clients;
+  stable submission identities prevent an acknowledgement retry from adding
+  another message.
+  Code dispatch records a distinct operation identity for each attempt before
+  admission begins. A durable pre-launch refusal keeps the queued message and
+  attachments; explicit resume creates a fresh attempt instead of replaying a
+  cached refusal. Recovery reconciles the recorded attempt before any retry,
+  while genuine failures after admission remain terminal for that attempt.
+  Before sending a queue command, the client saves a bounded local retry receipt
+  containing the exact command and original draft identity, without window
+  capabilities. An unresolved receipt survives navigation and reload and blocks
+  a fresh submission until the original outcome is reconciled. Acknowledgement
+  clears only the unchanged original draft. Receipt cleanup follows composer
+  draft deletion and purge; a storage failure is visible and prevents an unsafe
+  submission or retry.
+  One dispatcher per thread sends through the mode's ordinary turn admission,
+  regardless of harness. Every dispatch checks the current Project, provider,
+  model, checkout, access and context policy. Only normal turn completion
+  advances the queue automatically. Cancellation, failure, changed authority,
+  unavailable attachments and uncertain delivery hold it with a visible reason.
+  Restart recovery also holds pending work until an authenticated user resumes
+  it; recovery never restores a temporary grant or guesses that an ambiguous
+  send failed. Closing a composer cannot delete an accepted queued attachment.
+  Thread purge removes queued private content and retained attachments.
+  A queued message remains bound to the provider, model and authority settings
+  present at enqueue. After changing those settings, restore them before
+  resuming, or remove and resubmit the message with the new settings. Local
+  authenticated windows share the queue; paired remote queue commands remain
+  unavailable until dispatch can revalidate the originating device's grants.
+  Queuing a future message is distinct from steering a running turn; steering
+  remains subject to the active runtime's actual capability.
+
 - **Composer placeholder.** An empty follow-up composer in a Chat, Work, or
   Code thread says "Reply…" and nothing else: a rotating feature tip in the
   place of a prompt read as noise to someone who already knew the feature and

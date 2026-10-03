@@ -1,14 +1,13 @@
+import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
+import {
+  decodeWorkThreadTranscript,
+  decodeWorkAttachmentReference,
+  type ThreadMessageQueueResult,
+} from "@octant/contracts";
+import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { WorkTurnClientFailure } from "@octant/client-runtime/work-turn-client";
-import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
-import {
-  decodeProjectSummary,
-  decodeFileMentionPath,
-  decodeUtcTimestamp,
-  decodeWorkThread,
-  decodeWorkThreadId,
-} from "@octant/contracts";
-import type { MentionableThreadId, ThreadMentionCandidate } from "@octant/contracts";
+import { decodeProjectSummary, decodeWorkThread, decodeWorkThreadId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -23,6 +22,168 @@ const providerId = "80000000-0000-4000-8000-0000000000b1" as never;
 const modelId = "model-one" as never;
 const alternateProviderId = "80000000-0000-4000-8000-0000000000b2" as never;
 const alternateModelId = "model-two" as never;
+
+function queuedWorkClients() {
+  const threadClient: WorkThreadClient = {
+    bootstrap: vi.fn(),
+    navigation: vi.fn(),
+    execute: vi.fn(),
+    queryBoard: vi.fn(),
+  };
+  const turnClient: WorkTurnClient = {
+    transcript: vi.fn(async () =>
+      decodeWorkThreadTranscript({ threadId, turns: [workTurn({ status: "running" })] }),
+    ),
+    startFirstTurn: vi.fn(),
+    lookupFirstTurn: vi.fn(),
+    cancelFirstTurn: vi.fn(),
+    subscribe: vi.fn(),
+    putAttachment: vi.fn(async (input) =>
+      decodeWorkAttachmentReference({
+        attachmentId: input.attachmentId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+      }),
+    ),
+    discardAttachment: vi.fn(async () => undefined),
+  };
+  return { threadClient, turnClient };
+}
+
+describe("Work host queue", () => {
+  it("uploads before queueing and preserves newer text and images through acknowledgment", async () => {
+    const host = queueTestHost();
+    const clients = queuedWorkClients();
+    const user = userEvent.setup();
+    const response = Promise.withResolvers<ThreadMessageQueueResult>();
+    host.execute.mockImplementationOnce(() => response.promise);
+    const { unmount } = render(
+      <WorkThreadWorkspace
+        initialThread={workThread()}
+        messageQueueClient={host}
+        {...clients}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    const composer = await screen.findByLabelText("Work prompt");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument(),
+    );
+    await user.type(composer, "First");
+    fireEvent.paste(composer, {
+      clipboardData: {
+        files: [new File(["image"], "first.png", { type: "image/png" })],
+        items: [],
+      },
+    });
+    await screen.findByAltText("first.png");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
+    expect(clients.turnClient.putAttachment).toHaveBeenCalledOnce();
+    const command = host.execute.mock.calls[0]?.[0];
+    if (command?.kind !== "enqueue") throw new Error("Expected enqueue");
+    expect(command.payload).toEqual(
+      expect.objectContaining({
+        mode: "work",
+        prompt: "First",
+        attachmentIds: [expect.any(String)],
+      }),
+    );
+    expect(composer).toHaveValue("First");
+    await user.clear(composer);
+    await user.type(composer, "New draft");
+    fireEvent.paste(composer, {
+      clipboardData: {
+        files: [new File(["image"], "later.png", { type: "image/png" })],
+        items: [],
+      },
+    });
+    await screen.findByAltText("later.png");
+    await act(async () => {
+      response.resolve(host.apply(command));
+    });
+    expect(composer).toHaveValue("New draft");
+    expect(screen.queryByAltText("first.png")).not.toBeInTheDocument();
+    expect(screen.getByAltText("later.png")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    expect(await screen.findByRole("button", { name: "2 queued" })).toBeVisible();
+    unmount();
+    expect(clients.turnClient.startFirstTurn).not.toHaveBeenCalled();
+    expect(clients.turnClient.discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "keeps files with the draft and releases uploads after a definite queue refusal on retry=%s",
+    async (retry) => {
+      const host = queueTestHost();
+      const clients = queuedWorkClients();
+      const user = userEvent.setup();
+      if (retry) host.execute.mockRejectedValueOnce(new Error("offline"));
+      host.execute.mockImplementation(async (command) => ({
+        status: "refused",
+        requestId: command.requestId,
+        reason: "queue-full",
+      }));
+      render(
+        <WorkThreadWorkspace
+          initialThread={workThread()}
+          messageQueueClient={host}
+          {...clients}
+          threadId={threadId}
+          title="Draft brief"
+        />,
+      );
+      const composer = await screen.findByLabelText("Work prompt");
+      await user.type(composer, "Keep this");
+      fireEvent.paste(composer, {
+        clipboardData: {
+          files: [new File(["image"], "kept.png", { type: "image/png" })],
+          items: [],
+        },
+      });
+      await screen.findByAltText("kept.png");
+      await user.click(screen.getByRole("button", { name: "Queue message" }));
+      if (retry) {
+        await screen.findByText(/host has not confirmed/);
+        fireEvent.paste(composer, {
+          clipboardData: {
+            files: [new File(["later"], "later.png", { type: "image/png" })],
+            items: [],
+          },
+        });
+        await screen.findByAltText("later.png");
+        await user.click(screen.getByRole("button", { name: "Check queue" }));
+        expect(screen.getByAltText("later.png")).toBeVisible();
+      }
+      await waitFor(() => expect(clients.turnClient.discardAttachment).toHaveBeenCalledOnce());
+      expect(composer).toHaveValue("Keep this");
+      expect(screen.getByAltText("kept.png")).toBeVisible();
+      expect(clients.turnClient.startFirstTurn).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retains the draft when an older host has no queue route", async () => {
+    const clients = queuedWorkClients();
+    const user = userEvent.setup();
+    render(
+      <WorkThreadWorkspace
+        initialThread={workThread()}
+        {...clients}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    const composer = await screen.findByLabelText("Work prompt");
+    await user.type(composer, "Keep this");
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
+    expect(composer).toHaveValue("Keep this");
+    expect(clients.turnClient.startFirstTurn).not.toHaveBeenCalled();
+  });
+});
 
 describe("WorkThreadWorkspace", () => {
   it.each([true, false])(
@@ -1299,59 +1460,6 @@ describe("WorkThreadWorkspace", () => {
     }
   });
 
-  it("sends a follow-up written while a turn is running once that turn completes", async () => {
-    const user = userEvent.setup();
-    const startFirstTurn = vi.fn(async () => ({
-      kind: "accepted" as const,
-      turn: workTurn({
-        requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-        turnId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-        status: "accepted",
-        prompt: "Next instruction",
-        transcript: [{ role: "user", text: "Next instruction" }],
-      }),
-    }));
-    let turns = [workTurn({ status: "running" })];
-    const threadClient = {
-      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
-      execute: vi.fn(),
-    } as unknown as WorkThreadClient;
-    const turnClient = {
-      transcript: vi.fn(async () => ({ threadId, turns })),
-      startFirstTurn,
-    };
-
-    render(
-      <WorkThreadWorkspace
-        hostId={"local" as never}
-        threadClient={threadClient}
-        threadId={threadId}
-        title="Draft brief"
-        turnClient={turnClient as never}
-      />,
-    );
-
-    const composer = await screen.findByLabelText("Work prompt");
-    expect(composer).toBeEnabled();
-    await user.type(composer, "Next instruction");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(startFirstTurn).not.toHaveBeenCalled();
-    // The message left the composer and joined the transcript: it was sent,
-    // not parked somewhere the user has to go back and release.
-    expect(composer).toHaveValue("");
-    expect(await screen.findByText("Next instruction")).toBeVisible();
-
-    turns = [workTurn({ status: "completed" })];
-    await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
-    expect(startFirstTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "start-work-thread-turn",
-        threadId,
-        prompt: "Next instruction",
-      }),
-    );
-  });
-
   it("does not offer @Browser in a thread whose provider cannot carry the tool", async () => {
     const user = userEvent.setup();
     const threadClient = {
@@ -1486,148 +1594,6 @@ describe("WorkThreadWorkspace", () => {
     await waitFor(() => expect(screen.getAllByText("Quick turn")).toHaveLength(1));
   });
 
-  it("sends a follow-up written mid-turn even after that turn is cancelled", async () => {
-    const user = userEvent.setup();
-    const startFirstTurn = vi.fn(async () => ({
-      kind: "accepted" as const,
-      turn: workTurn({
-        requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-        turnId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-        status: "accepted",
-        prompt: "Hold this",
-        transcript: [{ role: "user", text: "Hold this" }],
-      }),
-    }));
-    let turns = [workTurn({ status: "running" })];
-    const threadClient = {
-      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
-      execute: vi.fn(),
-    } as unknown as WorkThreadClient;
-    const turnClient = {
-      transcript: vi.fn(async () => ({ threadId, turns })),
-      startFirstTurn,
-    };
-
-    render(
-      <WorkThreadWorkspace
-        hostId={"local" as never}
-        threadClient={threadClient}
-        threadId={threadId}
-        title="Draft brief"
-        turnClient={turnClient as never}
-      />,
-    );
-
-    await user.type(await screen.findByLabelText("Work prompt"), "Hold this");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    turns = [workTurn({ status: "waiting" })];
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(startFirstTurn).not.toHaveBeenCalled();
-    turns = [workTurn({ status: "cancelled" })];
-    await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
-  });
-
-  it("sends the captured Work context and keeps context added to a later draft", async () => {
-    const user = userEvent.setup();
-    const firstThreadId = "90000000-0000-4000-8000-000000000001" as MentionableThreadId;
-    const secondThreadId = "90000000-0000-4000-8000-000000000002" as MentionableThreadId;
-    let turns = [workTurn({ status: "running" })];
-    const startFirstTurn = vi.fn(async () => ({
-      kind: "accepted" as const,
-      turn: workTurn({
-        status: "accepted",
-        prompt: "first draft",
-        transcript: [{ role: "user", text: "first draft" }],
-      }),
-    }));
-    const threadClient = {
-      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
-      execute: vi.fn(),
-    } as unknown as WorkThreadClient;
-    const turnClient = {
-      transcript: vi.fn(async () => ({ threadId, turns })),
-      startFirstTurn,
-      putAttachment: vi.fn(async (input) => ({
-        attachmentId: input.attachmentId,
-        displayName: input.displayName,
-        mediaType: input.mediaType,
-        byteLength: input.bytes.byteLength,
-        digest: "d".repeat(64),
-      })),
-    };
-    const threadMentionClient: ThreadMentionClient = {
-      search: vi.fn(async (_requestId, query) => [
-        mentionCandidate(query.includes("second") ? secondThreadId : firstThreadId),
-      ]),
-      resolve: vi.fn(async (_requestId, ids: ReadonlyArray<MentionableThreadId>) => ({
-        mentions: [],
-        unavailable: ids.map((id) => ({ threadId: id, reason: "unauthorized" as const })),
-      })),
-      openSideChat: vi.fn(),
-      execute: vi.fn(),
-    };
-    const fileMentionClient: FileMentionClient = {
-      complete: vi.fn(async (_requestId, _scope, query) => [
-        {
-          kind: "file" as const,
-          path: decodeFileMentionPath(query.includes("second") ? "second.md" : "first.md"),
-        },
-      ]),
-      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
-      execute: vi.fn(),
-    };
-
-    render(
-      <WorkThreadWorkspace
-        fileMentionClient={fileMentionClient}
-        hostId={"local" as never}
-        threadClient={threadClient}
-        threadId={threadId}
-        threadMentionClient={threadMentionClient}
-        title="Draft brief"
-        turnClient={turnClient as never}
-      />,
-    );
-
-    const composer = await screen.findByLabelText("Work prompt");
-    await user.type(composer, "first draft #first");
-    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
-    await user.type(composer, " @first");
-    await user.click(await screen.findByRole("option", { name: /first.md/ }));
-    fireEvent.paste(composer, {
-      clipboardData: {
-        files: [new File([new Uint8Array([137, 80, 78])], "first.png", { type: "image/png" })],
-        items: [],
-      },
-    });
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-
-    await user.type(composer, "second draft #second");
-    await user.click(await screen.findByRole("option", { name: /Roadmap/ }));
-    await user.type(composer, " @second");
-    await user.click(await screen.findByRole("option", { name: /second.md/ }));
-    fireEvent.paste(composer, {
-      clipboardData: {
-        files: [new File([new Uint8Array([137, 80, 78])], "second.png", { type: "image/png" })],
-        items: [],
-      },
-    });
-
-    turns = [workTurn({ status: "completed" })];
-    await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
-    expect(startFirstTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: "first draft #[Release notes]  @first.md",
-        threadMentionIds: [firstThreadId],
-        fileMentionPaths: ["first.md"],
-        attachmentIds: [expect.anything()],
-      }),
-    );
-    expect(composer).toHaveValue("second draft #[Roadmap]  @second.md ");
-    expect(screen.getByLabelText("Mentioned threads")).toHaveTextContent("Roadmap");
-    expect(await screen.findByAltText("second.png")).toBeInTheDocument();
-  });
-
   it("shows the host's reason when it refuses to start a Work turn", async () => {
     const user = userEvent.setup();
     const reason =
@@ -1661,172 +1627,6 @@ describe("WorkThreadWorkspace", () => {
 
     expect(await screen.findByText(reason)).toBeInTheDocument();
     expect(screen.queryByText("The Work turn could not be started.")).not.toBeInTheDocument();
-  });
-
-  it("restores the captured Work context when the deferred send is refused", async () => {
-    const user = userEvent.setup();
-    const mentionedThreadId = "90000000-0000-4000-8000-000000000001" as MentionableThreadId;
-    let turns = [workTurn({ status: "running" })];
-    const startFirstTurn = vi.fn(async () => ({
-      kind: "not-created" as const,
-      requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-      message: "Work turn refused",
-    }));
-    const threadClient = {
-      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
-      execute: vi.fn(),
-    } as unknown as WorkThreadClient;
-    const turnClient = {
-      transcript: vi.fn(async () => ({ threadId, turns })),
-      startFirstTurn,
-      putAttachment: vi.fn(async (input) => ({
-        attachmentId: input.attachmentId,
-        displayName: input.displayName,
-        mediaType: input.mediaType,
-        byteLength: input.bytes.byteLength,
-        digest: "e".repeat(64),
-      })),
-      discardAttachment: vi.fn(async () => undefined),
-    };
-    const threadMentionClient: ThreadMentionClient = {
-      search: vi.fn(async () => [mentionCandidate(mentionedThreadId)]),
-      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
-      openSideChat: vi.fn(),
-      execute: vi.fn(),
-    };
-    const fileMentionClient: FileMentionClient = {
-      complete: vi.fn(async () => [
-        { kind: "file" as const, path: decodeFileMentionPath("first.md") },
-      ]),
-      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
-      execute: vi.fn(),
-    };
-
-    render(
-      <WorkThreadWorkspace
-        fileMentionClient={fileMentionClient}
-        hostId={"local" as never}
-        threadClient={threadClient}
-        threadId={threadId}
-        threadMentionClient={threadMentionClient}
-        title="Draft brief"
-        turnClient={turnClient as never}
-      />,
-    );
-
-    const composer = await screen.findByLabelText("Work prompt");
-    await user.type(composer, "retry this #first");
-    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
-    await user.type(composer, " @first");
-    await user.click(await screen.findByRole("option", { name: /first.md/ }));
-    fireEvent.paste(composer, {
-      clipboardData: {
-        files: [new File([new Uint8Array([137, 80, 78])], "first.png", { type: "image/png" })],
-        items: [],
-      },
-    });
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(composer).toHaveValue("");
-
-    turns = [workTurn({ status: "completed" })];
-    await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
-    await waitFor(() => expect(composer).toHaveValue("retry this #[Release notes]  @first.md"));
-    const uploadedId = turnClient.putAttachment.mock.calls[0]?.[0].attachmentId;
-    expect(uploadedId).toBeDefined();
-    expect(turnClient.discardAttachment).toHaveBeenCalledWith(threadId, uploadedId);
-    expect(await screen.findByAltText("first.png")).toBeInTheDocument();
-    expect(screen.getByLabelText("Mentioned threads")).toHaveTextContent("Release notes");
-  });
-
-  it("discards every Work attachment uploaded before turn start throws", async () => {
-    const user = userEvent.setup();
-    let turns = [workTurn({ status: "running" })];
-    const startFirstTurn = vi.fn(async () => {
-      throw new Error("offline");
-    });
-    const threadClient = {
-      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
-      execute: vi.fn(),
-    } as unknown as WorkThreadClient;
-    const putAttachment = vi.fn(async (input) => ({
-      attachmentId: input.attachmentId,
-      displayName: input.displayName,
-      mediaType: input.mediaType,
-      byteLength: input.bytes.byteLength,
-      digest: "f".repeat(64),
-    }));
-    const discardAttachment = vi.fn(async () => undefined);
-    const turnClient = {
-      transcript: vi.fn(async () => ({ threadId, turns })),
-      startFirstTurn,
-      putAttachment,
-      discardAttachment,
-    };
-
-    render(
-      <WorkThreadWorkspace
-        hostId={"local" as never}
-        threadClient={threadClient}
-        threadId={threadId}
-        title="Draft brief"
-        turnClient={turnClient as never}
-      />,
-    );
-
-    const composer = await screen.findByLabelText("Work prompt");
-    await user.type(composer, "retry with both images");
-    fireEvent.paste(composer, {
-      clipboardData: {
-        files: [
-          new File([new Uint8Array([1])], "first.png", { type: "image/png" }),
-          new File([new Uint8Array([2])], "second.png", { type: "image/png" }),
-        ],
-        items: [],
-      },
-    });
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-
-    turns = [workTurn({ status: "completed" })];
-    await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
-    await waitFor(() => expect(discardAttachment).toHaveBeenCalledTimes(2));
-    const uploadedIds = putAttachment.mock.calls.map((call) => call[0].attachmentId);
-    expect(discardAttachment.mock.calls).toEqual([
-      [threadId, uploadedIds[0]],
-      [threadId, uploadedIds[1]],
-    ]);
-  });
-
-  it("does not let Enter submit a second Work draft while one message waits", async () => {
-    const user = userEvent.setup();
-    const startFirstTurn = vi.fn();
-    const threadClient = {
-      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
-      execute: vi.fn(),
-    } as unknown as WorkThreadClient;
-    const turnClient = {
-      transcript: vi.fn(async () => ({ threadId, turns: [workTurn({ status: "running" })] })),
-      startFirstTurn,
-    };
-
-    render(
-      <WorkThreadWorkspace
-        hostId={"local" as never}
-        threadClient={threadClient}
-        threadId={threadId}
-        title="Draft brief"
-        turnClient={turnClient as never}
-      />,
-    );
-
-    const composer = await screen.findByLabelText("Work prompt");
-    await user.type(composer, "first draft");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    await user.type(composer, "second draft");
-    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
-
-    fireEvent.keyDown(composer, { key: "Enter" });
-    expect(composer).toHaveValue("second draft");
-    expect(startFirstTurn).not.toHaveBeenCalled();
   });
 
   it("keeps a newer draft when an accepted send has identical text", async () => {
@@ -1872,149 +1672,6 @@ describe("WorkThreadWorkspace", () => {
 
     await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce());
     expect(composer).toHaveValue("same draft");
-  });
-
-  it("restores a refused Work message into its origin thread after navigation", async () => {
-    const user = userEvent.setup();
-    const originThreadId = threadId;
-    const otherThreadId = decodeWorkThreadId("10000000-0000-4000-8000-000000000102");
-    const store = createComposerThreadDraftStore(memoryDraftStorage());
-    let activeThreadId = originThreadId;
-    const threadClient = {
-      bootstrap: vi.fn(async () => ({ threads: [workThread({ id: activeThreadId })] })),
-      execute: vi.fn(),
-    } as unknown as WorkThreadClient;
-    const turnClient = {
-      transcript: vi.fn(async () => ({
-        threadId: activeThreadId,
-        turns: [workTurn({ threadId: activeThreadId, status: "running" })],
-      })),
-      startFirstTurn: vi.fn(),
-      putAttachment: vi.fn(async (input) => ({
-        attachmentId: input.attachmentId,
-        displayName: input.displayName,
-        mediaType: input.mediaType,
-        byteLength: input.bytes.byteLength,
-        digest: "f".repeat(64),
-      })),
-      discardAttachment: vi.fn(),
-    };
-    const threadMentionClient: ThreadMentionClient = {
-      search: vi.fn(async () => [
-        mentionCandidate("90000000-0000-4000-8000-000000000001" as MentionableThreadId),
-      ]),
-      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
-      openSideChat: vi.fn(),
-      execute: vi.fn(),
-    };
-    const fileMentionClient: FileMentionClient = {
-      complete: vi.fn(async () => [
-        { kind: "file" as const, path: decodeFileMentionPath("first.md") },
-      ]),
-      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
-      execute: vi.fn(),
-    };
-
-    const rendered = render(
-      <WorkThreadWorkspace
-        draftStore={store}
-        fileMentionClient={fileMentionClient}
-        hostId={"local" as never}
-        threadClient={threadClient}
-        threadId={originThreadId}
-        threadMentionClient={threadMentionClient}
-        title="Draft brief"
-        turnClient={turnClient as never}
-      />,
-    );
-
-    const composer = await screen.findByLabelText("Work prompt");
-    await user.type(composer, "restore this #first");
-    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
-    await user.type(composer, " @first");
-    await user.click(await screen.findByRole("option", { name: /first.md/ }));
-    fireEvent.paste(composer, {
-      clipboardData: {
-        files: [new File([new Uint8Array([137, 80, 78])], "first.png", { type: "image/png" })],
-        items: [],
-      },
-    });
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-
-    activeThreadId = otherThreadId;
-    rendered.rerender(
-      <WorkThreadWorkspace
-        draftStore={store}
-        fileMentionClient={fileMentionClient}
-        hostId={"local" as never}
-        threadClient={threadClient}
-        threadId={otherThreadId}
-        threadMentionClient={threadMentionClient}
-        title="Other brief"
-        turnClient={turnClient as never}
-      />,
-    );
-
-    await waitFor(() =>
-      expect(store.read("work", String(originThreadId))?.text).toBe(
-        "restore this #[Release notes]  @first.md",
-      ),
-    );
-    expect(screen.getByLabelText("Work prompt")).toHaveValue("");
-    expect(store.read("work", String(otherThreadId))).toBeUndefined();
-    expect(screen.queryByAltText("first.png")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Mentioned threads")).not.toBeInTheDocument();
-  });
-
-  it("hands a Work follow-up back to the composer when the thread is confirmed Done", async () => {
-    const user = userEvent.setup();
-    const startFirstTurn = vi.fn();
-    let turns = [workTurn({ status: "running" })];
-    const execute = vi.fn(async () => ({
-      kind: "thread-completion-confirmed" as const,
-      thread: workThread({ version: 2, completionConfirmed: true }),
-    }));
-    const threadClient = {
-      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
-      execute,
-    } as unknown as WorkThreadClient;
-    const turnClient = {
-      transcript: vi.fn(async () => ({ threadId, turns })),
-      startFirstTurn,
-    };
-
-    render(
-      <WorkThreadWorkspace
-        hostId={"local" as never}
-        threadClient={threadClient}
-        threadId={threadId}
-        title="Draft brief"
-        turnClient={turnClient as never}
-      />,
-    );
-
-    await user.type(await screen.findByLabelText("Work prompt"), "After done");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    await user.click(screen.getByRole("button", { name: "Task actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Mark complete" }));
-    await user.type(
-      screen.getByRole("textbox", { name: "What this task delivered" }),
-      "The reviewed draft is saved in the bound folder.",
-    );
-    await user.click(screen.getByRole("button", { name: "Confirm this task is complete" }));
-    expect(await screen.findByText("Delivery marked complete.")).toBeInTheDocument();
-    turns = [workTurn({ status: "completed" })];
-    await waitFor(
-      () =>
-        expect(
-          (turnClient.transcript as { mock: { calls: unknown[] } }).mock.calls.length,
-        ).toBeGreaterThan(1),
-      { timeout: 2500 },
-    );
-    expect(startFirstTurn).not.toHaveBeenCalled();
-    // The thread will never run it, so the words go back where the user can
-    // still use them rather than disappearing with the message.
-    expect(screen.getByLabelText("Work prompt")).toHaveValue("After done");
   });
 
   it("refuses a follow-up when the thread has no binding authority instead of writing an artifact", async () => {
@@ -2357,16 +2014,6 @@ function providerGroup(): PickerGroup {
       },
     ],
   } as never;
-}
-
-function mentionCandidate(threadId: MentionableThreadId): ThreadMentionCandidate {
-  return {
-    threadId,
-    mode: "chat",
-    title: threadId.endsWith("002") ? "Roadmap" : "Release notes",
-    placement: { kind: "project", label: "Launch" },
-    updatedAt: decodeUtcTimestamp("2026-08-14T10:00:00.000Z"),
-  };
 }
 
 function memoryDraftStorage(): Storage {

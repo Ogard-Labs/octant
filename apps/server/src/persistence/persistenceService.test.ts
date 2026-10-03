@@ -187,6 +187,7 @@ describe("PersistenceLive", () => {
         { name: "thread-external-content-taint", lastSequence: 1, lag: 0 },
         { name: "usage-resume", lastSequence: 1, lag: 0 },
         { name: "spend-ceilings", lastSequence: 1, lag: 0 },
+        { name: "thread-message-queue", lastSequence: 1, lag: 0 },
       ],
     });
   });
@@ -474,6 +475,7 @@ describe("PersistenceLive", () => {
         { projection_name: "thread-external-content-taint", global_sequence: 1, reason },
         { projection_name: "usage-resume", global_sequence: 1, reason },
         { projection_name: "spend-ceilings", global_sequence: 1, reason },
+        { projection_name: "thread-message-queue", global_sequence: 1, reason },
       ]);
       inspected.close();
     },

@@ -1,4 +1,8 @@
 import {
+  registerThreadMessageQueueEvents,
+  ThreadMessageQueueProjection,
+} from "../messageQueue/threadMessageQueuePersistence";
+import {
   ContextCapacityReservationUpdated,
   ContextManifestCreated,
   ContextOverridesUpdated,
@@ -415,6 +419,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerFollowUpSuggestionEvents(events);
   registerSideTaskEvents(events);
   registerShipEvents(events);
+  registerThreadMessageQueueEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();
@@ -459,6 +464,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ThreadRetentionProjection())
       .register(new ExternalContentTaintProjection())
       .register(new UsageResumeProjection())
-      .register(new SpendCeilingProjection()),
+      .register(new SpendCeilingProjection())
+      .register(new ThreadMessageQueueProjection()),
   };
 }
