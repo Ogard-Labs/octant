@@ -163,9 +163,9 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
   const paused = nativeHarnessSessionHeld(view.session.status);
 
   return (
-    <section aria-label="Native harness" className="native-harness-card">
+    <section aria-label="Agent coordination" className="native-harness-card">
       <div className="native-harness-card__head">
-        <h3>Native harness</h3>
+        <h3>Agent coordination</h3>
         <span
           className={`native-harness-card__status native-harness-card__status--${view.session.status}`}
         >
@@ -190,13 +190,28 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
       )}
       {pendingApproval === undefined ? null : (
         <section aria-label="Approval requested" className="native-harness-question">
+          {pendingApproval.source === undefined ? null : (
+            <p className="native-harness-card__detail" title={String(pendingApproval.source.runId)}>
+              Child {String(pendingApproval.source.runId).slice(0, 8)} ·{" "}
+              {pendingApproval.source.providerName ?? "Provider"} · {pendingApproval.source.modelId}
+            </p>
+          )}
           <p className="native-harness-question__prompt">
-            <strong>{pendingApproval.toolName}</strong>{" "}
+            <strong>
+              {pendingApproval.toolName === "provider-action"
+                ? "Provider action"
+                : pendingApproval.toolName}
+            </strong>{" "}
             {pendingApproval.summary.replace(/^[a-z-]+: /, "")}
           </p>
           <p className="native-harness-card__detail">
-            Needs your say-so ({pendingApproval.approvalClass}).
+            {pendingApproval.source === undefined
+              ? `Needs your say-so (${pendingApproval.approvalClass}).`
+              : "Allow this request for this child."}
           </p>
+          {pendingApproval.detail === undefined ? null : (
+            <pre className="native-harness-question__detail">{pendingApproval.detail}</pre>
+          )}
           <div className="native-harness-chips">
             <OctantButton
               disabled={busy}
@@ -207,15 +222,17 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
             >
               Allow
             </OctantButton>
-            <OctantButton
-              disabled={busy}
-              onClick={() => void decideApproval("approve-always")}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Allow for this session
-            </OctantButton>
+            {pendingApproval.source === undefined ? (
+              <OctantButton
+                disabled={busy}
+                onClick={() => void decideApproval("approve-always")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Allow for this session
+              </OctantButton>
+            ) : null}
             <OctantButton
               disabled={busy}
               onClick={() => void decideApproval("deny")}
@@ -242,7 +259,11 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
       )}
       {pendingQuestion === undefined ? null : (
         <form
-          aria-label="Question from the lead"
+          aria-label={
+            pendingQuestion.source === undefined
+              ? "Question from the lead"
+              : "Question from a subagent"
+          }
           className="native-harness-question"
           noValidate
           onSubmit={(event) => {
@@ -251,6 +272,12 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
             if (trimmed.length > 0) void answerQuestion(trimmed);
           }}
         >
+          {pendingQuestion.source === undefined ? null : (
+            <p className="native-harness-card__detail" title={String(pendingQuestion.source.runId)}>
+              Child {String(pendingQuestion.source.runId).slice(0, 8)} ·{" "}
+              {pendingQuestion.source.providerName ?? "Provider"} · {pendingQuestion.source.modelId}
+            </p>
+          )}
           <p className="native-harness-question__prompt">{pendingQuestion.prompt}</p>
           {pendingQuestion.options.length === 0 ? null : (
             <div className="native-harness-chips">

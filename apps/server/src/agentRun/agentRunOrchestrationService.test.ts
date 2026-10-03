@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AGENT_RUN_DEPENDENCY_WAITING_REASON } from "@octant/domain";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import {
   AgentRunRequested,
   AgentRunResultAcknowledged,
@@ -47,6 +47,9 @@ import {
 import { AgentRunProcessSupervisor } from "./agentRunProcessSupervisor";
 import { AgentRunDependencyScheduler } from "./agentRunDependencyScheduler";
 import type { AgentRunSessionOutcome } from "./agentRunSessionPort";
+import { AgentRunSessionSupervisor } from "./agentRunSessionSupervisor";
+import { createAgentRunSessionRuntime } from "./agentRunSessionRuntime";
+import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 
 const directories: string[] = [];
 const now = "2026-08-01T14:00:00.000Z";
@@ -1351,6 +1354,97 @@ describe("AgentRun run slots", () => {
 });
 
 describe("managed child continuation", () => {
+  it.each(["dependency", "capacity"] as const)(
+    "leaves a never-started %s wait unchanged after Resume and still releases it normally",
+    async (kind) => {
+      let slots = kind === "capacity" ? 1 : 4;
+      const capacity = createInMemoryCapacityPort(() => ({ perThread: slots, onHost: slots }));
+      const reserve = vi.spyOn(capacity, "tryReserve");
+      const release = vi.spyOn(capacity, "release");
+      const scratchRoot = vi.fn(() => "/scratch");
+      const acquire = vi.fn(() => Effect.never);
+      const runtime = createAgentRunSessionRuntime({
+        capacityScheduler: makeProviderCapacityScheduler({
+          now: () => 0,
+          random: () => 0,
+          maxRetryJitterMs: 0,
+          ambiguousReservationTtlMs: 1000,
+        }),
+        resolveDriver: () => ({ kind: "codex", probe: () => Effect.never, acquire }),
+        supportsResume: () => true,
+        sessionStore: { read: () => undefined, write: () => true },
+        context: { resolve: () => [] },
+        scratchRoot,
+        uuid: () => ids.run,
+      });
+      const start = vi.fn((run: Parameters<typeof runtime.start>[0]) => ({
+        runId: run.id,
+        onSettled: () => undefined,
+      }));
+      const supervisor = new AgentRunSessionSupervisor({ port: { ...runtime, start } });
+      const harness = createHarness(capacity, true, supervisor);
+      const scheduler = new AgentRunDependencyScheduler({
+        agentRuns: harness.persistence,
+        orchestration: harness.orchestration,
+      });
+      harness.journal.subscribeCommitted((append) => scheduler.onCommittedAppend(append));
+      const first = harness.orchestration.admit({
+        command: {
+          ...requestCommand(),
+          requestedAuthority: { ...authority, network: false, subagents: false },
+        },
+        parentAuthority: authority,
+        liveAuthority: authority,
+        confirmed: true,
+      });
+      if (first.kind !== "run-accepted") throw new Error("Expected admitted first child");
+      harness.orchestration.start(first.run.id, first.run.version, authority);
+      const waiting = harness.orchestration.admit({
+        command: {
+          ...requestCommand(ids.requestChild),
+          requestedAuthority: { ...authority, network: false, subagents: false },
+          ...(kind === "dependency" ? { dependsOn: [first.run.id] } : {}),
+        },
+        parentAuthority: authority,
+        liveAuthority: authority,
+        confirmed: true,
+      });
+      if (waiting.kind !== "run-updated") throw new Error("Expected waiting child");
+      expect(waiting.run.recoveryReason).toBe(
+        kind === "dependency" ? AGENT_RUN_DEPENDENCY_WAITING_REASON : "provider-capacity-saturated",
+      );
+      // A slot can open without either scheduler dispatching yet. Resume must still
+      // leave this never-started child to its original scheduler.
+      slots = 4;
+      const events = () =>
+        harness.connection.prepare("SELECT * FROM event_journal ORDER BY global_sequence").all();
+      const beforeEvents = events();
+      const beforeReserve = reserve.mock.calls.length;
+      const beforeRelease = release.mock.calls.length;
+      const result = harness.orchestration.resume(waiting.run.id, waiting.run.version, authority);
+      expect(harness.persistence.getById(waiting.run.id)).toEqual(waiting.run);
+      expect(events()).toEqual(beforeEvents);
+      expect(reserve).toHaveBeenCalledTimes(beforeReserve);
+      expect(release).toHaveBeenCalledTimes(beforeRelease);
+      expect(scratchRoot).not.toHaveBeenCalled();
+      expect(acquire).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: "This child has no saved session to resume; its existing wait remains unchanged.",
+      });
+      harness.orchestration.onSessionSettled({
+        runId: first.run.id,
+        outcome: { kind: "completed", responseText: "Dependency finished" },
+      });
+      await vi.waitFor(() =>
+        expect(harness.persistence.getById(waiting.run.id)?.lifecycleStatus).toBe("starting"),
+      );
+      expect(harness.persistence.getById(waiting.run.id)).not.toHaveProperty("recoveryReason");
+      expect(start.mock.calls.map(([run]) => run.id)).toEqual([first.run.id, waiting.run.id]);
+    },
+  );
+
   it("resumes a waiting child through its saved session and reserves a new live slot", () => {
     const start = vi.fn();
     const resume = vi.fn();

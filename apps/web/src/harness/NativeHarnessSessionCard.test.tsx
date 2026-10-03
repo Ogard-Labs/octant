@@ -140,6 +140,40 @@ describe("NativeHarnessSessionCard", () => {
     );
   });
 
+  it("attributes a child approval and offers a decision for only that request", async () => {
+    const approval = {
+      id: "00000000-0000-4000-8000-000000000061",
+      toolName: "provider-action",
+      summary: "Run the focused tests",
+      approvalClass: "child-provider-action",
+      status: "pending",
+      askedAt: "2026-09-05T12:06:00.000Z",
+      source: {
+        runId: "00000000-0000-4000-8000-000000000062",
+        providerInstanceId: "00000000-0000-4000-8000-000000000063",
+        providerName: "Codex",
+        modelId: "gpt-5",
+      },
+    };
+    const client = {
+      session: vi.fn(async () => ({ ...view(), approvals: [approval] })),
+      command: vi.fn(),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(async () => ({
+        kind: "approval-decided",
+        approval: { ...approval, status: "approved", settledAt: "2026-09-05T12:06:05.000Z" },
+      })),
+    };
+    render(<NativeHarnessSessionCard client={client as never} threadId={threadId} />);
+    await waitFor(() => expect(screen.getByText(/Codex.*gpt-5/)).toBeVisible());
+    expect(screen.queryByRole("button", { name: "Allow for this session" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Allow" }));
+    expect(client.decideApproval).toHaveBeenCalledWith(threadId, {
+      approvalId: approval.id,
+      decision: "approve",
+    });
+  });
+
   it("shows a gated tool call and sends the person's decision", async () => {
     const approval = {
       id: "00000000-0000-4000-8000-000000000061",

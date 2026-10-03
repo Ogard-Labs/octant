@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -10,10 +10,17 @@ import {
 } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { ManagedRootGrantStore } from "../code/managedRootGrantStore";
-import { createManagedWorktreeNodePorts } from "../code/managedWorktreeNodePorts";
+import {
+  createManagedWorktreeNodePorts,
+  observeManagedWorktreeExecutionIdentity,
+} from "../code/managedWorktreeNodePorts";
 import { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
 import { ManagedWorktreeService } from "../code/managedWorktreeService";
-import { createAgentRunChildWorktreePort } from "./agentRunChildWorktreePort";
+import {
+  createAgentRunChildWorktreePort,
+  deriveAgentRunChildWorktreeThreadId,
+  resolveAgentRunChildWorktreeThreadId,
+} from "./agentRunChildWorktreePort";
 import { prepareAdmittedControlWorkspace } from "./agentRunControlService";
 import { AgentRunWorkspaceReceiptStore } from "./agentRunWorkspaceReceiptStore";
 import { AgentRunWorkspaceService } from "./agentRunWorkspaceService";
@@ -68,6 +75,7 @@ async function fixture() {
   const port = createAgentRunChildWorktreePort({
     service,
     repository: ports.repository,
+    observeExecutionIdentity: observeManagedWorktreeExecutionIdentity,
     loadReceipt: (id) => managedReceipts.load(id),
     findActive: (lookup) => managedReceipts.findActive(lookup),
   });
@@ -100,6 +108,172 @@ async function fixture() {
 }
 
 describe("Code child workspace ownership", () => {
+  it("verifies live child ownership after commits while preserving strict preparation", async () => {
+    const f = await fixture();
+    const prepared = await f.workspace.prepare({
+      requestId,
+      windowId,
+      parent: f.parent,
+      code: f.code,
+    });
+    if (prepared.status !== "prepared" || prepared.workspace.kind !== "code-worktree")
+      throw new Error("expected child");
+    const receipt = await f.managedReceipts.load(String(prepared.workspace.worktreeReceiptId));
+    if (receipt === undefined) throw new Error("expected receipt");
+    const input = {
+      requestId,
+      parentThreadId,
+      repositoryId: f.code.repositoryId,
+      repositoryRoot: f.code.repositoryRoot,
+      parentCheckoutRoot: f.code.parentCheckoutRoot,
+      worktreeRoot: receipt.canonicalWorktreePath,
+      signal,
+    };
+    const before = await f.port.verifyExecution(input);
+    expect(before.status).toBe("verified");
+    await writeFile(join(receipt.canonicalWorktreePath, "shared.txt"), "child commit\n");
+    await execFileAsync("git", ["-C", receipt.canonicalWorktreePath, "add", "shared.txt"]);
+    await execFileAsync("git", [
+      "-C",
+      receipt.canonicalWorktreePath,
+      "-c",
+      "user.name=Octant Test",
+      "-c",
+      "user.email=test@octant.local",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "child",
+    ]);
+    await writeFile(join(receipt.canonicalWorktreePath, "shared.txt"), "child pending edit\n");
+    expect(await f.port.verifyExecution(input)).toEqual(before);
+    expect(
+      await f.workspace.confirm({
+        requestId,
+        windowId,
+        parent: f.parent,
+        worktreeReceiptId: receipt.receiptId,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(await f.port.verifyExecution({ ...input, requestId: siblingRequestId })).toMatchObject({
+      status: "refused",
+    });
+    await execFileAsync("git", [
+      "-C",
+      receipt.canonicalWorktreePath,
+      "checkout",
+      "-b",
+      "foreign-branch",
+    ]);
+    expect(await f.port.verifyExecution(input)).toMatchObject({ status: "refused" });
+  });
+
+  it("detects replaced child identity and refuses a deleted or symlinked child", async () => {
+    const f = await fixture();
+    const prepared = await f.workspace.prepare({
+      requestId,
+      windowId,
+      parent: f.parent,
+      code: f.code,
+    });
+    if (prepared.status !== "prepared" || prepared.workspace.kind !== "code-worktree")
+      throw new Error("expected child");
+    const receipt = await f.managedReceipts.load(String(prepared.workspace.worktreeReceiptId));
+    if (receipt === undefined) throw new Error("expected receipt");
+    const input = {
+      requestId,
+      parentThreadId,
+      repositoryId: f.code.repositoryId,
+      repositoryRoot: f.code.repositoryRoot,
+      parentCheckoutRoot: f.code.parentCheckoutRoot,
+      worktreeRoot: receipt.canonicalWorktreePath,
+      signal,
+    };
+    const original = await f.port.verifyExecution(input);
+    expect(original.status).toBe("verified");
+    const moved = `${receipt.canonicalWorktreePath}-moved`;
+    await rename(receipt.canonicalWorktreePath, moved);
+    expect(await f.port.verifyExecution(input)).toMatchObject({ status: "refused" });
+    await symlink(moved, receipt.canonicalWorktreePath);
+    expect(await f.port.verifyExecution(input)).toMatchObject({ status: "refused" });
+    await rm(receipt.canonicalWorktreePath);
+    await cp(moved, receipt.canonicalWorktreePath, { recursive: true });
+    const replacement = await f.port.verifyExecution(input);
+    expect(replacement.status).toBe("verified");
+    expect(replacement).not.toEqual(original);
+    await f.managedReceipts.transition(receipt.receiptId, "cleanup-pending");
+    expect(await f.port.verifyExecution(input)).toMatchObject({ status: "refused" });
+  });
+
+  it("links each child to its recorded workspace and preserves legacy child links", async () => {
+    const f = await fixture();
+    const input = { requestId, windowId, parent: f.parent, code: f.code };
+    const workspace = await prepareAdmittedControlWorkspace({
+      ...input,
+      role: "implementation",
+      workspace: f.workspace,
+      parent: {
+        parentMode: "code",
+        workspaceParent: f.parent,
+        codeWorkspace: f.code,
+        parentRoute: {
+          providerInstanceId: decodeProviderInstanceId("44444444-4444-4444-8444-444444444444"),
+          modelId: decodeProviderModelId("fixture"),
+        },
+        parentAuthority: {
+          filesystem: true,
+          shell: true,
+          git: true,
+          network: true,
+          tools: true,
+          subagents: true,
+          executionPolicy: "approval-gated",
+          permissionPersistence: "current-session",
+        },
+        liveAuthority: {
+          filesystem: true,
+          shell: true,
+          git: true,
+          network: true,
+          tools: true,
+          subagents: true,
+          executionPolicy: "approval-gated",
+          permissionPersistence: "current-session",
+        },
+      },
+    });
+    if (workspace.status !== "admitted" || workspace.workspace.kind !== "code-worktree")
+      throw new Error("expected admitted Code workspace");
+    const context = {
+      parentThreadId,
+      requestId,
+      repositoryId: f.code.repositoryId,
+      workspace: workspace.workspace,
+    };
+    const childId = deriveAgentRunChildWorktreeThreadId(parentThreadId, requestId);
+    expect(resolveAgentRunChildWorktreeThreadId(context)).toBe(childId);
+    expect(
+      resolveAgentRunChildWorktreeThreadId({ ...context, requestId: siblingRequestId }),
+    ).toBeUndefined();
+    const legacyId = deriveAgentRunChildWorktreeThreadId(parentThreadId);
+    expect(
+      resolveAgentRunChildWorktreeThreadId({
+        ...context,
+        workspace: {
+          ...context.workspace,
+          worktreeRoot: context.workspace.worktreeRoot.replace(childId, legacyId),
+        },
+      }),
+    ).toBe(legacyId);
+    expect(
+      resolveAgentRunChildWorktreeThreadId({
+        ...context,
+        workspace: { ...context.workspace, worktreeRoot: context.workspace.checkoutRoot },
+      }),
+    ).toBeUndefined();
+  });
+
   it("replays a prepared request after receipt expiry without allocating another checkout", async () => {
     const f = await fixture();
     const input = { requestId, windowId, parent: f.parent, code: f.code };

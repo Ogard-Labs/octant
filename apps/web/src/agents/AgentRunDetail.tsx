@@ -191,12 +191,11 @@ export function AgentRunDetail(props: {
 }
 
 /**
- * What the subagent said. The live conversation is the host's bounded,
- * process-local read, so it can be unavailable (a provider-native run), stale,
- * or simply gone once the process that held it ends; the retained final reply
- * in the summary outlives it. When the live read has nothing, the retained
- * reply stands in as the answer, and when neither exists the page says so
- * rather than showing an empty column.
+ * What the subagent said. Managed conversation history is bounded and saved;
+ * after restart it is stale until execution reconnects. Provider-native runs
+ * may expose no conversation, and purged history cannot be restored. When the
+ * conversation has nothing, the retained final reply stands in as the answer;
+ * when neither exists the page explains what is missing.
  */
 function AgentRunReply(props: {
   readonly row: AgentHierarchyRow;

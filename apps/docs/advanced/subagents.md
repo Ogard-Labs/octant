@@ -34,8 +34,9 @@ The **Agents** dock tool lists the thread's subagents under **Working** and
 **Finished** and marks results you have not reviewed with **Needs review**. On
 a thread with none it says they appear when the agent hands off part of its
 work, or that subagents are turned off in Settings. Choosing a row opens its page: the task as the brief,
-then its replies, live while it runs, or its retained final reply once the live
-conversation is gone. **Mark reviewed**, **Steer**, **Retry**, **Resume**, and
+then its replies, live while it runs, with a bounded saved conversation after
+restart. Older entries may be omitted; the view identifies truncation or stale
+history. **Mark reviewed**, **Steer**, **Retry**, **Resume**, and
 **Cancel** sit under the conversation when they apply. A subagent that runs
 inside the provider's own runtime says so on its page.
 
@@ -97,7 +98,8 @@ an immutable ceiling set at start — a child can narrow it, never widen it.
 - **Work** children stay inside the one OS-confined Project root.
 - **Code** children get **isolated worktrees** by default; the worktree must
   be verified before the child starts, and failure prevents running in the
-  parent checkout.
+  parent checkout. Concurrent children use separate worktrees, starting from
+  the parent's committed revision. Uncommitted parent edits are not copied.
 
 ## Lifecycle, cancellation, and recovery
 
@@ -107,9 +109,22 @@ cancellation or restart resolves to **Waiting** or **Interrupted**, never
 **Completed**.
 
 Cancellation is leaf-first; a run is **Cancelled** only after its stop is
-confirmed. After a restart, Octant rebuilds the hierarchy, resumable runs
-reconnect, and non-resumable runs become **Interrupted** with a restart or
-retry. Approvals, tasks, outputs, transcripts, and usage are retained.
+confirmed. After a restart, Octant rebuilds the hierarchy and identifies
+interrupted work. **Resume** reconnects to the saved provider session, keeping
+its conversation and verified workspace. If the provider cannot resume it, the
+saved session is missing, or its authority no longer matches, Octant refuses
+Resume and asks you to use **Retry**, which starts a new execution.
+
+When a child needs an approval or an answer, the composer shows **A subagent
+needs your input**. **Review request** opens its detail view. The request names
+the child, provider, and model. Allowing a child action covers that request
+only; it does not grant access to siblings or later requests. Unanswered
+requests expire when the child stops or Octant restarts.
+
+**Steer** sends a note to a running child when its provider supports it.
+Octant's harness applies the note at the next complete response or tool-results
+boundary; Codex delivers it to the active turn. An unsupported provider reports
+that the note was not delivered.
 
 A run waiting for other runs to finish never starts on its own after a
 restart, even once they finish: **Resume** on the run, or resuming the parent

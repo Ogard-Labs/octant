@@ -66,6 +66,10 @@ export interface AgentRunSessionHandle {
   readonly startupReady?: Promise<void>;
 }
 
+export type AgentRunResumeReadiness =
+  | { readonly status: "ready" }
+  | { readonly status: "refused"; readonly message: string };
+
 /**
  * Provider-agnostic seam between AgentRun supervision and whatever actually
  * executes a managed child. Keeping the supervisor behind this interface is
@@ -73,6 +77,8 @@ export interface AgentRunSessionHandle {
  * design forbids core child semantics from depending on any one provider.
  */
 export interface AgentRunSessionPort {
+  /** Checks persisted identity/cursor and current capability without starting or reserving execution. */
+  readonly checkResume?: (run: AgentRun) => AgentRunResumeReadiness;
   /**
    * Starts one managed session. Implementations resolve every start-time
    * dependency before returning and throw {@link AgentRunSessionError} when one

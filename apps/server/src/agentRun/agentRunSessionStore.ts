@@ -18,6 +18,7 @@ const SessionRecord = Schema.Struct({
   binding: Schema.NonEmptyString.pipe(Schema.maxLength(16 * 1024)),
   sessionId: ProviderSessionId,
   resumeCursor: Schema.optional(ProviderResumeCursor),
+  workspaceIdentity: Schema.optional(Schema.NonEmptyString.pipe(Schema.maxLength(256))),
 });
 const decodeSessionRecord = Schema.decodeUnknownSync(SessionRecord);
 const ConversationRecord = Schema.Struct({

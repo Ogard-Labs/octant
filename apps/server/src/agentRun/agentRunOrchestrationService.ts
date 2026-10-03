@@ -18,7 +18,11 @@ import {
   decideAgentRunDependencies,
 } from "@octant/domain";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
-import { AgentRunSessionError, type AgentRunSessionOutcome } from "./agentRunSessionPort";
+import {
+  AgentRunSessionError,
+  type AgentRunSessionOutcome,
+  type AgentRunResumeReadiness,
+} from "./agentRunSessionPort";
 
 const MAX_RECOVERY_REASON_CHARACTERS = 1_024;
 
@@ -78,6 +82,7 @@ export interface AgentRunApprovalPort {
 }
 
 export interface AgentRunProcessSupervisorPort {
+  readonly checkResume?: (run: AgentRun) => AgentRunResumeReadiness;
   readonly start: (run: AgentRun) => unknown;
   /** Continues a saved provider conversation; absent means only explicit fresh retry is available. */
   readonly resume?: (run: AgentRun, input?: { readonly message?: string }) => unknown;
@@ -297,23 +302,6 @@ export class AgentRunOrchestrationService {
     }
     this.#assertWorkspaceAllowed(current.workspaceReceipt);
     this.#assertAuthorityWithinLiveAuthority(current.authority, liveAuthority);
-    if (!this.#approvals.isCurrent({ runId, authority: liveAuthority })) {
-      if (current.lifecycleStatus === "queued") {
-        return this.#persistence.applyCommand({
-          kind: "interrupt-agent-run",
-          runId,
-          expectedVersion: expectedVersion as never,
-          recoveryReason: "approval-or-extension-drift",
-        });
-      }
-      return this.#persistence.applyCommand({
-        kind: "wait-agent-run",
-        runId,
-        expectedVersion: expectedVersion as never,
-        recoveryReason: "approval-or-extension-drift",
-      });
-    }
-    let reservedForResume = false;
     if (continuation !== undefined) {
       if (current.version !== expectedVersion) {
         return {
@@ -337,6 +325,33 @@ export class AgentRunOrchestrationService {
           message: "Only waiting or interrupted children can resume.",
         };
       }
+      const readiness = this.#processes.checkResume?.(current);
+      if (readiness?.status === "refused") {
+        return {
+          kind: "run-command-failed",
+          reason: "unsupported-transition",
+          message: readiness.message,
+        };
+      }
+    }
+    if (!this.#approvals.isCurrent({ runId, authority: liveAuthority })) {
+      if (current.lifecycleStatus === "queued") {
+        return this.#persistence.applyCommand({
+          kind: "interrupt-agent-run",
+          runId,
+          expectedVersion: expectedVersion as never,
+          recoveryReason: "approval-or-extension-drift",
+        });
+      }
+      return this.#persistence.applyCommand({
+        kind: "wait-agent-run",
+        runId,
+        expectedVersion: expectedVersion as never,
+        recoveryReason: "approval-or-extension-drift",
+      });
+    }
+    let reservedForResume = false;
+    if (continuation !== undefined) {
       if (!this.#reservations.has(runId)) {
         const reservation = this.#capacity.tryReserve({
           runId,

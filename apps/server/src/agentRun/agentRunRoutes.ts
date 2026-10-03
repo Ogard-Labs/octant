@@ -43,6 +43,7 @@ import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { AgentRunControlParentFacts } from "./agentRunControlService";
+import type { AgentRunControlAdmissionDependencies } from "./agentRunControlAdmission";
 import type { AgentRunOrchestrationService } from "./agentRunOrchestrationService";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
 import type { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
@@ -58,6 +59,7 @@ const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 
 export interface AgentRunRouteDependencies {
+  readonly onExecutionAccepted?: AgentRunControlAdmissionDependencies["onExecutionAccepted"];
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly persistence: AgentRunPersistenceService;
   readonly liveConversations: AgentRunLiveConversationStore;
@@ -97,6 +99,8 @@ export interface AgentRunRouteDependencies {
   readonly resolveCenterContext: (input: {
     readonly parentThreadId: AgentRunParentThreadId;
     readonly mode: OctantMode;
+    readonly requestId: AgentRun["requestId"];
+    readonly workspaceReceipt: AgentRun["workspaceReceipt"];
   }) => {
     readonly parentThreadTitle: string;
     readonly childThreadId?: CodeThreadId;
@@ -786,6 +790,8 @@ function serializeCenterSummary(
   const context = resolveCenterContext({
     parentThreadId: run.parentThreadId,
     mode: run.routingReceipt.mode,
+    requestId: run.requestId,
+    workspaceReceipt: run.workspaceReceipt,
   });
   return {
     runId: run.id,
@@ -905,6 +911,11 @@ async function mutateLiveRun(
     action === "retry"
       ? dependencies.orchestration.retry(runId, expectedVersion, parent.liveAuthority)
       : dependencies.orchestration.resume(runId, expectedVersion, parent.liveAuthority);
+  if (result.kind === "run-updated" && result.run.lifecycleStatus === "starting") {
+    // The runtime awaits workspace verification before acquiring a provider.
+    // Bind synchronously after acceptance, before that asynchronous boundary resumes.
+    dependencies.onExecutionAccepted?.({ run: result.run, windowId, operation: action });
+  }
   return json(result, result.kind === "run-command-failed" ? 409 : 200, origin);
 }
 
