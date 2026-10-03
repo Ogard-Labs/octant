@@ -54,6 +54,21 @@ describe("native harness router", () => {
     expect(subject.resolve({ job: "lead" })).toMatchObject({ kind: "primary", candidate: big });
   });
 
+  it("uses only configured fallbacks allowed by the calling parent's policy", () => {
+    const subject = router(() => 1_000_000);
+    expect(
+      subject.resolve({
+        job: "lead",
+        isEligible: (candidate) => candidate.modelId === spare.modelId,
+      }),
+    ).toMatchObject({ kind: "failure-fallback", candidate: spare });
+    expect(subject.resolve({ job: "lead", isEligible: () => false })).toMatchObject({
+      kind: "unroutable",
+      reason: "no-eligible-candidate",
+    });
+    expect(subject.resolve({ job: "lead" })).toMatchObject({ kind: "primary", candidate: big });
+  });
+
   it("opens the slot's breaker after repeated failures so a tight loop cannot burn the chain", () => {
     let clock = 1_000_000;
     const subject = router(() => clock);

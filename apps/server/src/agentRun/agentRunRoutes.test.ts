@@ -387,7 +387,15 @@ function createHandler(
         orchestration,
         persistence,
         router: {
-          resolve: () => ({ kind: "unroutable", job: "research", reason: "none" }) as never,
+          resolve: () =>
+            ({
+              kind: "primary",
+              job: "researcher",
+              slotId: "default",
+              decidedAt: "2026-10-03T10:00:00.000Z",
+              rejected: [],
+              candidate: { hostId: "local", providerInstanceId: ids.provider, modelId: "gpt-4o" },
+            }) as never,
         },
         sessions: {
           ensure: () => ({}) as never,
@@ -395,6 +403,14 @@ function createHandler(
           read: () => undefined,
         },
         uuid: () => String(ids.request),
+        listTargets: () => [
+          {
+            providerInstanceId: String(ids.provider),
+            modelIds: ["gpt-4o"],
+            displayName: "Fixture",
+            driverKind: "openai",
+          },
+        ],
       },
       {
         parentThreadId: String(ids.thread),
@@ -1255,10 +1271,12 @@ describe("agentRunRoutes", () => {
       includeParentContext: false,
     });
 
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       status: "accepted",
       runId: String(ids.run),
       lifecycleStatus: "starting",
+      target: { providerInstanceId: ids.provider, modelId: "gpt-4o" },
+      route: { kind: "primary" },
     });
     expect(persistence.getById(ids.run)?.parentThreadId).toBe(ids.thread);
   });
