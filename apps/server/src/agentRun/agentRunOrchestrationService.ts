@@ -7,6 +7,7 @@ import type {
   AgentRunId,
   AgentRunParentThreadId,
   AgentRunWorkspaceReceipt,
+  AgentRunResultEvidence,
 } from "@octant/contracts";
 import { DEFAULT_AGENT_RUN_CONCURRENCY, MAX_AGENT_RUN_RESULT_CHARACTERS } from "@octant/contracts";
 import {
@@ -161,7 +162,7 @@ export class AgentRunOrchestrationService {
    */
   readonly #settledSessions = new Set<AgentRunId>();
   /** Runs currently being stopped by {@link cancelLeafFirst}. */
-  readonly #cancelling = new Set<AgentRunId>();
+  readonly #cancelling = new Map<AgentRunId, AgentRunResultEvidence | undefined>();
 
   constructor(options: AgentRunOrchestrationServiceOptions) {
     this.#persistence = options.persistence;
@@ -637,13 +638,15 @@ export class AgentRunOrchestrationService {
       const run = this.#persistence.getById(id);
       if (run === undefined) continue;
       if (isAgentRunTerminalStatus(run.lifecycleStatus)) continue;
+      let cancellationEvidence: AgentRunResultEvidence | undefined;
       if (this.#processes !== undefined) {
         // A managed session settles `cancelled` while this stop is still
         // awaited. Marking the run here is what lets that settlement defer to
         // this loop, which owns the leaf-first ordering and the reservation.
-        this.#cancelling.add(id);
+        this.#cancelling.set(id, undefined);
         try {
           await this.#processes.stop(id);
+          cancellationEvidence = this.#cancelling.get(id);
         } catch {
           results.push({
             kind: "run-command-failed",
@@ -657,12 +660,15 @@ export class AgentRunOrchestrationService {
       }
       this.#releaseReservation(id);
       results.push(
-        this.#persistence.applyCommand({
-          kind: "cancel-agent-run",
-          runId: id,
-          expectedVersion: run.version as never,
-          scope: "self",
-        }),
+        this.#persistence.applyCommand(
+          {
+            kind: "cancel-agent-run",
+            runId: id,
+            expectedVersion: run.version as never,
+            scope: "self",
+          },
+          cancellationEvidence,
+        ),
       );
     }
     return results;
@@ -705,7 +711,10 @@ export class AgentRunOrchestrationService {
     if (current === undefined) return undefined;
     if (isAgentRunTerminalStatus(current.lifecycleStatus)) return undefined;
     if (this.#settledSessions.has(input.runId)) return undefined;
-    if (input.outcome.kind === "cancelled" && this.#cancelling.has(input.runId)) return undefined;
+    if (input.outcome.kind === "cancelled" && this.#cancelling.has(input.runId)) {
+      this.#cancelling.set(input.runId, input.outcome.evidence);
+      return undefined;
+    }
 
     this.#releaseReservation(input.runId);
     let recorded: AgentRunCommandResult;
@@ -724,19 +733,25 @@ export class AgentRunOrchestrationService {
       case "completed":
         return this.#recordSessionCompletion(current, outcome);
       case "waiting":
-        return this.#persistence.applyCommand({
-          kind: "wait-agent-run",
-          runId: current.id,
-          expectedVersion,
-          recoveryReason: boundedRecoveryReason(outcome.reason),
-        });
+        return this.#persistence.applyCommand(
+          {
+            kind: "wait-agent-run",
+            runId: current.id,
+            expectedVersion,
+            recoveryReason: boundedRecoveryReason(outcome.reason),
+          },
+          outcome.evidence,
+        );
       case "cancelled":
-        return this.#persistence.applyCommand({
-          kind: "cancel-agent-run",
-          runId: current.id,
-          expectedVersion,
-          scope: "self",
-        });
+        return this.#persistence.applyCommand(
+          {
+            kind: "cancel-agent-run",
+            runId: current.id,
+            expectedVersion,
+            scope: "self",
+          },
+          outcome.evidence,
+        );
       case "failed":
         if (outcome.failure.usageLimit !== undefined) {
           // The provider's own protocol signal says this stop is a usage
@@ -744,31 +759,40 @@ export class AgentRunOrchestrationService {
           // never Failed, which would report a bounded wait as a dead run and
           // would offer Retry where the honest action is waiting out the
           // reset. Every other failure keeps the honest terminal state.
-          return this.#persistence.applyCommand({
-            kind: "wait-agent-run",
+          return this.#persistence.applyCommand(
+            {
+              kind: "wait-agent-run",
+              runId: current.id,
+              expectedVersion,
+              recoveryReason: boundedRecoveryReason(
+                `${outcome.failure.category}: ${outcome.failure.message}`,
+              ),
+              usageLimit: outcome.failure.usageLimit,
+            },
+            outcome.evidence,
+          );
+        }
+        return this.#persistence.applyCommand(
+          {
+            kind: "fail-agent-run",
             runId: current.id,
             expectedVersion,
             recoveryReason: boundedRecoveryReason(
               `${outcome.failure.category}: ${outcome.failure.message}`,
             ),
-            usageLimit: outcome.failure.usageLimit,
-          });
-        }
-        return this.#persistence.applyCommand({
-          kind: "fail-agent-run",
-          runId: current.id,
-          expectedVersion,
-          recoveryReason: boundedRecoveryReason(
-            `${outcome.failure.category}: ${outcome.failure.message}`,
-          ),
-        });
+          },
+          outcome.evidence,
+        );
       case "interrupted":
-        return this.#persistence.applyCommand({
-          kind: "interrupt-agent-run",
-          runId: current.id,
-          expectedVersion,
-          recoveryReason: boundedRecoveryReason(outcome.reason),
-        });
+        return this.#persistence.applyCommand(
+          {
+            kind: "interrupt-agent-run",
+            runId: current.id,
+            expectedVersion,
+            recoveryReason: boundedRecoveryReason(outcome.reason),
+          },
+          outcome.evidence,
+        );
     }
   }
 
@@ -858,6 +882,7 @@ export class AgentRunOrchestrationService {
         truncated: reply.truncated,
       },
       resultText: reply.text,
+      ...(outcome.evidence === undefined ? {} : { resultEvidence: outcome.evidence }),
       ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
     });
   }

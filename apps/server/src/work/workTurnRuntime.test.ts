@@ -35,6 +35,7 @@ describe("WorkTurnRuntime", () => {
     const start = vi.fn((_input: Parameters<ProviderConnection["start"]>[0]) => Effect.void);
     const deltas: string[] = [];
     const usage = vi.fn();
+    const childActivity = vi.fn();
     const events: ProviderRuntimeEvent[] = [
       {
         instanceId: ids.provider,
@@ -44,6 +45,17 @@ describe("WorkTurnRuntime", () => {
         kind: "text-delta",
         sessionId: ids.session as never,
         text: "Hello from Work",
+      },
+      {
+        instanceId: ids.provider,
+        sequence: 4,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:00.500Z"),
+        kind: "child-agent-activity",
+        sessionId: ids.session as never,
+        childAgentId: "observed-child",
+        status: "running",
+        summary: "Reading the brief",
       },
       {
         instanceId: ids.provider,
@@ -109,6 +121,7 @@ describe("WorkTurnRuntime", () => {
       signal: new AbortController().signal,
       onDelta: (text) => deltas.push(text),
       onUsage: usage,
+      onChildActivity: childActivity,
       modelOptionValues: { effort: "high" },
     });
 
@@ -126,6 +139,9 @@ describe("WorkTurnRuntime", () => {
     });
     expect(JSON.stringify(acquireInputs[0])).not.toMatch(/shell|worktree|pullRequest|checkoutId/);
     expect(deltas).toEqual(["Hello from Work"]);
+    expect(childActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "child-agent-activity", childAgentId: "observed-child" }),
+    );
     expect(usage).toHaveBeenCalledWith(
       expect.objectContaining({
         inputTokens: 120,

@@ -12,7 +12,7 @@ function entry(
     role: "worker",
     task: `task ${runId}`,
     lifecycleStatus,
-    executionKind: "managed",
+    executionKind: "octant-managed",
     usageQuality: "measured",
     resultAcknowledgement: {
       required: acknowledgement.required ?? false,
@@ -79,6 +79,16 @@ describe("buildChildRunStatusSummary", () => {
 
     expect(summary.outstanding).toBe(2);
     expect(summary.deliveryEvidence).toEqual({ active: 1, unacknowledgedResults: 1 });
+  });
+
+  it("keeps provider-native and unknown execution kinds out of stop targets", () => {
+    const summary = buildChildRunStatusSummary([
+      { ...entry("a", "running"), executionKind: "provider-native" },
+      { ...entry("b", "waiting"), executionKind: "unknown" },
+      entry("c", "running"),
+    ]);
+    expect(summary.stoppableRunIds).toEqual(["c"]);
+    expect(summary.confirmationRequired).toBe(false);
   });
 
   it("offers to stop only the non-terminal children", () => {

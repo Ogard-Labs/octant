@@ -8,6 +8,7 @@ import {
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
   MAX_AGENT_RUN_CONVERSATION_ENTRIES,
   decodeAgentRun,
+  decodeAgentRunReviewSnapshot,
   decodeAgentRunAdmittedContext,
   decodeAgentRunAuthority,
   decodeAgentRunCommand,
@@ -19,6 +20,28 @@ import {
   decodeAgentRunStatusChanged,
   decodeAgentRunWorkspaceReceipt,
 } from "./agentRun";
+
+describe("Retained child review", () => {
+  it("accepts an immutable bounded comparison and refuses oversized or invalid identities", () => {
+    const snapshot = {
+      capturedAt: "2026-10-04T00:00:00.000Z",
+      baseTree: "a".repeat(40),
+      resultTree: "b".repeat(40),
+      diff: "patch",
+      changedPaths: ["file.txt"],
+      truncated: false,
+    };
+    expect(decodeAgentRunReviewSnapshot(snapshot)).toEqual(snapshot);
+    expect(() => decodeAgentRunReviewSnapshot({ ...snapshot, baseTree: "HEAD" })).toThrow();
+    expect(() => decodeAgentRunReviewSnapshot({ ...snapshot, diff: "x".repeat(65_537) })).toThrow();
+    expect(() =>
+      decodeAgentRunReviewSnapshot({ ...snapshot, diff: "\u0000".repeat(30_000) }),
+    ).toThrow();
+    expect(() =>
+      decodeAgentRunReviewSnapshot({ ...snapshot, changedPaths: Array(129).fill("file.txt") }),
+    ).toThrow();
+  });
+});
 
 describe("AgentRunConversationResponse", () => {
   it("accepts a bounded live snapshot and rejects oversized entry lists", () => {
