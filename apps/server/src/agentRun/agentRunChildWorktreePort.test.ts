@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
+  decodeCodeCheckoutIdentity,
   decodeProviderInstanceId,
   decodeProviderModelId,
   type AgentRunAuthority,
@@ -20,7 +21,9 @@ import {
   createAgentRunChildWorktreePort,
   deriveAgentRunChildWorktreeThreadId,
   resolveAgentRunChildWorktreeThreadId,
+  resolveAgentRunCodeWorkspaceContext,
 } from "./agentRunChildWorktreePort";
+import { createAgentRunControlWorkspace } from "../server";
 import { prepareAdmittedControlWorkspace } from "./agentRunControlService";
 import { AgentRunWorkspaceReceiptStore } from "./agentRunWorkspaceReceiptStore";
 import { AgentRunWorkspaceService } from "./agentRunWorkspaceService";
@@ -284,6 +287,91 @@ describe("Code child workspace ownership", () => {
       childWorktree: f.port,
     });
     expect(await restarted.prepare(input)).toEqual(first);
+  });
+
+  it("admits a child from a managed parent checkout through the server workspace composition", async () => {
+    const f = await fixture();
+    const preparedParent = await f.workspace.prepare({
+      requestId,
+      windowId,
+      parent: f.parent,
+      code: f.code,
+    });
+    if (preparedParent.status !== "prepared" || preparedParent.workspace.kind !== "code-worktree")
+      throw new Error("expected managed parent");
+    const receipt = await f.managedReceipts.load(
+      String(preparedParent.workspace.worktreeReceiptId),
+    );
+    if (receipt === undefined) throw new Error("expected parent receipt");
+    const checkout = decodeCodeCheckoutIdentity({
+      id: receipt.checkoutId,
+      repositoryId: receipt.repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      ownershipReceiptId: receipt.receiptId,
+      head: { kind: "branch", name: receipt.branchIntent, oid: receipt.expectedHead },
+      observedAt: receipt.updatedAt,
+    });
+    const resolveContext = () =>
+      resolveAgentRunCodeWorkspaceContext({
+        thread: {
+          projectId,
+          bindingRevisionId,
+          repositoryId: receipt.repositoryId,
+          checkoutId: receipt.checkoutId,
+        },
+        repositoryRoot: f.code.repositoryRoot,
+        checkout,
+        loadManagedReceipt: (id) => f.managedReceipts.load(id),
+      });
+    const workspace = createAgentRunControlWorkspace(
+      f.workspace,
+      async (threadId) => {
+        expect(threadId).toBe(receipt.threadId);
+        const context = await resolveContext();
+        return context === undefined ? {} : { checkoutRoot: context.parentCheckoutRoot };
+      },
+      async () => {
+        const code = await resolveContext();
+        return code === undefined ? {} : { code };
+      },
+    );
+    const authority: AgentRunAuthority = {
+      filesystem: true,
+      shell: true,
+      git: true,
+      network: true,
+      tools: true,
+      subagents: true,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    };
+    const result = await prepareAdmittedControlWorkspace({
+      requestId: siblingRequestId,
+      windowId,
+      workspace,
+      role: "implementation",
+      parent: {
+        parentMode: "code",
+        parentAuthority: authority,
+        liveAuthority: authority,
+        // authorizeCreation supplies identity and binding, not a checkout path.
+        workspaceParent: { threadId: receipt.threadId, mode: "code", projectId, bindingRevisionId },
+        parentRoute: {
+          providerInstanceId: decodeProviderInstanceId("44444444-4444-4444-8444-444444444444"),
+          modelId: decodeProviderModelId("fixture"),
+        },
+      },
+    });
+    expect(result.status).toBe("admitted");
+    if (result.status !== "admitted" || result.workspace.kind !== "code-worktree")
+      throw new Error("expected admitted child");
+    expect(result.workspace.verified).toBe(true);
+    expect(result.workspace.worktreeRoot).not.toBe(receipt.canonicalWorktreePath);
+    expect(result.workspace.worktreeRoot).not.toBe(f.code.repositoryRoot);
+    expect(await readFile(join(result.workspace.worktreeRoot, "shared.txt"), "utf8")).toBe(
+      "committed\n",
+    );
   });
 
   it("admits concurrent siblings separately and replays only the same authorized child", async () => {

@@ -2222,47 +2222,11 @@ export function startOctantServer(
         }
         return { parentCandidate, runtimeFacts: [...factsByKey.values()] };
       },
-      workspace: {
-        prepare: async ({ requestId, windowId, parent, code }) =>
-          agentRunWorkspace.prepare({
-            requestId,
-            windowId,
-            parent:
-              parent.mode === "code"
-                ? {
-                    ...parent,
-                    ...(await resolveAgentRunParentCheckout(
-                      persistence,
-                      managedWorktreeReceipts,
-                      parent.threadId,
-                    )),
-                  }
-                : parent,
-            ...(code === undefined
-              ? await resolveAgentRunPrepareCode(persistence, managedWorktreeReceipts, parent)
-              : { code: code }),
-          }),
-        confirm: ({ requestId, windowId, parent, worktreeReceiptId }) =>
-          agentRunWorkspace.confirm({ requestId, windowId, parent, worktreeReceiptId }),
-        admit: async ({ requestId, windowId, requested, role, parent }) =>
-          agentRunWorkspace.admit({
-            requestId,
-            windowId,
-            requested,
-            role,
-            parent:
-              parent.mode === "code"
-                ? {
-                    ...parent,
-                    ...(await resolveAgentRunParentCheckout(
-                      persistence,
-                      managedWorktreeReceipts,
-                      parent.threadId,
-                    )),
-                  }
-                : parent,
-          }),
-      },
+      workspace: createAgentRunControlWorkspace(
+        agentRunWorkspace,
+        (threadId) => resolveAgentRunParentCheckout(persistence, managedWorktreeReceipts, threadId),
+        (parent) => resolveAgentRunPrepareCode(persistence, managedWorktreeReceipts, parent),
+      ),
       // A child that asked to be admitted with its parent's context is given
       // the parent thread's own recent conversation, read through the very
       // Chat view that thread already shows. `authorizeCreation` above has
@@ -9635,6 +9599,54 @@ export function admittedParentChatContext(
     }
   }
   return blocks.slice(-MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS);
+}
+
+export function createAgentRunControlWorkspace(
+  workspace: AgentRunWorkspaceService,
+  resolveParentCheckout: (threadId: string) => ReturnType<typeof resolveAgentRunParentCheckout>,
+  resolvePrepareCode: (
+    parent: Parameters<typeof resolveAgentRunPrepareCode>[2],
+  ) => ReturnType<typeof resolveAgentRunPrepareCode>,
+): NonNullable<AgentRunControlAdmissionDependencies["workspace"]> {
+  return {
+    prepare: async ({ requestId, windowId, parent, code }) =>
+      workspace.prepare({
+        requestId,
+        windowId,
+        parent:
+          parent.mode === "code"
+            ? {
+                ...parent,
+                ...(await resolveParentCheckout(parent.threadId)),
+              }
+            : parent,
+        ...(code === undefined ? await resolvePrepareCode(parent) : { code: code }),
+      }),
+    confirm: async ({ requestId, windowId, parent, worktreeReceiptId }) =>
+      workspace.confirm({
+        requestId,
+        windowId,
+        worktreeReceiptId,
+        parent:
+          parent.mode === "code"
+            ? { ...parent, ...(await resolveParentCheckout(parent.threadId)) }
+            : parent,
+      }),
+    admit: async ({ requestId, windowId, requested, role, parent }) =>
+      workspace.admit({
+        requestId,
+        windowId,
+        requested,
+        role,
+        parent:
+          parent.mode === "code"
+            ? {
+                ...parent,
+                ...(await resolveParentCheckout(parent.threadId)),
+              }
+            : parent,
+      }),
+  };
 }
 
 async function resolveAgentRunParentCheckout(

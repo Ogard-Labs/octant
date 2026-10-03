@@ -44,7 +44,10 @@ afterEach(() => {
 });
 
 /** An endpoint that answers from a script and remembers every request it was sent. */
-function scriptedTransport(script: NativeHarnessResponse[]): {
+function scriptedTransport(
+  script: NativeHarnessResponse[],
+  fits: (request: NativeHarnessRequest) => boolean = () => true,
+): {
   readonly transport: NativeHarnessTransport;
   readonly requests: NativeHarnessRequest[];
 } {
@@ -53,7 +56,7 @@ function scriptedTransport(script: NativeHarnessResponse[]): {
     requests,
     transport: {
       open: async () => ({
-        fits: () => true,
+        fits,
         send: async (request) => {
           requests.push(request);
           const next = script.shift();
@@ -226,6 +229,71 @@ describe("native harness loop", () => {
               ),
           ).toBe(true);
         }),
+      ),
+    );
+  });
+
+  it("acknowledges and journals only queued steering notes retained in the fitted provider request", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-harness-steering-limit-"));
+    directories.push(directory);
+    const messages = ["Earlier note: " + "a".repeat(400), "Later note: " + "b".repeat(400)];
+    const scripted = scriptedTransport(
+      [
+        {
+          text: "Reading",
+          toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+        },
+        { text: "Applied the delivered note", toolCalls: [] },
+      ],
+      (request) => JSON.stringify(request.history).length <= 800,
+    );
+    let identity = 0;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const persistence = yield* Persistence;
+          const transcripts = new JournalNativeHarnessTranscriptStore({
+            journal: persistence.journal,
+            uuid: () => `80000000-0000-4000-8000-${String(++identity).padStart(12, "0")}`,
+            clock: () => now,
+            actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+          });
+          const connection = yield* connect(scripted.transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          yield* sendAndCollect(connection, "Review", (event) => event.kind === "tool-request");
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          const notes = [];
+          for (const message of messages) {
+            notes.push(
+              yield* Effect.fork(
+                connection.steer?.({ sessionId, message }) ?? Effect.succeed("unsupported"),
+              ),
+            );
+            yield* Effect.yieldNow();
+          }
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: "{}",
+            isError: false,
+          });
+          const outcomes = [];
+          for (const note of notes) outcomes.push(yield* Fiber.join(note));
+          yield* Fiber.join(terminal);
+          const received = scripted.requests[1]?.history.filter((message) =>
+            messages.includes(message.text),
+          );
+          const recorded = transcripts
+            .load(sessionId)
+            ?.messages.filter((message) => messages.includes(message.text));
+          expect(received).toEqual([{ role: "user", text: messages[1] }]);
+          expect(outcomes).toEqual(["unsupported", "steered"]);
+          expect(recorded).toEqual(received);
+        }).pipe(
+          Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
+        ),
       ),
     );
   });
