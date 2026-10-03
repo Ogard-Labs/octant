@@ -2,14 +2,20 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { ChevronDown, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import {
   isActiveAgentHierarchyStatus,
   type AgentHierarchyInputEntry,
 } from "./buildAgentHierarchyModel";
-import { SubagentStatusIcon, subagentElapsedLabel, subagentStatusWord } from "./subagentStatus";
+import {
+  SubagentStatusIcon,
+  subagentElapsedLabel,
+  subagentModel,
+  subagentNeedsReview,
+  subagentStatusWord,
+} from "./subagentStatus";
 import { useChildRunStatus } from "./useChildRunStatus";
 import "./agent-hierarchy.css";
 
@@ -124,7 +130,7 @@ export interface SubagentsTrayProps {
   readonly onOpenSubagent?: (runId?: string) => void;
   /** Cancels one named subagent; it names its target, so it needs no confirmation. */
   readonly onStop: (runId: string) => void;
-  /** Cancels every working subagent on the thread. Already confirmed when called. */
+  /** Cancels every active subagent on the thread. Already confirmed when called. */
   readonly onStopAll: () => void;
   readonly busy?: boolean;
   readonly reconnecting?: boolean;
@@ -136,18 +142,12 @@ export interface SubagentsTrayProps {
 const OPEN_KEY = "octant.composer-subagents.open";
 
 /**
- * The composer's card of the thread's working subagents.
- *
- * Only what is running: finished subagents, reviewed or not, are Environment's
- * and the Agents tool's to list, because a thread that delegates a lot grew a
- * tall card of old results over the transcript. The head folds the card to a
- * one-line tab and remembers that per viewer; the rows scroll past three.
- * Each row opens that subagent in Agents and offers Stop on hover or focus.
- * Stopping one named subagent acts at once; stopping several asks first,
- * naming how many are affected, because it is irreversible for every run it
- * reaches.
+ * Keep attention and result counts visible even when folded. Preview only
+ * three active or unreviewed children; the full history stays in Agents so
+ * completed work remains reachable without growing over the transcript.
  */
 export function SubagentsTray(props: SubagentsTrayProps) {
+  const listId = useId();
   const [confirming, setConfirming] = useState(false);
   const storage = props.storage ?? browserStorage();
   const [open, setOpen] = useState(() => readOpen(storage));
@@ -155,8 +155,12 @@ export function SubagentsTray(props: SubagentsTrayProps) {
   const working = props.entries.filter((entry) =>
     isActiveAgentHierarchyStatus(entry.lifecycleStatus),
   );
-  const now = useNow(working.length > 0 && open);
-  if (working.length === 0 && props.errorMessage === undefined) return null;
+  const outstanding = props.entries.filter(
+    (entry) => isActiveAgentHierarchyStatus(entry.lifecycleStatus) || subagentNeedsReview(entry),
+  );
+  const preview = outstanding.slice(0, 3);
+  const now = useNow(preview.length > 0 && open);
+  if (props.entries.length === 0 && props.errorMessage === undefined) return null;
 
   const toggle = () => {
     const next = !open;
@@ -164,7 +168,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
     setConfirming(false);
     writeOpen(storage, next);
   };
-  const count = working.length === 1 ? "1 working" : `${String(working.length)} working`;
+  const count = trayStatus(props.entries);
 
   return (
     <div
@@ -176,83 +180,109 @@ export function SubagentsTray(props: SubagentsTrayProps) {
       <div className="composer-subagents__head">
         <OctantButton
           aria-expanded={open}
+          aria-controls={open ? listId : undefined}
           aria-label={`Subagents, ${count}. ${open ? "Hide" : "Show"} them`}
           className="composer-subagents__toggle"
           onClick={toggle}
           size="xs"
           type="button"
-          variant="link"
+          variant="ghost"
         >
           <span className="composer-subagents__label">Subagents</span>
           <span className="composer-subagents__count">{count}</span>
           <ChevronDown aria-hidden="true" className="composer-subagents__chevron" size={12} />
         </OctantButton>
-        {open && working.length > 1 && !confirming ? (
+        {props.onOpenSubagent === undefined ? null : (
           <OctantButton
-            disabled={props.busy === true}
-            onClick={() => setConfirming(true)}
+            aria-label={`View all ${props.entries.length} subagents in Agents`}
+            className="composer-subagents__all"
+            onClick={() => props.onOpenSubagent?.()}
             size="xs"
             type="button"
             variant="ghost"
           >
-            Stop all
+            View all
           </OctantButton>
-        ) : null}
+        )}
       </div>
 
-      {open && confirming && working.length > 1 ? (
-        <div
-          aria-label="Confirm stopping subagents"
-          className="composer-subagents__confirm"
-          role="group"
-        >
-          <p>
-            Stop all {working.length} working subagents on this thread? Their work is cancelled and
-            cannot be resumed.
-          </p>
-          <p className="composer-subagents__confirm-scope">
-            Only this thread&apos;s subagents are affected. No other thread is stopped.
-          </p>
-          <div className="composer-subagents__confirm-actions">
+      {open ? (
+        <div id={listId} className="composer-subagents__body">
+          {working.length > 1 && !confirming ? (
             <OctantButton
               disabled={props.busy === true}
-              onClick={() => {
-                setConfirming(false);
-                props.onStopAll();
-              }}
-              size="xs"
-              type="button"
-              variant="destructive"
-            >
-              Stop {working.length} subagents
-            </OctantButton>
-            <OctantButton
-              onClick={() => setConfirming(false)}
+              onClick={() => setConfirming(true)}
               size="xs"
               type="button"
               variant="ghost"
             >
-              Keep running
+              Stop all
             </OctantButton>
-          </div>
-        </div>
-      ) : null}
+          ) : null}
+          {confirming && working.length > 1 ? (
+            <div
+              aria-label="Confirm stopping subagents"
+              className="composer-subagents__confirm"
+              role="group"
+            >
+              <p>
+                Stop all {working.length} active subagents on this thread? Their work is cancelled
+                and cannot be resumed.
+              </p>
+              <p className="composer-subagents__confirm-scope">
+                Only this thread&apos;s subagents are affected. No other thread is stopped.
+              </p>
+              <div className="composer-subagents__confirm-actions">
+                <OctantButton
+                  disabled={props.busy === true}
+                  onClick={() => {
+                    setConfirming(false);
+                    props.onStopAll();
+                  }}
+                  size="xs"
+                  type="button"
+                  variant="destructive"
+                >
+                  Stop {working.length} subagents
+                </OctantButton>
+                <OctantButton
+                  onClick={() => setConfirming(false)}
+                  size="xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  Keep running
+                </OctantButton>
+              </div>
+            </div>
+          ) : null}
 
-      {open ? (
-        <ul className="composer-subagents__list">
-          {working.map((entry) => (
-            <SubagentTrayRow
-              busy={props.busy === true}
-              entry={entry}
-              key={entry.runId}
-              now={now}
-              {...(props.onOpenSubagent === undefined
-                ? {}
-                : { onOpenSubagent: props.onOpenSubagent })}
-              onStop={props.onStop}
-            />
-          ))}
-        </ul>
+          {preview.length > 0 ? (
+            <ul className="composer-subagents__list">
+              {preview.map((entry) => (
+                <SubagentTrayRow
+                  busy={props.busy === true}
+                  entry={entry}
+                  key={entry.runId}
+                  now={now}
+                  {...(props.onOpenSubagent === undefined
+                    ? {}
+                    : { onOpenSubagent: props.onOpenSubagent })}
+                  onStop={props.onStop}
+                />
+              ))}
+            </ul>
+          ) : null}
+          {outstanding.length > preview.length ? (
+            <p className="composer-subagents__notice">
+              Showing {preview.length} of {outstanding.length} active or unreviewed subagents. Open
+              Agents for the full list.
+            </p>
+          ) : null}
+          {outstanding.length === 0 ? (
+            <p className="composer-subagents__notice">Finished subagents are listed in Agents.</p>
+          ) : null}
+        </div>
       ) : null}
 
       {props.reconnecting === true ? (
@@ -278,11 +308,20 @@ function SubagentTrayRow(props: {
 }) {
   const entry = props.entry;
   const word = subagentStatusWord(entry.lifecycleStatus);
-  const meta = `${word} · ${subagentElapsedLabel(entry.updatedAt, props.now)}`;
+  const elapsed = subagentElapsedLabel(entry.updatedAt, props.now);
+  const meta = [
+    word,
+    subagentNeedsReview(entry) ? "Needs review" : undefined,
+    subagentModel(entry),
+    elapsed === "" ? undefined : `Updated ${elapsed} ago`,
+  ]
+    .filter((part) => part !== undefined)
+    .join(" · ");
+  const reason = entry.recoveryReason ?? entry.resultAcknowledgement.followUpReason;
   return (
     <li className="composer-subagents__row">
       <OctantButton
-        aria-label={`${entry.task}. ${word}. Opens it in Agents.`}
+        aria-label={`${entry.task}. ${meta}. ${reason === undefined ? "" : `${reason}. `}Opens it in Agents.`}
         className="composer-subagents__open"
         onClick={() => props.onOpenSubagent?.(entry.runId)}
         size="xs"
@@ -291,21 +330,54 @@ function SubagentTrayRow(props: {
         variant="ghost"
       >
         <SubagentStatusIcon lifecycleStatus={entry.lifecycleStatus} />
-        <span className="composer-subagents__task">{entry.task}</span>
-        <span className="composer-subagents__meta">{meta}</span>
+        <span className="composer-subagents__content">
+          <span className="composer-subagents__task">{entry.task}</span>
+          <span className="composer-subagents__meta">{meta}</span>
+          {reason === undefined ? null : (
+            <span className="composer-subagents__reason">{reason}</span>
+          )}
+        </span>
       </OctantButton>
-      <OctantIconButton
-        className="composer-subagents__action"
-        disabled={props.busy}
-        label={`Stop subagent: ${entry.task}`}
-        onClick={() => props.onStop(entry.runId)}
-        size="icon-xs"
-        type="button"
-      >
-        <X aria-hidden="true" size={12} />
-      </OctantIconButton>
+      {isActiveAgentHierarchyStatus(entry.lifecycleStatus) ? (
+        <OctantIconButton
+          className="composer-subagents__action"
+          disabled={props.busy}
+          label={`Stop subagent: ${entry.task}`}
+          onClick={() => props.onStop(entry.runId)}
+          size="icon-xs"
+          type="button"
+        >
+          <X aria-hidden="true" size={12} />
+        </OctantIconButton>
+      ) : null}
     </li>
   );
+}
+
+function trayStatus(entries: ReadonlyArray<AgentHierarchyInputEntry>): string {
+  const count = (status: string) =>
+    entries.filter((entry) => entry.lifecycleStatus === status).length;
+  const review = entries.filter(subagentNeedsReview).length;
+  const statuses = [
+    "failed",
+    "interrupted",
+    "cancelled",
+    "waiting",
+    "queued",
+    "starting",
+    "running",
+    "completed",
+  ];
+  const parts: string[] = [];
+  for (const status of statuses) {
+    if (status === "queued" && review > 0)
+      parts.push(`${review} ${review === 1 ? "needs" : "need"} review`);
+    const total = count(status);
+    if (total > 0) parts.push(`${total} ${status === "running" ? "working" : status}`);
+  }
+  const unknown = entries.filter((entry) => !statuses.includes(entry.lifecycleStatus)).length;
+  if (unknown > 0) parts.push(`${unknown} status unavailable`);
+  return [`${entries.length} total`, ...parts].join(" · ");
 }
 
 function browserStorage(): Pick<Storage, "getItem" | "setItem"> | undefined {
@@ -316,12 +388,12 @@ function browserStorage(): Pick<Storage, "getItem" | "setItem"> | undefined {
   }
 }
 
-/** Open unless this viewer folded it; storage that throws reads as open. */
+/** Keep the first view compact; preserve a viewer's explicit choice. */
 function readOpen(storage: Pick<Storage, "getItem"> | undefined): boolean {
   try {
-    return storage?.getItem(OPEN_KEY) !== "false";
+    return storage?.getItem(OPEN_KEY) === "true";
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -334,9 +406,8 @@ function writeOpen(storage: Pick<Storage, "setItem"> | undefined, open: boolean)
 }
 
 /**
- * The current time, re-read each second while something in the tray is
- * working. The host's summary only changes on a status change, so without
- * this the "12s" beside a working subagent would sit still until it finished.
+ * Refresh the update age while preview rows are visible, including finished
+ * results awaiting review, without polling the clock for a folded tray.
  */
 function useNow(ticking: boolean): number {
   const [now, setNow] = useState(() => Date.now());

@@ -304,13 +304,9 @@
   display: none;
 }
 
-/* Folded, the card is a tab just wide enough for its head. */
-.composer-subagents[data-open="false"] {
-  right: auto;
-}
-
 .composer-subagents__head {
   display: flex;
+  min-width: 0;
   min-height: 24px;
   align-items: center;
   justify-content: space-between;
@@ -318,10 +314,16 @@
 }
 
 .composer-subagents__toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
   gap: var(--oct-space-2);
-  height: 24px;
+  height: auto;
+  min-height: 24px;
   padding-inline: var(--oct-space-1);
+  text-align: start;
   text-decoration: none;
+  white-space: normal;
 }
 
 .composer-subagents__toggle:hover {
@@ -335,10 +337,23 @@
 }
 
 .composer-subagents__count {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
   font-weight: normal;
+}
+
+.composer-subagents__all {
+  flex: 0 0 auto;
+}
+
+.composer-subagents__body {
+  display: grid;
+  min-width: 0;
+  justify-items: start;
+  gap: var(--oct-space-1);
 }
 
 .composer-subagents__chevron {
@@ -350,11 +365,11 @@
   transform: rotate(180deg);
 }
 
-/* Three rows, then the list scrolls: a thread that delegates a lot does not
-   grow a tall card over its own transcript. */
+/* Bounded previews still scroll when long task text wraps at a narrow width. */
 .composer-subagents__list {
   display: grid;
-  max-height: 72px;
+  width: 100%;
+  max-height: 10rem;
   margin: 0;
   padding: 0;
   overflow-y: auto;
@@ -374,25 +389,33 @@
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
+  height: auto;
+  min-height: 24px;
+  align-items: flex-start;
   justify-content: flex-start;
   gap: var(--oct-space-2);
   padding-inline: var(--oct-space-1);
+  padding-block: var(--oct-space-1);
   text-align: start;
+  white-space: normal;
+}
+
+.composer-subagents__content {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px;
+  overflow-wrap: anywhere;
 }
 
 .composer-subagents__task {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
   color: var(--oct-fg);
   font-size: var(--oct-text-xs);
   font-weight: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.composer-subagents__meta {
-  flex: 0 0 auto;
+.composer-subagents__meta,
+.composer-subagents__reason {
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
@@ -415,6 +438,7 @@
 .composer-subagents__notice,
 .composer-subagents__confirm p {
   margin: 0;
+  overflow-wrap: anywhere;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
@@ -433,6 +457,7 @@
 
 .composer-subagents__confirm-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--oct-space-1);
 }
 
