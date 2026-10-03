@@ -1885,7 +1885,7 @@ export class ChatService {
       // agent's question, so it never blocks putting a thread away.
       const decision = decideCompleteThread({
         lifecycle: current.lifecycle,
-        executing: this.#isTurnActive(current.id),
+        executing: this.isTurnActive(current.id),
         awaitingInput: false,
       });
       if (decision.status === "refused") {
@@ -1907,7 +1907,7 @@ export class ChatService {
         updatedAt: timestamp,
       };
     } else if (command.kind === "snooze-chat-thread") {
-      const executing = this.#isTurnActive(current.id);
+      const executing = this.isTurnActive(current.id);
       const decision = decideSnoozeThread({
         lifecycle: current.lifecycle,
         awaitingInput: false,
@@ -5409,7 +5409,7 @@ export class ChatService {
   }
 
   /** A queued or streaming attempt, or an execution this process still owns. */
-  #isTurnActive(threadId: ChatThreadId): boolean {
+  isTurnActive(threadId: ChatThreadId): boolean {
     const view = this.#persistence.readChatThreadView(threadId);
     return hasAttemptInFlight(view) || this.#activeThreadExecutions.has(String(threadId));
   }

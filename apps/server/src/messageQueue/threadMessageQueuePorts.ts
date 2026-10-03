@@ -43,6 +43,7 @@ export interface ThreadMessageQueuePortDependencies {
   readonly journal: Pick<Journal, "replayAggregate">;
   readonly chat: {
     readonly read: ChatService["read"];
+    readonly isTurnActive: ChatService["isTurnActive"];
     readonly execute: (command: unknown, context?: ChatServiceExecutionContext) => Promise<unknown>;
   };
   readonly work: {
@@ -88,6 +89,7 @@ function readFacts(
     const attempt = turn?.attempts.at(-1);
     return {
       thread,
+      executing: deps.chat.isTurnActive(id),
       binding: {
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
@@ -204,7 +206,10 @@ export function createThreadMessageQueuePort(
       )
       .digest("hex");
     return {
-      status: facts.tail?.status === "active" ? "busy" : "ready",
+      status:
+        facts.tail?.status === "active" || ("executing" in facts && facts.executing)
+          ? "busy"
+          : "ready",
       binding,
       ...(facts.tail === undefined ? {} : { tail: facts.tail }),
     };

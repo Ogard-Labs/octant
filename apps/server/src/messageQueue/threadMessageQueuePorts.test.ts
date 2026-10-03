@@ -70,6 +70,7 @@ function setup() {
     },
     journal: { replayAggregate: () => [] },
     chat: {
+      isTurnActive: () => false,
       read: () =>
         decodeChatThreadView({
           thread: current,
@@ -105,9 +106,11 @@ function setup() {
 }
 
 describe("queued turn admission", () => {
-  it("dispatches the next Chat message after turn events advance the journal beyond the thread projection", async () => {
+  it("waits for Chat completion cleanup before dispatching at the current journal version", async () => {
     const dataDirectory = mkdtempSync(join(tmpdir(), "octant-queue-version-"));
     const runtime = ManagedRuntime.make(makePersistenceLive({ dataDirectory }));
+    const completion = Promise.withResolvers<void>();
+    let firstTurn: Promise<unknown> | undefined;
     try {
       const persistence = await runtime.runPromise(Persistence);
       const now = thread.createdAt;
@@ -236,6 +239,11 @@ describe("queued turn admission", () => {
           searxngClient: { search: async () => ({ query: "", backend: "searxng", results: [] }) },
         }),
         turnTimeoutMs: 5_000,
+        nativeHarness: {
+          contextFor: () => [],
+          turnStarted: () => undefined,
+          turnCompleted: () => completion.promise,
+        },
       });
       const created = await chat.execute({
         kind: "create-chat-thread",
@@ -243,12 +251,15 @@ describe("queued turn admission", () => {
         title: "Queue version",
       });
       if (created.kind !== "thread-created") throw new Error("Expected a Chat thread.");
-      await chat.execute({
+      firstTurn = chat.execute({
         kind: "send-chat-turn",
         threadId: created.thread.id,
         expectedVersion: created.thread.version,
         prompt: "First message",
       });
+      await expect
+        .poll(() => chat.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome)
+        .toBe("completed");
       const completed = chat.read(created.thread.id);
       expect(completed.turns[0]?.attempts.at(-1)?.outcome).toBe("completed");
       expect(persistence.readChatThread(created.thread.id)?.version).toBeLessThan(
@@ -266,7 +277,13 @@ describe("queued turn admission", () => {
         threadId: decodeMentionableThreadId(created.thread.id),
       } as const;
       const inspection = await port.inspect({ scope, windowId, intent: "enqueue" });
+      expect(inspection).toMatchObject({ status: "busy", tail: { status: "completed" } });
       if (inspection.status === "held") throw new Error("Expected an admitted scope.");
+      completion.resolve();
+      await firstTurn;
+      expect(await port.inspect({ scope, windowId, intent: "dispatch" })).toMatchObject({
+        status: "ready",
+      });
       const messageId = decodeThreadQueueMessageId(randomUUID());
       expect(
         await port.admit({
@@ -286,6 +303,8 @@ describe("queued turn admission", () => {
         { sequence: 2, submissionId: messageId },
       ]);
     } finally {
+      completion.resolve();
+      await firstTurn;
       await runtime.dispose();
       rmSync(dataDirectory, { recursive: true, force: true });
     }
