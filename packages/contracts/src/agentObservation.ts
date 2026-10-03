@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import {
   AgentRunResultEvidence,
+  AgentRunReviewMetadata,
+  AgentRunReviewSnapshot,
   AgentRunId,
   AgentRunParentThreadId,
   AgentRunExecutionKind,
@@ -43,7 +45,9 @@ export const AgentRunResultPacket = Schema.Struct({
     ),
     truncated: Schema.Boolean,
   }).annotations(strict),
-  ...AgentRunResultEvidence.fields,
+  files: AgentRunResultEvidence.fields.files,
+  checks: AgentRunResultEvidence.fields.checks,
+  review: Schema.optional(AgentRunReviewMetadata),
   blockers: Schema.Struct({
     status: Schema.Literal("recorded", "unavailable", "truncated"),
     items: Schema.Array(
@@ -63,3 +67,19 @@ export const AgentRunResultsResponse = Schema.Struct({
 }).annotations(strict);
 export type AgentRunResultsResponse = typeof AgentRunResultsResponse.Type;
 export const decodeAgentRunResultsResponse = Schema.decodeUnknownSync(AgentRunResultsResponse);
+
+const reviewIdentity = {
+  runId: AgentRunId,
+  parentThreadId: AgentRunParentThreadId,
+  generation: Schema.Int.pipe(Schema.positive()),
+};
+export const AgentRunReviewResponse = Schema.Union(
+  Schema.Struct({
+    ...reviewIdentity,
+    status: Schema.Literal("available"),
+    snapshot: AgentRunReviewSnapshot,
+  }).annotations(strict),
+  Schema.Struct({ ...reviewIdentity, status: Schema.Literal("unavailable") }).annotations(strict),
+);
+export type AgentRunReviewResponse = typeof AgentRunReviewResponse.Type;
+export const decodeAgentRunReviewResponse = Schema.decodeUnknownSync(AgentRunReviewResponse);
