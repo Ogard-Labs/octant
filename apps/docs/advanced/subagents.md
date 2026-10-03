@@ -153,9 +153,13 @@ continue. The earlier conversation stays available, and the new reply needs
 its own acknowledgement. The previous reply must reach the parent or be
 collected before a follow-up starts. Checking status does not collect it; an
 oversized reply remains available when a tool cannot return it completely.
+A follow-up also requires the child's provider, model, and reasoning choice to
+remain available under the parent's current Project policy.
 If capacity or the spend ceiling refuses a follow-up, the completed reply and
 your draft stay available so you can retry. Once accepted, the follow-up is saved
-with the child. Recovery sends an unsent follow-up as written; if delivery is
+with the child. If its connection fails before sending, the child becomes
+interrupted; choose **Resume** to send the saved follow-up in its existing
+conversation. Recovery sends an unsent follow-up as written; if delivery is
 uncertain, Octant says so and preserves it for inspection rather than silently
 sending it again.
 

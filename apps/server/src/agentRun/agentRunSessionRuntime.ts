@@ -654,6 +654,20 @@ export function createAgentRunSessionRuntime(
       markFinished = resolve;
     });
     const end = (outcome: AgentRunSessionOutcome): void => {
+      if (
+        outcome.kind === "failed" &&
+        record.pendingContinuation?.generation === (run.generation ?? 1) &&
+        record.pendingContinuation.state === "unsent"
+      ) {
+        // Acquisition or native resume can fail before send. The accepted
+        // input is still durable and must remain reachable through Resume.
+        outcome = {
+          kind: "interrupted",
+          reason: boundedReason(
+            `follow-up-not-sent: ${outcome.failure.category}: ${outcome.failure.message}`,
+          ),
+        };
+      }
       endedOutcome = outcome;
       // A shutdown the provider never confirmed is not a terminal fact.
       // Withholding the outcome keeps the session owned here and at the
