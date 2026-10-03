@@ -328,6 +328,20 @@ export class AgentResultDeliveryService {
       } else if (result.kind === "deferred") {
         this.#armTimer(pending);
       } else {
+        // Preparation may outlive one member's result. That refusal describes
+        // the stale batch, so rebuild it without failing its healthy siblings.
+        if (
+          runs.some((run) => {
+            const current = this.#options.agentRuns.getById(run.id);
+            return (
+              current === undefined ||
+              (current.generation ?? 1) !== (run.generation ?? 1) ||
+              current.lifecycleStatus !== run.lifecycleStatus ||
+              !owesDelivery(current)
+            );
+          })
+        )
+          return;
         for (const run of runs)
           this.#settle(
             pending,

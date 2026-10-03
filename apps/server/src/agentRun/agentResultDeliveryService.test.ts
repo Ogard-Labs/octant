@@ -17,6 +17,7 @@ import {
 import {
   agentRunResultGeneration,
   coveredAgentResultDeliveryMembers,
+  validateAgentResultDelivery,
 } from "./agentResultDeliveryBatch";
 import {
   agentResultDeliveryBatchPrompt,
@@ -177,6 +178,109 @@ function deliveryFixture(
 }
 
 describe("AgentResultDeliveryService", () => {
+  it.each(["consumed", "replaced", "resumed"] as const)(
+    "delivers an unchanged sibling when another result is %s during preparation",
+    async (change) => {
+      const first = finishedRun();
+      const second = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000005" });
+      let release: (() => void) | undefined;
+      const preparation = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const admitted: AgentRunResultDeliveryMark[] = [];
+      let preparing = true;
+      const fixture = deliveryFixture({
+        runs: [first, second],
+        chat: {
+          dispatch: vi.fn<AgentResultDeliveryModePort["dispatch"]>(async (batch) => {
+            const primary = batch[0];
+            if (primary === undefined) throw new Error("Empty batch");
+            const mark: AgentRunResultDeliveryMark = {
+              kind: "agent-result",
+              runId: primary.id,
+              runIds: batch.map((run) => run.id),
+              runGenerations: batch.map((run) => ({
+                runId: run.id,
+                generation: run.generation ?? 1,
+              })),
+            };
+            if (preparing) {
+              preparing = false;
+              await preparation;
+            }
+            // Mode admission rechecks the captured mark after asynchronous preparation.
+            const validation = validateAgentResultDelivery({
+              delivery: mark,
+              threadId: String(first.parentThreadId),
+              mode: "chat",
+              getById: (id) => fixture.runs.get(id),
+            });
+            if (validation.kind === "invalid")
+              return { kind: "refused", detail: validation.detail };
+            if (validation.runs.some((run) => run.resultDelivery !== undefined))
+              return { kind: "refused", detail: "A child result already settled." };
+            admitted.push(mark);
+            return {
+              kind: "dispatched",
+              runIds: batch.map((run) => run.id),
+              runGenerations: mark.runGenerations,
+            };
+          }),
+        },
+      });
+      fixture.service.start();
+      await fixture.flush();
+      expect(fixture.chat.dispatch).toHaveBeenCalledWith([first, second]);
+      const changed = finishedRun({
+        version: 9,
+        ...(change === "consumed"
+          ? { resultDelivery: { outcome: "consumed", settledAt: now } }
+          : change === "replaced"
+            ? { generation: 2 }
+            : { lifecycleStatus: "running" }),
+      });
+      fixture.runs.set(first.id, changed);
+      expect(fixture.runs.get(second.id)).toEqual(second);
+      expect(admitted).toEqual([]);
+      release?.();
+      await fixture.flush();
+
+      expect(fixture.runs.get(second.id)?.resultDelivery?.outcome).toBe("delivered");
+      expect(admitted.map((mark) => mark.runGenerations)).toEqual([
+        change === "replaced"
+          ? [
+              { runId: first.id, generation: 2 },
+              { runId: second.id, generation: 1 },
+            ]
+          : [{ runId: second.id, generation: 1 }],
+      ]);
+      expect(fixture.applyCommand).not.toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "failed" }),
+      );
+      if (change !== "replaced") expect(fixture.runs.get(first.id)).toEqual(changed);
+      expect(fixture.timers).toHaveLength(0);
+    },
+  );
+
+  it("settles an unchanged batch after a fatal parent refusal without retrying", async () => {
+    const first = finishedRun();
+    const second = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000005" });
+    const fixture = deliveryFixture({
+      runs: [first, second],
+      chat: {
+        dispatch: vi.fn(async () => ({ kind: "refused" as const, detail: "Parent revoked" })),
+      },
+    });
+    fixture.service.start();
+    await fixture.flush();
+    expect(fixture.chat.dispatch).toHaveBeenCalledTimes(1);
+    expect([...fixture.runs.values()].map((run) => run.resultDelivery?.outcome)).toEqual([
+      "failed",
+      "failed",
+    ]);
+    expect(fixture.timers).toHaveLength(0);
+  });
+
   it("replays a partially settled group after a crash without swallowing a new sibling", async () => {
     const first = finishedRun();
     const second = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000005" });
