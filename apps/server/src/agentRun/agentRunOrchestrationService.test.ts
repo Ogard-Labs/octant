@@ -1267,7 +1267,7 @@ describe("AgentRun dependency graphs", () => {
     const orchestration = restart();
     const waiting = persistence.getById(dependent.id);
     if (waiting === undefined) throw new Error("The dependent is gone.");
-    expect(orchestration.resume(dependent.id, waiting.version + 1, authority)).toMatchObject({
+    expect(await orchestration.resume(dependent.id, waiting.version + 1, authority)).toMatchObject({
       kind: "run-command-failed",
       reason: "stale-version",
     });
@@ -1287,7 +1287,7 @@ describe("AgentRun dependency graphs", () => {
 
     const parked = persistence.getById(dependent.id);
     if (parked === undefined) throw new Error("The dependent is gone.");
-    orchestration.resume(dependent.id, parked.version, authority);
+    await orchestration.resume(dependent.id, parked.version, authority);
     expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("starting");
     expect(starts).toContain(String(dependent.id));
   });
@@ -1309,7 +1309,7 @@ describe("AgentRun dependency graphs", () => {
     // Resuming the child alone does not get around its parent's pause.
     const parked = persistence.getById(dependent.id);
     if (parked === undefined) throw new Error("The dependent is gone.");
-    expect(orchestration.resume(dependent.id, parked.version, authority)).toMatchObject({
+    expect(await orchestration.resume(dependent.id, parked.version, authority)).toMatchObject({
       kind: "run-command-failed",
       reason: "unsupported-transition",
     });
