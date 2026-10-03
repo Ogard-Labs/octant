@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
   decodeCapacityReservationId,
   decodeContextSubjectRef,
   decodeProviderSessionId,
+  decodeProviderResumeCursor,
   decodeUtcTimestamp,
   type AgentRun,
   type AgentRunAuthority,
@@ -16,6 +18,7 @@ import {
   type ProviderInstanceId,
   type ProviderModelId,
   type ProviderRuntimeEvent,
+  type ProviderResumeCursor,
   type ProviderServiceLimits,
   type ProviderSessionId,
   type UtcTimestamp,
@@ -27,7 +30,7 @@ import {
   effectiveAgentRunExecutionTarget,
 } from "@octant/domain/agent-run-policy";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
-import { Cause, Effect, Exit, Fiber, Option, Scope, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Scope, Stream } from "effect";
 import {
   ProviderCapacitySchedulerRejected,
   type ProviderCapacityScheduler,
@@ -35,6 +38,7 @@ import {
 } from "../context/providerCapacityScheduler";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
+import type { AgentRunSessionRecord, AgentRunSessionStatePort } from "./agentRunSessionStore";
 import { AGENT_RUN_AGGREGATE_TYPE } from "./agentRunEventStore";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import {
@@ -154,7 +158,25 @@ function dependencyResultBlocks(
   return blocks;
 }
 
+export interface AgentRunSessionInteractions {
+  /** The host checks current child authority and asks the person; this port never grants it. */
+  readonly approve?: (input: {
+    readonly run: AgentRun;
+    readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "approval-request" }>;
+    readonly signal: AbortSignal;
+  }) => Promise<boolean>;
+  readonly askUser?: (input: {
+    readonly run: AgentRun;
+    readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "user-input-request" }>;
+    readonly signal: AbortSignal;
+  }) => Promise<string | undefined>;
+}
+
 export interface AgentRunSessionRuntimeOptions {
+  readonly interactions?: AgentRunSessionInteractions;
+  readonly sessionStore?: AgentRunSessionStatePort;
+  /** Current observed capability; absent is unsupported, never an optimistic probe. */
+  readonly supportsResume?: (providerInstanceId: ProviderInstanceId) => boolean;
   /** Resolves the configured driver for a provider instance, or undefined. */
   readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   readonly capacityScheduler: ProviderCapacityScheduler;
@@ -181,7 +203,17 @@ export interface AgentRunSessionRuntimeOptions {
   /** Bound on one teardown attempt; see {@link DEFAULT_SHUTDOWN_TIMEOUT_MS}. */
   readonly shutdownTimeoutMs?: number;
   /** Publishes ephemeral managed-child transcript facts to the host read model. */
-  readonly onSessionStarted?: (input: { readonly runId: AgentRunId }) => void;
+  readonly onSessionStarted?: (input: {
+    readonly runId: AgentRunId;
+    readonly resumed: boolean;
+  }) => void;
+  /** Input attribution for the bounded display history; it never exposes private cursors. */
+  readonly onUserMessage?: (input: {
+    readonly runId: AgentRunId;
+    readonly kind: "task" | "follow-up" | "resume" | "steering" | "answer";
+    readonly text: string;
+    readonly occurredAt: UtcTimestamp;
+  }) => void;
   readonly onTextDelta?: (input: {
     readonly runId: AgentRunId;
     readonly text: string;
@@ -226,6 +258,7 @@ interface SessionShutdown {
 
 interface LiveSession {
   readonly controller: AbortController;
+  steer: ((message: string) => Promise<"steered" | "unsupported">) | undefined;
   /** Resolves once the managed session ended, whether or not it settled. */
   readonly finished: Promise<void>;
   readonly shutdown: SessionShutdown;
@@ -256,173 +289,308 @@ export function createAgentRunSessionRuntime(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
 
-  return {
-    start: (run) => {
-      // Authority is re-derived from the persisted run, never inherited from
-      // the parent thread at execution time: the parent's live grant may have
-      // widened since admission, and a child must never gain from that.
-      const authority = clampAgentRunSessionAuthority(run);
-      const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
-      const driver = options.resolveDriver(target.providerInstanceId);
-      if (driver === undefined) {
-        throw new AgentRunSessionError(
-          "provider-unavailable",
-          `Provider instance ${String(target.providerInstanceId)} is not configured on this host.`,
-        );
-      }
-      const projectRoot = resolveProjectRoot(run, options.scratchRoot);
-      const context = options.context.resolve({
-        runId: run.id,
-        contextSnapshotId: run.routingReceipt.contextSnapshotId,
-      });
-      if (context === undefined) {
-        throw new AgentRunSessionError(
-          "context-unavailable",
-          "The AgentRun context snapshot could not be resolved for execution.",
-        );
-      }
-
-      const subject = decodeContextSubjectRef({
-        aggregateType: AGENT_RUN_AGGREGATE_TYPE,
-        aggregateId: String(run.id),
-      });
-      const estimatedTokens = estimateInputTokens(run, context);
-      const spendReservationId =
-        options.spendCeiling === undefined
-          ? undefined
-          : decodeSpendCeilingReservationId(options.uuid());
-      if (options.spendCeiling !== undefined && spendReservationId !== undefined) {
-        const threadType =
-          run.workspaceReceipt.kind === "work-root"
-            ? ("work-thread" as const)
-            : run.workspaceReceipt.kind === "code-worktree"
-              ? ("code-thread" as const)
-              : ("chat-thread" as const);
-        const spendAdmission = options.spendCeiling.admit({
-          reservationId: spendReservationId,
-          threadId: String(run.parentThreadId),
-          threadType,
-          ...("projectId" in run.workspaceReceipt
-            ? { projectId: String(run.workspaceReceipt.projectId) }
-            : {}),
-          turnUpperBoundTokens: estimatedTokens,
-          childSubjectIds: [String(run.id)],
-        });
-        if (spendAdmission.status === "refused") {
-          throw new AgentRunSessionError("spend-ceiling-exhausted", spendAdmission.refusal.message);
-        }
-      }
-      const reservationId = (() => {
-        try {
-          return reserveCapacity({
-            capacityScheduler: options.capacityScheduler,
-            ...(options.serviceLimits === undefined
-              ? {}
-              : { serviceLimits: options.serviceLimits }),
-            ...(options.capacityEnforcement === undefined
-              ? {}
-              : { capacityEnforcement: options.capacityEnforcement }),
-            uuid: options.uuid,
-            subject,
-            providerInstanceId: target.providerInstanceId,
-            modelId: target.modelId,
-            estimatedTokens,
-          });
-        } catch (error) {
-          // Capacity refusal happens before the managed session owns cleanup.
-          if (spendReservationId !== undefined) {
-            options.spendCeiling?.settle({ reservationId: spendReservationId });
-          }
-          throw error;
-        }
-      })();
-
-      const listeners = new Set<(outcome: AgentRunSessionOutcome) => void>();
-      let settledOutcome: AgentRunSessionOutcome | undefined;
-      const settle = (outcome: AgentRunSessionOutcome): void => {
-        if (settledOutcome !== undefined) return;
-        settledOutcome = outcome;
-        try {
-          options.onSessionSettled?.({ runId: run.id, outcome });
-        } catch {
-          // A transient observer must never prevent lifecycle settlement.
-        }
-        sessions.delete(run.id);
-        for (const listener of listeners) listener(outcome);
-      };
-
-      const shutdown: SessionShutdown = { unconfirmed: undefined };
-      let endedOutcome: AgentRunSessionOutcome | undefined;
-      let markFinished: () => void = () => undefined;
-      const finished = new Promise<void>((resolve) => {
-        markFinished = resolve;
-      });
-      const end = (outcome: AgentRunSessionOutcome): void => {
-        endedOutcome = outcome;
-        // A shutdown the provider never confirmed is not a terminal fact.
-        // Withholding the outcome keeps the session owned here and at the
-        // supervisor, so the cancellation stays pending and retryable instead
-        // of being reported as a termination nobody observed.
-        if (shutdown.unconfirmed === undefined) settle(outcome);
-        markFinished();
-      };
-
-      const controller = new AbortController();
-      sessions.set(run.id, {
-        controller,
-        finished,
-        shutdown,
-        publish: () => {
-          if (endedOutcome !== undefined) settle(endedOutcome);
-        },
-      });
-      try {
-        options.onSessionStarted?.({ runId: run.id });
-      } catch {
-        // A transient observer must never prevent provider startup.
-      }
-
-      void Effect.runPromiseExit(
-        Effect.scoped(
-          runManagedSession({
-            run,
-            driver,
-            authority,
-            projectRoot,
-            context,
-            reservationId,
-            ...(spendReservationId === undefined ? {} : { spendReservationId }),
-            ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
-            capacityScheduler: options.capacityScheduler,
-            providerInstanceId: target.providerInstanceId,
-            modelId: target.modelId,
-            sessionId: decodeProviderSessionId(options.uuid()),
-            maxEvents,
-            timeoutMs,
-            shutdownTimeoutMs,
-            shutdown,
-            onTextDelta: options.onTextDelta,
-            ...(options.appManagedTools === undefined
-              ? {}
-              : { appManagedTools: options.appManagedTools({ run, authority, projectRoot }) }),
-          }),
-        ),
-        { signal: controller.signal },
-      ).then(
-        (exit) => end(outcomeFromExit(exit)),
-        (error: unknown) => end({ kind: "interrupted", reason: boundedReason(error) }),
+  const startSession = (run: AgentRun, continuation?: { readonly message?: string }) => {
+    if (sessions.has(run.id))
+      throw new AgentRunSessionError(
+        "provider-unavailable",
+        "This child already owns a live session.",
       );
+    // Authority is re-derived from the persisted run, never inherited from
+    // the parent thread at execution time: the parent's live grant may have
+    // widened since admission, and a child must never gain from that.
+    const authority = clampAgentRunSessionAuthority(run);
+    const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+    const driver = options.resolveDriver(target.providerInstanceId);
+    if (driver === undefined) {
+      throw new AgentRunSessionError(
+        "provider-unavailable",
+        `Provider instance ${String(target.providerInstanceId)} is not configured on this host.`,
+      );
+    }
+    const projectRoot = resolveProjectRoot(run, options.scratchRoot);
+    const context = options.context.resolve({
+      runId: run.id,
+      contextSnapshotId: run.routingReceipt.contextSnapshotId,
+    });
+    if (context === undefined) {
+      throw new AgentRunSessionError(
+        "context-unavailable",
+        "The AgentRun context snapshot could not be resolved for execution.",
+      );
+    }
 
-      return {
+    const binding = childSessionBinding(run, driver, projectRoot);
+    const previous = continuation === undefined ? undefined : options.sessionStore?.read(run);
+    if (
+      continuation !== undefined &&
+      (run.lifecycleStatus === "cancelled" ||
+        options.supportsResume?.(target.providerInstanceId) !== true ||
+        previous === undefined ||
+        previous.binding !== binding ||
+        previous.resumeCursor === undefined ||
+        !validResumeCursor(previous.resumeCursor, {
+          driver,
+          run,
+          projectRoot,
+          sessionId: previous.sessionId,
+        }))
+    ) {
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "The child has no compatible saved provider conversation. Use Retry to start a fresh session.",
+      );
+    }
+    const prompt =
+      continuation === undefined
+        ? run.task
+        : (continuation.message ??
+          "Continue the existing task from the saved conversation. Check what already completed before repeating work.");
+    if (prompt.trim().length === 0 || (continuation !== undefined && prompt.length > 4096)) {
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "A child follow-up must contain between 1 and 4096 characters.",
+      );
+    }
+
+    const subject = decodeContextSubjectRef({
+      aggregateType: AGENT_RUN_AGGREGATE_TYPE,
+      aggregateId: String(run.id),
+    });
+    const estimatedTokens = estimateInputTokens(
+      continuation === undefined ? run.task : `${run.task}\n${prompt}`,
+      context,
+    );
+    const spendReservationId =
+      options.spendCeiling === undefined
+        ? undefined
+        : decodeSpendCeilingReservationId(options.uuid());
+    if (options.spendCeiling !== undefined && spendReservationId !== undefined) {
+      const threadType =
+        run.workspaceReceipt.kind === "work-root"
+          ? ("work-thread" as const)
+          : run.workspaceReceipt.kind === "code-worktree"
+            ? ("code-thread" as const)
+            : ("chat-thread" as const);
+      const spendAdmission = options.spendCeiling.admit({
+        reservationId: spendReservationId,
+        threadId: String(run.parentThreadId),
+        threadType,
+        ...("projectId" in run.workspaceReceipt
+          ? { projectId: String(run.workspaceReceipt.projectId) }
+          : {}),
+        turnUpperBoundTokens: estimatedTokens,
+        childSubjectIds: [String(run.id)],
+      });
+      if (spendAdmission.status === "refused") {
+        throw new AgentRunSessionError("spend-ceiling-exhausted", spendAdmission.refusal.message);
+      }
+    }
+    const reservationId = (() => {
+      try {
+        return reserveCapacity({
+          capacityScheduler: options.capacityScheduler,
+          ...(options.serviceLimits === undefined ? {} : { serviceLimits: options.serviceLimits }),
+          ...(options.capacityEnforcement === undefined
+            ? {}
+            : { capacityEnforcement: options.capacityEnforcement }),
+          uuid: options.uuid,
+          subject,
+          providerInstanceId: target.providerInstanceId,
+          modelId: target.modelId,
+          estimatedTokens,
+        });
+      } catch (error) {
+        // Capacity refusal happens before the managed session owns cleanup.
+        if (spendReservationId !== undefined) {
+          options.spendCeiling?.settle({ reservationId: spendReservationId });
+        }
+        throw error;
+      }
+    })();
+
+    const providerSessionId = previous?.sessionId ?? decodeProviderSessionId(options.uuid());
+    let record: AgentRunSessionRecord = previous ?? { sessionId: providerSessionId, binding };
+    try {
+      if (options.sessionStore !== undefined && !options.sessionStore.write(run, record)) {
+        throw new AgentRunSessionError(
+          "resume-unavailable",
+          "The child session cannot be persisted under its parent thread.",
+        );
+      }
+    } catch {
+      options.capacityScheduler.recordTerminal({ reservationId, outcome: "interrupted" });
+      if (spendReservationId !== undefined)
+        options.spendCeiling?.settle({ reservationId: spendReservationId });
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "The child session cannot be persisted under its parent thread.",
+      );
+    }
+    const recordCursor = (cursor: ProviderResumeCursor | undefined): boolean => {
+      if (cursor === undefined) return true;
+      if (!validResumeCursor(cursor, { driver, run, projectRoot, sessionId: providerSessionId }))
+        return false;
+      record = { ...record, resumeCursor: cursor };
+      try {
+        return options.sessionStore?.write(run, record) ?? true;
+      } catch {
+        return false;
+      }
+    };
+
+    const listeners = new Set<(outcome: AgentRunSessionOutcome) => void>();
+    let settledOutcome: AgentRunSessionOutcome | undefined;
+    const settle = (outcome: AgentRunSessionOutcome): void => {
+      if (settledOutcome !== undefined) return;
+      settledOutcome = outcome;
+      try {
+        options.onSessionSettled?.({ runId: run.id, outcome });
+      } catch {
+        // A transient observer must never prevent lifecycle settlement.
+      }
+      sessions.delete(run.id);
+      for (const listener of listeners) listener(outcome);
+    };
+
+    const shutdown: SessionShutdown = { unconfirmed: undefined };
+    let endedOutcome: AgentRunSessionOutcome | undefined;
+    let markFinished: () => void = () => undefined;
+    const finished = new Promise<void>((resolve) => {
+      markFinished = resolve;
+    });
+    const end = (outcome: AgentRunSessionOutcome): void => {
+      endedOutcome = outcome;
+      // A shutdown the provider never confirmed is not a terminal fact.
+      // Withholding the outcome keeps the session owned here and at the
+      // supervisor, so the cancellation stays pending and retryable instead
+      // of being reported as a termination nobody observed.
+      if (shutdown.unconfirmed === undefined) settle(outcome);
+      markFinished();
+    };
+
+    const controller = new AbortController();
+    const inputController = new AbortController();
+    const live: LiveSession = {
+      controller,
+      steer: undefined,
+      finished,
+      shutdown,
+      publish: () => {
+        if (endedOutcome !== undefined) settle(endedOutcome);
+      },
+    };
+    sessions.set(run.id, live);
+    try {
+      options.onSessionStarted?.({ runId: run.id, resumed: continuation !== undefined });
+      options.onUserMessage?.({
         runId: run.id,
-        onSettled: (listener) => {
-          if (settledOutcome !== undefined) {
-            listener(settledOutcome);
-            return;
-          }
-          listeners.add(listener);
-        },
-      };
+        kind:
+          continuation === undefined
+            ? "task"
+            : continuation.message === undefined
+              ? "resume"
+              : "follow-up",
+        text: prompt,
+        occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+      });
+    } catch {
+      // A transient observer must never prevent provider startup.
+    }
+
+    void Effect.runPromiseExit(
+      Effect.scoped(
+        runManagedSession({
+          run,
+          driver,
+          authority,
+          projectRoot,
+          context: continuation === undefined ? context : [],
+          reservationId,
+          ...(spendReservationId === undefined ? {} : { spendReservationId }),
+          ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
+          capacityScheduler: options.capacityScheduler,
+          providerInstanceId: target.providerInstanceId,
+          modelId: target.modelId,
+          sessionId: providerSessionId,
+          prompt,
+          resumeCursor: previous?.resumeCursor,
+          recordCursor,
+          requireResumeCursor: options.supportsResume?.(target.providerInstanceId) === true,
+          maxEvents,
+          timeoutMs,
+          shutdownTimeoutMs,
+          shutdown,
+          onTextDelta: options.onTextDelta,
+          onUserMessage: options.onUserMessage,
+          interactions: options.interactions,
+          onSessionEnding: () => {
+            live.steer = undefined;
+            inputController.abort();
+          },
+          onConnectionReady: (connection, providerSessionId) => {
+            if (connection.steer === undefined) return;
+            live.steer = async (message) => {
+              if (controller.signal.aborted || sessions.get(run.id) !== live) return "unsupported";
+              const steer = connection.steer;
+              if (steer === undefined) return "unsupported";
+              const result = await Effect.runPromiseExit(
+                steer({ sessionId: providerSessionId, message }),
+                { signal: AbortSignal.any([controller.signal, inputController.signal]) },
+              );
+              if (
+                Exit.isSuccess(result) &&
+                result.value === "steered" &&
+                !controller.signal.aborted &&
+                !inputController.signal.aborted &&
+                sessions.get(run.id) === live
+              ) {
+                options.onUserMessage?.({
+                  runId: run.id,
+                  kind: "steering",
+                  text: message,
+                  occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+                });
+                return "steered";
+              }
+              return "unsupported";
+            };
+          },
+          ...(options.appManagedTools === undefined
+            ? {}
+            : { appManagedTools: options.appManagedTools({ run, authority, projectRoot }) }),
+        }),
+      ),
+      { signal: controller.signal },
+    ).then(
+      (exit) => end(outcomeFromExit(exit)),
+      (error: unknown) => end({ kind: "interrupted", reason: boundedReason(error) }),
+    );
+
+    return {
+      runId: run.id,
+      onSettled: (listener: (outcome: AgentRunSessionOutcome) => void) => {
+        if (settledOutcome !== undefined) {
+          listener(settledOutcome);
+          return;
+        }
+        listeners.add(listener);
+      },
+    };
+  };
+
+  return {
+    start: (run) => startSession(run),
+    resume: (run, input) => startSession(run, input ?? {}),
+    steer: async ({ runId, message }) => {
+      const live = sessions.get(runId);
+      if (
+        live === undefined ||
+        live.controller.signal.aborted ||
+        message.trim().length === 0 ||
+        message.length > 4096
+      )
+        return "unsupported";
+      return live.steer?.(message) ?? "unsupported";
     },
 
     stop: async (runId) => {
@@ -592,11 +760,22 @@ interface ManagedSessionInput {
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
   readonly sessionId: ProviderSessionId;
+  readonly prompt: string;
+  readonly resumeCursor: ProviderResumeCursor | undefined;
+  readonly recordCursor: (cursor: ProviderResumeCursor | undefined) => boolean;
+  readonly requireResumeCursor: boolean;
   readonly maxEvents: number;
   readonly timeoutMs: number;
   readonly shutdownTimeoutMs: number;
   readonly shutdown: SessionShutdown;
   readonly onTextDelta?: AgentRunSessionRuntimeOptions["onTextDelta"];
+  readonly onUserMessage?: AgentRunSessionRuntimeOptions["onUserMessage"];
+  readonly interactions: AgentRunSessionRuntimeOptions["interactions"];
+  readonly onConnectionReady: (
+    connection: ProviderConnection,
+    sessionId: ProviderSessionId,
+  ) => void;
+  readonly onSessionEnding: () => void;
   readonly appManagedTools?: AppManagedToolSet | undefined;
 }
 
@@ -728,26 +907,55 @@ function runSessionTurn(
 
     // A stopped run must also stop a tool call still working for it.
     const toolAbort = new AbortController();
-    yield* Effect.addFinalizer(() => Effect.sync(() => toolAbort.abort()));
     yield* Effect.addFinalizer(() =>
       shutdownProviderSession(connection, input, state, releaseCapacity),
     );
+    // End authority-bearing input before provider teardown, which may need a retry.
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        toolAbort.abort();
+        input.onSessionEnding();
+      }),
+    );
 
-    yield* connection.start({
-      sessionId: input.sessionId,
-      modelId: input.modelId,
-      // The clamped run authority is what reaches the provider. Nothing here
-      // may widen it, and no parent-thread policy is consulted.
-      executionPolicy: input.authority.executionPolicy,
-      tools: input.appManagedTools?.definitions ?? [],
-    });
+    const handle = yield* input.resumeCursor === undefined
+      ? connection.start({
+          sessionId: input.sessionId,
+          modelId: input.modelId,
+          // The clamped run authority is what reaches the provider. Nothing here
+          // may widen it, and no parent-thread policy is consulted.
+          executionPolicy: input.authority.executionPolicy,
+          tools: input.appManagedTools?.definitions ?? [],
+        })
+      : connection.resume({
+          sessionId: input.sessionId,
+          resumeCursor: input.resumeCursor,
+          modelId: input.modelId,
+          executionPolicy: input.authority.executionPolicy,
+          tools: input.appManagedTools?.definitions ?? [],
+        });
+    if (
+      String(handle.sessionId) !== String(input.sessionId) ||
+      (input.requireResumeCursor &&
+        handle.resumeCursor === undefined &&
+        input.resumeCursor === undefined) ||
+      !input.recordCursor(handle.resumeCursor)
+    ) {
+      return yield* Effect.fail({
+        category: "stale-resume",
+        message:
+          "The provider did not preserve a compatible child session identity and resume cursor.",
+      } satisfies ProviderFailure);
+    }
+
+    input.onConnectionReady(connection, input.sessionId);
 
     const collected = yield* subscribeThenSend({
       connection,
       consume: (events) => collectSessionEvents(connection, events, input, state, toolAbort),
       send: connection.send({
         sessionId: input.sessionId,
-        prompt: input.run.task,
+        prompt: input.prompt,
         context: [...input.context],
         // A managed child gets no attachments; its tools are whatever the
         // host composed from the run's own clamped authority, or none.
@@ -757,6 +965,7 @@ function runSessionTurn(
     });
 
     yield* Fiber.join(collected);
+    input.onSessionEnding();
 
     return (
       state.outcome ?? {
@@ -858,155 +1067,242 @@ function collectSessionEvents(
 ): Effect.Effect<void, ProviderFailure> {
   const answeredToolRequestIds = new Set<string>();
   const answeredApprovalRequestIds = new Set<string>();
+  const answeredQuestionRequestIds = new Set<string>();
 
-  return events.pipe(
-    Stream.filter((event) => event.sessionId === input.sessionId),
-    Stream.take(input.maxEvents + 1),
-    Stream.takeUntil(
-      (event) =>
-        event.kind === "waiting" ||
-        event.kind === "completed" ||
-        event.kind === "interrupted" ||
-        event.kind === "failed",
-    ),
-    Stream.runForEach((event) =>
-      Effect.gen(function* () {
-        state.handledEvents += 1;
-        if (state.handledEvents > input.maxEvents) {
-          state.outcome = {
-            kind: "interrupted",
-            reason: "Managed AgentRun turn exceeded its bounded event budget.",
-          };
-          return;
-        }
-        if (event.kind === "text-delta") {
-          const delta = publishableTextDelta(event);
-          if (delta === undefined) return;
-          state.responseText = (state.responseText + delta.text).slice(0, MAX_RESPONSE_CHARACTERS);
-          try {
-            input.onTextDelta?.({
-              runId: input.run.id,
-              text: delta.text,
-              occurredAt: delta.occurredAt,
-            });
-          } catch {
-            // A transient observer must never interrupt provider collection.
-          }
-          return;
-        }
-        if (event.kind === "usage") {
-          const observation = usageFromRuntimeEvent(event);
-          if (observation !== undefined) {
-            state.sawUsage = true;
-            state.inputTokens = observation.inputTokens;
-            state.outputTokens = observation.outputTokens;
-          }
-          return;
-        }
-        if (event.kind === "approval-request") {
-          if (answeredApprovalRequestIds.has(event.requestId)) return;
-          answeredApprovalRequestIds.add(event.requestId);
-          // A managed child has no interactive approver on this path. Declining
-          // keeps the run inside its admitted authority; approving on the
-          // child's behalf would manufacture consent nobody gave.
-          yield* connection.answerApproval({
-            sessionId: input.sessionId,
-            requestId: event.requestId,
-            approved: false,
-          });
-          return;
-        }
-        if (event.kind === "tool-request") {
-          if (answeredToolRequestIds.has(event.requestId)) return;
-          answeredToolRequestIds.add(event.requestId);
-          const requestSignal = connection.toolRequestSignal?.({
-            sessionId: input.sessionId,
-            requestId: event.requestId,
-          });
-          const executionSignal =
-            requestSignal === undefined
-              ? toolAbort.signal
-              : AbortSignal.any([toolAbort.signal, requestSignal]);
-          if (executionSignal.aborted) return;
-          const toolSet = input.appManagedTools;
-          const offered = toolSet?.definitions.some(
-            (definition) => definition.name === event.toolName,
-          );
-          if (toolSet === undefined || offered !== true) {
-            yield* connection.answerTool({
-              sessionId: input.sessionId,
-              requestId: event.requestId,
-              resultJson: JSON.stringify({ error: "tool-unavailable" }),
-              isError: true,
-            });
-            return;
-          }
-          const execution = yield* Effect.promise(async () => {
-            try {
-              return await toolSet.execute({
-                name: event.toolName,
-                inputJson: event.inputJson,
-                signal: executionSignal,
-              });
-            } catch {
-              return { result: { error: "tool-execution-failed" }, isError: true } as const;
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const interactionFailure = yield* Deferred.make<never, ProviderFailure>();
+      const forkInteraction = (effect: Effect.Effect<void, ProviderFailure>) =>
+        Effect.forkScoped(
+          effect.pipe(Effect.catchAll((failure) => Deferred.fail(interactionFailure, failure))),
+        );
+      const collection = events.pipe(
+        Stream.filter((event) => event.sessionId === input.sessionId),
+        Stream.take(input.maxEvents + 1),
+        Stream.takeUntil(
+          (event) =>
+            event.kind === "waiting" ||
+            event.kind === "completed" ||
+            event.kind === "interrupted" ||
+            event.kind === "failed",
+        ),
+        Stream.runForEach((event) =>
+          Effect.gen(function* () {
+            state.handledEvents += 1;
+            if (state.handledEvents > input.maxEvents) {
+              state.outcome = {
+                kind: "interrupted",
+                reason: "Managed AgentRun turn exceeded its bounded event budget.",
+              };
+              return;
             }
-          });
-          if (executionSignal.aborted) return;
-          yield* connection.answerTool({
-            sessionId: input.sessionId,
-            requestId: event.requestId,
-            resultJson: boundedToolResultJson(execution.result),
-            isError: execution.isError === true,
-          });
-          return;
-        }
-        if (event.kind === "waiting") {
-          state.outcome = {
-            kind: "waiting",
-            reason: boundedReason(event.message),
-          };
-          return;
-        }
-        if (event.kind === "interrupted") {
-          state.outcome = {
-            kind: "interrupted",
-            reason: boundedReason(event.message),
-          };
-          return;
-        }
-        if (event.kind === "failed") {
-          state.outcome = { kind: "failed", failure: event.failure };
-          return;
-        }
-        if (event.kind === "completed") {
-          // A provider that completes without a visible reply produced no
-          // result to return to the parent; reporting completion would be a
-          // fabricated success.
-          state.outcome =
-            state.responseText.trim().length === 0
-              ? {
-                  kind: "failed",
-                  failure: {
-                    category: "provider-failed",
-                    message: "The provider completed without a visible reply.",
-                  },
+            if (event.kind === "text-delta") {
+              const delta = publishableTextDelta(event);
+              if (delta === undefined) return;
+              state.responseText = (state.responseText + delta.text).slice(
+                0,
+                MAX_RESPONSE_CHARACTERS,
+              );
+              try {
+                input.onTextDelta?.({
+                  runId: input.run.id,
+                  text: delta.text,
+                  occurredAt: delta.occurredAt,
+                });
+              } catch {
+                // A transient observer must never interrupt provider collection.
+              }
+              return;
+            }
+            if (event.kind === "usage") {
+              const observation = usageFromRuntimeEvent(event);
+              if (observation !== undefined) {
+                state.sawUsage = true;
+                state.inputTokens = observation.inputTokens;
+                state.outputTokens = observation.outputTokens;
+              }
+              return;
+            }
+            if (event.kind === "approval-request") {
+              if (answeredApprovalRequestIds.has(event.requestId)) return;
+              answeredApprovalRequestIds.add(event.requestId);
+              yield* forkInteraction(
+                Effect.gen(function* () {
+                  let interactionSignal: AbortSignal | undefined;
+                  const approved = yield* Effect.tryPromise({
+                    try: async (signal) => {
+                      interactionSignal = AbortSignal.any([signal, toolAbort.signal]);
+                      return (
+                        (await input.interactions?.approve?.({
+                          run: input.run,
+                          event,
+                          signal: interactionSignal,
+                        })) ?? false
+                      );
+                    },
+                    catch: (): ProviderFailure => ({
+                      category: "unavailable",
+                      message: "The child permission request could not be answered.",
+                    }),
+                  });
+                  if (interactionSignal?.aborted) return;
+                  yield* connection.answerApproval({
+                    sessionId: input.sessionId,
+                    requestId: event.requestId,
+                    approved,
+                  });
+                }),
+              );
+              return;
+            }
+            if (event.kind === "user-input-request") {
+              if (answeredQuestionRequestIds.has(event.requestId)) return;
+              answeredQuestionRequestIds.add(event.requestId);
+              yield* forkInteraction(
+                Effect.gen(function* () {
+                  let interactionSignal: AbortSignal | undefined;
+                  const answer = yield* Effect.tryPromise({
+                    try: async (signal) => {
+                      interactionSignal = AbortSignal.any([signal, toolAbort.signal]);
+                      return input.interactions?.askUser?.({
+                        run: input.run,
+                        event,
+                        signal: interactionSignal,
+                      });
+                    },
+                    catch: (): ProviderFailure => ({
+                      category: "unavailable",
+                      message: "The child question could not be answered.",
+                    }),
+                  });
+                  if (interactionSignal?.aborted) return;
+                  if (answer === undefined || answer.trim().length === 0) {
+                    yield* Effect.fail({
+                      category: "unsupported",
+                      message:
+                        "The child question was not answered. Resume after providing input or retry explicitly.",
+                    } satisfies ProviderFailure);
+                    return;
+                  }
+                  yield* connection.answerUserInput({
+                    sessionId: input.sessionId,
+                    requestId: event.requestId,
+                    answer,
+                  });
+                  try {
+                    input.onUserMessage?.({
+                      runId: input.run.id,
+                      kind: "answer",
+                      text: `Question: ${event.prompt}\nAnswer: ${answer}`,
+                      occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+                    });
+                  } catch {
+                    /* A display observer does not undo a delivered answer. */
+                  }
+                }),
+              );
+              return;
+            }
+            if (event.kind === "tool-request") {
+              if (answeredToolRequestIds.has(event.requestId)) return;
+              answeredToolRequestIds.add(event.requestId);
+              const requestSignal = connection.toolRequestSignal?.({
+                sessionId: input.sessionId,
+                requestId: event.requestId,
+              });
+              const executionSignal =
+                requestSignal === undefined
+                  ? toolAbort.signal
+                  : AbortSignal.any([toolAbort.signal, requestSignal]);
+              if (executionSignal.aborted) return;
+              const toolSet = input.appManagedTools;
+              const offered = toolSet?.definitions.some(
+                (definition) => definition.name === event.toolName,
+              );
+              if (toolSet === undefined || offered !== true) {
+                yield* connection.answerTool({
+                  sessionId: input.sessionId,
+                  requestId: event.requestId,
+                  resultJson: JSON.stringify({ error: "tool-unavailable" }),
+                  isError: true,
+                });
+                return;
+              }
+              const execution = yield* Effect.promise(async () => {
+                try {
+                  return await toolSet.execute({
+                    name: event.toolName,
+                    inputJson: event.inputJson,
+                    signal: executionSignal,
+                  });
+                } catch {
+                  return { result: { error: "tool-execution-failed" }, isError: true } as const;
                 }
-              : {
-                  kind: "completed",
-                  responseText: state.responseText,
-                  ...(state.sawUsage
-                    ? {
-                        usage: {
-                          inputTokens: state.inputTokens,
-                          outputTokens: state.outputTokens,
-                        },
-                      }
-                    : {}),
-                };
-        }
-      }),
-    ),
+              });
+              if (executionSignal.aborted) return;
+              yield* connection.answerTool({
+                sessionId: input.sessionId,
+                requestId: event.requestId,
+                resultJson: boundedToolResultJson(execution.result),
+                isError: execution.isError === true,
+              });
+              return;
+            }
+            if (event.kind === "waiting") {
+              state.outcome = {
+                kind: "waiting",
+                reason: boundedReason(event.message),
+              };
+              return;
+            }
+            if (event.kind === "interrupted") {
+              state.outcome = {
+                kind: "interrupted",
+                reason: boundedReason(event.message),
+              };
+              return;
+            }
+            if (event.kind === "failed") {
+              state.outcome = { kind: "failed", failure: event.failure };
+              return;
+            }
+            if (event.kind === "completed") {
+              if (!input.recordCursor(event.resumeCursor)) {
+                return yield* Effect.fail({
+                  category: "stale-resume",
+                  message: "The provider returned incompatible child continuation state.",
+                } satisfies ProviderFailure);
+              }
+              // A provider that completes without a visible reply produced no
+              // result to return to the parent; reporting completion would be a
+              // fabricated success.
+              state.outcome =
+                state.responseText.trim().length === 0
+                  ? {
+                      kind: "failed",
+                      failure: {
+                        category: "provider-failed",
+                        message: "The provider completed without a visible reply.",
+                      },
+                    }
+                  : {
+                      kind: "completed",
+                      responseText: state.responseText,
+                      ...(state.sawUsage
+                        ? {
+                            usage: {
+                              inputTokens: state.inputTokens,
+                              outputTokens: state.outputTokens,
+                            },
+                          }
+                        : {}),
+                    };
+            }
+          }),
+        ),
+      );
+      yield* Effect.raceFirst(collection, Deferred.await(interactionFailure));
+    }),
   );
 }
 
@@ -1068,8 +1364,8 @@ function outcomeFromExit(
  * path in this slice, and the routing receipt already records usage quality as
  * unavailable, so this reserves capacity without claiming measured accuracy.
  */
-function estimateInputTokens(run: AgentRun, context: ReadonlyArray<ProviderContextBlock>): number {
-  const characters = context.reduce((total, block) => total + block.text.length, run.task.length);
+function estimateInputTokens(task: string, context: ReadonlyArray<ProviderContextBlock>): number {
+  const characters = context.reduce((total, block) => total + block.text.length, task.length);
   return Math.max(1, Math.ceil(characters / AVERAGE_CHARACTERS_PER_TOKEN));
 }
 
@@ -1084,4 +1380,57 @@ function boundedReason(reason: unknown): string {
   return trimmed.length === 0
     ? "Managed AgentRun session ended unexpectedly."
     : trimmed.slice(0, MAX_REASON_CHARACTERS);
+}
+
+function childSessionBinding(run: AgentRun, driver: ProviderDriver, projectRoot: string): string {
+  const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        run.id,
+        run.requestId,
+        run.parentThreadId,
+        run.routingReceipt.hostId,
+        run.routingReceipt.mode,
+        run.routingReceipt.contextSnapshotId,
+        target.providerInstanceId,
+        target.modelId,
+        driver.kind,
+        projectRoot,
+        run.workspaceReceipt,
+        run.authority,
+      ]),
+    )
+    .digest("hex");
+}
+
+function validResumeCursor(
+  cursor: ProviderResumeCursor,
+  input: {
+    readonly driver: ProviderDriver;
+    readonly run: AgentRun;
+    readonly projectRoot: string;
+    readonly sessionId: ProviderSessionId;
+  },
+): boolean {
+  try {
+    const decoded = decodeProviderResumeCursor(cursor);
+    if (
+      decoded.driverKind !== input.driver.kind ||
+      new TextEncoder().encode(JSON.stringify(decoded)).byteLength > 60 * 1024
+    )
+      return false;
+    const binding = decoded.binding;
+    if (binding === undefined) return true;
+    const target = effectiveAgentRunExecutionTarget(input.run.routingReceipt);
+    return (
+      String(binding.instanceId) === String(target.providerInstanceId) &&
+      String(binding.sessionId) === String(input.sessionId) &&
+      binding.projectRoot === input.projectRoot &&
+      binding.mode === input.run.routingReceipt.mode &&
+      String(binding.modelId) === String(target.modelId)
+    );
+  } catch {
+    return false;
+  }
 }

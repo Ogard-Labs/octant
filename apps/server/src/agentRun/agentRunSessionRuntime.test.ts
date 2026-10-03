@@ -1,4 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openSqlite } from "../persistence/sqlitePort";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import {
+  purgeAgentRunSubjectContent,
+  agentRunContentSubject,
+} from "../persistence/agentRunContentStore";
+import { AgentRunSessionStore } from "./agentRunSessionStore";
+import { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
 import { Effect, Queue, Stream } from "effect";
 import {
   decodeContextSubjectRef,
@@ -8,6 +19,8 @@ import {
   type ProviderContextBlock,
   type ProviderExecutionPolicy,
   type ProviderTurnInput,
+  type ProviderSessionId,
+  type ProviderResumeCursor,
 } from "@octant/contracts";
 import type { ProviderAcquireInput, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
@@ -22,6 +35,17 @@ import {
   createRecordedAgentRunContextSnapshotPort,
   type AgentRunSessionRuntimeOptions,
 } from "./agentRunSessionRuntime";
+
+const testDirectories: string[] = [];
+afterEach(() => {
+  for (const directory of testDirectories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
+});
+function databasePath(): string {
+  const directory = mkdtempSync(join(tmpdir(), "octant-child-session-"));
+  testDirectories.push(directory);
+  return join(directory, "child.sqlite");
+}
 
 const now = "2026-08-01T14:00:00.000Z";
 const retryUntil = "2026-08-01T14:05:00.000Z";
@@ -209,6 +233,12 @@ interface FakeProvider {
   readonly turns: ProviderTurnInput[];
   readonly answeredApprovals: ReadonlyArray<{ readonly approved: boolean }>;
   readonly answeredTools: ReadonlyArray<{ readonly isError?: boolean }>;
+  readonly resumes: Array<{
+    readonly sessionId: ProviderSessionId;
+    readonly resumeCursor: ProviderResumeCursor;
+  }>;
+  readonly answeredQuestions: Array<{ readonly answer: string }>;
+  readonly steered: string[];
   readonly interrupts: string[];
   readonly stops: string[];
   readonly emit: (event: unknown) => Promise<void>;
@@ -224,6 +254,9 @@ function fakeProvider(options?: {
   readonly wedge?: "start" | "send" | "stop";
   /** Makes teardown asynchronous, as a real control-channel round trip is. */
   readonly shutdownDelayMs?: number;
+  readonly resumable?: boolean;
+  readonly steerable?: boolean;
+  readonly changedResumeIdentity?: boolean;
 }) {
   let shutdownFails = options?.shutdownFails ?? false;
   let wedge = options?.wedge;
@@ -233,6 +266,10 @@ function fakeProvider(options?: {
   const turns: ProviderTurnInput[] = [];
   const answeredApprovals: { readonly approved: boolean }[] = [];
   const answeredTools: { readonly isError?: boolean }[] = [];
+  const resumes: FakeProvider["resumes"] = [];
+  const answeredQuestions: FakeProvider["answeredQuestions"] = [];
+  const steered: string[] = [];
+  const cursor = { driverKind: "codex" as const, value: "private-provider-session" };
   const interrupts: string[] = [];
   const stops: string[] = [];
   const emit = async (event: unknown): Promise<void> => {
@@ -242,9 +279,28 @@ function fakeProvider(options?: {
     subscribe: Effect.succeed(Stream.fromQueue(queue)),
     start: (input: { readonly executionPolicy: ProviderExecutionPolicy }) => {
       executionPolicies.push(input.executionPolicy);
-      return wedge === "start" ? Effect.never : Effect.succeed({ sessionId });
+      return wedge === "start"
+        ? Effect.never
+        : Effect.succeed({ sessionId, ...(options?.resumable ? { resumeCursor: cursor } : {}) });
     },
-    resume: () => Effect.succeed({ sessionId }),
+    resume: (input: {
+      readonly sessionId: ProviderSessionId;
+      readonly resumeCursor: ProviderResumeCursor;
+    }) => {
+      resumes.push(input);
+      return Effect.succeed({
+        sessionId: options?.changedResumeIdentity ? providerInstanceId : input.sessionId,
+      });
+    },
+    ...(options?.steerable
+      ? {
+          steer: (input: { readonly message: string }) =>
+            Effect.sync(() => {
+              steered.push(input.message);
+              return "steered" as const;
+            }),
+        }
+      : {}),
     send: (input: ProviderTurnInput) =>
       Effect.sync(() => {
         turns.push(input);
@@ -275,12 +331,15 @@ function fakeProvider(options?: {
       }),
     answerApproval: (input: { readonly approved: boolean }) =>
       Effect.sync(() => void answeredApprovals.push(input)),
-    answerUserInput: () => Effect.void,
+    answerUserInput: (input: { readonly answer: string }) =>
+      Effect.sync(() => void answeredQuestions.push(input)),
     answerTool: (input: { readonly isError?: boolean }) =>
       Effect.sync(() => void answeredTools.push(input)),
   };
   const provider: FakeProvider = {
     driver: {
+      kind: "codex",
+      conversationOwnership: "provider",
       acquire: (input: ProviderAcquireInput) => {
         acquired.push(input);
         return Effect.succeed(connection);
@@ -291,6 +350,9 @@ function fakeProvider(options?: {
     turns,
     answeredApprovals,
     answeredTools,
+    resumes,
+    answeredQuestions,
+    steered,
     interrupts,
     stops,
     emit,
@@ -1071,4 +1133,379 @@ describe("createAgentRunSessionRuntime", () => {
     // reserved tokens stay honestly ambiguous rather than leaking as running.
     expect(capacityScheduler.getReservation(reservationId as never)?.state).toBe("ambiguous");
   });
+});
+
+describe("managed child interaction continuity", () => {
+  it("waits for the person's approval and answers a duplicated request only once", async () => {
+    const provider = fakeProvider();
+    let decide: (approved: boolean) => void = () => undefined;
+    const approve = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          decide = resolve;
+        }),
+    );
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, { interactions: { approve } }),
+    );
+    const result = settled(runtime.start(agentRun()));
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    const request = {
+      kind: "approval-request",
+      sessionId,
+      requestId: "permission-1",
+      action: "shell",
+      description: "Run the tests",
+      occurredAt: now,
+    };
+    await provider.emit(request);
+    await vi.waitFor(() => expect(approve).toHaveBeenCalledOnce());
+    expect(provider.answeredApprovals).toEqual([]);
+    decide(true);
+    await vi.waitFor(() =>
+      expect(provider.answeredApprovals).toEqual([expect.objectContaining({ approved: true })]),
+    );
+    await provider.emit(request);
+    await provider.emit({ kind: "text-delta", sessionId, text: "Tests complete", occurredAt: now });
+    await provider.emit({ kind: "completed", sessionId });
+    expect((await result).kind).toBe("completed");
+    expect(approve).toHaveBeenCalledOnce();
+    expect(provider.answeredApprovals).toHaveLength(1);
+  });
+
+  it("expires a pending question on cancellation and never delivers a late answer", async () => {
+    const provider = fakeProvider();
+    let answer: (text: string) => void = () => undefined;
+    let questionSignal: AbortSignal | undefined;
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        interactions: {
+          askUser: ({ signal }) => {
+            questionSignal = signal;
+            return new Promise<string>((resolve) => {
+              answer = resolve;
+            });
+          },
+        },
+      }),
+    );
+    const run = agentRun();
+    const result = settled(runtime.start(run));
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    await provider.emit({
+      kind: "user-input-request",
+      sessionId,
+      requestId: "question-1",
+      prompt: "Which branch?",
+      options: [],
+    });
+    await vi.waitFor(() => expect(questionSignal).toBeDefined());
+    await runtime.stop(run.id);
+    expect(questionSignal?.aborted).toBe(true);
+    answer("main");
+    expect((await result).kind).toBe("cancelled");
+    expect(provider.answeredQuestions).toEqual([]);
+  });
+
+  it("steers only a live capable session and refuses after cancellation", async () => {
+    const provider = fakeProvider({ steerable: true });
+    const runtime = createAgentRunSessionRuntime(runtimeOptions(provider));
+    const run = agentRun();
+    runtime.start(run);
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    await expect(
+      runtime.steer?.({ runId: run.id, message: "Focus on the failing test" }),
+    ).resolves.toBe("steered");
+    expect(provider.steered).toEqual(["Focus on the failing test"]);
+    await runtime.stop(run.id);
+    await expect(runtime.steer?.({ runId: run.id, message: "Too late" })).resolves.toBe(
+      "unsupported",
+    );
+  });
+});
+
+describe("durable child provider identity", () => {
+  it("continues the same child session after runtime restart without replaying its original task", async () => {
+    const path = databasePath();
+    let connection = openSqlite(path);
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const run = agentRun();
+    const durable = new AgentRunSessionStore({ connection, getById: () => run });
+    const provider = fakeProvider({ resumable: true });
+    const options = runtimeOptions(provider, {
+      sessionStore: durable.sessions,
+      supportsResume: () => true,
+    });
+    const first = createAgentRunSessionRuntime(options);
+    const result = settled(first.start(run));
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    await provider.emit({ kind: "text-delta", sessionId, text: "First report", occurredAt: now });
+    await provider.emit({ kind: "completed", sessionId });
+    expect((await result).kind).toBe("completed");
+    const recorded = durable.sessions.read(run);
+    expect(recorded?.resumeCursor?.value).toBe("private-provider-session");
+    connection.close();
+    connection = openSqlite(path);
+    const restored = new AgentRunSessionStore({ connection, getById: () => run });
+    const second = createAgentRunSessionRuntime(
+      runtimeOptions(provider, { sessionStore: restored.sessions, supportsResume: () => true }),
+    );
+    const continued = second.resume?.(run, { message: "Add the regression evidence" });
+    expect(continued).toBeDefined();
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(2));
+    expect(provider.resumes).toEqual([
+      expect.objectContaining({ sessionId, resumeCursor: recorded?.resumeCursor }),
+    ]);
+    expect(provider.turns[1]?.prompt).toBe("Add the regression evidence");
+    expect(provider.turns[1]?.context).toEqual([]);
+    await second.stop(run.id);
+    purgeAgentRunSubjectContent(connection, agentRunContentSubject(run));
+    expect(restored.sessions.read(run)).toBeUndefined();
+    connection.close();
+  });
+
+  it("refuses resume without a recoverable cursor, without invoking a replacement start", async () => {
+    const provider = fakeProvider();
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, { supportsResume: () => true }),
+    );
+    expect(() => runtime.resume?.(agentRun())).toThrow("Retry");
+    expect(provider.acquired).toEqual([]);
+  });
+});
+
+describe("child continuation authority and recovery", () => {
+  it("rejects a changed session acknowledgement before sending a follow-up", async () => {
+    const run = agentRun();
+    const connection = openSqlite(databasePath());
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const store = new AgentRunSessionStore({ connection, getById: () => run });
+    const firstProvider = fakeProvider({ resumable: true });
+    const first = createAgentRunSessionRuntime(
+      runtimeOptions(firstProvider, { sessionStore: store.sessions, supportsResume: () => true }),
+    );
+    first.start(run);
+    await vi.waitFor(() => expect(firstProvider.turns).toHaveLength(1));
+    await first.stop(run.id);
+    const provider = fakeProvider({ changedResumeIdentity: true });
+    const next = createAgentRunSessionRuntime(
+      runtimeOptions(provider, { sessionStore: store.sessions, supportsResume: () => true }),
+    );
+    const handle = next.resume?.(run);
+    if (handle === undefined) throw new Error("The continuation port is unavailable");
+    await expect(settled(handle)).resolves.toMatchObject({
+      kind: "failed",
+      failure: { category: "stale-resume" },
+    });
+    expect(provider.turns).toEqual([]);
+    connection.close();
+  });
+
+  it("refuses a cursor for another workspace and does not reserve provider capacity", async () => {
+    const run = agentRun();
+    const connection = openSqlite(databasePath());
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const store = new AgentRunSessionStore({ connection, getById: () => run });
+    const provider = fakeProvider({ resumable: true });
+    const first = createAgentRunSessionRuntime(
+      runtimeOptions(provider, { sessionStore: store.sessions, supportsResume: () => true }),
+    );
+    first.start(run);
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    await first.stop(run.id);
+    const nextProvider = fakeProvider();
+    const capacityScheduler = scheduler();
+    const reserve = vi.spyOn(capacityScheduler, "submit");
+    const next = createAgentRunSessionRuntime(
+      runtimeOptions(nextProvider, {
+        capacityScheduler,
+        sessionStore: store.sessions,
+        supportsResume: () => true,
+        scratchRoot: () => "/another-root",
+      }),
+    );
+    expect(() => next.resume?.(run)).toThrow("Retry");
+    expect(nextProvider.acquired).toEqual([]);
+    expect(reserve).not.toHaveBeenCalled();
+    connection.close();
+  });
+
+  it("restores bounded partial history as stale, continues its sequence, and keeps cursors private", async () => {
+    const run = agentRun();
+    const path = databasePath();
+    let connection = openSqlite(path);
+    applyMigrations(connection, MIGRATIONS, () => now);
+    let store = new AgentRunSessionStore({ connection, getById: () => run });
+    const live = new AgentRunLiveConversationStore({ persistence: store.conversations });
+    live.begin(run.id);
+    live.appendStatus(run.id, "Person: First task", now as never);
+    live.appendText(run.id, "Partial report", now as never);
+    store.sessions.write(run, {
+      binding: "a".repeat(64),
+      sessionId: sessionId as never,
+      resumeCursor: { driverKind: "codex", value: "private-native-cursor" },
+    });
+    connection.close();
+    connection = openSqlite(path);
+    store = new AgentRunSessionStore({ connection, getById: () => run });
+    const restored = new AgentRunLiveConversationStore({ persistence: store.conversations });
+    expect(restored.read({ runId: run.id })).toMatchObject({
+      status: "stale",
+      entries: [
+        { sequence: 1, kind: "status" },
+        { sequence: 2, text: "Partial report" },
+      ],
+    });
+    expect(JSON.stringify(restored.read({ runId: run.id }))).not.toContain("private-native-cursor");
+    restored.begin(run.id, { resume: true });
+    restored.appendText(run.id, "Continued report", now as never);
+    expect(restored.read({ runId: run.id, afterSequence: 2 })?.entries).toMatchObject([
+      { sequence: 3, text: "Continued report" },
+    ]);
+    purgeAgentRunSubjectContent(connection, agentRunContentSubject(run));
+    connection
+      .prepare(
+        "INSERT INTO thread_purge_tombstone(mode, thread_id, purged_at, last_sequence) VALUES (?, ?, ?, 1)",
+      )
+      .run("chat", String(run.parentThreadId), now);
+    restored.appendText(run.id, "Late output must not restore the deleted history", now as never);
+    expect(
+      store.sessions.write(run, { binding: "a".repeat(64), sessionId: sessionId as never }),
+    ).toBe(false);
+    expect(connection.prepare("SELECT * FROM agent_run_content_store").all()).toEqual([]);
+    connection.close();
+  });
+
+  it("expires an unanswered permission when the provider finishes on its own", async () => {
+    const provider = fakeProvider();
+    let approvalSignal: AbortSignal | undefined;
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        interactions: {
+          approve: ({ signal }) => {
+            approvalSignal = signal;
+            return new Promise<boolean>(() => undefined);
+          },
+        },
+      }),
+    );
+    const result = settled(runtime.start(agentRun()));
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    await provider.emit({
+      kind: "approval-request",
+      sessionId,
+      requestId: "permission-1",
+      action: "shell",
+      description: "Run tests",
+    });
+    await vi.waitFor(() => expect(approvalSignal).toBeDefined());
+    await provider.emit({
+      kind: "text-delta",
+      sessionId,
+      text: "I did not need that command",
+      occurredAt: now,
+    });
+    await provider.emit({ kind: "completed", sessionId });
+    expect((await result).kind).toBe("completed");
+    expect(approvalSignal?.aborted).toBe(true);
+    expect(provider.answeredApprovals).toEqual([]);
+  });
+
+  it("releases admission reservations if private session storage cannot be written", () => {
+    const provider = fakeProvider();
+    const counted = countingScheduler();
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        capacityScheduler: counted.capacityScheduler,
+        sessionStore: {
+          read: () => undefined,
+          write: () => {
+            throw new Error("Storage unavailable");
+          },
+        },
+      }),
+    );
+    expect(() => runtime.start(agentRun())).toThrow();
+    expect(counted.recordTerminal).toHaveBeenCalledOnce();
+    expect(provider.acquired).toEqual([]);
+  });
+});
+
+it("answers a child's repeated question only once and records the person's answer", async () => {
+  const provider = fakeProvider();
+  const askUser = vi.fn(async () => "main");
+  const onUserMessage = vi.fn();
+  const runtime = createAgentRunSessionRuntime(
+    runtimeOptions(provider, { interactions: { askUser }, onUserMessage }),
+  );
+  const result = settled(runtime.start(agentRun()));
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+  const question = {
+    kind: "user-input-request",
+    sessionId,
+    requestId: "question-1",
+    prompt: "Which branch?",
+    options: [],
+  };
+  await provider.emit(question);
+  await vi.waitFor(() => expect(provider.answeredQuestions).toHaveLength(1));
+  await provider.emit(question);
+  await provider.emit({ kind: "text-delta", sessionId, text: "Using main", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  expect((await result).kind).toBe("completed");
+  expect(askUser).toHaveBeenCalledOnce();
+  expect(provider.answeredQuestions).toHaveLength(1);
+  expect(onUserMessage).toHaveBeenCalledWith(
+    expect.objectContaining({ kind: "answer", text: "Question: Which branch?\nAnswer: main" }),
+  );
+});
+
+it("refuses an unanswered question instead of manufacturing an empty provider answer", async () => {
+  const provider = fakeProvider();
+  const runtime = createAgentRunSessionRuntime(runtimeOptions(provider));
+  const result = settled(runtime.start(agentRun()));
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+  await provider.emit({
+    kind: "user-input-request",
+    sessionId,
+    requestId: "question-1",
+    prompt: "Which branch?",
+    options: [],
+  });
+  await expect(result).resolves.toMatchObject({
+    kind: "failed",
+    failure: { category: "unsupported" },
+  });
+  expect(provider.answeredQuestions).toEqual([]);
+  expect(provider.interrupts).toEqual([sessionId]);
+  expect(provider.stops).toEqual([sessionId]);
+});
+
+it("refuses malformed saved cursors without launching another provider session", async () => {
+  const run = agentRun();
+  const connection = openSqlite(databasePath());
+  applyMigrations(connection, MIGRATIONS, () => now);
+  const store = new AgentRunSessionStore({ connection, getById: () => run });
+  const provider = fakeProvider({ resumable: true });
+  const first = createAgentRunSessionRuntime(
+    runtimeOptions(provider, { sessionStore: store.sessions, supportsResume: () => true }),
+  );
+  first.start(run);
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+  await first.stop(run.id);
+  connection
+    .prepare(
+      "UPDATE agent_run_content_store SET body_text = ? WHERE content_kind = 'managed-session'",
+    )
+    .run(
+      JSON.stringify({
+        binding: "a".repeat(64),
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: { invalid: true } },
+      }),
+    );
+  expect(store.sessions.read(run)).toBeUndefined();
+  expect(() => first.resume?.(run)).toThrow("Retry");
+  expect(provider.acquired).toHaveLength(1);
+  connection.close();
 });
