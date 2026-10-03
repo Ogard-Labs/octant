@@ -635,7 +635,7 @@ function normalizeProviderEvent(
       return Effect.succeed({
         ...base,
         category: "child-activity",
-        childObservation: event,
+        childObservation: { ...event, summary: text(event.summary) },
         requestId: text(event.childAgentId),
         status: event.status,
         text: text(event.summary),

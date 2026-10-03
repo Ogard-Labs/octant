@@ -67,11 +67,22 @@ export function agentRunContentSubject(run: AgentRun): ContextSubjectRef {
   });
 }
 
-function isPurgedSubject(connection: SqliteConnection, subject: ContextSubjectRef): boolean {
+function isDeletingOrPurgedSubject(
+  connection: SqliteConnection,
+  subject: ContextSubjectRef,
+): boolean {
+  // Ordinary Chat deletion retains lifecycle state without a retention tombstone.
+  // Late child settlement must not recreate content while deletion runs or after it finishes.
   return (
     connection
       .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ? AND mode || '-thread' = ?")
-      .get(subject.aggregateId, subject.aggregateType) !== undefined
+      .get(subject.aggregateId, subject.aggregateType) !== undefined ||
+    (subject.aggregateType === "chat-thread" &&
+      connection
+        .prepare(
+          "SELECT 1 FROM chat_thread_projection WHERE thread_id = ? AND lifecycle IN ('deleting', 'deleted')",
+        )
+        .get(subject.aggregateId) !== undefined)
   );
 }
 
@@ -86,7 +97,7 @@ function write(
     readonly createdAt: string;
   },
 ): void {
-  if (isPurgedSubject(connection, input.subject)) return;
+  if (isDeletingOrPurgedSubject(connection, input.subject)) return;
   connection
     .prepare(`
       INSERT INTO agent_run_content_store (
@@ -228,7 +239,7 @@ export function writeAgentRunResultEvidence(
   },
 ): void {
   const subject = agentRunContentSubject(input.run);
-  if (isPurgedSubject(connection, subject)) return;
+  if (isDeletingOrPurgedSubject(connection, subject)) return;
   const next = decodeAgentRunResultEvidence(input.evidence);
   const prior = readAgentRunResultEvidence(connection, {
     runId: input.run.id,
