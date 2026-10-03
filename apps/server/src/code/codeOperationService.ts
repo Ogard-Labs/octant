@@ -2761,7 +2761,9 @@ export class CodeOperationService {
       ...(extensionTools === undefined ? {} : { extensionTools }),
       ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
     });
-    this.#options.consumeIssueContextFramed?.(String(thread.id));
+    if (turn.admission !== "refused") {
+      this.#options.consumeIssueContextFramed?.(String(thread.id));
+    }
     return this.#providerResult(command.operationId, turn);
   }
 

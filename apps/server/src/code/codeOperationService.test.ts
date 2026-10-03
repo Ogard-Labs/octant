@@ -1511,6 +1511,30 @@ describe("CodeOperationService", () => {
     );
   });
 
+  it("retains pending issue context after refused admission until a later turn starts", async () => {
+    const consumeIssueContextFramed = vi.fn();
+    const fixture = providerTurnFixture({ consumeIssueContextFramed });
+    fixture.turns.start.mockResolvedValueOnce({
+      state: "failed",
+      admission: "refused",
+      failure: { category: "unauthorized", message: "Turn admission is no longer current." },
+    });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      admission: "refused",
+    });
+    expect(consumeIssueContextFramed).not.toHaveBeenCalled();
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId("56565656-5656-4565-8565-565656565656"),
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(consumeIssueContextFramed).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+  });
+
   it("sends the images the journal recorded, and refuses ones no turn may claim", async () => {
     const reference = {
       attachmentId: "40000000-0000-4000-8000-000000000001",
@@ -2359,16 +2383,14 @@ function providerTurnFixture(
       | "git"
       | "isProviderModelAllowed"
       | "agentRuns"
+      | "consumeIssueContextFramed"
     >
   > & { readonly thread?: CodeThread } = {},
 ) {
   const { thread: threadOverride, ...serviceOptions } = options;
   const activeThread = threadOverride ?? thread();
   const turns = {
-    start: vi.fn(
-      async (_input: Parameters<CodeOperationServiceOptions["turns"]["start"]>[0]) =>
-        ({ state: "running" }) as const,
-    ),
+    start: vi.fn<CodeOperationServiceOptions["turns"]["start"]>(async () => ({ state: "running" })),
     answerInput: vi.fn(),
     answerApproval: vi.fn(),
     cancel: vi.fn(),
