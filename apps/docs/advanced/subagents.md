@@ -114,7 +114,8 @@ retry. Approvals, tasks, outputs, transcripts, and usage are retained.
 A run waiting for other runs to finish never starts on its own after a
 restart, even once they finish: **Resume** on the run, or resuming the parent
 thread, lets it go. While the parent thread is paused, or needs a check after
-a restart, a waiting run stays waiting too.
+a restart, a waiting run stays waiting too, and its own **Resume** asks you to
+resume the parent thread first.
 
 ## Following up on results
 

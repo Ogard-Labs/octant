@@ -535,7 +535,8 @@ closed. A ready run is held instead while its parent's harness session is
 paused or `recovery-required` (the same rule that refuses a new `delegate`),
 and a restart never starts one on its own: every run already parked when the
 host boots stays parked, even once its dependencies complete, until a person
-resumes it or resumes the parent's session. The hold lives in the
+resumes it or resumes the parent's session; a person's resume of the run
+itself is refused while the parent's session is held. The hold lives in the
 orchestration service and is rebuilt the same way at every boot. A dependency that failed or was cancelled fails
 the dependent without running it (`dependency-failed: <id>`); an interrupted
 dependency does not, because a retry can still complete it. A run cannot be

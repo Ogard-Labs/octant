@@ -344,6 +344,20 @@ export class AgentRunOrchestrationService {
     expectedVersion: number,
     liveAuthority: AgentRunAuthority,
   ): AgentRunCommandResult {
+    // A paused parent starts nothing new, and that includes a child parked on
+    // its dependencies: resuming the parent comes first, or the child's
+    // Resume would undo the pause the parent's own controls show.
+    const run = this.#persistence.getById(runId);
+    if (
+      run?.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON &&
+      this.#parentSessions?.isHeld(run.parentThreadId) === true
+    ) {
+      return {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: "The parent thread is paused. Resume it first, and this run continues.",
+      };
+    }
     // A person resuming the run is the release a restart waits for.
     this.#heldSinceRestart.delete(runId);
     return this.start(runId, expectedVersion, liveAuthority);

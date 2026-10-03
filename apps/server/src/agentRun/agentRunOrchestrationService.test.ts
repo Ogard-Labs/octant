@@ -1291,6 +1291,15 @@ describe("AgentRun dependency graphs", () => {
     expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("waiting");
     expect(starts).not.toContain(String(dependent.id));
 
+    // Resuming the child alone does not get around its parent's pause.
+    const parked = persistence.getById(dependent.id);
+    if (parked === undefined) throw new Error("The dependent is gone.");
+    expect(orchestration.resume(dependent.id, parked.version, authority)).toMatchObject({
+      kind: "run-command-failed",
+      reason: "unsupported-transition",
+    });
+    expect(starts).not.toContain(String(dependent.id));
+
     sessions.resume(String(ids.thread));
     await settle();
     expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("starting");
