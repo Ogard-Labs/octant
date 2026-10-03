@@ -55,11 +55,6 @@ export interface AgentRunControlAdmissionDependencies {
     readonly request: AgentRunCreationRequest;
   }) => AgentRunPoolRoutingContext | undefined | Promise<AgentRunPoolRoutingContext | undefined>;
   readonly parentContext?: AgentRunParentContextPort;
-  readonly onExecutionAccepted?: (input: {
-    readonly run: AgentRun;
-    readonly windowId: string;
-    readonly operation: "admission" | "resume" | "retry";
-  }) => void;
 }
 
 export type AgentRunControlAdmission =

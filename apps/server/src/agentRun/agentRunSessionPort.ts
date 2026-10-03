@@ -78,7 +78,9 @@ export type AgentRunResumeReadiness =
  */
 export interface AgentRunSessionPort {
   /** Checks persisted identity/cursor and current capability without starting or reserving execution. */
-  readonly checkResume?: (run: AgentRun) => AgentRunResumeReadiness;
+  readonly checkResume?: (
+    run: AgentRun,
+  ) => AgentRunResumeReadiness | Promise<AgentRunResumeReadiness>;
   /**
    * Starts one managed session. Implementations resolve every start-time
    * dependency before returning and throw {@link AgentRunSessionError} when one

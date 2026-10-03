@@ -201,7 +201,9 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
       )}
       {lastRoute === undefined ? null : (
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-          {lastRoute.job} → {String(lastRoute.slotId)}: {lastRoute.kind}
+          {lastRoute.job} →{" "}
+          {lastRoute.kind === "inherited-parent" ? "parent" : String(lastRoute.slotId)}:{" "}
+          {lastRoute.kind}
         </Text>
       )}
       {lastIntervention === undefined ? null : (

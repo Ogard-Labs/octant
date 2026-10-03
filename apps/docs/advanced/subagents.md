@@ -6,11 +6,13 @@ description: Child agent runs, their hierarchy, isolation, recovery, and how res
 
 Subagents are child agent runs that a thread's agent starts to delegate
 research, implementation, or review. They are one durable **AgentRun** each and
-inherit the parent thread's provider, model, and authority ceiling.
+run under the parent thread's authority ceiling. Their provider and model can
+come from the parent, a configured role slot, or an explicit eligible target.
 
-Only the thread's agent starts a subagent: the Octant Harness hands it a
-bounded task with its `delegate` tool, and the subagent's result returns to that
-agent through `collect`. You watch and control subagents from the composer and
+Only the thread's agent starts a subagent. Octant's harness and supported
+provider harnesses both hand bounded tasks to the same host-managed child
+runtime, and both can collect results and continue a completed child. An
+Octant-harness parent can use a provider-harness child and the reverse. You watch and control subagents from the composer and
 the **Agents** dock tool, but you do not start them there; a subagent a person
 started by hand would have no agent to hand its result back to.
 
@@ -20,7 +22,8 @@ Subagent infrastructure — contracts, journaling, projection, the
 orchestration service, process supervision, and packaged child smoke — is on
 `main`. **Settings → Octant Harness → Helper agents** holds one
 server-authoritative switch, **Let the agent start subagents**: on (the
-default) or off. Role cards and mixed-vendor routing per role remain planned.
+default) or off. **Settings → Octant Harness → Model slots** configures shared
+role routing for both Octant and provider harnesses; Projects can override it.
 
 A thread's working subagents show in a small card behind its composer in
 Chat, Work, and Code: one row each with its task and "Working · 12s". Click the
@@ -59,10 +62,13 @@ right-dock tool, not a generic Thread-tab accordion.
 
 Every child is one **AgentRun** with an execution kind of `provider-native`
 or `octant-managed`, and a role of **Research**, **Implementation**,
-**Review**, or **Custom**. Children normally inherit the parent's
-provider/model/reasoning. Mixed-vendor routing is **opt-in and disabled by
-default**; enabling it opens role-card setup for Research, Implementation,
-and Review, with advanced rules behind an **Advanced** disclosure.
+**Review**, or **Custom**. Research uses **Research and tasks**, implementation
+and custom work use **Main model**, and review uses **Careful review** in Model
+slots. An unconfigured route can use the parent's eligible model. A configured
+route that is unavailable reports that problem rather than silently choosing a
+different provider. The lead can also name an eligible provider, model, and
+supported reasoning setting for a specific child. All choices retain the same
+authority and budget checks.
 
 A provider's own subagent feature stays off inside Octant, because a child it
 starts itself would run where Octant cannot show it or answer its approvals.
@@ -133,6 +139,22 @@ a restart, a waiting run stays waiting too, and its own **Resume** asks you to
 resume the parent thread first.
 
 ## Following up on results
+
+Finished siblings can return together in one parent turn. Octant does not wait
+for the entire group: independent results can reach the parent while other
+children are still working. Saved delivery records prevent a restart from
+delivering the same result twice.
+
+Open a completed managed child and choose **Follow up** to send another
+instruction in its existing conversation. The parent agent can do the same
+through either delegation tool. The provider must support genuine resume; if
+it cannot, start a new delegation from the parent. Cancelled children cannot
+continue. The earlier conversation stays available, and the new reply needs
+its own acknowledgement.
+
+When the lead includes parent context, the child receives a bounded, attributed
+selection of accepted prompts and completed replies. Missing or omitted text
+is identified; private reasoning and tool bodies are excluded.
 
 Child results must be **acknowledged** by the parent. On a terminal parent
 turn, unacknowledged, failed, interrupted, waiting, or unfinished descendants

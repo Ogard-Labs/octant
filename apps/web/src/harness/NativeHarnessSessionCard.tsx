@@ -22,6 +22,8 @@ export interface NativeHarnessSessionCardProps {
 function describeRoute(decision: NativeHarnessRouteDecision): string {
   const model = "candidate" in decision ? String(decision.candidate.modelId) : undefined;
   switch (decision.kind) {
+    case "inherited-parent":
+      return `${decision.job}: inherited parent model (${model})`;
     case "primary":
       return `${decision.job} → ${decision.slotId} (${model})`;
     case "failure-fallback":

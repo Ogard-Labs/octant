@@ -68,7 +68,7 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
     return this.#start(run);
   }
 
-  checkResume(run: AgentRun): AgentRunResumeReadiness {
+  checkResume(run: AgentRun): AgentRunResumeReadiness | Promise<AgentRunResumeReadiness> {
     if (this.#sessions.has(run.id))
       return { status: "refused", message: "This child still owns an active session." };
     if (this.#port.resume === undefined || this.#port.checkResume === undefined) {

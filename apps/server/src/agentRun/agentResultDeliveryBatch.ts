@@ -19,7 +19,7 @@ export interface AgentResultDeliveryMember {
 
 export function agentRunResultGeneration(run: {
   readonly id: AgentRunId;
-  readonly generation?: number;
+  readonly generation?: number | undefined;
 }): number {
   return run.generation ?? 1;
 }
