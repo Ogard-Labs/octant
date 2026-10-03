@@ -830,20 +830,32 @@ flowchart LR
   sync client's conflict copies and lost updates cannot happen. An entry is a
   readable JSON bundle in the
   [0029](decisions/0029-artifact-storage-mirror.md) format, with a detached
-  signature from the writing host's device key. The storage provider can read
-  those files; they are not encrypted. Each host's own journal stays the
-  source of truth. A pull imports other hosts' entries as appended versions
-  with provenance — the computer's name, the host id, and the origin
-  sequence. It never adopts another journal and never overwrites a version.
-  If two computers revise the same artifact from the same parent, the library
-  shows both heads. The person picks one or merges them, and the merge is a
-  new version. Nothing is silently chosen. Deletion is a tombstone entry:
-  other computers hide the artifact and offer to undo. Each host's own erase
-  and purge rules still apply locally. The mirror and the export stay
-  separate. They still write plain files for people and other tools, and they
-  still never push to git. Sync is Octant to Octant through the store. The
-  store holds every version, so a new or wiped computer that joins restores
-  the artifact library. Scope is artifact and Canvas versions and tombstones.
+  signature from the writing host's own identity key. The storage provider can
+  read those files; they are not encrypted. Before an entry is written, and
+  before an imported entry is accepted, the host applies the same refusal and
+  redaction as a shared bundle: credentials, secret-shaped values, and absolute
+  filesystem paths in free-form text do not leave, and a bundle that still
+  contains them is refused. Each host's own journal stays the source of truth.
+  A pull imports other hosts' entries as appended versions with provenance —
+  the computer's name, the host id, and the origin sequence. It never adopts
+  another journal and never overwrites a version. An imported entry keeps that
+  origin identity. The importing host does not publish it again under its own
+  sequence. A later edit on this host is a new version and a new entry. If two
+  computers revise the same artifact from the same parent, the library shows
+  both heads. The person picks one or merges them, and the merge is a new
+  version. Nothing is silently chosen. Deletion is a tombstone entry. A
+  tombstone and a revision from the same parent are two heads: the revision
+  stays visible, and the tombstone is not discarded. Other computers hide the
+  artifact only when the tombstone is the only head, and they offer to undo.
+  A later version from another computer after a tombstone is a new version;
+  the tombstone stays in the log. Each host's own erase and purge rules still
+  apply locally. The mirror and the export stay separate. They still write
+  plain files for people and other tools, and they still never push to git.
+  Sync is Octant to Octant through the store. The log holds every artifact
+  version, so a computer that joins can import those versions. It does not
+  recreate threads, Projects, or settings. Binding an imported version to a
+  local Project follows the existing artifact import rule and is not widened
+  here. Scope is artifact and Canvas versions and tombstones.
   Canvas comments are not in this log. Threads and settings are not. A
   replica-store contribution offers list, get, and put-if-absent. A folder
   store and an S3-compatible store ship in-tree on that seam. Direct cloud
@@ -1599,20 +1611,24 @@ mechanisms are:
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal.
 - **Artifact replica membership.** Each replica entry carries a detached
-  signature from the writing host's device key. There is no replica key. An
-  entry from an unknown or revoked host, or one that fails verification, is
-  refused and journaled. A new computer joins by writing a join request into
-  the store. A computer that is already a member approves it by name. A short
-  matching code, shown on both screens, guards against a stranger's request.
-  Revoke writes a signed revocation. Store setup, joining, and revoking happen
-  on the host, never from a paired phone. Store credentials live in the host
-  credential store — macOS Keychain or freedesktop Secret Service — and are
-  not written into the replica. The storage provider can read the synced
-  content: the artifact versions and tombstones are plain files. Settings and
-  the user guide (`apps/docs/guide/sync-artifacts.md`) say so before sync is
-  turned on. Opt-in encryption of replicas is not this rule. A replica import
-  appends versions to this journal and adopts nothing else; it does not make
-  two hosts trust each other.
+  signature from the writing host's own identity key — the host-owned identity,
+  not a paired client's device key. There is no replica key. An entry from an
+  unknown or revoked host, or one that fails verification, is refused and
+  journaled. A new computer joins by writing a join request into the store. A
+  computer that is already a member approves it by name. A short matching code,
+  shown on both screens, guards against a stranger's request. Revoke writes a
+  signed revocation. Store setup, joining, and revoking happen on the host,
+  never from a paired phone. Store credentials live in the host credential
+  store — macOS Keychain or freedesktop Secret Service — and are not written
+  into the replica. An S3-compatible store is contacted only over authenticated
+  TLS. A plaintext endpoint is refused, and store credentials are not sent on
+  it. The storage provider can read the synced content: the artifact versions
+  and tombstones are plain files. Settings and the user guide
+  (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
+  Opt-in encryption of replicas is not this rule. A replica import appends
+  versions to this journal and adopts nothing else. Membership accepts an entry
+  signed by a known, non-revoked host identity key as authentic. It does not
+  delegate host authority between hosts.
 - **Hosts never trust each other.** Multi-host views merge read models
   client-side; credentials and mutable authority never cross hosts. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client

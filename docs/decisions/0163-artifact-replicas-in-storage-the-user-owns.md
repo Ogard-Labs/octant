@@ -30,20 +30,31 @@ the only way an artifact reaches another computer.
 - **Each host's own journal stays the source of truth.** A pull imports other
   hosts' entries as appended versions with provenance: the computer's name,
   the host id, and the origin sequence. It never adopts another journal and
-  never overwrites a version.
+  never overwrites a version. An imported entry keeps that origin identity.
+  The importing host does not publish it again under its own sequence. A later
+  edit on this host is a new version and a new entry.
 - **Concurrent edits keep both versions.** If two computers revise the same
   artifact from the same parent, the library shows both heads. The person
   picks one or merges them, which is a new version. Nothing is silently
   chosen.
-- **Deletion is a tombstone entry.** Other computers hide the artifact and
-  offer to undo. Each host's own erase and purge rules still apply locally.
+- **Deletion is a tombstone entry.** A tombstone and a revision from the same
+  parent are two heads: the revision stays visible, and the tombstone is not
+  discarded. Other computers hide the artifact only when the tombstone is the
+  only head, and they offer to undo. A later version from another computer
+  after a tombstone is a new version; the tombstone stays in the log. Each
+  host's own erase and purge rules still apply locally.
 - **Plain, readable files, signed.** Entries are readable JSON bundles in the
-  0029 format, so they work across computers and with other tools. Each entry
-  carries a detached signature from the writing host's device key. An entry
-  from an unknown or revoked host, or one that fails verification, is refused
-  and journaled. A new computer joins by writing a join request into the
-  store; a computer that is already a member approves it by name. A short
-  matching code shown on both screens guards against a stranger's request.
+  0029 format, so they work across computers and with other tools. The same
+  refusal and redaction as a shared bundle applies before an entry is written
+  and before an imported entry is accepted: credentials, secret-shaped values,
+  and absolute filesystem paths in free-form text do not leave, and a bundle
+  that still contains them is refused. Each entry carries a detached
+  signature from the writing host's own identity key, not a paired client's
+  device key. An entry from an unknown or revoked host, or one that fails
+  verification, is refused and journaled. A new computer joins by writing a
+  join request into the store; a computer that is already a member approves
+  it by name. A short matching code shown on both screens guards against a
+  stranger's request.
   Revoke writes a signed revocation. There is no replica key. The storage
   provider can read the content. Settings and the user guide say so plainly
   before sync is turned on. Opt-in encryption may come later — turned down
@@ -52,17 +63,23 @@ the only way an artifact reaches another computer.
   history of versions. The existing mirror and export still write plain files
   for people and other tools. Sync is Octant to Octant. Mirror and export
   still never push to git.
-- **Backup falls out of the model.** The store holds every version, so a new
-  or wiped computer that joins restores the whole artifact library.
+- **Backup falls out of the model.** The log holds every artifact version, so
+  a computer that joins can import those versions. It does not recreate
+  threads, Projects, or settings. Binding an imported version to a local
+  Project follows the existing artifact import rule and is not widened here.
 - **Plugin-shaped.** A replica-store contribution offers list, get, and
   put-if-absent. A folder store and an S3-compatible store ship in-tree on
   that seam. Direct cloud APIs, for a host with no desktop sync client, come
   later as plugins.
 - **Authority.** Store setup, joining, and revoking happen on the host, never
   from a paired phone. Credentials live in the host credential store — macOS
-  Keychain or freedesktop Secret Service. Plan mode, and a host with sync
-  off, make no store calls. Every publish, pull, refusal, and failure is
-  journaled. A failed upload never unwinds a local version.
+  Keychain or freedesktop Secret Service. An S3-compatible store is contacted
+  only over authenticated TLS. A plaintext endpoint is refused, and store
+  credentials are not sent on it. Plan mode, and a host with sync off, make
+  no store calls. Every publish, pull, refusal, and failure is journaled. A
+  failed upload never unwinds a local version. Membership accepts an entry
+  signed by a known, non-revoked host identity key as authentic. It does not
+  delegate host authority between hosts.
 
 Scope is artifacts and Canvases: versions and tombstones first. Canvas
 comments are a follow-up. Whole-host backup — threads and settings — is out
