@@ -26,6 +26,9 @@ interface DetachedCodeAttachment {
 }
 
 export interface CodeAttachments {
+  readonly claimForQueue: () => ReadonlyArray<StagedCodeAttachment>;
+  readonly releaseQueueClaim: (entries: ReadonlyArray<StagedCodeAttachment>) => void;
+  readonly acceptQueueClaim: (entries: ReadonlyArray<StagedCodeAttachment>) => void;
   readonly staged: ReadonlyArray<StagedCodeAttachment>;
   readonly message: string | undefined;
   /** Whether an upload is still in flight. Sending waits for it. */
@@ -85,6 +88,7 @@ export function useCodeAttachments(input: {
   const current = useRef<ReadonlyArray<StagedCodeAttachment>>([]);
   const detached = useRef<ReadonlyArray<DetachedCodeAttachment>>([]);
   const inFlight = useRef(0);
+  const queueClaims = useRef(new Set<string>());
 
   const apply = useCallback(
     (next: (list: ReadonlyArray<StagedCodeAttachment>) => ReadonlyArray<StagedCodeAttachment>) => {
@@ -177,6 +181,7 @@ export function useCodeAttachments(input: {
 
   const remove = useCallback(
     (attachmentId: CodeAttachmentId) => {
+      if (queueClaims.current.has(String(attachmentId))) return;
       apply((list) => {
         const removed = list.find((entry) => entry.reference.attachmentId === attachmentId);
         if (removed !== undefined) forget(removed.previewUrl);
@@ -291,6 +296,22 @@ export function useCodeAttachments(input: {
   }, [apply, forget]);
 
   return {
+    claimForQueue: () => {
+      const entries = current.current;
+      for (const entry of entries) queueClaims.current.add(String(entry.reference.attachmentId));
+      return entries;
+    },
+    releaseQueueClaim: (entries) => {
+      for (const entry of entries) queueClaims.current.delete(String(entry.reference.attachmentId));
+    },
+    acceptQueueClaim: (entries) => {
+      const ids = new Set(entries.map((entry) => String(entry.reference.attachmentId)));
+      for (const entry of entries) {
+        queueClaims.current.delete(String(entry.reference.attachmentId));
+        forget(entry.previewUrl);
+      }
+      apply((list) => list.filter((entry) => !ids.has(String(entry.reference.attachmentId))));
+    },
     staged,
     message,
     busy,

@@ -1,11 +1,13 @@
+import { queueTestHost } from "../messageQueue/queueTestHost";
+import type { ThreadMessageQueueResult } from "@octant/contracts";
 import {
   decodeCodeAttachmentId,
   decodeCodeRelativePath,
   type CodeApprovalId,
 } from "@octant/contracts/code";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
-import type { CodeAttachmentId, CodeBoardCard, CodeBoardView, ThreadPlan } from "@octant/contracts";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { CodeBoardCard, CodeBoardView, ThreadPlan } from "@octant/contracts";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -26,6 +28,126 @@ const modelId = "model-one" as never;
 const mentionedThreadId = "90000000-0000-4000-8000-000000000001" as never;
 const alternateProviderId = "80000000-0000-4000-8000-0000000000a2" as never;
 const alternateModelId = "model-two" as never;
+
+describe("Code host queue", () => {
+  it("queues multiple messages without sending after a turn finishes", async () => {
+    const host = queueTestHost();
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const { rerender, unmount } = render(
+      <CodeThreadWorkspace
+        messageQueueClient={host}
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "First");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await waitFor(() => expect(composer).toHaveValue(""));
+    await user.type(composer, "Second");
+    expect(host.execute).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    expect(await screen.findByRole("button", { name: "2 queued" })).toBeVisible();
+    rerender(
+      <CodeThreadWorkspace
+        messageQueueClient={host}
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
+        threadId={threadId}
+      />,
+    );
+    unmount();
+    expect(sendFollowUp).not.toHaveBeenCalled();
+    expect(host.execute).toHaveBeenCalledTimes(2);
+    expect(host.execute.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        payload: expect.objectContaining({ mode: "code", prompt: "First" }),
+      }),
+    );
+  });
+
+  it("keeps newer draft attachments across a delayed queue acknowledgment", async () => {
+    const host = queueTestHost();
+    const response = Promise.withResolvers<ThreadMessageQueueResult>();
+    host.execute.mockImplementationOnce(() => response.promise);
+    const user = userEvent.setup();
+    const attachments: CodeAttachmentClient = {
+      putAttachment: vi.fn(async (input) => ({
+        attachmentId: input.attachmentId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+      })),
+      discardAttachment: vi.fn(async () => undefined),
+      attachment: vi.fn(),
+    };
+    const { unmount } = render(
+      <CodeThreadWorkspace
+        messageQueueClient={host}
+        attachmentClient={attachments}
+        controller={controller({ turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "First");
+    pasteImage(composer, "first.png");
+    await screen.findByAltText("first.png");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
+    expect(composer).toHaveValue("First");
+    await user.clear(composer);
+    await user.type(composer, "New draft");
+    pasteImage(composer, "later.png");
+    await screen.findByAltText("later.png");
+    const command = host.execute.mock.calls[0]?.[0];
+    if (command === undefined) throw new Error("Expected enqueue");
+    await act(async () => {
+      response.resolve(host.apply(command));
+    });
+    expect(composer).toHaveValue("New draft");
+    expect(screen.queryByAltText("first.png")).not.toBeInTheDocument();
+    expect(screen.getByAltText("later.png")).toBeVisible();
+    unmount();
+    expect(attachments.discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it("refuses to persist a one-shot access selection in the queue", async () => {
+    const host = queueTestHost();
+    const user = userEvent.setup();
+    render(
+      <CodeThreadWorkspace
+        messageQueueClient={host}
+        controller={controller({ turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Plan · read-only" }));
+    await user.type(screen.getByLabelText("Follow-up message"), "Keep this");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    expect(host.execute).not.toHaveBeenCalled();
+    expect(screen.getByText(/one-shot access change cannot be queued/)).toBeVisible();
+    expect(screen.getByLabelText("Follow-up message")).toHaveValue("Keep this");
+  });
+
+  it("leaves a draft editable when the host queue is unavailable", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ turnStatus: "running", sendFollowUp })}
+        threadId={threadId}
+      />,
+    );
+    await user.type(screen.getByLabelText("Follow-up message"), "Keep this");
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
+    expect(sendFollowUp).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Follow-up message")).toHaveValue("Keep this");
+  });
+});
 
 describe("CodeThreadWorkspace", () => {
   it("shows how long a completed Code turn worked and leaves unsettled turns without a duration", async () => {
@@ -309,39 +431,6 @@ describe("CodeThreadWorkspace", () => {
       "Fix the failing test",
     );
     expect(screen.queryByRole("heading", { name: "Loading conversation" })).not.toBeInTheDocument();
-  });
-
-  it("queues a follow-up until the running turn settles without composer instructions", async () => {
-    const user = userEvent.setup();
-    const sendFollowUp = vi.fn(async () => true);
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        providerGroups={[providerGroup()]}
-        threadId={threadId}
-      />,
-    );
-    expect(screen.queryByText("Enter sends when this response finishes")).not.toBeInTheDocument();
-    await user.type(screen.getByLabelText("Follow-up message"), "Hold this");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-    expect(screen.getByText("Queued")).toBeInTheDocument();
-    rerender(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "waiting" })}
-        providerGroups={[providerGroup()]}
-        threadId={threadId}
-      />,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(sendFollowUp).not.toHaveBeenCalled();
-    rerender(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "failed" })}
-        providerGroups={[providerGroup()]}
-        threadId={threadId}
-      />,
-    );
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalled());
   });
 
   /**
@@ -2280,844 +2369,6 @@ describe("CodeThreadWorkspace", () => {
     expect(document.querySelectorAll("[data-transcript-row]").length).toBeLessThan(80);
     expect(screen.getByText("Code turn 0")).toBeVisible();
     expect(screen.queryByText("Code turn 999")).not.toBeInTheDocument();
-  });
-
-  it("sends a follow-up written while a turn runs, and runs it once that turn finishes", async () => {
-    const user = userEvent.setup();
-    const sendFollowUp = vi.fn(async () => true);
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadId={threadId}
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    expect(composer).toBeEnabled();
-    await user.type(composer, "and then push");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-
-    // The message left the composer and joined the transcript: it was sent,
-    // not parked somewhere the user has to go back and release.
-    expect(composer).toHaveValue("");
-    expect(await screen.findByText("and then push")).toBeVisible();
-    expect(sendFollowUp).not.toHaveBeenCalled();
-
-    rerender(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "idle" })}
-        threadId={threadId}
-      />,
-    );
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
-    expect(sendFollowUp).toHaveBeenCalledWith("and then push", [], [], [], "approval-gated", true);
-  });
-
-  it("keeps a second draft visible but disables sending while one message waits", async () => {
-    const user = userEvent.setup();
-    const sendFollowUp = vi.fn(async () => true);
-    render(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadId={threadId}
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "and then push");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-    await user.type(composer, "write the release note");
-
-    expect(composer).toHaveValue("write the release note");
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
-    await user.keyboard("{Enter}");
-    expect(sendFollowUp).not.toHaveBeenCalled();
-  });
-
-  it("sends only the first context and preserves a newer draft and image", async () => {
-    const user = userEvent.setup();
-    let resolveFirst!: (sent: boolean) => void;
-    const sendFollowUp = vi.fn(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolveFirst = resolve;
-        }),
-    );
-    const references = [
-      {
-        attachmentId: "40000000-0000-4000-8000-000000000021" as CodeAttachmentId,
-        displayName: "first.png",
-        mediaType: "image/png" as const,
-        byteLength: 3,
-        digest: "a".repeat(64),
-      },
-      {
-        attachmentId: "40000000-0000-4000-8000-000000000022" as CodeAttachmentId,
-        displayName: "second.png",
-        mediaType: "image/png" as const,
-        byteLength: 3,
-        digest: "b".repeat(64),
-      },
-    ];
-    let uploaded = 0;
-    const attachmentClient: CodeAttachmentClient = {
-      putAttachment: vi.fn(async () => references[uploaded++]!),
-      discardAttachment: vi.fn(async () => undefined),
-      attachment: vi.fn(),
-    };
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadId={threadId}
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "and then push");
-    pasteImage(composer, "first.png");
-    await screen.findByAltText("first.png");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-    expect(screen.queryByAltText("first.png")).not.toBeInTheDocument();
-
-    rerender(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controller({ sendFollowUp, turnStatus: "idle" })}
-        threadId={threadId}
-      />,
-    );
-    await waitFor(() =>
-      expect(sendFollowUp).toHaveBeenCalledWith(
-        "and then push",
-        [],
-        [references[0]],
-        [],
-        "approval-gated",
-        true,
-      ),
-    );
-
-    await user.type(composer, "write the release note");
-    pasteImage(composer, "second.png");
-    await screen.findByAltText("second.png");
-    resolveFirst(true);
-
-    await waitFor(() => expect(screen.queryByAltText("first.png")).not.toBeInTheDocument());
-    expect(screen.getByAltText("second.png")).toBeInTheDocument();
-    expect(composer).toHaveValue("write the release note");
-
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledTimes(2));
-    expect(sendFollowUp).toHaveBeenLastCalledWith(
-      "write the release note",
-      [],
-      [references[1]],
-      [],
-      "approval-gated",
-    );
-  });
-
-  it("discards detached host images when a refusal loses to a newer draft", async () => {
-    const user = userEvent.setup();
-    let resolveFirst!: (sent: boolean) => void;
-    const sendFollowUp = vi.fn(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolveFirst = resolve;
-        }),
-    );
-    const reference = {
-      attachmentId: "40000000-0000-4000-8000-000000000024" as CodeAttachmentId,
-      displayName: "superseded.png",
-      mediaType: "image/png" as const,
-      byteLength: 3,
-      digest: "d".repeat(64),
-    };
-    const discardAttachment = vi.fn(async () => undefined);
-    const attachmentClient: CodeAttachmentClient = {
-      putAttachment: vi.fn(async () => reference),
-      discardAttachment,
-      attachment: vi.fn(),
-    };
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadId={threadId}
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "and then push");
-    pasteImage(composer, "superseded.png");
-    await screen.findByAltText("superseded.png");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-
-    rerender(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controller({ sendFollowUp, turnStatus: "idle" })}
-        threadId={threadId}
-      />,
-    );
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
-    await user.type(composer, "newer draft");
-    resolveFirst(false);
-
-    await waitFor(() =>
-      expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId),
-    );
-    expect(screen.queryByAltText("superseded.png")).not.toBeInTheDocument();
-    expect(composer).toHaveValue("newer draft");
-  });
-
-  it("never restores a pending Code context into the next thread", async () => {
-    const user = userEvent.setup();
-    const sendFollowUp = vi.fn(async () => true);
-    const reference = {
-      attachmentId: "40000000-0000-4000-8000-000000000025" as CodeAttachmentId,
-      displayName: "origin.png",
-      mediaType: "image/png" as const,
-      byteLength: 3,
-      digest: "e".repeat(64),
-    };
-    const discardAttachment = vi.fn(async () => undefined);
-    const attachmentClient: CodeAttachmentClient = {
-      putAttachment: vi.fn(async () => reference),
-      discardAttachment,
-      attachment: vi.fn(),
-    };
-    const attachmentClientB: CodeAttachmentClient = {
-      putAttachment: vi.fn(async () => reference),
-      discardAttachment: vi.fn(async () => undefined),
-      attachment: vi.fn(),
-    };
-    const search = vi.fn(async () => [
-      {
-        threadId: mentionedThreadId,
-        mode: "chat" as const,
-        title: "Release notes",
-        placement: { kind: "unfiled" as const },
-        updatedAt: "2026-08-15T09:00:00.000Z" as never,
-      },
-    ]);
-    const resolveMention = vi.fn(async () => ({ mentions: [], unavailable: [] }));
-    const list = vi.fn(async () => ({
-      status: "listed" as const,
-      listing: {
-        kind: "code-file-listing" as const,
-        threadId,
-        checkoutId: "20000000-0000-4000-8000-000000000002" as never,
-        entries: [
-          {
-            kind: "file" as const,
-            fileId: "file_" + "b".repeat(59),
-            path: "src/index.ts" as never,
-            byteLength: 12,
-            availability: { status: "available" as const },
-          },
-        ],
-        truncated: false,
-        observedAt: "2026-08-16T09:00:00.000Z" as never,
-      },
-    }));
-    const threadMentionClient = {
-      search,
-      resolve: resolveMention,
-      openSideChat: vi.fn(),
-      execute: vi.fn(),
-    } as never;
-    const writePendingDraftFor = vi.fn();
-    const controllerA = controller({
-      sendFollowUp,
-      turnStatus: "running",
-      writePendingDraftFor,
-    } as never);
-    const controllerB = controller({ turnStatus: "idle" }, anotherThreadId);
-    const { rerender, unmount } = render(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controllerA}
-        fileListingClient={{ list } as never}
-        threadId={threadId}
-        threadMentionClient={threadMentionClient}
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "#Rel");
-    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
-    await user.type(composer, "explain @ind");
-    await user.click(await screen.findByRole("option", { name: /src\/index\.ts/ }));
-    await user.type(composer, " now");
-    pasteImage(composer, "origin.png");
-    await screen.findByAltText("origin.png");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-
-    rerender(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClientB}
-        controller={controllerB}
-        fileListingClient={{ list } as never}
-        threadId={anotherThreadId}
-        threadMentionClient={threadMentionClient}
-      />,
-    );
-
-    await waitFor(() => expect(screen.getByLabelText("Follow-up message")).toHaveValue(""));
-    expect(screen.queryByAltText("origin.png")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Mentioned threads")).not.toBeInTheDocument();
-    expect(writePendingDraftFor).toHaveBeenCalledWith(
-      String(threadId),
-      expect.stringContaining("Release notes"),
-    );
-    expect(controllerB.setPendingDraft).not.toHaveBeenCalledWith(
-      expect.stringContaining("Release"),
-    );
-
-    unmount();
-    expect(discardAttachment).toHaveBeenCalledOnce();
-    expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId);
-    expect(attachmentClientB.discardAttachment).not.toHaveBeenCalled();
-  });
-
-  it("restores detached Code context after Strict Mode effect replay", async () => {
-    const user = userEvent.setup();
-    const sendFollowUp = vi.fn(async () => false);
-    const reference = {
-      attachmentId: "40000000-0000-4000-8000-000000000026" as CodeAttachmentId,
-      displayName: "strict.png",
-      mediaType: "image/png" as const,
-      byteLength: 3,
-      digest: "f".repeat(64),
-    };
-    const attachmentClient: CodeAttachmentClient = {
-      putAttachment: vi.fn(async () => reference),
-      discardAttachment: vi.fn(async () => undefined),
-      attachment: vi.fn(),
-    };
-    const { rerender } = render(
-      <StrictMode>
-        <CodeThreadWorkspace
-          attachmentClient={attachmentClient}
-          controller={controller({ sendFollowUp, turnStatus: "running" })}
-          threadId={threadId}
-        />
-      </StrictMode>,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "retry after strict mode");
-    pasteImage(composer, "strict.png");
-    await screen.findByAltText("strict.png");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-    rerender(
-      <StrictMode>
-        <CodeThreadWorkspace
-          attachmentClient={attachmentClient}
-          controller={controller({ sendFollowUp, turnStatus: "idle" })}
-          threadId={threadId}
-        />
-      </StrictMode>,
-    );
-
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
-    await waitFor(() => expect(composer).toHaveValue("retry after strict mode"));
-    expect(screen.getByAltText("strict.png")).toBeInTheDocument();
-    expect(attachmentClient.discardAttachment).not.toHaveBeenCalled();
-  });
-
-  it("restores the refused prompt, image, thread chip, and path for retry", async () => {
-    const user = userEvent.setup();
-    const sendFollowUp = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    const reference = {
-      attachmentId: "40000000-0000-4000-8000-000000000023" as CodeAttachmentId,
-      displayName: "retry.png",
-      mediaType: "image/png" as const,
-      byteLength: 3,
-      digest: "c".repeat(64),
-    };
-    const search = vi.fn(async () => [
-      {
-        threadId: mentionedThreadId,
-        mode: "chat" as const,
-        title: "Release notes",
-        placement: { kind: "unfiled" as const },
-        updatedAt: "2026-08-15T09:00:00.000Z" as never,
-      },
-    ]);
-    const resolveMention = vi.fn(async () => ({
-      mentions: [],
-      unavailable: [],
-    }));
-    const list = vi.fn(async () => ({
-      status: "listed" as const,
-      listing: {
-        kind: "code-file-listing" as const,
-        threadId,
-        checkoutId: "20000000-0000-4000-8000-000000000002" as never,
-        entries: [
-          {
-            kind: "file" as const,
-            fileId: "file_" + "a".repeat(59),
-            path: "src/index.ts" as never,
-            byteLength: 12,
-            availability: { status: "available" as const },
-          },
-        ],
-        truncated: false,
-        observedAt: "2026-08-16T09:00:00.000Z" as never,
-      },
-    }));
-    const attachmentClient: CodeAttachmentClient = {
-      putAttachment: vi.fn(async () => reference),
-      discardAttachment: vi.fn(async () => undefined),
-      attachment: vi.fn(),
-    };
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        fileListingClient={{ list } as never}
-        threadId={threadId}
-        threadMentionClient={
-          {
-            search,
-            resolve: resolveMention,
-            openSideChat: vi.fn(),
-            execute: vi.fn(),
-          } as never
-        }
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "#Rel");
-    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
-    await user.type(composer, "explain @ind");
-    await user.click(await screen.findByRole("option", { name: /src\/index\.ts/ }));
-    await user.type(composer, " now");
-    pasteImage(composer, "retry.png");
-    await screen.findByAltText("retry.png");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-
-    rerender(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controller({ sendFollowUp, turnStatus: "idle" })}
-        fileListingClient={{ list } as never}
-        threadId={threadId}
-        threadMentionClient={
-          {
-            search,
-            resolve: resolveMention,
-            openSideChat: vi.fn(),
-            execute: vi.fn(),
-          } as never
-        }
-      />,
-    );
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
-    await waitFor(() =>
-      expect(composer).toHaveValue("#[Release notes] explain @src/index.ts  now"),
-    );
-    expect(screen.getByAltText("retry.png")).toBeInTheDocument();
-    expect(attachmentClient.discardAttachment).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("Mentioned threads")).toHaveTextContent("Release notes");
-
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledTimes(2));
-    expect(sendFollowUp).toHaveBeenLastCalledWith(
-      "#[Release notes] explain @src/index.ts  now",
-      [mentionedThreadId],
-      [reference],
-      ["src/index.ts"],
-      "approval-gated",
-    );
-  });
-
-  it("keeps a newer draft when mention resolution is slow before steering", async () => {
-    const user = userEvent.setup();
-    let resolveMention!: (value: { mentions: never[]; unavailable: never[] }) => void;
-    const mentionResolution = new Promise<{ mentions: never[]; unavailable: never[] }>(
-      (resolve) => {
-        resolveMention = resolve;
-      },
-    );
-    const sendFollowUp = vi.fn(async () => true);
-    const search = vi.fn(async () => [
-      {
-        threadId: mentionedThreadId,
-        mode: "chat" as const,
-        title: "Release notes",
-        placement: { kind: "unfiled" as const },
-        updatedAt: "2026-08-15T09:00:00.000Z" as never,
-      },
-    ]);
-    const resolveClient = vi.fn(() => mentionResolution);
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadId={threadId}
-        threadMentionClient={
-          {
-            search,
-            resolve: resolveClient,
-            openSideChat: vi.fn(),
-            execute: vi.fn(),
-          } as never
-        }
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "#Rel");
-    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
-    await user.type(composer, "first");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-    await user.clear(composer);
-    await user.type(composer, "newer draft");
-    resolveMention({ mentions: [], unavailable: [] });
-
-    await waitFor(() => expect(composer).toHaveValue("newer draft"));
-    expect(screen.getByText("#[Release notes] first")).toBeInTheDocument();
-
-    rerender(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "idle" })}
-        threadId={threadId}
-        threadMentionClient={
-          {
-            search,
-            resolve: resolveClient,
-            openSideChat: vi.fn(),
-            execute: vi.fn(),
-          } as never
-        }
-      />,
-    );
-    await waitFor(() =>
-      expect(sendFollowUp).toHaveBeenCalledWith(
-        "#[Release notes] first",
-        [mentionedThreadId],
-        [],
-        [],
-        "approval-gated",
-        true,
-      ),
-    );
-    expect(composer).toHaveValue("newer draft");
-  });
-
-  it("persists an abandoned prompt to its origin when navigation wins mention resolution", async () => {
-    const user = userEvent.setup();
-    let resolveMention!: (value: { mentions: never[]; unavailable: never[] }) => void;
-    const mentionResolution = new Promise<{ mentions: never[]; unavailable: never[] }>(
-      (resolve) => {
-        resolveMention = resolve;
-      },
-    );
-    const writePendingDraftFor = vi.fn();
-    const sendFollowUp = vi.fn(async () => true);
-    const reference = {
-      attachmentId: "40000000-0000-4000-8000-000000000027" as CodeAttachmentId,
-      displayName: "abandoned.png",
-      mediaType: "image/png" as const,
-      byteLength: 3,
-      digest: "a".repeat(64),
-    };
-    const discardAttachment = vi.fn(async () => undefined);
-    const attachmentClient: CodeAttachmentClient = {
-      putAttachment: vi.fn(async () => reference),
-      discardAttachment,
-      attachment: vi.fn(),
-    };
-    const search = vi.fn(async () => [
-      {
-        threadId: mentionedThreadId,
-        mode: "chat" as const,
-        title: "Release notes",
-        placement: { kind: "unfiled" as const },
-        updatedAt: "2026-08-15T09:00:00.000Z" as never,
-      },
-    ]);
-    const resolveClient = vi.fn(() => mentionResolution);
-    const threadMentionClient = {
-      search,
-      resolve: resolveClient,
-      openSideChat: vi.fn(),
-      execute: vi.fn(),
-    } as never;
-    const controllerA = controller({
-      sendFollowUp,
-      turnStatus: "running",
-      writePendingDraftFor,
-    } as never);
-    const controllerB = controller({ turnStatus: "idle" }, anotherThreadId);
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controllerA}
-        threadId={threadId}
-        threadMentionClient={threadMentionClient}
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "#Rel");
-    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
-    await user.type(composer, "first");
-    pasteImage(composer, "abandoned.png");
-    await screen.findByAltText("abandoned.png");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-
-    rerender(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controllerB}
-        threadId={anotherThreadId}
-        threadMentionClient={threadMentionClient}
-      />,
-    );
-    resolveMention({ mentions: [], unavailable: [] });
-
-    await waitFor(() =>
-      expect(writePendingDraftFor).toHaveBeenCalledWith(String(threadId), "#[Release notes] first"),
-    );
-    expect(sendFollowUp).not.toHaveBeenCalled();
-    expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId);
-    expect(screen.getByLabelText("Follow-up message")).toHaveValue("");
-  });
-
-  it("removes a sent image when clearing the draft also cleared its thread mention", async () => {
-    const user = userEvent.setup();
-    const sendFollowUp = vi.fn(async () => true);
-    const reference = {
-      attachmentId: "40000000-0000-4000-8000-000000000011" as CodeAttachmentId,
-      displayName: "pasted.png",
-      mediaType: "image/png" as const,
-      byteLength: 3,
-      digest: "e".repeat(64),
-    };
-    const attachmentClient: CodeAttachmentClient = {
-      putAttachment: vi.fn(async () => reference),
-      discardAttachment: vi.fn(async () => undefined),
-      attachment: vi.fn(),
-    };
-    const search = vi.fn(async () => [
-      {
-        threadId: mentionedThreadId,
-        mode: "chat" as const,
-        title: "Release notes",
-        placement: { kind: "unfiled" as const },
-        updatedAt: "2026-08-15T09:00:00.000Z" as never,
-      },
-    ]);
-    const resolveMention = vi.fn(async () => ({
-      mentions: [
-        {
-          threadId: mentionedThreadId,
-          mode: "chat" as const,
-          title: "Release notes",
-          placement: { kind: "unfiled" as const },
-          transcript: [],
-          truncated: false,
-        },
-      ],
-      unavailable: [],
-    }));
-    const threadMentionClient = {
-      search,
-      resolve: resolveMention,
-      openSideChat: vi.fn(),
-      execute: vi.fn(),
-    } as never;
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadMentionClient={threadMentionClient}
-        threadId={threadId}
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "#Rel");
-    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
-    await user.type(composer, "ship it");
-    pasteImage(composer);
-    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-
-    rerender(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controller({ sendFollowUp, turnStatus: "idle" })}
-        threadMentionClient={threadMentionClient}
-        threadId={threadId}
-      />,
-    );
-
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
-    await waitFor(() => expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument());
-  });
-
-  it("keeps a later Code draft when the message it was typed after reaches the host", async () => {
-    const user = userEvent.setup();
-    let finish: ((value: boolean) => void) | undefined;
-    const sendFollowUp = vi.fn(
-      () =>
-        new Promise<boolean>((resolve) => {
-          finish = resolve;
-        }),
-    );
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadId={threadId}
-      />,
-    );
-
-    await user.type(screen.getByLabelText("Follow-up message"), "and then push");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-    rerender(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "idle" })}
-        threadId={threadId}
-      />,
-    );
-    await waitFor(() =>
-      expect(sendFollowUp).toHaveBeenCalledWith(
-        "and then push",
-        [],
-        [],
-        [],
-        "approval-gated",
-        true,
-      ),
-    );
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "later draft");
-    finish?.(true);
-    await waitFor(() => expect(composer).toHaveValue("later draft"));
-    expect(sendFollowUp).toHaveBeenCalledOnce();
-  });
-
-  it("hands the words back to the composer when the host refuses the message", async () => {
-    const user = userEvent.setup();
-    const sendFollowUp = vi.fn(async () => false);
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadId={threadId}
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "retry after the provider recovers");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-    expect(composer).toHaveValue("");
-
-    rerender(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "idle" })}
-        threadId={threadId}
-      />,
-    );
-
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
-    await waitFor(() => expect(composer).toHaveValue("retry after the provider recovers"));
-  });
-
-  it("keeps a later draft rather than restoring a message the host refused", async () => {
-    // A refused message used to be restored unconditionally, so a draft the
-    // user typed while the send was still resolving got silently overwritten
-    // by the stale, already-refused text.
-    const user = userEvent.setup();
-    let finish: ((value: boolean) => void) | undefined;
-    const sendFollowUp = vi.fn(
-      () =>
-        new Promise<boolean>((resolve) => {
-          finish = resolve;
-        }),
-    );
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadId={threadId}
-      />,
-    );
-
-    await user.type(screen.getByLabelText("Follow-up message"), "and then push");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-    rerender(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "idle" })}
-        threadId={threadId}
-      />,
-    );
-    await waitFor(() =>
-      expect(sendFollowUp).toHaveBeenCalledWith(
-        "and then push",
-        [],
-        [],
-        [],
-        "approval-gated",
-        true,
-      ),
-    );
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "later draft");
-    finish?.(false);
-    await waitFor(() => expect(screen.queryByText("and then push")).not.toBeInTheDocument());
-    expect(sendFollowUp).toHaveBeenCalledOnce();
-    expect(composer).toHaveValue("later draft");
-  });
-
-  it("keeps a staged image when the message it was attached to is refused", async () => {
-    // The images are never taken until the host accepts the message, so a
-    // refusal leaves the whole message retryable rather than restoring the
-    // words with the attachment the user still needs silently gone.
-    const user = userEvent.setup();
-    const sendFollowUp = vi.fn(async () => false);
-    const reference = {
-      attachmentId: "40000000-0000-4000-8000-000000000010" as CodeAttachmentId,
-      displayName: "pasted.png",
-      mediaType: "image/png" as const,
-      byteLength: 3,
-      digest: "d".repeat(64),
-    };
-    const attachmentClient: CodeAttachmentClient = {
-      putAttachment: vi.fn(async () => reference),
-      discardAttachment: vi.fn(async () => undefined),
-      attachment: vi.fn(),
-    };
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadId={threadId}
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "retry after the provider recovers");
-    pasteImage(composer);
-    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-
-    rerender(
-      <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
-        controller={controller({ sendFollowUp, turnStatus: "idle" })}
-        threadId={threadId}
-      />,
-    );
-
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
-    await waitFor(() => expect(composer).toHaveValue("retry after the provider recovers"));
-    expect(screen.getByAltText("pasted.png")).toBeInTheDocument();
   });
 
   it("keeps loading and disconnected states honest", () => {
