@@ -71,7 +71,7 @@ import type { ProviderDriver, ProviderLocalUsageHistorySource } from "@octant/pr
 import {
   authorizeAgentRunCreation,
   layoutContainsAgentRunThread,
-  scheduledAgentRunLiveAuthority,
+  boundAgentRunLiveAuthority,
 } from "./agentRun/authorizeAgentRunCreation";
 import { Data, Effect, Schema, Scope } from "effect";
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
@@ -1791,16 +1791,14 @@ export function startOctantServer(
         parentThreadId: run.parentThreadId,
       });
     };
-    const agentRunParentAuthority = (run: AgentRun) => {
-      const binding = agentRunExecutionWindows.get(run.requestId);
-      return scheduledAgentRunLiveAuthority({
+    const agentRunParentAuthority = (run: AgentRun) =>
+      boundAgentRunLiveAuthority({
         persistence,
         run,
-        ...(binding !== undefined && String(binding.parentThreadId) === String(run.parentThreadId)
-          ? { executionWindow: { windowId: binding.windowId, codeSessionAuthority } }
-          : {}),
+        executionWindows: agentRunExecutionWindows,
+        codeSessionAuthority,
+        windowAuthorityStore,
       });
-    };
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
     let projectBrowserService: ProjectBrowserService | undefined;
