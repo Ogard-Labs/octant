@@ -55,6 +55,7 @@
     "./canvas-refresh": "./src/canvasRefresh.ts",
     "./canvas-skill": "./src/canvasSkill.ts",
     "./canvas-share": "./src/canvasShare.ts",
+    "./canvas-export": "./src/canvasExport.ts",
     "./computer-use": "./src/computerUse.ts",
     "./diagnostics": "./src/diagnostics.ts",
     "./validation-composition": "./src/validationComposition.ts",

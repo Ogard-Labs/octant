@@ -1271,6 +1271,18 @@ prompt, schema, tool, route, model, or capability.
   absent and refuses actions as a value rather than throwing. See
   [decisions/0053-computer-use-destinations.md](decisions/0053-computer-use-destinations.md).
 
+**Canvas export.** A destination plugin contributes an export target through
+`@octant/plugin-api`. The contribution names the formats it accepts. The host
+offers it only when the package is installed, trusted, enabled, and effective;
+a disabled or uninstalled target is omitted, not listed as refused. The server
+renders the Canvas to Markdown or HTML, shows an approval card with that
+payload and the destination, and calls the target only after approval. The
+call returns a receipt (a link, a path, or a remote id) or a typed refusal.
+Each completed export is a `canvas.export@1` journal event and is rebuilt by
+replay. PDF and PNG are named formats the seam can carry later; this host does
+not render them. A target that passed activation is still reported honestly as
+`not-connected`, `ready`, or `refused`.
+
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured
 selection and supplies `octant_computer` through the provider's existing
