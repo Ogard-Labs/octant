@@ -6,6 +6,7 @@ import {
   NATIVE_HARNESS_BUILT_IN_SLOTS,
   type NativeHarnessSlotCandidate,
   decodeAggregateVersion,
+  decodeUtcTimestamp,
   decodeProviderContextBlock,
   decodeProjectId,
   type AgentRun,
@@ -14,6 +15,7 @@ import {
   type AgentRunCommandResult,
   type NativeHarnessRouteDecision,
 } from "@octant/contracts";
+import { evaluateAgentRunCommand } from "@octant/domain";
 import { createAgentsManagedTools } from "../agentRun/agentRunManagedTools";
 import type { AgentRunControlAdmissionDependencies } from "../agentRun/agentRunControlAdmission";
 import type { AgentRunParentSummaryEntry } from "../agentRun/agentRunProjection";
@@ -220,6 +222,7 @@ function delegationPair(
     run?: Partial<AgentRun>;
     noResume?: boolean;
     resumeResult?: AgentRunCommandResult;
+    settlementFailure?: "failed" | "new-generation";
   } = {},
 ) {
   const commands: AgentRunCommand[] = [];
@@ -246,6 +249,8 @@ function delegationPair(
     },
     ...options.run,
   } as AgentRun;
+  let stored = admitted;
+  const settlements: AgentRunCommand[] = [];
   const admission: AgentRunControlAdmissionDependencies = {
     persistence: { getByRequestId: () => undefined },
     orchestration: {
@@ -293,17 +298,42 @@ function delegationPair(
     },
   };
   const persistence = {
+    applyCommand: (command: AgentRunCommand): AgentRunCommandResult => {
+      settlements.push(command);
+      if (options.settlementFailure !== undefined) {
+        if (options.settlementFailure === "new-generation")
+          stored = {
+            ...stored,
+            generation: 3,
+            resultDelivery: {
+              outcome: "delivered",
+              settledAt: decodeUtcTimestamp("2026-10-03T12:00:00.000Z"),
+            },
+          };
+        return {
+          kind: "run-command-failed",
+          reason: "stale-version",
+          message: "Result changed before settlement.",
+        };
+      }
+      stored = evaluateAgentRunCommand(
+        stored,
+        command,
+        decodeUtcTimestamp("2026-10-03T12:00:00.000Z"),
+      );
+      return { kind: "run-updated", run: stored };
+    },
     getById: () =>
       ({
-        ...admitted,
-        parentThreadId: options.foreignDependency ? "foreign" : admitted.parentThreadId,
+        ...stored,
+        parentThreadId: options.foreignDependency ? "foreign" : stored.parentThreadId,
       }) as AgentRun,
     parentSummary: (): ReadonlyArray<AgentRunParentSummaryEntry> => [
       {
-        runId: admitted.id,
-        requestId: admitted.requestId,
-        parentThreadId: admitted.parentThreadId,
-        executionKind: admitted.executionKind,
+        runId: stored.id,
+        requestId: stored.requestId,
+        parentThreadId: stored.parentThreadId,
+        executionKind: stored.executionKind,
         usageQuality: "provider-reported",
         resultAcknowledgement: { required: false, acknowledged: false },
         route: {
@@ -313,12 +343,13 @@ function delegationPair(
           executionModelId: routeChild.modelId,
           poolDerived: false,
         },
-        version: admitted.version,
-        updatedAt: admitted.updatedAt,
-        role: admitted.role,
+        version: stored.version,
+        updatedAt: stored.updatedAt,
+        role: stored.role,
         task: "Look",
-        lifecycleStatus: admitted.lifecycleStatus,
-        ...(admitted.result === undefined ? {} : { result: admitted.result }),
+        ...(stored.result === undefined ? {} : { resultText: "prior reply" }),
+        lifecycleStatus: stored.lifecycleStatus,
+        ...(stored.result === undefined ? {} : { result: stored.result }),
       },
     ],
     resultText: () => "prior reply",
@@ -449,6 +480,7 @@ function delegationPair(
       currentParent = candidate;
     },
     resumes,
+    settlements,
     accepted,
     authorizations,
     native,
@@ -706,6 +738,77 @@ describe("completed child follow-up parity", () => {
         expect(pair.commands).toEqual([]);
       }
     });
+    it(`${transport} settles the generation it collects and exposes the resulting current version`, async () => {
+      const pair = delegationPair({
+        run: {
+          lifecycleStatus: "completed",
+          generation: 2,
+          result: { truncated: false } as AgentRun["result"],
+        },
+      });
+      const collect = async () =>
+        transport === "native"
+          ? pair.native.collect(dependencyId)
+          : (
+              await pair.managed.execute({
+                name: "octant_agents",
+                inputJson: JSON.stringify({ operation: "wait", runId: dependencyId }),
+              })
+            ).result;
+      expect(await collect()).toMatchObject({
+        status: "completed",
+        text: "prior reply",
+        version: 2,
+        generation: 2,
+      });
+      expect(pair.settlements).toEqual([
+        {
+          kind: "settle-agent-run-result-delivery",
+          runId: dependencyId,
+          expectedVersion: 1,
+          generation: 2,
+          outcome: "consumed",
+        },
+      ]);
+      expect(await collect()).toMatchObject({ version: 2, generation: 2 });
+      expect(pair.settlements).toHaveLength(1);
+    });
+    it(`${transport} withholds a reply when its delivery cannot be settled for that generation`, async () => {
+      for (const settlementFailure of ["failed", "new-generation"] as const) {
+        const pair = delegationPair({
+          settlementFailure,
+          run: {
+            lifecycleStatus: "completed",
+            generation: 2,
+            result: { truncated: false } as AgentRun["result"],
+          },
+        });
+        const result =
+          transport === "native"
+            ? await pair.native.collect(dependencyId)
+            : (
+                await pair.managed.execute({
+                  name: "octant_agents",
+                  inputJson: JSON.stringify({ operation: "wait", runId: dependencyId }),
+                })
+              ).result;
+        expect(result).toMatchObject(
+          transport === "native"
+            ? { status: "refused", reason: "result-delivery-unavailable" }
+            : { status: "error", error: "result-delivery-unavailable" },
+        );
+        expect(result).not.toHaveProperty("text");
+        expect(pair.settlements).toEqual([
+          {
+            kind: "settle-agent-run-result-delivery",
+            runId: dependencyId,
+            expectedVersion: 1,
+            generation: 2,
+            outcome: "consumed",
+          },
+        ]);
+      }
+    });
     it(`${transport} returns a resume refusal without binding a new execution`, async () => {
       const pair = delegationPair({
         run: { lifecycleStatus: "completed" },
@@ -749,7 +852,13 @@ describe("completed child follow-up parity", () => {
             ).result;
       expect(
         transport === "native" ? status : (status as { children: unknown[] }).children,
-      ).toEqual([expect.objectContaining({ runId: dependencyId, version: 1, generation: 2 })]);
+      ).toEqual([
+        expect.objectContaining({
+          runId: dependencyId,
+          version: transport === "native" ? 1 : 2,
+          generation: 2,
+        }),
+      ]);
       const collected =
         transport === "native"
           ? await pair.native.collect(dependencyId)
@@ -761,7 +870,7 @@ describe("completed child follow-up parity", () => {
             ).result;
       expect(collected).toMatchObject({
         status: "completed",
-        version: 1,
+        version: 2,
         generation: 2,
         text: "prior reply",
       });
