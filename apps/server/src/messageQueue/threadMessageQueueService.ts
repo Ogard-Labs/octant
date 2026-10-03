@@ -54,6 +54,7 @@ export class ThreadMessageQueueService {
   readonly #port: ThreadMessageQueueModePort;
   readonly #clock: () => string;
   readonly #locks = new Map<string, Promise<void>>();
+  readonly #pendingTicks = new Set<string>();
   readonly #authorized = new Map<string, LiveAuthorization>();
   readonly #retained = new Map<string, ThreadMessageQueueResource>();
   readonly #controllers = new Map<
@@ -324,7 +325,18 @@ export class ThreadMessageQueueService {
             ).values(),
           ]
         : [scope];
-    await Promise.all(scopes.map((current) => this.#serial(current, () => this.#tick(current))));
+    await Promise.all(
+      scopes.map(async (current) => {
+        const key = queueId(current);
+        if (this.#pendingTicks.has(key)) return;
+        this.#pendingTicks.add(key);
+        try {
+          await this.#serial(current, () => this.#tick(current));
+        } finally {
+          this.#pendingTicks.delete(key);
+        }
+      }),
+    );
   }
   async #tick(scope: ThreadMessageQueueScope): Promise<void> {
     if (this.#disposed || this.#purging.has(queueId(scope))) return;
@@ -629,7 +641,9 @@ function authorization(
   return {
     windowId,
     scope,
-    ...(inspection.tail === undefined ? {} : { acknowledgedTail: inspection.tail.id }),
+    ...(inspection.tail?.status === "failed" || inspection.tail?.status === "cancelled"
+      ? { acknowledgedTail: inspection.tail.id }
+      : {}),
   };
 }
 function validContent(content: QueueContent): boolean {

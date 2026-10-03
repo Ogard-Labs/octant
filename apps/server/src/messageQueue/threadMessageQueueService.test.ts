@@ -14,7 +14,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { erasePurgedThread } from "../persistence/threadPurge";
 import { ThreadRetentionThreadId } from "@octant/contracts";
 import { THREAD_RETENTION_AGGREGATE_ID } from "../persistence/threadRetentionProjection";
-import { ThreadMessageQueueProjection } from "./threadMessageQueuePersistence";
+import {
+  ThreadMessageQueuePersistence,
+  ThreadMessageQueueProjection,
+} from "./threadMessageQueuePersistence";
 import { rebuildProjection } from "../persistence/projection";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -669,4 +672,68 @@ describe("durable ordinary thread queue", () => {
     await f.service.awaitIdle();
     expect(f.journal.headSequence()).toBe(before);
   });
+  it("scans outstanding work and deferred cleanup but excludes finished empty queues", async () => {
+    const f = fixture();
+    const store = new ThreadMessageQueuePersistence({ ...f, actor, clock: () => now });
+    const queued = enqueue();
+    await f.service.execute(windowId, queued);
+    expect(store.scopes()).toEqual([scope]);
+    f.p.release.mockResolvedValueOnce({ status: "refused" });
+    await f.service.execute(windowId, command("remove", 1, { messageId: queued.messageId }));
+    expect((await snapshot(f.service)).items).toEqual([]);
+    expect(store.scopes()).toEqual([scope]);
+    await f.service.tick();
+    expect(store.scopes()).toEqual([]);
+    await f.service.execute(windowId, enqueue(2));
+    f.connection.exec("DELETE FROM thread_message_queue_content");
+    expect(store.scopes()).toEqual([scope]);
+  });
+  it("coalesces tick bursts behind a slow admission and accepts a later tick", async () => {
+    const f = fixture();
+    await f.service.execute(windowId, enqueue());
+    let finish: ((value: { status: "accepted" }) => void) | undefined;
+    f.p.admit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const first = f.service.tick(scope);
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    const repeated = Array.from({ length: 12 }, () => f.service.tick(scope));
+    finish?.({ status: "accepted" });
+    await Promise.all([first, ...repeated]);
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    expect(f.p.reconcile).not.toHaveBeenCalled();
+    await f.service.tick(scope);
+    expect(f.p.reconcile).toHaveBeenCalledTimes(1);
+  });
+  it.each(["cancelled", "failed"] as const)(
+    "holds an active tail that later becomes %s until explicit resume",
+    async (status) => {
+      const f = fixture();
+      f.p.setInspection({
+        status: "busy",
+        binding: "authorized-target",
+        tail: { id: "running-turn", status: "active" },
+      });
+      expect((await f.service.execute(windowId, enqueue())).status).toBe("applied");
+      await f.service.tick();
+      expect(f.p.admit).not.toHaveBeenCalled();
+      f.p.setInspection({
+        status: "ready",
+        binding: "authorized-target",
+        tail: { id: "running-turn", status },
+      });
+      await f.service.tick();
+      const held = await snapshot(f.service);
+      expect(held.holdReason).toBe(status);
+      expect(f.p.admit).not.toHaveBeenCalled();
+      expect((await f.service.execute(windowId, command("resume", held.version))).status).toBe(
+        "applied",
+      );
+      await f.service.tick();
+      expect(f.p.admit).toHaveBeenCalledTimes(1);
+    },
+  );
 });

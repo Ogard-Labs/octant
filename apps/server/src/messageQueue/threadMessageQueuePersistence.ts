@@ -216,7 +216,10 @@ export class ThreadMessageQueuePersistence {
   }
   scopes(): ReadonlyArray<ThreadMessageQueueScope> {
     return this.#connection
-      .prepare("SELECT state_json AS value FROM thread_message_queue_projection")
+      .prepare(`SELECT queue.state_json AS value FROM thread_message_queue_projection AS queue
+        WHERE json_array_length(queue.state_json, '$.items') > 0
+           OR EXISTS (SELECT 1 FROM thread_message_queue_content AS content
+                      WHERE content.queue_id = queue.queue_id)`)
       .all()
       .map((row) => decodeState(JSON.parse(jsonRow(row).value)).scope);
   }
