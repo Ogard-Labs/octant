@@ -40,7 +40,7 @@ import {
 } from "./agentRunOrchestrationService";
 import { AgentRunProcessSupervisor } from "./agentRunProcessSupervisor";
 import { AgentRunDependencyScheduler } from "./agentRunDependencyScheduler";
-import type { AgentRunSessionOutcome } from "./agentRunSessionPort";
+import { AgentRunSessionError, type AgentRunSessionOutcome } from "./agentRunSessionPort";
 
 const directories: string[] = [];
 const now = "2026-08-01T14:00:00.000Z";
@@ -700,6 +700,34 @@ describe("AgentRunOrchestrationService", () => {
     expect(persistence.getById(admitted.run.id)).toMatchObject({
       lifecycleStatus: "interrupted",
       recoveryReason: "provider-process-death",
+    });
+  });
+
+  it("records a typed reason when a child cannot start because its transport cannot carry tools", () => {
+    const { orchestration, persistence } = createHarness(createInMemoryCapacityPort(), true, {
+      start: () => {
+        throw new AgentRunSessionError(
+          "tools-unsupported",
+          "This provider cannot carry Octant's tools.",
+        );
+      },
+      stop: async () => undefined,
+    });
+    const admitted = orchestration.admit({
+      command: requestCommand(),
+      parentAuthority: authority,
+      confirmed: true,
+      liveAuthority: authority,
+    });
+    expect(admitted.kind).toBe("run-accepted");
+    if (admitted.kind !== "run-accepted") return;
+
+    const started = orchestration.start(admitted.run.id, admitted.run.version, authority);
+
+    expect(started.kind).toBe("run-updated");
+    expect(persistence.getById(admitted.run.id)).toMatchObject({
+      lifecycleStatus: "interrupted",
+      recoveryReason: "tools-unsupported",
     });
   });
 

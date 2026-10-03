@@ -14,6 +14,11 @@ agent through `collect`. You watch and control subagents from the composer and
 the **Agents** dock tool, but you do not start them there; a subagent a person
 started by hand would have no agent to hand its result back to.
 
+A managed child can also author a Canvas in the workspace the host resolved for
+that run. The document appears on the parent thread, and the child is recorded
+as its author. A provider that cannot carry Octant's tools does not start the
+child.
+
 ## Availability
 
 Subagent infrastructure — contracts, journaling, projection, the

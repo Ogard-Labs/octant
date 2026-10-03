@@ -1556,7 +1556,13 @@ mechanisms are:
   reaches the target.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
-  Each adapter turns its provider's own subagent feature off, because a child
+  A managed child, whether driven by Octant's harness or a provider harness,
+  receives `octant_canvas` bound to the workspace and Project the host resolved
+  for that run. The model cannot name a path. Create and revise succeed only
+  inside that scope; another Project or an unresolved checkout is refused, and
+  the child run is the author. A provider transport that cannot carry
+  app-managed tools fails the start with a typed reason rather than dropping
+  the tool. Each adapter turns its provider's own subagent feature off, because a child
   the provider starts itself runs outside the journal and the approval path.
 - **Remote clients.** Pairing issues a revocable device key; the private
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.

@@ -197,6 +197,15 @@ export interface AgentRunSessionRuntimeOptions {
     readonly authority: AgentRunAuthority;
     readonly projectRoot: string;
   }) => AppManagedToolSet | undefined;
+  /**
+   * Whether this child's provider transport can carry app-managed tools.
+   * When tools are offered and the transport is not supported, start fails
+   * closed instead of dropping them.
+   */
+  readonly appManagedToolTransport?: (input: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+  }) => "supported" | "unsupported" | "unavailable";
   readonly onSessionSettled?: (input: {
     readonly runId: AgentRunId;
     readonly outcome: AgentRunSessionOutcome;
@@ -280,6 +289,19 @@ export function createAgentRunSessionRuntime(
           "context-unavailable",
           "The AgentRun context snapshot could not be resolved for execution.",
         );
+      }
+      const appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
+      if (appManagedTools !== undefined && appManagedTools.definitions.length > 0) {
+        const transport = options.appManagedToolTransport?.({
+          providerInstanceId: target.providerInstanceId,
+          modelId: target.modelId,
+        });
+        if (transport !== undefined && transport !== "supported") {
+          throw new AgentRunSessionError(
+            "tools-unsupported",
+            "This provider cannot carry Octant's tools.",
+          );
+        }
       }
 
       const subject = decodeContextSubjectRef({
@@ -402,9 +424,7 @@ export function createAgentRunSessionRuntime(
             shutdownTimeoutMs,
             shutdown,
             onTextDelta: options.onTextDelta,
-            ...(options.appManagedTools === undefined
-              ? {}
-              : { appManagedTools: options.appManagedTools({ run, authority, projectRoot }) }),
+            ...(appManagedTools === undefined ? {} : { appManagedTools }),
           }),
         ),
         { signal: controller.signal },

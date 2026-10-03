@@ -18,7 +18,7 @@ import {
   decideAgentRunDependencies,
 } from "@octant/domain";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
-import type { AgentRunSessionOutcome } from "./agentRunSessionPort";
+import { AgentRunSessionError, type AgentRunSessionOutcome } from "./agentRunSessionPort";
 
 const MAX_RECOVERY_REASON_CHARACTERS = 1_024;
 
@@ -296,7 +296,16 @@ export class AgentRunOrchestrationService {
       this.#settledSessions.delete(started.run.id);
       this.#processes.start(started.run);
       return started;
-    } catch {
+    } catch (error) {
+      if (error instanceof AgentRunSessionError && error.reason === "tools-unsupported") {
+        this.#releaseReservation(started.run.id);
+        return this.#persistence.applyCommand({
+          kind: "interrupt-agent-run",
+          runId: started.run.id,
+          expectedVersion: started.run.version as never,
+          recoveryReason: error.reason,
+        });
+      }
       return this.onProcessDeath(started.run.id, started.run.version);
     }
   }
