@@ -483,7 +483,8 @@ export function recordAgentRunResultConsumption(
     Partial<Pick<AgentRunPersistenceService, "applyCommand">>,
   run: AgentRun,
 ): { readonly status: "settled"; readonly run: AgentRun } | { readonly status: "refused" } {
-  if (run.resultDelivery !== undefined) return { status: "settled", run };
+  if (run.resultDelivery?.outcome === "delivered" || run.resultDelivery?.outcome === "consumed")
+    return { status: "settled", run };
   const result = persistence.applyCommand?.({
     kind: "settle-agent-run-result-delivery",
     runId: run.id,
@@ -495,7 +496,8 @@ export function recordAgentRunResultConsumption(
   if (
     current !== undefined &&
     (current.generation ?? 1) === (run.generation ?? 1) &&
-    current.resultDelivery !== undefined
+    (current.resultDelivery?.outcome === "delivered" ||
+      current.resultDelivery?.outcome === "consumed")
   )
     return { status: "settled", run: current };
   return { status: "refused" };

@@ -746,41 +746,51 @@ describe("completed child follow-up parity", () => {
         expect(pair.commands).toEqual([]);
       }
     });
-    it(`${transport} settles the generation it collects and exposes the resulting current version`, async () => {
-      const pair = delegationPair({
-        run: {
-          lifecycleStatus: "completed",
+    for (const outcome of [undefined, "failed", "invalidated"] as const) {
+      it(`${transport} collects a reply with ${outcome ?? "no"} delivery and exposes the resulting current version`, async () => {
+        const pair = delegationPair({
+          run: {
+            lifecycleStatus: "completed",
+            generation: 2,
+            ...(outcome === undefined
+              ? {}
+              : {
+                  resultDelivery: {
+                    outcome,
+                    settledAt: decodeUtcTimestamp("2026-10-03T11:00:00.000Z"),
+                  },
+                }),
+            result: { truncated: false } as AgentRun["result"],
+          },
+        });
+        const collect = async () =>
+          transport === "native"
+            ? pair.native.collect(dependencyId)
+            : (
+                await pair.managed.execute({
+                  name: "octant_agents",
+                  inputJson: JSON.stringify({ operation: "wait", runId: dependencyId }),
+                })
+              ).result;
+        expect(await collect()).toMatchObject({
+          status: "completed",
+          text: "prior reply",
+          version: 2,
           generation: 2,
-          result: { truncated: false } as AgentRun["result"],
-        },
+        });
+        expect(pair.settlements).toEqual([
+          {
+            kind: "settle-agent-run-result-delivery",
+            runId: dependencyId,
+            expectedVersion: 1,
+            generation: 2,
+            outcome: "consumed",
+          },
+        ]);
+        expect(await collect()).toMatchObject({ version: 2, generation: 2 });
+        expect(pair.settlements).toHaveLength(1);
       });
-      const collect = async () =>
-        transport === "native"
-          ? pair.native.collect(dependencyId)
-          : (
-              await pair.managed.execute({
-                name: "octant_agents",
-                inputJson: JSON.stringify({ operation: "wait", runId: dependencyId }),
-              })
-            ).result;
-      expect(await collect()).toMatchObject({
-        status: "completed",
-        text: "prior reply",
-        version: 2,
-        generation: 2,
-      });
-      expect(pair.settlements).toEqual([
-        {
-          kind: "settle-agent-run-result-delivery",
-          runId: dependencyId,
-          expectedVersion: 1,
-          generation: 2,
-          outcome: "consumed",
-        },
-      ]);
-      expect(await collect()).toMatchObject({ version: 2, generation: 2 });
-      expect(pair.settlements).toHaveLength(1);
-    });
+    }
     it(`${transport} leaves an oversized encoded reply owed and never returns a lossy preview as consumed`, async () => {
       const pair = delegationPair({
         resultText: "\u0000".repeat(16_384),
@@ -845,39 +855,49 @@ describe("completed child follow-up parity", () => {
       }
     });
     it(`${transport} withholds a reply when its delivery cannot be settled for that generation`, async () => {
-      for (const settlementFailure of ["failed", "new-generation"] as const) {
-        const pair = delegationPair({
-          settlementFailure,
-          run: {
-            lifecycleStatus: "completed",
-            generation: 2,
-            result: { truncated: false } as AgentRun["result"],
-          },
-        });
-        const result =
-          transport === "native"
-            ? await pair.native.collect(dependencyId)
-            : (
-                await pair.managed.execute({
-                  name: "octant_agents",
-                  inputJson: JSON.stringify({ operation: "wait", runId: dependencyId }),
-                })
-              ).result;
-        expect(result).toMatchObject(
-          transport === "native"
-            ? { status: "refused", reason: "result-delivery-unavailable" }
-            : { status: "error", error: "result-delivery-unavailable" },
-        );
-        expect(result).not.toHaveProperty("text");
-        expect(pair.settlements).toEqual([
-          {
-            kind: "settle-agent-run-result-delivery",
-            runId: dependencyId,
-            expectedVersion: 1,
-            generation: 2,
-            outcome: "consumed",
-          },
-        ]);
+      for (const outcome of [undefined, "failed", "invalidated"] as const) {
+        for (const settlementFailure of ["failed", "new-generation"] as const) {
+          const pair = delegationPair({
+            settlementFailure,
+            run: {
+              lifecycleStatus: "completed",
+              generation: 2,
+              ...(outcome === undefined
+                ? {}
+                : {
+                    resultDelivery: {
+                      outcome,
+                      settledAt: decodeUtcTimestamp("2026-10-03T11:00:00.000Z"),
+                    },
+                  }),
+              result: { truncated: false } as AgentRun["result"],
+            },
+          });
+          const result =
+            transport === "native"
+              ? await pair.native.collect(dependencyId)
+              : (
+                  await pair.managed.execute({
+                    name: "octant_agents",
+                    inputJson: JSON.stringify({ operation: "wait", runId: dependencyId }),
+                  })
+                ).result;
+          expect(result).toMatchObject(
+            transport === "native"
+              ? { status: "refused", reason: "result-delivery-unavailable" }
+              : { status: "error", error: "result-delivery-unavailable" },
+          );
+          expect(result).not.toHaveProperty("text");
+          expect(pair.settlements).toEqual([
+            {
+              kind: "settle-agent-run-result-delivery",
+              runId: dependencyId,
+              expectedVersion: 1,
+              generation: 2,
+              outcome: "consumed",
+            },
+          ]);
+        }
       }
     });
     it(`${transport} returns a resume refusal without binding a new execution`, async () => {
