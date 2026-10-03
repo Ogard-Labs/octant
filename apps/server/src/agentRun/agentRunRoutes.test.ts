@@ -9,6 +9,7 @@ import {
   AgentRunPolicySettings,
   AgentRunRequested,
   AgentRunResultAcknowledged,
+  AgentRunResultDeliverySettled,
   AgentRunStatusChanged,
   decodeAgentRunControlRequest,
   decodeAgentRunId,
@@ -37,6 +38,7 @@ import { WindowAuthorityStore } from "../windowAuthorityStore";
 import {
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
+  AGENT_RUN_RESULT_DELIVERY_SETTLED,
   AGENT_RUN_STATUS_CHANGED,
   AgentRunEventStore,
 } from "./agentRunEventStore";
@@ -191,6 +193,7 @@ function createHandler(
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
+    .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
     .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings);
   const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
   const journal = new Journal({ connection, registry, projections, clock: () => now });
@@ -1954,8 +1957,17 @@ describe("agentRunRoutes", () => {
       runId: run.id,
       outcome: { kind: "completed", responseText: "First answer" },
     });
-    const completed = persistence.getById(run.id);
-    if (completed === undefined) throw new Error("missing completion");
+    const finished = persistence.getById(run.id);
+    if (finished === undefined) throw new Error("missing completion");
+    const delivered = persistence.applyCommand({
+      kind: "settle-agent-run-result-delivery",
+      runId: finished.id,
+      expectedVersion: finished.version,
+      generation: finished.generation ?? 1,
+      outcome: "delivered",
+    });
+    if (delivered.kind !== "run-updated") throw new Error("delivery failed");
+    const completed = delivered.run;
     const post = (body: Record<string, unknown>) =>
       handler(
         new Request("http://127.0.0.1/api/agent-runs/resume", {

@@ -717,6 +717,15 @@ export function evaluateAgentRunCommand(
             "A completed child requires an explicit follow-up message.",
           );
         }
+        if (
+          current.resultDelivery?.outcome !== "delivered" &&
+          current.resultDelivery?.outcome !== "consumed"
+        ) {
+          reject(
+            "unsupported-transition",
+            "Collect the current result or wait for delivery to the parent before following up.",
+          );
+        }
         const generation = (current.generation ?? 1) + 1;
         if (!Number.isSafeInteger(generation))
           reject("unsupported-transition", "Child result generation limit reached.");

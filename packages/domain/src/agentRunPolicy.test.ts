@@ -796,6 +796,58 @@ describe("completed child follow-ups", () => {
     ).toThrow();
   });
 
+  it("keeps an undelivered completed result until the parent receives or collects it", () => {
+    for (const outcome of [undefined, "failed", "invalidated"] as const) {
+      const completed = baseRun({
+        lifecycleStatus: "completed",
+        result: completedResult,
+        ...(outcome === undefined ? {} : { resultDelivery: { outcome, settledAt: now as never } }),
+      });
+      const before = structuredClone(completed);
+      expect(() =>
+        evaluateAgentRunCommand(
+          completed,
+          {
+            kind: "resume-agent-run",
+            runId: completed.id,
+            expectedVersion: completed.version,
+            message: "Continue",
+          },
+          now as never,
+        ),
+      ).toThrow(
+        "Collect the current result or wait for delivery to the parent before following up.",
+      );
+      expect(completed).toEqual(before);
+    }
+    for (const outcome of ["delivered", "consumed"] as const) {
+      const completed = baseRun({ lifecycleStatus: "completed", result: completedResult });
+      const settled = evaluateAgentRunCommand(
+        completed,
+        {
+          kind: "settle-agent-run-result-delivery",
+          runId: completed.id,
+          expectedVersion: completed.version,
+          outcome,
+          generation: 1,
+        },
+        now as never,
+      );
+      expect(
+        evaluateAgentRunCommand(
+          settled,
+          {
+            kind: "resume-agent-run",
+            runId: settled.id,
+            expectedVersion: settled.version,
+            message: "Continue",
+          },
+          now as never,
+        ),
+      ).toMatchObject({ generation: 2, lifecycleStatus: "starting" });
+    }
+  });
+
   it("keeps each result identity distinct and refuses settlement for a previous generation", () => {
     const current = baseRun({ generation: 2, lifecycleStatus: "running" });
     expect(() =>
