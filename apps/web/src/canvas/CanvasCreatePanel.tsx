@@ -5,6 +5,7 @@ import type {
 } from "@octant/contracts/canvas-cards";
 import { useState } from "react";
 import { CreateCanvasDraft, type CanvasCreationContext } from "./CreateCanvasDraft";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface CanvasCreatePanelProps {
   readonly client: CanvasClient;
@@ -30,9 +31,9 @@ export function CanvasCreatePanel(props: CanvasCreatePanelProps) {
         }}
       />
       {denial ? (
-        <p data-testid="canvas-create-panel-denial" role="alert">
+        <OctantAlert testId="canvas-create-panel-denial" tone="warning">
           {denial}
-        </p>
+        </OctantAlert>
       ) : null}
     </section>
   );

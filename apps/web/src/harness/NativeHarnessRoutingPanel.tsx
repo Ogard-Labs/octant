@@ -17,6 +17,7 @@ import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import "./native-harness.css";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface NativeHarnessProviderOption {
   readonly instanceId: string;
@@ -150,9 +151,9 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
   if (status === "loading") return <p role="status">Loading model slots…</p>;
   if (status === "error" || draft === undefined) {
     return (
-      <p className="native-harness-panel__error" role="alert">
+      <OctantAlert className="native-harness-panel__error" tone="danger">
         {message ?? "Model slots are unavailable."}
-      </p>
+      </OctantAlert>
     );
   }
 

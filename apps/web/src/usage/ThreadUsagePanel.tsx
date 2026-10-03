@@ -14,6 +14,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { useUsageDashboardController } from "./useUsageDashboardController";
 import "./usageWorkspace.css";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ThreadUsagePanelProps {
   readonly client: UsageDashboardClient | undefined;
@@ -78,9 +79,9 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
         {controller.status === "unauthorized" ||
         controller.status === "unavailable" ||
         controller.status === "failure" ? (
-          <p className="thread-usage__status" role="alert">
+          <OctantAlert className="thread-usage__status" tone="warning">
             {controller.errorMessage ?? "Thread usage could not be loaded."}
-          </p>
+          </OctantAlert>
         ) : null}
 
         {summary === undefined ? null : summary.totals.totalRequests === 0 ? (
@@ -262,9 +263,9 @@ function SpendCeilingControls(props: {
         )}
       </div>
       {refusal === undefined ? null : (
-        <p className="thread-usage__status" role="alert">
+        <OctantAlert className="thread-usage__status" tone="warning">
           {refusal.message}
-        </p>
+        </OctantAlert>
       )}
       {scope === undefined ? null : (
         // One line: the number and what to do with it. The field had sat alone
@@ -320,9 +321,9 @@ function SpendCeilingControls(props: {
         </form>
       )}
       {message === undefined ? null : (
-        <p className="thread-usage__status" role="alert">
+        <OctantAlert className="thread-usage__status" tone="warning">
           {message}
-        </p>
+        </OctantAlert>
       )}
     </div>
   );

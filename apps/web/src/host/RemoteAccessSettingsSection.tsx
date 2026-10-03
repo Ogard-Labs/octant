@@ -23,6 +23,7 @@ import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * Listener, pairing, and paired-device administration for the packaged host.
@@ -375,13 +376,13 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
               {draft.hostname.trim() !== "" &&
               draftExposure !== "lan-private" &&
               draftExposure !== "tailscale" ? (
-                <p className="settings-section-line" role="alert">
+                <OctantAlert className="settings-section-line" tone="warning">
                   {draftExposure === "loopback"
                     ? "A loopback address cannot be reached by another device."
                     : draftExposure === "public"
                       ? "Octant does not listen on public addresses."
                       : "Enter a private LAN or Tailscale address."}
-                </p>
+                </OctantAlert>
               ) : null}
               <div className="host-settings__controls">
                 <OctantButton

@@ -4,6 +4,7 @@ import type {
 } from "@octant/contracts/workspace-presets";
 import { LayoutTemplate } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface WorkspacePresetPickerProps {
   readonly presets: ReadonlyArray<WorkspacePreset>;
@@ -61,9 +62,9 @@ export function WorkspacePresetPicker(props: WorkspacePresetPickerProps) {
         </ul>
       )}
       {props.message === undefined ? null : (
-        <p className="workspace-presets__message" role="alert">
+        <OctantAlert className="workspace-presets__message" tone="warning">
           {props.message}
-        </p>
+        </OctantAlert>
       )}
     </section>
   );

@@ -103,6 +103,148 @@ export function findRawControlBoundaryViolations(
     );
 }
 
+const RAW_LIVE_REGION_ROLE =
+  /role\s*=\s*(?:["'](alert|dialog)["']|\{\s*[^}\n]*["'](alert|dialog)["'][^}\n]*\})/g;
+const LIVE_REGION_EXCEPTION =
+  /\/\*\s*ui-boundary-exception:\s*(inline-field-error|compact-status|screen-reader-announcement|non-modal-panel|positioned-banner|empty-state)\s*\*\/\s*$/i;
+const LIVE_REGION_RECIPE_FILES = new Set([
+  `${WEB_SOURCE}/ui/base/OctantAlert.tsx`,
+  `${WEB_SOURCE}/ui/base/OctantToast.tsx`,
+  `${WEB_SOURCE}/ui/base/OctantApprovalCard.tsx`,
+  `${WEB_SOURCE}/ui/shadcn/field.tsx`,
+  `${WEB_SOURCE}/shell/ShellState.tsx`,
+]);
+const LIVE_REGION_RECIPE_TAGS = new Set([
+  "OctantAlert",
+  "OctantToast",
+  "OctantDialog",
+  "OctantConfirmDialog",
+  "ShellState",
+  "FieldError",
+  "OctantEmptyRoot",
+  "OctantEmpty",
+  "OctantApprovalCard",
+  "UnavailableNotice",
+]);
+
+export type LiveRegionException =
+  | "inline-field-error"
+  | "compact-status"
+  | "screen-reader-announcement"
+  | "non-modal-panel"
+  | "positioned-banner"
+  | "empty-state"
+  | "recipe";
+
+export interface RawLiveRegionFinding {
+  readonly category: "ordinary" | LiveRegionException;
+  readonly file: string;
+  readonly line: number;
+  readonly role: "alert" | "dialog";
+  readonly tag: string;
+}
+
+function isInsideJsString(source: string, index: number): boolean {
+  let quote: "'" | '"' | "`" | undefined;
+  let i = 0;
+  while (i < index) {
+    if (quote === "`") {
+      if (source[i] === "\\") {
+        i += 2;
+        continue;
+      }
+      if (source[i] === "`") quote = undefined;
+      i += 1;
+      continue;
+    }
+    if (quote !== undefined) {
+      if (source[i] === "\\") {
+        i += 2;
+        continue;
+      }
+      if (source[i] === quote) quote = undefined;
+      i += 1;
+      continue;
+    }
+    if (source.startsWith("/*", i)) {
+      const end = source.indexOf("*/", i + 2);
+      i = end < 0 ? source.length : end + 2;
+      continue;
+    }
+    if (source.startsWith("//", i)) {
+      const end = source.indexOf("\n", i);
+      i = end < 0 ? source.length : end + 1;
+      continue;
+    }
+    const ch = source[i];
+    if (ch === "'" || ch === '"' || ch === "`") quote = ch;
+    i += 1;
+  }
+  return quote !== undefined;
+}
+
+function jsxTagAt(
+  source: string,
+  index: number,
+): { readonly tag: string; readonly start: number } | undefined {
+  let i = index;
+  while (i > 0 && source[i] !== "<") i -= 1;
+  const match = /^<([A-Za-z][\w.]*)/.exec(source.slice(i));
+  const tag = match?.[1];
+  if (tag === undefined) return undefined;
+  return { tag, start: i };
+}
+
+/** Raw alert and dialog roles outside the shared recipes. Recorded exceptions stay. */
+export function findRawLiveRegionInventory(
+  files: Readonly<Record<string, string>>,
+): ReadonlyArray<RawLiveRegionFinding> {
+  const findings: RawLiveRegionFinding[] = [];
+  for (const [file, source] of Object.entries(files).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    const normalized = file.split(sep).join("/");
+    if (!normalized.startsWith(`${WEB_SOURCE}/`) || normalized.includes(".test.")) continue;
+    RAW_LIVE_REGION_ROLE.lastIndex = 0;
+    for (const match of source.matchAll(RAW_LIVE_REGION_ROLE)) {
+      const index = match.index ?? 0;
+      if (isInsideJsString(source, index)) continue;
+      const role = match[1] ?? match[2];
+      if (role !== "alert" && role !== "dialog") continue;
+      const located = jsxTagAt(source, index);
+      const tag = located?.tag ?? "?";
+      const tagStart = located?.start ?? index;
+      const line = source.slice(0, index).split("\n").length;
+      const beforeTag = source.slice(Math.max(0, tagStart - 240), tagStart);
+      const marker = beforeTag.match(LIVE_REGION_EXCEPTION)?.[1]?.toLowerCase();
+      const category: RawLiveRegionFinding["category"] =
+        LIVE_REGION_RECIPE_FILES.has(normalized) || LIVE_REGION_RECIPE_TAGS.has(tag)
+          ? "recipe"
+          : marker === "inline-field-error" ||
+              marker === "compact-status" ||
+              marker === "screen-reader-announcement" ||
+              marker === "non-modal-panel" ||
+              marker === "positioned-banner" ||
+              marker === "empty-state"
+            ? marker
+            : "ordinary";
+      findings.push({ category, file: normalized, line, role, tag });
+    }
+  }
+  return findings;
+}
+
+export function findRawLiveRegionViolations(
+  files: Readonly<Record<string, string>>,
+): ReadonlyArray<string> {
+  return findRawLiveRegionInventory(files)
+    .filter((finding) => finding.category === "ordinary")
+    .map(
+      (finding) =>
+        `${finding.file}:${String(finding.line)} renders raw role="${finding.role}" on <${finding.tag}>; use OctantAlert, OctantToast, OctantDialog, or OctantConfirmDialog, or record an exception.`,
+    );
+}
+
 function maskComments(source: string): string {
   const preserveLines = (value: string): string => value.replace(/[^\n]/g, " ");
   return source.replace(/\/\*[\s\S]*?\*\//g, preserveLines).replace(/\/\/[^\n]*/g, preserveLines);
@@ -230,6 +372,11 @@ async function main(): Promise<void> {
   const exceptions = rawControls.filter((finding) => finding.category !== "ordinary");
   const adapterViolations = findWrongAdapterBoundaryViolations(files);
   const formViolations = findFormValidationOwnerViolations(files);
+  const liveRegions = findRawLiveRegionInventory(files);
+  const liveViolations = liveRegions.filter((finding) => finding.category === "ordinary");
+  const liveExceptions = liveRegions.filter(
+    (finding) => finding.category !== "ordinary" && finding.category !== "recipe",
+  );
   const violations = [
     ...importViolations,
     ...ordinary.map(
@@ -238,6 +385,10 @@ async function main(): Promise<void> {
     ),
     ...adapterViolations,
     ...formViolations,
+    ...liveViolations.map(
+      (finding) =>
+        `${finding.file}:${String(finding.line)} renders raw role="${finding.role}" on <${finding.tag}>; use OctantAlert, OctantToast, OctantDialog, or OctantConfirmDialog, or record an exception.`,
+    ),
   ];
   if (violations.length > 0) {
     for (const violation of violations) console.error(violation);
@@ -252,6 +403,14 @@ async function main(): Promise<void> {
     for (const finding of exceptions) {
       console.log(
         `  ${finding.file}:${String(finding.line)} <${finding.tag}> (${finding.category})`,
+      );
+    }
+  }
+  if (liveExceptions.length > 0) {
+    console.log(`Documented raw alert/dialog exceptions: ${String(liveExceptions.length)}.`);
+    for (const finding of liveExceptions) {
+      console.log(
+        `  ${finding.file}:${String(finding.line)} role=${finding.role} (${finding.category})`,
       );
     }
   }

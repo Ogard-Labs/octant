@@ -181,6 +181,7 @@ export function ManagedToolsSettingsView(props: { readonly bridge?: ManagedTools
           </SettingRow>
         </div>
       </SettingsSection>
+      /* ui-boundary-exception: inline-field-error */
       <p
         className="provider-settings__field-guidance"
         role={error === undefined ? "status" : "alert"}
