@@ -1546,31 +1546,44 @@ describe("managed child continuation", () => {
     expect(release).toHaveBeenCalledTimes(2);
   });
 
-  it("leaves a waiting child unchanged when its execution backend cannot resume", () => {
-    const start = vi.fn();
-    const harness = createHarness(createInMemoryCapacityPort(), true, {
-      start,
-      stop: async () => undefined,
-    });
-    const admitted = harness.orchestration.admit({
-      command: requestCommand(),
-      parentAuthority: authority,
-      liveAuthority: authority,
-      confirmed: true,
-    });
-    if (admitted.kind !== "run-accepted") throw new Error("Fixture was not admitted");
-    harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
-    const waited = harness.orchestration.onSessionSettled({
-      runId: admitted.run.id,
-      outcome: { kind: "waiting", reason: "Provider wait" },
-    });
-    if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
-    expect(
-      harness.orchestration.resume(waited.run.id, waited.run.version, authority),
-    ).toMatchObject({ kind: "run-command-failed", message: expect.stringContaining("Retry") });
-    expect(harness.persistence.getById(waited.run.id)?.version).toBe(waited.run.version);
-    expect(start).toHaveBeenCalledOnce();
-  });
+  it.each(["waiting", "completed"] as const)(
+    "leaves a %s child unchanged when its execution backend cannot resume",
+    (status) => {
+      const start = vi.fn();
+      const harness = createHarness(createInMemoryCapacityPort(), true, {
+        start,
+        stop: async () => undefined,
+      });
+      const admitted = harness.orchestration.admit({
+        command: requestCommand(),
+        parentAuthority: authority,
+        liveAuthority: authority,
+        confirmed: true,
+      });
+      if (admitted.kind !== "run-accepted") throw new Error("Fixture was not admitted");
+      harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
+      const waited = harness.orchestration.onSessionSettled({
+        runId: admitted.run.id,
+        outcome:
+          status === "waiting"
+            ? { kind: "waiting", reason: "Provider wait" }
+            : { kind: "completed", responseText: "Retained reply" },
+      });
+      if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
+      expect(
+        harness.orchestration.resume(waited.run.id, waited.run.version, authority, {
+          message: "Continue",
+        }),
+      ).toMatchObject({
+        kind: "run-command-failed",
+        message: expect.stringContaining(
+          status === "completed" ? "Start a new delegation from the parent." : "Retry",
+        ),
+      });
+      expect(harness.persistence.getById(waited.run.id)).toEqual(waited.run);
+      expect(start).toHaveBeenCalledOnce();
+    },
+  );
 });
 
 it("starts another capacity waiter without restarting a continuation whose resume cannot be persisted", () => {

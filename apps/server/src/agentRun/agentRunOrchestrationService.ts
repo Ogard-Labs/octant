@@ -315,7 +315,9 @@ export class AgentRunOrchestrationService {
           kind: "run-command-failed",
           reason: "unsupported-transition",
           message:
-            "This execution cannot resume a saved child session. Use Retry for a fresh session.",
+            current.lifecycleStatus === "completed"
+              ? "This execution cannot resume a saved child session. Start a new delegation from the parent."
+              : "This execution cannot resume a saved child session. Use Retry for a fresh session.",
         };
       }
       if (
@@ -352,7 +354,7 @@ export class AgentRunOrchestrationService {
           message:
             readiness?.status === "refused"
               ? readiness.message
-              : "This execution cannot verify a saved conversation for a completed child.",
+              : "This execution cannot verify a saved conversation for a completed child. Start a new delegation from the parent.",
         };
       }
     }
