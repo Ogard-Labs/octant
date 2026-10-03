@@ -12,7 +12,8 @@ import type { AgentRunControlAdmissionDependencies } from "./agentRunControlAdmi
 import {
   agentRunDelegationCapabilities,
   followUpAgentRunDelegation,
-  recordAgentRunResultConsumption,
+  boundedAgentRunChildren,
+  collectAgentRunResult,
   startAgentRunDelegation,
   type AgentRunDelegationRouting,
   type AgentsToolTarget,
@@ -52,7 +53,7 @@ const AGENTS_TOOL_NAME = "octant_agents";
 const AGENTS_TOOL_DEFINITION = {
   name: AGENTS_TOOL_NAME,
   description:
-    "Delegate part of this task to a child agent run the host owns and supervises. Use capabilities to see which provider models you may target and the current creation posture. delegate creates one child with a bounded task; it runs asynchronously and appears in the Agents surface. status lists this thread's children; wait blocks briefly for one child's terminal state and returns its result when completed; cancel stops one of this thread's children. follow-up continues a completed child in its saved session using runId, expectedVersion from status/wait, and an explicit message (at most 4096 characters); unsupported continuity is refused. Child refs from another parent cannot be used here. Use after to wait for existing siblings and receive their results. Omit providerInstanceId and modelId to use the configured role slot. Delegation is refused when subagents are off in Settings or the parent is paused.",
+    "Delegate part of this task to a child agent run the host owns and supervises. Use capabilities to see which provider models you may target and the current creation posture. delegate creates one child with a bounded task; it runs asynchronously and appears in the Agents surface. status inspects this thread's children without consuming their replies; wait blocks briefly for one child's terminal state and returns its result when completed; cancel stops one of this thread's children. follow-up continues a completed child in its saved session using runId, expectedVersion from status/wait, and an explicit message (at most 4096 characters); unsupported continuity is refused. Child refs from another parent cannot be used here. Use after to wait for existing siblings and receive their results. Omit providerInstanceId and modelId to use the configured role slot. Delegation is refused when subagents are off in Settings or the parent is paused.",
   inputSchema: {
     type: "object",
     properties: {
@@ -132,6 +133,7 @@ type AgentsToolFailure =
   | "invalid-agents-input"
   | "delegate-tainted"
   | "delegate-target-unavailable"
+  | "result-too-large"
   | "result-unavailable"
   | "result-delivery-unavailable"
   | "run-not-found"
@@ -309,48 +311,33 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
         const children = options.persistence
           .parentSummary(options.parentThreadId as AgentRun["parentThreadId"])
           .filter((entry) => input.runId === undefined || String(entry.runId) === input.runId);
-        return answer({
-          status: "ok",
-          children: children.map((entry) => {
-            const run = options.persistence.getById(entry.runId);
-            const consumed =
-              entry.resultText !== undefined &&
-              run !== undefined &&
-              String(run.parentThreadId) === options.parentThreadId &&
-              entry.version === run.version
-                ? recordAgentRunResultConsumption(options.persistence, run)
-                : undefined;
-            return {
-              runId: String(entry.runId),
-              role: entry.role,
-              task: entry.task,
-              lifecycleStatus: entry.lifecycleStatus,
-              resultAvailable: entry.result !== undefined,
-              ...(run === undefined
-                ? {}
-                : {
-                    version: consumed?.status === "settled" ? consumed.run.version : run.version,
-                    generation: run.generation ?? 1,
-                  }),
-              ...(entry.resultText === undefined
-                ? {}
-                : consumed?.status === "settled"
-                  ? { resultText: entry.resultText }
-                  : { resultUnavailableReason: "result-delivery-unavailable" }),
-              ...(run?.dependsOn === undefined ? {} : { after: run.dependsOn.map(String) }),
-              ...(run?.routingReceipt?.rawReasoning === undefined
-                ? {}
-                : { reasoning: run.routingReceipt.rawReasoning }),
-              route: entry.route,
-              // A child parked on a provider limit is a blocked dependency the
-              // parent must plan around, not a pending result to keep polling.
-              ...(entry.usageLimit === undefined ? {} : { usageLimit: entry.usageLimit }),
-              ...(entry.usageResume === undefined
-                ? {}
-                : { usageResume: { status: entry.usageResume.status } }),
-            };
-          }),
-        });
+        return answer(
+          boundedAgentRunChildren(
+            children.map((entry) => {
+              const run = options.persistence.getById(entry.runId);
+              return {
+                runId: String(entry.runId),
+                role: entry.role,
+                task: entry.task,
+                lifecycleStatus: entry.lifecycleStatus,
+                resultAvailable: entry.result !== undefined,
+                ...(run === undefined
+                  ? {}
+                  : { version: run.version, generation: run.generation ?? 1 }),
+                ...(run?.dependsOn === undefined ? {} : { after: run.dependsOn.map(String) }),
+                ...(run?.routingReceipt?.rawReasoning === undefined
+                  ? {}
+                  : { reasoning: run.routingReceipt.rawReasoning }),
+                route: entry.route,
+                ...(entry.usageLimit === undefined ? {} : { usageLimit: entry.usageLimit }),
+                ...(entry.usageResume === undefined
+                  ? {}
+                  : { usageResume: { status: entry.usageResume.status } }),
+              };
+            }),
+            { status: "ok" },
+          ),
+        );
       }
 
       if (input.operation === "delegate") {
@@ -391,16 +378,10 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
             if (run.lifecycleStatus === "completed" && run.result !== undefined) {
               const text = options.persistence.resultText(run.id);
               if (text === undefined) return failure("result-unavailable");
-              const consumed = recordAgentRunResultConsumption(options.persistence, run);
-              if (consumed.status === "refused") return failure("result-delivery-unavailable");
-              return answer({
-                status: "completed",
-                runId: String(run.id),
-                version: consumed.run.version,
-                generation: run.generation ?? 1,
-                text,
-                truncated: run.result.truncated,
-              });
+              const collected = collectAgentRunResult(options.persistence, run, text);
+              return collected.status === "refused"
+                ? failure(collected.reason, collected.message)
+                : answer(collected);
             }
             return answer({
               status: run.lifecycleStatus,

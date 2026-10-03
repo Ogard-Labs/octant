@@ -1,9 +1,10 @@
-import type {
-  AgentRunDelegationResult,
-  AgentRunFollowUpInput,
-  AgentRunFollowUpResult,
-  AgentRunDelegationInput,
-  agentRunDelegationCapabilities,
+import {
+  boundedAgentRunChildren,
+  type AgentRunDelegationResult,
+  type AgentRunFollowUpInput,
+  type AgentRunFollowUpResult,
+  type AgentRunDelegationInput,
+  type agentRunDelegationCapabilities,
 } from "../agentRun/agentRunDelegation";
 import type { AgentRunParentSummaryRoute } from "../agentRun/agentRunProjection";
 import {
@@ -108,7 +109,7 @@ export type NativeHarnessDelegateCollect =
       readonly version?: number;
       readonly generation?: number;
     }
-  | { readonly status: "refused"; readonly reason: string };
+  | { readonly status: "refused"; readonly reason: string; readonly message?: string };
 
 /**
  * Delegation as the tool set sees it. The port owns admission: role→slot
@@ -549,19 +550,20 @@ async function execute(
         return result.status === "accepted" ? ok(result) : refused(result.reason, result.message);
       }
       if (input.operation === "status") {
-        return ok({ children: await port.status() });
+        return ok(boundedAgentRunChildren(await port.status(), {}));
       }
       if (input.operation === "wait") {
-        return ok(
-          await port.wait({
-            ...(input.runIds === undefined ? {} : { runIds: input.runIds.map(String) }),
-            timeoutMs: input.timeoutMs ?? DEFAULT_DELEGATE_WAIT_MS,
-            signal,
-          }),
-        );
+        const waited = await port.wait({
+          ...(input.runIds === undefined ? {} : { runIds: input.runIds.map(String) }),
+          timeoutMs: input.timeoutMs ?? DEFAULT_DELEGATE_WAIT_MS,
+          signal,
+        });
+        return ok(boundedAgentRunChildren(waited.children, { finished: waited.finished }));
       }
       const collected = await port.collect(input.runId);
-      return collected.status === "refused" ? refused(collected.reason) : ok(collected);
+      return collected.status === "refused"
+        ? refused(collected.reason, collected.message)
+        : ok(collected);
     }
     case "ask-user": {
       const input = args as NativeHarnessAskUserArguments;
