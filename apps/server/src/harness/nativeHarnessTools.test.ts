@@ -2,7 +2,12 @@ import { mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { decodeNativeHarnessContextRemaining, type ToolActionAuthority } from "@octant/contracts";
+import {
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
+  decodeNativeHarnessContextRemaining,
+  type ToolActionAuthority,
+} from "@octant/contracts";
+import { boundedToolResultJson } from "../providers/toolResultJson";
 import { ToolCallAuthorityService, type ToolCallLiveFacts } from "../toolCallAuthorityService";
 import { GoalService } from "../goal/goalService";
 import { InMemoryGoalStore } from "../goal/goalService.test-support";
@@ -143,6 +148,46 @@ describe("native harness tools", () => {
       generation: 2,
     });
     expect(inputs).toEqual([{ runId: input.runId, expectedVersion: 7, message: input.message }]);
+  });
+
+  it("bounds native batch status and wait without collecting omitted children", async () => {
+    let collected = 0;
+    const children = Array.from({ length: 24 }, (_, i) => ({
+      runId: `child-${i}`,
+      role: "research",
+      task: "x".repeat(8192),
+      lifecycleStatus: "completed",
+      resultAvailable: true,
+      version: 3,
+      generation: 1,
+    }));
+    const delegate: NativeHarnessDelegatePort = {
+      capabilities: async () => {
+        throw new Error("unexpected capabilities read");
+      },
+      start: async () => {
+        throw new Error("must not start a new child");
+      },
+      status: async () => children,
+      collect: async () => {
+        collected++;
+        return { status: "refused", reason: "unexpected collection" };
+      },
+      wait: async () => ({ finished: true, children }),
+    };
+    const { tools } = await fixture({}, { delegate });
+    for (const operation of ["status", "wait"]) {
+      const outcome = await call(tools, "delegate", { operation });
+      const encoded = boundedToolResultJson(outcome.result);
+      expect(Buffer.byteLength(encoded)).toBeLessThanOrEqual(MAX_PROVIDER_TOOL_RESULT_BYTES);
+      const wire = JSON.parse(encoded);
+      expect(wire).toMatchObject({ bounds: { truncated: true } });
+      expect(wire.children.length).toBeGreaterThan(0);
+      expect(wire.children.length).toBeLessThan(24);
+      expect(wire.bounds.omittedChildren).toBe(24 - wire.children.length);
+      if (operation === "wait") expect(wire.finished).toBe(true);
+    }
+    expect(collected).toBe(0);
   });
 
   it("refuses a tool the model invented without consulting any port", async () => {
