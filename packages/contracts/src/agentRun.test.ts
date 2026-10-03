@@ -1,6 +1,9 @@
+import { Schema } from "effect";
+import { decodeChatCommand } from "./chat";
 import { describe, expect, it } from "vitest";
 import {
   AGENT_RUN_EVENT_NAMES,
+  AgentRunResultDeliveryMark,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
   MAX_AGENT_RUN_CONVERSATION_ENTRIES,
@@ -528,6 +531,58 @@ describe("agentRun pool-derived route receipts", () => {
       ],
     });
     expect(response.items).toHaveLength(1);
+  });
+});
+
+describe("Agent result delivery marks", () => {
+  it("reads legacy marks and only accepts bounded groups with complete generation identities", () => {
+    const decode = Schema.decodeUnknownSync(AgentRunResultDeliveryMark);
+    const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const legacy = { kind: "agent-result", runId: first };
+    expect(decode(legacy)).toEqual(legacy);
+    const batch = {
+      ...legacy,
+      runIds: [first, second],
+      runGenerations: [
+        { runId: first, generation: 1 },
+        { runId: second, generation: 2 },
+      ],
+    };
+    expect(decode(batch)).toEqual(batch);
+    for (const invalid of [
+      { ...legacy, runIds: [] },
+      { ...legacy, runIds: [second] },
+      { ...legacy, runIds: [first, first] },
+      { ...batch, runGenerations: [{ runId: first, generation: 1 }] },
+      {
+        ...batch,
+        runGenerations: [
+          { runId: first, generation: 1 },
+          { runId: first, generation: 2 },
+        ],
+      },
+      { ...legacy, runGenerations: [{ runId: first, generation: 0 }] },
+      {
+        ...legacy,
+        runIds: Array.from(
+          { length: 17 },
+          (_, index) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, "0")}`,
+        ),
+      },
+    ])
+      expect(() => decode(invalid)).toThrow();
+    const command = {
+      kind: "deliver-chat-agent-result",
+      threadId: second,
+      expectedVersion: 1,
+      runId: first,
+      runIds: batch.runIds,
+      runGenerations: batch.runGenerations,
+    };
+    expect(decodeChatCommand(command)).toEqual(command);
+    expect(() => decodeChatCommand({ ...command, runGenerations: [] })).toThrow();
+    expect(() => decodeChatCommand({ ...command, runIds: [first] })).toThrow();
   });
 });
 
