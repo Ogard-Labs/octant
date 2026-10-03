@@ -11,6 +11,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { AgentRunControlAdmissionDependencies } from "./agentRunControlAdmission";
 import {
   agentRunDelegationCapabilities,
+  followUpAgentRunDelegation,
   startAgentRunDelegation,
   type AgentRunDelegationRouting,
   type AgentsToolTarget,
@@ -22,7 +23,8 @@ export type { AgentsToolTarget } from "./agentRunDelegation";
 
 export interface AgentsManagedToolsOptions {
   readonly admission: AgentRunControlAdmissionDependencies;
-  readonly orchestration: Pick<AgentRunOrchestrationService, "start" | "cancelLeafFirst">;
+  readonly orchestration: Pick<AgentRunOrchestrationService, "start" | "cancelLeafFirst"> &
+    Partial<Pick<AgentRunOrchestrationService, "resume">>;
   readonly persistence: Pick<
     AgentRunPersistenceService,
     "parentSummary" | "getById" | "resultText"
@@ -48,13 +50,13 @@ const AGENTS_TOOL_NAME = "octant_agents";
 const AGENTS_TOOL_DEFINITION = {
   name: AGENTS_TOOL_NAME,
   description:
-    "Delegate part of this task to a child agent run the host owns and supervises. Use capabilities to see which provider models you may target and the current creation posture. delegate creates one child with a bounded task; it runs asynchronously and appears in the Agents surface. status lists this thread's children; wait blocks briefly for one child's terminal state and returns its result when completed; cancel stops one of this thread's children. Child refs from another parent cannot be used here. Use after to wait for existing siblings and receive their results. Omit providerInstanceId and modelId to use the configured role slot. Delegation is refused when subagents are off in Settings or the parent is paused.",
+    "Delegate part of this task to a child agent run the host owns and supervises. Use capabilities to see which provider models you may target and the current creation posture. delegate creates one child with a bounded task; it runs asynchronously and appears in the Agents surface. status lists this thread's children; wait blocks briefly for one child's terminal state and returns its result when completed; cancel stops one of this thread's children. follow-up continues a completed child in its saved session using runId, expectedVersion from status/wait, and an explicit message (at most 4096 characters); unsupported continuity is refused. Child refs from another parent cannot be used here. Use after to wait for existing siblings and receive their results. Omit providerInstanceId and modelId to use the configured role slot. Delegation is refused when subagents are off in Settings or the parent is paused.",
   inputSchema: {
     type: "object",
     properties: {
       operation: {
         type: "string",
-        enum: ["capabilities", "delegate", "status", "wait", "cancel"],
+        enum: ["capabilities", "delegate", "status", "wait", "cancel", "follow-up"],
       },
       task: {
         type: "string",
@@ -99,6 +101,17 @@ const AGENTS_TOOL_DEFINITION = {
         maxLength: 128,
         description: "Child run id for wait/cancel, or to narrow status.",
       },
+      expectedVersion: {
+        type: "integer",
+        minimum: 1,
+        description: "Current child version from status or wait; required for follow-up.",
+      },
+      message: {
+        type: "string",
+        minLength: 1,
+        maxLength: 4096,
+        description: "Explicit message for the completed child; required for follow-up.",
+      },
       timeoutMs: {
         type: "integer",
         minimum: 0,
@@ -121,8 +134,10 @@ type AgentsToolFailure =
   | "cancel-unauthorized";
 
 interface AgentsToolInput {
-  readonly operation: "capabilities" | "delegate" | "status" | "wait" | "cancel";
+  readonly operation: "capabilities" | "delegate" | "status" | "wait" | "cancel" | "follow-up";
   readonly task?: string;
+  readonly expectedVersion?: number;
+  readonly message?: string;
   readonly role?: AgentRunRole;
   readonly providerInstanceId?: string;
   readonly modelId?: string;
@@ -172,7 +187,8 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
     operation !== "delegate" &&
     operation !== "status" &&
     operation !== "wait" &&
-    operation !== "cancel"
+    operation !== "cancel" &&
+    operation !== "follow-up"
   )
     return undefined;
   const task = record.task;
@@ -198,6 +214,21 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
     return undefined;
   const runId = record.runId;
   if (runId !== undefined && typeof runId !== "string") return undefined;
+  const expectedVersion = record.expectedVersion;
+  const message = record.message;
+  if (
+    operation === "follow-up" &&
+    (typeof runId !== "string" ||
+      typeof expectedVersion !== "number" ||
+      !Number.isSafeInteger(expectedVersion) ||
+      expectedVersion < 1 ||
+      typeof message !== "string" ||
+      message.trim().length === 0 ||
+      message.length > 4096)
+  )
+    return undefined;
+  if (expectedVersion !== undefined && typeof expectedVersion !== "number") return undefined;
+  if (message !== undefined && typeof message !== "string") return undefined;
   const timeoutMs = record.timeoutMs;
   if (timeoutMs !== undefined && (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs)))
     return undefined;
@@ -211,6 +242,8 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(after === undefined ? {} : { after }),
     ...(runId === undefined ? {} : { runId }),
+    ...(expectedVersion === undefined ? {} : { expectedVersion }),
+    ...(message === undefined ? {} : { message }),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   };
 }
@@ -282,6 +315,9 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
               task: entry.task,
               lifecycleStatus: entry.lifecycleStatus,
               resultAvailable: entry.result !== undefined,
+              ...(run === undefined
+                ? {}
+                : { version: run.version, generation: run.generation ?? 1 }),
               ...(entry.resultText === undefined ? {} : { resultText: entry.resultText }),
               ...(run?.dependsOn === undefined ? {} : { after: run.dependsOn.map(String) }),
               ...(run?.routingReceipt?.rawReasoning === undefined
@@ -310,6 +346,22 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
         return answer(result);
       }
 
+      if (input.operation === "follow-up") {
+        if (
+          input.runId === undefined ||
+          input.expectedVersion === undefined ||
+          input.message === undefined
+        )
+          return failure("invalid-agents-input");
+        return answer(
+          await followUpAgentRunDelegation(options, {
+            runId: input.runId,
+            expectedVersion: input.expectedVersion,
+            message: input.message,
+          }),
+        );
+      }
+
       if (input.operation === "wait") {
         if (input.runId === undefined) return failure("invalid-agents-input");
         const deadline = Date.now() + Math.min(Math.max(input.timeoutMs ?? 30_000, 0), 120_000);
@@ -323,6 +375,8 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
               return answer({
                 status: "completed",
                 runId: String(run.id),
+                version: run.version,
+                generation: run.generation ?? 1,
                 ...(text === undefined ? {} : { text }),
                 truncated: run.result.truncated,
               });
@@ -330,6 +384,8 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
             return answer({
               status: run.lifecycleStatus,
               runId: String(run.id),
+              version: run.version,
+              generation: run.generation ?? 1,
             });
           }
           // A run parked on a disclosed provider limit cannot progress before

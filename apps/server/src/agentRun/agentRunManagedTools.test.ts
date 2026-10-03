@@ -191,6 +191,30 @@ describe("agents managed tools", () => {
     expect((outcome.result as { roles: string[] }).roles.length).toBeGreaterThan(0);
   });
 
+  it("refuses follow-ups without a current version and bounded explicit message", async () => {
+    const { set, calls } = tool();
+    const valid = {
+      operation: "follow-up",
+      runId: ids.run,
+      expectedVersion: 3,
+      message: "Continue",
+    };
+    for (const invalid of [
+      { ...valid, runId: undefined },
+      { ...valid, expectedVersion: undefined },
+      { ...valid, expectedVersion: 0 },
+      { ...valid, expectedVersion: 1.5 },
+      { ...valid, message: undefined },
+      { ...valid, message: " " },
+      { ...valid, message: "x".repeat(4097) },
+    ])
+      expect((await call(set, invalid)).result).toMatchObject({
+        status: "error",
+        error: "invalid-agents-input",
+      });
+    expect(calls).toEqual([]);
+  });
+
   it("refuses to delegate while subagents are off, without consulting authority", async () => {
     const { set, calls } = tool({ posture: "off" });
     const outcome = await call(set, { operation: "delegate", task: "Look" });

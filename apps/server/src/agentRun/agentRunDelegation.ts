@@ -1,6 +1,7 @@
 import {
   LOCAL_HOST_ID,
   decodeAgentRunControlRequest,
+  decodeAgentRunResumeRequest,
   decodeProjectId,
   decodeProviderInstanceId,
   decodeProviderModelId,
@@ -10,14 +11,27 @@ import {
   type NativeHarnessRouteDecision,
   type OctantMode,
 } from "@octant/contracts";
-import { allowedAgentRunRolesForMode, nativeHarnessJobForRole } from "@octant/domain";
+import {
+  AgentRunPolicyRejected,
+  clampAgentRunAuthority,
+  effectiveAgentRunExecutionTarget,
+  allowedAgentRunRolesForMode,
+  nativeHarnessJobForRole,
+} from "@octant/domain";
 import type { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import {
   admitAgentRunControlRequest,
   type AgentRunControlAdmissionDependencies,
 } from "./agentRunControlAdmission";
-import type { AgentRunControlParentFacts } from "./agentRunControlService";
-import type { AgentRunOrchestrationService } from "./agentRunOrchestrationService";
+import {
+  AgentRunControlRefused,
+  resolveAgentRunControlFacts,
+  type AgentRunControlParentFacts,
+} from "./agentRunControlService";
+import {
+  AgentRunOrchestrationError,
+  type AgentRunOrchestrationService,
+} from "./agentRunOrchestrationService";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
 
 /** Host-filtered targets for this parent, including only supported reasoning values. */
@@ -49,7 +63,8 @@ export interface AgentRunDelegationRouting {
 
 export interface AgentRunDelegationOptions {
   readonly admission: AgentRunControlAdmissionDependencies;
-  readonly orchestration: Pick<AgentRunOrchestrationService, "start">;
+  readonly orchestration: Pick<AgentRunOrchestrationService, "start"> &
+    Partial<Pick<AgentRunOrchestrationService, "resume">>;
   readonly persistence: Pick<AgentRunPersistenceService, "getById">;
   readonly mode: OctantMode;
   readonly parentThreadId: string;
@@ -290,4 +305,132 @@ export async function startAgentRunDelegation(
     },
     ...(decision === undefined ? {} : { route: decision }),
   };
+}
+
+export interface AgentRunFollowUpInput {
+  readonly runId: string;
+  readonly expectedVersion: number;
+  readonly message: string;
+}
+
+export type AgentRunFollowUpResult =
+  | {
+      readonly status: "accepted";
+      readonly runId: string;
+      readonly version: number;
+      readonly generation: number;
+      readonly lifecycleStatus: string;
+    }
+  | { readonly status: "refused"; readonly reason: string; readonly message?: string };
+
+/** A follow-up keeps the admitted route and workspace; it cannot create a new child. */
+export async function followUpAgentRunDelegation(
+  options: AgentRunDelegationOptions,
+  input: AgentRunFollowUpInput,
+): Promise<AgentRunFollowUpResult> {
+  let request: ReturnType<typeof decodeAgentRunResumeRequest>;
+  try {
+    request = decodeAgentRunResumeRequest(input);
+  } catch {
+    return { status: "refused", reason: "invalid-follow-up" };
+  }
+  if (request.message === undefined) return { status: "refused", reason: "invalid-follow-up" };
+  if (options.admission.settings.current().creationPosture !== "automatic")
+    return { status: "refused", reason: "creation-posture-off" };
+  if (options.isTainted?.()) return { status: "refused", reason: "delegate-tainted" };
+  if (options.isPaused?.()) return { status: "refused", reason: "session-paused" };
+  const run = options.persistence.getById(request.runId);
+  if (run === undefined || String(run.parentThreadId) !== options.parentThreadId)
+    return { status: "refused", reason: "run-not-found" };
+  const parent = options.admission.authorizeCreation({
+    parentThreadId: run.parentThreadId,
+    windowId: options.windowId,
+  });
+  if (
+    parent === undefined ||
+    parent.parentMode !== options.mode ||
+    parent.parentMode !== run.routingReceipt.mode ||
+    String(parent.workspaceParent.threadId) !== options.parentThreadId ||
+    parent.parentRoute.projectId !== run.routingReceipt.projectId ||
+    !parent.parentAuthority.subagents ||
+    !parent.liveAuthority.subagents
+  )
+    return { status: "refused", reason: "unauthorized" };
+  if (run.version !== request.expectedVersion)
+    return { status: "refused", reason: "stale-version" };
+  if (run.executionKind !== "octant-managed" || run.lifecycleStatus !== "completed")
+    return {
+      status: "refused",
+      reason: "unsupported-transition",
+      message: "Only a completed managed child can receive a follow-up.",
+    };
+  if (options.orchestration.resume === undefined)
+    return {
+      status: "refused",
+      reason: "follow-up-unavailable",
+      message:
+        "This host cannot continue saved child sessions. Start a new delegation from the parent.",
+    };
+  try {
+    resolveAgentRunControlFacts({
+      parent,
+      role: run.role,
+      creationPosture: "automatic",
+      nativeEvidence: options.admission.nativeEvidence({ parent }),
+    });
+    clampAgentRunAuthority({
+      requestedAuthority: run.authority,
+      parentAuthority: parent.parentAuthority,
+      liveParentGrant: parent.liveAuthority,
+    });
+    const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+    if (
+      !options
+        .listTargets()
+        .some(
+          (candidate) =>
+            candidate.providerInstanceId === String(target.providerInstanceId) &&
+            candidate.modelIds.includes(String(target.modelId)) &&
+            (run.routingReceipt.rawReasoning === undefined ||
+              candidate.reasoningByModel?.[String(target.modelId)]?.includes(
+                run.routingReceipt.rawReasoning,
+              ) === true),
+        )
+    )
+      return { status: "refused", reason: "delegate-target-unavailable" };
+    // resume is synchronous today. Bind the accepted execution before yielding,
+    // so the runtime's asynchronous workspace check cannot outrun its window grant.
+    const result = options.orchestration.resume(
+      run.id,
+      request.expectedVersion,
+      parent.liveAuthority,
+      { message: request.message },
+    );
+    if (result.kind === "run-command-failed")
+      return { status: "refused", reason: result.reason, message: result.message };
+    if (result.kind !== "run-updated" || result.run.lifecycleStatus !== "starting")
+      return {
+        status: "refused",
+        reason: "unsupported-transition",
+        message: "The child did not accept the follow-up.",
+      };
+    options.admission.onExecutionAccepted?.({
+      run: result.run,
+      windowId: options.windowId,
+      operation: "resume",
+    });
+    return {
+      status: "accepted",
+      runId: String(result.run.id),
+      version: result.run.version,
+      generation: result.run.generation ?? 1,
+      lifecycleStatus: result.run.lifecycleStatus,
+    };
+  } catch (error) {
+    if (error instanceof AgentRunPolicyRejected)
+      return { status: "refused", reason: error.code, message: error.message };
+    if (error instanceof AgentRunControlRefused || error instanceof AgentRunOrchestrationError)
+      return { status: "refused", reason: error.reason, message: error.message };
+    throw error;
+  }
 }
