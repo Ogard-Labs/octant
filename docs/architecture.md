@@ -836,6 +836,13 @@ flowchart LR
   Versioned edit, reorder and removal commands detect concurrent clients;
   stable submission identities prevent an acknowledgement retry from adding
   another message.
+  Before sending a queue command, the client saves a bounded local retry receipt
+  containing the exact command and original draft identity, without window
+  capabilities. An unresolved receipt survives navigation and reload and blocks
+  a fresh submission until the original outcome is reconciled. Acknowledgement
+  clears only the unchanged original draft. Receipt cleanup follows composer
+  draft deletion and purge; a storage failure is visible and prevents an unsafe
+  submission or retry.
   One dispatcher per thread sends through the mode's ordinary turn admission,
   regardless of harness. Every dispatch checks the current Project, provider,
   model, checkout, access and context policy. Only normal turn completion

@@ -57,6 +57,9 @@ tombstone rather than leaving a hole with no explanation.
   or unavailable attachment holds the queue and explains why. After a host
   restart, review the retained messages and choose **Resume queue**. Octant
   checks current access again and never blindly repeats an uncertain send.
+  If the connection drops before confirmation, use **Check queue** after
+  reconnecting. Octant keeps the original submission identity across navigation
+  and reload, and preserves any newer draft you have written.
   If you changed the provider, model or access settings, restore the original
   settings before resuming, or remove and resubmit the message. Queue controls
   are available in authenticated local windows; paired remote clients do not
