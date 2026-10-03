@@ -261,3 +261,8 @@ export function describeAgentGoal(goal: ThreadGoal): string {
   const progress = criteria.length === 0 ? "" : ` · ${met} of ${criteria.length} criteria met`;
   return `Goal (${goal.status}): ${goal.objective}${progress}`;
 }
+
+/** A checkpoint's default name: when it was marked, to the minute. */
+export function defaultCheckpointLabel(now: Date = new Date()): string {
+  return `Checkpoint ${now.toISOString().slice(0, 16).replace("T", " ")}`;
+}

@@ -4107,6 +4107,63 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).turns[0]).toEqual(first.turns[0]);
   });
 
+  it.each([true, false])(
+    "keeps a native Chat conversation after a switch to another model of the same provider only when it can: %s",
+    async (canSwitch) => {
+      const base = probeFixture();
+      const firstModel = base.models[0];
+      if (firstModel === undefined) throw new Error("Expected a model.");
+      const { service, fakeDriver } = openFixture({
+        nativeConversation: true,
+        probe: probeFixture({
+          models: [firstModel, { ...firstModel, id: "model-b" as never, displayName: "Model B" }],
+          capabilities: {
+            ...base.capabilities,
+            ...(canSwitch ? { modelSwitch: "supported" as const } : {}),
+          },
+        }),
+      });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Switch model",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread.");
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Remember this",
+      });
+      const first = service.read(created.thread.id);
+      await service.execute({
+        kind: "change-chat-provider",
+        threadId: created.thread.id,
+        expectedVersion: first.thread.version,
+        providerInstanceId: String(ids.provider),
+        modelId: "model-b",
+      });
+      const before = service.read(created.thread.id);
+      const followUp = service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: before.thread.version,
+        prompt: "Continue",
+      });
+      if (!canSwitch) {
+        await expect(followUp).rejects.toMatchObject({
+          failure: { message: expect.stringContaining("native session cannot be recovered") },
+        });
+        expect(fakeDriver.sentTurns).toHaveLength(1);
+        return;
+      }
+      await followUp;
+      expect(fakeDriver.startedSessionIds).toHaveLength(1);
+      expect(fakeDriver.resumeInputs).toEqual([expect.objectContaining({ modelId: "model-b" })]);
+      expect(fakeDriver.sentTurns[1]?.sessionId).toBe(fakeDriver.sentTurns[0]?.sessionId);
+    },
+  );
+
   it("preserves native history and explains recovery when the former provider is removed", async () => {
     let removed = false;
     const replacement = "84000000-0000-4000-8000-000000000007";

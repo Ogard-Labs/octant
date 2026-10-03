@@ -298,6 +298,8 @@ import { createContextRouteHandler } from "./contextRoutes";
 import { GitEnvironmentPort } from "./gitEnvironmentPort";
 import { GitObservationPort } from "./code/gitObservationPort";
 import { GitMutationPort } from "./code/gitMutationPort";
+import { codeThreadTurns } from "./code/codeForkPoint";
+import { seedCodeForkHarnessSession } from "./harness/nativeHarnessFork";
 import { nativeHarnessRecoveryBlockers } from "./harness/nativeHarnessRecovery";
 import { GitService } from "./code/gitService";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
@@ -4245,6 +4247,9 @@ export function startOctantServer(
         supportsAcpClientCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .acpClientCapabilities === "supported",
+        supportsModelSwitch: (thread) =>
+          providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
+            .modelSwitch === "supported",
         supportsAttachments: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           if (observed?.capabilities.nativeAttachments !== "supported") return false;
@@ -4442,6 +4447,23 @@ export function startOctantServer(
             : undefined;
         },
         resolveForkHandoff: forkHandoffResolver(() => routeCodeService),
+        forkProviderSession: (input) =>
+          seedCodeForkHarnessSession(
+            {
+              transcripts: nativeHarnessTranscripts,
+              harnessDriverKind: (instanceId) => {
+                const instance = persistence.readProviderInstance(instanceId);
+                return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind)
+                  ? instance.driverKind
+                  : undefined;
+              },
+              sourceTurns: (threadId) =>
+                codeThreadTurns((page) => codeBoardEventStore.conversation(page), threadId),
+              sourceConversations: (threadId) =>
+                codeBoardEventStore.providerConversationsOfTurns(threadId),
+            },
+            input,
+          ),
         resolveProfileSkills: createCodeProfileSkillResolver({
           snapshot: () => extensionApiService.snapshot(),
           loadSkillText: createStoredCodeProfileSkillTextLoader({
@@ -6203,6 +6225,9 @@ export function startOctantServer(
         );
       },
       attachments: workAttachments,
+      supportsModelSwitch: (providerInstanceId) =>
+        providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.modelSwitch ===
+        "supported",
       supportsAttachments: (thread) => {
         const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
         if (observed?.capabilities.nativeAttachments !== "supported") return false;

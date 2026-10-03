@@ -611,6 +611,12 @@ export interface CodeOperationTurnPort {
      * of the message the journal keeps and no later turn replays it.
      */
     readonly context?: ReadonlyArray<ProviderContextBlock>;
+    /**
+     * A fork's first turn: the source's conversation as text. Carried only
+     * when the provider's own session could not start from the source's, so
+     * a fork never reads its history twice.
+     */
+    readonly forkHandoff?: ProviderContextBlock;
     /** Images this turn carries, already read from the host's own store. */
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     /** The selected MCP servers' tools, beside the host's own for this turn. */
@@ -2658,10 +2664,10 @@ export class CodeOperationService {
     const issueContext =
       this.#options.peekIssueContextFramed?.(String(thread.id)) ??
       this.#options.takeIssueContextFramed?.(String(thread.id));
+    const [forkHandoff] = await this.#resolveForkHandoff(thread, windowId, command.operationId);
     const context = [
       ...skillContext,
       ...profileContext,
-      ...(await this.#resolveForkHandoff(thread, windowId, command.operationId)),
       ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
       ...(await this.#resolveFileMentions(command.fileMentionPaths, windowId, thread)),
       ...(feedback?.context === undefined || feedback.context.trim().length === 0
@@ -2696,6 +2702,7 @@ export class CodeOperationService {
       checkoutRoot,
       prompt,
       ...(context.length === 0 ? {} : { context }),
+      ...(forkHandoff === undefined ? {} : { forkHandoff }),
       ...(attachments.length === 0 ? {} : { attachments }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
     });

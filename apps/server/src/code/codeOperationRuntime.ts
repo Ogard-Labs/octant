@@ -23,6 +23,7 @@ import {
   type CodeOperationCommand,
   type CodeOperationFailure,
   type CodeConversationPage,
+  type ProviderSessionId,
   type CodeEvidenceBatchRequest,
   type CodeEvidenceBatchResponse,
   type CodeOperationApprovalReceipt,
@@ -57,7 +58,7 @@ import {
 } from "./gitObservationPort";
 import { GitService } from "./gitService";
 import { CodeOperationEventStore } from "./codeOperationEventStore";
-import { chooseCodeForkPoint } from "./codeForkPoint";
+import { chooseCodeForkPoint, codeThreadTurns } from "./codeForkPoint";
 import {
   CodeRuntimeWorkRecorder,
   codeRuntimeWorkObserved,
@@ -277,6 +278,12 @@ export interface CodeOperationRuntimeOptions {
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   readonly supportsAcpClientCapabilities?: (thread: CodeThread) => boolean;
   /**
+   * Whether the thread's provider can carry its native session on to another
+   * of its models. A host that cannot say so answers false, and a turn whose
+   * model differs from its session's is refused as before.
+   */
+  readonly supportsModelSwitch?: (thread: CodeThread) => boolean;
+  /**
    * Whether the thread's provider can take an image. A host that cannot say so
    * answers false: a turn that attached images then fails in words rather than
    * reaching the provider with the pictures silently dropped.
@@ -386,6 +393,19 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly resolveBaseCheckoutRoot?: (thread: CodeThread) => Promise<string | undefined>;
   readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
+  /**
+   * Starts a fork's first provider session from the source's own
+   * conversation through the fork point, returning the cursor that resumes
+   * it. Undefined when the provider cannot take that up exactly, in which
+   * case the fork reads the source's history as text instead.
+   */
+  readonly forkProviderSession?: (input: {
+    readonly fork: CodeThread;
+    readonly origin: NonNullable<CodeThread["forkedFrom"]>;
+    readonly sessionId: ProviderSessionId;
+    readonly checkoutRoot: string;
+    readonly secrets: ReadonlyArray<string>;
+  }) => Promise<ProviderResumeCursor | undefined>;
   readonly resolveProfileSkills?: CodeOperationServiceOptions["resolveProfileSkills"];
   readonly resolveSelectedExtensions?: CodeOperationServiceOptions["resolveSelectedExtensions"];
   /**
@@ -1109,19 +1129,8 @@ export function createCodeOperationRuntime(
       if (!(await options.windowAccess.canAccessProject(windowId, source.projectId))) {
         return { status: "refused", reason: "unavailable" };
       }
-      const turns: CodeConversationPage["turns"][number][] = [];
-      let cursor = 0;
-      for (let page = 0; page < MAX_FORK_POINT_PAGES; page += 1) {
-        const listed = events.conversation({
-          threadId: source.id,
-          afterCursor: cursor,
-          limit: MAX_CODE_CONVERSATION_PAGE_SIZE,
-          providerInstanceId: source.providerInstanceId,
-        });
-        turns.push(...listed.turns);
-        if (!listed.hasMore || listed.nextCursor <= cursor) break;
-        cursor = listed.nextCursor;
-      }
+      const turns = codeThreadTurns((page) => events.conversation(page), source.id);
+      if (turns === undefined) return { status: "refused", reason: "not-found" };
       const choice = chooseCodeForkPoint(turns, throughOperationId);
       if (choice.kind === "refused") return { status: "refused", reason: choice.reason };
       if (choice.kind === "checkpoint") return forkPointFrom(choice.checkpoint);
@@ -1598,10 +1607,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const previous = recovered.session;
     const priorTurn = recovered.priorTurn;
     const priorTurnSettled = recovered.priorTurnSettled;
+    // The composer offers another model of the same provider in a started
+    // thread; refusing every turn after that switch left the thread stuck. A
+    // provider that can resume onto the new model keeps the conversation, and
+    // the turn records the new model on its session.
     if (
       previous?.kind === "provider-session-ready" &&
       (String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
-        String(previous.modelId) !== String(input.thread.modelId) ||
+        (String(previous.modelId) !== String(input.thread.modelId) &&
+          this.#options.supportsModelSwitch?.(input.thread) !== true) ||
         String(previous.checkoutId) !== String(input.thread.checkoutId))
     )
       return failStart(
@@ -1658,6 +1672,31 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       if (value === undefined) return failStart();
       if (value.length > 0) secrets.push(value);
     }
+    // A fork's first turn starts from the source's own provider conversation
+    // when the provider can take it up exactly; otherwise it reads the
+    // source's history as text. Never both.
+    let resumeCursor =
+      previous?.kind === "provider-session-ready" ? previous.resumeCursor : undefined;
+    let forkSeeded = false;
+    if (previous === undefined && input.thread.forkedFrom !== undefined) {
+      const seeded = await this.#options
+        .forkProviderSession?.({
+          fork: input.thread,
+          origin: input.thread.forkedFrom,
+          sessionId: decodeProviderSessionId(input.sessionId),
+          checkoutRoot: input.checkoutRoot,
+          secrets,
+        })
+        .catch(() => undefined);
+      if (seeded !== undefined) {
+        resumeCursor = seeded;
+        forkSeeded = true;
+      }
+    }
+    const context =
+      forkSeeded || input.forkHandoff === undefined
+        ? input.context
+        : [input.forkHandoff, ...(input.context ?? [])];
     const active: ActiveTurn = {
       ...(command.computerUseSelection === undefined
         ? {}
@@ -1671,9 +1710,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       operationId: command.operationId,
       sessionId: previous?.kind === "provider-session-ready" ? previous.sessionId : input.sessionId,
       requestedSessionId: input.sessionId,
-      ...(previous?.kind !== "provider-session-ready" || previous.resumeCursor === undefined
-        ? {}
-        : { resumeCursor: previous.resumeCursor }),
+      ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
       driver,
       secrets,
@@ -1687,7 +1724,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       deniedApprovals: 0,
       state: "running",
     };
-    active.launch = () => this.#launch(active, input.prompt, input.context, input.attachments);
+    active.launch = () => this.#launch(active, input.prompt, context, input.attachments);
     this.#active.set(key, active);
     // The turn is the unit of work, so the operation it runs under is the
     // record's identity. It opens here rather than in `#launch`, because a turn
@@ -3062,9 +3099,6 @@ function concatenatedOutput(stdout: Uint8Array, stderr: Uint8Array): Uint8Array 
   combined.set(stderr, stdout.byteLength);
   return combined;
 }
-
-/** Conversation pages read to find a fork point; a longer history refuses as not found. */
-const MAX_FORK_POINT_PAGES = 64;
 
 function forkPointFrom(checkpoint: {
   readonly worktree: string;

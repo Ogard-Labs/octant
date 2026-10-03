@@ -25,6 +25,7 @@ import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   pickerGroupCarriesAppManagedTools,
+  startedThreadPickerGroups,
   type PickerGroup,
 } from "@octant/domain";
 import { CirclePause, X } from "lucide-react";
@@ -624,6 +625,21 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     trimmed.length > 0 && !attachments.busy && !slash.resolving && steered.pending === undefined;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
+  // The host only binds a thread to its provider once a provider session
+  // exists, and a completed reply is the renderer's proof of one. A thread
+  // whose first turn failed before the provider started has nothing to carry
+  // over, so it keeps every provider and can recover on another. Computed in
+  // place rather than memoised: this runs after the early returns above,
+  // where a hook would change the hook order between renders.
+  const hasProviderSession = messages.some(
+    (message) => message.role === "assistant" && message.status === "completed",
+  );
+  const threadModelGroups = hasProviderSession
+    ? startedThreadPickerGroups(providerGroups, {
+        providerInstanceId: thread.providerInstanceId,
+        modelId: thread.modelId,
+      })
+    : providerGroups;
   const settledReplyCount = messages.filter(
     (message) =>
       message.role === "assistant" &&
@@ -1860,7 +1876,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <ComposerModelPicker
                 ariaLabel="Provider and model"
                 disabled={busy}
-                groups={providerGroups}
+                groups={threadModelGroups}
                 {...(thread.modelOptionValues === undefined
                   ? {}
                   : { modelOptionValues: thread.modelOptionValues })}

@@ -67,6 +67,13 @@ When a long conversation no longer fits the model's window, older tool
 results are left out of the request first, then whole earlier exchanges, with
 a note to the model. The saved conversation keeps everything.
 
+Forking a Code thread on a harness model gives the fork the model's own
+memory up to the reply you forked from — every message, tool call, and result
+— rather than a summary. Paths point at the fork's own folder, and secret
+values the thread uses are blanked. The fork starts without the source's goal,
+task list, notes, or approvals. If Octant cannot tell exactly where that reply
+ends in the saved conversation, the fork gets a written summary instead.
+
 ## Goals
 
 Give a thread a goal and the harness works toward it. Every turn starts with
@@ -180,6 +187,14 @@ reads the thread and cannot change it; in the terminal UI, `/back` returns to
 the thread. `/goal` shows the thread's goal, and `/goal revise <objective>`
 changes its objective. If another screen changed the goal first, nothing is
 overwritten: the terminal says so and shows the newer goal.
+
+`/fork` forks the thread at its last finished reply — a Code fork on its own
+worktree and branch, a Chat fork with the conversation so far — and
+`/checkpoint [name]` marks that reply. `/checkpoints` lists the marks, and
+`/restore N` starts a new thread from one; the thread you are in is never
+rewound. The terminal UI moves to the new thread; the line mode prints its id
+and the `octant agent --thread` command that continues it. Work threads have
+neither forks nor checkpoints yet, and the terminal says so.
 
 ## Questions
 

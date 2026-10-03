@@ -663,6 +663,7 @@ export class ChatTurnRunner {
         input.resumeCursor !== undefined
           ? connection.resume({
               sessionId: input.attempt.providerSessionId,
+              modelId: input.attempt.modelId,
               resumeCursor: input.resumeCursor,
               executionPolicy: "approval-gated",
               tools: [

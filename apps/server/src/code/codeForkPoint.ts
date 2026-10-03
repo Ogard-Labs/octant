@@ -1,4 +1,37 @@
-import type { CodeCheckpoint, CodeConversationTurn } from "@octant/contracts";
+import {
+  MAX_CODE_CONVERSATION_PAGE_SIZE,
+  type CodeCheckpoint,
+  type CodeConversationPage,
+  type CodeConversationTurn,
+  type CodeThreadId,
+} from "@octant/contracts";
+import type { ReadCodeConversationInput } from "./codeOperationEventStore";
+
+/** Conversation pages read for a fork; a longer history is refused rather than cut short. */
+const MAX_FORK_PAGES = 64;
+
+/**
+ * Every turn of a Code thread, oldest first, or undefined when the history is
+ * longer than a fork reads — a fork point past that would be placed wrongly.
+ */
+export function codeThreadTurns(
+  conversation: (input: ReadCodeConversationInput) => CodeConversationPage,
+  threadId: CodeThreadId,
+): ReadonlyArray<CodeConversationTurn> | undefined {
+  const turns: CodeConversationTurn[] = [];
+  let cursor = 0;
+  for (let page = 0; page < MAX_FORK_PAGES; page += 1) {
+    const listed = conversation({
+      threadId,
+      afterCursor: cursor,
+      limit: MAX_CODE_CONVERSATION_PAGE_SIZE,
+    });
+    turns.push(...listed.turns);
+    if (!listed.hasMore || listed.nextCursor <= cursor) return turns;
+    cursor = listed.nextCursor;
+  }
+  return undefined;
+}
 
 /**
  * Which recorded state a fork at `throughOperationId` starts from.

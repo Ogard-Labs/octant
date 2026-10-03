@@ -3345,7 +3345,7 @@ export class ChatService {
         !previousNative ||
         previous.resumeCursor === undefined ||
         String(previous.providerInstanceId) !== String(thread.providerInstanceId) ||
-        previous.modelId !== thread.modelId)
+        (previous.modelId !== thread.modelId && probe.capabilities.modelSwitch !== "supported"))
     ) {
       throw new ChatServiceError({
         category: "unavailable",

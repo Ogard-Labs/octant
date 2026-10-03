@@ -1,6 +1,7 @@
 import type { NativeHarnessSessionView, OctantMode } from "@octant/contracts";
 import {
   agentThreadPort,
+  attachAgentThread,
   isAgentSnapshotRunning,
   type AgentThreadPort,
   type AgentThreadSnapshot,
@@ -28,9 +29,17 @@ import {
   uploadAgentAttachment,
   type AgentModelChoice,
 } from "./agentHost";
+import {
+  forkAgentThread,
+  listAgentCheckpoints,
+  markAgentCheckpoint,
+  restoreAgentCheckpoint,
+  type AgentBranchResult,
+} from "./agentBranches";
 import { AgentWake, followAgentThread } from "./agentLiveFeed";
 import { notifyDesktop } from "./agentNotify";
 import {
+  defaultCheckpointLabel,
   describeAgentGoal,
   paletteFor,
   statusLineFrom,
@@ -620,6 +629,7 @@ class AgentScreen {
           "/next N      take a suggested follow-up    /pause /resume /model /threads /open N /quit",
           "/side text   ask Side Chat, which only reads  /back  return to the thread",
           "/steer text  note for the lead's next step    /goal · /goal revise text",
+          "/fork        fork at the last reply           /checkpoint · /checkpoints · /restore N",
           "drag + Ctrl+C  copy selected text           /copy   copy the last reply",
           "y · a · n    answer an approval            1..9 or text  answer a question",
         ].join("\n"),
@@ -1037,6 +1047,16 @@ class AgentScreen {
       await this.#goal(text.slice("/goal".length).trim());
       return;
     }
+    if (
+      text === "/fork" ||
+      text === "/checkpoints" ||
+      text === "/checkpoint" ||
+      text.startsWith("/checkpoint ") ||
+      text.startsWith("/restore")
+    ) {
+      await this.#branch(text);
+      return;
+    }
     if (text.startsWith("/steer ")) {
       await this.#steer(text.slice("/steer".length).trim());
       return;
@@ -1149,6 +1169,90 @@ class AgentScreen {
     const sent = await this.#port.send(question);
     if (sent.kind === "refused") this.#note = sent.message;
     await this.refresh();
+  }
+
+  /**
+   * Forks and checkpoints. A fork or restore is a new thread, and the screen
+   * moves to it; the thread it came from keeps every turn and file it had.
+   */
+  async #branch(text: string): Promise<void> {
+    const snapshot = this.#thread;
+    if (this.#home !== undefined || snapshot === undefined) {
+      this.#note =
+        this.#home !== undefined
+          ? "Side Chat only reads; /back first."
+          : "The thread could not be read.";
+      this.#draw();
+      return;
+    }
+    const open = async (result: AgentBranchResult, what: string) => {
+      if (result.kind === "refused") {
+        this.#note = result.message;
+        this.#draw();
+        return;
+      }
+      // A Code thread acts only through a window that has it open.
+      if (result.mode === "code") {
+        const attached = await attachAgentThread(this.#input.session, {
+          threadId: result.threadId,
+          mode: "code",
+        });
+        if (attached.kind !== "attached") {
+          this.#note = `Created ${what} ${result.threadId}, but it could not be opened here: ${
+            attached.kind === "refused" ? attached.message : "not found"
+          }`;
+          this.#draw();
+          return;
+        }
+      }
+      await this.#switchThread(result.threadId, result.mode);
+      this.#note = `Now on the ${what}. The thread it came from is unchanged.`;
+      this.#draw();
+    };
+    if (text === "/fork") {
+      await open(await forkAgentThread(this.#input.session, snapshot), "fork");
+      return;
+    }
+    if (text === "/checkpoint" || text.startsWith("/checkpoint ")) {
+      const label = text.slice("/checkpoint".length).trim() || defaultCheckpointLabel();
+      const marked = await markAgentCheckpoint(this.#input.session, snapshot, label);
+      this.#note =
+        marked.kind === "refused"
+          ? marked.message
+          : `Marked checkpoint "${marked.checkpoint.label}".`;
+      this.#draw();
+      return;
+    }
+    const listed = await listAgentCheckpoints(this.#input.session, this.#threadId);
+    if (listed.kind === "refused") {
+      this.#note = listed.message;
+      this.#draw();
+      return;
+    }
+    if (text === "/checkpoints") {
+      this.#note =
+        listed.checkpoints.length === 0
+          ? "No checkpoints yet. /checkpoint marks the last reply."
+          : listed.checkpoints
+              .map((checkpoint, index) => `${index + 1}. ${checkpoint.label}`)
+              .join("   ");
+      this.#draw();
+      return;
+    }
+    const picked = listed.checkpoints[Number(text.slice("/restore".length).trim()) - 1];
+    if (picked === undefined) {
+      this.#note = "Pick a checkpoint by number from /checkpoints: /restore 1";
+      this.#draw();
+      return;
+    }
+    await open(
+      await restoreAgentCheckpoint(
+        this.#input.session,
+        picked,
+        `${snapshot.title} (${picked.label})`,
+      ),
+      "restored thread",
+    );
   }
 
   /** Shows the goal, or revises its objective against the version just read. */

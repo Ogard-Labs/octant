@@ -179,6 +179,7 @@ const availableCapabilities: ProviderCapabilities = {
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
   harnessAutoReview: "supported",
+  modelSwitch: "supported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
 };
@@ -1701,7 +1702,10 @@ function makeConnection(
           return open(
             {
               sessionId: input.sessionId,
-              modelId: identity.modelId,
+              // The SDK resumes a session under whichever model it is given,
+              // and opening re-records the identity with that model, so a
+              // thread switched to another model carries its conversation on.
+              modelId: input.modelId ?? identity.modelId,
               executionPolicy: input.executionPolicy,
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(input.modelOptionValues === undefined
