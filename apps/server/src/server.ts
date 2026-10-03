@@ -365,11 +365,17 @@ import {
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
 import { AgentRunDependencyScheduler } from "./agentRun/agentRunDependencyScheduler";
 import { AgentResultDeliveryService } from "./agentRun/agentResultDeliveryService";
-import { agentResultDeliveryPrompt } from "./agentRun/agentResultDeliveryPrompt";
+import { agentResultDeliveryBatchPrompt } from "./agentRun/agentResultDeliveryPrompt";
 import { createAgentMessageRouteHandler } from "./agentMessage/agentMessageRoutes";
 import { createAgentRunForestCanvasSnapshot } from "./agentRun/agentRunCanvasSnapshot";
 import { createAgentRunRouteHandler } from "./agentRun/agentRunRoutes";
 import type { AgentRunControlAdmissionDependencies } from "./agentRun/agentRunControlAdmission";
+import {
+  admittedParentWorkContext,
+  admittedParentCodeContext,
+} from "./agentRun/agentRunParentContext";
+import { agentResultDeliveryMembers } from "./agentRun/agentResultDeliveryBatch";
+import { NATIVE_HARNESS_BUILT_IN_SLOTS, type AgentRunResultDeliveryMark } from "@octant/contracts";
 import { createAgentsManagedTools } from "./agentRun/agentRunManagedTools";
 import {
   createAgentRunChildWorktreePort,
@@ -2335,27 +2341,84 @@ export function startOctantServer(
         (threadId) => resolveAgentRunParentCheckout(persistence, managedWorktreeReceipts, threadId),
         (parent) => resolveAgentRunPrepareCode(persistence, managedWorktreeReceipts, parent),
       ),
-      // A child that asked to be admitted with its parent's context is given
-      // the parent thread's own recent conversation, read through the very
-      // Chat view that thread already shows. `authorizeCreation` above has
-      // already proved this window may create children from that thread, so
-      // this widens nothing. Code parent conversations have no transcript read
-      // port on this host yet, so such a request fails the creation closed
-      // rather than admitting a child with an empty selection.
-      // `chatService` is declared below; this closure only runs per request.
       parentContext: {
         resolve: ({ parentThreadId, mode }) => {
-          if (mode !== "chat") return undefined;
           try {
-            return admittedParentChatContext(
-              chatService.read(decodeChatThreadId(String(parentThreadId))),
-            );
+            if (mode === "chat")
+              return admittedParentChatContext(
+                chatService.read(decodeChatThreadId(String(parentThreadId))),
+              );
+            const externalContentIngested = readThreadExternalContentTaint(
+              persistence.connection,
+              String(parentThreadId),
+            ).externalContentIngested;
+            const selection =
+              mode === "work"
+                ? admittedParentWorkContext({
+                    threadId: decodeWorkThreadId(String(parentThreadId)),
+                    externalContentIngested,
+                    readThread: (id) => workThreadProjection.read(id),
+                    readTurns: (id) => workTurnProjection.listForThread(id),
+                  })
+                : admittedParentCodeContext({
+                    threadId: decodeCodeThreadId(String(parentThreadId)),
+                    externalContentIngested,
+                    readThread: (id) => persistence.readCodeThread(id),
+                    readActivity: (id) =>
+                      persistence
+                        .readCodeThreadActivity()
+                        .find((activity) => String(activity.threadId) === String(id)),
+                    conversation: (input) => codeBoardEventStore.conversation(input),
+                    readEvidence: (reference) => codeEvidence.read(reference),
+                  });
+            return selection.status === "available" ? selection.blocks : undefined;
           } catch {
             return undefined;
           }
         },
       },
       uuid: randomUUID,
+    };
+    const agentRunEligibleTargets = (projectId: ProjectId | undefined) => {
+      // A Code Project's provider policy binds delegate targets too: the
+      // same list the tool advertises is the one explicit targets are
+      // revalidated against, so filtering here guards both.
+      const project = projectId === undefined ? undefined : persistence.readProject(projectId);
+      return persistence.readProviderInstances().flatMap((instance) => {
+        if (!instance.enabled) return [];
+        const observed = providerRuntimeRegistry.observedState(instance.id);
+        if (observed?.readiness !== "ready") return [];
+        const models =
+          project === undefined || project.type !== "code"
+            ? observed.models
+            : observed.models.filter((model) =>
+                isCodeProviderModelAllowed({
+                  projectId: project.id,
+                  providerInstanceId: instance.id,
+                  modelId: model.id,
+                }),
+              );
+        if (models.length === 0) return [];
+        return [
+          {
+            providerInstanceId: String(instance.id),
+            displayName: instance.displayName,
+            driverKind: String(instance.driverKind),
+            modelIds: models.map((model) => String(model.id)),
+            reasoningByModel: Object.fromEntries(
+              models.map((model) => [
+                String(model.id),
+                model.options.flatMap((option) =>
+                  option.kind === "selection" &&
+                  (option.id === "reasoning" || option.id === "effort")
+                    ? option.values
+                    : [],
+                ),
+              ]),
+            ),
+          },
+        ];
+      });
     };
     // Every turn's `octant_agents` tool set binds to the calling thread: the
     // delegation and the cancellation authority it petitions are the same ones
@@ -2373,36 +2436,37 @@ export function startOctantServer(
         mode: input.mode,
         windowId: input.windowId,
         parentThreadId: input.parentThreadId,
-        listTargets: () => {
-          // A Code Project's provider policy binds delegate targets too: the
-          // same list the tool advertises is the one explicit targets are
-          // revalidated against, so filtering here guards both.
-          const project =
-            input.projectId === undefined ? undefined : persistence.readProject(input.projectId);
-          return persistence.readProviderInstances().flatMap((instance) => {
-            if (!instance.enabled) return [];
-            const observed = providerRuntimeRegistry.observedState(instance.id);
-            if (observed?.readiness !== "ready") return [];
-            const models =
-              project === undefined || project.type !== "code"
-                ? observed.models
-                : observed.models.filter((model) =>
-                    isCodeProviderModelAllowed({
-                      projectId: project.id,
-                      providerInstanceId: instance.id,
-                      modelId: model.id,
-                    }),
-                  );
-            if (models.length === 0) return [];
-            return [
-              {
-                providerInstanceId: String(instance.id),
-                displayName: instance.displayName,
-                driverKind: String(instance.driverKind),
-                modelIds: models.map((model) => String(model.id)),
+        listTargets: () => agentRunEligibleTargets(input.projectId),
+        routing: {
+          router: { resolve: (request) => nativeHarnessRouterLive.resolve(request) },
+          recordDecision: (parent, decision) => {
+            nativeHarnessSessionsLive.ensure({
+              threadId: input.parentThreadId,
+              mode: parent.parentMode,
+              projectId:
+                parent.parentRoute.projectId === undefined
+                  ? undefined
+                  : decodeProjectId(parent.parentRoute.projectId),
+              leadSlotId: NATIVE_HARNESS_BUILT_IN_SLOTS.default,
+              lead: {
+                hostId: LOCAL_HOST_ID,
+                providerInstanceId: parent.parentRoute.providerInstanceId,
+                modelId: parent.parentRoute.modelId,
+                ...(parent.parentRoute.reasoning === undefined
+                  ? {}
+                  : { reasoning: parent.parentRoute.reasoning }),
               },
-            ];
-          });
+            });
+            nativeHarnessSessionsLive.recordRouteDecision(input.parentThreadId, decision);
+          },
+        },
+        isPaused: () => {
+          const status = nativeHarnessSessionsLive.read(input.parentThreadId)?.session.status;
+          return (
+            status === "paused-by-user" ||
+            status === "paused-by-advisor" ||
+            status === "recovery-required"
+          );
         },
         isTainted: () =>
           readThreadExternalContentTaint(persistence.connection, input.parentThreadId)
@@ -5714,6 +5778,10 @@ export function startOctantServer(
             admission: agentRunAdmission,
             orchestration: agentRunOrchestration,
             persistence: agentRunPersistence,
+            listTargets: () => agentRunEligibleTargets(scope.projectId),
+            isTainted: () =>
+              readThreadExternalContentTaint(persistence.connection, scope.parentThreadId)
+                .externalContentIngested,
             router: nativeHarnessRouterLive,
             sessions: nativeHarnessSessionsLive,
             uuid: randomUUID,
@@ -7126,7 +7194,12 @@ export function startOctantServer(
           readRun: (runId) => agentRunPersistence.getById(runId),
           liveAuthority: agentRunParentAuthority,
           resume: (runId, expectedVersion, liveAuthority) =>
-            agentRunOrchestration.resume(runId, expectedVersion, liveAuthority),
+            agentRunOrchestration.resume(runId, expectedVersion, liveAuthority, {
+              resolveLiveAuthority: () => {
+                const run = agentRunPersistence.getById(runId);
+                return run === undefined ? undefined : agentRunParentAuthority(run);
+              },
+            }),
           applySettled: (settled) => agentRunPersistence.applyUsageResumeSettled(settled),
         },
       }),
@@ -7148,6 +7221,17 @@ export function startOctantServer(
     // its result. The service watches committed appends and dispatches through
     // each mode's ordinary turn admission — the mark on that turn is what
     // keeps a replayed delivery from minting a second one.
+    const deliveredAgentResultMark = (mark: AgentRunResultDeliveryMark | undefined) =>
+      mark === undefined
+        ? {
+            kind: "refused" as const,
+            detail: "The parent did not journal a child-result delivery mark.",
+          }
+        : {
+            kind: "dispatched" as const,
+            runIds: agentResultDeliveryMembers(mark).map((member) => member.runId),
+            runGenerations: agentResultDeliveryMembers(mark),
+          };
     const agentResultDeliveryService = new AgentResultDeliveryService({
       journal: persistence.journal,
       agentRuns: agentRunPersistence,
@@ -7158,7 +7242,19 @@ export function startOctantServer(
             persistence.readChatThread(decodeChatThreadId(String(run.parentThreadId))) === undefined
               ? { kind: "invalid", detail: "The parent Chat thread is gone." }
               : { kind: "ready" },
-          dispatch: async (run) => {
+          dispatch: async (runs) => {
+            const run = runs[0];
+            if (run === undefined)
+              return { kind: "refused", detail: "No child results were supplied." };
+            const delivery = {
+              kind: "agent-result" as const,
+              runId: run.id,
+              runIds: runs.map((child) => child.id),
+              runGenerations: runs.map((child) => ({
+                runId: child.id,
+                generation: child.generation ?? 1,
+              })),
+            };
             const thread = persistence.readChatThread(
               decodeChatThreadId(String(run.parentThreadId)),
             );
@@ -7166,13 +7262,17 @@ export function startOctantServer(
               return { kind: "refused", detail: "The parent Chat thread is gone." };
             }
             try {
-              await chatService.execute({
+              const result = await chatService.execute({
                 kind: "deliver-chat-agent-result",
                 threadId: thread.id,
                 expectedVersion: thread.version,
-                runId: run.id,
+                runId: delivery.runId,
+                runIds: delivery.runIds,
+                runGenerations: delivery.runGenerations,
               });
-              return { kind: "dispatched" };
+              return deliveredAgentResultMark(
+                result.kind === "turn-created" ? result.turn.delivery : undefined,
+              );
             } catch (error) {
               if (error instanceof ChatServiceError && error.failure.category === "waiting") {
                 return { kind: "deferred", detail: "The parent Chat thread is mid-turn." };
@@ -7190,7 +7290,19 @@ export function startOctantServer(
             workThreadProjection.read(decodeWorkThreadId(String(run.parentThreadId))) === undefined
               ? { kind: "invalid", detail: "The parent Work thread is gone." }
               : { kind: "ready" },
-          dispatch: async (run) => {
+          dispatch: async (runs) => {
+            const run = runs[0];
+            if (run === undefined)
+              return { kind: "refused", detail: "No child results were supplied." };
+            const delivery = {
+              kind: "agent-result" as const,
+              runId: run.id,
+              runIds: runs.map((child) => child.id),
+              runGenerations: runs.map((child) => ({
+                runId: child.id,
+                generation: child.generation ?? 1,
+              })),
+            };
             const windowId = firstRegisteredWindowId();
             if (windowId === undefined) {
               return { kind: "deferred", detail: "No local window is registered for this host." };
@@ -7207,7 +7319,9 @@ export function startOctantServer(
                 requestId: decodeWorkTurnRequestId(randomUUID()),
                 threadId: thread.id,
                 turnId: decodeWorkTurnId(randomUUID()),
-                prompt: agentResultDeliveryPrompt(run, agentRunPersistence.resultText(run.id)),
+                prompt: agentResultDeliveryBatchPrompt(runs, (id) =>
+                  agentRunPersistence.resultText(id),
+                ),
                 authority: {
                   hostId: LOCAL_HOST_ID,
                   projectId: thread.projectId,
@@ -7217,10 +7331,10 @@ export function startOctantServer(
                   providerInstanceId: thread.providerInstanceId,
                   modelId: thread.modelId,
                 },
-                delivery: { kind: "agent-result", runId: run.id },
+                delivery,
               });
               return result.kind === "accepted"
-                ? { kind: "dispatched" }
+                ? deliveredAgentResultMark(result.turn.delivery)
                 : {
                     kind: "refused",
                     detail:
@@ -7245,7 +7359,19 @@ export function startOctantServer(
             persistence.readCodeThread(decodeCodeThreadId(String(run.parentThreadId))) === undefined
               ? { kind: "invalid", detail: "The parent Code thread is gone." }
               : { kind: "ready" },
-          dispatch: async (run) => {
+          dispatch: async (runs) => {
+            const run = runs[0];
+            if (run === undefined)
+              return { kind: "refused", detail: "No child results were supplied." };
+            const delivery = {
+              kind: "agent-result" as const,
+              runId: run.id,
+              runIds: runs.map((child) => child.id),
+              runGenerations: runs.map((child) => ({
+                runId: child.id,
+                generation: child.generation ?? 1,
+              })),
+            };
             const windowId = firstRegisteredWindowId();
             if (windowId === undefined) {
               return { kind: "deferred", detail: "No local window is registered for this host." };
@@ -7264,7 +7390,7 @@ export function startOctantServer(
               const prompt = await routeCodeService.stageEvidence(
                 windowId,
                 thread.id,
-                agentResultDeliveryPrompt(run, agentRunPersistence.resultText(run.id)),
+                agentResultDeliveryBatchPrompt(runs, (id) => agentRunPersistence.resultText(id)),
               );
               const result = await routeCodeService.executeOperation(windowId, {
                 kind: "start-provider-turn",
@@ -7273,13 +7399,13 @@ export function startOctantServer(
                 checkoutId: thread.checkoutId,
                 sessionId: decodeProviderSessionId(randomUUID()),
                 prompt,
-                delivery: { kind: "agent-result", runId: run.id },
+                delivery,
               });
               return result.kind === "provider-turn-state" &&
                 (result.state === "running" ||
                   result.state === "waiting" ||
                   result.state === "completed")
-                ? { kind: "dispatched" }
+                ? deliveredAgentResultMark(result.delivery)
                 : {
                     kind: "refused",
                     detail:

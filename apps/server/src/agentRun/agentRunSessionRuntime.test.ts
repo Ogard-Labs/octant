@@ -1406,6 +1406,11 @@ describe("durable child provider identity", () => {
         onSessionStarted,
       }),
     );
+    expect(await second.checkResume?.({ ...run, lifecycleStatus: "completed" })).toMatchObject({
+      status: "refused",
+    });
+    expect(store.sessions.read(run)).toEqual(saved);
+    expect(nextProvider.acquired).toEqual([]);
     const handle = second.resume?.(run);
     if (handle === undefined) throw new Error("expected resume handle");
     expect(await settled(handle)).toMatchObject({
@@ -1418,7 +1423,7 @@ describe("durable child provider identity", () => {
     if (saved === undefined) throw new Error("Expected saved Code session");
     const { workspaceIdentity: _, ...legacyRecord } = saved;
     store.sessions.write(run, legacyRecord);
-    expect(second.checkResume?.(run)).toMatchObject({ status: "refused" });
+    expect(await second.checkResume?.(run)).toMatchObject({ status: "refused" });
     expect(nextProvider.acquired).toEqual([]);
     connection.close();
   });
@@ -1468,10 +1473,10 @@ describe("durable child provider identity", () => {
           verifyCodeWorkspace: async () => ({ status: "verified", identity: "original-directory" }),
         }),
       );
-      expect(second.checkResume?.({ ...run, lifecycleStatus: "completed" })).toEqual({
+      expect(await second.checkResume?.({ ...run, lifecycleStatus: "completed" })).toEqual({
         status: "ready",
       });
-      expect(second.checkResume?.({ ...run, lifecycleStatus: "cancelled" })).toMatchObject({
+      expect(await second.checkResume?.({ ...run, lifecycleStatus: "cancelled" })).toMatchObject({
         status: "refused",
       });
       expect(provider.acquired).toHaveLength(1);
@@ -1498,12 +1503,14 @@ describe("durable child provider identity", () => {
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(provider, { supportsResume: () => true }),
     );
-    expect(runtime.checkResume?.({ ...agentRun(), lifecycleStatus: "completed" })).toMatchObject({
+    expect(
+      await runtime.checkResume?.({ ...agentRun(), lifecycleStatus: "completed" }),
+    ).toMatchObject({
       status: "refused",
       message:
         "The child has no compatible saved provider conversation. Start a new delegation from the parent.",
     });
-    expect(runtime.checkResume?.(agentRun())).toMatchObject({ status: "refused" });
+    expect(await runtime.checkResume?.(agentRun())).toMatchObject({ status: "refused" });
     expect(() => runtime.resume?.(agentRun())).toThrow("Retry");
     expect(provider.acquired).toEqual([]);
   });
