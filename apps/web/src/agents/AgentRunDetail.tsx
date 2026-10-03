@@ -5,6 +5,7 @@ import { relativeTimeLabel } from "../lib/relativeTime";
 import { Markdown } from "../markdown/Markdown";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { FollowUpControl } from "./FollowUpControl";
 import type { AgentHierarchyRow } from "./buildAgentHierarchyModel";
 import {
   SubagentStatusIcon,
@@ -37,6 +38,11 @@ export function AgentRunDetail(props: {
   readonly onSteer?: (input: { runId: string; version: number; message: string }) => void;
   readonly onRetry?: RunCommand;
   readonly onResume?: RunCommand;
+  readonly onFollowUp?: (input: {
+    readonly runId: string;
+    readonly version: number;
+    readonly message: string;
+  }) => Promise<string | undefined>;
   /** Arms or withdraws the opt-in to resume a usage-limited run at reset. */
   readonly onUsageResume?: (input: {
     runId: string;
@@ -45,6 +51,7 @@ export function AgentRunDetail(props: {
   }) => void;
 }) {
   const row = props.row;
+  const followUp = props.onFollowUp;
   const status = row.lifecycleStatus;
   const command = { runId: row.runId, version: row.version };
   const canSteer = status === "running" || status === "waiting";
@@ -142,6 +149,14 @@ export function AgentRunDetail(props: {
           >
             Retry
           </OctantButton>
+        ) : null}
+        {status === "completed" &&
+        row.executionKind === "octant-managed" &&
+        followUp !== undefined ? (
+          <FollowUpControl
+            key={row.runId}
+            onFollowUp={(message) => followUp({ ...command, message })}
+          />
         ) : null}
         {canResume ? (
           <OctantButton

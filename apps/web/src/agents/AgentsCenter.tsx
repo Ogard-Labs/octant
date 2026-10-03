@@ -37,6 +37,7 @@ import {
   useAgentsCenterController,
   type AgentsCenterController,
 } from "./useAgentsCenterController";
+import { FollowUpControl } from "./FollowUpControl";
 import { AgentsCenterGraph } from "./AgentsCenterGraph";
 
 export interface AgentsCenterProps {
@@ -533,6 +534,17 @@ function AgentsCenterDetail(props: {
           >
             Retry
           </OctantButton>
+        ) : null}
+        {lifecycleStatus === "completed" && props.summary.executionKind === "octant-managed" ? (
+          <FollowUpControl
+            onFollowUp={(message) =>
+              props.controls.resume({
+                runId: String(props.summary.runId),
+                version: props.summary.version,
+                message,
+              })
+            }
+          />
         ) : null}
         {canResume ? (
           <OctantButton
