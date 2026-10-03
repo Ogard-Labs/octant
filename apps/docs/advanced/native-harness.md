@@ -106,15 +106,15 @@ is an ordered list of models: the first is used; the rest are fallbacks when
 the first is rate-limited, down, or timing out. Jobs the harness performs map
 onto slots:
 
-| Job                           | Default slot |
-| ----------------------------- | ------------ |
-| Lead, Implementer, Custom     | `default`    |
-| Planner                       | `plan`       |
-| Explorer, Researcher          | `task`       |
-| Reviewer                      | `slow`       |
-| Titles, summaries, compaction | `smol`       |
-| Image understanding           | `vision`     |
-| Advisor                       | `advisor`    |
+| Job                           | Default slot | Named in Settings  |
+| ----------------------------- | ------------ | ------------------ |
+| Lead, Implementer, Custom     | `default`    | Main model         |
+| Planner                       | `plan`       | Planning           |
+| Explorer, Researcher          | `task`       | Research and tasks |
+| Reviewer                      | `slow`       | Careful review     |
+| Titles, summaries, compaction | `smol`       | Quick jobs         |
+| Image understanding           | `vision`     | Images             |
+| Advisor                       | `advisor`    | Advisor            |
 
 A Project may override the host's table. A job whose slot is not configured
 runs on `default` and the session says so. Every routing decision — the

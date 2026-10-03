@@ -310,6 +310,17 @@ describe("ComposerModelPicker", () => {
     expect(await screen.findByText("Degraded")).toBeVisible();
   });
 
+  it("names a model, not the provider, while no model has been chosen yet", () => {
+    render(<ComposerModelPicker groups={groups()} onSelect={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Provider and model" })).toHaveTextContent(
+      "Model One",
+    );
+    expect(screen.getByRole("button", { name: "Provider and model" })).not.toHaveTextContent(
+      "Local OpenCode",
+    );
+  });
+
   it("offers Settings when no providers are ready", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();

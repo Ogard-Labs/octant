@@ -788,8 +788,8 @@ Composer-row selects drop the same field chrome. Feature CSS must not
 repaint those controls a third time. Select lists open beside their trigger
 without covering it with the selected item. The model picker anchors to the
 trigger's trailing edge, keeps its dimensions stable while filtering, and
-scrolls its model list internally. Its catalog filters stay on one line that
-scrolls sideways, and its level slider draws the whole track in ink, with the
+scrolls its model list internally. Its catalog filters wrap onto short rows so
+every catalog is visible (past three rows the block scrolls), and its level slider draws the whole track in ink, with the
 reading above it and both ends named below. Popovers, menus, dialogs, and hover cards use
 the floating surface and the overlay shadow, and have exactly one 1px hairline
 edge: the overlay shadow carries it for menus and popovers, and the shared

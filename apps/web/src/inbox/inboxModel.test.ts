@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { decodeProjectId } from "@octant/contracts/projects";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
-import { assignedWorkSeenKey, buildInboxAttentionItems, inboxThreadProjectId } from "./inboxModel";
+import {
+  assignedWorkSeenKey,
+  buildInboxAttentionItems,
+  inboxAttentionMeta,
+  inboxThreadProjectId,
+} from "./inboxModel";
 
 const signal = (overrides: Partial<ThreadAttentionSignal>): ThreadAttentionSignal => ({
   threadId: "thread-a",
@@ -20,6 +25,7 @@ describe("buildInboxAttentionItems", () => {
         signal({ threadId: "t3", reason: "question-asked", title: "Asking" }),
       ],
       new Map([["p1", "Octant"]]),
+      "code",
     );
     expect(items.map((item) => item.signal.reason)).toEqual([
       "approval-required",
@@ -37,8 +43,44 @@ describe("buildInboxAttentionItems", () => {
         signal({ threadId: "t1", reason: "question-asked" }),
       ],
       new Map(),
+      "code",
     );
     expect(items).toHaveLength(1);
+  });
+
+  it("says where a thread from the other mode lives, and stays quiet for the current mode", () => {
+    const signals = [
+      signal({ threadId: "c1", source: "code", projectId: "code-project", title: "Code thread" }),
+      signal({ threadId: "w1", source: "work", projectId: "work-project", title: "Work thread" }),
+      signal({ threadId: "h1", source: "chat", projectId: "chat-project", title: "Chat thread" }),
+    ];
+    const projectNames = new Map([
+      ["code-project", "Octant"],
+      ["work-project", "Notes"],
+      ["chat-project", "Ideas"],
+    ]);
+    const meta = (currentMode: "work" | "code") =>
+      buildInboxAttentionItems(signals, projectNames, currentMode).map(
+        (item) => `${item.signal.title}: ${inboxAttentionMeta(item)}`,
+      );
+
+    expect(meta("work")).toEqual([
+      "Chat thread: Finished a turn · Ideas",
+      "Code thread: Finished a turn · Octant · Code",
+      "Work thread: Finished a turn · Notes",
+    ]);
+    expect(meta("code")).toEqual([
+      "Chat thread: Finished a turn · Ideas · Work",
+      "Code thread: Finished a turn · Octant",
+      "Work thread: Finished a turn · Notes · Work",
+    ]);
+  });
+
+  it("still names the mode of a thread whose Project is not known", () => {
+    const [item] = buildInboxAttentionItems([signal({ source: "code" })], new Map(), "work");
+    expect(item === undefined ? undefined : inboxAttentionMeta(item)).toBe(
+      "Finished a turn · Code",
+    );
   });
 });
 

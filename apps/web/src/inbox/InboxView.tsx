@@ -8,8 +8,8 @@ import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   ASSIGNED_WORK_CATEGORY_LABELS,
-  ATTENTION_REASON_LABELS,
   assignedWorkSeenKey,
+  inboxAttentionMeta,
   linearIssueSeenKey,
   type InboxAttentionItem,
 } from "./inboxModel";
@@ -184,10 +184,7 @@ export function InboxView(props: InboxViewProps) {
                 >
                   <span className="surface-row__copy">
                     <span className="oct-row-label">{item.signal.title}</span>
-                    <span className="oct-meta">
-                      {ATTENTION_REASON_LABELS[item.signal.reason]}
-                      {item.projectName === undefined ? "" : ` · ${item.projectName}`}
-                    </span>
+                    <span className="oct-meta">{inboxAttentionMeta(item)}</span>
                     {item.signal.detail === undefined ? null : (
                       <span className="oct-row-detail">{item.signal.detail}</span>
                     )}

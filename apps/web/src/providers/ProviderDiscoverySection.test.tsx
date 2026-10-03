@@ -72,7 +72,9 @@ describe("ProviderDiscoverySection", () => {
 
   it("shows scanning state", () => {
     render(<ProviderDiscoverySection {...defaultProps} snapshot={undefined} scanning />);
-    expect(screen.getByText("Scanning for installed runtimes…")).toBeDefined();
+    expect(
+      screen.getByText("Scanning for installed runtimes. This can take a few seconds."),
+    ).toBeDefined();
     expect(screen.getByText("Scanning…")).toBeDefined();
   });
 

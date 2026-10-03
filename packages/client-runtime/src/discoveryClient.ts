@@ -9,6 +9,8 @@ export interface DiscoveryClientOptions {
   readonly baseUrl: string;
   readonly fetch: typeof globalThis.fetch;
   readonly windowCapability: string;
+  /** How long a request may stay open before it fails as a timeout. */
+  readonly timeoutMs?: number;
 }
 
 export interface DiscoveryClient {
@@ -28,6 +30,7 @@ export class DiscoveryClientFailure extends Error {
 
 export function createDiscoveryClient(options: DiscoveryClientOptions): DiscoveryClient {
   const headers = { "x-octant-window-capability": options.windowCapability };
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   return {
     scan() {
       return request(
@@ -41,6 +44,7 @@ export function createDiscoveryClient(options: DiscoveryClientOptions): Discover
           }
           return result.snapshot;
         },
+        timeoutMs,
       );
     },
     connect(command) {
@@ -53,12 +57,54 @@ export function createDiscoveryClient(options: DiscoveryClientOptions): Discover
           body: JSON.stringify(command),
         },
         decodeDiscoveryCommandResult,
+        // No client-side limit: the host does not cancel a connect when the
+        // request is dropped, so timing out here would report a provider the
+        // host goes on to create as failed and invite a duplicate.
+        undefined,
       );
     },
   };
 }
 
+/**
+ * The host's own scan budget is 10 s and each probe is cut off at 5 s, so a
+ * request still open after this long means the host is wedged. Without a limit
+ * the Settings page kept saying "Scanning…" for as long as the socket stayed open.
+ */
+const REQUEST_TIMEOUT_MS = 45_000;
+
+/** Thrown by a read the timeout aborted, so only that read becomes a timeout. */
+const REQUEST_CUT_OFF: unique symbol = Symbol("discovery request cut off");
+
 async function request<T>(
+  fetch: typeof globalThis.fetch,
+  url: string,
+  init: RequestInit,
+  decode: (value: unknown) => T,
+  timeoutMs: number | undefined,
+): Promise<T> {
+  if (timeoutMs === undefined) return readResponse(fetch, url, init, decode);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await readResponse(fetch, url, { ...init, signal: controller.signal }, decode);
+  } catch (error) {
+    // Only a request the timer actually cut off is a timeout. A host error or
+    // undecodable body that merely finished after the deadline keeps its own
+    // category and message.
+    if (error === REQUEST_CUT_OFF) {
+      throw new DiscoveryClientFailure(
+        "timeout",
+        "The provider scan took too long to answer. Try again.",
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readResponse<T>(
   fetch: typeof globalThis.fetch,
   url: string,
   init: RequestInit,
@@ -68,12 +114,14 @@ async function request<T>(
   try {
     response = await fetch(url, init);
   } catch {
+    if (init.signal?.aborted === true) throw REQUEST_CUT_OFF;
     throw new DiscoveryClientFailure("unavailable", "Discovery service is unavailable.");
   }
   let body: unknown;
   try {
     body = await response.json();
   } catch {
+    if (init.signal?.aborted === true) throw REQUEST_CUT_OFF;
     throw new DiscoveryClientFailure("protocol", "Discovery service returned an invalid response.");
   }
   if (!response.ok) {

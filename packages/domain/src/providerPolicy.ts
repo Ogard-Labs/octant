@@ -156,6 +156,22 @@ export function isNativeHarnessDriverKind(
   );
 }
 
+/**
+ * Whether the provider keeps a thread's conversation in its own session, so a
+ * follow-up must resume that session rather than replay history the host
+ * holds. Mirrors each driver's `conversationOwnership`, which the server's
+ * driver factory test pins: Chat and Work refuse a follow-up that moves a
+ * thread between the two kinds, and a picker that offered the move led to that
+ * refusal.
+ */
+export function providerKeepsConversation(driverKind: ProviderDriverKind): boolean {
+  return !(
+    isNativeHarnessDriverKind(driverKind) ||
+    isImageProfileDriverKind(driverKind) ||
+    driverKind === "ollama"
+  );
+}
+
 function nextVersion(version: AggregateVersion): AggregateVersion {
   return (version + 1) as AggregateVersion;
 }

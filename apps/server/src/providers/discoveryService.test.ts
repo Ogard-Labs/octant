@@ -797,6 +797,67 @@ describe("discoveryService", () => {
     expect(snapshot.candidates.find((c) => c.driverKind === "opencode")).toBeDefined();
   });
 
+  it("probes different runtimes side by side so a slow one does not hold up the scan", async () => {
+    const fs = makeFakeFs(
+      new Map([
+        ["/usr/local/bin/codex", { file: true }],
+        ["/usr/local/bin/claude", { file: true }],
+      ]),
+    );
+    // Each version read waits until the other has started. One after the
+    // other, neither could ever start, so a serial scan times out here.
+    const started = new Set<string>();
+    let release: () => void = () => undefined;
+    const bothStarted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const exec: DiscoveryExecPort = async (file, args) => {
+      if (args.join(" ") === "--version") {
+        started.add(file);
+        if (started.size === 2) release();
+        await bothStarted;
+        return { stdout: "1.0.0\n", stderr: "" };
+      }
+      return { stdout: "Logged in", stderr: "" };
+    };
+    const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
+      exec,
+      fs,
+      environment: baseEnvironment,
+      now: () => 1753430400000,
+    });
+
+    const snapshot = await service.scan();
+    expect(snapshot.status).toBe("completed");
+    expect(snapshot.candidates.map((candidate) => candidate.driverKind).sort()).toEqual([
+      "claude",
+      "codex",
+    ]);
+  }, 2_000);
+
+  it("runs one scan for overlapping requests instead of one burst each", async () => {
+    const fs = makeFakeFs(new Map([["/usr/local/bin/codex", { file: true }]]));
+    let versionReads = 0;
+    const exec: DiscoveryExecPort = async (_file, args) => {
+      if (args.join(" ") === "--version") versionReads += 1;
+      return { stdout: args.join(" ") === "--version" ? "1.0.0\n" : "Logged in", stderr: "" };
+    };
+    const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
+      exec,
+      fs,
+      environment: baseEnvironment,
+      now: () => 1753430400000,
+    });
+
+    const [first, second] = await Promise.all([service.scan(), service.scan()]);
+    expect(second).toBe(first);
+    expect(versionReads).toBe(1);
+    await service.scan();
+    expect(versionReads).toBe(2);
+  });
+
   it("does not discover a runtime whose provider-driver plugin is not admitted", async () => {
     const fs = makeFakeFs(
       new Map([

@@ -149,6 +149,7 @@ import {
   enabledWorkKinds,
   readPreferredWorkKind,
   resolveWorkKind,
+  visibleModeOf,
   writePreferredWorkKind,
   type VisibleMode,
   type WorkKind,
@@ -1840,9 +1841,12 @@ function LaunchedShell(
     () =>
       buildInboxAttentionItems(
         attentionSignals,
-        new Map(projectController.projects.map((project) => [String(project.id), project.name])),
+        // Every mode's Projects: the Inbox lists threads from all of them, and
+        // the current mode's list alone left other modes' rows unnamed.
+        new Map(projectController.allProjects.map((project) => [String(project.id), project.name])),
+        visibleModeOf(activeMode),
       ),
-    [attentionSignals, projectController.projects],
+    [attentionSignals, projectController.allProjects, activeMode],
   );
   useEffect(() => {
     const target = props.hostBridge?.initialProjectTarget;
