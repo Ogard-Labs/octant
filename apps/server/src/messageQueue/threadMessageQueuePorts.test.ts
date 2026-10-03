@@ -1,7 +1,12 @@
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { Schema } from "effect";
+import { Effect, ManagedRuntime, Queue, Schema, Stream } from "effect";
 import {
   decodeChatThread,
+  decodeChatThreadView,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceReference,
   decodeCodeOperationResult,
@@ -12,13 +17,24 @@ import {
   decodeProject,
   decodeProviderInstance,
   decodeProviderModelId,
+  decodeProviderObservedState,
+  decodeProviderRuntimeEvent,
   decodeStartWorkThreadTurnCommand,
   decodeThreadQueueMessageId,
   decodeWindowId,
   decodeWorkThread,
   decodeWorkTurnState,
   type WorkTurnState,
+  type ProviderRuntimeEvent,
 } from "@octant/contracts";
+import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import { ChatService } from "../chat/chatService";
+import { ResearchRouter } from "../chat/research/researchRouter";
+import { ThreadWorkService } from "../chat/threadWorkService";
+import { ContextHarnessService } from "../context/contextHarnessService";
+import { makeProviderCapacityScheduler } from "../context/contextRuntime";
+import { CHAT_SETTINGS_AGGREGATE_ID } from "../persistence/chatProjection";
+import { makePersistenceLive, Persistence } from "../persistence/persistenceService";
 import {
   createThreadMessageQueuePort,
   type ThreadMessageQueuePortDependencies,
@@ -53,7 +69,21 @@ function setup() {
       readProviderInstance: () => undefined,
     },
     journal: { replayAggregate: () => [] },
-    chat: { execute: vi.fn(async () => undefined) },
+    chat: {
+      read: () =>
+        decodeChatThreadView({
+          thread: current,
+          turns: [],
+          contents: [],
+          attachments: [],
+          citations: [],
+          workItems: [],
+          workListVersion: 0,
+          followUpVersion: 0,
+          lastSequence: 0,
+        }),
+      execute: vi.fn(async () => undefined),
+    },
     work: { readThread: () => undefined, listTurns: () => [], startFirstTurn: vi.fn() },
     code: {},
     isModeEnabled: () => true,
@@ -75,6 +105,192 @@ function setup() {
 }
 
 describe("queued turn admission", () => {
+  it("dispatches the next Chat message after turn events advance the journal beyond the thread projection", async () => {
+    const dataDirectory = mkdtempSync(join(tmpdir(), "octant-queue-version-"));
+    const runtime = ManagedRuntime.make(makePersistenceLive({ dataDirectory }));
+    try {
+      const persistence = await runtime.runPromise(Persistence);
+      const now = thread.createdAt;
+      const clock = () => now;
+      const probe = decodeProviderObservedState({
+        instanceId: thread.providerInstanceId,
+        readiness: "ready",
+        processState: "running",
+        observedAt: now,
+        models: [
+          {
+            id: thread.modelId,
+            displayName: "Queue fixture",
+            contextLimit: 8_000,
+            reasoning: "unsupported",
+            inputModalities: ["text"],
+            options: [],
+            source: "discovered",
+            verification: "verified",
+          },
+        ],
+        capabilities: {
+          streaming: "supported",
+          resume: "unsupported",
+          interruption: "supported",
+          approvals: "unsupported",
+          userQuestions: "unsupported",
+          reasoning: "unsupported",
+          usage: "unsupported",
+          toolActivity: "unsupported",
+          fileChanges: "unsupported",
+          diffs: "unsupported",
+          taskProgress: "unsupported",
+          nativeChildAgents: "unsupported",
+          harnessAutoReview: "unsupported",
+          nativeAttachments: "unsupported",
+          nativeWebResearch: "unsupported",
+          appManagedTools: "unsupported",
+          citations: "unsupported",
+        },
+      });
+      const driver: ProviderDriver = {
+        kind: "openai-compatible",
+        probe: () => Effect.succeed(probe),
+        acquire: () =>
+          Effect.gen(function* () {
+            const events = yield* Queue.unbounded<ProviderRuntimeEvent>();
+            return {
+              subscribe: Effect.succeed(Stream.fromQueue(events)),
+              start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+              resume: (input) => Effect.succeed({ sessionId: input.sessionId }),
+              send: (input) =>
+                Effect.gen(function* () {
+                  const common = {
+                    instanceId: probe.instanceId,
+                    sessionId: input.sessionId,
+                    correlationId: randomUUID(),
+                    occurredAt: now,
+                  };
+                  yield* Queue.offer(
+                    events,
+                    decodeProviderRuntimeEvent({
+                      ...common,
+                      sequence: 1,
+                      kind: "text-delta",
+                      text: "Fixture reply",
+                    }),
+                  );
+                  yield* Queue.offer(
+                    events,
+                    decodeProviderRuntimeEvent({
+                      ...common,
+                      sequence: 2,
+                      kind: "completed",
+                    }),
+                  );
+                }),
+              interrupt: () => Effect.void,
+              stop: () => Effect.void,
+              answerApproval: () => Effect.void,
+              answerUserInput: () => Effect.void,
+              answerTool: () => Effect.void,
+            };
+          }),
+      };
+      persistence.journal.append({
+        aggregate: { aggregateType: "chat-settings", aggregateId: CHAT_SETTINGS_AGGREGATE_ID },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: randomUUID(),
+            eventName: "chat.settings-updated@1",
+            eventVersion: 1,
+            correlationId: randomUUID(),
+            actor: { kind: "system", actorId: windowId },
+            occurredAt: now,
+            payload: {
+              kind: "settings-updated",
+              settings: {
+                defaultProviderInstanceId: thread.providerInstanceId,
+                defaultModelId: thread.modelId,
+                defaultResearchEnabled: false,
+                defaultResearchRouting: "automatic",
+                defaultPersonalityInstructions: "Be concise.",
+                version: 1,
+                updatedAt: now,
+              },
+            },
+          },
+        ],
+      });
+      const options = { persistence, uuid: randomUUID, clock };
+      const chat = new ChatService({
+        ...options,
+        dataDirectory,
+        driver: () => driver,
+        contextHarness: new ContextHarnessService(options),
+        threadWork: new ThreadWorkService(options),
+        capacityScheduler: makeProviderCapacityScheduler({
+          now: () => Date.parse(now),
+          random: () => 0.5,
+          maxRetryJitterMs: 0,
+          ambiguousReservationTtlMs: 60_000,
+        }),
+        researchRouter: new ResearchRouter({
+          searxngClient: { search: async () => ({ query: "", backend: "searxng", results: [] }) },
+        }),
+        turnTimeoutMs: 5_000,
+      });
+      const created = await chat.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Queue version",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected a Chat thread.");
+      await chat.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "First message",
+      });
+      const completed = chat.read(created.thread.id);
+      expect(completed.turns[0]?.attempts.at(-1)?.outcome).toBe("completed");
+      expect(persistence.readChatThread(created.thread.id)?.version).toBeLessThan(
+        completed.thread.version,
+      );
+      const { deps } = setup();
+      const port = createThreadMessageQueuePort({
+        ...deps,
+        persistence,
+        journal: persistence.journal,
+        chat,
+      });
+      const scope = {
+        mode: "chat",
+        threadId: decodeMentionableThreadId(created.thread.id),
+      } as const;
+      const inspection = await port.inspect({ scope, windowId, intent: "enqueue" });
+      if (inspection.status === "held") throw new Error("Expected an admitted scope.");
+      const messageId = decodeThreadQueueMessageId(randomUUID());
+      expect(
+        await port.admit({
+          scope,
+          windowId,
+          messageId,
+          binding: inspection.binding,
+          payload: { mode: "chat", prompt: "Queued follow-up" },
+          signal: new AbortController().signal,
+        }),
+      ).toEqual({ status: "accepted" });
+      await expect
+        .poll(() => port.reconcile({ scope, messageId }))
+        .toEqual({ status: "completed" });
+      expect(chat.read(created.thread.id).turns).toMatchObject([
+        { sequence: 1 },
+        { sequence: 2, submissionId: messageId },
+      ]);
+    } finally {
+      await runtime.dispose();
+      rmSync(dataDirectory, { recursive: true, force: true });
+    }
+  });
+
   it.each(["work", "code"] as const)(
     "starts queued %s messages through ordinary admission with the recorded identity",
     async (mode) => {
@@ -357,7 +573,7 @@ describe("queued turn admission", () => {
         return new Promise(() => undefined);
       },
     );
-    const port = createThreadMessageQueuePort({ ...deps, chat: { execute } });
+    const port = createThreadMessageQueuePort({ ...deps, chat: { ...deps.chat, execute } });
     const scope = { mode: "chat", threadId } as const;
     const inspection = await port.inspect({ scope, windowId, intent: "enqueue" });
     if (inspection.status === "held") throw new Error("Expected an admitted scope.");
@@ -394,7 +610,7 @@ describe("queued turn admission", () => {
     const execute = vi.fn(deps.chat.execute);
     const port = createThreadMessageQueuePort({
       ...deps,
-      chat: { execute },
+      chat: { ...deps.chat, execute },
       isWindowLive: () => live,
       attachments: {
         ...deps.attachments,

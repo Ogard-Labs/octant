@@ -16,7 +16,7 @@ import {
   type WorkTurnState,
 } from "@octant/contracts";
 import { activeChatTurns } from "@octant/domain";
-import type { ChatServiceExecutionContext } from "../chat/chatService";
+import type { ChatService, ChatServiceExecutionContext } from "../chat/chatService";
 import type { CodeRouteService } from "../codeRoutes";
 import type { Journal } from "../persistence/journal";
 import type { PersistenceService } from "../persistence/persistenceService";
@@ -42,6 +42,7 @@ export interface ThreadMessageQueuePortDependencies {
   >;
   readonly journal: Pick<Journal, "replayAggregate">;
   readonly chat: {
+    readonly read: ChatService["read"];
     readonly execute: (command: unknown, context?: ChatServiceExecutionContext) => Promise<unknown>;
   };
   readonly work: {
@@ -339,8 +340,7 @@ export function createThreadMessageQueuePort(
       try {
         const { mode: _mode, ...message } = input.payload;
         if (input.scope.mode === "chat") {
-          const thread = deps.persistence.readChatThread(decodeChatThreadId(input.scope.threadId));
-          if (thread === undefined) return { status: "refused", reason: "thread-unavailable" };
+          const { thread } = deps.chat.read(decodeChatThreadId(input.scope.threadId));
           return await new Promise((resolve) => {
             deps.chat
               .execute(
