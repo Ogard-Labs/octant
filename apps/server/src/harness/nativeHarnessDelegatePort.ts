@@ -10,6 +10,7 @@ import {
 import { type AgentRunControlAdmissionDependencies } from "../agentRun/agentRunControlAdmission";
 import {
   agentRunDelegationCapabilities,
+  followUpAgentRunDelegation,
   startAgentRunDelegation,
   type AgentsToolTarget,
 } from "../agentRun/agentRunDelegation";
@@ -27,7 +28,8 @@ import type {
 
 export interface NativeHarnessDelegatePortOptions {
   readonly admission: AgentRunControlAdmissionDependencies;
-  readonly orchestration: Pick<AgentRunOrchestrationService, "start">;
+  readonly orchestration: Pick<AgentRunOrchestrationService, "start"> &
+    Partial<Pick<AgentRunOrchestrationService, "resume">>;
   readonly persistence: Pick<
     AgentRunPersistenceService,
     "parentSummary" | "resultText" | "getById"
@@ -87,6 +89,7 @@ export function createNativeHarnessDelegatePort(
         task: entry.task,
         lifecycleStatus: entry.lifecycleStatus,
         resultAvailable: entry.result !== undefined,
+        ...(run === undefined ? {} : { version: run.version, generation: run.generation ?? 1 }),
         route: entry.route,
         ...(run?.routingReceipt?.rawReasoning === undefined
           ? {}
@@ -128,6 +131,7 @@ export function createNativeHarnessDelegatePort(
     capabilities: async () => agentRunDelegationCapabilities(delegation),
     start: async (input): Promise<NativeHarnessDelegateStart> =>
       startAgentRunDelegation(delegation, input),
+    followUp: async (input) => followUpAgentRunDelegation(delegation, input),
     status: async (): Promise<ReadonlyArray<NativeHarnessDelegateChild>> => children(),
     wait: async ({ runIds, timeoutMs, signal }) => {
       const wanted = runIds === undefined ? undefined : new Set(runIds);
@@ -151,11 +155,22 @@ export function createNativeHarnessDelegatePort(
         return { status: "refused", reason: "run-not-found" };
       }
       if (run.lifecycleStatus !== "completed" || run.result === undefined) {
-        return { status: "not-ready", lifecycleStatus: run.lifecycleStatus };
+        return {
+          status: "not-ready",
+          lifecycleStatus: run.lifecycleStatus,
+          version: run.version,
+          generation: run.generation ?? 1,
+        };
       }
       const text = options.persistence.resultText(run.id);
       if (text === undefined) return { status: "refused", reason: "result-unavailable" };
-      return { status: "completed", text, truncated: run.result.truncated };
+      return {
+        status: "completed",
+        text,
+        truncated: run.result.truncated,
+        version: run.version,
+        generation: run.generation ?? 1,
+      };
     },
   };
 }
