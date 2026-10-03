@@ -1287,6 +1287,12 @@ describe("AgentRun dependency graphs", () => {
     await settle();
 
     const orchestration = restart();
+    const waiting = persistence.getById(dependent.id);
+    if (waiting === undefined) throw new Error("The dependent is gone.");
+    expect(orchestration.resume(dependent.id, waiting.version + 1, authority)).toMatchObject({
+      kind: "run-command-failed",
+      reason: "stale-version",
+    });
     const interrupted = persistence.getById(first);
     if (interrupted === undefined) throw new Error("The dependency is gone.");
     orchestration.retry(first, interrupted.version, authority);
@@ -1455,11 +1461,16 @@ describe("managed child continuation", () => {
       expect(release).toHaveBeenCalledTimes(beforeRelease);
       expect(scratchRoot).not.toHaveBeenCalled();
       expect(acquire).not.toHaveBeenCalled();
-      expect(result).toEqual({
-        kind: "run-command-failed",
-        reason: "unsupported-transition",
-        message: "This child has no saved session to resume; its existing wait remains unchanged.",
-      });
+      expect(result).toEqual(
+        kind === "dependency"
+          ? { kind: "run-updated", run: waiting.run }
+          : {
+              kind: "run-command-failed",
+              reason: "unsupported-transition",
+              message:
+                "This child has no saved session to resume; its existing wait remains unchanged.",
+            },
+      );
       harness.orchestration.onSessionSettled({
         runId: first.run.id,
         outcome: { kind: "completed", responseText: "Dependency finished" },
