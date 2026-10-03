@@ -71,12 +71,17 @@ and close controls.
 Octant is one Electron application that hosts a Bun HTTP server, a React
 renderer, and (optionally) remote clients that connect to that same server.
 Everything the user cares about — Projects, threads, memory, event history,
-credential references, layouts — stays on the host machine.
+credential references, layouts — stays on the host machine. Artifact versions
+are the exception once sync is on: they are copied into a store the user owns,
+not into a store Octant operates. The journal does not leave. See
+[Persistence](#persistence).
 
 The design rests on a small set of invariants that every package obeys:
 
 - **Local-first.** No Octant cloud account, relay, or telemetry is required.
-  Remote access is host-to-device over the user's own network. Three host-initiated
+  Artifact sync, when the person turns it on, uses a store that person owns.
+  Octant operates none of it. Remote access is host-to-device over the user's
+  own network. Three host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
   device-tool update checks against the npm registry, and server marketplace
   fetches when the person searches, inspects, previews, or installs from the
@@ -818,6 +823,35 @@ flowchart LR
   controller footing for small teams lives in
   `docs/legal/shared-host-controller.md` and aligns with
   `docs/decisions/0040` without shipping the shared team host.
+- **Artifact replicas.** A replica is an append-only log in a store the user
+  owns — a synced folder, or an S3-compatible bucket. Each host writes only
+  its own write-once entries, one per committed artifact version or deletion,
+  named by host id and sequence. No file is written by two computers, so a
+  sync client's conflict copies and lost updates cannot happen. An entry is a
+  readable JSON bundle in the
+  [0029](decisions/0029-artifact-storage-mirror.md) format, with a detached
+  signature from the writing host's device key. The storage provider can read
+  those files; they are not encrypted. Each host's own journal stays the
+  source of truth. A pull imports other hosts' entries as appended versions
+  with provenance — the computer's name, the host id, and the origin
+  sequence. It never adopts another journal and never overwrites a version.
+  If two computers revise the same artifact from the same parent, the library
+  shows both heads. The person picks one or merges them, and the merge is a
+  new version. Nothing is silently chosen. Deletion is a tombstone entry:
+  other computers hide the artifact and offer to undo. Each host's own erase
+  and purge rules still apply locally. The mirror and the export stay
+  separate. They still write plain files for people and other tools, and they
+  still never push to git. Sync is Octant to Octant through the store. The
+  store holds every version, so a new or wiped computer that joins restores
+  the artifact library. Scope is artifact and Canvas versions and tombstones.
+  Canvas comments are not in this log. Threads and settings are not. A
+  replica-store contribution offers list, get, and put-if-absent. A folder
+  store and an S3-compatible store ship in-tree on that seam. Direct cloud
+  APIs for a host with no desktop sync client come later as plugins. Every
+  publish, pull, refusal, and failure is journaled. A failed upload never
+  unwinds a local version. Plan mode, and a host with sync off, make no store
+  calls. See
+  [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -1564,6 +1598,21 @@ mechanisms are:
   classifier. A remote principal can never exceed host, mode, provider, Project,
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal.
+- **Artifact replica membership.** Each replica entry carries a detached
+  signature from the writing host's device key. There is no replica key. An
+  entry from an unknown or revoked host, or one that fails verification, is
+  refused and journaled. A new computer joins by writing a join request into
+  the store. A computer that is already a member approves it by name. A short
+  matching code, shown on both screens, guards against a stranger's request.
+  Revoke writes a signed revocation. Store setup, joining, and revoking happen
+  on the host, never from a paired phone. Store credentials live in the host
+  credential store — macOS Keychain or freedesktop Secret Service — and are
+  not written into the replica. The storage provider can read the synced
+  content: the artifact versions and tombstones are plain files. Settings and
+  the user guide (`apps/docs/guide/sync-artifacts.md`) say so before sync is
+  turned on. Opt-in encryption of replicas is not this rule. A replica import
+  appends versions to this journal and adopts nothing else; it does not make
+  two hosts trust each other.
 - **Hosts never trust each other.** Multi-host views merge read models
   client-side; credentials and mutable authority never cross hosts. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client
@@ -1602,6 +1651,12 @@ The first shipping surface is the Apple Silicon technical preview with the
 provider-neutral plugin and skill marketplace, signed and self-updating per
 [0034](decisions/0034-signed-updates.md). Cross-platform desktop is authorized
 and sequenced by [0058](decisions/0058-cross-platform-desktop.md).
+
+Artifact replicas, when the person turns sync on, go only to a store that
+person owns — a synced folder or an S3-compatible bucket. Octant operates no
+storage and no relay for them. The storage provider can read the files. That
+does not open a hosted relay or an Octant cloud account. See
+[0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
 
 Two holds stay Later until documented approved designs, published seams, and an
 explicit maintainer request open them:

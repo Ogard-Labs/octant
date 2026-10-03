@@ -49,6 +49,12 @@ confinement.
   Auto-push stays off. The first implementation is the mirrored files the user
   already commits. An Octant-operated push would have to supersede 0029 first;
   this record does not.
+- **Artifact replicas are not this git path.** 0163 amends this layer for a
+  store the user explicitly set up for sync — a synced folder or an
+  S3-compatible bucket. Octant writes an append-only log of artifact versions
+  there and reads it back. That is not a git push, not storage Octant
+  operates, and not a relay. Mirror and export still never push to git. This
+  layer's git rule stands for them.
 - Import is a journaled command on this host. This host's journal remains the
   source of truth. It never adopts the other host's journal, never merges two
   documents into one aggregate, and never grants the origin's filesystem,
@@ -172,6 +178,7 @@ confinement.
 - 0027 Plans as journaled artifacts
 - 0028 The artifact library
 - 0029 The artifact storage mirror
+- 0163 Artifact replicas in storage the user owns (amends layer 1)
 - 0031 Hosts as environments
 - 0035 Thread retention and explicit purge
 - 0036 Thread export
