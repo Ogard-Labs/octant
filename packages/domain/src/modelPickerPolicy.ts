@@ -644,7 +644,9 @@ export function startedConversationPickerGroups(
   const current = groups.find(
     (candidate) => String(candidate.instance.id) === String(selection.providerInstanceId),
   );
-  if (current === undefined) return groups;
+  // Chat and Work refuse a follow-up when the bound provider is unavailable, so
+  // a thread whose provider is missing has no switch to offer.
+  if (current === undefined) return [];
   if (providerKeepsConversation(current.instance.driverKind)) {
     return startedThreadPickerGroups(groups, selection);
   }

@@ -1912,11 +1912,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   <ComposerModelPicker
                     ariaLabel="Provider and model"
                     disabled={providerChanging || creating || completionLocked}
-                    // Once a turn completed, the thread's history lives with
+                    // Once any turn ran, the host checks the latest one
+                    // whatever its status, so the thread's history lives with
                     // its provider kind; offering a move the host refuses led
                     // straight to a stuck thread.
                     groups={
-                      turns.some((turn) => turn.status === "completed")
+                      turns.length > 0
                         ? startedConversationPickerGroups(props.providerGroups ?? [], {
                             providerInstanceId: thread.providerInstanceId,
                             modelId: thread.modelId,

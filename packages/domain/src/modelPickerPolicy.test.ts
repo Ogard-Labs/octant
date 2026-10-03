@@ -755,6 +755,15 @@ describe("model picker policy", () => {
       expect(picked[0]?.sections.flatMap((section) => section.models)).toHaveLength(1);
     });
 
+    it("offers no switch when the thread's provider is missing", () => {
+      expect(
+        startedConversationPickerGroups(groups, {
+          providerInstanceId: "00000000-0000-4000-8000-000000000199" as never,
+          modelId: decodeProviderModelId("m-a"),
+        }),
+      ).toEqual([]);
+    });
+
     it("lets a host-held conversation move between host-held providers only", () => {
       expect(
         providers(
