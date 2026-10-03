@@ -1688,6 +1688,15 @@ it("resumes a completed child's next generation while preserving journaled prior
   });
   const completed = persistence.getById(admitted.run.id);
   if (completed?.result === undefined) throw new Error("completion failed");
+  expect(
+    orchestration.resume(completed.id, completed.version, authority, { message: "Too early" }),
+  ).toMatchObject({
+    kind: "run-command-failed",
+    message: "Collect the current result or wait for delivery to the parent before following up.",
+  });
+  expect(persistence.getById(completed.id)).toEqual(completed);
+  expect(persistence.resultText(completed.id)).toBe("First reply");
+  expect(resume).not.toHaveBeenCalled();
   const delivered = persistence.applyCommand({
     kind: "settle-agent-run-result-delivery",
     runId: completed.id,
@@ -1791,8 +1800,17 @@ it("keeps completion unchanged when follow-up resume evidence, authority or capa
     runId: admitted.run.id,
     outcome: { kind: "completed", responseText: "Keep this reply" },
   });
-  const completed = persistence.getById(admitted.run.id);
-  if (completed === undefined) throw new Error("completion failed");
+  const finished = persistence.getById(admitted.run.id);
+  if (finished === undefined) throw new Error("completion failed");
+  const delivered = persistence.applyCommand({
+    kind: "settle-agent-run-result-delivery",
+    runId: finished.id,
+    expectedVersion: finished.version,
+    generation: finished.generation ?? 1,
+    outcome: "delivered",
+  });
+  if (delivered.kind !== "run-updated") throw new Error("delivery failed");
+  const completed = delivered.run;
   reserve.mockClear();
   expect(
     await orchestration.resume(completed.id, completed.version, authority, { message: "Continue" }),
@@ -1835,8 +1853,17 @@ it("refuses completed-child follow-ups at the existing unfinished-child admissio
     runId: admitted.run.id,
     outcome: { kind: "completed", responseText: "Completed" },
   });
-  const completed = persistence.getById(admitted.run.id);
-  if (completed === undefined) throw new Error("completion failed");
+  const finished = persistence.getById(admitted.run.id);
+  if (finished === undefined) throw new Error("completion failed");
+  const delivered = persistence.applyCommand({
+    kind: "settle-agent-run-result-delivery",
+    runId: finished.id,
+    expectedVersion: finished.version,
+    generation: finished.generation ?? 1,
+    outcome: "delivered",
+  });
+  if (delivered.kind !== "run-updated") throw new Error("delivery failed");
+  const completed = delivered.run;
   for (let i = 0; i < 16; i++) {
     const requested = persistence.requestRun({
       command: requestCommand(
