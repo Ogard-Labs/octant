@@ -1084,8 +1084,10 @@ native harness in `apps/server/src/harness`:
   replayed journal still holds an open turn or a pending approval or
   question is `recovery-required` after a restart: it admits nothing, and
   only a resume clears it, after the host checks the lead's provider instance
-  is present and enabled and the thread's checkout or Project still exists
-  (`not-ready` names what is missing). That resume journals the lost turn as
+  is present and enabled, a Code thread's checkout has been confirmed
+  available since the restart (a restart leaves every checkout waiting until a
+  window's bootstrap revalidates it), and a Work Project's folder still exists
+  at the path it was bound to (`not-ready` names what is missing). That resume journals the lost turn as
   `lost-in-restart` and the dead approvals and questions as expired, so the
   next restart does not raise the recovery again. Also journaled:
   the questions a lead asked with how each was

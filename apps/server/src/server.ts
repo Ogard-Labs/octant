@@ -298,6 +298,7 @@ import { createContextRouteHandler } from "./contextRoutes";
 import { GitEnvironmentPort } from "./gitEnvironmentPort";
 import { GitObservationPort } from "./code/gitObservationPort";
 import { GitMutationPort } from "./code/gitMutationPort";
+import { nativeHarnessRecoveryBlockers } from "./harness/nativeHarnessRecovery";
 import { GitService } from "./code/gitService";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
 import { GhRepositoryCataloguePort } from "./github/ghRepositoryCataloguePort";
@@ -5319,30 +5320,29 @@ export function startOctantServer(
       recoveryBlockers: async ({ threadId }) => {
         const view = nativeHarnessSessionsLive.read(threadId);
         if (view === undefined) return [];
-        const blockers: string[] = [];
-        const provider = persistence.readProviderInstance(view.session.lead.providerInstanceId);
-        if (provider === undefined || !provider.enabled) {
-          blockers.push("The model's endpoint is gone or turned off; turn it on in Settings.");
-        }
-        if (view.session.mode === "code") {
-          let thread: ReturnType<typeof persistence.readCodeThread>;
-          try {
-            thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-          } catch {
-            thread = undefined;
-          }
-          const checkout =
-            thread === undefined ? undefined : persistence.readCodeCheckout(thread.checkoutId);
-          if (checkout === undefined || checkout.availability === "unavailable") {
-            blockers.push("The thread's checkout is no longer available.");
-          }
-        } else if (view.session.projectId !== undefined) {
-          const project = persistence.readProject(view.session.projectId);
-          if (project === undefined || project.lifecycle !== "active") {
-            blockers.push("The thread's Project is no longer available.");
-          }
-        }
-        return blockers;
+        return nativeHarnessRecoveryBlockers(
+          {
+            providerInstance: (id) => persistence.readProviderInstance(id),
+            codeCheckout: (id) => {
+              try {
+                const thread = persistence.readCodeThread(decodeCodeThreadId(id));
+                return thread === undefined
+                  ? undefined
+                  : persistence.readCodeCheckout(thread.checkoutId);
+              } catch {
+                return undefined;
+              }
+            },
+            project: (id) => persistence.readProject(id),
+            directory: async (path) => {
+              const isDirectory = await statFromDisk(path)
+                .then((entry) => entry.isDirectory())
+                .catch(() => false);
+              return isDirectory ? await realpath(path).catch(() => undefined) : undefined;
+            },
+          },
+          view,
+        );
       },
       followUps: followUpActions,
       answerQuestion: ({ threadId, questionId, answer }) =>
