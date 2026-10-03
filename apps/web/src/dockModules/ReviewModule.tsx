@@ -7,7 +7,15 @@ import { ShellState } from "../shell/ShellState";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
-  "codeController" | "hostBridge" | "onOpenFile" | "serverUrl" | "subject" | "windowCapability"
+  | "codeController"
+  | "hostBridge"
+  | "onOpenFile"
+  | "serverUrl"
+  | "subject"
+  | "windowCapability"
+  | "agentRunClient"
+  | "requestedAgentReview"
+  | "onAgentReviewBack"
 >;
 
 export default function ReviewModule(props: Props) {
@@ -17,6 +25,13 @@ export default function ReviewModule(props: Props) {
   return (
     <Suspense fallback={<ShellState state="loading" title="Loading review" />}>
       <ReviewWorkspace
+        {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+        {...(props.requestedAgentReview === undefined
+          ? {}
+          : { requestedAgentReview: props.requestedAgentReview })}
+        {...(props.onAgentReviewBack === undefined
+          ? {}
+          : { onAgentReviewBack: props.onAgentReviewBack })}
         {...(props.codeController === undefined ? {} : { controller: props.codeController })}
         threadId={decodeCodeThreadId(props.subject.threadId)}
         {...(props.subject.checkoutId === undefined

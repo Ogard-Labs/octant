@@ -6,6 +6,7 @@ import { Markdown } from "../markdown/Markdown";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { AgentRunResults } from "./AgentRunResults";
+import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import { FollowUpControl } from "./FollowUpControl";
 import type { AgentHierarchyRow } from "./buildAgentHierarchyModel";
 import {
@@ -30,6 +31,7 @@ type RunCommand = (input: { runId: string; version: number }) => void;
 export function AgentRunDetail(props: {
   readonly row: AgentHierarchyRow;
   readonly onBack: () => void;
+  readonly onReviewChanges?: (request: AgentResultReviewRequest) => void;
   readonly conversation?: AgentRunConversationResponse;
   readonly conversationLoading?: boolean;
   readonly conversationReconnecting?: boolean;
@@ -122,7 +124,13 @@ export function AgentRunDetail(props: {
           <span className="agent-run-detail__label">Brief</span>
           <p>{row.task}</p>
         </div>
-        <AgentRunResults packets={row.resultPackets} truncated={row.resultsTruncated === true} />
+        <AgentRunResults
+          packets={row.resultPackets}
+          truncated={row.resultsTruncated === true}
+          {...(props.onReviewChanges === undefined
+            ? {}
+            : { onReviewChanges: props.onReviewChanges })}
+        />
         <AgentRunReply
           active={active}
           row={row}
