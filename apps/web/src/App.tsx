@@ -1238,6 +1238,13 @@ function LaunchedShell(
   const projectPullRequestReviewOpen = selectedProjectPullRequest !== undefined;
   const dockThreadKey =
     dockThreadId === undefined ? undefined : threadUtilityDockKey(activeMode, String(dockThreadId));
+  // A saved comparison is a navigation request, not a remembered tool for a
+  // thread. Leaving its scope must not restore that request on a later visit.
+  useEffect(() => {
+    setRequestedAgentReview((current) =>
+      current?.threadKey === dockThreadKey ? current : undefined,
+    );
+  }, [dockThreadKey]);
   // A hand-off can take minutes, and the person is free to move threads while
   // it runs, so its completion reads the dock's thread as it is then rather
   // than as it was when the request was made.
@@ -2951,8 +2958,8 @@ function LaunchedShell(
         onReviewAgentChanges={(request) => {
           if (String(request.packet.parentThreadId) !== dockThread.threadId) return;
           setSelectedProjectPullRequest(undefined);
-          setRequestedAgentReview({ threadKey: dockThreadKey, request });
           openDockTab("review");
+          setRequestedAgentReview({ threadKey: dockThreadKey, request });
         }}
         {...(requestedAgentReview?.threadKey === dockThreadKey
           ? {
@@ -3091,6 +3098,7 @@ function LaunchedShell(
   function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
+    if (surface === "review") setRequestedAgentReview(undefined);
     markInteraction("renderer", "dock-open-requested");
     markInteractionAfterPaint("dock-open");
     if (bottomPanelPresentation.open) {
@@ -3107,6 +3115,7 @@ function LaunchedShell(
   function addDockTab(surface: RightUtilityDockSurfaceId) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
+    if (surface === "review") setRequestedAgentReview(undefined);
     if (bottomPanelPresentation.open) {
       persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
     }
@@ -3121,6 +3130,7 @@ function LaunchedShell(
     }
   }
   function openReviewForThread(threadId: string) {
+    setRequestedAgentReview(undefined);
     const key = threadUtilityDockKey("code", threadId);
     setDockVisible(true);
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "review"));
@@ -3331,6 +3341,7 @@ function LaunchedShell(
 
   function openBottomTool(surface: RightUtilityDockSurfaceId) {
     if (!bottomPanelSurfaces.some((candidate) => candidate.id === surface)) return;
+    if (surface === "review") setRequestedAgentReview(undefined);
     const nextBottomState = openUtilityTabState(renderedBottomPanelState, surface);
     if (dockThreadKey === undefined) {
       setFallbackBottomPanelState(nextBottomState);
