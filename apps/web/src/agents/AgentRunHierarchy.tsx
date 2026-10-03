@@ -22,6 +22,7 @@ import { buildAgentHierarchyModel, isActiveAgentHierarchyStatus } from "./buildA
 import { useAgentRunControlCommands } from "./useAgentRunControlCommands";
 import { useAgentRunConversation } from "./useAgentRunConversation";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 
 const ACTIVE_CHILD_REFRESH_MS = 2_000;
 
@@ -41,6 +42,7 @@ export function AgentRunHierarchy(props: {
    */
   readonly requestedView?: AgentRunViewRequest;
   readonly onRequestedViewHandled?: () => void;
+  readonly onReviewChanges?: (request: AgentResultReviewRequest) => void;
 }) {
   const [read, setRead] = useState<AgentRunParentSummaryResponse>();
   const currentRead = read?.parentThreadId === props.parentThreadId ? read : undefined;
@@ -286,6 +288,9 @@ export function AgentRunHierarchy(props: {
           key={selectedRow.runId}
           row={selectedRow}
           onBack={leaveSelectedRun}
+          {...(props.client.review === undefined || props.onReviewChanges === undefined
+            ? {}
+            : { onReviewChanges: props.onReviewChanges })}
           onAcknowledge={(input) => void acknowledge(input)}
           onCancel={(input) => void cancel(input)}
           onSteer={(input) => void controls.steer(input).then(setErrorMessage)}

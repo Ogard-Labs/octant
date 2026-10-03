@@ -309,6 +309,7 @@ import { ProjectReviewModule as DockProjectPullRequestReviewTool } from "./dockM
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
 import type { AgentRunViewRequest } from "./agents/AgentRunHierarchy";
+import type { AgentResultReviewRequest } from "./gitHistory/SavedAgentReview";
 import {
   MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
@@ -1022,6 +1023,10 @@ function LaunchedShell(
   const [requestedAgentView, setRequestedAgentView] = useState<{
     readonly threadKey: string;
     readonly view: AgentRunViewRequest;
+  }>();
+  const [requestedAgentReview, setRequestedAgentReview] = useState<{
+    readonly threadKey: string;
+    readonly request: AgentResultReviewRequest;
   }>();
   // Documents a turn wrote, per thread, and which the dock already offered.
   // Session-local presentation: nothing here is authority, and a reopened
@@ -2943,6 +2948,21 @@ function LaunchedShell(
         key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
+        onReviewAgentChanges={(request) => {
+          if (String(request.packet.parentThreadId) !== dockThread.threadId) return;
+          setSelectedProjectPullRequest(undefined);
+          setRequestedAgentReview({ threadKey: dockThreadKey, request });
+          openDockTab("review");
+        }}
+        {...(requestedAgentReview?.threadKey === dockThreadKey
+          ? {
+              requestedAgentReview: requestedAgentReview.request,
+              onAgentReviewBack: () => {
+                openSubagent(String(requestedAgentReview.request.packet.runId));
+                setRequestedAgentReview(undefined);
+              },
+            }
+          : {})}
         {...(requestedAgentView?.threadKey === dockThreadKey
           ? {
               requestedAgentView: requestedAgentView.view,
