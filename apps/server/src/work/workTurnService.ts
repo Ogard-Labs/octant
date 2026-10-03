@@ -1,3 +1,7 @@
+import {
+  coveredAgentResultDeliveryMembers,
+  validateAgentResultDelivery,
+} from "../agentRun/agentResultDeliveryBatch";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import { observeWorkContext } from "./workContextInspection";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
@@ -30,6 +34,7 @@ import {
   type WorkTurnLookupResult,
   type WorkTurnRequestId,
   type WorkTurnState,
+  type StartWorkThreadTurnCommand,
   type AgentRun,
   type AgentRunId,
   type WorkTurnStreamFrame,
@@ -400,6 +405,48 @@ export class WorkTurnService {
     this.#agentRuns = dependencies.agentRuns;
   }
 
+  #agentResultDelivery(command: StartWorkThreadTurnCommand): WorkTurnLookupResult | undefined {
+    if (command.delivery === undefined) return undefined;
+    const requested = command.delivery;
+    const validation = validateAgentResultDelivery({
+      delivery: requested,
+      threadId: String(command.threadId),
+      mode: "work",
+      getById: (id) => this.#agentRuns?.getById(id),
+    });
+    if (validation.kind === "invalid") throw this.#failure("invalid", validation.detail);
+    const existing = this.#projection.lookup(command.requestId);
+    if (existing !== undefined) return this.#lookupMatching(command, existing);
+    const turns = this.#projection.listForThread(command.threadId);
+    const covered = new Set(
+      coveredAgentResultDeliveryMembers(
+        requested,
+        turns.flatMap((turn) => (turn.delivery === undefined ? [] : [turn.delivery])),
+      ).map((member) => String(member.runId)),
+    );
+    if (
+      validation.runs.some(
+        (run) => run.resultDelivery !== undefined && !covered.has(String(run.id)),
+      )
+    )
+      throw this.#failure("invalid", "A named subagent run's result delivery already settled.");
+    const delivered = turns.find(
+      (turn) =>
+        turn.delivery !== undefined &&
+        coveredAgentResultDeliveryMembers(requested, [turn.delivery]).length > 0,
+    );
+    if (delivered !== undefined)
+      return decodeWorkTurnLookupResult({ kind: "accepted", turn: delivered });
+    if (
+      turns.some(
+        (turn) =>
+          turn.status === "accepted" || turn.status === "running" || turn.status === "waiting",
+      )
+    )
+      throw this.#failure("stale", "The Work parent already has an active turn.");
+    return undefined;
+  }
+
   async startFirstTurn(
     authenticatedWindowId: WindowId,
     input: unknown,
@@ -421,7 +468,7 @@ export class WorkTurnService {
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
     const existing = this.#projection.lookup(command.requestId);
-    if (existing !== undefined) {
+    if (existing !== undefined && command.delivery === undefined) {
       return this.#lookupMatching(command, existing);
     }
 
@@ -522,6 +569,9 @@ export class WorkTurnService {
     if (project?.type !== "work") {
       throw this.#failure("unauthorized", "Work Project is unavailable for this turn.");
     }
+
+    const delivered = this.#agentResultDelivery(command);
+    if (delivered !== undefined) return delivered;
 
     let projectRoot: string;
     try {
@@ -701,30 +751,9 @@ export class WorkTurnService {
       throw this.#failure("invalid", planned.message);
     }
 
-    if (command.delivery !== undefined) {
-      // A turn that claims to deliver a finished subagent run's result is
-      // verified against the journaled run before it can journal anything:
-      // the run must belong to this thread, have finished for good, and
-      // still owe its delivery — otherwise the mark is a caller's story the
-      // journal does not back.
-      const run = this.#agentRuns?.getById(command.delivery.runId);
-      if (run === undefined || String(run.parentThreadId) !== String(command.threadId)) {
-        throw this.#failure(
-          "invalid",
-          "The named subagent run does not belong to this Work thread.",
-        );
-      }
-      if (
-        run.lifecycleStatus !== "completed" &&
-        run.lifecycleStatus !== "failed" &&
-        run.lifecycleStatus !== "cancelled"
-      ) {
-        throw this.#failure("invalid", "The named subagent run has not finished.");
-      }
-      if (run.resultDelivery !== undefined) {
-        throw this.#failure("invalid", "The named subagent run's result delivery already settled.");
-      }
-    }
+    // Preparation awaits filesystem and provider context; recheck the journal before admission.
+    const afterPreparation = this.#agentResultDelivery(command);
+    if (afterPreparation !== undefined) return afterPreparation;
 
     const spendReservationId = decodeSpendCeilingReservationId(this.#uuid());
     const spendAdmission = this.#spendCeiling?.admit({
@@ -1618,6 +1647,7 @@ export class WorkTurnService {
       String(existing.threadId) !== String(command.threadId) ||
       String(existing.turnId) !== String(command.turnId) ||
       existing.prompt !== command.prompt ||
+      JSON.stringify(existing.delivery ?? null) !== JSON.stringify(command.delivery ?? null) ||
       JSON.stringify(existing.extensionSelections ?? []) !==
         JSON.stringify(command.extensionSelections ?? []) ||
       !sameAttachmentIds(existing.attachments, command.attachmentIds)

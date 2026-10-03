@@ -11,14 +11,20 @@
  */
 import {
   decodeAgentRunResultDeliverySettled,
+  MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE,
   decodeAgentRunStatusChanged,
   decodeCodeOperationEventFrame,
   type AgentRun,
   type AgentRunId,
   type AgentRunResultDeliveryOutcome,
+  type AgentRunResultDeliveryMark,
   type CommittedAppend,
   type EventEnvelope,
 } from "@octant/contracts";
+import {
+  agentRunResultGeneration,
+  type AgentResultDeliveryMember,
+} from "./agentResultDeliveryBatch";
 import type { Journal } from "../persistence/journal";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
 
@@ -33,10 +39,12 @@ export interface AgentResultDeliveryModePort {
   readonly inspect: (
     run: AgentRun,
   ) => Promise<{ readonly kind: "ready" } | { readonly kind: "invalid"; readonly detail: string }>;
-  readonly dispatch: (
-    run: AgentRun,
-  ) => Promise<
-    | { readonly kind: "dispatched" }
+  readonly dispatch: (runs: ReadonlyArray<AgentRun>) => Promise<
+    | {
+        readonly kind: "dispatched";
+        readonly runIds: ReadonlyArray<AgentRunId>;
+        readonly runGenerations?: AgentRunResultDeliveryMark["runGenerations"];
+      }
     | { readonly kind: "refused"; readonly detail: string }
     | { readonly kind: "deferred"; readonly detail: string }
   >;
@@ -51,7 +59,6 @@ export interface AgentResultDeliveryPorts {
 export type AgentResultDeliveryTimerHandle = unknown;
 
 interface PendingDelivery {
-  readonly runId: AgentRunId;
   readonly aggregateType: AgentRunDeliveryAggregateType;
   readonly aggregateId: string;
   timer: AgentResultDeliveryTimerHandle | undefined;
@@ -193,32 +200,56 @@ export class AgentResultDeliveryService {
         // parent freed up: the port's dispatch is the authority on whether
         // the turn can be admitted now.
         this.#clearTimer(pending);
-        queueMicrotask(() => void this.#evaluate(String(pending.runId)));
+        queueMicrotask(() => void this.#evaluate(this.#key(pending)));
       }
     }
+  }
+
+  #key(parent: Pick<PendingDelivery, "aggregateType" | "aggregateId">): string {
+    return `${parent.aggregateType}:${parent.aggregateId}`;
+  }
+
+  #owed(parent: PendingDelivery): ReadonlyArray<AgentRun> {
+    return [...this.#options.agentRuns.snapshot().values()]
+      .filter(
+        (run) =>
+          owesDelivery(run) &&
+          aggregateTypeFor(run) === parent.aggregateType &&
+          String(run.parentThreadId) === parent.aggregateId,
+      )
+      .sort(
+        (left, right) =>
+          left.updatedAt.localeCompare(right.updatedAt) ||
+          String(left.id).localeCompare(String(right.id)),
+      )
+      .slice(0, MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE);
   }
 
   #arm(run: AgentRun): void {
     const aggregateType = aggregateTypeFor(run);
     if (aggregateType === undefined) return;
-    const key = String(run.id);
+    const parent = { aggregateType, aggregateId: String(run.parentThreadId) };
+    const key = this.#key(parent);
     const existing = this.#pending.get(key);
-    if (existing !== undefined) this.#clearTimer(existing);
-    this.#pending.set(key, {
-      runId: run.id,
-      aggregateType,
-      aggregateId: String(run.parentThreadId),
-      timer: undefined,
-      evaluating: false,
-    });
+    if (existing !== undefined) {
+      if (existing.evaluating) return;
+      this.#clearTimer(existing);
+    } else {
+      this.#pending.set(key, { ...parent, timer: undefined, evaluating: false });
+    }
     queueMicrotask(() => void this.#evaluate(key));
   }
 
   #dropRun(runId: AgentRunId): void {
-    const pending = this.#pending.get(String(runId));
-    if (pending === undefined) return;
+    const run = this.#options.agentRuns.getById(runId);
+    if (run === undefined) return;
+    const aggregateType = aggregateTypeFor(run);
+    if (aggregateType === undefined) return;
+    const key = this.#key({ aggregateType, aggregateId: String(run.parentThreadId) });
+    const pending = this.#pending.get(key);
+    if (pending === undefined || pending.evaluating || this.#owed(pending).length > 0) return;
     this.#clearTimer(pending);
-    this.#pending.delete(String(runId));
+    this.#pending.delete(key);
   }
 
   #retryAfterMs(): number {
@@ -238,8 +269,9 @@ export class AgentResultDeliveryService {
     const schedule =
       this.#options.schedule ??
       ((at: number, fire: () => void) => setTimeout(fire, Math.max(0, at - Date.now())));
+    this.#clearTimer(pending);
     pending.timer = schedule(this.#options.clock().getTime() + this.#retryAfterMs(), () =>
-      this.#evaluate(String(pending.runId)),
+      this.#evaluate(this.#key(pending)),
     );
   }
 
@@ -247,75 +279,108 @@ export class AgentResultDeliveryService {
     const pending = this.#pending.get(key);
     if (pending === undefined || pending.evaluating) return;
     pending.evaluating = true;
-    pending.timer = undefined;
+    this.#clearTimer(pending);
     try {
-      const run = this.#options.agentRuns.getById(pending.runId);
-      // A settle that raced in — or a run state the host can no longer owe —
-      // disarms silently; the journal already recorded whatever mattered.
-      if (run === undefined || !owesDelivery(run)) {
-        this.#pending.delete(key);
-        return;
-      }
       const port = this.#portFor(pending.aggregateType);
-      const verdict = await port.inspect(run);
-      if (verdict.kind === "invalid") {
-        await this.#settle(pending, run, "invalidated", verdict.detail);
-        return;
+      const ready: AgentRun[] = [];
+      for (const run of this.#owed(pending)) {
+        const verdict = await port.inspect(run);
+        if (this.#pending.get(key) !== pending) return;
+        if (verdict.kind === "invalid") {
+          this.#settle(
+            pending,
+            { runId: run.id, generation: agentRunResultGeneration(run) },
+            "invalidated",
+            verdict.detail,
+          );
+        } else {
+          const current = this.#options.agentRuns.getById(run.id);
+          if (current !== undefined && owesDelivery(current)) ready.push(current);
+        }
       }
-      const result = await port.dispatch(run);
+      const runs = ready.flatMap((run) => {
+        const current = this.#options.agentRuns.getById(run.id);
+        return current !== undefined && owesDelivery(current) ? [current] : [];
+      });
+      if (runs.length === 0) return;
+      const result = await port.dispatch(runs);
+      if (this.#pending.get(key) !== pending) return;
       if (result.kind === "dispatched") {
-        await this.#settle(pending, run, "delivered");
+        const requested = new Set(runs.map((run) => `${run.id}:${agentRunResultGeneration(run)}`));
+        const covered =
+          result.runGenerations ?? result.runIds.map((runId) => ({ runId, generation: 1 }));
+        if (
+          result.runIds.length === 0 ||
+          new Set(result.runIds.map(String)).size !== result.runIds.length ||
+          covered.length !== result.runIds.length ||
+          new Set(covered.map((member) => String(member.runId))).size !== covered.length ||
+          covered.some(
+            (member) =>
+              !result.runIds.some((id) => String(id) === String(member.runId)) ||
+              !requested.has(`${member.runId}:${member.generation}`),
+          )
+        ) {
+          throw new Error(
+            "The delivery did not identify a nonempty subset of the requested results.",
+          );
+        }
+        for (const member of covered) this.#settle(pending, member, "delivered");
       } else if (result.kind === "deferred") {
-        // The parent cannot take the turn yet — keep it armed; a commit on
-        // the parent's aggregate or the retry cadence re-fires it.
         this.#armTimer(pending);
       } else {
-        await this.#settle(pending, run, "failed", result.detail);
+        for (const run of runs)
+          this.#settle(
+            pending,
+            { runId: run.id, generation: agentRunResultGeneration(run) },
+            "failed",
+            result.detail,
+          );
       }
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "The delivery threw.";
-      const run = this.#options.agentRuns.getById(pending.runId);
-      if (run !== undefined && owesDelivery(run)) {
-        await this.#settle(pending, run, "failed", detail);
-      } else {
-        this.#pending.delete(key);
-      }
+      // A dispatch may have journaled its turn before throwing. Keep every
+      // unsettled member owed so the next admission can read that durable mark.
+      this.#options.onError?.("Agent-run result delivery will retry.", error);
+      if (this.#pending.get(key) === pending) this.#armTimer(pending);
     } finally {
       pending.evaluating = false;
+      if (this.#pending.get(key) === pending) {
+        if (this.#owed(pending).length === 0) {
+          this.#clearTimer(pending);
+          this.#pending.delete(key);
+        } else if (pending.timer === undefined) {
+          queueMicrotask(() => void this.#evaluate(key));
+        }
+      }
     }
   }
 
-  /**
-   * Journals how the delivery settled. A refused settle — a consume that
-   * raced it, or a version that moved — is checked against the projection
-   * rather than trusted: a run the journal says is settled is disarmed; any
-   * other refusal retries on the cadence so an owed delivery is never
-   * dropped by a transient write.
-   */
-  async #settle(
+  #settle(
     pending: PendingDelivery,
-    run: AgentRun,
+    member: AgentResultDeliveryMember,
     outcome: AgentRunResultDeliveryOutcome,
     detail?: string,
-  ): Promise<void> {
-    const normalizedDetail =
-      detail === undefined ? undefined : detail.trim().slice(0, 512).trim() || undefined;
-    const result = this.#options.agentRuns.applyCommand({
-      kind: "settle-agent-run-result-delivery",
-      runId: run.id,
+  ): void {
+    const runId = member.runId;
+    const run = this.#options.agentRuns.getById(runId);
+    if (
+      run === undefined ||
+      !owesDelivery(run) ||
+      agentRunResultGeneration(run) !== member.generation
+    )
+      return;
+    const normalizedDetail = detail?.trim().slice(0, 512).trim() || undefined;
+    const command = {
+      kind: "settle-agent-run-result-delivery" as const,
+      runId,
       expectedVersion: run.version,
       outcome,
+      generation: member.generation,
       ...(normalizedDetail === undefined ? {} : { detail: normalizedDetail }),
-    });
-    if (result.kind === "run-updated") {
-      this.#pending.delete(String(run.id));
-      return;
-    }
-    const latest = this.#options.agentRuns.getById(run.id);
-    if (latest === undefined || !owesDelivery(latest)) {
-      this.#pending.delete(String(run.id));
-      return;
-    }
+    };
+    const result = this.#options.agentRuns.applyCommand(command);
+    if (result.kind === "run-updated") return;
+    const latest = this.#options.agentRuns.getById(runId);
+    if (latest === undefined || !owesDelivery(latest)) return;
     this.#options.onError?.(
       "Agent-run result delivery settle was refused.",
       new Error(result.kind === "run-command-failed" ? result.message : "Unexpected result."),
