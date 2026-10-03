@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import {
   UtcTimestamp,
   decodeAggregateVersion,
+  decodeCodeOperationId,
   decodeThreadMessageQueueCommand,
   decodeThreadMessageQueuePayload,
   MAX_THREAD_MESSAGE_QUEUE_ITEMS,
@@ -25,6 +27,7 @@ import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
   MAX_THREAD_MESSAGE_QUEUE_PRIVATE_CONTEXT_BYTES,
+  queueHoldReason,
   type ThreadMessageQueueModePort,
   type ThreadMessageQueueResource,
   type ThreadMessageQueueInspection,
@@ -356,7 +359,11 @@ export class ThreadMessageQueueService {
     if (head.status !== "queued") {
       let reconciled: Awaited<ReturnType<ThreadMessageQueueModePort["reconcile"]>>;
       try {
-        reconciled = await this.#port.reconcile({ scope, messageId: head.messageId });
+        reconciled = await this.#port.reconcile({
+          scope,
+          messageId: head.messageId,
+          ...(head.codeOperationId === undefined ? {} : { codeOperationId: head.codeOperationId }),
+        });
       } catch {
         reconciled = { status: "unknown" };
       }
@@ -429,7 +436,7 @@ export class ThreadMessageQueueService {
       return;
     }
     if (inspection.status === "held") {
-      this.#hold(state, holdReason(inspection.reason));
+      this.#hold(state, queueHoldReason(inspection.reason));
       return;
     }
     if (inspection.binding !== content.binding) {
@@ -445,11 +452,18 @@ export class ThreadMessageQueueService {
       return;
     }
     if (inspection.status === "busy") return;
+    const codeOperationId = scope.mode === "code" ? decodeCodeOperationId(randomUUID()) : undefined;
     if (
       this.#store.write({
         ...state,
         items: state.items.map((item) =>
-          item === head ? { ...item, status: "dispatching" } : item,
+          item === head
+            ? {
+                ...item,
+                status: "dispatching",
+                ...(codeOperationId === undefined ? {} : { codeOperationId }),
+              }
+            : item,
         ),
       }) !== "applied"
     )
@@ -460,6 +474,7 @@ export class ThreadMessageQueueService {
     try {
       admission = await this.#port.admit({
         ...content,
+        ...(codeOperationId === undefined ? {} : { codeOperationId }),
         windowId: auth.windowId,
         signal: controller.signal,
       });
@@ -668,18 +683,5 @@ function validContent(content: QueueContent): boolean {
     }
   }
   return true;
-}
-function holdReason(reason: ThreadMessageQueueRefusalReason): ThreadMessageQueueHoldReason {
-  if (reason === "unauthorized") return "authority-revoked";
-  if (reason === "not-found") return "thread-unavailable";
-  if (
-    reason === "not-editable" ||
-    reason === "invalid-order" ||
-    reason === "queue-full" ||
-    reason === "invalid-payload" ||
-    reason === "storage-unavailable"
-  )
-    return "admission-refused";
-  return reason;
 }
 const decodeTime = Schema.decodeUnknownSync(UtcTimestamp);

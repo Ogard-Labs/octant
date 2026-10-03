@@ -210,6 +210,52 @@ describe("durable ordinary thread queue", () => {
     await restored.service.tick();
     expect(restored.p.admit.mock.calls[0]?.[0].messageId).toBe(first.messageId);
   });
+  it("keeps refused Code content across restart and gives explicit resume a fresh durable attempt", async () => {
+    const f = fixture();
+    const first = enqueue();
+    const codeScope = { ...scope, mode: "code" } as const;
+    const queued = decodeThreadMessageQueueCommand({
+      ...first,
+      scope: codeScope,
+      payload: { mode: "code", prompt: "Keep this queued message." },
+    });
+    f.p.admit.mockResolvedValue({ status: "unknown" });
+    await f.service.execute(windowId, queued);
+    await f.service.tick();
+    const attempt = f.p.admit.mock.calls[0]?.[0];
+    expect(attempt?.codeOperationId).toEqual(expect.any(String));
+    expect(attempt?.codeOperationId).not.toBe(first.messageId);
+    f.close();
+    const restored = fixture(port(), f.database);
+    restored.p.reconcile.mockResolvedValue({ status: "not-admitted" });
+    await restored.service.recover();
+    await restored.service.tick();
+    expect(restored.p.reconcile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: first.messageId,
+        codeOperationId: attempt?.codeOperationId,
+      }),
+    );
+    const state = await restored.service.read(windowId, codeScope);
+    if (state.status !== "ready") throw new Error("Expected a readable queue.");
+    expect(state.snapshot.items[0]).toMatchObject({
+      status: "queued",
+      payload: { prompt: "Keep this queued message." },
+    });
+    expect(restored.p.admit).not.toHaveBeenCalled();
+    await restored.service.execute(
+      windowId,
+      decodeThreadMessageQueueCommand({
+        ...command("resume", state.snapshot.version),
+        scope: codeScope,
+      }),
+    );
+    await restored.service.tick();
+    const next = restored.p.admit.mock.calls[0]?.[0];
+    expect(next?.messageId).toBe(first.messageId);
+    expect(next?.codeOperationId).toEqual(expect.any(String));
+    expect(next?.codeOperationId).not.toBe(attempt?.codeOperationId);
+  });
   it("allows an acknowledged old failure but holds new failures and target changes", async () => {
     const f = fixture();
     f.p.setInspection({

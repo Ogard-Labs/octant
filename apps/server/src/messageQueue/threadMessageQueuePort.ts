@@ -6,6 +6,7 @@ import type {
   ThreadMessageQueueScope,
   ThreadQueueMessageId,
   WindowId,
+  CodeOperationId,
 } from "@octant/contracts";
 
 export interface ThreadMessageQueueTail {
@@ -63,13 +64,16 @@ export interface ThreadMessageQueueModePort {
     input: ThreadMessageQueueInspectionInput,
   ) => Promise<ThreadMessageQueueInspection>;
   /**
-   * Use messageId as the ordinary mode's stable submission/turn identity.
+   * Chat and Work use messageId as their stable submission identity. Code uses
+   * the persisted operation identity for this attempt so a refused attempt
+   * cannot poison a later explicit resume with its cached refusal.
    * Return accepted when admission is durable, without waiting for the reply.
    * Private context is host-produced metadata, never execution authority.
    */
   readonly admit: (input: {
     readonly scope: ThreadMessageQueueScope;
     readonly messageId: ThreadQueueMessageId;
+    readonly codeOperationId?: CodeOperationId;
     readonly payload: ThreadMessageQueuePayload;
     readonly binding: string;
     readonly windowId: WindowId;
@@ -84,7 +88,24 @@ export interface ThreadMessageQueueModePort {
   readonly reconcile: (input: {
     readonly scope: ThreadMessageQueueScope;
     readonly messageId: ThreadQueueMessageId;
+    readonly codeOperationId?: CodeOperationId;
   }) => Promise<{
     readonly status: "not-admitted" | "accepted" | "completed" | "failed" | "cancelled" | "unknown";
   }>;
+}
+
+export function queueHoldReason(
+  reason: ThreadMessageQueueRefusalReason,
+): ThreadMessageQueueHoldReason {
+  if (reason === "unauthorized") return "authority-revoked";
+  if (reason === "not-found") return "thread-unavailable";
+  if (
+    reason === "not-editable" ||
+    reason === "invalid-order" ||
+    reason === "queue-full" ||
+    reason === "invalid-payload" ||
+    reason === "storage-unavailable"
+  )
+    return "admission-refused";
+  return reason;
 }

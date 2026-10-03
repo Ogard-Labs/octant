@@ -1457,6 +1457,7 @@ describe("CodeOperationService", () => {
 
     await expect(pending).resolves.toMatchObject({
       kind: "operation-failed",
+      admission: "refused",
       failure: { category: "unauthorized" },
     });
     expect(fixture.turns.start).not.toHaveBeenCalled();
@@ -1492,6 +1493,7 @@ describe("CodeOperationService", () => {
 
     await expect(pending).resolves.toMatchObject({
       kind: "operation-failed",
+      admission: "refused",
       failure: { category: "unauthorized" },
     });
     expect(fixture.turns.start).not.toHaveBeenCalled();
@@ -1501,6 +1503,7 @@ describe("CodeOperationService", () => {
           kind: "operation-result",
           result: expect.objectContaining({
             kind: "operation-failed",
+            admission: "refused",
             failure: expect.objectContaining({ category: "unauthorized" }),
           }),
         }),

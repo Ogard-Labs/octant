@@ -2196,6 +2196,7 @@ export class ChatService {
         updatedAt: timestamp,
       };
       if (executionContext?.admissionCurrent?.() === false) {
+        await prepared.appManagedTools?.close?.().catch(() => undefined);
         throw new ChatServiceError({
           category: "unauthorized",
           message: "Queued Chat admission was revoked during preparation.",

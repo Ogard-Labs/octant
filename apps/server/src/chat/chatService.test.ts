@@ -1654,7 +1654,14 @@ describe("ChatService", () => {
   });
 
   it("refuses a queued send revoked during provider preparation before accepting a turn", async () => {
-    const { service, fakeDriver, persistence } = openFixture();
+    const close = vi.fn(async () => undefined);
+    const { service, fakeDriver, persistence } = openFixture({
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_task", inputSchema: { type: "object", properties: {} } }],
+        execute: async () => ({ result: {} }),
+        close,
+      }),
+    });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
@@ -1679,6 +1686,7 @@ describe("ChatService", () => {
         prompt: "Queue authority changed.",
       },
       {
+        windowId: decodeWindowId("84000000-0000-4000-8000-000000000011"),
         admissionCurrent: () => authorized,
         onTurnAccepted: accepted,
       },
@@ -1688,6 +1696,7 @@ describe("ChatService", () => {
     authorized = false;
     probe.resolve(probeFixture());
     await refused;
+    expect(close).toHaveBeenCalledOnce();
     expect(service.read(created.thread.id).turns).toEqual([]);
     expect(service.read(created.thread.id).thread.version).toBe(created.thread.version);
     expect(accepted).not.toHaveBeenCalled();

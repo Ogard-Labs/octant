@@ -627,6 +627,7 @@ export interface CodeOperationTurnPort {
     readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
     readonly evidence?: string;
     readonly failure?: CodeOperationFailure;
+    readonly admission?: "refused";
   }>;
   readonly answerInput: (input: {
     readonly thread: CodeThread;
@@ -650,6 +651,7 @@ type CodeOperationTurnResult = {
   readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
   readonly evidence?: string;
   readonly failure?: CodeOperationFailure;
+  readonly admission?: "refused";
 };
 
 /**
@@ -913,6 +915,7 @@ export class CodeOperationService {
         command.operationId,
         "unauthorized",
         "Code turn admission is no longer current.",
+        "refused",
       );
     }
 
@@ -1029,6 +1032,7 @@ export class CodeOperationService {
                   command.operationId,
                   "unauthorized",
                   "Code turn admission is no longer current.",
+                  "refused",
                 );
               } else {
                 this.#options.events.append({
@@ -2666,6 +2670,7 @@ export class CodeOperationService {
         command.operationId,
         "unavailable",
         "Provider prompt evidence is unavailable.",
+        "refused",
       );
     const selections =
       command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
@@ -2680,6 +2685,7 @@ export class CodeOperationService {
           command.operationId,
           "unavailable",
           resolved?.message ?? "Selected extension is unavailable for Code on this host.",
+          "refused",
         );
       }
       skillContext = resolved.context;
@@ -2720,6 +2726,7 @@ export class CodeOperationService {
         command.operationId,
         "invalid",
         "The selected model does not support images. Choose a vision model, or remove the attachments.",
+        "refused",
       );
     }
     const own = await this.#attachmentInputs(command.threadId, references);
@@ -2729,6 +2736,7 @@ export class CodeOperationService {
         command.operationId,
         "unavailable",
         "An image attached to this turn is unavailable.",
+        "refused",
       );
     }
     // Prompt, context, and attachment reads can finish after admission was revoked.
@@ -2738,6 +2746,7 @@ export class CodeOperationService {
         command.operationId,
         "unauthorized",
         "Code turn admission is no longer current.",
+        "refused",
       );
     }
     const turn = await this.#options.turns.start({
@@ -2971,6 +2980,7 @@ export class CodeOperationService {
         ? {}
         : { evidence: this.#options.evidence.put(turn.evidence) }),
       ...(turn.failure === undefined ? {} : { failure: turn.failure }),
+      ...(turn.admission === undefined ? {} : { admission: turn.admission }),
     });
   }
 
@@ -2985,11 +2995,13 @@ export class CodeOperationService {
       | "invalid"
       | "stale",
     message: string,
+    admission?: "refused",
   ): CodeOperationResult {
     return decodeCodeOperationResult({
       kind: "operation-failed",
       operationId,
       failure: { category, message },
+      ...(admission === undefined ? {} : { admission }),
     });
   }
 

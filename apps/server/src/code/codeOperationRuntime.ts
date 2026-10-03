@@ -1699,6 +1699,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await input.extensionTools?.close?.().catch(() => undefined);
       return {
         state: "failed" as const,
+        admission: "refused" as const,
         failure: {
           category: "unauthorized" as const,
           message: "Code turn admission is no longer current.",

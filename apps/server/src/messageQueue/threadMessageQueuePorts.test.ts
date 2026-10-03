@@ -5,6 +5,7 @@ import {
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceReference,
   decodeCodeOperationResult,
+  decodeCodeOperationId,
   decodeCodeThread,
   EventEnvelope,
   decodeMentionableThreadId,
@@ -212,6 +213,7 @@ describe("queued turn admission", () => {
       });
       const scope = { mode, threadId };
       const messageId = decodeThreadQueueMessageId("92000000-0000-4000-8000-000000000004");
+      const codeOperationId = decodeCodeOperationId("92000000-0000-4000-8000-000000000005");
       const inspection = await port.inspect({ scope, windowId, intent: "enqueue" });
       if (inspection.status === "held") throw new Error("Expected an admitted scope.");
       expect(
@@ -219,6 +221,7 @@ describe("queued turn admission", () => {
           scope,
           windowId,
           messageId,
+          ...(mode === "code" ? { codeOperationId } : {}),
           binding: inspection.binding,
           payload: { mode, prompt: "Continue", threadMentionIds: [threadId] },
           signal: new AbortController().signal,
@@ -254,8 +257,8 @@ describe("queued turn admission", () => {
         expect(executeOperation).toHaveBeenCalledWith(
           windowId,
           expect.objectContaining({
-            operationId: messageId,
-            sessionId: messageId,
+            operationId: codeOperationId,
+            sessionId: codeOperationId,
             checkoutId,
             threadMentionIds: [threadId],
           }),
@@ -266,7 +269,7 @@ describe("queued turn admission", () => {
             eventId: messageId,
             globalSequence: sequence,
             aggregateType: "code-operation",
-            aggregateId: messageId,
+            aggregateId: codeOperationId,
             aggregateVersion: sequence,
             eventName: "code.operation-event-recorded@1",
             eventVersion: 1,
@@ -276,7 +279,7 @@ describe("queued turn admission", () => {
             occurredAt: now,
             payload: {
               threadId,
-              operationId: messageId,
+              operationId: codeOperationId,
               cursor: sequence,
               occurredAt: now,
               event: payload,
@@ -286,35 +289,62 @@ describe("queued turn admission", () => {
           kind: "conversation-turn-started",
           providerInstanceId: thread.providerInstanceId,
           modelId: thread.modelId,
-          sessionId: messageId,
+          sessionId: codeOperationId,
           prompt: { contentId: checkoutId, digest: "a".repeat(64), byteLength: 8 },
         });
         replay.mockReturnValue([started]);
-        expect(await port.reconcile({ scope, messageId })).toEqual({ status: "unknown" });
+        expect(await port.reconcile({ scope, messageId, codeOperationId })).toEqual({
+          status: "unknown",
+        });
         replay.mockReturnValue([
           started,
           event(2, {
             kind: "operation-result",
             result: {
               kind: "provider-turn-state",
-              operationId: messageId,
+              operationId: codeOperationId,
               state: "failed",
             },
           }),
         ]);
-        expect(await port.reconcile({ scope, messageId })).toEqual({ status: "failed" });
+        expect(await port.reconcile({ scope, messageId, codeOperationId })).toEqual({
+          status: "failed",
+        });
+        for (const kind of ["provider-turn-state", "operation-failed"]) {
+          replay.mockReturnValue([
+            started,
+            event(2, {
+              kind: "operation-result",
+              result: {
+                kind,
+                operationId: codeOperationId,
+                ...(kind === "provider-turn-state" ? { state: "failed" } : {}),
+                admission: "refused",
+                failure: { category: "unauthorized", message: "Admission was revoked." },
+              },
+            }),
+          ]);
+          expect(await port.reconcile({ scope, messageId, codeOperationId })).toEqual({
+            status: "not-admitted",
+          });
+        }
         replay.mockReturnValue([
           started,
           event(2, {
             kind: "operation-result",
             result: {
               kind: "operation-failed",
-              operationId: messageId,
+              operationId: codeOperationId,
               failure: { category: "unavailable", message: "Provider preparation failed." },
             },
           }),
         ]);
-        expect(await port.reconcile({ scope, messageId })).toEqual({ status: "failed" });
+        expect(await port.reconcile({ scope, messageId, codeOperationId })).toEqual({
+          status: "failed",
+        });
+        expect(replay).toHaveBeenLastCalledWith(
+          expect.objectContaining({ aggregateId: codeOperationId }),
+        );
       }
     },
   );
@@ -398,6 +428,21 @@ describe("queued turn admission", () => {
     expect(
       await createThreadMessageQueuePort({ ...deps, isModeEnabled: () => false }).inspect(input),
     ).toEqual({ status: "held", reason: "thread-unavailable" });
+  });
+
+  it("keeps an unavailable thread's reason when admission is refused", async () => {
+    const { deps } = setup();
+    const port = createThreadMessageQueuePort({ ...deps, isModeEnabled: () => false });
+    expect(
+      await port.admit({
+        scope: { mode: "chat", threadId },
+        windowId,
+        messageId: decodeThreadQueueMessageId("92000000-0000-4000-8000-000000000004"),
+        binding: "previous binding",
+        payload: { mode: "chat", prompt: "Continue." },
+        signal: new AbortController().signal,
+      }),
+    ).toEqual({ status: "refused", reason: "thread-unavailable" });
   });
 
   it("changes the admission binding when the selected model changes", async () => {

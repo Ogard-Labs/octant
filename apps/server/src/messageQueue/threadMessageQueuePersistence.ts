@@ -8,6 +8,7 @@ import {
   ThreadMessageQueueHoldReason,
   ThreadMessageQueueRequestId,
   ThreadQueueMessageId,
+  CodeOperationId,
   THREAD_RETENTION_EVENT_NAMES,
   decodeChatDeleted,
   decodeThreadRetentionThreadPurged,
@@ -27,7 +28,10 @@ import type { SqliteConnection } from "../persistence/sqlitePort";
 import type { ThreadMessageQueueResource } from "./threadMessageQueuePort";
 
 export const THREAD_MESSAGE_QUEUE_CHANGED = "thread.message-queue-changed@1";
-const MetadataItem = ThreadMessageQueueItem.omit("payload");
+const MetadataItem = Schema.Struct({
+  ...ThreadMessageQueueItem.omit("payload").fields,
+  codeOperationId: Schema.optional(CodeOperationId),
+});
 const QueueState = Schema.Struct({
   scope: ThreadMessageQueueScope,
   version: AggregateVersion,
@@ -292,7 +296,8 @@ export class ThreadMessageQueuePersistence {
       ...state,
       items: state.items.map((item) => {
         const content = this.content(item.messageId);
-        return { ...item, ...(content === undefined ? {} : { payload: content.payload }) };
+        const { codeOperationId: _codeOperationId, ...visible } = item;
+        return { ...visible, ...(content === undefined ? {} : { payload: content.payload }) };
       }),
     });
   }

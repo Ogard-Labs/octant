@@ -20,6 +20,7 @@ import type { ChatServiceExecutionContext } from "../chat/chatService";
 import type { CodeRouteService } from "../codeRoutes";
 import type { Journal } from "../persistence/journal";
 import type { PersistenceService } from "../persistence/persistenceService";
+import { queueHoldReason } from "./threadMessageQueuePort";
 import type {
   ThreadMessageQueueInspection,
   ThreadMessageQueueInspectionInput,
@@ -208,7 +209,11 @@ export function createThreadMessageQueuePort(
     };
   };
 
-  const reconcile: ThreadMessageQueueModePort["reconcile"] = async ({ scope, messageId }) => {
+  const reconcile: ThreadMessageQueueModePort["reconcile"] = async ({
+    scope,
+    messageId,
+    codeOperationId,
+  }) => {
     if (scope.mode === "chat") {
       const view = deps.persistence.readChatThreadView(decodeChatThreadId(scope.threadId));
       if (view === undefined) return { status: "unknown" };
@@ -230,28 +235,41 @@ export function createThreadMessageQueuePort(
       return { status: status === "active" ? "accepted" : status };
     }
     const id = decodeCodeThreadId(scope.threadId);
+    const operationId = codeOperationId ?? messageId;
     if (deps.persistence.readCodeThread(id) === undefined) return { status: "unknown" };
     const frames = deps.journal
       .replayAggregate({
         aggregateType: "code-operation",
-        aggregateId: String(messageId),
+        aggregateId: String(operationId),
         afterVersion: 0,
         limit: 256,
       })
       .map((event) => decodeCodeOperationEventFrame(event.payload));
     if (frames.some((frame) => String(frame.threadId) !== String(scope.threadId)))
       return { status: "unknown" };
+    const result = frames.findLast((frame) => frame.event.kind === "operation-result")?.event;
+    if (
+      result?.kind === "operation-result" &&
+      (result.result.kind === "operation-failed" || result.result.kind === "provider-turn-state") &&
+      result.result.admission === "refused"
+    )
+      return { status: "not-admitted" };
     if (!frames.some((frame) => frame.event.kind === "conversation-turn-started")) {
-      return { status: frames.length === 0 ? "not-admitted" : "unknown" };
+      return {
+        status:
+          frames.length === 0 ||
+          (result?.kind === "operation-result" && result.result.kind === "operation-failed")
+            ? "not-admitted"
+            : "unknown",
+      };
     }
     const work = deps.persistence
       .readCodeRuntimeWorks(id)
-      .find(({ work }) => String(work.id) === String(messageId))?.work;
+      .find(({ work }) => String(work.id) === String(operationId))?.work;
     if (work !== undefined) {
       const status = tailStatus(work.state);
       return { status: status === "active" ? "accepted" : status };
     }
-    const result = frames.findLast((frame) => frame.event.kind === "operation-result")?.event;
     if (result?.kind === "operation-result") {
       if (result.result.kind === "operation-failed") return { status: "failed" };
       if (result.result.kind === "provider-turn-state") {
@@ -274,7 +292,8 @@ export function createThreadMessageQueuePort(
         windowId: input.windowId,
         intent: "dispatch",
       });
-      if (inspection.status === "held") return { status: "refused", reason: "authority-revoked" };
+      if (inspection.status === "held")
+        return { status: "refused", reason: queueHoldReason(inspection.reason) };
       if (inspection.binding !== input.binding)
         return { status: "refused", reason: "binding-changed" };
       if (inspection.status === "busy" || input.signal.aborted)
@@ -290,8 +309,9 @@ export function createThreadMessageQueuePort(
         windowId: input.windowId,
         intent: "dispatch",
       });
-      if (current.status === "held" || input.signal.aborted)
-        return { status: "refused", reason: "authority-revoked" };
+      if (current.status === "held")
+        return { status: "refused", reason: queueHoldReason(current.reason) };
+      if (input.signal.aborted) return { status: "refused", reason: "authority-revoked" };
       if (current.binding !== input.binding)
         return { status: "refused", reason: "binding-changed" };
       if (current.status === "busy") return { status: "refused", reason: "admission-refused" };
@@ -309,7 +329,9 @@ export function createThreadMessageQueuePort(
                 .readChatThreadView(decodeChatThreadId(input.scope.threadId))
                 ?.turns.find((turn) => String(turn.submissionId) === String(input.messageId))
                 ?.attempts.at(-1)?.id
-            : input.messageId;
+            : input.scope.mode === "code"
+              ? (input.codeOperationId ?? input.messageId)
+              : input.messageId;
         if (latest.tail !== undefined && String(latest.tail.id) === String(ownTail))
           return latest.tail.status === "active";
         return latest.tail?.id === current.tail?.id && latest.tail?.status === current.tail?.status;
@@ -395,8 +417,9 @@ export function createThreadMessageQueuePort(
           windowId: input.windowId,
           intent: "dispatch",
         });
-        if (input.signal.aborted || finalInspection.status === "held")
-          return { status: "refused", reason: "authority-revoked" };
+        if (finalInspection.status === "held")
+          return { status: "refused", reason: queueHoldReason(finalInspection.reason) };
+        if (input.signal.aborted) return { status: "refused", reason: "authority-revoked" };
         if (finalInspection.binding !== input.binding)
           return { status: "refused", reason: "binding-changed" };
         if (finalInspection.status === "busy")
@@ -406,14 +429,25 @@ export function createThreadMessageQueuePort(
           decodeCodeOperationCommand({
             ...message,
             kind: "start-provider-turn",
-            operationId: input.messageId,
-            sessionId: input.messageId,
+            operationId: input.codeOperationId ?? input.messageId,
+            sessionId: input.codeOperationId ?? input.messageId,
             threadId: thread.id,
             checkoutId: thread.checkoutId,
             prompt,
           }),
           { admissionCurrent },
         );
+        if (
+          (result.kind === "provider-turn-state" || result.kind === "operation-failed") &&
+          result.admission === "refused"
+        )
+          return {
+            status: "refused",
+            reason:
+              result.failure?.category === "unauthorized"
+                ? "authority-revoked"
+                : "admission-refused",
+          };
         return result.kind === "provider-turn-state"
           ? { status: "accepted" }
           : { status: "refused", reason: "admission-refused" };

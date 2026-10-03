@@ -836,6 +836,11 @@ flowchart LR
   Versioned edit, reorder and removal commands detect concurrent clients;
   stable submission identities prevent an acknowledgement retry from adding
   another message.
+  Code dispatch records a distinct operation identity for each attempt before
+  admission begins. A durable pre-launch refusal keeps the queued message and
+  attachments; explicit resume creates a fresh attempt instead of replaying a
+  cached refusal. Recovery reconciles the recorded attempt before any retry,
+  while genuine failures after admission remain terminal for that attempt.
   Before sending a queue command, the client saves a bounded local retry receipt
   containing the exact command and original draft identity, without window
   capabilities. An unresolved receipt survives navigation and reload and blocks

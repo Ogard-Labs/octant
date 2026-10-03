@@ -504,6 +504,7 @@ describe("CodeOperationRuntime", () => {
       await expect(pending).resolves.toMatchObject({
         kind: "provider-turn-state",
         state: "failed",
+        admission: "refused",
         failure: { category: "unauthorized" },
       });
       expect(connection.start).not.toHaveBeenCalled();
