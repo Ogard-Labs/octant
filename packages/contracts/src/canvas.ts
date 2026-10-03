@@ -346,7 +346,18 @@ export const CanvasTableBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasTableBlock = typeof CanvasTableBlock.Type;
 
-export const CanvasChartType = Schema.Literal("line", "bar", "area", "scatter", "distribution");
+export const CanvasChartType = Schema.Literal(
+  "line",
+  "bar",
+  "area",
+  "scatter",
+  "distribution",
+  "pie",
+  "donut",
+  "stacked-bar",
+  "grouped-bar",
+  "bar-line",
+);
 export type CanvasChartType = typeof CanvasChartType.Type;
 
 export const CanvasChartPoint = Schema.Struct({
@@ -355,19 +366,127 @@ export const CanvasChartPoint = Schema.Struct({
 }).annotations(strict);
 export type CanvasChartPoint = typeof CanvasChartPoint.Type;
 
+/** Which mark a series draws on a bar-and-line chart. Other chart types omit it. */
+export const CanvasChartMark = Schema.Literal("bar", "line");
+export type CanvasChartMark = typeof CanvasChartMark.Type;
+
 export const CanvasChartSeries = Schema.Struct({
   seriesId: boundedToken("CanvasSeriesId"),
   label: CanvasLabel,
   points: Schema.NonEmptyArray(CanvasChartPoint).pipe(Schema.maxItems(CANVAS_MAX_CHART_POINTS)),
+  mark: Schema.optional(CanvasChartMark),
 }).annotations(strict);
 export type CanvasChartSeries = typeof CanvasChartSeries.Type;
+
+/**
+ * Why a chart's series do not match its type, or undefined when they do.
+ *
+ * A pie or donut is one series of labeled, non-negative slices. Stacked and
+ * grouped bars, and a bar-and-line chart, compare series across one shared
+ * category order. Only a bar-and-line chart names each series as a bar or a line.
+ */
+export function canvasChartSeriesIssue(block: {
+  readonly chartType: string;
+  readonly series: ReadonlyArray<{
+    readonly points: ReadonlyArray<{ readonly x: number | string; readonly y: number }>;
+    readonly mark?: CanvasChartMark | undefined;
+  }>;
+}): string | undefined {
+  const marked = block.series.some((item) => item.mark !== undefined);
+  if (block.chartType !== "bar-line" && marked) {
+    return "Only a bar and line chart names a mark on its series.";
+  }
+  if (block.chartType === "pie" || block.chartType === "donut") {
+    return partToWholeIssue(block.series);
+  }
+  if (
+    block.chartType === "stacked-bar" ||
+    block.chartType === "grouped-bar" ||
+    block.chartType === "bar-line"
+  ) {
+    return alignedSeriesIssue(block.chartType, block.series);
+  }
+  return undefined;
+}
+
+function categoryKey(x: number | string): string {
+  return typeof x === "number" ? `n:${String(x)}` : `s:${x}`;
+}
+
+function partToWholeIssue(
+  series: ReadonlyArray<{
+    readonly points: ReadonlyArray<{ readonly x: number | string; readonly y: number }>;
+  }>,
+): string | undefined {
+  const only = series[0];
+  if (series.length !== 1 || only === undefined) {
+    return "A pie or donut chart needs one series of labeled slices.";
+  }
+  const labels = new Set<string>();
+  for (const point of only.points) {
+    if (typeof point.x !== "string" || point.x.trim() === "") {
+      return "A pie or donut slice needs a label.";
+    }
+    if (!Number.isFinite(point.y) || point.y < 0) {
+      return "A pie or donut slice needs a value that is not negative.";
+    }
+    if (labels.has(point.x)) return "A pie or donut chart lists each slice once.";
+    labels.add(point.x);
+  }
+  return undefined;
+}
+
+function alignedSeriesIssue(
+  chartType: string,
+  series: ReadonlyArray<{
+    readonly points: ReadonlyArray<{ readonly x: number | string; readonly y: number }>;
+    readonly mark?: CanvasChartMark | undefined;
+  }>,
+): string | undefined {
+  if (series.length < 2) {
+    return "This chart needs at least two series that share categories.";
+  }
+  if (chartType === "bar-line") {
+    if (series.some((item) => item.mark === undefined)) {
+      return "A bar and line chart names each series as a bar or a line.";
+    }
+    const marks = new Set(series.map((item) => item.mark));
+    if (!marks.has("bar") || !marks.has("line")) {
+      return "A bar and line chart needs at least one bar series and one line series.";
+    }
+  }
+  const first = series[0];
+  if (first === undefined) return "This chart needs at least two series that share categories.";
+  const keys = first.points.map((point) => categoryKey(point.x));
+  if (new Set(keys).size !== keys.length) return "Each series lists a category once.";
+  for (const item of series) {
+    const itemKeys = item.points.map((point) => categoryKey(point.x));
+    if (itemKeys.length !== keys.length || itemKeys.some((key, index) => key !== keys[index])) {
+      return "Every series lists the same categories in the same order.";
+    }
+    if (chartType === "stacked-bar") {
+      for (const point of item.points) {
+        if (!Number.isFinite(point.y) || point.y < 0) {
+          return "A stacked bar value is not negative.";
+        }
+      }
+    }
+  }
+  return undefined;
+}
 
 export const CanvasChartBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("chart"),
   chartType: CanvasChartType,
   series: Schema.Array(CanvasChartSeries).pipe(Schema.maxItems(CANVAS_MAX_SERIES)),
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((block) => canvasChartSeriesIssue(block) === undefined, {
+      message: () => "Chart series do not match the chart type.",
+    }),
+  );
 export type CanvasChartBlock = typeof CanvasChartBlock.Type;
 
 export const CanvasTimelineItem = Schema.Struct({

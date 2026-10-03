@@ -23,6 +23,7 @@ export * from "./canvasPolicy";
 export * from "./canvasDiagramLayout";
 export * from "./canvasKindLayout";
 export * from "./canvasDiagramExamples";
+export * from "./canvasChartExamples";
 export * from "./canvasActionPolicy";
 export * from "./canvasActionExecutionPolicy";
 export * from "./canvasActionAvailabilityPolicy";

@@ -241,6 +241,74 @@ describe("createCanvasAgentTools", () => {
     );
   });
 
+  it("lets an agent create a pie, a donut, stacked and grouped bars, and a bar and line chart from the examples describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["chart"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+      blockSchema?: { properties?: { chartType?: { enum?: ReadonlyArray<string> } } };
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.chartType)).toEqual([
+      "pie",
+      "donut",
+      "stacked-bar",
+      "grouped-bar",
+      "bar-line",
+    ]);
+    expect(result.blockSchema?.properties?.chartType?.enum).toEqual(
+      expect.arrayContaining(["pie", "donut", "stacked-bar", "grouped-bar", "bar-line"]),
+    );
+    expect(JSON.stringify(described.result)).not.toContain("heatmap");
+    expect(JSON.stringify(described.result)).not.toContain("sankey");
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks.every((block) => block.kind === "chart")).toBe(true);
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Quarterly mix",
+        blocks: examples,
+      }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Quarterly mix" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+
+    const refused = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Broken pie",
+        blocks: [
+          {
+            blockId: "two-pies",
+            schemaVersion: 1,
+            kind: "chart",
+            chartType: "pie",
+            series: [
+              { seriesId: "a", label: "A", points: [{ x: "Product", y: 1 }] },
+              { seriesId: "b", label: "B", points: [{ x: "Services", y: 1 }] },
+            ],
+          },
+        ],
+      }),
+    });
+    expect(refused.isError).toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     { blockKinds: [] },
     { blockKinds: ["raw-html"] },
