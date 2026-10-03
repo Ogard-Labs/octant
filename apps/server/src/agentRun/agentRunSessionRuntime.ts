@@ -330,7 +330,9 @@ export function createAgentRunSessionRuntime(
     ) {
       throw new AgentRunSessionError(
         "resume-unavailable",
-        "The child has no compatible saved provider conversation. Use Retry to start a fresh session.",
+        run.lifecycleStatus === "completed"
+          ? "The child has no compatible saved provider conversation. Start a new delegation from the parent."
+          : "The child has no compatible saved provider conversation. Use Retry to start a fresh session.",
       );
     }
     return previous;

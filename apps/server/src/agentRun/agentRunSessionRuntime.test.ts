@@ -1444,6 +1444,11 @@ describe("durable child provider identity", () => {
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(provider, { supportsResume: () => true }),
     );
+    expect(runtime.checkResume?.({ ...agentRun(), lifecycleStatus: "completed" })).toMatchObject({
+      status: "refused",
+      message:
+        "The child has no compatible saved provider conversation. Start a new delegation from the parent.",
+    });
     expect(runtime.checkResume?.(agentRun())).toMatchObject({ status: "refused" });
     expect(() => runtime.resume?.(agentRun())).toThrow("Retry");
     expect(provider.acquired).toEqual([]);

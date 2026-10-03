@@ -74,7 +74,10 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
     if (this.#port.resume === undefined || this.#port.checkResume === undefined) {
       return {
         status: "refused",
-        message: "This execution cannot verify a saved child conversation.",
+        message:
+          run.lifecycleStatus === "completed"
+            ? "This execution cannot verify a saved child conversation. Start a new delegation from the parent."
+            : "This execution cannot verify a saved child conversation.",
       };
     }
     return this.#port.checkResume(run);
@@ -84,7 +87,9 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
     if (this.#port.resume === undefined)
       throw new AgentRunSessionError(
         "resume-unavailable",
-        "This execution cannot resume its saved conversation. Use Retry for a fresh session.",
+        run.lifecycleStatus === "completed"
+          ? "This execution cannot resume its saved conversation. Start a new delegation from the parent."
+          : "This execution cannot resume its saved conversation. Use Retry for a fresh session.",
       );
     return this.#start(run, input ?? {});
   }
@@ -101,7 +106,9 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
     if (handle === undefined)
       throw new AgentRunSessionError(
         "resume-unavailable",
-        "This execution cannot resume its saved conversation. Use Retry for a fresh session.",
+        run.lifecycleStatus === "completed"
+          ? "This execution cannot resume its saved conversation. Start a new delegation from the parent."
+          : "This execution cannot resume its saved conversation. Use Retry for a fresh session.",
       );
     const owned: OwnedSession = {
       runId: run.id,
