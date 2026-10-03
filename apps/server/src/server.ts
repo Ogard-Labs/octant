@@ -2020,6 +2020,22 @@ export function startOctantServer(
             signal,
           });
         },
+        resolveModelOptionValues: (run) => {
+          const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+          const reasoning = run.routingReceipt.rawReasoning;
+          if (reasoning === undefined) return undefined;
+          const model = providerRuntimeRegistry
+            .observedState(target.providerInstanceId)
+            ?.models.find((model) => String(model.id) === String(target.modelId));
+          const supported = model?.options.filter(
+            (option) =>
+              option.kind === "selection" &&
+              (option.id === "reasoning" || option.id === "effort") &&
+              option.values.includes(reasoning),
+          );
+          const option = supported?.length === 1 ? supported[0] : undefined;
+          return option === undefined ? undefined : { [option.id]: reasoning };
+        },
         supportsResume: (providerInstanceId) =>
           providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.resume ===
           "supported",
