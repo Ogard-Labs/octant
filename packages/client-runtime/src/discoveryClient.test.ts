@@ -137,6 +137,42 @@ describe("discoveryClient", () => {
     }
   });
 
+  it("leaves a slow provider connect running instead of reporting it failed", async () => {
+    vi.useFakeTimers();
+    try {
+      let aborted = false;
+      const slowFetch = vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>(() => {
+            init?.signal?.addEventListener("abort", () => {
+              aborted = true;
+            });
+          }),
+      ) as unknown as typeof globalThis.fetch;
+      const client = createDiscoveryClient({
+        baseUrl: "http://127.0.0.1:3000",
+        fetch: slowFetch,
+        windowCapability: "test-cap",
+        timeoutMs: 30_000,
+      });
+      let settled = false;
+      void client
+        .connect({ kind: "connect" } as never)
+        .then(
+          () => undefined,
+          () => undefined,
+        )
+        .finally(() => {
+          settled = true;
+        });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(aborted).toBe(false);
+      expect(settled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("sends the window capability header", async () => {
     const fetchSpy = vi.fn(
       async () => new Response(JSON.stringify(scanResponse), { status: 200 }),

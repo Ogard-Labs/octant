@@ -57,7 +57,10 @@ export function createDiscoveryClient(options: DiscoveryClientOptions): Discover
           body: JSON.stringify(command),
         },
         decodeDiscoveryCommandResult,
-        timeoutMs,
+        // No client-side limit: the host does not cancel a connect when the
+        // request is dropped, so timing out here would report a provider the
+        // host goes on to create as failed and invite a duplicate.
+        undefined,
       );
     },
   };
@@ -75,8 +78,9 @@ async function request<T>(
   url: string,
   init: RequestInit,
   decode: (value: unknown) => T,
-  timeoutMs: number,
+  timeoutMs: number | undefined,
 ): Promise<T> {
+  if (timeoutMs === undefined) return readResponse(fetch, url, init, decode);
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
