@@ -201,6 +201,14 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
     opacity: 1;
     pointer-events: auto;
   }
+
+  /* The control sits at the turn's top-right corner, which is where a
+     right-aligned message bubble ends: at 390px it covered the last word of
+     the first line. The person's turn keeps a 32px column for it, the same
+     reserve the assistant's turn header already holds. */
+  .turn-user > .turn-action-menu {
+    padding-inline-end: 32px;
+  }
 }
 
 @media (prefers-contrast: more) {

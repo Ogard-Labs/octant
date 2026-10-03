@@ -1557,6 +1557,16 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   white-space: nowrap;
 }
 
+/* A phone header is about 340px wide: the two chips kept their widths and
+   left a thread title of "Reply …". The title is what names the pane, and the
+   Project and branch are still shown by the composer's context bar below. */
+@media (max-width: 680px) {
+  .workspace-pane__context,
+  .workspace-pane__branch {
+    display: none;
+  }
+}
+
 /* A turn is executing. The pill keeps its width while the chips shrink, so
    the state stays readable in a narrow pane. */
 .workspace-pane__status {
