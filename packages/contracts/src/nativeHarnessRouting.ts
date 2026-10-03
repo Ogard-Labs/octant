@@ -283,6 +283,13 @@ function differentCandidates(decision: {
 export const NativeHarnessRouteDecision = Schema.Union(
   Schema.Struct({
     ...RouteDecisionFields,
+    kind: Schema.Literal("inherited-parent"),
+    /** The unconfigured role slot; this does not claim a configured selection. */
+    requestedSlotId: NativeHarnessSlotId,
+    candidate: NativeHarnessSlotCandidate,
+  }).annotations(strict),
+  Schema.Struct({
+    ...RouteDecisionFields,
     kind: Schema.Literal("primary"),
     slotId: NativeHarnessSlotId,
     candidate: NativeHarnessSlotCandidate,

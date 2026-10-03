@@ -1,4 +1,5 @@
 import {
+  LOCAL_HOST_ID,
   decodeAgentRunControlRequest,
   decodeProjectId,
   decodeProviderInstanceId,
@@ -196,8 +197,15 @@ export async function startAgentRunDelegation(
             refusal = "delegate-routing-unavailable";
             return undefined;
           }
+          const parentReasoning = input.reasoning ?? parent.parentRoute.reasoning;
           decision = options.routing.router.resolve({
             job: nativeHarnessJobForRole(controlRequest.role),
+            inheritParent: {
+              hostId: LOCAL_HOST_ID,
+              providerInstanceId: parent.parentRoute.providerInstanceId,
+              modelId: parent.parentRoute.modelId,
+              ...(parentReasoning === undefined ? {} : { reasoning: parentReasoning }),
+            },
             ...(parent.parentRoute.projectId === undefined
               ? {}
               : { projectId: decodeProjectId(parent.parentRoute.projectId) }),
