@@ -818,6 +818,18 @@ flowchart LR
   controller footing for small teams lives in
   `docs/legal/shared-host-controller.md` and aligns with
   `docs/decisions/0040` without shipping the shared team host.
+- **Artifact replica entries.** A store a person sets aside for sync holds one
+  write-once JSON entry per committed artifact version or deletion, at
+  `<instanceId>/<sequence>.json`, with a detached signature beside it at
+  `<instanceId>/<sequence>.sig`. The payload is the artifact bundle from
+  [0029](decisions/0029-artifact-storage-mirror.md) (`octant.artifact-bundle/1`),
+  not a second document. Reconciling an entry appends a version, keeps both
+  heads when two computers revise the same parent, or records a tombstone. It
+  cannot overwrite. A gap in an instance's sequence, an unknown or revoked
+  instance, a bad or missing signature, a content-hash mismatch, or an entry
+  that names a local artifact as foreign is refused. An unknown entry format
+  fails closed. A later version after a tombstone appends; the tombstone stays
+  in the history.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a

@@ -9,6 +9,8 @@
     "./agent-run": "./src/agentRun.ts",
     "./artifact-library": "./src/artifactLibrary.ts",
     "./artifact-mirror": "./src/artifactMirror.ts",
+    "./artifact-bundle": "./src/artifactBundle.ts",
+    "./replica-entry": "./src/replicaEntry.ts",
     "./automation": "./src/automation.ts",
     "./goal-loop": "./src/goalLoop.ts",
     "./ship-target": "./src/shipTarget.ts",

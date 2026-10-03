@@ -1,0 +1,203 @@
+/**
+ * One write-once record in a store a person set aside for artifact sync.
+ *
+ * The file is `<instanceId>/<sequence>.json`. A detached signature sits beside
+ * it at `<instanceId>/<sequence>.sig`. Both are write-once. This module names
+ * those paths and decodes the JSON; it does not write either file and it does
+ * not verify a signature. The payload is the artifact bundle, not a second
+ * document.
+ *
+ * An unknown format fails closed. A decoder that guessed would apply a record
+ * this host does not know how to read.
+ */
+
+import { Schema } from "effect";
+import { ArtifactBundle, decodeArtifactBundle, encodeArtifactBundle } from "./artifactBundle";
+import { CanvasId, CanvasVersionId } from "./canvas";
+import { HostId } from "./host";
+
+const strict = { parseOptions: { onExcessProperty: "error" as const } };
+const PositiveInt = Schema.Int.pipe(Schema.positive());
+
+export const REPLICA_ENTRY_FORMAT = "octant.replica-entry/1" as const;
+
+const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+
+export const ReplicaInstanceId = brandedUuid("ReplicaInstanceId");
+export type ReplicaInstanceId = typeof ReplicaInstanceId.Type;
+
+function isReplicaDisplayName(value: string): boolean {
+  if (value !== value.normalize("NFC") || value === "." || value === "..") return false;
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    if (code === undefined || code < 0x20 || character === "\\" || character === "/") return false;
+  }
+  return true;
+}
+
+/**
+ * The name of the computer that wrote the entry, as that computer names
+ * itself. It is not a path and it is not an instance id.
+ */
+export const ReplicaDisplayName = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(128),
+  Schema.filter(isReplicaDisplayName),
+);
+export type ReplicaDisplayName = typeof ReplicaDisplayName.Type;
+
+export const ReplicaOrigin = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  displayName: ReplicaDisplayName,
+  sequence: PositiveInt,
+}).annotations(strict);
+export type ReplicaOrigin = typeof ReplicaOrigin.Type;
+
+/**
+ * Where the artifact was created. A later revision from another computer
+ * still carries this identity; it does not become that computer's artifact.
+ */
+export const ReplicaArtifactOrigin = Schema.Struct({
+  canvasId: CanvasId,
+  hostId: HostId,
+}).annotations(strict);
+export type ReplicaArtifactOrigin = typeof ReplicaArtifactOrigin.Type;
+
+export const ReplicaParentVersion = Schema.Struct({
+  versionId: CanvasVersionId,
+}).annotations(strict);
+export type ReplicaParentVersion = typeof ReplicaParentVersion.Type;
+
+export const ReplicaParents = Schema.Array(ReplicaParentVersion).pipe(
+  Schema.maxItems(16),
+  Schema.filter(
+    (parents) => new Set(parents.map((parent) => String(parent.versionId))).size === parents.length,
+  ),
+);
+export type ReplicaParents = typeof ReplicaParents.Type;
+
+/** Lowercase hex SHA-256 of {@link replicaEntryContentPreimage}. */
+export const ReplicaContentHash = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+export type ReplicaContentHash = typeof ReplicaContentHash.Type;
+
+/**
+ * A verdict the host already reached. Missing is not verified: an entry whose
+ * signature was not checked is not an entry that passed.
+ */
+export const ReplicaSignatureVerdict = Schema.Literal("verified", "bad-signature", "missing");
+export type ReplicaSignatureVerdict = typeof ReplicaSignatureVerdict.Type;
+
+const ReplicaEntryFields = {
+  format: Schema.Literal(REPLICA_ENTRY_FORMAT),
+  origin: ReplicaOrigin,
+  artifact: ReplicaArtifactOrigin,
+  parents: ReplicaParents,
+  contentHash: ReplicaContentHash,
+  bundle: ArtifactBundle,
+} as const;
+
+export const ReplicaVersionEntry = Schema.Struct({
+  kind: Schema.Literal("artifact-version"),
+  ...ReplicaEntryFields,
+}).annotations(strict);
+export type ReplicaVersionEntry = typeof ReplicaVersionEntry.Type;
+
+export const ReplicaTombstoneEntry = Schema.Struct({
+  kind: Schema.Literal("artifact-tombstone"),
+  ...ReplicaEntryFields,
+}).annotations(strict);
+export type ReplicaTombstoneEntry = typeof ReplicaTombstoneEntry.Type;
+
+export const ReplicaEntry = Schema.Union(ReplicaVersionEntry, ReplicaTombstoneEntry);
+export type ReplicaEntry = typeof ReplicaEntry.Type;
+
+export const decodeReplicaEntry = Schema.decodeUnknownSync(ReplicaEntry);
+export const decodeReplicaSignatureVerdict = Schema.decodeUnknownSync(ReplicaSignatureVerdict);
+
+/**
+ * Read one entry from the JSON text a store would hold.
+ *
+ * Invalid JSON, an unknown format, and a field this format does not define
+ * all fail closed. There is no fallback document.
+ */
+export function decodeReplicaEntryText(text: string): ReplicaEntry {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("Replica entry is not readable JSON.");
+  }
+  return decodeReplicaEntry(parsed);
+}
+
+/**
+ * The bytes a content hash covers: the canonical artifact bundle, including
+ * its trailing newline, in the same shape the mirror writes.
+ */
+export function replicaEntryContentPreimage(entry: ReplicaEntry): string {
+  return encodeArtifactBundle(entry.bundle);
+}
+
+/**
+ * Whether the bundle names the artifact the entry claims.
+ *
+ * A bundle that names another artifact is not this entry's payload, however
+ * it got there. Applying it would graft one document onto another's history.
+ */
+export function replicaEntryBundleAgrees(entry: ReplicaEntry): boolean {
+  return (
+    String(entry.bundle.octant.canvasId) === String(entry.artifact.canvasId) &&
+    String(entry.bundle.octant.hostId) === String(entry.artifact.hostId)
+  );
+}
+
+/**
+ * Relative paths under the store root.
+ *
+ * `<instanceId>/<sequence>.json` beside `<instanceId>/<sequence>.sig`. Both
+ * are write-once. This names them; it does not create them.
+ */
+export function replicaEntryRelativePaths(
+  instanceId: ReplicaInstanceId,
+  sequence: number,
+): { readonly entry: string; readonly signature: string } {
+  const id = String(instanceId);
+  if (
+    !Number.isInteger(sequence) ||
+    sequence < 1 ||
+    id.length === 0 ||
+    /[\\/]/.test(id) ||
+    id.includes("..")
+  ) {
+    throw new Error("Replica entry path is not a write-once instance sequence.");
+  }
+  return {
+    entry: `${id}/${String(sequence)}.json`,
+    signature: `${id}/${String(sequence)}.sig`,
+  };
+}
+
+/**
+ * Plain readable JSON. Keys go out in a fixed order, indentation is two
+ * spaces, and the text ends with a newline, so a revision that changed one
+ * sentence shows one changed line.
+ */
+export function encodeReplicaEntry(entry: ReplicaEntry): string {
+  const bundle = decodeArtifactBundle(JSON.parse(encodeArtifactBundle(entry.bundle)));
+  const body = {
+    format: entry.format,
+    kind: entry.kind,
+    origin: {
+      instanceId: entry.origin.instanceId,
+      displayName: entry.origin.displayName,
+      sequence: entry.origin.sequence,
+    },
+    artifact: {
+      canvasId: entry.artifact.canvasId,
+      hostId: entry.artifact.hostId,
+    },
+    parents: entry.parents.map((parent) => ({ versionId: parent.versionId })),
+    contentHash: entry.contentHash,
+    bundle,
+  };
+  return `${JSON.stringify(body, null, 2)}\n`;
+}

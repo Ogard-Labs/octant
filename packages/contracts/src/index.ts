@@ -97,6 +97,8 @@ export * from "./androidToolchain";
 export * from "./androidToolchainRpc";
 export * from "./artifactLibrary";
 export * from "./artifactMirror";
+export * from "./artifactBundle";
+export * from "./replicaEntry";
 export * from "./appUpdates";
 export * from "./scaffolds";
 export * from "./workspacePresets";
