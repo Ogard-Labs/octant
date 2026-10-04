@@ -159,8 +159,10 @@ earlier beta build, which discovery still accepts as a fallback and shows as
 **OpenCode 2 preview**. When both names are installed, discovery prefers
 `opencode`. Which routes run is selected by the installed binary's version,
 not by that name: a 1.x binary keeps the legacy session API, and a 2.x binary
-lists providers and models from its HTTP catalogue. OpenCode 2 is listing
-only, turns not yet supported. Octant never falls back to an unconfined
+lists providers and models from its HTTP catalogue and can run a turn where
+the process jail already enforces the permission boundary. Chat turns run.
+Work and Code writes stay refused until session permission rules can be
+enforced. Octant never falls back to an unconfined
 session or treats the 2.x version as the legacy runtime.
 
 ### API endpoints

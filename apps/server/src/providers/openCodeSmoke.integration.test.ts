@@ -57,6 +57,77 @@ describe("real OpenCode integration", () => {
     },
     60_000,
   );
+
+  it.skipIf(!enabled)(
+    "completes one Chat turn against the installed runtime when credentials exist",
+    async () => {
+      const binaryPath = findExecutable("opencode");
+      expect(binaryPath, "enabled smoke requires an installed OpenCode CLI").not.toBeNull();
+      const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000305");
+      const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000306");
+      const registry = new ProviderRuntimeRegistry();
+      const driver = makeOpenCodeDriver({
+        instanceId,
+        binaryPath: binaryPath!,
+        process: makeOpenCodeProcessLive({ startupTimeoutMs: 20_000 }),
+        runtimeRegistry: registry,
+        idleLeaseMs: 0,
+        permissionPersistence: () => "current-session",
+      });
+      const projectRoot = process.cwd();
+      const kinds: string[] = [];
+      const failures: string[] = [];
+      try {
+        const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+        if (probe.readiness !== "ready" || probe.models.length === 0) {
+          throw new Error(
+            `Installed OpenCode did not offer a usable model (${probe.readiness}). Credentials were not available for a live Chat turn.`,
+          );
+        }
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "chat" });
+              const events = yield* connection.subscribe;
+              const consume = yield* Effect.forkScoped(
+                Stream.runForEach(
+                  events.pipe(
+                    Stream.filter((event) => event.sessionId === sessionId),
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                  (event) =>
+                    Effect.sync(() => {
+                      if (kinds.length < 40) kinds.push(event.kind);
+                      if (event.kind === "failed") failures.push(event.failure.category);
+                    }),
+                ),
+              );
+              yield* connection.start({
+                sessionId,
+                modelId: probe.models[0]!.id,
+                executionPolicy: "approval-gated",
+              });
+              yield* connection.send({
+                sessionId,
+                prompt: "Reply with the single word ready. Do not use tools.",
+                attachments: [],
+                tools: [],
+              });
+              yield* Fiber.join(consume).pipe(Effect.timeout("90 seconds"));
+            }),
+          ),
+        );
+        expect(failures, kinds.join(",")).toEqual([]);
+        expect(kinds, kinds.join(",")).toContain("text-delta");
+        expect(kinds.at(-1), kinds.join(",")).toBe("completed");
+      } finally {
+        await registry.closeAll();
+      }
+    },
+    120_000,
+  );
   it.skipIf(process.env.OCTANT_OPENCODE_TOOL_SMOKE !== "1")(
     "round-trips a read-only app tool through the installed runtime when explicitly enabled",
     async () => {

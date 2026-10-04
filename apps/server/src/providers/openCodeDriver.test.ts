@@ -1256,7 +1256,7 @@ describe("OpenCode driver", () => {
     },
   );
 
-  it("marks a version-selected 2.x catalogue as listing only", async () => {
+  it("reports 2.x resume, interruption, and tool activity, and leaves unmapped operations unsupported", async () => {
     const fixture = driverFixture({
       process: {
         start: () =>
@@ -1275,9 +1275,87 @@ describe("OpenCode driver", () => {
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
     expect(probe.readiness).toBe("ready");
     expect(probe.models.length).toBeGreaterThan(0);
-    expect(probe.message).toBe("OpenCode 2 is listing only, turns not yet supported.");
+    expect(probe.message).toBeUndefined();
+    expect(probe.capabilities).toMatchObject({
+      resume: "supported",
+      interruption: "supported",
+      toolActivity: "supported",
+      approvals: "unsupported",
+      userQuestions: "unsupported",
+      fileChanges: "unsupported",
+      appManagedTools: "unsupported",
+    });
+  });
+
+  it("refuses a 2.x Work or Code write and still starts a Chat or Plan turn", async () => {
+    const writeFixture = betaDriver();
+    const writeExit = await Effect.runPromiseExit(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* writeFixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "code",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        }),
+      ),
+    );
+    expect(writeExit._tag).toBe("Failure");
+    expect(writeFixture.calls).not.toContain("session.create:ask");
+
+    const chatFixture = betaDriver();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* chatFixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        }),
+      ),
+    );
+    expect(chatFixture.calls).toContain("session.create:ask");
+
+    const planFixture = betaDriver();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* planFixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "work",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+        }),
+      ),
+    );
+    expect(planFixture.calls).toContain("session.create:ask");
+    expect(planFixture.createdPermissions.at(-1)).toEqual(
+      expect.arrayContaining([{ permission: "edit", pattern: "*", action: "deny" }]),
+    );
   });
 });
+
+function betaDriver() {
+  return driverFixture({
+    process: {
+      start: () =>
+        Effect.acquireRelease(
+          Effect.succeed({
+            authorization: "Basic redacted",
+            pid: process.pid,
+            runtime: "beta" as const,
+            version: "opencode v2.0.22",
+            url: new URL("http://127.0.0.1:1/"),
+          }),
+          () => Effect.void,
+        ),
+    },
+  });
+}
 
 function driverFixture(
   options: {

@@ -212,6 +212,102 @@ describe("OpenCode provider conformance", () => {
     });
     expect(chatEvidence).toMatchObject({ appManagedToolRoundTrip: true, released: true });
   });
+
+  it("completes a Chat turn and a Code turn from recorded 2.x session fixtures", async () => {
+    const codeSource = new EventSourceFixture();
+    const codeDriver = makeBetaHarnessDriver(codeSource, {
+      onPrompt: (sessionId) => {
+        for (const event of recordedBetaTurn(sessionId)) codeSource.emit(event);
+      },
+      onAbort: (sessionId) => {
+        codeSource.emit({
+          type: "session.error",
+          properties: {
+            sessionID: sessionId,
+            error: { name: "MessageAbortedError", data: { message: "aborted" } },
+          },
+        } as Event);
+      },
+    });
+    const codeEvidence = await runProviderConformance({
+      driver: codeDriver.driver,
+      probeInput: { instanceId },
+      acquireInput: { instanceId, projectRoot },
+      sessionStart: { sessionId, modelId, executionPolicy: "plan" },
+      turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
+      resume: {
+        sessionId,
+        resumeCursor: { driverKind: "opencode", value: "provider-session" },
+        executionPolicy: "plan",
+      },
+      staleResume: {
+        sessionId,
+        resumeCursor: { driverKind: "opencode", value: "stale" },
+        executionPolicy: "plan",
+      },
+      unknownApproval: { sessionId, requestId: "unknown", approved: false },
+      unknownUserInput: { sessionId, requestId: "unknown", answer: "none" },
+      expectedEventKinds: [
+        "text-delta",
+        "reasoning-delta",
+        "tool-start",
+        "tool-success",
+        "usage",
+        "diff",
+        "task-progress",
+        "interrupted",
+      ],
+      expectedFailureCategories: {
+        staleResume: "stale-resume",
+        unknownApproval: "unsupported",
+        unknownUserInput: "unsupported",
+      },
+      isReleased: codeDriver.isReleased,
+    });
+    expect(codeEvidence).toMatchObject({
+      capabilityHonest: true,
+      streamedInOrder: true,
+      interrupted: true,
+      resumed: true,
+      released: true,
+    });
+
+    const chatSource = new EventSourceFixture();
+    const chatDriver = makeBetaHarnessDriver(chatSource, {
+      onPrompt: (sessionId) => {
+        chatSource.emit({
+          type: "session.next.text.delta",
+          properties: {
+            sessionID: sessionId,
+            delta: "hello",
+            assistantMessageID: "m",
+            textID: "t",
+          },
+        } as Event);
+        chatSource.emit({
+          type: "session.idle",
+          properties: { sessionID: sessionId },
+        } as Event);
+      },
+      onAbort: () => undefined,
+    });
+    const chatEvidence = await withProcessPlatform("darwin", () =>
+      runProviderChatConformance({
+        driver: chatDriver.driver,
+        probeInput: { instanceId },
+        acquireInput: { instanceId, projectRoot, mode: "chat" },
+        sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
+        turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
+        isReleased: chatDriver.isReleased,
+      }),
+    );
+    expect(chatEvidence).toEqual({
+      nativeAttachmentHonest: true,
+      appManagedToolRoundTrip: true,
+      citationsNormalized: true,
+      released: true,
+    });
+  });
 });
 
 class EventSourceFixture implements AsyncIterable<Event> {
@@ -447,4 +543,140 @@ function runtimeEvents(sourceId: string): ReadonlyArray<Event> {
       },
     },
   ] as unknown as ReadonlyArray<Event>;
+}
+
+function recordedBetaTurn(sourceId: string): ReadonlyArray<Event> {
+  return [
+    {
+      type: "session.next.text.delta",
+      properties: {
+        sessionID: sourceId,
+        assistantMessageID: "m",
+        textID: "t",
+        delta: "hello",
+      },
+    },
+    {
+      type: "session.next.reasoning.delta",
+      properties: {
+        sessionID: sourceId,
+        assistantMessageID: "m",
+        textID: "r",
+        delta: "think",
+      },
+    },
+    {
+      type: "session.next.tool.called",
+      properties: {
+        sessionID: sourceId,
+        assistantMessageID: "m",
+        callID: "c",
+        tool: "read",
+        input: {},
+      },
+    },
+    {
+      type: "session.next.tool.success",
+      properties: {
+        sessionID: sourceId,
+        assistantMessageID: "m",
+        callID: "c",
+      },
+    },
+    {
+      type: "session.next.step.ended",
+      properties: {
+        sessionID: sourceId,
+        assistantMessageID: "m",
+        finish: "stop",
+        cost: 0,
+        tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+    },
+    {
+      type: "session.diff",
+      properties: {
+        sessionID: sourceId,
+        diff: [{ file: "README.md", patch: "+x", additions: 1, deletions: 0 }],
+      },
+    },
+    {
+      type: "todo.updated",
+      properties: {
+        sessionID: sourceId,
+        todos: [{ content: "test", status: "pending", priority: "medium" }],
+      },
+    },
+  ] as unknown as ReadonlyArray<Event>;
+}
+
+function makeBetaHarnessDriver(
+  source: EventSourceFixture,
+  handlers: {
+    readonly onPrompt: (sessionId: string) => void;
+    readonly onAbort: (sessionId: string) => void;
+  },
+) {
+  let released = false;
+  const session = {
+    id: "provider-session",
+    directory: projectRoot,
+    model: { id: "claude-sonnet", providerID: "anthropic" },
+  };
+  const client: OpenCodeClientPort = {
+    health: async () => ({ healthy: true, version: "opencode v2.0.22" }),
+    providers: async () => ({ all: [provider()], connected: ["anthropic"] }),
+    subscribe: async () => source,
+    createSession: async () => session,
+    getSession: async (id) => {
+      if (id === "stale") throw new Error("not found");
+      return session;
+    },
+    prompt: async ({ sessionId: nativeId }) => {
+      handlers.onPrompt(nativeId);
+    },
+    addMcpServer: async () => {
+      throw new Error("app-managed tools are not mapped");
+    },
+    disconnectMcpServer: async () => undefined,
+    abort: async (nativeId) => {
+      handlers.onAbort(nativeId);
+    },
+    replyPermission: async () => {
+      throw new Error("approval replies are not mapped");
+    },
+    replyQuestion: async () => {
+      throw new Error("questions are not mapped");
+    },
+  };
+  return {
+    isReleased: () => released,
+    driver: makeOpenCodeDriver({
+      instanceId,
+      binaryPath: "/opt/homebrew/bin/opencode",
+      process: {
+        start: () =>
+          Effect.acquireRelease(
+            Effect.succeed({
+              isolatedConfiguration: true,
+              authorization: "Basic redacted",
+              pid: process.pid,
+              runtime: "beta" as const,
+              version: "opencode v2.0.22",
+              url: new URL("http://127.0.0.1:1/"),
+            }),
+            () =>
+              Effect.sync(() => {
+                released = true;
+              }),
+          ),
+      },
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      clientFactory: () => client,
+      idleLeaseMs: 0,
+      permissionPersistence: () => "current-session",
+      clock: () => "2026-07-15T00:00:00.000Z",
+      correlationId: () => "80000000-0000-4000-8000-000000000203",
+    }),
+  };
 }
