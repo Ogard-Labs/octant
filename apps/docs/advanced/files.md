@@ -80,7 +80,9 @@ short pointer; brief answers stay in the conversation. A follow-up such as "add
 a risks section" revises the existing Canvas: the read-only `list` operation
 returns the thread's Canvases and `read` returns one's current blocks and
 sequence. Its read-only `describe` operation lists the
-supported block kinds and a creation example. Requesting up to three
+supported block kinds, the document recipes an agent should start from, and a
+creation example. Asking to write a plan, review a pull request, or summarise
+research starts from the matching recipe. Requesting up to three
 `blockKinds` returns their exact schemas from the host's block contracts:
 
 ```json

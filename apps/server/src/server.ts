@@ -430,7 +430,10 @@ import { CanvasShareService } from "./canvas/canvasShareService";
 import { createCanvasRefreshSourceResolver } from "./canvas/canvasRefreshSourceResolver";
 import { readCanvasRefreshFile, resolveCanvasRefreshFile } from "./canvas/canvasRefreshFileRead";
 import { createCanvasSkillContributionResolver } from "./canvas/canvasSkillContributionResolver";
-import { createCanvasSkillContributionLookup } from "./canvas/canvasSkillContributionLoader";
+import {
+  createCanvasSkillContributionLookup,
+  offeredCanvasDocumentRecipes,
+} from "./canvas/canvasSkillContributionLoader";
 import { resolveConfinedPath } from "./preview/previewTargetRegistry";
 import {
   createPreviewRouteHandler,
@@ -8237,6 +8240,8 @@ export function startOctantServer(
       uuid: randomUUID,
       hostId: LOCAL_HOST_ID,
       resolveWorkspace: resolveCanvasWorkspace,
+      documentRecipes: () =>
+        offeredCanvasDocumentRecipes(extensionApiService.snapshot().skills ?? []),
     };
     // Canvas sharing is local-only: a snapshot is served over the loopback
     // Canvas API to a principal this host authenticates, never uploaded or

@@ -253,7 +253,14 @@ same guidance through MCP, dynamic tools, or direct tool calls without a
 separate global tool installation or prompt catalogue. Browser shares one
 definition across modes. Canvas's `describe` operation lists the closed block
 catalogue and a creation example, or returns canonical schemas for up to three
-requested block kinds. It reads no Project data and creates no artifact.
+requested block kinds. Unscoped describe also lists document recipes: an id, a
+title, when to use one, and a skeleton of block kinds that already exist. The
+host offers an implementation plan, an audit or test report, a code review, a
+research brief, and a postmortem. A trusted, enabled, unscoped skill may add
+recipes through its Canvas contribution; a skill that is not enabled contributes
+none, and a contributed recipe cannot replace an in-tree id. A recipe is a
+starting shape, not a document and not authority. Describe reads no Project
+data and creates no artifact.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the

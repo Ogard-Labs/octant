@@ -1,7 +1,15 @@
 import type { CanvasRefreshRequest, CanvasRefreshSkill } from "@octant/contracts/canvas-refresh";
-import { decodeCanvasSkillContribution } from "@octant/contracts/canvas-skill";
+import {
+  decodeCanvasSkillContribution,
+  type CanvasDocumentRecipe,
+  type CanvasSkillContribution,
+} from "@octant/contracts/canvas-skill";
 import type { StandaloneSkillRecord } from "@octant/contracts/extensions";
-import type { CanvasSkillTrustFacts } from "@octant/plugin-host/canvas-skill-contributions";
+import {
+  canvasDocumentRecipesFromAdmitted,
+  type CanvasSkillTrustFacts,
+} from "@octant/plugin-host/canvas-skill-contributions";
+import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
 import type { CanvasSkillContributionSource } from "./canvasSkillContributionResolver";
 
 /**
@@ -79,4 +87,36 @@ export function createCanvasSkillContributionLookup(
     }
     return { contribution, facts: canvasSkillTrustFactsFromRecord(record) };
   };
+}
+
+/**
+ * Document recipes describe may offer from reconciled skill records.
+ *
+ * In-tree recipes are always offered. A skill contributes its recipes only
+ * after the same decode and admission the refresh path uses, so a skill that
+ * is not enabled, not trusted, or not effective contributes none. A skill
+ * scoped to a thread contributes none here: describe reads no Project, and a
+ * scoped recipe must not leak into another thread's catalogue. A malformed
+ * document contributes nothing rather than a partial recipe.
+ */
+export function offeredCanvasDocumentRecipes(
+  records: ReadonlyArray<StandaloneSkillRecord>,
+): ReadonlyArray<CanvasDocumentRecipe> {
+  const candidates: Array<{
+    readonly contribution: CanvasSkillContribution;
+    readonly facts: CanvasSkillTrustFacts;
+  }> = [];
+  for (const record of records) {
+    if (record.scope !== undefined) continue;
+    const document = record.canvasContribution;
+    if (document === undefined) continue;
+    let contribution;
+    try {
+      contribution = decodeCanvasSkillContribution(document);
+    } catch {
+      continue;
+    }
+    candidates.push({ contribution, facts: canvasSkillTrustFactsFromRecord(record) });
+  }
+  return canvasDocumentRecipesFromAdmitted(candidates, inTreeCanvasDocumentRecipes());
 }
