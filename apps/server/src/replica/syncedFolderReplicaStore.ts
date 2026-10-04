@@ -394,40 +394,69 @@ async function walkFiles(syncRoot: string): Promise<readonly string[]> {
 }
 
 /**
- * Create the sync directory and the key's parent, then prove both still sit
- * inside the folder. A symlink planted at either name would otherwise publish
- * outside the folder the person picked.
+ * Create the sync directory and the key's parent one name at a time.
+ *
+ * Recursive mkdir follows an intermediate symlink and can create directories
+ * outside the folder before the containment check runs. Each missing name is
+ * created only after its parent still sits inside the folder.
  */
 async function ensureConfinedDirectory(
   folder: string,
   syncRoot: string,
   destination: string,
 ): Promise<boolean> {
-  if (await isEscapingLink(syncRoot, folder)) return false;
+  if (!(await mkdirEachContained(folder, syncRoot))) return false;
+  let canonicalSync: string;
   try {
-    await mkdir(syncRoot, { recursive: true });
-    const canonicalSync = await realpath(syncRoot);
-    if (!isContained(folder, canonicalSync)) return false;
-    const parent = dirname(destination);
-    if (await isEscapingLink(parent, canonicalSync)) return false;
-    await mkdir(parent, { recursive: true });
-    const canonicalParent = await realpath(parent);
-    return isContained(canonicalSync, canonicalParent);
+    canonicalSync = await realpath(syncRoot);
   } catch {
     return false;
   }
+  if (!isContained(folder, canonicalSync)) return false;
+  return mkdirEachContained(canonicalSync, dirname(destination));
 }
 
-async function isEscapingLink(path: string, root: string): Promise<boolean> {
-  try {
-    const metadata = await lstat(path);
-    if (!metadata.isSymbolicLink()) return false;
-    const target = await realpath(path);
-    return !isContained(root, target);
-  } catch (error) {
-    if (isEnoent(error)) return false;
-    return true;
+async function mkdirEachContained(root: string, target: string): Promise<boolean> {
+  const missing: string[] = [];
+  let cursor = target;
+  for (let depth = 0; depth < 64; depth += 1) {
+    try {
+      const metadata = await lstat(cursor);
+      if (metadata.isSymbolicLink()) {
+        const resolved = await realpath(cursor);
+        if (!isContained(root, resolved)) return false;
+      }
+      break;
+    } catch (error) {
+      if (!isEnoent(error)) return false;
+      missing.push(cursor);
+      const parent = dirname(cursor);
+      if (parent === cursor) return false;
+      cursor = parent;
+    }
   }
+  let canonical: string;
+  try {
+    canonical = await realpath(cursor);
+  } catch {
+    return false;
+  }
+  if (!isContained(root, canonical)) return false;
+  for (const next of missing.reverse()) {
+    try {
+      await mkdir(next);
+    } catch {
+      return false;
+    }
+    let created: string;
+    try {
+      created = await realpath(next);
+    } catch {
+      return false;
+    }
+    if (!isContained(root, created)) return false;
+  }
+  return true;
 }
 
 async function pathExists(path: string): Promise<boolean> {

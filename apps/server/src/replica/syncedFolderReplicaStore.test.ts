@@ -200,6 +200,18 @@ describe("synced folder replica store", () => {
     expect(await store.get("id/1.json")).toEqual({ status: "refused", reason: "key-refused" });
   });
 
+  it("does not create directories through an intermediate symlink out of the folder", async () => {
+    const folder = temporaryDirectory(homedir());
+    const outside = temporaryDirectory(homedir());
+    mkdirSync(join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY));
+    symlinkSync(outside, join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY, "escape"));
+    const store = await offeredStore(folder);
+    expect(await store.putIfAbsent("escape/nested/1.json", new TextEncoder().encode("no"))).toEqual(
+      { status: "refused", reason: "key-refused" },
+    );
+    expect(existsSync(join(outside, "nested"))).toBe(false);
+  });
+
   it("does not offer or call a disabled or uninstalled store", async () => {
     const folder = temporaryDirectory(homedir());
     expect(openFolder(folder, { installed: false })).toEqual({
