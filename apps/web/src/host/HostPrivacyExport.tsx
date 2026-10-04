@@ -36,13 +36,25 @@ export function HostPrivacyExport({
           setState({ kind: "refused", text: REFUSAL[result.reason] });
           return;
         }
+        if (typeof URL.createObjectURL !== "function") {
+          setState({
+            kind: "error",
+            text: "The export could not be completed. Nothing was saved.",
+          });
+          return;
+        }
         const blob = new Blob([result.payload], { type: "application/x-ndjson" });
         const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = "octant-host-export.ndjson";
-        link.click();
-        URL.revokeObjectURL(url);
+        try {
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = "octant-host-export.ndjson";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+        } finally {
+          URL.revokeObjectURL(url);
+        }
         setState({ kind: "saved" });
       })
       .catch(() => {

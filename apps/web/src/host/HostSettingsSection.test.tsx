@@ -526,4 +526,64 @@ describe("HostSettingsSection", () => {
     expect(screen.getByLabelText("Find a thread")).toHaveValue("thread-1");
     expect(screen.queryByRole("button", { name: "Dive notes (chat)" })).not.toBeInTheDocument();
   });
+
+  it("downloads the assembled payload and shows Saved after the click path", async () => {
+    const user = userEvent.setup();
+    const payload = '{"kind":"complete","threadCount":0}\n';
+    const createObjectURL = vi.fn(() => "blob:host-export");
+    const originalCreateObjectURL = URL.createObjectURL;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectURL,
+    });
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        expect(this.download).toBe("octant-host-export.ndjson");
+        expect(this.isConnected).toBe(true);
+      });
+    try {
+      render(
+        <HostDataSettingsSection
+          client={makeClient({
+            exportHost: async () => ({
+              kind: "exported",
+              payload,
+              bundle: {
+                octant: {
+                  format: "octant.host-export/1",
+                  hostId: "local" as never,
+                  generatedAt: "2026-08-19T12:00:00.000Z" as never,
+                  threadCount: 0,
+                },
+                threads: [],
+                projects: [],
+                projectMemory: [],
+                canvases: [],
+                settings: { chatEnabled: true, workEnabled: false, themeMode: "dark" },
+                usage: [],
+                retention: { windows: [], tombstones: [] },
+                omissions: [
+                  {
+                    subject: "credentials",
+                    reason: "Secrets, tokens, and credential material are unrepresentable.",
+                  },
+                ],
+              },
+            }),
+          })}
+        />,
+      );
+      await user.click(await screen.findByRole("button", { name: "Export my data" }));
+      expect(createObjectURL).toHaveBeenCalledOnce();
+      expect(click).toHaveBeenCalledOnce();
+      expect(await screen.findByText("Saved octant-host-export.ndjson.")).toBeInTheDocument();
+    } finally {
+      click.mockRestore();
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        value: originalCreateObjectURL,
+      });
+    }
+  });
 });
