@@ -36,9 +36,8 @@ export type AppVersion = typeof AppVersion.Type;
 /**
  * Platforms that may appear in a signed update feed.
  *
- * `darwin` is the Apple Silicon technical preview. `linux` is the Ubuntu
- * dogfood arch once a signed feed is published; the schema accepts it so the
- * release matrix can name `<ring>/linux-x64.json` with the same document shape.
+ * `darwin` is the Apple Silicon technical preview. `linux` is the x64
+ * portable-image feed, the same document shape as `<ring>/linux-x64.json`.
  * Windows stays out until packaging lands.
  */
 export const AppUpdatePlatform = Schema.Literal("darwin", "linux");
@@ -161,6 +160,17 @@ export const AppUpdateRefusal = Schema.Literal(
    * that location is simply not the one it claims to be.
    */
   "wrong-ring",
+  /**
+   * The running launch is not a portable image this app can replace. A
+   * package or an unpacked archive has to be replaced by hand.
+   */
+  "unsupported-install",
+  /**
+   * The image could be replaced, but its directory is not writable. Distinct
+   * from a bad signature: the release may be genuine, and the location is
+   * what refused.
+   */
+  "not-writable",
 );
 export type AppUpdateRefusal = typeof AppUpdateRefusal.Type;
 
