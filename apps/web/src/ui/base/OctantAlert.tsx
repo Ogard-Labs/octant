@@ -9,6 +9,8 @@ export interface OctantAlertProps {
   readonly tone?: "neutral" | "accent" | "success" | "warning" | "danger";
   readonly role?: "alert" | "status";
   readonly className?: string;
+  readonly id?: string;
+  readonly testId?: string;
 }
 
 export function OctantAlert({
@@ -18,6 +20,8 @@ export function OctantAlert({
   tone = "neutral",
   role = tone === "warning" || tone === "danger" ? "alert" : "status",
   className,
+  id,
+  testId,
 }: OctantAlertProps) {
   const Icon =
     tone === "success"
@@ -28,7 +32,13 @@ export function OctantAlert({
           ? CircleAlert
           : Info;
   return (
-    <div className={cn("callout", className)} data-tone={tone} role={role}>
+    <div
+      className={cn("callout", className)}
+      data-tone={tone}
+      {...(id === undefined ? {} : { id })}
+      {...(testId === undefined ? {} : { "data-testid": testId })}
+      role={role}
+    >
       <Icon aria-hidden="true" size={16} />
       <div className="callout__body">
         {title === undefined ? null : <p className="callout-title">{title}</p>}

@@ -25,6 +25,7 @@ import {
 } from "../browser/BrowserWorkspace";
 import { useNativeBrowserSurface } from "../browser/useNativeBrowserSurface";
 import type { OctantHostBridge } from "../shell/hostBridge";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 const ZEN_RESEARCH_BROWSER_TAB_ID = decodeWorkspaceTabId("90000000-0000-4000-8000-000000000008");
 
@@ -507,20 +508,20 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
           </div>
           <div aria-label="Research page" className="zen-research__page" ref={surface.mount}>
             {surface.failed ? (
-              <div className="zen-research__notice" role="alert">
+              <OctantAlert className="zen-research__notice" tone="warning">
                 <p>The page could not attach to the dock.</p>
                 <OctantButton onClick={surface.retry} type="button" variant="secondary">
                   Retry
                 </OctantButton>
-              </div>
+              </OctantAlert>
             ) : null}
           </div>
         </>
       )}
       {message === undefined ? null : (
-        <p className="zen-research__notice" role="alert">
+        <OctantAlert className="zen-research__notice" tone="warning">
           {message}
-        </p>
+        </OctantAlert>
       )}
     </aside>
   );

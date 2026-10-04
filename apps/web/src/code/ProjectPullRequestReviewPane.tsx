@@ -15,6 +15,7 @@ import { Markdown } from "../markdown/Markdown";
 import { CodeBlock } from "../transcript/CodeBlock";
 import "./project-pull-request-review.css";
 import { PullRequestConversation } from "./CodeReviewPane";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 const PR_STATE_LABELS: Record<CodeProjectPullRequestDetailObserved["pullRequestState"], string> = {
   open: "Open",
@@ -276,6 +277,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         </div>
       ) : null}
       {mergeOutcome === undefined ? null : (
+        /* ui-boundary-exception: compact-status */
         <p
           ref={mergeResult}
           tabIndex={-1}
@@ -291,14 +293,14 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       </p>
 
       {waiting ? (
-        <div className="code-pr-review__waiting" role="alert">
+        <OctantAlert className="code-pr-review__waiting" tone="warning">
           <strong>Waiting on a fresh GitHub observation.</strong>
           <p>
             {detail.freshness === "stale"
               ? "This is the last known GitHub metadata and may be out of date."
               : "Some sections could not be fully observed."}
           </p>
-        </div>
+        </OctantAlert>
       ) : null}
 
       {props.linkedThreads.length === 0 ? null : (

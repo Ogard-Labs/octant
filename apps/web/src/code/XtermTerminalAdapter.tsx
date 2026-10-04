@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { TerminalTypographyProjection } from "@octant/theme/typography";
 import { useTypographyProjection } from "../theme/TypographyProvider";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface XtermAdapterSession {
   readonly dispose: () => void;
@@ -106,7 +107,9 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
         tabIndex={0}
       />
       {runtimeUnavailable ? (
-        <p role="alert">The Code terminal engine is unavailable. Retry this tab.</p>
+        <OctantAlert tone="warning">
+          The Code terminal engine is unavailable. Retry this tab.
+        </OctantAlert>
       ) : null}
     </>
   );

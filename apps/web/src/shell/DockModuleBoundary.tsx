@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /** A tool's render or chunk failure cannot replace its owning conversation. */
 export class DockModuleBoundary extends Component<
@@ -11,10 +12,10 @@ export class DockModuleBoundary extends Component<
   }
   override render() {
     return this.state.failed ? (
-      <p role="alert">
+      <OctantAlert tone="warning">
         This tool could not be displayed. Close and reopen it, or refresh the app if it remains
         unavailable.
-      </p>
+      </OctantAlert>
     ) : (
       this.props.children
     );

@@ -23,6 +23,7 @@ import {
   useAndroidEmulatorLiveScreen,
   type AndroidEmulatorLiveScreen,
 } from "./useAndroidEmulatorLiveScreen";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export type AndroidEmulatorIntent =
   | {
@@ -304,9 +305,9 @@ export function AndroidEmulatorPane(props: {
         </p>
       ) : null}
       {actionMessage === undefined ? null : (
-        <p className="apple-workbench__action-message" role="alert">
+        <OctantAlert className="apple-workbench__action-message" tone="warning">
           {actionMessage}
-        </p>
+        </OctantAlert>
       )}
       <DeviceRail
         busy={busy}

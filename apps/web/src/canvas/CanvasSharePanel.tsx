@@ -356,6 +356,7 @@ function ShareStatus(props: { readonly run: ShareRun }) {
   if (run.kind === "idle") return null;
   const failed = run.kind === "failed";
   return (
+    /* ui-boundary-exception: compact-status */
     <p
       aria-live="polite"
       className="canvas-share__status"
