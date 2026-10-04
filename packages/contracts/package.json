@@ -63,6 +63,7 @@
     "./validation-events": "./src/validationEvents.ts",
     "./validation-rpc": "./src/validationRpc.ts",
     "./host": "./src/host.ts",
+    "./host-oauth": "./src/hostOAuth.ts",
     "./host-control": "./src/hostControl.ts",
     "./host-data-map": "./src/hostDataMap.ts",
     "./host-export": "./src/hostExport.ts",
