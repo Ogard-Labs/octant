@@ -278,8 +278,16 @@ function membershipOutcome(
     return refuse("membership-conflict");
   }
   const wrote = membership(state, entry.origin.instanceId);
+  // A store creator approves itself once at its own sequence 1, before any
+  // other member exists. A joiner that never saw that computer's earlier
+  // entries cannot check membership for it, so the one self-founding record
+  // is accepted by what it is: an approval naming its own writer.
+  const foundingSelfApproval =
+    entry.kind === "join-approved" &&
+    String(entry.subject) === String(entry.origin.instanceId) &&
+    entry.origin.sequence === 1;
   if (entry.kind !== "join-request") {
-    if (wrote === "unknown") return refuse("unknown-instance");
+    if (wrote === "unknown" && !foundingSelfApproval) return refuse("unknown-instance");
     if (wrote === "revoked") return refuse("revoked-instance");
   } else if (wrote === "revoked") {
     return refuse("revoked-instance");

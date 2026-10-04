@@ -220,6 +220,7 @@ function membershipEntry(
     readonly sequence?: number;
     readonly subject?: ReplicaInstanceId;
     readonly subjectDisplayName?: string;
+    readonly subjectDeviceKey?: string;
   } = {},
 ): ReplicaMembershipEntry {
   const origin = {
@@ -233,6 +234,11 @@ function membershipEntry(
     origin,
     subject: options.subject ?? origin.instanceId,
     subjectDisplayName: options.subjectDisplayName ?? origin.displayName,
+    ...(options.subjectDeviceKey === undefined && (options.kind ?? "join-request") !== "revocation"
+      ? {
+          subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
+        }
+      : {}),
   });
 }
 
@@ -552,5 +558,20 @@ describe("reconciling replica membership", () => {
       outcome: "refused",
       reason: "sequence-gap",
     });
+  });
+
+  it("accepts a store creator's founding self-approval so joiners can learn the first member", () => {
+    const founding = membershipEntry({
+      kind: "join-approved",
+      instanceId: ids.north,
+      sequence: 1,
+      subject: ids.north,
+      subjectDisplayName: "North",
+    });
+    const joinerState = state({
+      localInstanceId: ids.south,
+      instances: [{ instanceId: ids.south, status: "member" }],
+    });
+    expect(reconcileReplicaEntry(joinerState, founding)).toEqual({ outcome: "member-added" });
   });
 });

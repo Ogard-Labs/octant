@@ -90,6 +90,7 @@ export * from "./untrustedContentPolicy";
 export * from "./artifactLibraryPolicy";
 export * from "./artifactMirrorPolicy";
 export * from "./replicaEntryPolicy";
+export * from "./replicaMembershipPolicy";
 export * from "./scaffoldPolicy";
 export * from "./threadCheckpointPolicy";
 export * from "./threadWorkPolicy";

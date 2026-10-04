@@ -114,6 +114,43 @@ describe("artifact bundle contract", () => {
       }),
     ).toThrow();
   });
+
+  it("refuses a join request that does not carry the joiner's device key", () => {
+    expect(() =>
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-request",
+        origin: { instanceId: ids.instance, displayName: "North", sequence: 1 },
+        subject: ids.instance,
+        subjectDisplayName: "North",
+      }),
+    ).toThrow();
+  });
+
+  it("refuses an approval that does not carry the approved device key", () => {
+    expect(() =>
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-approved",
+        origin: { instanceId: ids.instance, displayName: "North", sequence: 2 },
+        subject: ids.otherVersion,
+        subjectDisplayName: "South",
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a revocation that carries a device key", () => {
+    expect(() =>
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "revocation",
+        origin: { instanceId: ids.instance, displayName: "North", sequence: 3 },
+        subject: ids.otherVersion,
+        subjectDisplayName: "South",
+        subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
+      }),
+    ).toThrow();
+  });
 });
 
 describe("replica entry contract", () => {
@@ -205,6 +242,7 @@ describe("replica entry contract", () => {
       origin: { instanceId: ids.instance, displayName: "North", sequence: 1 },
       subject: ids.instance,
       subjectDisplayName: "North",
+      subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
     });
     const encoded = encodeReplicaEntry(request);
     expect(Object.keys(JSON.parse(encoded) as Record<string, unknown>)).toEqual([
@@ -213,6 +251,7 @@ describe("replica entry contract", () => {
       "origin",
       "subject",
       "subjectDisplayName",
+      "subjectDeviceKey",
     ]);
     expect(decodeReplicaEntryText(encoded)).toEqual(request);
     expect(() =>

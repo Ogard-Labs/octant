@@ -133,6 +133,14 @@ export const ReplicaMembershipEntryKind = Schema.Literal(
 );
 export type ReplicaMembershipEntryKind = typeof ReplicaMembershipEntryKind.Type;
 
+/**
+ * Base64 SPKI bytes of the Ed25519 device key an instance signs entries with.
+ * Ed25519 SPKI is 44 DER bytes, which base64 encodes to 60 characters with
+ * one padding character; a different-length string is not an Ed25519 SPKI.
+ */
+export const ReplicaDevicePublicKey = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9+/]{59}=$/));
+export type ReplicaDevicePublicKey = typeof ReplicaDevicePublicKey.Type;
+
 const ReplicaMembershipEntryFields = {
   format: Schema.Literal(REPLICA_ENTRY_FORMAT),
   kind: ReplicaMembershipEntryKind,
@@ -140,15 +148,30 @@ const ReplicaMembershipEntryFields = {
   /** The instance this record is about. A join request names itself. */
   subject: ReplicaInstanceId,
   subjectDisplayName: ReplicaDisplayName,
+  /** The device key that instance signs entries with. A revocation has none. */
+  subjectDeviceKey: Schema.optional(ReplicaDevicePublicKey),
 } as const;
 
 export const ReplicaMembershipEntry = Schema.Struct(ReplicaMembershipEntryFields)
   .annotations(strict)
   .pipe(
     Schema.filter(
-      (entry) =>
-        entry.kind !== "join-request" || String(entry.subject) === String(entry.origin.instanceId),
-      { message: () => "A join request names the instance that wrote it." },
+      (entry) => {
+        if (entry.kind === "join-request") {
+          return (
+            String(entry.subject) === String(entry.origin.instanceId) &&
+            entry.subjectDeviceKey !== undefined
+          );
+        }
+        if (entry.kind === "join-approved") {
+          return entry.subjectDeviceKey !== undefined;
+        }
+        return entry.subjectDeviceKey === undefined;
+      },
+      {
+        message: () =>
+          "A join request names the instance that wrote it and carries its device key; an approval carries the approved device key; a revocation carries none.",
+      },
     ),
   );
 export type ReplicaMembershipEntry = typeof ReplicaMembershipEntry.Type;
@@ -241,6 +264,9 @@ export function encodeReplicaEntry(entry: ReplicaEntry): string {
         },
         subject: entry.subject,
         subjectDisplayName: entry.subjectDisplayName,
+        ...(entry.subjectDeviceKey === undefined
+          ? {}
+          : { subjectDeviceKey: entry.subjectDeviceKey }),
       }
     : {
         format: entry.format,
