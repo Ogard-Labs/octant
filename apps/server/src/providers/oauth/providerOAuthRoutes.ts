@@ -285,7 +285,36 @@ function unmatchedInstance(
   if (!offer.driverKinds.some((kind) => kind === instance.driverKind)) {
     return { kind: "refused", reason: "unsupported-driver" };
   }
+  if (!endpointMatchesOffer(instance, offer)) {
+    return { kind: "refused", reason: "endpoint-mismatch" };
+  }
   return undefined;
+}
+
+/**
+ * A sign-in may only attach to the endpoint its catalog entry names, matched
+ * on canonical origin so path and trailing-slash differences in the stored
+ * base URL neither smuggle nor spuriously refuse. Drivers without a base URL
+ * have nothing to match and stay refused.
+ */
+function endpointMatchesOffer(instance: ProviderInstance, offer: SubscriptionOAuthOffer): boolean {
+  const baseUrl =
+    instance.driverKind === "openai-compatible" || instance.driverKind === "anthropic-compatible"
+      ? instance.configuration.baseUrl
+      : undefined;
+  if (baseUrl === undefined) return false;
+  return (
+    canonicalOrigin(baseUrl) !== undefined &&
+    canonicalOrigin(baseUrl) === canonicalOrigin(offer.allowedEndpoint)
+  );
+}
+
+function canonicalOrigin(value: string): string | undefined {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return undefined;
+  }
 }
 
 async function revokeReplacedPointer(

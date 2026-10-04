@@ -4,7 +4,8 @@ export interface HostOAuthBrokerPort {
   readonly begin: (input: {
     readonly descriptor: {
       readonly descriptorId: string;
-      readonly clientId: string;
+      readonly clientId?: string;
+      readonly dialect?: "openrouter-pkce";
       readonly flow: "authorization-code-pkce" | "device-code";
       readonly authorizationEndpoint?: string;
       readonly tokenEndpoint: string;
@@ -52,7 +53,10 @@ export function makeHostOAuthBrokerClient(options: {
         termsAcknowledgedAt: input.termsAcknowledgedAt,
         descriptor: {
           descriptorId: input.descriptor.descriptorId,
-          clientId: input.descriptor.clientId,
+          ...(input.descriptor.clientId === undefined
+            ? {}
+            : { clientId: input.descriptor.clientId }),
+          ...(input.descriptor.dialect === undefined ? {} : { dialect: input.descriptor.dialect }),
           flow: input.descriptor.flow,
           tokenEndpoint: input.descriptor.tokenEndpoint,
           scopes: input.descriptor.scopes,
