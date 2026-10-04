@@ -5680,6 +5680,10 @@ function LaunchedShell(
       themeController={themeController}
       diagnosticsExportClient={diagnosticsExportClient}
       hostControlClient={hostControlClient}
+      workThreads={(workNavigation.bootstrap?.threads ?? []).map((thread) => ({
+        id: String(thread.id),
+        title: thread.title,
+      }))}
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
       githubClient={githubClient}

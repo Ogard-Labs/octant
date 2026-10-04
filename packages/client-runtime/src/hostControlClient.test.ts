@@ -255,4 +255,98 @@ describe("createHostControlClient", () => {
     expect(call?.[0]).toBe("http://127.0.0.1:4100/api/host-control/export");
     expect(call?.[1].method).toBe("GET");
   });
+
+  it("returns the streamed payload when a host export assembles", async () => {
+    const payload = [
+      JSON.stringify({
+        kind: "header",
+        octant: {
+          format: "octant.host-export/1",
+          hostId: "local",
+          generatedAt: "2026-08-19T12:00:00.000Z",
+          threadCount: 0,
+        },
+      }),
+      JSON.stringify({
+        kind: "settings",
+        settings: { chatEnabled: true, workEnabled: false, themeMode: "dark" },
+      }),
+      JSON.stringify({
+        kind: "omissions",
+        omissions: [
+          {
+            subject: "credentials",
+            reason: "Secrets, tokens, and credential material are unrepresentable.",
+          },
+        ],
+      }),
+      JSON.stringify({ kind: "complete", threadCount: 0 }),
+    ].join("\n");
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(payload, {
+          status: 200,
+          headers: { "content-type": "application/x-ndjson" },
+        }),
+    );
+    const client = createHostControlClient({
+      baseUrl: "http://127.0.0.1:4100",
+      fetch: fetchImpl,
+      windowCapability: capability,
+    });
+    const result = await client.exportHost();
+    expect(result).toEqual({
+      kind: "exported",
+      payload,
+      bundle: {
+        octant: {
+          format: "octant.host-export/1",
+          hostId: "local",
+          generatedAt: "2026-08-19T12:00:00.000Z",
+          threadCount: 0,
+        },
+        threads: [],
+        projects: [],
+        projectMemory: [],
+        canvases: [],
+        settings: { chatEnabled: true, workEnabled: false, themeMode: "dark" },
+        usage: [],
+        retention: { windows: [], tombstones: [] },
+        omissions: [
+          {
+            subject: "credentials",
+            reason: "Secrets, tokens, and credential material are unrepresentable.",
+          },
+        ],
+      },
+    });
+  });
+
+  it("does not attach a payload when assemble refuses the stream", async () => {
+    const payload = JSON.stringify({
+      kind: "header",
+      octant: {
+        format: "octant.host-export/1",
+        hostId: "local",
+        generatedAt: "2026-08-19T12:00:00.000Z",
+        threadCount: 0,
+      },
+    });
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(payload, {
+          status: 200,
+          headers: { "content-type": "application/x-ndjson" },
+        }),
+    );
+    const client = createHostControlClient({
+      baseUrl: "http://127.0.0.1:4100",
+      fetch: fetchImpl,
+      windowCapability: capability,
+    });
+    await expect(client.exportHost()).resolves.toEqual({
+      kind: "refused",
+      reason: "incomplete",
+    });
+  });
 });
