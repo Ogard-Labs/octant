@@ -6,6 +6,7 @@ import {
   type NativeHarnessRoutingConfiguration,
   type NativeHarnessRoutingSettings,
   type NativeHarnessSlot,
+  type NativeHarnessSlotCandidate,
 } from "@octant/contracts";
 import {
   NativeHarnessClientFailure,
@@ -17,6 +18,7 @@ import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import "./native-harness.css";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface NativeHarnessProviderOption {
   readonly instanceId: string;
@@ -81,6 +83,16 @@ function slotPresentation(id: string): { label: string; meaning: string } {
 }
 
 /**
+ * A slot's model row as the person edits it. Observed models are presentation
+ * only and never choose for the person, so a new row, or one moved to another
+ * provider, stays unset until they pick a model. The host refuses a candidate
+ * without one, so unset rows live here and only chosen rows reach the draft.
+ */
+type CandidateRow =
+  | { readonly kind: "chosen"; readonly candidate: NativeHarnessSlotCandidate }
+  | { readonly kind: "unset"; readonly providerInstanceId: string | undefined };
+
+/**
  * Settings → Octant Harness → Model slots. A slot is an ordered list of models; jobs
  * map onto slots. Every edit round-trips through the host with the version it
  * was read at, so two editors cannot silently overwrite each other.
@@ -91,12 +103,22 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [message, setMessage] = useState<string>();
   const [saving, setSaving] = useState(false);
+  // Rows of slots edited since the draft was last reset; untouched slots read
+  // their rows straight from the draft.
+  const [editedRows, setEditedRows] = useState<
+    Readonly<Record<string, ReadonlyArray<CandidateRow>>>
+  >({});
+
+  const resetDraft = useCallback((configuration: NativeHarnessRoutingConfiguration) => {
+    setDraft(configuration);
+    setEditedRows({});
+  }, []);
 
   const load = useCallback(async () => {
     try {
       const current = await props.client.routing();
       setSettings(current);
-      setDraft(current.configuration);
+      resetDraft(current.configuration);
       setStatus("ready");
     } catch (error) {
       setMessage(
@@ -106,7 +128,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
       );
       setStatus("error");
     }
-  }, [props.client]);
+  }, [props.client, resetDraft]);
 
   useEffect(() => {
     void load();
@@ -129,7 +151,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
       });
       if (result.kind === "routing-settings") {
         setSettings(result.settings);
-        setDraft(result.settings.configuration);
+        resetDraft(result.settings.configuration);
       } else if (result.kind === "routing-refused" && result.reason === "stale-version") {
         setMessage(
           "Model slots changed elsewhere. Reloaded the current table; apply your edit again.",
@@ -145,22 +167,25 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
     } finally {
       setSaving(false);
     }
-  }, [props.client, settings, draft, saving, load]);
+  }, [props.client, settings, draft, saving, load, resetDraft]);
 
   if (status === "loading") return <p role="status">Loading model slots…</p>;
   if (status === "error" || draft === undefined) {
     return (
-      <p className="native-harness-panel__error" role="alert">
+      <OctantAlert className="native-harness-panel__error" tone="danger">
         {message ?? "Model slots are unavailable."}
-      </p>
+      </OctantAlert>
     );
   }
 
+  // A slot whose only row is unset is out of the draft, but its row is still on
+  // screen, so a custom slot stays listed while it has edited rows.
   const slotIds = [
-    ...NATIVE_HARNESS_BUILT_IN_SLOT_IDS,
-    ...draft.slots
-      .map((slot) => String(slot.id))
-      .filter((id) => !(NATIVE_HARNESS_BUILT_IN_SLOT_IDS as ReadonlyArray<string>).includes(id)),
+    ...new Set([
+      ...NATIVE_HARNESS_BUILT_IN_SLOT_IDS,
+      ...draft.slots.map((slot) => String(slot.id)),
+      ...Object.keys(editedRows),
+    ]),
   ];
   const slotFor = (id: string) => draft.slots.find((slot) => String(slot.id) === id);
   const setSlot = (id: string, next: NativeHarnessSlot | undefined) =>
@@ -171,6 +196,24 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
         ...(next === undefined ? [] : [next]),
       ],
     });
+  const rowsFor = (id: string): ReadonlyArray<CandidateRow> =>
+    editedRows[id] ??
+    (slotFor(id)?.candidates ?? []).map((candidate) => ({ kind: "chosen", candidate }));
+  const setRows = (id: string, rows: ReadonlyArray<CandidateRow>) => {
+    setEditedRows({ ...editedRows, [id]: rows });
+    const candidates = rows.flatMap((row) => (row.kind === "chosen" ? [row.candidate] : []));
+    // Leaving the draft while a row is unset must not lose settings this page
+    // does not show, such as the overflow promotion, so fall back to the saved slot.
+    const slot =
+      slotFor(id) ?? settings?.configuration.slots.find((saved) => String(saved.id) === id);
+    setSlot(
+      id,
+      candidates.length === 0 ? undefined : { ...(slot ?? { id: id as never }), candidates },
+    );
+  };
+  const hasUnsetRow = Object.values(editedRows).some((rows) =>
+    rows.some((row) => row.kind === "unset"),
+  );
   // A provider with no observed models cannot fill a slot, so it must not be
   // the reason a button silently does nothing.
   const assignableProvider = props.providers.find((option) => option.models.length > 0);
@@ -202,6 +245,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
             <div className="native-harness-slots">
               {slotIds.map((id) => {
                 const slot = slotFor(id);
+                const rows = rowsFor(id);
                 const { label, meaning } = slotPresentation(id);
                 return (
                   <div className="native-harness-slot" key={id}>
@@ -233,36 +277,47 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                       ) : (
                         <OctantButton
                           aria-label={
-                            slot === undefined || slot.candidates.length === 0
+                            rows.length === 0
                               ? `Choose a model for ${label}`
                               : `Add a fallback model for ${label}`
                           }
-                          onClick={() => {
-                            const model = assignableProvider.models[0];
-                            if (model === undefined) return;
-                            const candidate = {
-                              hostId: props.hostId as never,
-                              providerInstanceId: assignableProvider.instanceId as never,
-                              modelId: model.id as never,
-                            };
-                            setSlot(id, {
-                              id: id as never,
-                              candidates: [...(slot?.candidates ?? []), candidate],
-                            });
-                          }}
+                          onClick={() =>
+                            setRows(id, [...rows, { kind: "unset", providerInstanceId: undefined }])
+                          }
                           size="sm"
                           variant="secondary"
                         >
-                          {slot === undefined || slot.candidates.length === 0
-                            ? "Choose model"
-                            : "Add fallback"}
+                          {rows.length === 0 ? "Choose model" : "Add fallback"}
                         </OctantButton>
                       )}
                     </SettingRow>
-                    {(slot?.candidates ?? []).map((candidate, index) => {
+                    {rows.map((row, index) => {
+                      const providerId =
+                        row.kind === "chosen"
+                          ? String(row.candidate.providerInstanceId)
+                          : row.providerInstanceId;
                       const provider = props.providers.find(
-                        (option) => option.instanceId === String(candidate.providerInstanceId),
+                        (option) => option.instanceId === providerId,
                       );
+                      const providerOptions = props.providers.map((option) => ({
+                        id: option.instanceId,
+                        label: option.label,
+                      }));
+                      const modelOptions = (provider?.models ?? []).map((model) => ({
+                        id: model.id,
+                        label: model.label,
+                      }));
+                      // A saved choice stays readable when its provider or model is
+                      // no longer observed, rather than looking unset.
+                      if (row.kind === "chosen") {
+                        if (provider === undefined && providerId !== undefined) {
+                          providerOptions.push({ id: providerId, label: providerId });
+                        }
+                        const modelId = String(row.candidate.modelId);
+                        if (!modelOptions.some((model) => model.id === modelId)) {
+                          modelOptions.push({ id: modelId, label: modelId });
+                        }
+                      }
                       return (
                         <div className="native-harness-candidate" key={`${id}-${index}`}>
                           <span className="native-harness-candidate__rank">
@@ -271,59 +326,52 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                           <OctantSelectField
                             aria-label={`${label}, model ${index + 1} provider`}
                             onValueChange={(value) => {
-                              const next = props.providers.find(
-                                (option) => option.instanceId === value,
-                              );
-                              if (next === undefined || slot === undefined) return;
-                              const model = next.models[0];
-                              if (model === undefined) return;
-                              setSlot(id, {
-                                ...slot,
-                                candidates: slot.candidates.map((entry, at) =>
+                              if (value === providerId) return;
+                              setRows(
+                                id,
+                                rows.map((entry, at) =>
                                   at === index
-                                    ? {
-                                        ...entry,
-                                        providerInstanceId: next.instanceId as never,
-                                        modelId: model.id as never,
-                                      }
+                                    ? { kind: "unset", providerInstanceId: value }
                                     : entry,
                                 ),
-                              });
+                              );
                             }}
-                            options={props.providers.map((option) => ({
-                              id: option.instanceId,
-                              label: option.label,
-                            }))}
-                            value={String(candidate.providerInstanceId)}
+                            options={providerOptions}
+                            placeholder="Choose a provider"
+                            value={providerId ?? ""}
                           />
                           <OctantSelectField
                             aria-label={`${label}, model ${index + 1}`}
+                            disabled={providerId === undefined}
                             onValueChange={(value) => {
-                              if (slot === undefined) return;
-                              setSlot(id, {
-                                ...slot,
-                                candidates: slot.candidates.map((entry, at) =>
-                                  at === index ? { ...entry, modelId: value as never } : entry,
+                              if (providerId === undefined) return;
+                              const candidate: NativeHarnessSlotCandidate =
+                                row.kind === "chosen"
+                                  ? { ...row.candidate, modelId: value as never }
+                                  : {
+                                      hostId: props.hostId as never,
+                                      providerInstanceId: providerId as never,
+                                      modelId: value as never,
+                                    };
+                              setRows(
+                                id,
+                                rows.map((entry, at) =>
+                                  at === index ? { kind: "chosen", candidate } : entry,
                                 ),
-                              });
+                              );
                             }}
-                            options={(
-                              provider?.models ?? [
-                                { id: String(candidate.modelId), label: String(candidate.modelId) },
-                              ]
-                            ).map((model) => ({ id: model.id, label: model.label }))}
-                            value={String(candidate.modelId)}
+                            options={modelOptions}
+                            placeholder="Choose a model"
+                            value={row.kind === "chosen" ? String(row.candidate.modelId) : ""}
                           />
                           <OctantButton
                             aria-label={`Remove ${label}, model ${index + 1}`}
-                            onClick={() => {
-                              if (slot === undefined) return;
-                              const candidates = slot.candidates.filter((_, at) => at !== index);
-                              setSlot(
+                            onClick={() =>
+                              setRows(
                                 id,
-                                candidates.length === 0 ? undefined : { ...slot, candidates },
-                              );
-                            }}
+                                rows.filter((_, at) => at !== index),
+                              )
+                            }
                             size="sm"
                             variant="ghost"
                           >
@@ -367,16 +415,21 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
             </div>
             <div className="native-harness-panel__actions">
               <OctantButton
-                disabled={!dirty || saving}
+                disabled={!dirty || saving || hasUnsetRow}
                 onClick={() => void save()}
                 variant="default"
               >
                 {saving ? "Saving…" : "Save slots"}
               </OctantButton>
-              {dirty ? (
-                <OctantButton onClick={() => setDraft(settings?.configuration)} variant="ghost">
+              {(dirty || hasUnsetRow) && settings !== undefined ? (
+                <OctantButton onClick={() => resetDraft(settings.configuration)} variant="ghost">
                   Discard
                 </OctantButton>
+              ) : null}
+              {hasUnsetRow ? (
+                <span className="oct-meta">
+                  Choose a model in every row, or remove it, to save.
+                </span>
               ) : null}
             </div>
             {message === undefined ? null : (

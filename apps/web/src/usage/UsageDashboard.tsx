@@ -30,6 +30,7 @@ import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggl
 import { SettingsDisclosure } from "../settings/primitives";
 import "../styles/usage.css";
 import { LatencyStatsSection } from "./LatencyStatsSection";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface UsageDashboardProps {
   readonly client: UsageClient;
@@ -222,13 +223,13 @@ export function UsageDashboard(props: UsageDashboardProps) {
   if (status === "error") {
     return (
       <section aria-label="Usage dashboard" className="usage-dashboard">
-        <div className="usage-dashboard__error" role="alert">
+        <OctantAlert className="usage-dashboard__error" tone="danger">
           <AlertTriangle aria-hidden="true" size={16} />
           <p>{errorMessage}</p>
           <OctantButton onClick={() => void load()} size="sm" type="button">
             Retry
           </OctantButton>
-        </div>
+        </OctantAlert>
       </section>
     );
   }
@@ -288,13 +289,13 @@ export function UsageDashboard(props: UsageDashboardProps) {
         </p>
       ) : null}
       {status === "ready" && errorMessage !== undefined ? (
-        <div className="usage-dashboard__error" role="alert">
+        <OctantAlert className="usage-dashboard__error" tone="danger">
           <AlertTriangle aria-hidden="true" size={16} />
           <p>{errorMessage}</p>
           <OctantButton onClick={() => void load()} size="sm" type="button">
             Retry
           </OctantButton>
-        </div>
+        </OctantAlert>
       ) : null}
 
       {hasUnavailableUsage ? (
@@ -764,6 +765,7 @@ function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
         />
       </label>
       {rangeError !== undefined ? (
+        /* ui-boundary-exception: inline-field-error */
         <p className="usage-dashboard__filter-error" role="alert">
           {rangeError}
         </p>

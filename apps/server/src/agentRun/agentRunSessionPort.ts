@@ -14,7 +14,8 @@ export type AgentRunSessionFailureReason =
   | "capacity-unavailable"
   | "spend-ceiling-exhausted"
   | "workspace-unavailable"
-  | "authority-drift";
+  | "authority-drift"
+  | "tools-unsupported";
 
 export class AgentRunSessionError extends Error {
   override readonly name = "AgentRunSessionError";

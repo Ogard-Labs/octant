@@ -128,6 +128,74 @@ export function readThreadPurgeTombstone(
   return row === undefined ? undefined : decodeTombstoneRow(row);
 }
 
+export function readThreadRetentionWindowPage(
+  connection: SqliteConnection,
+  offset: number,
+  limit: number,
+): { readonly windows: ReadonlyArray<ThreadRetentionWindowEntry>; readonly hasMore: boolean } {
+  const rows = connection
+    .prepare(
+      `SELECT scope_kind, scope_key, window_json, updated_at, aggregate_version
+       FROM thread_retention_projection ORDER BY scope_kind, scope_key
+       LIMIT ? OFFSET ?`,
+    )
+    .all(limit + 1, offset);
+  const windows: ThreadRetentionWindowEntry[] = [];
+  for (const row of rows) {
+    if (isWindowRow(row)) windows.push(decodeWindowRow(row));
+  }
+  const hasMore = windows.length > limit;
+  return { windows: hasMore ? windows.slice(0, limit) : windows, hasMore };
+}
+
+export function readThreadPurgeTombstonePage(
+  connection: SqliteConnection,
+  offset: number,
+  limit: number,
+): { readonly tombstones: ReadonlyArray<ThreadPurgeTombstone>; readonly hasMore: boolean } {
+  const rows = connection
+    .prepare(
+      `SELECT mode, thread_id, project_id, purged_at FROM thread_purge_tombstone
+       ORDER BY purged_at ASC, mode ASC, thread_id ASC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(limit + 1, offset);
+  const tombstones: ThreadPurgeTombstone[] = [];
+  for (const row of rows) {
+    if (isTombstoneRow(row)) tombstones.push(decodeTombstoneRow(row));
+  }
+  const hasMore = tombstones.length > limit;
+  return { tombstones: hasMore ? tombstones.slice(0, limit) : tombstones, hasMore };
+}
+
+function isWindowRow(value: unknown): value is WindowRow {
+  if (typeof value !== "object" || value === null) return false;
+  if (!("scope_kind" in value) || !("scope_key" in value) || !("window_json" in value))
+    return false;
+  if (!("updated_at" in value) || !("aggregate_version" in value)) return false;
+  const kind = value.scope_kind;
+  return (
+    (kind === "host" || kind === "project" || kind === "thread") &&
+    typeof value.scope_key === "string" &&
+    typeof value.window_json === "string" &&
+    typeof value.updated_at === "string" &&
+    typeof value.aggregate_version === "number"
+  );
+}
+
+function isTombstoneRow(value: unknown): value is TombstoneRow {
+  if (typeof value !== "object" || value === null) return false;
+  if (!("mode" in value) || !("thread_id" in value) || !("project_id" in value)) return false;
+  if (!("purged_at" in value)) return false;
+  const mode = value.mode;
+  return (
+    (mode === "chat" || mode === "work" || mode === "code") &&
+    typeof value.thread_id === "string" &&
+    (value.project_id === null || typeof value.project_id === "string") &&
+    typeof value.purged_at === "string"
+  );
+}
+
 export function scopeKey(scope: RetentionScope): string {
   if (scope.kind === "host") return "host";
   if (scope.kind === "project") return String(scope.projectId);

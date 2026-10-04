@@ -9,6 +9,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ComposerPoolControlProps {
   /** Settings-derived pool projection; the control can only narrow it. */
@@ -262,9 +263,9 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
               </div>
             ) : null}
             {error === undefined ? null : (
-              <p className="composer-pool-control__error" role="alert">
+              <OctantAlert className="composer-pool-control__error" tone="danger">
                 {error}
-              </p>
+              </OctantAlert>
             )}
             <div className="composer-pool-control__actions">
               <OctantButton

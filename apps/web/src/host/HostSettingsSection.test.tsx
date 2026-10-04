@@ -113,6 +113,7 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
         deleted: [],
         occurredAt: "2026-08-19T12:00:00.000Z" as never,
       })),
+    exportHost: async () => ({ kind: "refused", reason: "local-owner-only" }),
   };
 }
 

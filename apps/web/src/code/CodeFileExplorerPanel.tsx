@@ -9,6 +9,7 @@ import { FolderTree, RefreshCw } from "lucide-react";
 import { CodeFileExplorer, type CodeFileExplorerEntry } from "./CodeFileExplorer";
 import { useCodeFileListingController } from "./useCodeFileListingController";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface CodeFileExplorerPanelProps {
   readonly threadId?: CodeThreadId | undefined;
@@ -61,9 +62,9 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
     // there are no files to match.
     return (
       <div className="code-file-explorer-panel">
-        <p className="code-file-explorer__error" role="alert">
+        <OctantAlert className="code-file-explorer__error" tone="danger">
           {controller.errorMessage ?? "Repository files are unavailable."}
-        </p>
+        </OctantAlert>
         <div className="code-file-explorer-panel__recovery">
           <OctantButton
             onClick={() => void controller.refresh()}

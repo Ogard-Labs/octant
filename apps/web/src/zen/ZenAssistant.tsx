@@ -33,6 +33,7 @@ export function ZenAssistant(props: ZenAssistantProps) {
   const recipePreview = props.snapshot?.recipePreview;
 
   return (
+    /* ui-boundary-exception: non-modal-panel */
     <OctantCard className="zen-panel zen-assistant px-6" role="dialog" variant="glass">
       <NavigatorPanel
         controller={props.controller}

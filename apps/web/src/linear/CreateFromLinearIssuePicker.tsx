@@ -10,6 +10,7 @@ import {
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export function useLinearIssuesCreateAvailable(
   client: IntegrationClient | undefined,
@@ -179,7 +180,7 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
       />
       {issues.kind === "loading" ? <p role="status">Loading issues…</p> : null}
       {issues.kind === "error" || issues.kind === "unavailable" ? (
-        <p role="alert">{issues.message}</p>
+        <OctantAlert tone="warning">{issues.message}</OctantAlert>
       ) : null}
       {issues.kind === "ready" ? (
         issues.rows.length === 0 ? (

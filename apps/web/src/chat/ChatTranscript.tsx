@@ -36,6 +36,7 @@ import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { ChatTurnEditor } from "./ChatTurnEditor";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ChatTranscriptProps {
   /** The decoded, authoritative transcript projection. */
@@ -686,7 +687,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           />
         )}
         {props.attempt.responseRefs.length === 0 ? null : responseBody === undefined ? (
-          <p role="alert">Response content is unavailable.</p>
+          <OctantAlert tone="warning">Response content is unavailable.</OctantAlert>
         ) : (
           <AssistantResponse
             attempt={props.attempt}
@@ -928,7 +929,7 @@ function MessageBody(props: {
   readonly missing: string;
 }) {
   if (props.content === undefined) {
-    return <p role="alert">{props.missing}</p>;
+    return <OctantAlert tone="warning">{props.missing}</OctantAlert>;
   }
   return <TrackerReferenceText asParagraph text={props.content.body} />;
 }

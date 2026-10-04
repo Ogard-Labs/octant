@@ -169,6 +169,7 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
         </form>
       )}
       {controller.commandMessage === undefined ? null : (
+        /* ui-boundary-exception: inline-field-error */
         <p className="thread-plan__command-error" role="alert">
           <AlertTriangle aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>{controller.commandMessage}</span>

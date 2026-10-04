@@ -64,6 +64,7 @@ import { useThreadMentions } from "../../chat/useThreadMentions";
 import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type { MentionableThreadId } from "@octant/contracts";
 import { WorkKindSwitch } from "../../shell/WorkKindSwitch";
+import { OctantAlert } from "../../ui/base/OctantAlert";
 
 export interface WorkComposerAdapterProps {
   /** The person's name from their profile, for the greeting on the hero. */
@@ -548,17 +549,17 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         {props.homeStart}
 
         {props.errorMessage !== undefined ? (
-          <p className="work-composer-adapter__error" role="alert">
+          <OctantAlert className="work-composer-adapter__error" tone="danger">
             {props.errorMessage}
-          </p>
+          </OctantAlert>
         ) : sendNotice !== undefined ? (
-          <p className="work-composer-adapter__error" role="alert">
+          <OctantAlert className="work-composer-adapter__error" tone="danger">
             {sendNotice}
-          </p>
+          </OctantAlert>
         ) : projectRequired && !hasFolder ? (
-          <p className="work-composer-adapter__error" role="alert">
+          <OctantAlert className="work-composer-adapter__error" tone="danger">
             Choose a Project to work in before sending. Work needs a confined folder.
-          </p>
+          </OctantAlert>
         ) : null}
         {props.creating ? (
           <div>

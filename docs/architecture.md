@@ -531,11 +531,18 @@ Children can form a dependency graph. A run admitted with `dependsOn` (up to
 eight existing sibling runs of the same parent thread) parks as Waiting under
 `waiting-on-dependencies`: it holds no capacity slot, the capacity queue never
 starts it, and a restart leaves it parked. `AgentRunDependencyScheduler` asks
-the orchestration service to settle it on every committed status change and
-once at boot, through the pure `decideAgentRunDependencies`. When every
-dependency completed, the run starts (or joins the capacity queue if no slot is
-free) and receives each dependency's reply as a context block; a reply that is
-gone fails the start closed. A dependency that failed or was cancelled fails
+the orchestration service to settle it on every committed status change, when
+the parent thread's harness session is resumed, and once at boot, through the
+pure `decideAgentRunDependencies`. When every dependency completed, the run
+starts (or joins the capacity queue if no slot is free) and receives each
+dependency's reply as a context block; a reply that is gone fails the start
+closed. A ready run is held instead while its parent's harness session is
+paused or `recovery-required` (the same rule that refuses a new `delegate`),
+and a restart never starts one on its own: every run already parked when the
+host boots stays parked, even once its dependencies complete, until a person
+resumes it or resumes the parent's session; a person's resume of the run
+itself is refused while the parent's session is held. The hold lives in the
+orchestration service and is rebuilt the same way at every boot. A dependency that failed or was cancelled fails
 the dependent without running it (`dependency-failed: <id>`); an interrupted
 dependency does not, because a retry can still complete it. A run cannot be
 admitted on a sibling that already failed or was cancelled, and since only
@@ -815,7 +822,19 @@ flowchart LR
   of the journal — transcript, evidence, and provenance, named with the
   instant it was taken. Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
-  journal are listed as omissions. See `docs/decisions/0036`. User-facing
+  journal are listed as omissions. A local owner can also take one
+  `octant.host-export/1` cut of what this host holds: a thread bundle for
+  every thread of every mode, Projects, Project memory, Canvases, a
+  non-secret settings summary, usage export rows, and retention windows
+  with purge tombstones. That call is a host-control read on the loopback
+  route chain. A remote principal and a paired device are refused, and the
+  remote forward list does not carry the path. The same forbidden-key walk
+  runs over the assembled cut. Large stores are read and written in bounded
+  pages, so a transcript, usage row, or tombstone table is not loaded all
+  at once; each page is walked before it is written. The cut names what it
+  leaves out — credentials, filesystem paths, attachment bytes, raw
+  provider payloads, unsent drafts, paired-device keys, and window
+  capabilities — and why. See `docs/decisions/0036`. User-facing
   drafts of the privacy notice, sub-processor position, data-residency
   statement, DPA template, SCC position, and EULA governing-law placeholders
   live in `apps/docs/advanced/` and are marked pending legal review; they
@@ -864,6 +883,31 @@ flowchart LR
   unwinds a local version. Plan mode, and a host with sync off, make no store
   calls. See
   [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
+- **Artifact replica entries.** A store a person sets aside for sync holds one
+  write-once JSON entry per committed artifact version or deletion, at
+  `<instanceId>/<sequence>.json`, with a detached signature beside it at
+  `<instanceId>/<sequence>.sig`. The payload is the artifact bundle from
+  [0029](decisions/0029-artifact-storage-mirror.md) (`octant.artifact-bundle/1`),
+  not a second document. Reconciling an entry appends a version, keeps both
+  heads when two computers revise the same parent, or records a tombstone. It
+  cannot overwrite. A gap in an instance's sequence, an unknown or revoked
+  instance, a bad or missing signature, a content-hash mismatch, or an entry
+  that names a local artifact as foreign is refused. An unknown entry format
+  fails closed. A later version after a tombstone appends; the tombstone stays
+  in the history.
+  The detached signature covers an entry's encoded bytes whole - origin, kind,
+  parents, the claimed content hash, and the bundle - so a rewrite of any of
+  those is a different signature, not the same one the log recorded. The log
+  also carries membership: a computer that is not yet a member writes a join
+  request at its own next sequence and names itself, and a member returns that
+  request for approval instead of refusing it. Approving journals the new
+  instance on the member; confirming the same approval on the joining computer
+  journals the member there, which is how a computer that was never part of
+  the store learns who the members are. A pull walks each instance's entries in
+  sequence order from the start, because the sequence is per instance and a
+  host that joins in the middle cannot have seen anything earlier. A member's
+  revocation is an entry the member writes; it is refused for a revoked
+  instance rather than re-admitting it, because re-joining is a new identity.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -918,7 +962,9 @@ modelId }`, and the model picker is provider-first. Discovery can find
   `acquire`, so its probe reports `unavailable` and it never reaches a
   picker), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
-  GitHub Copilot, Cline, Qwen Code, fx). fx runs in a per-instance managed
+  GitHub Copilot, Cline, Qwen Code, fx). The installed OpenCode binary's
+  version selects its routes: 1.x keeps the legacy session API, and 2.x lists
+  providers and models and is listing only, turns not yet supported. fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable; see
   [fx-acp-compatibility.md](fx-acp-compatibility.md) and
   [0130](decisions/0130-fx-runs-in-a-managed-home.md). Image profiles are
@@ -973,9 +1019,18 @@ modelId }`, and the model picker is provider-first. Discovery can find
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
   those tokens. **Host-driven** (`subscription-oauth`, direct HTTP drivers):
-  the host runs PKCE and/or device flow; the 0054 broker holds refresh and
-  access material as opaque refs — never journaled, logged, exported, or
-  renderer-visible. Secrets
+  the host runs a generic authorization-code PKCE runner and a device-code
+  runner from a provider descriptor (endpoints, scopes, and a public client
+  id). PKCE binds a one-shot loopback redirect on a random port, checks state
+  and the code verifier, and times out. Device-code polling waits with backoff
+  until consent, denial, or expiry. Refresh and access material stay in the
+  0054 broker as opaque refs — never journaled, logged, exported, or
+  renderer-visible. The raw credential resolve path refuses that material, so
+  a refresh token is not handed out as an API key. Refresh runs in the broker.
+  A revoked, expired, or reused refresh token becomes a typed sign-in-again
+  state. An API-key path stays available beside every sign-in. The effective
+  authority rule is in [security and authority](#security-and-authority); the
+  historical record remains Proposed. Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
   never receive raw token material. Broker URLs and tokens are stripped from
@@ -1602,7 +1657,13 @@ mechanisms are:
   reaches the target.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
-  Each adapter turns its provider's own subagent feature off, because a child
+  A managed child, whether driven by Octant's harness or a provider harness,
+  receives `octant_canvas` bound to the workspace and Project the host resolved
+  for that run. The model cannot name a path. Create and revise succeed only
+  inside that scope; another Project or an unresolved checkout is refused, and
+  the child run is the author. A provider transport that cannot carry
+  app-managed tools fails the start with a typed reason rather than dropping
+  the tool. Each adapter turns its provider's own subagent feature off, because a child
   the provider starts itself runs outside the journal and the approval path.
 - **Remote clients.** Pairing issues a revocable device key; the private
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.
@@ -1638,24 +1699,36 @@ mechanisms are:
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
   into authority on another.
+- **Host-driven provider sign-in.** A local principal may start a descriptor-driven
+  PKCE or device-code sign-in. The host, not a provider child and not the
+  renderer, owns the loopback redirect, the device poll, and refresh. State and
+  the code verifier are checked, the redirect is one-shot, and an unanswered
+  consent times out. Tokens stay in the credential broker. The journal records
+  the terms acknowledgment (who and when) and the public sign-in state, never
+  an access token, refresh token, authorization code, or verifier. A remote
+  principal cannot acknowledge terms, start the flow, or refresh. A revoked,
+  expired, or reused refresh token is a typed sign-in-again state and drops the
+  stored grant. The API-key path remains available beside that sign-in.
+  [0111](decisions/0111-host-driven-provider-oauth.md) stays a Proposed
+  historical record; this section is the effective rule.
 
 ## Package map
 
-| Package                   | Responsibility                                                                                                                        | Depends on                                                        |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `packages/contracts`      | Effect Schema entities, commands, events, RPC and wire contracts; no runtime logic                                                    | `effect`                                                          |
-| `packages/domain`         | Pure policies and state transitions (modes, tool calls, approvals, remote access, boards, canvas, …)                                  | contracts, theme                                                  |
-| `packages/theme`          | Semantic theme schema, presets, backgrounds, typography, importer, contrast                                                           | contracts                                                         |
-| `packages/provider-sdk`   | `ProviderDriver` interface, normalized runtime events, discovery, conformance harnesses                                               | contracts, `effect`                                               |
-| `packages/plugin-host`    | Extension manifests, component model, activation ladder, addressing, bundled skills and provider-driver plugins, Agent Plugins loader | contracts, `yaml`                                                 |
-| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties (re-exports contracts/extensions)                       | contracts                                                         |
-| `packages/host-runtime`   | Host paths, owner receipts, service lifecycle, bridge secret, diagnostics, redaction (shared by desktop and CLI)                      | —                                                                 |
-| `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads                    | contracts, domain                                                 |
-| `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                                       | contracts, host-runtime                                           |
-| `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway                     | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
-| `apps/desktop`            | Electron shell: windows, menus, native credential-store integration, pickers, signed updates, server process lifecycle, packaging     | contracts, domain, host-runtime                                   |
-| `apps/web`                | React renderer for desktop and paired browsers                                                                                        | client-runtime, contracts, domain, plugin-host, theme             |
-| `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                | client-runtime, contracts, domain                                 |
+| Package                   | Responsibility                                                                                                                                          | Depends on                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `packages/contracts`      | Effect Schema entities, commands, events, RPC and wire contracts; no runtime logic                                                                      | `effect`                                                          |
+| `packages/domain`         | Pure policies and state transitions (modes, tool calls, approvals, remote access, boards, canvas, …)                                                    | contracts, theme                                                  |
+| `packages/theme`          | Semantic theme schema, presets, backgrounds, typography, importer, contrast                                                                             | contracts                                                         |
+| `packages/provider-sdk`   | `ProviderDriver` interface, normalized runtime events, discovery, conformance harnesses                                                                 | contracts, `effect`                                               |
+| `packages/plugin-host`    | Extension manifests, component model, activation ladder, addressing, bundled skills and provider-driver plugins, Agent Plugins loader                   | contracts, `yaml`                                                 |
+| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties (re-exports contracts/extensions)                                         | contracts                                                         |
+| `packages/host-runtime`   | Host paths, owner receipts, service lifecycle, credential broker, host OAuth runners, bridge secret, diagnostics, redaction (shared by desktop and CLI) | —                                                                 |
+| `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads                                      | contracts, domain                                                 |
+| `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                                                         | contracts, host-runtime                                           |
+| `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway                                       | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
+| `apps/desktop`            | Electron shell: windows, menus, native credential-store integration, pickers, signed updates, server process lifecycle, packaging                       | contracts, domain, host-runtime                                   |
+| `apps/web`                | React renderer for desktop and paired browsers                                                                                                          | client-runtime, contracts, domain, plugin-host, theme             |
+| `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                                  | client-runtime, contracts, domain                                 |
 
 Dependencies point inward: no package imports an app, and `contracts` imports
 nothing first-party.

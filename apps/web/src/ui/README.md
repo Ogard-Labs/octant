@@ -26,7 +26,8 @@ variables without a hand-port from a Radix-era style.
 
 `bun run ui:check` fails closed on new `@base-ui/react` or `ui/shadcn` imports
 outside this directory, on raw `<button>`, `<input>`, `<select>`, `<textarea>`,
-or `<dialog>` in feature modules, and on `OctantInput` used as a checkbox or
+or `<dialog>` in feature modules, on a raw `role="alert"` or `role="dialog"`
+that is not a recorded exception, and on `OctantInput` used as a checkbox or
 radio. Remaining raw controls must be native platform exceptions:
 
 | Exception comment            | Use for                                            |
@@ -34,6 +35,12 @@ radio. Remaining raw controls must be native platform exceptions:
 | `native-file-input`          | Hidden or OS file choosers the adapter cannot host |
 | `native-platform-control`    | Native color/media/window controls                 |
 | `specialized-editor-surface` | Monaco, xterm, Canvas, or drag hit regions         |
+| `inline-field-error`         | Validation copy tied to its input                  |
+| `compact-status`             | One-line status that already owns its mark         |
+| `screen-reader-announcement` | Visually hidden live text                          |
+| `non-modal-panel`            | Anchored glass panel that is not a modal dialog    |
+| `positioned-banner`          | Banner whose placement is not a callout            |
+| `empty-state`                | Live region around an empty-state recipe           |
 
 Place `{/* ui-boundary-exception: native-file-input */}` immediately above the
 element. Hidden `type="file"` inputs are also recognized without a comment.

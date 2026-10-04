@@ -138,9 +138,8 @@ export function providerRefusalCopy(
   if (reason === "runtime-incompatible") {
     if (instance.driverKind === "opencode") {
       return {
-        reason:
-          "This OpenCode runtime is discovery-only and cannot carry Octant's session permission rules yet.",
-        nextStep: "Use a supported OpenCode 1.x runtime, then check the connection again.",
+        reason: "OpenCode 2 is listing only, turns not yet supported.",
+        nextStep: "Review the listed models. Turns are not available on this runtime yet.",
       };
     }
     return {
