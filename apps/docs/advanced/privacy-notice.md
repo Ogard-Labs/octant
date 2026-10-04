@@ -170,9 +170,19 @@ one thread you can already open. The JSON bundle (`octant.thread-bundle/1`)
 carries transcript, evidence, and provenance, and names the instant it was
 cut. Secrets, raw provider payloads, resume cursors, and filesystem paths
 are unrepresentable. Attachment bytes and other bulk content outside the
-journal are listed as omissions rather than inlined. A paired device may
-export only a thread it can already read. This is not a host-wide dump;
-Chat Markdown remains a convenience copy, not the authoritative export.
+journal are listed as omissions rather than inlined. A paired device may export
+only a thread it can already read. Chat Markdown remains a convenience
+copy, not the authoritative export.
+
+**Export this host.** **Export my data** is the host-wide cut
+(`octant.host-export/1`): one local-owner read of every thread the host
+can project — across Chat, Work, and Code — plus Projects, memory,
+Canvases, settings, usage rows, and the retention state including purge
+tombstones, streamed as line-delimited JSON. It is local-owner-only: a
+remote or paired device principal is refused before any store is opened.
+The same unrepresentable rules as the thread bundle apply — no credentials,
+no filesystem paths, no raw provider payloads — and anything the walk
+cannot represent is refused rather than partially emitted.
 
 **Retain and purge.** Retention windows are per host, Project, or thread.
 The narrower scope wins. The host default is forever. Setting a window
@@ -184,7 +194,9 @@ transcript or title, then appends a tombstone. Usage attribution, canvas
 documents, memory, credentials, Projects, and other threads stay unless a
 later request names them. SQLite free pages may keep bytes until a vacuum
 or store rebuild; that residual is reported, not hidden. A remote
-principal cannot set a window or purge.
+principal cannot set a window or purge. A later host export carries no
+content trace of a purged thread; the purge outcome names exactly which
+scopes it deleted and which it retained.
 
 **Remove local data.** Reset, remove-all, and delete-remote-host are
 explicit, reported per scope, and never implicit. Keychain cleanup is

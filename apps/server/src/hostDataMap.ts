@@ -21,13 +21,21 @@ const ARTIFACT_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly rela
   { name: "Apple toolchain artifacts", relative: "artifacts" },
 ];
 
+// Every directory the confirmed thread purge sweep reaches outside the
+// journal must appear here, or the map under-states the erasure scope.
+// The host roots its chat stores at <dataDirectory>/chat, so a relative
+// path below "chat/" names where the running host actually writes.
 const CACHE_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relative: string }> = [
   { name: "Local provider usage history", relative: "local-usage-cache.sqlite3" },
-  // The host roots its chat stores at <dataDirectory>/chat, so a relative
-  // "scratch" here would name a directory nothing writes to.
   { name: "Chat scratch", relative: "chat/scratch" },
-  { name: "Chat attachments", relative: "threads" },
+  { name: "Chat attachments", relative: "chat/threads" },
   { name: "Work attachments", relative: "work-threads" },
+  { name: "Code attachments", relative: "code-threads" },
+  { name: "Generated images", relative: "generated-images" },
+  { name: "Agent messages", relative: "agent-messages" },
+  { name: "Agent-run scratch", relative: "agent-run-scratch" },
+  { name: "Agent-run workspace receipts", relative: "agent-run-workspace-receipts" },
+  { name: "Managed worktree receipts", relative: "managed-worktree-receipts" },
   { name: "Installed extensions", relative: "extensions" },
   // The desktop app installs the computer-use driver here, and the host keeps
   // its runtime receipts under it, so a person inspecting the store sees it.

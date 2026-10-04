@@ -43,8 +43,9 @@ Settings → Data & privacy includes a read-only data map of what this host stor
 where — journal, projections, artifacts, named Keychain or secret-service
 entries (never values), caches, and the categories that leave the machine
 (provider calls, update checks, marketplace fetches). A category the host
-cannot verify is shown as unknown. The map does not purge or export; those
-actions stay on thread retention and the thread export menu.
+cannot verify is shown as unknown. The map itself performs no destructive
+action; export and purge are separate confirmed operations on the same
+Data & privacy surface.
 
 An unsent composer draft is ordinary local client storage on the machine
 where it was typed. It never enters the journal, diagnostics, or a provider
@@ -57,7 +58,18 @@ names the instant it was cut. Credentials, OAuth tokens, raw provider
 payloads, resume cursors, and host filesystem paths never enter the file.
 Attachment bytes and other bulk content that live outside the journal are
 named as omissions rather than inlined. A paired device may export only a
-thread it can already read. This is not a host-wide dump.
+thread it can already read.
+
+**Export my data** is the host-wide cut: a local-owner-only read of every
+projectable thread across Chat, Work, and Code, plus Projects, memory,
+Canvases, settings, usage rows, and retention state including purge
+tombstones, streamed as line-delimited JSON. A remote or paired device
+principal is refused before any store is opened, and the same secret and
+path exclusions apply as in the thread bundle. A confirmed thread purge
+deletes that thread's journal events, projections, and bulk content, so a
+later host export carries no content trace of it; the purge outcome names
+the retained scopes — the tombstone and usage attribution — where the
+thread id remains by design.
 
 ## Credentials
 
