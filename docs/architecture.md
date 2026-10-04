@@ -904,7 +904,9 @@ modelId }`, and the model picker is provider-first. Discovery can find
   `acquire`, so its probe reports `unavailable` and it never reaches a
   picker), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
-  GitHub Copilot, Cline, Qwen Code, fx). fx runs in a per-instance managed
+  GitHub Copilot, Cline, Qwen Code, fx). The installed OpenCode binary's
+  version selects its routes: 1.x keeps the legacy session API, and 2.x lists
+  providers and models and is listing only, turns not yet supported. fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable; see
   [fx-acp-compatibility.md](fx-acp-compatibility.md) and
   [0130](decisions/0130-fx-runs-in-a-managed-home.md). Image profiles are
