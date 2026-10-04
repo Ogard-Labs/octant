@@ -166,7 +166,7 @@ async function dispatch(input: {
       actorId,
       descriptor,
     });
-    return finish(dependencies, command, offer, started, actorId);
+    return finish(dependencies, command, offer, started, actorId, principal);
   }
   if (command.kind === "poll") {
     const state = await dependencies.service.status({
@@ -174,7 +174,7 @@ async function dispatch(input: {
       attemptId: command.attemptId,
       descriptor,
     });
-    return finish(dependencies, command, offer, state, actorId);
+    return finish(dependencies, command, offer, state, actorId, principal);
   }
   const pointer = await readPointer(dependencies, command.instanceId);
   if (pointer === undefined || pointer.descriptorId !== offer.descriptor.descriptorId) {
@@ -207,10 +207,15 @@ async function finish(
   offer: SubscriptionOAuthOffer,
   state: HostOAuthSignInState,
   windowId: string,
+  principal: PrincipalKind,
 ): Promise<ProviderOAuthView> {
   if (state.kind === "signed-in") {
+    if (state.descriptorId !== offer.descriptor.descriptorId) {
+      return { kind: "refused", reason: "invalid" };
+    }
     const unmatched = unmatchedInstance(dependencies, command.instanceId, offer);
     if (unmatched !== undefined) return unmatched;
+    await revokeReplacedPointer(dependencies, command, offer, state.credentialRef, principal);
     await storePointer(dependencies, command.instanceId, offer, state.credentialRef, windowId);
     return { kind: "signed-in", accountLabel: offer.accountLabel };
   }
@@ -281,6 +286,26 @@ function unmatchedInstance(
     return { kind: "refused", reason: "unsupported-driver" };
   }
   return undefined;
+}
+
+async function revokeReplacedPointer(
+  dependencies: ProviderOAuthRouteDependencies,
+  command: OAuthCommand,
+  offer: SubscriptionOAuthOffer,
+  nextCredentialRef: string,
+  principal: PrincipalKind,
+): Promise<void> {
+  const pointer = await readPointer(dependencies, command.instanceId);
+  if (pointer === undefined || pointer.credentialRef === nextCredentialRef) return;
+  if (pointer.descriptorId === offer.descriptor.descriptorId) {
+    const signedOut = await dependencies.service.signOut({
+      principalKind: principal,
+      descriptor: offer.descriptor,
+      credentialRef: pointer.credentialRef,
+    });
+    if (signedOut.kind !== "signed-out") return;
+  }
+  await dependencies.credentials?.delete(command.instanceId).catch(() => undefined);
 }
 
 async function storePointer(
