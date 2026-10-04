@@ -13,7 +13,7 @@ import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpD
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
 import { sanitizeAcpEnvironment } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpProviderProfile } from "./acpProfiles";
-import { AcpFailure, type AcpNewSessionResult } from "./acpProtocol";
+import { AcpFailure, type AcpNewSessionResult, type AcpConfigOptionsResult } from "./acpProtocol";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
 
@@ -35,7 +35,17 @@ const profiles = Object.values(acpProviderProfiles);
 class FakeClient implements AcpClientPort {
   readonly notifications = new Set<Parameters<AcpClientPort["onNotification"]>[0]>();
   readonly requests = new Set<Parameters<AcpClientPort["onRequest"]>[0]>();
-  readonly setConfigOption = vi.fn(async () => ({ configOptions: this.configOptions }));
+  readonly setConfigOption = vi.fn(
+    async (
+      _sessionId: string,
+      configId: string,
+      value: string,
+    ): Promise<AcpConfigOptionsResult> => ({
+      configOptions: this.configOptions.map((option) =>
+        option.id === configId ? { ...option, currentValue: value } : option,
+      ),
+    }),
+  );
   readonly call = vi.fn(async () => ({})) as unknown as AcpClientPort["call"];
   readonly respondPermission = vi.fn(async () => undefined);
   readonly respond = vi.fn(async () => undefined);
@@ -410,6 +420,11 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       };
     });
 
+    client.setConfigOption.mockResolvedValue({
+      configOptions: client.configOptions.filter(
+        (option) => option.id !== profile.reasoningOptionId,
+      ),
+    });
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
     expect(result.capabilities.reasoning).toBe("unavailable");
     expect(result.models.every((model) => model.reasoning === "unavailable")).toBe(true);
@@ -453,6 +468,9 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       return renamed("agent-session-renamed");
     });
 
+    client.setConfigOption.mockResolvedValue({
+      configOptions: renamed("agent-session-renamed").configOptions ?? [],
+    });
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
 
     expect(result.capabilities.reasoning).toBe("supported");
@@ -478,6 +496,11 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       };
     });
 
+    client.setConfigOption.mockResolvedValue({
+      configOptions: client.configOptions.filter(
+        (option) => option.id !== profile.reasoningOptionId,
+      ),
+    });
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
 
     expect(result.models.every((model) => model.options.length === 0)).toBe(true);
@@ -1161,10 +1184,10 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     );
   });
 
-  it("leaves the agent's own level alone when the chosen value is not offered", async () => {
+  it("does not apply a reasoning value the agent does not offer", async () => {
     const { driver, client } = fixture(profile);
 
-    await Effect.runPromise(
+    const result = await Effect.runPromiseExit(
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
@@ -1178,8 +1201,9 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         }),
       ),
     );
+    expect(result._tag).toBe(profile.discoverModelOptions === true ? "Failure" : "Success");
 
-    // The session keeps the agent's own level: no call carries the option.
+    // A stale preference never reaches the agent, whether ignored or refused.
     const reasoningCalls = client.setConfigOption.mock.calls.filter(
       (call) => (call as ReadonlyArray<unknown>)[1] === profile.reasoningOptionId,
     );
@@ -2349,4 +2373,183 @@ it("refuses a provider that replaces the native identity during resume", async (
       }),
     ),
   );
+});
+
+describe("Devin model configuration", () => {
+  const pairing = "fusion-gpt-6-1-sol-high-sidekick-swe-2-medium";
+  const thinking = {
+    type: "select" as const,
+    id: "thought_level",
+    name: "Thinking",
+    category: "thought_level",
+    currentValue: "high",
+    options: [
+      { value: "low", name: "Low" },
+      { value: "high", name: "High" },
+    ],
+  };
+  const speed = {
+    type: "select" as const,
+    id: "speed",
+    name: "Speed",
+    category: "model_config",
+    currentValue: "standard",
+    options: [
+      { value: "standard", name: "Standard" },
+      { value: "fast", name: "Fast" },
+    ],
+  };
+
+  it("discovers each model's own effort and speed with normalized pairing choices", async () => {
+    const { driver, client } = fixture(devin);
+    const model = {
+      type: "select" as const,
+      id: "model",
+      name: "Model",
+      currentValue: "agent-k2",
+      options: [
+        { value: "agent-k2", name: "Agent K2" },
+        { value: pairing, name: "Fusion (GPT-6.1 Sol High Thinking + SWE-2 Medium)" },
+      ],
+    };
+    client.newSession.mockResolvedValue({ sessionId: "probe", configOptions: [model] });
+    client.setConfigOption.mockImplementation(async (_sessionId, _id, value) => ({
+      configOptions: [model, ...(value === pairing ? [thinking, speed] : [])],
+    }));
+    const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(probe.models.find((model) => String(model.id) === "agent-k2")?.options).toEqual([]);
+    expect(probe.models.find((model) => String(model.id) === pairing)).toMatchObject({
+      configuration: {
+        family: "Fusion",
+        choices: [
+          { id: "lead", displayName: "Lead", value: "GPT-6.1 Sol" },
+          { id: "sidekick", displayName: "Sidekick", value: "SWE-2 Medium" },
+        ],
+      },
+      options: [
+        {
+          id: "thought_level",
+          displayName: "Thinking",
+          kind: "selection",
+          values: ["low", "high"],
+        },
+        { id: "speed", displayName: "Speed", kind: "selection", values: ["standard", "fast"] },
+      ],
+    });
+  });
+
+  it.each(["start", "resume"] as const)(
+    "applies effort and speed before a %s session can send",
+    async (operation) => {
+      const { driver, client } = fixture(devin);
+      let configs = [
+        ...client.configOptions.filter((option) => option.id !== devin.reasoningOptionId),
+        thinking,
+        speed,
+      ];
+      client.setConfigOption.mockImplementation(async (_session, id, value) => {
+        configs = configs.map((option) =>
+          option.id === id
+            ? { ...option, currentValue: value }
+            : id === "thought_level" && option.id === "speed"
+              ? { ...option, currentValue: "standard" }
+              : option,
+        );
+        return { configOptions: configs };
+      });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            const input = {
+              sessionId,
+              modelId: pairing as ProviderModelId,
+              executionPolicy: "approval-gated" as const,
+              modelOptionValues: { speed: "fast", thought_level: "high" },
+            };
+            if (operation === "start") yield* connection.start(input);
+            else {
+              const started = yield* connection.start(input);
+              yield* connection.stop(sessionId);
+              client.setConfigOption.mockClear();
+              if (started.resumeCursor === undefined)
+                throw new Error("Expected native Fusion cursor");
+              yield* connection.resume({ ...input, resumeCursor: started.resumeCursor });
+            }
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+      const calls = client.setConfigOption.mock.calls.map((call) => call.slice(1));
+      expect(calls).toEqual([
+        ["model", pairing],
+        ["mode", "ask"],
+        ["thought_level", "high"],
+        ["speed", "fast"],
+      ]);
+      expect(client.prompt).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([{ speed: "fast" }, { mode: "bypass" }])(
+    "refuses an unavailable or authority-changing model option",
+    async (modelOptionValues) => {
+      const { driver, client } = fixture(devin);
+      const result = await Effect.runPromiseExit(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            return yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              modelOptionValues,
+            });
+          }),
+        ),
+      );
+      expect(result._tag).toBe("Failure");
+      expect(
+        client.setConfigOption.mock.calls.some(
+          (call) => call[1] === "speed" || call[2] === "bypass",
+        ),
+      ).toBe(false);
+      expect(client.prompt).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses to send when a later setting resets the requested effort", async () => {
+    const { driver, client } = fixture(devin);
+    let configs = [
+      ...client.configOptions.filter((option) => option.id !== devin.reasoningOptionId),
+      thinking,
+      speed,
+    ];
+    client.setConfigOption.mockImplementation(async (_session, id, value) => {
+      configs = configs.map((option) =>
+        option.id === id
+          ? { ...option, currentValue: value }
+          : id === "speed" && option.id === "thought_level"
+            ? { ...option, currentValue: "low" }
+            : option,
+      );
+      return { configOptions: configs };
+    });
+    const result = await Effect.runPromiseExit(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          return yield* connection.start({
+            sessionId,
+            modelId: pairing as ProviderModelId,
+            executionPolicy: "approval-gated",
+            modelOptionValues: { thought_level: "high", speed: "fast" },
+          });
+        }),
+      ),
+    );
+    expect(result._tag).toBe("Failure");
+    expect(client.setConfigOption.mock.calls.at(-1)?.slice(1)).toEqual(["speed", "fast"]);
+    expect(client.prompt).not.toHaveBeenCalled();
+  });
 });

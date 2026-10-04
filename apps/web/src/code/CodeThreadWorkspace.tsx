@@ -977,6 +977,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   async function changeProvider(selection: {
     readonly providerInstanceId: typeof thread.providerInstanceId;
     readonly modelId: typeof thread.modelId;
+    readonly modelOptionValues?: ProviderModelOptionValues;
   }) {
     if (
       selection.providerInstanceId === thread.providerInstanceId &&
@@ -992,6 +993,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         expectedVersion: thread.version,
         providerInstanceId: selection.providerInstanceId,
         modelId: selection.modelId,
+        ...(selection.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: selection.modelOptionValues }),
       });
     } finally {
       setProviderChanging(false);

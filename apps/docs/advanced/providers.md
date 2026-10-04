@@ -309,3 +309,26 @@ intended, not a bug: move the keys into a profile or use the bearer token.
 - [Context budgets and limits](/advanced/context-budgets) to understand how turns fit provider limits
 - [Subagents](/advanced/subagents) for child runs that inherit provider settings
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries
+
+## Devin Fusion settings
+
+With an eligible paid Devin account and a current Devin CLI, check the Devin ACP
+connection in **Settings → Providers & Models**. Discovery reads the options for
+each model, so a large catalog can take tens of seconds to finish checking.
+
+Choose a Fusion pairing in the composer model picker. Its **Lead** and
+**Sidekick** controls select available pairings; **Thinking** sets the lead's
+effort. **Speed → Fast** enables Fast Mode where that pairing supports it;
+**Standard** disables it, and **Default** leaves the choice to Devin. Models
+without a fast variant do not show a speed control. These settings are available
+in Chat, Work, and Code and are applied when a thread starts or resumes. New
+threads remember supported choices per provider and pairing; existing threads
+keep their saved settings. Changing lead or sidekick carries any explicit effort
+or speed choice that the new pairing also supports.
+
+Octant refuses a setting that Devin no longer offers rather than silently using
+a different one. Check the connection again to refresh the available choices.
+Fusion model selection does not change Octant's access or approval policy.
+
+See [Devin's Fusion documentation](https://docs.devin.ai/cli/fusion) for account
+eligibility and model pricing.

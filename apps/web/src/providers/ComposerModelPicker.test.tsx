@@ -68,6 +68,103 @@ describe("ComposerModelPicker", () => {
     next.unmount();
   });
 
+  it("selects advertised lead and sidekick pairings and remembers speed beside effort", async () => {
+    const source = groups();
+    const first = source[0];
+    const entry = first?.sections[0]?.models[0];
+    if (first === undefined || entry === undefined) throw new Error("Expected picker fixture");
+    const pairings = [
+      { id: "pair-a", lead: "Frontier A", sidekick: "SWE Medium" },
+      { id: "pair-b", lead: "Frontier B", sidekick: "SWE Medium" },
+      { id: "pair-c", lead: "Frontier A", sidekick: "Luna High" },
+    ].map((pair) => ({
+      ...entry,
+      model: {
+        ...entry.model,
+        id: decodeProviderModelId(pair.id),
+        displayName: `Fusion (${pair.lead} + ${pair.sidekick})`,
+        configuration: {
+          family: "Fusion",
+          choices: [
+            { id: "lead", displayName: "Lead", value: pair.lead },
+            { id: "sidekick", displayName: "Sidekick", value: pair.sidekick },
+          ] as const,
+        },
+        options: [
+          {
+            id: "thought_level",
+            displayName: "Thinking",
+            kind: "selection" as const,
+            values: ["low", "high"] as const,
+          },
+          {
+            id: "speed",
+            displayName: "Speed",
+            kind: "selection" as const,
+            values: ["standard", "fast"] as const,
+          },
+        ],
+      },
+    }));
+    const configured = [
+      { ...first, sections: first.sections.map((section) => ({ ...section, models: pairings })) },
+    ];
+    const onSelect = vi.fn();
+    const onModelOptionChange = vi.fn();
+    const user = userEvent.setup();
+    const view = render(
+      <ComposerModelPicker
+        groups={configured}
+        selectedProviderInstanceId={providerA}
+        selectedModelId={decodeProviderModelId("pair-a")}
+        onSelect={onSelect}
+        onModelOptionChange={onModelOptionChange}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("combobox", { name: "Lead" }));
+    await user.click(await screen.findByRole("option", { name: "Frontier B" }));
+    expect(onSelect).toHaveBeenLastCalledWith({ providerInstanceId: providerA, modelId: "pair-b" });
+    await user.click(screen.getByRole("combobox", { name: "Sidekick" }));
+    await user.click(await screen.findByRole("option", { name: "Luna High" }));
+    expect(onSelect).toHaveBeenLastCalledWith({ providerInstanceId: providerA, modelId: "pair-c" });
+    await user.click(screen.getByRole("combobox", { name: "Speed" }));
+    await user.click(await screen.findByRole("option", { name: "Fast" }));
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("speed", "fast");
+    expect(
+      readRememberedModelOptions(configured, {
+        providerInstanceId: providerA,
+        modelId: decodeProviderModelId("pair-a"),
+      }),
+    ).toEqual({ speed: "fast" });
+    view.rerender(
+      <ComposerModelPicker
+        groups={configured}
+        selectedProviderInstanceId={providerA}
+        selectedModelId={decodeProviderModelId("pair-a")}
+        modelOptionValues={{ speed: "fast", thought_level: "high" }}
+        onSelect={onSelect}
+        onModelOptionChange={onModelOptionChange}
+      />,
+    );
+    await user.click(screen.getByRole("combobox", { name: "Lead" }));
+    await user.click(await screen.findByRole("option", { name: "Frontier B" }));
+    expect(onSelect).toHaveBeenLastCalledWith({
+      providerInstanceId: providerA,
+      modelId: "pair-b",
+      modelOptionValues: { thought_level: "high", speed: "fast" },
+    });
+    expect(
+      readRememberedModelOptions(configured, {
+        providerInstanceId: providerA,
+        modelId: decodeProviderModelId("pair-b"),
+      }),
+    ).toEqual({ thought_level: "high", speed: "fast" });
+    await user.click(screen.getByRole("combobox", { name: "Speed" }));
+    await user.click(await screen.findByRole("option", { name: "Default" }));
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("speed", undefined);
+  });
+
   it("recovers from malformed preferences without blocking model selection", () => {
     localStorage.setItem("octant.models.last-choice.v1", "{broken");
     expect(readLastModelChoice()).toBeUndefined();

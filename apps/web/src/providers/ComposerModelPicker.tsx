@@ -17,6 +17,7 @@ import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { rememberModelChoice } from "./modelChoiceMemory";
@@ -36,8 +37,7 @@ export interface ComposerModelPickerModelOption {
 
 /**
  * Whether an option names how hard the model should think. The picker keeps
- * that one next to the model name; every other declared option stays in the
- * composer's options surface.
+ * that one on a level slider beside the other declared model settings.
  */
 export function isComposerReasoningOption(option: {
   readonly id: string;
@@ -62,13 +62,12 @@ export interface ComposerModelPickerProps {
   readonly disabled?: boolean;
   readonly ariaLabel?: string;
   /**
-   * The selected model's declared options. A reasoning/effort option among
-   * them is drawn inline in the picker so choosing a model and choosing how
-   * hard it thinks are one decision.
+   * The selected model's declared options, shown beside its configuration
+   * choices. Reasoning/effort uses a level slider; other choices use selects.
    */
   readonly modelOptions?: ReadonlyArray<ComposerModelPickerModelOption>;
   readonly modelOptionValues?: ProviderModelOptionValues;
-  /** Absent leaves the inline level control out; undefined restores the default. */
+  /** Absent leaves model option controls out; undefined restores the default. */
   readonly onModelOptionChange?: (optionId: string, value: string | undefined) => void;
   /**
    * Which side of the trigger the menu opens on. Most composers sit at the
@@ -187,16 +186,25 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     "Choose model";
   // The inline level control shows only when the caller owns the option value
   // and the selected model actually declares a reasoning/effort option.
-  const declaredOptions =
-    findPickerModel(
-      props.groups,
-      props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
-        ? undefined
-        : {
-            providerInstanceId: props.selectedProviderInstanceId,
-            modelId: props.selectedModelId,
-          },
-    )?.model.options ?? [];
+  const selectedModel = findPickerModel(
+    props.groups,
+    props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+      ? undefined
+      : {
+          providerInstanceId: props.selectedProviderInstanceId,
+          modelId: props.selectedModelId,
+        },
+  );
+  const declaredOptions = selectedModel?.model.options ?? [];
+  const configuration = selectedModel?.model.configuration;
+  const configuredModels =
+    selectedGroup === undefined || configuration === undefined
+      ? []
+      : flattenModels(selectedGroup).filter(
+          (row) =>
+            row.picker.unavailableReason === undefined &&
+            row.picker.model.configuration?.family === configuration.family,
+        );
   const modelOptions =
     props.modelOptions ??
     declaredOptions.flatMap((option) =>
@@ -273,6 +281,20 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     : catalogs.length > 1 && filteringCatalog === undefined
       ? groupByCatalog(models, catalogs)
       : [{ catalog: undefined, rows: models }];
+
+  function changeModelOption(id: string, value: string | undefined) {
+    if (
+      props.rememberChoice !== false &&
+      props.selectedProviderInstanceId !== undefined &&
+      props.selectedModelId !== undefined
+    ) {
+      rememberModelChoice(
+        { providerInstanceId: props.selectedProviderInstanceId, modelId: props.selectedModelId },
+        { id, value },
+      );
+    }
+    props.onModelOptionChange?.(id, value);
+  }
 
   function toggleFavorite(key: string) {
     setFavorites((current) => {
@@ -679,30 +701,115 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           </div>
         </div>
         <p className="sr-only">↓ Browse · Enter select · Esc close</p>
-        {levelOption === undefined || props.onModelOptionChange === undefined ? null : (
-          <LevelSlider
-            displayName={levelOption.displayName}
-            disabled={props.disabled === true}
-            labels={["Default", ...levelOption.values.map(levelLabel)]}
-            onIndexChange={(index) => {
-              const value = index === 0 ? undefined : levelOption.values[index - 1];
-              if (
-                props.rememberChoice !== false &&
-                props.selectedProviderInstanceId !== undefined &&
-                props.selectedModelId !== undefined
-              ) {
-                rememberModelChoice(
-                  {
-                    providerInstanceId: props.selectedProviderInstanceId,
-                    modelId: props.selectedModelId,
-                  },
-                  { id: levelOption.id, value },
-                );
-              }
-              props.onModelOptionChange?.(levelOption.id, value);
-            }}
-            index={levelIndex}
-          />
+        {configuration === undefined &&
+        (modelOptions.length === 0 || props.onModelOptionChange === undefined) ? null : (
+          <div aria-label="Model settings" className="composer-model-picker__settings" role="group">
+            {configuration?.choices.map((choice) => {
+              const candidates = configuredModels.filter((row) =>
+                configuration.choices.every(
+                  (other) =>
+                    other.id === choice.id ||
+                    row.picker.model.configuration?.choices.some(
+                      (candidate) => candidate.id === other.id && candidate.value === other.value,
+                    ),
+                ),
+              );
+              return (
+                <label className="composer-model-picker__setting" key={choice.id}>
+                  <span>{choice.displayName}</span>
+                  <OctantSelectField
+                    aria-label={choice.displayName}
+                    disabled={props.disabled === true || candidates.length < 2}
+                    value={String(props.selectedModelId)}
+                    options={candidates.map((row) => ({
+                      id: String(row.picker.model.id),
+                      label:
+                        row.picker.model.configuration?.choices.find(
+                          (candidate) => candidate.id === choice.id,
+                        )?.value ?? row.picker.model.displayName,
+                    }))}
+                    onValueChange={(id) => {
+                      const target = candidates.find((row) => String(row.picker.model.id) === id);
+                      if (target === undefined) return;
+                      const selection = {
+                        providerInstanceId: target.group.instance.id,
+                        modelId: target.picker.model.id,
+                      };
+                      rememberModel(selection.providerInstanceId, selection.modelId);
+                      const values = Object.fromEntries(
+                        modelOptions.flatMap((option) =>
+                          option.value !== undefined &&
+                          target.picker.model.options.some(
+                            (candidate) =>
+                              candidate.id === option.id &&
+                              candidate.kind === "selection" &&
+                              candidate.values.includes(option.value ?? ""),
+                          )
+                            ? [[option.id, option.value]]
+                            : [],
+                        ),
+                      );
+                      if (props.rememberChoice !== false) {
+                        rememberModelChoice(selection);
+                        for (const [id, value] of Object.entries(values))
+                          rememberModelChoice(selection, { id, value });
+                      }
+                      props.onSelect(
+                        Object.keys(values).length === 0
+                          ? selection
+                          : { ...selection, modelOptionValues: values },
+                      );
+                    }}
+                  />
+                </label>
+              );
+            })}
+            {levelOption === undefined || props.onModelOptionChange === undefined ? null : (
+              <LevelSlider
+                displayName={levelOption.displayName}
+                disabled={props.disabled === true}
+                labels={["Default", ...levelOption.values.map(levelLabel)]}
+                onIndexChange={(index) =>
+                  changeModelOption(
+                    levelOption.id,
+                    index === 0 ? undefined : levelOption.values[index - 1],
+                  )
+                }
+                index={levelIndex}
+              />
+            )}
+            {props.onModelOptionChange === undefined
+              ? null
+              : modelOptions
+                  .filter((option) => !isComposerReasoningOption(option))
+                  .map((option) => (
+                    <label className="composer-model-picker__setting" key={option.id}>
+                      <span>{option.displayName}</span>
+                      <OctantSelectField
+                        aria-label={option.displayName}
+                        disabled={props.disabled === true}
+                        value={
+                          option.value !== undefined && option.values.includes(option.value)
+                            ? option.value
+                            : DEFAULT_LEVEL_ID
+                        }
+                        options={[
+                          { id: DEFAULT_LEVEL_ID, label: "Default" },
+                          ...option.values.map((value) => ({
+                            id: value,
+                            label: levelLabel(value),
+                          })),
+                        ]}
+                        onValueChange={(value) =>
+                          changeModelOption(
+                            option.id,
+                            value === DEFAULT_LEVEL_ID ? undefined : value,
+                          )
+                        }
+                      />
+                    </label>
+                  ))}
+          </div>
         )}
       </OctantPopover>
     </div>

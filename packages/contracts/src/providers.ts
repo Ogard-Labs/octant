@@ -995,6 +995,20 @@ export const ProviderModelOptionValues = Schema.Record({
   );
 export type ProviderModelOptionValues = typeof ProviderModelOptionValues.Type;
 
+/** Display choices identify advertised variants; selecting one still binds its real model id. */
+const ProviderModelConfiguration = Schema.Struct({
+  family: Schema.NonEmptyTrimmedString,
+  choices: Schema.NonEmptyArray(
+    Schema.Struct({
+      id: Schema.NonEmptyTrimmedString,
+      displayName: Schema.NonEmptyTrimmedString,
+      value: Schema.NonEmptyTrimmedString,
+    }).annotations(strict),
+  ).pipe(
+    Schema.filter((choices) => new Set(choices.map((choice) => choice.id)).size === choices.length),
+  ),
+}).annotations(strict);
+
 const ProviderModelFields = {
   id: ProviderModelId,
   displayName: Schema.NonEmptyTrimmedString,
@@ -1009,6 +1023,7 @@ const ProviderModelFields = {
   inputModalities: UniqueInputModalities,
   imageInput: Schema.optional(ImageInputCapability),
   options: Schema.Array(ProviderModelOption),
+  configuration: Schema.optional(ProviderModelConfiguration),
   capabilityEvidence: Schema.optional(Schema.Array(CapabilityEvidence)),
   /** User-maintained residency/privacy labels; absent means untagged. */
   dataTags: Schema.optional(ProviderDataTags),

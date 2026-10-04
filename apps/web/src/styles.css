@@ -3821,6 +3821,36 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
      workspace's, so it was the one darker popup beside the menus. */
 }
 
+/* Model settings stay reachable when a long catalog or a short viewport
+   leaves only part of the picker visible. */
+.composer-model-picker__settings {
+  min-height: 0;
+  max-height: 45vh;
+  overflow-y: auto;
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+  border-top: 1px solid var(--octant-border);
+}
+
+.composer-model-picker__setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  align-items: center;
+  gap: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+.composer-model-picker__setting [data-slot="select-trigger"] {
+  min-width: 0;
+  width: 100%;
+}
+
+.composer-model-picker__settings .composer-model-picker__level {
+  padding: 0;
+  border: 0;
+}
+
 /* The chosen model's effort/reasoning level, one tap from the list. The
    declared levels are the slider's stops and the knob snaps to a stop. The
    reading above names the level the knob sits on, and the ends below name the
