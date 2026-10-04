@@ -184,6 +184,7 @@ links from specifications remain useful for rationale and supporting detail.
 | [0160](0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md) | An Apple screen capture lands in a directory only its launch can write | Accepted |
 | [0161](0161-geist-is-the-default-interface-face.md) | Geist is the default interface face | Accepted |
 | [0162](0162-managed-npm-device-tools-share-one-release-channel.md) | Managed npm device tools share one release channel | Proposed |
+| [0163](0163-artifact-replicas-in-storage-the-user-owns.md) | Artifact replicas in storage the user owns | Accepted |
 
 ## Recording architectural rationale
 
