@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-import { ProviderOAuthSignIn } from "./ProviderOAuthSignIn";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ProviderOAuthSignIn, ProviderOAuthSignInPanel } from "./ProviderOAuthSignIn";
 
 const handlers = () => ({
   onAcknowledge: vi.fn(),
@@ -88,5 +88,49 @@ describe("provider sign-in", () => {
       />,
     );
     expect(screen.getByText("Sign-in was refused.")).toBeInTheDocument();
+  });
+});
+
+describe("provider sign-in panel", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("opens the consent URL once while polling awaiting-consent", async () => {
+    vi.useFakeTimers();
+    const openUrl = vi.fn();
+    const run = vi.fn(async (command: { readonly kind: string }) => {
+      if (command.kind === "status") return { kind: "signed-out" as const, termsRequired: false };
+      return {
+        kind: "awaiting-consent" as const,
+        attemptId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        authorizationUrl: "http://127.0.0.1/consent",
+      };
+    });
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="Fixture account"
+        descriptorId="fixture-oauth"
+        instanceId="00000000-0000-4000-8000-000000000901"
+        onUseApiKey={() => undefined}
+        openUrl={openUrl}
+        run={run}
+        termsSummary="Terms"
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(openUrl).toHaveBeenCalledOnce();
+    expect(openUrl).toHaveBeenCalledWith("http://127.0.0.1/consent");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(openUrl).toHaveBeenCalledOnce();
+    expect(run.mock.calls.some((call) => call[0].kind === "poll")).toBe(true);
   });
 });

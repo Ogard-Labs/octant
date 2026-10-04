@@ -3932,6 +3932,9 @@ export function startOctantServer(
             service: hostOAuth,
             windowAuthorityStore,
             ...(credentialResolver === undefined ? {} : { credentials: credentialResolver }),
+            ...(options.allowedRendererHttpOrigin === undefined
+              ? {}
+              : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
             readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
             bindDescriptor: async (instance, descriptorId, windowId) => {
               const authenticatedWindow = decodeWindowId(windowId);

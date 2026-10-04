@@ -120,75 +120,65 @@ export function ProviderOAuthSignInPanel(props: {
   const [termsRequired, setTermsRequired] = useState(true);
   const [state, setState] = useState<ProviderOAuthSignInState>({ kind: "signed-out" });
   const [attemptId, setAttemptId] = useState<string>();
+  const { run, openUrl, instanceId, descriptorId } = props;
 
   useEffect(() => {
-    if (props.run === undefined) return;
+    if (run === undefined) return;
     let cancelled = false;
-    void props
-      .run({ kind: "status", instanceId: props.instanceId, descriptorId: props.descriptorId })
-      .then((result) => {
-        if (cancelled || result === undefined) return;
-        apply(result, setState, setTermsRequired, setAttemptId, props.openUrl);
-      });
+    void run({ kind: "status", instanceId, descriptorId }).then((result) => {
+      if (cancelled || result === undefined) return;
+      apply(result, setState, setTermsRequired, setAttemptId);
+    });
     return () => {
       cancelled = true;
     };
-  }, [props, props.descriptorId, props.instanceId, props.run]);
+  }, [descriptorId, instanceId, run]);
 
   useEffect(() => {
-    if (props.run === undefined || attemptId === undefined || state.kind !== "awaiting-consent")
-      return;
+    if (run === undefined || attemptId === undefined || state.kind !== "awaiting-consent") return;
     const timer = setInterval(() => {
-      void props
-        .run?.({
-          kind: "poll",
-          instanceId: props.instanceId,
-          descriptorId: props.descriptorId,
-          attemptId,
-        })
-        .then((result) => {
-          if (result === undefined) return;
-          apply(result, setState, setTermsRequired, setAttemptId, props.openUrl);
-        });
+      void run({
+        kind: "poll",
+        instanceId,
+        descriptorId,
+        attemptId,
+      }).then((result) => {
+        if (result === undefined) return;
+        apply(result, setState, setTermsRequired, setAttemptId);
+      });
     }, 2000);
     return () => clearInterval(timer);
-  }, [attemptId, props, props.descriptorId, props.instanceId, props.run, state.kind]);
+  }, [attemptId, descriptorId, instanceId, run, state.kind]);
 
   return (
     <ProviderOAuthSignIn
       accountLabel={props.accountLabel}
       {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
       onAcknowledge={() => {
-        void props
-          .run?.({
-            kind: "acknowledge",
-            instanceId: props.instanceId,
-            descriptorId: props.descriptorId,
-          })
-          .then((result) => {
-            if (result === undefined) return;
-            apply(result, setState, setTermsRequired, setAttemptId, props.openUrl);
-          });
+        void run?.({
+          kind: "acknowledge",
+          instanceId,
+          descriptorId,
+        }).then((result) => {
+          if (result === undefined) return;
+          apply(result, setState, setTermsRequired, setAttemptId);
+        });
       }}
       onSignIn={() => {
-        void props
-          .run?.({ kind: "begin", instanceId: props.instanceId, descriptorId: props.descriptorId })
-          .then((result) => {
-            if (result === undefined) return;
-            apply(result, setState, setTermsRequired, setAttemptId, props.openUrl);
-          });
+        void run?.({ kind: "begin", instanceId, descriptorId }).then((result) => {
+          if (result === undefined) return;
+          apply(result, setState, setTermsRequired, setAttemptId, openUrl);
+        });
       }}
       onSignOut={() => {
-        void props
-          .run?.({
-            kind: "sign-out",
-            instanceId: props.instanceId,
-            descriptorId: props.descriptorId,
-          })
-          .then((result) => {
-            if (result === undefined) return;
-            apply(result, setState, setTermsRequired, setAttemptId, props.openUrl);
-          });
+        void run?.({
+          kind: "sign-out",
+          instanceId,
+          descriptorId,
+        }).then((result) => {
+          if (result === undefined) return;
+          apply(result, setState, setTermsRequired, setAttemptId);
+        });
       }}
       onUseApiKey={props.onUseApiKey}
       state={state}

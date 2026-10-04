@@ -16,7 +16,7 @@ import {
 } from "@octant/provider-sdk/subscription-oauth";
 import type { PrincipalKind } from "@octant/domain/remote-access-policy";
 import { authenticateProjectRequest } from "../../projectBindingRoutes";
-import { isLoopbackHostname } from "../../shellRoutes";
+import { isAllowedRendererOrigin, isLoopbackHostname } from "../../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../../windowAuthorityStore";
 import { readPrincipalRouteContext } from "../../principalRouteContext";
 import type { ProviderCredentialStore } from "../credentialBrokerClient";
@@ -38,6 +38,7 @@ export interface ProviderOAuthRouteDependencies {
   ) => Promise<void>;
   readonly now?: () => number;
   readonly maxRequestBodySize?: number;
+  readonly allowedRendererHttpOrigin?: string | null;
 }
 
 export type ProviderOAuthView =
@@ -75,7 +76,13 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
     if (url.pathname !== "/api/providers/oauth") return undefined;
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname) || url.search !== "") {
-      return json({ kind: "refused", reason: "invalid" }, 400, origin);
+      return json({ kind: "refused", reason: "invalid" }, 400, null);
+    }
+    if (
+      origin !== null &&
+      !isAllowedRendererOrigin(origin, dependencies.allowedRendererHttpOrigin)
+    ) {
+      return json({ kind: "refused", reason: "invalid" }, 400, null);
     }
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors(origin) });
@@ -170,7 +177,7 @@ async function dispatch(input: {
     return finish(dependencies, command, offer, state, actorId);
   }
   const pointer = await readPointer(dependencies, command.instanceId);
-  if (pointer === undefined) {
+  if (pointer === undefined || pointer.descriptorId !== offer.descriptor.descriptorId) {
     return {
       kind: "signed-out",
       termsRequired: dependencies.service.offer(descriptor).oauth.termsRequired,
@@ -249,6 +256,9 @@ async function signedInOrOut(
       return { kind: "expired", accountLabel: pointer.accountLabel };
     }
     if (refreshed.kind === "refused") return { kind: "refused", reason: refreshed.reason };
+    if (refreshed.kind === "unavailable" || refreshed.kind === "transient") {
+      return { kind: "refused", reason: "unavailable" };
+    }
     return { kind: "signed-in", accountLabel: pointer.accountLabel };
   }
   return {
