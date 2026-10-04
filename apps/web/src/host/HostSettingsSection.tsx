@@ -573,7 +573,7 @@ const WINDOW_OPTIONS: ReadonlyArray<{ readonly value: string; readonly window: R
     { value: "365", window: { kind: "duration-days", days: 365 } },
   ];
 
-interface PrivacyTarget {
+export interface PrivacyTarget {
   readonly id: string;
   readonly title: string;
   readonly mode: "chat" | "work" | "code";
@@ -726,7 +726,11 @@ function ThreadRetentionPanel({
               <OctantSelectField
                 id="thread-retention-mode"
                 onValueChange={(value) => {
-                  if (isThreadMode(value)) setMode(value);
+                  if (isThreadMode(value)) {
+                    setMode(value);
+                    const selected = threads.find((thread) => thread.id === threadId);
+                    if (selected !== undefined && selected.mode !== value) setThreadId("");
+                  }
                 }}
                 options={[
                   { id: "chat", label: "Chat" },
@@ -739,10 +743,14 @@ function ThreadRetentionPanel({
             <PrivacyTargetSearch
               id="thread-retention-thread"
               label="Find a thread"
-              onSelect={(id) => setThreadId(id)}
+              onSelect={(id) => {
+                const selected = threads.find((thread) => thread.id === id);
+                if (selected !== undefined) setMode(selected.mode);
+                setThreadId(id);
+              }}
               query={threadId}
               setQuery={setThreadId}
-              targets={threads}
+              targets={threads.filter((thread) => thread.mode === mode)}
             />
           </>
         ) : null}

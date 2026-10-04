@@ -36,13 +36,11 @@ export function HostPrivacyExport({
           setState({ kind: "refused", text: REFUSAL[result.reason] });
           return;
         }
-        const blob = new Blob([JSON.stringify(result.bundle, null, 2)], {
-          type: "application/json",
-        });
+        const blob = new Blob([result.payload], { type: "application/x-ndjson" });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = "octant-host-export.json";
+        link.download = "octant-host-export.ndjson";
         link.click();
         URL.revokeObjectURL(url);
         setState({ kind: "saved" });
@@ -72,7 +70,7 @@ export function HostPrivacyExport({
           </OctantButton>
         </div>
         {state.kind === "saved" ? (
-          <SettingsState kind="success">Saved octant-host-export.json.</SettingsState>
+          <SettingsState kind="success">Saved octant-host-export.ndjson.</SettingsState>
         ) : null}
         {state.kind === "refused" || state.kind === "error" ? (
           <SettingsState kind="error">{state.text}</SettingsState>

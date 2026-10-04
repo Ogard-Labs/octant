@@ -507,7 +507,10 @@ describe("HostSettingsSection", () => {
         client={makeClient({
           exportHost: async () => ({ kind: "refused", reason: "local-owner-only" }),
         })}
-        threads={[{ id: "thread-1", title: "Dive plan", mode: "work" }]}
+        threads={[
+          { id: "thread-1", title: "Dive plan", mode: "work" },
+          { id: "thread-2", title: "Dive notes", mode: "chat" },
+        ]}
       />,
     );
     await user.click(await screen.findByRole("button", { name: "Export my data" }));
@@ -521,5 +524,6 @@ describe("HostSettingsSection", () => {
     await user.type(screen.getByLabelText("Find a thread"), "dive");
     await user.click(screen.getByRole("button", { name: "Dive plan (work)" }));
     expect(screen.getByLabelText("Find a thread")).toHaveValue("thread-1");
+    expect(screen.queryByRole("button", { name: "Dive notes (chat)" })).not.toBeInTheDocument();
   });
 });
