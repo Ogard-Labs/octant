@@ -51,6 +51,11 @@ export interface HostOAuthService {
     | { readonly kind: "transient" }
     | { readonly kind: "unavailable" }
   >;
+  readonly signOut: (input: {
+    readonly principalKind: PrincipalKind;
+    readonly descriptor: HostOAuthDescriptor;
+    readonly credentialRef: string;
+  }) => Promise<{ readonly kind: "signed-out" } | Refused | { readonly kind: "unavailable" }>;
 }
 
 export function createHostOAuthService(options: {
@@ -247,6 +252,24 @@ export function createHostOAuthService(options: {
         reason: state.reason,
       });
       return state;
+    },
+    signOut: async (input) => {
+      const decision = authorize({
+        principalKind: input.principalKind,
+        action: "provider.oauth.sign-out",
+      });
+      if (decision.kind === "deny") return refuse(input.descriptor, "local-host-required");
+      try {
+        await options.broker.forget(input.credentialRef);
+      } catch {
+        return { kind: "unavailable" };
+      }
+      append({
+        name: "host-oauth.signed-out",
+        descriptorId: input.descriptor.descriptorId,
+        credentialRef: input.credentialRef,
+      });
+      return { kind: "signed-out" };
     },
   };
   return service;

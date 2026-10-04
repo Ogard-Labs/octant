@@ -1085,7 +1085,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   those tokens. **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
-  id). PKCE binds a one-shot loopback redirect on a random port, checks state
+  id). Direct endpoint drivers accept a `subscription-oauth` credential
+  pointer from the broker and refresh through the host service per request.
+  A missing or expired grant is `unauthenticated`, and a binding mismatch is
+  `incompatible`; neither claims capabilities the endpoint has not shown.
+  PKCE binds a one-shot loopback redirect on a random port, checks state
   and the code verifier, and times out. Device-code polling waits with backoff
   until consent, denial, or expiry. Refresh and access material stay in the
   0054 broker as opaque refs — never journaled, logged, exported, or

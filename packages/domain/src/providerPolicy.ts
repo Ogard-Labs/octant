@@ -253,6 +253,7 @@ export interface OpenAiCompatibleConfigurationInput {
   readonly authentication: OpenAiCompatibleProviderConfiguration["authentication"];
   readonly protocol: OpenAiCompatibleProviderConfiguration["protocol"];
   readonly manualModelIds: ReadonlyArray<string>;
+  readonly oauthDescriptorId?: OpenAiCompatibleProviderConfiguration["oauthDescriptorId"];
 }
 
 function normalizeOpenAiCompatibleConfiguration(
@@ -269,6 +270,9 @@ function normalizeOpenAiCompatibleConfiguration(
     manualModelIds: normalizeManualModelIds(
       configuration.manualModelIds,
     ) as OpenAiCompatibleProviderConfiguration["manualModelIds"],
+    ...(configuration.oauthDescriptorId === undefined
+      ? {}
+      : { oauthDescriptorId: configuration.oauthDescriptorId }),
   };
 }
 
@@ -279,6 +283,7 @@ export interface AnthropicCompatibleConfigurationInput {
   readonly protocol: AnthropicCompatibleProviderConfiguration["protocol"];
   readonly protocolVersion: string;
   readonly manualModelIds: ReadonlyArray<string>;
+  readonly oauthDescriptorId?: AnthropicCompatibleProviderConfiguration["oauthDescriptorId"];
 }
 
 function normalizeAnthropicCompatibleConfiguration(
@@ -302,6 +307,9 @@ function normalizeAnthropicCompatibleConfiguration(
     manualModelIds: normalizeManualModelIds(
       configuration.manualModelIds,
     ) as AnthropicCompatibleProviderConfiguration["manualModelIds"],
+    ...(configuration.oauthDescriptorId === undefined
+      ? {}
+      : { oauthDescriptorId: configuration.oauthDescriptorId }),
   };
 }
 

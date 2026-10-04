@@ -94,6 +94,7 @@ export type ProviderSettingsListProps = Pick<
   | "onChangeIdeogramImageConfiguration"
   | "onProviderCredentialStatus"
   | "onClearProviderCredential"
+  | "onProviderOAuth"
   | "onBeginProviderAuthentication"
   | "onOpenExternalUrl"
   | "onCompleteProviderAuthentication"
@@ -248,6 +249,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
         onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
+        {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
         onBeginProviderAuthentication={props.onBeginProviderAuthentication}
         onOpenExternalUrl={props.onOpenExternalUrl}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
@@ -561,6 +563,7 @@ interface ProviderRowProps {
   readonly onChangeIdeogramImageConfiguration: ProviderSettingsViewProps["onChangeIdeogramImageConfiguration"];
   readonly onProviderCredentialStatus: ProviderSettingsViewProps["onProviderCredentialStatus"];
   readonly onClearProviderCredential: ProviderSettingsViewProps["onClearProviderCredential"];
+  readonly onProviderOAuth?: ProviderSettingsViewProps["onProviderOAuth"];
   readonly onBeginProviderAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
   readonly onOpenExternalUrl?: ProviderSettingsViewProps["onOpenExternalUrl"];
   readonly onCompleteProviderAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
@@ -1136,6 +1139,12 @@ function ProviderRow(props: ProviderRowProps) {
                   key={`anthropic:${props.instance.version}`}
                   onChange={props.onChangeAnthropicCompatibleConfiguration}
                   onClearCredential={props.onClearProviderCredential}
+                  {...(props.onProviderOAuth === undefined
+                    ? {}
+                    : { onProviderOAuth: props.onProviderOAuth })}
+                  {...(props.onOpenExternalUrl === undefined
+                    ? {}
+                    : { onOpenExternalUrl: props.onOpenExternalUrl })}
                 />
               ) : isFoundry ? (
                 <FoundryConfigurationForm
@@ -1196,6 +1205,12 @@ function ProviderRow(props: ProviderRowProps) {
                   key={`http:${props.instance.version}`}
                   onChange={props.onChangeOpenAiCompatibleConfiguration}
                   onClearCredential={props.onClearProviderCredential}
+                  {...(props.onProviderOAuth === undefined
+                    ? {}
+                    : { onProviderOAuth: props.onProviderOAuth })}
+                  {...(props.onOpenExternalUrl === undefined
+                    ? {}
+                    : { onOpenExternalUrl: props.onOpenExternalUrl })}
                 />
               ) : null}
             </section>

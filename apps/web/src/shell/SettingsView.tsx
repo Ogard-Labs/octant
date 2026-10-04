@@ -1229,6 +1229,9 @@ function ProvidersSection(props: {
         }
         onChangeAzureFoundryConfiguration={props.providerController.changeAzureFoundryConfiguration}
         onClearProviderCredential={props.providerController.clearProviderCredential}
+        {...(props.providerController.providerOAuth === undefined
+          ? {}
+          : { onProviderOAuth: props.providerController.providerOAuth })}
         onBeginProviderAuthentication={props.providerController.beginProviderAuthentication}
         onCompleteProviderAuthentication={props.providerController.completeProviderAuthentication}
         onUpdateProviderCli={props.providerController.updateProviderCli}
