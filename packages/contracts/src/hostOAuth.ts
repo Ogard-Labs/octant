@@ -187,7 +187,3 @@ export const SubscriptionOAuthOffer = Schema.Struct({
   ),
 }).annotations(strict);
 export type SubscriptionOAuthOffer = typeof SubscriptionOAuthOffer.Type;
-
-export function subscriptionOAuthOffers(): readonly SubscriptionOAuthOffer[] {
-  return [];
-}

@@ -3,9 +3,9 @@ import {
   type ProviderInstance,
   type ProviderInstanceId,
 } from "@octant/contracts";
+import { subscriptionOAuthOffers } from "@octant/domain";
 import {
   decodeHostOAuthDescriptor,
-  subscriptionOAuthOffers,
   type HostOAuthDescriptor,
   type HostOAuthSignInState,
   type SubscriptionOAuthOffer,
@@ -136,7 +136,7 @@ async function dispatch(input: {
   readonly actorId: string;
 }): Promise<ProviderOAuthView> {
   const { dependencies, command, descriptor, offer, principal, actorId } = input;
-  if (command.kind === "status") return signedInOrOut(dependencies, command, offer);
+  if (command.kind === "status") return signedInOrOut(dependencies, command, offer, principal);
   if (command.kind === "acknowledge") {
     const recorded = dependencies.service.acknowledgeTerms({
       principalKind: principal,
@@ -235,9 +235,20 @@ async function signedInOrOut(
   dependencies: ProviderOAuthRouteDependencies,
   command: OAuthCommand,
   offer: SubscriptionOAuthOffer,
+  principal: PrincipalKind,
 ): Promise<ProviderOAuthView> {
   const pointer = await readPointer(dependencies, command.instanceId);
   if (pointer !== undefined && pointer.descriptorId === offer.descriptor.descriptorId) {
+    const refreshed = await dependencies.service.refresh({
+      principalKind: principal,
+      descriptor: offer.descriptor,
+      credentialRef: pointer.credentialRef,
+    });
+    if (refreshed.kind === "sign-in-again") {
+      await dependencies.credentials?.delete(command.instanceId).catch(() => undefined);
+      return { kind: "expired", accountLabel: pointer.accountLabel };
+    }
+    if (refreshed.kind === "refused") return { kind: "refused", reason: refreshed.reason };
     return { kind: "signed-in", accountLabel: pointer.accountLabel };
   }
   return {

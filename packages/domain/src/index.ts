@@ -134,3 +134,4 @@ export * from "./appUpdatePolicy";
 export * from "./nativeHarnessRoutingPolicy";
 export * from "./nativeHarnessSessionPolicy";
 export * from "./projectProviderPolicy";
+export * from "./subscriptionOAuthCatalog";

@@ -97,6 +97,7 @@ export function makeHostOAuthBrokerClient(options: {
         },
         body: JSON.stringify({ providerInstanceId: credentialRef }),
       });
+      if (response.status === 404) return;
       if (!response.ok) throw new Error("Octant host OAuth broker refused the request.");
     },
   };

@@ -1,5 +1,6 @@
 import { type ProviderInstance } from "@octant/contracts";
-import { subscriptionOAuthOffers, type SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
+import { subscriptionOAuthOffers } from "@octant/domain";
+import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { useRef } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
