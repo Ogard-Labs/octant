@@ -1,3 +1,4 @@
+import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarTasks, type MenuBarTask } from "./menuBar";
 import { contextBridge, ipcRenderer } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
@@ -7,6 +8,7 @@ import type { CodeOperationApprovalPalette } from "./codeOperationApprovalView";
 export const HOST_BRIDGE_KEY = "octantHost";
 
 export const IPC_CHANNELS = {
+  nativeMenu: "octant:menu:popup",
   menuBarTasks: "octant:menu:tasks",
   menuBarTask: "octant:menu:task",
   attentionBadge: "octant:attention:badge",
@@ -375,6 +377,7 @@ export interface AttentionNotificationBridgeRequest {
 }
 
 export interface OctantHostBridge {
+  readonly popupNativeMenu: (request: NativeMenuRequest) => Promise<NativeMenuOutcome>;
   readonly setMenuBarTasks: (tasks: ReadonlyArray<MenuBarTask>) => Promise<void>;
   readonly subscribeMenuBarTask: (
     listener: (target: Pick<MenuBarTask, "mode" | "threadId">) => void,
@@ -518,6 +521,20 @@ export function createHostBridge(
             threadId: initialProjectTarget.threadId,
           });
   return Object.freeze({
+    popupNativeMenu: async (request: NativeMenuRequest): Promise<NativeMenuOutcome> => {
+      try {
+        const result: unknown = await ipc.invoke(IPC_CHANNELS.nativeMenu, request);
+        if (isRecord(result)) {
+          if (result.kind === "dismissed" || result.kind === "refused")
+            return { kind: result.kind };
+          if (result.kind === "selected" && typeof result.id === "string")
+            return { kind: "selected", id: result.id };
+        }
+      } catch {
+        // A closed window or refused origin cannot select a renderer action.
+      }
+      return { kind: "refused" };
+    },
     setMenuBarTasks: async (tasks: ReadonlyArray<MenuBarTask>) => {
       await invoke(IPC_CHANNELS.menuBarTasks, decodeMenuBarTasks(tasks));
     },

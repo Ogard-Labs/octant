@@ -207,6 +207,7 @@ describe("desktop preload bridge", () => {
       "openCodeExternalEditor",
       "openComputerUsePermissionSettings",
       "openInNewWindow",
+      "popupNativeMenu",
       "previewHandoff",
       "projectWindowCapability",
       "providerCredentialStatus",
@@ -1013,5 +1014,30 @@ describe("desktop preload bridge", () => {
       [IPC_CHANNELS.remoteHostIdentityRecover],
     ]);
     expect(JSON.stringify(bridge)).not.toMatch(/PRIVATE KEY|privateKey|session secret/i);
+  });
+});
+
+describe("native menu bridge", () => {
+  it("returns only a selected action, dismissal, or refusal", async () => {
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "selected", id: "0" })
+      .mockResolvedValueOnce({ kind: "dismissed" })
+      .mockResolvedValueOnce({ kind: "quit" })
+      .mockRejectedValueOnce(new Error("Untrusted origin"));
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+    );
+    const request = {
+      x: 10,
+      y: 20,
+      items: [{ kind: "item", id: "0", label: "Rename", enabled: true }],
+    } as const;
+    expect(await bridge.popupNativeMenu(request)).toEqual({ kind: "selected", id: "0" });
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.nativeMenu, request);
+    expect(await bridge.popupNativeMenu(request)).toEqual({ kind: "dismissed" });
+    expect(await bridge.popupNativeMenu(request)).toEqual({ kind: "refused" });
+    expect(await bridge.popupNativeMenu(request)).toEqual({ kind: "refused" });
   });
 });

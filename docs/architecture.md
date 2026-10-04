@@ -49,6 +49,18 @@ windows, not an additional host task registry. Titles never enter the public
 health response or redacted diagnostics. Separately managed hosts retain their
 existing lifecycle restrictions.
 
+## Desktop context menus
+
+Trusted top-level desktop windows may contribute a bounded native context menu
+through the preload bridge: at most 160 entries, four submenu levels, and labels
+up to 256 characters. Contributions contain presentation and opaque action IDs;
+they cannot supply Electron roles, callbacks, paths, URLs, or native commands.
+The shell returns the selected ID to the same window, which invokes its existing
+renderer action and ordinary server authority checks. Dismissed, refused, closed,
+or navigated windows select no action. Each window owns at most one contributed
+native popup. The desktop's own text editing menu uses Chromium's edit flags and
+fixed native roles; embedded browser frames cannot contribute workspace menus.
+
 ## Repository test cancellation
 
 An authorized repository test remains cancellable while the host rediscovers its
