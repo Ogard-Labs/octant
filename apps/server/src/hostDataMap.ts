@@ -41,7 +41,8 @@ const RELATED_RETENTION = {
 
 const RELATED_EXPORT = {
   kind: "thread-export" as const,
-  guidance: "Export a thread from that thread's menu. This map does not export or purge.",
+  guidance:
+    "Export everything this host holds from Data & privacy. This map does not export or purge.",
 };
 
 export interface HostDataMapProjectInput {

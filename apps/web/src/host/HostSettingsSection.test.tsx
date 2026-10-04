@@ -56,6 +56,7 @@ interface ClientOverrides {
   readonly backup?: (label?: string) => Promise<HostBackupOutcome>;
   readonly restore?: () => Promise<HostRestoreOutcome>;
   readonly purgeThreads?: () => Promise<PurgeThreadsOutcome>;
+  readonly exportHost?: HostControlClient["exportHost"];
 }
 
 function makeClient(overrides: ClientOverrides = {}): HostControlClient {
@@ -113,7 +114,8 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
         deleted: [],
         occurredAt: "2026-08-19T12:00:00.000Z" as never,
       })),
-    exportHost: async () => ({ kind: "refused", reason: "local-owner-only" }),
+    exportHost:
+      overrides.exportHost ?? (async () => ({ kind: "refused", reason: "local-owner-only" })),
   };
 }
 
@@ -496,5 +498,28 @@ describe("HostSettingsSection", () => {
     await user.click(screen.getByRole("button", { name: "Purge" }));
     expect(await screen.findByText(/Purged 1 thread/)).toBeInTheDocument();
     expect(composerThreadDrafts.read("chat", threadId)).toBeUndefined();
+  });
+
+  it("states an export refusal in words and lets a titled thread be chosen", async () => {
+    const user = userEvent.setup();
+    render(
+      <HostDataSettingsSection
+        client={makeClient({
+          exportHost: async () => ({ kind: "refused", reason: "local-owner-only" }),
+        })}
+        threads={[{ id: "thread-1", title: "Dive plan", mode: "work" }]}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Export my data" }));
+    expect(
+      await screen.findByText("Only the person at this computer can export this host's data."),
+    ).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Scope"));
+    await user.click(await screen.findByRole("option", { name: "One thread" }));
+    await user.click(screen.getByLabelText("Mode"));
+    await user.click(await screen.findByRole("option", { name: "Work" }));
+    await user.type(screen.getByLabelText("Find a thread"), "dive");
+    await user.click(screen.getByRole("button", { name: "Dive plan (work)" }));
+    expect(screen.getByLabelText("Find a thread")).toHaveValue("thread-1");
   });
 });
