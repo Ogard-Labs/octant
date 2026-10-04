@@ -805,9 +805,13 @@ flowchart LR
   canvases authored in that thread (including their comments, shares,
   refreshes, actions, and mirrored files), agent-run session and content
   stores, harness sessions, and a managed worktree only when no other
-  thread still references it. It then records a tombstone so a rebuild
-  cannot resurrect the transcript. Usage records stay and are named in
-  the outcome; deciding whether they should be erased is a later choice.
+  thread still references it, and only at a path inside that repository's
+  managed worktree directory: a receipt that names any other path, or one
+  the sweep cannot read, leaves every owned worktree in place and keeps
+  its file so the leftover is visible. It then records a tombstone so a
+  rebuild cannot resurrect the transcript. Usage records stay and are
+  named in the outcome; deciding whether they should be erased is a later
+  choice.
   The tombstone, other threads, Projects, credentials, external
   repositories, and SQLite free pages are named retained scopes rather
   than hidden leftovers. A remote principal cannot purge. See

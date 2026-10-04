@@ -263,6 +263,7 @@ import { FileOperationPort } from "./code/fileOperationPort";
 import { createManagedWorktreeNodePorts, listWorktreeRefs } from "./code/managedWorktreeNodePorts";
 import {
   ManagedWorktreeService,
+  managedWorktreeRoot,
   type ManagedWorktreeRepositoryPort,
 } from "./code/managedWorktreeService";
 import { ManagedRootGrantStore } from "./code/managedRootGrantStore";
@@ -8986,6 +8987,7 @@ export function startOctantServer(
           dataDirectory: persistence.dataDirectory,
           mode,
           threadId: String(threadId),
+          managedWorktreeRootPath: managedWorktreeRoot,
           purgeChatAttachments: (id) => chatAttachmentStore.purgeThread(decodeChatThreadId(id)),
           purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
           purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),

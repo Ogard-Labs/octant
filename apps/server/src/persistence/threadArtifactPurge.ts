@@ -15,6 +15,12 @@ export interface ThreadArtifactPurgeInput {
   readonly dataDirectory: string;
   readonly mode: OctantMode;
   readonly threadId: string;
+  /**
+   * The directory the managed-worktree service keeps one repository's
+   * managed worktrees under. A receipt that names a path outside it is not
+   * a worktree this sweep may delete.
+   */
+  readonly managedWorktreeRootPath: (repositoryRoot: string, repositoryId: string) => string;
   readonly purgeChatAttachments: (threadId: string) => Promise<void>;
   readonly purgeWorkAttachments: (threadId: string) => Promise<void>;
   readonly purgeCodeAttachments: (threadId: string) => Promise<void>;
@@ -40,7 +46,7 @@ export async function purgeThreadArtifacts(input: ThreadArtifactPurgeInput): Pro
       input.dataDirectory,
     );
   }
-  await removeOwnedWorktrees(input.dataDirectory, input.threadId);
+  await removeOwnedWorktrees(input);
 }
 
 async function removeMirrorFiles(
@@ -102,44 +108,92 @@ function projectCheckoutRoot(connection: SqliteConnection, projectId: unknown): 
     : undefined;
 }
 
-async function removeOwnedWorktrees(dataDirectory: string, threadId: string): Promise<void> {
-  const directory = join(dataDirectory, "managed-worktree-receipts");
-  const receipts: Array<{
-    readonly file: string;
-    readonly threadId?: string;
-    readonly path?: string;
-    readonly parsed: boolean;
-  }> = [];
+interface StoredWorktreeReceipt {
+  readonly file: string;
+  readonly threadId?: string;
+  readonly path?: string;
+  /** A receipt the sweep cannot trust to name a managed worktree blocks it. */
+  readonly deletable: boolean;
+}
+
+async function removeOwnedWorktrees(input: ThreadArtifactPurgeInput): Promise<void> {
+  const directory = join(input.dataDirectory, "managed-worktree-receipts");
+  const receipts: Array<StoredWorktreeReceipt> = [];
   for (const name of await readNames(directory)) {
     if (!name.endsWith(".json")) continue;
     const file = join(directory, name);
     const parsed = parseRecord(await readFile(file, "utf8").catch(() => ""));
-    receipts.push({
-      file,
-      ...(parsed !== undefined && typeof parsed.threadId === "string"
-        ? { threadId: parsed.threadId }
-        : {}),
-      ...(parsed !== undefined && typeof parsed.canonicalWorktreePath === "string"
-        ? { path: parsed.canonicalWorktreePath }
-        : {}),
-      parsed: parsed !== undefined,
-    });
+    receipts.push({ file, ...worktreeReceiptEvidence(parsed, input) });
   }
   const owned: string[] = [];
   const kept = new Set<string>();
   for (const receipt of receipts) {
     if (receipt.path === undefined) continue;
-    if (receipt.threadId === threadId) owned.push(receipt.path);
+    if (receipt.threadId === input.threadId) owned.push(receipt.path);
     else kept.add(receipt.path);
   }
-  const unparsed = receipts.some((receipt) => !receipt.parsed);
+  const blocked = receipts.some((receipt) => !receipt.deletable);
   for (const receipt of receipts) {
-    if (receipt.threadId === threadId) await rm(receipt.file, { force: true });
+    if (receipt.threadId === input.threadId && receipt.deletable)
+      await rm(receipt.file, { force: true });
   }
-  if (unparsed) return;
+  if (blocked) return;
   for (const path of owned) {
-    if (!kept.has(path)) await removeDirectory(path, dataDirectory);
+    if (!kept.has(path)) await removeDirectory(path, input.dataDirectory);
   }
+}
+
+/**
+ * Whether a receipt names a managed worktree this sweep may delete.
+ *
+ * A receipt that cannot be parsed, or whose recorded worktree is not inside
+ * the directory the service keeps its repository's managed worktrees under,
+ * is not evidence this sweep may act on. Its file stays, so a leftover
+ * directory is visible instead of silently orphaned, and the sweep leaves
+ * every owned worktree in place rather than deleting the ones it happens to
+ * recognise.
+ */
+function worktreeReceiptEvidence(
+  parsed: Record<string, unknown> | undefined,
+  input: ThreadArtifactPurgeInput,
+): { readonly threadId?: string; readonly path?: string; readonly deletable: boolean } {
+  if (parsed === undefined) return { deletable: false };
+  const threadId =
+    typeof parsed.threadId === "string" && parsed.threadId.length > 0 ? parsed.threadId : undefined;
+  const path =
+    typeof parsed.canonicalWorktreePath === "string" && parsed.canonicalWorktreePath.length > 0
+      ? parsed.canonicalWorktreePath
+      : undefined;
+  const repositoryRoot =
+    typeof parsed.canonicalRepositoryPath === "string" && parsed.canonicalRepositoryPath.length > 0
+      ? parsed.canonicalRepositoryPath
+      : undefined;
+  const repositoryId =
+    typeof parsed.repositoryId === "string" && parsed.repositoryId.length > 0
+      ? parsed.repositoryId
+      : undefined;
+  if (
+    threadId === undefined ||
+    path === undefined ||
+    repositoryRoot === undefined ||
+    repositoryId === undefined ||
+    !isAbsolute(repositoryRoot) ||
+    !isAbsolute(path)
+  ) {
+    return { ...(threadId === undefined ? {} : { threadId }), deletable: false };
+  }
+  const root = resolve(input.managedWorktreeRootPath(repositoryRoot, repositoryId));
+  const target = resolve(path);
+  const within = relative(root, target);
+  if (
+    within.length === 0 ||
+    within.startsWith("..") ||
+    isAbsolute(within) ||
+    target === resolve(input.dataDirectory)
+  ) {
+    return { threadId, deletable: false };
+  }
+  return { threadId, path, deletable: true };
 }
 
 async function removeMatchingReceipts(

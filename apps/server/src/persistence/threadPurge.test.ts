@@ -30,6 +30,7 @@ import { applyMigrations, MIGRATIONS } from "./migrations";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { purgeThreadArtifacts } from "./threadArtifactPurge";
+import { managedWorktreeRoot } from "../code/managedWorktreeService";
 import { ThreadCheckpointProjection } from "./threadCheckpointProjection";
 import { ThreadRetentionService } from "../threadRetentionService";
 
@@ -119,6 +120,48 @@ describe("thread purge sweep", () => {
     expect(sharedWorktreeRemains(harness.directory)).toBe(true);
     expect(usageRowsRemain(harness.connection)).toBe(3);
   });
+
+  it("leaves a managed worktree in place whose receipt names a path outside the managed worktree directory", async () => {
+    const harness = openHarness();
+    seedControlThread(harness);
+    const thread = threads.code;
+    seedThreadTraces(harness, thread);
+    const layout = worktreeLayout(harness.directory);
+    const escaped = join(harness.directory, "escaped-worktree");
+    mkdirSync(escaped, { recursive: true });
+    writeFileSync(join(escaped, "note.txt"), thread.marker);
+    const receipts = join(harness.directory, "managed-worktree-receipts");
+    writeFileSync(
+      join(receipts, "escaped.json"),
+      JSON.stringify({
+        ...worktreeReceipt(thread.id, escaped, layout),
+        note: thread.marker,
+      }),
+    );
+
+    const outcome = await harness.service.purge(
+      {
+        scope: {
+          kind: "thread",
+          mode: thread.mode,
+          threadId: decodeThreadRetentionThreadId(thread.id),
+        },
+        confirm: true,
+      },
+      "local-window",
+    );
+    expect(outcome).toMatchObject({ operation: "purge-threads" });
+
+    // A receipt the sweep cannot trust blocks it: nothing it names is deleted,
+    // and every other owned worktree stays in place rather than half-removed.
+    expect(readFileSync(join(escaped, "note.txt"), "utf8")).toBe(thread.marker);
+    expect(
+      readdirSync(
+        join(harness.directory, "repository", ".octant-worktrees", layout.repositoryId),
+      ).some((entry) => entry === thread.id),
+    ).toBe(true);
+    expect(readFileSync(join(receipts, "escaped.json"), "utf8")).toContain(thread.marker);
+  });
 });
 
 interface Harness {
@@ -163,6 +206,7 @@ function openHarness(): Harness {
         dataDirectory: directory,
         mode,
         threadId: String(threadId),
+        managedWorktreeRootPath: managedWorktreeRoot,
         purgeChatAttachments: (id) => chatAttachments.purgeThread(decodeChatThreadId(id)),
         purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
         purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),
@@ -402,35 +446,27 @@ function seedHarnessSession(harness: Harness, thread: SeededThread): void {
 }
 
 function seedWorktree(directory: string, thread: SeededThread): void {
-  const owned = join(directory, "owned-worktrees", thread.id);
+  const layout = worktreeLayout(directory);
+  const owned = layout.worktreeFor(thread.id);
   mkdirSync(owned, { recursive: true });
   writeFileSync(join(owned, "note.txt"), thread.marker);
-  const shared = join(directory, "shared-worktree");
+  const shared = layout.worktreeFor(controlThreadId);
   mkdirSync(shared, { recursive: true });
   writeFileSync(join(shared, "note.txt"), controlMarker);
   const receipts = join(directory, "managed-worktree-receipts");
   mkdirSync(receipts, { recursive: true });
+  const receipt = (threadId: string, path: string, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ ...worktreeReceipt(threadId, path, layout), ...extra });
   writeFileSync(
-    join(receipts, `${uuidFor(thread.mode, "worktree")}.json`),
-    JSON.stringify({
-      threadId: thread.id,
-      canonicalWorktreePath: owned,
-      note: thread.marker,
-    }),
+    join(receipts, uuidFor(thread.mode, "worktree") + ".json"),
+    receipt(thread.id, owned, { note: thread.marker }),
   );
   if (thread.mode === "chat") {
-    writeFileSync(
-      join(receipts, "shared.json"),
-      JSON.stringify({
-        threadId: controlThreadId,
-        canonicalWorktreePath: shared,
-      }),
-    );
+    writeFileSync(join(receipts, "shared.json"), receipt(controlThreadId, shared));
     writeFileSync(
       join(receipts, "shared-purged.json"),
       JSON.stringify({
-        threadId: thread.id,
-        canonicalWorktreePath: shared,
+        ...worktreeReceipt(thread.id, shared, layout),
         note: thread.marker,
       }),
     );
@@ -577,10 +613,55 @@ function usageRowsRemain(connection: SqliteConnection): number {
 
 function sharedWorktreeRemains(directory: string): boolean {
   try {
-    return readFileSync(join(directory, "shared-worktree", "note.txt"), "utf8") === controlMarker;
+    const layout = worktreeLayout(directory);
+    return (
+      readFileSync(join(layout.worktreeFor(controlThreadId), "note.txt"), "utf8") === controlMarker
+    );
   } catch {
     return false;
   }
+}
+
+/**
+ * The layout the managed-worktree service derives. The seeded receipts use the
+ * same shape the store writes, so the sweep's containment gate is exercised by
+ * the same derivation that created the worktrees.
+ */
+function worktreeLayout(directory: string): {
+  readonly repositoryRoot: string;
+  readonly repositoryId: string;
+  readonly worktreeFor: (threadId: string) => string;
+} {
+  const repositoryRoot = join(directory, "repository", "checkout");
+  const repositoryId = "repo_" + "a".repeat(64);
+  return {
+    repositoryRoot,
+    repositoryId,
+    worktreeFor: (threadId: string) =>
+      join(directory, "repository", ".octant-worktrees", repositoryId, threadId),
+  };
+}
+
+function worktreeReceipt(
+  threadId: string,
+  canonicalWorktreePath: string,
+  layout: ReturnType<typeof worktreeLayout>,
+): Record<string, unknown> {
+  return {
+    version: 1,
+    receiptId: randomUUID(),
+    repositoryId: layout.repositoryId,
+    threadId,
+    checkoutId: randomUUID(),
+    canonicalRepositoryPath: layout.repositoryRoot,
+    canonicalWorktreePath,
+    branchIntent: "octant/agent-run/" + threadId,
+    refIntent: "refs/heads/octant/agent-run/" + threadId,
+    expectedHead: "a".repeat(40),
+    state: "ready",
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 function uuidFor(mode: string, kind: string): string {
