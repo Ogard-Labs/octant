@@ -1051,7 +1051,17 @@ const ProviderTurnResult = Schema.Struct({
    * here; without it the client can only say the turn could not be started.
    */
   failure: Schema.optional(CodeOperationFailure),
-}).annotations(strict);
+  /** The host proved that preparation ended before this attempt could launch. */
+  admission: Schema.optional(Schema.Literal("refused")),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (result) =>
+        result.admission === undefined ||
+        (result.state === "failed" && result.failure !== undefined),
+    ),
+  );
 const OperationAccepted = Schema.Struct({
   kind: Schema.Literal("operation-accepted"),
   operationId: CodeOperationId,
@@ -1060,6 +1070,8 @@ const OperationFailed = Schema.Struct({
   kind: Schema.Literal("operation-failed"),
   operationId: CodeOperationId,
   failure: CodeOperationFailure,
+  /** A durable pre-launch refusal permits a new, explicitly authorized attempt. */
+  admission: Schema.optional(Schema.Literal("refused")),
 }).annotations(strict);
 
 /**

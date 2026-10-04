@@ -1,3 +1,4 @@
+import { THREAD_MESSAGE_QUEUE_SQL } from "../messageQueue/threadMessageQueuePersistence";
 import { createHash } from "node:crypto";
 import {
   DatabaseVersionTooNew,
@@ -1924,6 +1925,7 @@ ALTER TABLE code_runtime_projection
     name: "create_spend_turn_projection",
     sql: SPEND_TURN_PROJECTION_SQL,
   },
+  { version: 67, name: "create_thread_message_queue", sql: THREAD_MESSAGE_QUEUE_SQL },
 ];
 
 interface AppliedMigrationRow {

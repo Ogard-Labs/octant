@@ -1593,11 +1593,22 @@ diff presentation; file disclosures mount only their open preview.
 ### Compact task controls
 
 The right Tools launcher starts directly beneath the window control rail, without
-an extra top spacer. While a Code or Work turn runs, its composer keeps its send
-action (**Queue message** in Code, **Send follow-up** in Work) and shows a
+an extra top spacer. While a turn runs, its composer keeps a **Queue message**
+action and shows a
 **Stop turn** control beside it; that control stays disabled until the host has
-admitted the turn. An accepted queued message shows **Queued** instead of
-instructions about Enter. The idle action sends normally.
+admitted the turn. Accepted messages appear in the queue count. The idle action
+sends normally when there are no pending messages or queue holds.
+
+Accepted messages appear in a compact, initially collapsed queue above the
+composer in Chat, Work and Code. Its header shows the message count and status;
+expanding it reveals pending text, edit, move and remove controls, plus pause
+and resume. A held reason remains visible when collapsed. Controls operate on the
+host's current version; conflicting edits refresh the list and preserve the
+person's unsent text. A failed enqueue leaves the draft and attachments in the
+composer. Reopening a thread reads the accepted queue from the host without
+resending it. Queue controls remain keyboard accessible and wrap at narrow
+widths. A running-turn steering control is separate and appears only where the
+runtime supports it.
 
 Native Code approvals use a compact 216px surface above the composer, with a
 scrollable action and scope description, collapsible authority details, and a
