@@ -228,9 +228,20 @@ describe("UI component boundary check", () => {
       "  );",
       "}",
     ].join("\n");
+    const wrappedFieldError = [
+      "export function Picker() {",
+      "  return (",
+      "    <div>",
+      "      {/* ui-boundary-exception: inline-field-error */}",
+      '      <p id="path-error" role="alert">Choose a folder.</p>',
+      "    </div>",
+      "  );",
+      "}",
+    ].join("\n");
     expect(
       findRawLiveRegionViolations({
         "apps/web/src/projects/FolderPicker.tsx": fieldError,
+        "apps/web/src/projects/ProjectPicker.tsx": wrappedFieldError,
         "apps/web/src/ui/base/OctantToast.tsx":
           'export function Toast() { return <div role={tone === "danger" ? "alert" : "status"} />; }',
         "apps/web/src/shell/ShellState.tsx":

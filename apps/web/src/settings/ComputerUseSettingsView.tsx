@@ -255,7 +255,7 @@ export function ComputerUseSettingsView(props: {
           </p>
         ) : null}
       </SettingsSection>
-      /* ui-boundary-exception: inline-field-error */
+      {/* ui-boundary-exception: inline-field-error */}
       <p
         className="provider-settings__field-guidance"
         role={error === undefined ? "status" : "alert"}

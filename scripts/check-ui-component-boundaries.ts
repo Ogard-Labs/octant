@@ -106,7 +106,7 @@ export function findRawControlBoundaryViolations(
 const RAW_LIVE_REGION_ROLE =
   /role\s*=\s*(?:["'](alert|dialog)["']|\{\s*[^}\n]*["'](alert|dialog)["'][^}\n]*\})/g;
 const LIVE_REGION_EXCEPTION =
-  /\/\*\s*ui-boundary-exception:\s*(inline-field-error|compact-status|screen-reader-announcement|non-modal-panel|positioned-banner|empty-state)\s*\*\/\s*$/i;
+  /\/\*\s*ui-boundary-exception:\s*(inline-field-error|compact-status|screen-reader-announcement|non-modal-panel|positioned-banner|empty-state)\s*\*\/\s*\}?\s*$/i;
 const LIVE_REGION_RECIPE_FILES = new Set([
   `${WEB_SOURCE}/ui/base/OctantAlert.tsx`,
   `${WEB_SOURCE}/ui/base/OctantToast.tsx`,

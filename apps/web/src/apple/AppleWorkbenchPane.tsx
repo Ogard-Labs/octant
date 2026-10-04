@@ -328,7 +328,7 @@ function AppleWorkbenchState(
       {device ? null : <span className="apple-workbench__eyebrow">Apple development</span>}
       <LiveFrame {...props} chrome={device ? "device" : "workbench"} />
       <h1>{title}</h1>
-      /* ui-boundary-exception: compact-status */
+      {/* ui-boundary-exception: compact-status */}
       <p role={props.status === "failed" ? "alert" : undefined}>{message}</p>
       {props.onRetry === undefined || props.status === "loading" ? null : (
         <OctantButton onClick={props.onRetry} type="button" variant="outline">

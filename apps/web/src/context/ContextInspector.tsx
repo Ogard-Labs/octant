@@ -68,7 +68,7 @@ export function ContextInspector(props: ContextInspectorProps) {
       <div className="context-inspector__scroll">
         <section aria-labelledby="context-health-title" className="context-inspector__section">
           <h3 id="context-health-title">Planned next turn</h3>
-          /* ui-boundary-exception: compact-status */
+          {/* ui-boundary-exception: compact-status */}
           <p
             className="context-inspector__health"
             data-health={plan.health}
