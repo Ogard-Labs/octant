@@ -22,6 +22,7 @@ import { UnifiedDiffList } from "./UnifiedDiffList";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
 type RunReviewed = Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>;
@@ -104,7 +105,7 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
     return <AvailableDiff {...props} diff={props.diff} snapshot={summary} />;
   }
   if (props.diff.state === "loading") return <ShellState state="loading" title="Loading diff" />;
-  return <p role="alert">{props.diff.message}</p>;
+  return <OctantAlert tone="warning">{props.diff.message}</OctantAlert>;
 }
 
 function AvailableDiff(
@@ -250,7 +251,7 @@ function AvailableDiff(
       </header>
 
       {props.staleNotice === undefined ? null : (
-        <div className="code-diff-pane__warning" role="alert">
+        <OctantAlert className="code-diff-pane__warning" tone="warning">
           <strong>{props.staleNotice.message}</strong>
           <OctantButton
             size="sm"
@@ -260,18 +261,20 @@ function AvailableDiff(
           >
             Refresh
           </OctantButton>
-        </div>
+        </OctantAlert>
       )}
 
       {evidence.truncated === true ? (
-        <div className="code-diff-pane__warning" role="alert">
+        <OctantAlert className="code-diff-pane__warning" tone="warning">
           <strong>This diff is truncated and is not complete.</strong>
           <p>{evidence.byteLength.toLocaleString()} bytes retained</p>
-        </div>
+        </OctantAlert>
       ) : null}
 
       {content.kind === "loading" ? <ShellState state="loading" title="Loading diff" /> : null}
-      {content.kind === "unavailable" ? <p role="alert">{content.message}</p> : null}
+      {content.kind === "unavailable" ? (
+        <OctantAlert tone="warning">{content.message}</OctantAlert>
+      ) : null}
       {content.kind === "ready" && files.length === 0 ? (
         <p role="status">This checkout has no textual changes.</p>
       ) : null}

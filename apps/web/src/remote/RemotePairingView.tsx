@@ -184,6 +184,7 @@ function RemotePairingEntry(props: RemotePairingEntryProps) {
           value={props.typedCode}
         />
         {props.inputError === undefined ? null : (
+          /* ui-boundary-exception: inline-field-error */
           <span className="remote-pairing__error" id={`${inputId}-error`} role="alert">
             {props.inputError}
           </span>

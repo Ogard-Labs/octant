@@ -27,6 +27,7 @@ import { UsageActivityHeatmap } from "./UsageActivityHeatmap";
 import { LatencyStatsSection } from "./LatencyStatsSection";
 import { useUsageDashboardController } from "./useUsageDashboardController";
 import "./usageWorkspace.css";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface UsageWorkspaceProps {
   readonly client: UsageDashboardClient | undefined;
@@ -205,12 +206,12 @@ function RecordedUsageWorkspace(
         {controller.status === "unauthorized" ||
         controller.status === "unavailable" ||
         controller.status === "failure" ? (
-          <div role="alert">
+          <OctantAlert tone="warning">
             <p>{controller.errorMessage ?? "The usage dashboard could not be loaded."}</p>
             <OctantButton onClick={controller.reload} type="button">
               Retry
             </OctantButton>
-          </div>
+          </OctantAlert>
         ) : null}
 
         {dashboard === undefined ? null : (

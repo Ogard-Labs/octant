@@ -21,6 +21,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SettingRow, SettingsSection } from "./primitives";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 // Matches ImageGenerationCustomSource.label's Schema.maxLength(120): reject
 // here so a too-long label never reaches the replace-settings command that
@@ -186,9 +187,9 @@ function ImageProviderSettings(props: { readonly controller: ProviderController 
     <div className="provider-settings">
       <div aria-live="polite" className="provider-settings__message-slot">
         {controller.message === undefined ? null : (
-          <p className="provider-settings__alert" role="alert">
+          <OctantAlert className="provider-settings__alert" tone="warning">
             {controller.message}
-          </p>
+          </OctantAlert>
         )}
       </div>
       <ProviderSettingsList
@@ -376,6 +377,7 @@ function CustomImageSourceForm(props: {
         />
       </label>
       {problem === undefined ? null : (
+        /* ui-boundary-exception: inline-field-error */
         <p className="provider-settings__field-guidance" role="alert">
           {problem}
         </p>

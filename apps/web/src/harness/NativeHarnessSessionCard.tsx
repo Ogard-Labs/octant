@@ -9,6 +9,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import "./native-harness.css";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface NativeHarnessSessionCardProps {
   readonly client: Pick<
@@ -157,7 +158,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
   if (view === undefined) {
     // The Agents tab mounts this card above the run hierarchy, which shows
     // the tab's one loading line; a second spinner here stacked two.
-    return error === undefined ? null : <p role="alert">{error}</p>;
+    return error === undefined ? null : <OctantAlert tone="warning">{error}</OctantAlert>;
   }
   if (view === null) return null;
   const paused = nativeHarnessSessionHeld(view.session.status);
@@ -184,9 +185,9 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
         <p className="native-harness-card__detail">{view.session.detail}</p>
       )}
       {refusal === undefined ? null : (
-        <p className="native-harness-card__detail" role="alert">
+        <OctantAlert className="native-harness-card__detail" tone="warning">
           {refusal}
-        </p>
+        </OctantAlert>
       )}
       {pendingApproval === undefined ? null : (
         <section aria-label="Approval requested" className="native-harness-question">
@@ -328,9 +329,9 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
         </>
       )}
       {error === undefined ? null : (
-        <p className="native-harness-panel__error" role="alert">
+        <OctantAlert className="native-harness-panel__error" tone="danger">
           {error}
-        </p>
+        </OctantAlert>
       )}
     </section>
   );

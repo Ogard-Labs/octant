@@ -945,8 +945,17 @@ function validOid(value: string): boolean {
   return /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);
 }
 
-function managedTargetPath(repositoryRoot: string, repositoryId: string, threadId: string): string {
-  return join(dirname(repositoryRoot), ".octant-worktrees", repositoryId, threadId);
+export function managedTargetPath(
+  repositoryRoot: string,
+  repositoryId: string,
+  threadId: string,
+): string {
+  return join(managedWorktreeRoot(repositoryRoot, repositoryId), threadId);
+}
+
+/** The directory the service keeps one repository's managed worktrees under. */
+export function managedWorktreeRoot(repositoryRoot: string, repositoryId: string): string {
+  return join(dirname(repositoryRoot), ".octant-worktrees", repositoryId);
 }
 
 function branchRef(branchIntent: string): string {

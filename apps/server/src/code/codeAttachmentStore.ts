@@ -9,7 +9,15 @@ import {
   type CodeAttachmentReference,
   type CodeThreadId,
 } from "@octant/contracts";
-import { ManagedAttachmentStore } from "../attachments/managedAttachmentStore";
+import {
+  ManagedAttachmentStore,
+  type ManagedAttachmentQueueResult,
+  type QueuedAttachmentRelease,
+} from "../attachments/managedAttachmentStore";
+
+export type CodeQueuedAttachments =
+  | { readonly status: "ok"; readonly attachments: ReadonlyArray<CodeAttachmentReference> }
+  | Exclude<ManagedAttachmentQueueResult, { readonly status: "ok" }>;
 
 export { MAX_CODE_ATTACHMENT_BYTES, MAX_CODE_ATTACHMENT_DISPLAY_NAME_LENGTH };
 
@@ -56,6 +64,10 @@ export class CodeAttachmentStore {
   readonly #pending = new Map<string, Map<string, CodeAttachmentReference>>();
   /** Uploads that have reserved a staging slot but not yet finalized. */
   readonly #inFlight = new Map<string, Set<string>>();
+  readonly #queued = new Map<string, ReadonlyArray<CodeAttachmentReference>>();
+  readonly #prepared = new Set<string>();
+  readonly #discarding = new Set<string>();
+  readonly #queueOperations = new Set<string>();
 
   constructor(dataDirectory: string) {
     this.#store = new ManagedAttachmentStore(dataDirectory, {
@@ -90,10 +102,15 @@ export class CodeAttachmentStore {
     // against the same per-thread budget, not each read the pre-upload size.
     const pending = this.#pending.get(threadKey);
     const inFlight = this.#inFlight.get(threadKey) ?? new Set<string>();
-    const occupied = new Set([...(pending?.keys() ?? []), ...inFlight]);
+    const occupied = new Set([
+      ...[...(pending?.keys() ?? [])].filter((id) => !this.#prepared.has(`${threadKey}/${id}`)),
+      ...inFlight,
+    ]);
     if (occupied.size >= MAX_PENDING_ATTACHMENTS_PER_THREAD && !occupied.has(attachmentKey)) {
       throw new CodeAttachmentInvalid("Too many attachments are staged for this thread.");
     }
+    if (inFlight.has(attachmentKey))
+      throw new CodeAttachmentInvalid("Attachment upload is already in progress.");
     inFlight.add(attachmentKey);
     this.#inFlight.set(threadKey, inFlight);
     try {
@@ -135,6 +152,13 @@ export class CodeAttachmentStore {
     const scope = this.#pending.get(String(threadId));
     const attachments: CodeAttachmentReference[] = [];
     for (const attachmentId of attachmentIds) {
+      if (
+        this.#discarding.has(`${threadId}/${attachmentId}`) ||
+        (this.isQueued(threadId, attachmentId) &&
+          !this.#prepared.has(`${threadId}/${attachmentId}`))
+      ) {
+        return { status: "unknown", attachmentId };
+      }
       const reference = scope?.get(String(attachmentId));
       if (reference === undefined) return { status: "unknown", attachmentId };
       attachments.push(reference);
@@ -151,7 +175,10 @@ export class CodeAttachmentStore {
     const threadKey = String(threadId);
     const scope = this.#pending.get(threadKey);
     if (scope === undefined) return;
-    for (const attachmentId of attachmentIds) scope.delete(String(attachmentId));
+    for (const attachmentId of attachmentIds) {
+      scope.delete(String(attachmentId));
+      this.#prepared.delete(`${threadKey}/${attachmentId}`);
+    }
     if (scope.size === 0) this.#pending.delete(threadKey);
   }
 
@@ -180,8 +207,167 @@ export class CodeAttachmentStore {
   }
 
   async discard(threadId: CodeThreadId, attachmentId: CodeAttachmentId): Promise<void> {
-    this.#pending.get(String(threadId))?.delete(String(attachmentId));
-    await this.#store.remove(String(threadId), String(attachmentId));
+    if (this.isQueued(threadId, attachmentId)) {
+      throw new CodeAttachmentInvalid("Attachment belongs to a queued message.");
+    }
+    // A turn has taken released slots over; late composer cleanup cannot erase them.
+    if (!this.#pending.get(String(threadId))?.has(String(attachmentId))) return;
+    const key = `${threadId}/${attachmentId}`;
+    if (this.#discarding.has(key))
+      throw new CodeAttachmentInvalid("Attachment removal is already in progress.");
+    this.#discarding.add(key);
+    try {
+      await this.#store.remove(String(threadId), String(attachmentId));
+      this.release(threadId, [attachmentId]);
+    } finally {
+      this.#discarding.delete(key);
+    }
+  }
+
+  /** Reserve before persisting the queue payload; roll back with disposition draft. */
+  claimQueued(
+    threadId: CodeThreadId,
+    ownerId: string,
+    attachmentIds: ReadonlyArray<CodeAttachmentId>,
+  ): CodeQueuedAttachments {
+    const key = `${threadId}/${ownerId}`;
+    if (this.#queueOperations.has(key)) return { status: "refused", reason: "busy" };
+    const existing = this.#queued.get(key);
+    if (existing !== undefined) {
+      return existing.length === attachmentIds.length &&
+        existing.every((ref, index) => String(ref.attachmentId) === String(attachmentIds[index]))
+        ? { status: "ok", attachments: existing }
+        : { status: "refused", reason: "owner-conflict" };
+    }
+    const pending = this.peek(threadId, attachmentIds);
+    if (pending.status !== "ok") return { status: "refused", reason: "unavailable" };
+    const pinned = this.restoreQueuedOwnership(threadId, ownerId, pending.attachments);
+    return pinned.status === "ok" ? { status: "ok", attachments: pending.attachments } : pinned;
+  }
+
+  /** Only a durable enqueue acknowledgement transfers the draft's staging slots. */
+  commitQueued(threadId: CodeThreadId, ownerId: string): ManagedAttachmentQueueResult {
+    if (this.#queueOperations.has(`${threadId}/${ownerId}`))
+      return { status: "refused", reason: "busy" };
+    const references = this.#queued.get(`${threadId}/${ownerId}`);
+    if (references === undefined) return { status: "refused", reason: "unknown-owner" };
+    this.release(
+      threadId,
+      references
+        .map((ref) => ref.attachmentId)
+        .filter((id) => !this.#prepared.has(`${threadId}/${id}`)),
+    );
+    return { status: "ok" };
+  }
+
+  restoreQueuedOwnership(
+    threadId: CodeThreadId,
+    ownerId: string,
+    references: ReadonlyArray<CodeAttachmentReference>,
+  ): ManagedAttachmentQueueResult {
+    const key = `${threadId}/${ownerId}`;
+    if (this.#queueOperations.has(key)) return { status: "refused", reason: "busy" };
+    const existing = this.#queued.get(key);
+    if (
+      existing !== undefined &&
+      (existing.length !== references.length ||
+        existing.some((ref, index) => {
+          const candidate = references[index];
+          return (
+            candidate === undefined ||
+            String(ref.attachmentId) !== String(candidate.attachmentId) ||
+            ref.displayName !== candidate.displayName ||
+            ref.mediaType !== candidate.mediaType ||
+            ref.byteLength !== candidate.byteLength ||
+            ref.digest !== candidate.digest
+          );
+        }))
+    ) {
+      return { status: "refused", reason: "owner-conflict" };
+    }
+    const result = this.#store.pinQueued(
+      String(threadId),
+      ownerId,
+      references.map((ref) => ({
+        scopeId: String(threadId),
+        attachmentId: String(ref.attachmentId),
+        displayName: ref.displayName,
+        size: ref.byteLength,
+        hash: ref.digest,
+        finalizedAt: new Date(0).toISOString(),
+      })),
+    );
+    if (result.status === "ok" && existing === undefined)
+      this.#queued.set(
+        key,
+        references.map((ref) => ({ ...ref })),
+      );
+    return result;
+  }
+
+  async prepareQueued(threadId: CodeThreadId, ownerId: string): Promise<CodeQueuedAttachments> {
+    const key = `${threadId}/${ownerId}`;
+    if (this.#queueOperations.has(key)) return { status: "refused", reason: "busy" };
+    const references = this.#queued.get(key);
+    if (references === undefined) return { status: "refused", reason: "unknown-owner" };
+    this.#queueOperations.add(key);
+    this.release(
+      threadId,
+      references.map((ref) => ref.attachmentId),
+    );
+    try {
+      const verified = await this.#store.verifyQueued(String(threadId), ownerId);
+      if (verified.status !== "ok") return verified;
+      if (this.#queued.get(key) !== references)
+        return { status: "refused", reason: "unknown-owner" };
+      const pending =
+        this.#pending.get(String(threadId)) ?? new Map<string, CodeAttachmentReference>();
+      for (const ref of references) {
+        pending.set(String(ref.attachmentId), ref);
+        this.#prepared.add(`${threadId}/${ref.attachmentId}`);
+      }
+      if (pending.size > 0) this.#pending.set(String(threadId), pending);
+      return { status: "ok", attachments: references };
+    } finally {
+      this.#queueOperations.delete(key);
+    }
+  }
+
+  async releaseQueued(
+    threadId: CodeThreadId,
+    ownerId: string,
+    options: QueuedAttachmentRelease<CodeAttachmentId>,
+  ): Promise<ManagedAttachmentQueueResult> {
+    const key = `${threadId}/${ownerId}`;
+    if (this.#queueOperations.has(key)) return { status: "refused", reason: "busy" };
+    const references = this.#queued.get(key);
+    this.#queueOperations.add(key);
+    try {
+      const result = await this.#store.releaseQueued(
+        String(threadId),
+        ownerId,
+        options.disposition === "removed"
+          ? {
+              disposition: "removed",
+              isTurnOwned: (id) => options.isTurnOwned(decodeCodeAttachmentId(id)),
+            }
+          : options,
+      );
+      if (result.status === "ok") {
+        if (options.disposition !== "draft")
+          this.release(threadId, references?.map((ref) => ref.attachmentId) ?? []);
+        for (const ref of references ?? [])
+          this.#prepared.delete(`${threadId}/${ref.attachmentId}`);
+        this.#queued.delete(key);
+      }
+      return result;
+    } finally {
+      this.#queueOperations.delete(key);
+    }
+  }
+
+  isQueued(threadId: CodeThreadId, attachmentId: CodeAttachmentId): boolean {
+    return this.#store.isQueued(String(threadId), String(attachmentId));
   }
 
   /**
@@ -191,5 +377,13 @@ export class CodeAttachmentStore {
    */
   recover(): Promise<void> {
     return this.#store.recover();
+  }
+
+  /** Removes every attachment file this thread staged or sent. */
+  purgeThread(threadId: CodeThreadId): Promise<void> {
+    const threadKey = String(threadId);
+    this.#pending.delete(threadKey);
+    this.#inFlight.delete(threadKey);
+    return this.#store.purgeScope(threadKey);
   }
 }

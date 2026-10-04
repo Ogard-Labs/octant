@@ -16,7 +16,6 @@ import { acpProviderProfiles, type AcpProviderKind } from "./acpProfiles";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { makeOpenCodeDriver } from "./openCodeDriver";
 import type { OpenCodeProcessPort } from "./openCodeProcess";
-import { isOpenCode2Instance, makeOpenCode2Driver } from "./openCode2Driver";
 import { makeOllamaDriver } from "./ollamaDriver";
 import type { OllamaFetch } from "./ollamaEndpoint";
 import type { OllamaHistoryStore } from "./ollamaHistoryStore";
@@ -67,20 +66,9 @@ export function makeProviderDriver(
   }
   switch (instance.driverKind) {
     case "opencode":
-      if (isOpenCode2Instance(instance)) {
-        if (options.acpProcess === undefined || options.acpHome === undefined) {
-          throw new ProviderDriverConfigurationError();
-        }
-        return makeOpenCode2Driver({
-          instanceId: instance.id,
-          binaryPath: instance.configuration.binaryPath,
-          catalogProcess: options.openCodeProcess,
-          acpProcess: options.acpProcess,
-          acpHome: options.acpHome("opencode", instance.id),
-          runtimeRegistry: options.runtimeRegistry,
-          permissionPersistence: options.permissionPersistence,
-        });
-      }
+      // Route selection follows the version the process attests, not the
+      // binary's file name. A released 2.x install and a 1.x install can
+      // share the name `opencode`.
       return makeOpenCodeDriver({
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,

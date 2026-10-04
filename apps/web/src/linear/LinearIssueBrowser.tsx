@@ -24,6 +24,7 @@ import {
 } from "../ui/base/OctantEmpty";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface LinearIssueBrowserProps {
   readonly listIssues: (input?: LinearIssueListInput) => Promise<LinearIssueListPage>;
@@ -352,9 +353,9 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
               </ul>
             )}
             {list.status === "error" && page !== undefined ? (
-              <p className="linear-issues__status" role="alert">
+              <OctantAlert className="linear-issues__status" tone="warning">
                 {list.message}
-              </p>
+              </OctantAlert>
             ) : null}
             {page.hasNextPage ? (
               <OctantButton

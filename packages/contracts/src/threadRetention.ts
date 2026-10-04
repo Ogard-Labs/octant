@@ -82,6 +82,9 @@ export const ThreadRetentionDeletedScope = Schema.Literal(
   "thread-projections",
   "thread-content",
   "thread-attachments",
+  "thread-canvases",
+  "thread-sessions",
+  "managed-worktrees",
 );
 export type ThreadRetentionDeletedScope = typeof ThreadRetentionDeletedScope.Type;
 
@@ -91,6 +94,7 @@ export const ThreadRetentionRetainedScope = Schema.Literal(
   "other-threads",
   "projects",
   "usage-records",
+  "purge-tombstone",
   "credentials",
   "external-repositories",
   "sqlite-free-pages",

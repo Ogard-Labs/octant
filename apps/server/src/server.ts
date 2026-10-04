@@ -30,6 +30,7 @@ import {
   type AppleRpcEnvelope,
   type AndroidRpcEnvelope,
   decodeAgentRunParentThreadId,
+  decodeAgentRunId,
   decodeChatThreadId,
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
@@ -41,6 +42,7 @@ import {
   decodeWorkThreadId,
   ThreadCreationRootId,
   decodeThreadWorkingDirectory,
+  decodeThreadMessageQueueScope,
   decodeCodeWorktreeRef,
   decodeCodeWorktreeSourcePreview,
   decodeWindowId,
@@ -79,6 +81,10 @@ import { assistantTranscript } from "./chat/assistantTranscript";
 import { ChatService, ChatServiceError } from "./chat/chatService";
 import { UsageResumeService } from "./usage/usageResumeService";
 import { createUsageResumePorts } from "./usage/usageResumePorts";
+import { ThreadMessageQueueService } from "./messageQueue/threadMessageQueueService";
+import { createThreadMessageQueuePort } from "./messageQueue/threadMessageQueuePorts";
+import { createThreadMessageQueueAttachments } from "./messageQueue/threadMessageQueueAttachments";
+import { createThreadMessageQueueRouteHandler } from "./messageQueue/threadMessageQueueRoutes";
 import { ResearchRouter } from "./chat/research/researchRouter";
 import { SearxngClient } from "./chat/research/searxngClient";
 import { ThreadWorkService } from "./chat/threadWorkService";
@@ -263,6 +269,7 @@ import { FileOperationPort } from "./code/fileOperationPort";
 import { createManagedWorktreeNodePorts, listWorktreeRefs } from "./code/managedWorktreeNodePorts";
 import {
   ManagedWorktreeService,
+  managedWorktreeRoot,
   type ManagedWorktreeRepositoryPort,
 } from "./code/managedWorktreeService";
 import { ManagedRootGrantStore } from "./code/managedRootGrantStore";
@@ -339,6 +346,7 @@ import {
   type VerifiedStoreBackupReceipt,
 } from "./persistence/persistenceService";
 import { readAgentRunAdmittedContext } from "./persistence/agentRunContentStore";
+import { purgeThreadArtifacts } from "./persistence/threadArtifactPurge";
 import { readHostIdentity } from "./persistence/remoteAccessProjection";
 import { createProjectBindingRouteHandler } from "./projectBindingRoutes";
 import { createProjectRouteHandler } from "./projectRoutes";
@@ -741,6 +749,7 @@ import {
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
   isProviderAllowedByProjectPolicy,
+  effectiveAgentRunExecutionTarget,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   type PreviewPosture,
@@ -749,7 +758,12 @@ import {
 import { ZenThreadCatalog } from "./zen/zenThreadCatalog";
 import { localHostDisplayName } from "./localHostDisplayName";
 import { ZenAssistantTools } from "./zen/zenAssistantTools";
-import { createCanvasAgentTools, type CanvasAgentToolPort } from "./canvas/canvasAgentTools";
+import {
+  createCanvasAgentTools,
+  createChildCanvasAgentTools,
+  type CanvasAgentToolPort,
+} from "./canvas/canvasAgentTools";
+import { loadChildCanvasWorkspace } from "./canvas/childCanvasWorkspace";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "./providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "./providers/appManagedToolTaint";
 import {
@@ -774,6 +788,7 @@ import {
 } from "./hostControlRoutes";
 import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
+import { createLiveHostExportService } from "./hostExportService";
 import { ChatAttachmentStore } from "./chat/chatAttachmentStore";
 import { createPrivateListenerLifecycleController } from "./remote/privateListenerLifecycleController";
 import { resolvePrivateListenerHostIdentity } from "./remote/privateListenerHostIdentity";
@@ -1788,9 +1803,13 @@ export function startOctantServer(
     let activeComputerUseTools: ComputerUseToolService | undefined;
     let workRequestRuntime: WorkRequestRuntime | undefined;
     let revokeShellWindow: ((windowId: WindowId) => void) | undefined;
+    let revokeQueuedMessages: ((windowId: WindowId) => Promise<void>) | undefined;
     const windowAuthorityStore = new WindowAuthorityStore(
       (windowId) => {
         revokeShellWindow?.(windowId);
+        void revokeQueuedMessages?.(windowId).catch(() =>
+          console.error("Queued message authority could not be revoked."),
+        );
         codeApprovalStore.revokeWindow(windowId);
         simulatorInputGrants.revokeWindow(String(windowId));
         androidInputGrants.revokeWindow(String(windowId));
@@ -1930,7 +1949,91 @@ export function startOctantServer(
       port: createAgentRunSessionRuntime({
         capacityScheduler,
         spendCeiling,
-        appManagedTools: (input) => nativeHarnessComposition?.forAgentRun(input),
+        appManagedTools: (input) => {
+          const native = nativeHarnessComposition?.forAgentRun(input);
+          const target = effectiveAgentRunExecutionTarget(input.run.routingReceipt);
+          const canvas =
+            canvasAgentToolPort === undefined
+              ? undefined
+              : createChildCanvasAgentTools({
+                  port: {
+                    ...canvasAgentToolPort,
+                    resolveChildWorkspace: (query) =>
+                      loadChildCanvasWorkspace(
+                        {
+                          readRun: (runId) => {
+                            try {
+                              return agentRunPersistence.getById(decodeAgentRunId(runId));
+                            } catch {
+                              return undefined;
+                            }
+                          },
+                          readProject: (projectId) => {
+                            try {
+                              const project = persistence.readProject(decodeProjectId(projectId));
+                              if (project === undefined) return undefined;
+                              if (project.type === "chat") {
+                                return {
+                                  id: String(project.id),
+                                  type: project.type,
+                                  lifecycle: project.lifecycle,
+                                };
+                              }
+                              return {
+                                id: String(project.id),
+                                type: project.type,
+                                lifecycle: project.lifecycle,
+                                binding: project.binding,
+                                bindingHistory: project.bindingHistory,
+                              };
+                            } catch {
+                              return undefined;
+                            }
+                          },
+                          readCodeThread: (threadId) => {
+                            try {
+                              return persistence.readCodeThread(decodeCodeThreadId(threadId));
+                            } catch {
+                              return undefined;
+                            }
+                          },
+                          readCodeCheckout: (checkoutId) => {
+                            try {
+                              return persistence.readCodeCheckout(decodeCodeCheckoutId(checkoutId));
+                            } catch {
+                              return undefined;
+                            }
+                          },
+                          loadManagedReceipt: (receiptId) =>
+                            managedWorktreeReceipts.load(receiptId),
+                        },
+                        query.runId,
+                      ),
+                  },
+                  run: {
+                    id: String(input.run.id),
+                    parentThreadId: String(input.run.parentThreadId),
+                    mode: input.run.routingReceipt.mode,
+                    ...("projectId" in input.run.workspaceReceipt
+                      ? { projectId: String(input.run.workspaceReceipt.projectId) }
+                      : {}),
+                    providerInstanceId: target.providerInstanceId,
+                    modelId: target.modelId,
+                  },
+                });
+          if (native === undefined && canvas === undefined) return undefined;
+          return combineAppManagedToolSets(native, canvas);
+        },
+        appManagedToolTransport: ({ providerInstanceId, modelId }) => {
+          const observed = providerRuntimeRegistry.observedState(providerInstanceId);
+          const supported =
+            observed?.capabilities.appManagedTools === "supported" ||
+            observed?.verifiedToolModelIds?.some(
+              (candidate: unknown) => String(candidate) === String(modelId),
+            ) === true;
+          if (supported) return "supported" as const;
+          return observed === undefined ? ("unavailable" as const) : ("unsupported" as const);
+        },
         // `configuredDriverOptions` is declared later in this scope; the closure
         // only runs when a child starts, long after boot, so the reference is safe.
         resolveDriver: (providerInstanceId) => {
@@ -3814,6 +3917,7 @@ export function startOctantServer(
       },
     });
     const chatDataDirectory = join(providerDataDirectory, "chat");
+    const chatAttachmentStore = new ChatAttachmentStore(chatDataDirectory);
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
       openCodeProcess,
       codexProcess,
@@ -5632,7 +5736,14 @@ export function startOctantServer(
       return createSideChatSourceTools({ source, authorize });
     };
     let imageJobService!: ImageJobService;
+    let purgeQueuedChatMessages: ((threadId: ChatThreadId) => Promise<void>) | undefined;
     const chatService = new ChatService({
+      attachmentStore: chatAttachmentStore,
+      beforeAttachmentPurge: async (threadId) => {
+        if (purgeQueuedChatMessages === undefined)
+          throw new Error("Queued attachment cleanup is not available.");
+        await purgeQueuedChatMessages(threadId);
+      },
       agentRuns: agentRunPersistence,
       resolveComputerUseTools: ({ windowId, thread, selection }) =>
         computerToolsFor(
@@ -5862,9 +5973,6 @@ export function startOctantServer(
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     yield* Effect.promise(() => chatService.reapStaleProviderSessions({ staleAfterMs: 0 }));
-    yield* Effect.promise(() => chatService.recoverManagedAttachments());
-    yield* Effect.promise(() => codeAttachments.recover());
-    yield* Effect.promise(() => workAttachments.recover());
     const generatedImageStore = new GeneratedImageStore(persistence.dataDirectory);
     yield* Effect.promise(() =>
       generatedImageStore.recover({
@@ -5891,7 +5999,6 @@ export function startOctantServer(
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
-    yield* Effect.promise(() => chatService.recoverPendingDeletions());
     const linkedThreadService = createLinkedThreadRuntime({
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       chat: chatService,
@@ -6681,6 +6788,120 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     };
+    const queueAttachments = createThreadMessageQueueAttachments({
+      chatStore: chatAttachmentStore,
+      codeStore: codeAttachments,
+      workStore: workAttachments,
+      readChatAttachment: (threadId, attachmentId) =>
+        persistence
+          .readChatThreadView(decodeChatThreadId(threadId))
+          ?.attachments.find((attachment) => String(attachment.id) === String(attachmentId)),
+      discardChatAttachment: (threadId, attachmentId) =>
+        chatService.discardAttachment(threadId, attachmentId).then(() => undefined),
+      isTurnOwned: (mode, threadId, attachmentId) => {
+        if (mode === "chat")
+          return (
+            persistence
+              .readChatThreadView(decodeChatThreadId(threadId))
+              ?.turns.some((turn) =>
+                turn.attachmentIds.some((id) => String(id) === String(attachmentId)),
+              ) ?? false
+          );
+        if (mode === "work")
+          return workTurnProjection
+            .listForThread(decodeWorkThreadId(threadId))
+            .some((turn) =>
+              turn.attachments?.some(
+                (attachment) => String(attachment.attachmentId) === String(attachmentId),
+              ),
+            );
+        return (
+          persistence.connection
+            .prepare(`
+          SELECT 1 FROM event_journal AS event,
+            json_each(event.payload_json, '$.event.attachments') AS attachment
+          WHERE event.event_name = 'code.operation-event-recorded@1'
+            AND json_extract(event.payload_json, '$.threadId') = ?
+            AND json_extract(event.payload_json, '$.event.kind') = 'conversation-turn-started'
+            AND json_extract(attachment.value, '$.attachmentId') = ? LIMIT 1
+        `)
+            .get(String(threadId), String(attachmentId)) !== undefined
+        );
+      },
+    });
+    const threadMessageQueue = new ThreadMessageQueueService({
+      connection: persistence.connection,
+      journal: persistence.journal,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+      port: createThreadMessageQueuePort({
+        persistence,
+        journal: persistence.journal,
+        chat: chatService,
+        work: {
+          readThread: (id) => workThreadProjection.read(id),
+          listTurns: (id) => workTurnProjection.listForThread(id),
+          startFirstTurn: (windowId, command, admissionOptions) =>
+            workTurnService.startFirstTurn(windowId, command, admissionOptions),
+        },
+        code: routeCodeService,
+        isModeEnabled: (mode) =>
+          enabledModes(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes(mode),
+        isWindowLive: (windowId) =>
+          windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
+        canAccess: (windowId, mode, projectId) => {
+          if (mode === "chat")
+            return projectId === undefined || persistence.readProject(projectId)?.type === "chat";
+          if (projectId === undefined) return false;
+          return mode === "code"
+            ? canAccessCodeProject(windowId, projectId)
+            : windowHoldsProject(windowId, projectId, mode);
+        },
+        effectiveCodeThread: (windowId, thread) =>
+          codeSessionAuthority.effectiveThread(windowId, thread),
+        attachments: queueAttachments,
+      }),
+    });
+    yield* Effect.promise(() => threadMessageQueue.recover());
+    revokeQueuedMessages = (windowId) => threadMessageQueue.revokeWindow(windowId);
+    purgeQueuedChatMessages = async (threadId) => {
+      const result = await threadMessageQueue.purgeThread(
+        decodeThreadMessageQueueScope({ mode: "chat", threadId }),
+      );
+      if (result.status !== "released")
+        throw new Error("Queued attachments could not be released.");
+    };
+    yield* Effect.promise(() => chatService.recoverPendingDeletions());
+    // Accepted queue items retain images before draft recovery removes uploads
+    // whose composer disappeared during the previous host process.
+    yield* Effect.promise(() => chatService.recoverManagedAttachments());
+    yield* Effect.promise(() => codeAttachments.recover());
+    yield* Effect.promise(() => workAttachments.recover());
+    const advanceMessageQueue = () => {
+      void threadMessageQueue
+        .tick()
+        .catch(() => console.error("The message queue could not advance."));
+    };
+    const unsubscribeMessageQueue = persistence.journal.subscribeCommitted((append) => {
+      void threadMessageQueue
+        .onCommittedAppend(append)
+        .catch(() => console.error("The message queue could not process a thread change."));
+    });
+    const messageQueueTimer = setInterval(advanceMessageQueue, 1000);
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        clearInterval(messageQueueTimer);
+        unsubscribeMessageQueue();
+        threadMessageQueue.dispose();
+        await threadMessageQueue.awaitIdle();
+      }),
+    );
+    const threadMessageQueueRoutes = createThreadMessageQueueRouteHandler({
+      service: threadMessageQueue,
+      windowAuthorityStore,
+    });
     // Host-owned recovery for provider usage-limited stops: the journal record
     // is the opt-in, the projection rebuilds what is armed after a restart, and
     // every reset fires through the mode's ordinary turn admission.
@@ -8785,6 +9006,7 @@ export function startOctantServer(
       (await providerUsageLimitsRoutes(request)) ??
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??
+      (await threadMessageQueueRoutes(request)) ??
       (await threadCheckpointRoutes(request)) ??
       (await scaffoldRoutes(request)) ??
       (await workspacePresetRoutes(request)) ??
@@ -8969,7 +9191,6 @@ export function startOctantServer(
     // Registered on the loopback chain only — never inside
     // dispatchProductRoutes — so the remote gateway's product dispatch can
     // never reach host lifecycle authority even if route policy regressed.
-    const chatAttachmentStore = new ChatAttachmentStore(persistence.dataDirectory);
     const threadRetention = new ThreadRetentionService({
       connection: persistence.connection,
       journal: persistence.journal,
@@ -8985,13 +9206,29 @@ export function startOctantServer(
         workThreadProjection.forget(threadId as never);
       },
       purgeThreadArtifacts: async ({ mode, threadId }) => {
-        if (mode === "chat") await chatAttachmentStore.purgeThread(threadId as never);
-        await agentMessageService.purgeThread(threadId);
-        try {
-          await generatedImageStore.purgeScope(decodeImageGenerationScopeId(String(threadId)));
-        } catch {
-          // A thread id that is not a generated-image scope is not an image basin.
-        }
+        const released = await threadMessageQueue.purgeThread(
+          decodeThreadMessageQueueScope({ mode, threadId }),
+        );
+        if (released.status !== "released")
+          throw new Error("Queued attachments could not be purged.");
+        await purgeThreadArtifacts({
+          connection: persistence.connection,
+          dataDirectory: persistence.dataDirectory,
+          mode,
+          threadId: String(threadId),
+          managedWorktreeRootPath: managedWorktreeRoot,
+          purgeChatAttachments: (id) => chatAttachmentStore.purgeThread(decodeChatThreadId(id)),
+          purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
+          purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),
+          purgeGeneratedImages: async (id) => {
+            try {
+              await generatedImageStore.purgeScope(decodeImageGenerationScopeId(id));
+            } catch {
+              // A thread id that is not a generated-image scope is not an image basin.
+            }
+          },
+          purgeAgentMessages: (id) => agentMessageService.purgeThread(id),
+        });
       },
     });
     const hostRuntimePlatform =
@@ -9033,6 +9270,42 @@ export function startOctantServer(
           byteLength: receipt.byteLength,
         };
       },
+      hostExport: createLiveHostExportService({
+        hostId: LOCAL_HOST_ID,
+        clock: () => new Date().toISOString(),
+        threads: threadExportService,
+        connection: persistence.connection,
+        listWorkThreadIds: () => workThreadProjection.list().map((thread) => String(thread.id)),
+        listProjects: () =>
+          persistence.readProjects().map((project) => ({
+            projectId: project.id,
+            name: project.name,
+            type: project.type,
+            lifecycle: project.lifecycle,
+            ...(project.type === "chat" ? {} : { canonicalRoot: project.binding.canonicalRoot }),
+          })),
+        listProjectIds: () => persistence.readProjects().map((project) => String(project.id)),
+        readProjectMemory: (projectId) => persistence.readProjectMemory(decodeProjectId(projectId)),
+        listCanvases: () =>
+          [...persistence.canvasProjection.snapshot().values()].map((entry) => ({
+            canvasId: entry.canvasId,
+            projectId: entry.currentVersion.definition.provenance.projectId,
+            mode: entry.currentVersion.definition.provenance.mode,
+            title: entry.currentVersion.definition.title,
+            updatedAt: entry.updatedAt,
+            definition: entry.currentVersion.definition,
+          })),
+        readSettings: () => {
+          const shell = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+          const themeMode = persistence.readThemeSettings()?.settings.mode;
+          return {
+            chatEnabled: shell.chatEnabled,
+            workEnabled: shell.workEnabled,
+            themeMode: themeMode ?? "unknown",
+            ...(shell.streamReplies === undefined ? {} : { streamReplies: shell.streamReplies }),
+          };
+        },
+      }),
     });
     return yield* Effect.acquireRelease(
       Effect.tryPromise({

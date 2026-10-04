@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { samePollingData } from "../polling/samePollingData";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 const ACTIVE_TOOL_APPROVAL_POLL_MS = 500;
 const IDLE_TOOL_APPROVAL_POLL_MS = 5_000;
@@ -115,9 +116,9 @@ export function ExtensionToolApprovalPrompt(props: {
         {pending.inputJson === "" ? "(empty input)" : pending.inputJson}
       </code>
       {message === undefined ? null : (
-        <p className="approval-row__detail" role="alert">
+        <OctantAlert className="approval-row__detail" tone="warning">
           {message}
-        </p>
+        </OctantAlert>
       )}
     </section>
   );

@@ -57,6 +57,28 @@ thread, not a second library.
 - A later host-wide data-subject export can compose this command per
   thread rather than invent a second format.
 
+## Addendum: host-wide export
+
+The host-wide cut this decision deferred is now a local-owner read.
+
+- **One call, one bundle.** `octant.host-export/1` composes an
+  `octant.thread-bundle/1` for every thread of every mode, plus Projects,
+  Project memory, Canvases and their current definitions, a non-secret
+  settings summary, usage export rows, and retention windows with purge
+  tombstones. The wire is a page stream so a large store is not loaded or
+  written all at once. The pages assemble into the inspectable bundle.
+- **Local owner only.** The route lives on the host-control loopback chain,
+  not on product dispatch. A remote principal and a paired device are
+  refused. A paired device may still export one thread it can already open;
+  it cannot take this cut.
+- **Secrets stay unrepresentable.** The forbidden-key walk from the thread
+  bundle runs on every page before it is written, and again on the assembled
+  bundle. Credentials, filesystem paths, attachment bytes, raw provider
+  payloads, unsent composer drafts, paired-device keys, and window
+  capabilities are omitted and named.
+- **Import is still undefined.** This cut is a copy the owner can inspect.
+  It is not a legal package and not a way back in.
+
 ## Related
 
 - 0002 Durable event journal and rebuildable projections

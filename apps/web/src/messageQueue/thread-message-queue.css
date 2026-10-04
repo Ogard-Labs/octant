@@ -1,0 +1,35 @@
+.thread-message-queue {
+  padding: 0.5rem 0.75rem;
+  font-size: var(--oct-text-xs);
+  color: var(--octant-text-secondary);
+}
+.thread-message-queue__heading,
+.thread-message-queue__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.thread-message-queue__heading {
+  justify-content: space-between;
+}
+.thread-message-queue ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  max-height: min(22rem, 40vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.thread-message-queue li {
+  padding-block: 0.375rem;
+}
+.thread-message-queue__prompt {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 8rem;
+  overflow: auto;
+}
+
+.thread-message-queue__toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}

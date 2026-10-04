@@ -41,6 +41,24 @@ export function erasePurgedThread(input: {
            AND event_journal.aggregate_id = aggregate_heads.aggregate_id
        )`,
     );
+    input.connection.exec(
+      `UPDATE aggregate_heads
+       SET aggregate_version = (
+             SELECT MAX(event_journal.aggregate_version) FROM event_journal
+             WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
+               AND event_journal.aggregate_id = aggregate_heads.aggregate_id
+           ),
+           last_sequence = (
+             SELECT MAX(event_journal.global_sequence) FROM event_journal
+             WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
+               AND event_journal.aggregate_id = aggregate_heads.aggregate_id
+           )
+       WHERE EXISTS (
+         SELECT 1 FROM event_journal
+         WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
+           AND event_journal.aggregate_id = aggregate_heads.aggregate_id
+       )`,
+    );
   } finally {
     input.connection.pragma("foreign_keys = ON");
   }
@@ -121,6 +139,59 @@ export function threadProjectionExists(
   );
 }
 
+const THREAD_OWNERSHIP_PATHS = [
+  "$.threadId",
+  "$.thread.id",
+  "$.parentThreadId",
+  "$.run.parentThreadId",
+  "$.followUp.threadId",
+  "$.version.definition.provenance.threadId",
+  "$.version.provenance.threadId",
+  "$.anchor.threadId",
+  "$.checkpoint.anchor.threadId",
+  "$.provenance.threadId",
+  "$.record.provenance.threadId",
+  "$.record.document.provenance.threadId",
+  "$.originThreadId",
+] as const;
+
+const CANVAS_LINK_PATHS = [
+  "$.canvasId",
+  "$.receipt.canvasId",
+  "$.version.canvasId",
+  "$.record.canvasId",
+  "$.record.document.canvasId",
+  "$.event.canvasId",
+] as const;
+const RUN_LINK_PATHS = ["$.parentRunId", "$.run.parentRunId"] as const;
+
+/** Aggregates a purge must not take, even when a payload names the thread. */
+const RETAINED_AGGREGATE_TYPES = new Set<string>([THREAD_RETENTION_AGGREGATE, "context-ledger"]);
+
+const USAGE_EVENT_NAME = "context.usage-reconciled@1";
+
+export interface ThreadFileAnchors {
+  readonly canvasIds: ReadonlyArray<string>;
+  readonly runIds: ReadonlyArray<string>;
+}
+
+/** Canvas and agent-run identities a file purge can resolve before journal erasure. */
+export function listThreadFileAnchors(
+  connection: SqliteConnection,
+  mode: OctantMode,
+  threadId: string,
+): ThreadFileAnchors {
+  const aggregates = collectOwnedAggregates(connection, mode, threadId);
+  return {
+    canvasIds: aggregates
+      .filter((aggregate) => aggregate.aggregateType === "canvas")
+      .map((aggregate) => aggregate.aggregateId),
+    runIds: aggregates
+      .filter((aggregate) => aggregate.aggregateType === "agent-run")
+      .map((aggregate) => aggregate.aggregateId),
+  };
+}
+
 function collectOwnedAggregates(
   connection: SqliteConnection,
   mode: OctantMode,
@@ -128,23 +199,88 @@ function collectOwnedAggregates(
 ): ReadonlyArray<AggregateKey> {
   const keys = new Map<string, AggregateKey>();
   const add = (aggregateType: string, aggregateId: string) => {
-    if (aggregateType === THREAD_RETENTION_AGGREGATE) return;
+    if (RETAINED_AGGREGATE_TYPES.has(aggregateType) || aggregateId.length === 0) return;
     keys.set(`${aggregateType}:${aggregateId}`, { aggregateType, aggregateId });
   };
   add(THREAD_AGGREGATE_BY_MODE[mode], threadId);
+  add("native-harness-session", threadId);
+  for (const match of aggregatesMatching(connection, THREAD_OWNERSHIP_PATHS, threadId)) {
+    add(match.aggregateType, match.aggregateId);
+  }
+  followLinkedAggregates(connection, keys, add, "canvas", CANVAS_LINK_PATHS);
+  for (const canvasId of idsOf(keys, "canvas")) {
+    add("canvas-comments", canvasId);
+    add("artifact-mirror", canvasId);
+  }
+  followLinkedAggregates(connection, keys, add, "agent-run", RUN_LINK_PATHS);
+  for (const sessionId of harnessSessionIds(connection, threadId)) {
+    add("native-harness-transcript", sessionId);
+    for (const match of aggregatesMatching(connection, ["$.sessionId"], sessionId)) {
+      add(match.aggregateType, match.aggregateId);
+    }
+  }
+  return [...keys.values()];
+}
+
+function followLinkedAggregates(
+  connection: SqliteConnection,
+  keys: Map<string, AggregateKey>,
+  add: (aggregateType: string, aggregateId: string) => void,
+  aggregateType: string,
+  paths: ReadonlyArray<string>,
+): void {
+  const seen = new Set<string>();
+  const pending = idsOf(keys, aggregateType);
+  while (pending.length > 0) {
+    const id = pending.pop();
+    if (id === undefined || seen.has(id)) continue;
+    seen.add(id);
+    for (const match of aggregatesMatching(connection, paths, id)) {
+      const before = keys.size;
+      add(match.aggregateType, match.aggregateId);
+      if (keys.size > before && match.aggregateType === aggregateType)
+        pending.push(match.aggregateId);
+    }
+  }
+}
+
+function idsOf(keys: Map<string, AggregateKey>, aggregateType: string): string[] {
+  const ids: string[] = [];
+  for (const key of keys.values()) {
+    if (key.aggregateType === aggregateType) ids.push(key.aggregateId);
+  }
+  return ids;
+}
+
+function aggregatesMatching(
+  connection: SqliteConnection,
+  paths: ReadonlyArray<string>,
+  value: string,
+): ReadonlyArray<AggregateKey> {
+  if (paths.length === 0) return [];
+  const clause = paths.map((path) => `json_extract(payload_json, '${path}') = ?`).join(" OR ");
   const rows = connection
-    .prepare(
-      `SELECT DISTINCT aggregate_type, aggregate_id FROM event_journal
-       WHERE (aggregate_type = ? AND aggregate_id = ?)
-          OR json_extract(payload_json, '$.threadId') = ?
-          OR json_extract(payload_json, '$.thread.id') = ?`,
-    )
-    .all(THREAD_AGGREGATE_BY_MODE[mode], threadId, threadId, threadId) as ReadonlyArray<{
+    .prepare(`SELECT DISTINCT aggregate_type, aggregate_id FROM event_journal WHERE ${clause}`)
+    .all(...paths.map(() => value)) as ReadonlyArray<{
     readonly aggregate_type: string;
     readonly aggregate_id: string;
   }>;
-  for (const row of rows) add(row.aggregate_type, row.aggregate_id);
-  return [...keys.values()];
+  return rows.map((row) => ({ aggregateType: row.aggregate_type, aggregateId: row.aggregate_id }));
+}
+
+function harnessSessionIds(connection: SqliteConnection, threadId: string): ReadonlyArray<string> {
+  const rows = connection
+    .prepare(
+      `SELECT json_extract(payload_json, '$.id') AS session_id
+       FROM event_journal
+       WHERE aggregate_type = 'native-harness-session' AND aggregate_id = ?`,
+    )
+    .all(threadId) as ReadonlyArray<{ readonly session_id: unknown }>;
+  const ids: string[] = [];
+  for (const row of rows) {
+    if (typeof row.session_id === "string" && row.session_id.length > 0) ids.push(row.session_id);
+  }
+  return ids;
 }
 
 function purgeDerivedContent(
@@ -198,9 +334,10 @@ function deleteJournalEvents(
   for (const aggregate of aggregates) {
     const sequences = connection
       .prepare(
-        `SELECT global_sequence FROM event_journal WHERE aggregate_type = ? AND aggregate_id = ?`,
+        `SELECT global_sequence FROM event_journal
+         WHERE aggregate_type = ? AND aggregate_id = ? AND event_name != ?`,
       )
-      .all(aggregate.aggregateType, aggregate.aggregateId) as ReadonlyArray<{
+      .all(aggregate.aggregateType, aggregate.aggregateId, USAGE_EVENT_NAME) as ReadonlyArray<{
       readonly global_sequence: number;
     }>;
     for (const row of sequences) {
@@ -209,8 +346,11 @@ function deleteJournalEvents(
         .run(row.global_sequence);
     }
     connection
-      .prepare(`DELETE FROM event_journal WHERE aggregate_type = ? AND aggregate_id = ?`)
-      .run(aggregate.aggregateType, aggregate.aggregateId);
+      .prepare(
+        `DELETE FROM event_journal
+         WHERE aggregate_type = ? AND aggregate_id = ? AND event_name != ?`,
+      )
+      .run(aggregate.aggregateType, aggregate.aggregateId, USAGE_EVENT_NAME);
   }
 }
 

@@ -96,7 +96,7 @@ export function ManagedToolsSettingsView(props: { readonly bridge?: ManagedTools
     }
   }
   const supported = status?.supported === true;
-  const tools = status?.tools ?? [];
+  const tools = (status?.tools ?? []).filter((tool) => tool.tool !== "opencode");
   return (
     <section
       aria-label="Device tools"
@@ -181,6 +181,7 @@ export function ManagedToolsSettingsView(props: { readonly bridge?: ManagedTools
           </SettingRow>
         </div>
       </SettingsSection>
+      {/* ui-boundary-exception: inline-field-error */}
       <p
         className="provider-settings__field-guidance"
         role={error === undefined ? "status" : "alert"}

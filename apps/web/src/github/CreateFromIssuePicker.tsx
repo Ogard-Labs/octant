@@ -9,6 +9,7 @@ import type {
 import { GitHubRepositoryPicker } from "../code/GitHubRepositoryPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export function issuesReadIsAvailable(snapshot: GithubAuthenticationSnapshot): boolean {
   return (
@@ -212,7 +213,7 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
           />
           {issues.kind === "loading" ? <p role="status">Loading issues…</p> : null}
           {issues.kind === "error" || issues.kind === "unavailable" ? (
-            <p role="alert">{issues.message}</p>
+            <OctantAlert tone="warning">{issues.message}</OctantAlert>
           ) : null}
           {issues.kind === "ready" ? (
             issues.rows.length === 0 ? (

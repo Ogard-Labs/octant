@@ -675,6 +675,27 @@ describe("Code operation contracts", () => {
     ).toThrow();
   });
 
+  it("distinguishes a host refusal before launch from an admitted provider failure", () => {
+    const refused = {
+      kind: "provider-turn-state",
+      operationId: ids.operation,
+      state: "failed",
+      admission: "refused",
+      failure: { category: "unauthorized", message: "Admission was revoked." },
+    };
+    expect(decodeCodeOperationResult(refused)).toEqual(refused);
+    expect(() => decodeCodeOperationResult({ ...refused, state: "running" })).toThrow();
+    expect(() => decodeCodeOperationResult({ ...refused, admission: "accepted" })).toThrow();
+    expect(
+      decodeCodeOperationResult({
+        kind: "operation-failed",
+        operationId: ids.operation,
+        admission: "refused",
+        failure: refused.failure,
+      }),
+    ).toMatchObject({ admission: "refused" });
+  });
+
   it("uses monotonically increasing resource cursors and opaque evidence in events", () => {
     const frame = {
       threadId: ids.thread,

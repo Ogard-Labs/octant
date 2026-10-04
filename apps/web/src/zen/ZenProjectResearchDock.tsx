@@ -8,6 +8,7 @@ import { useNativeBrowserSurface } from "../browser/useNativeBrowserSurface";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /** How often a headless page's picture is refreshed while the dock is open. */
 const PICTURE_INTERVAL_MS = 1_500;
@@ -238,12 +239,12 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
       ) : native ? (
         <div aria-label="Project page" className="zen-research__page" ref={surface.mount}>
           {surface.failed ? (
-            <div className="zen-research__notice" role="alert">
+            <OctantAlert className="zen-research__notice" tone="warning">
               <p>The page could not attach to the dock.</p>
               <OctantButton onClick={surface.retry} type="button" variant="secondary">
                 Retry
               </OctantButton>
-            </div>
+            </OctantAlert>
           ) : null}
         </div>
       ) : (
@@ -261,9 +262,9 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
         </div>
       )}
       {message === undefined ? null : (
-        <p className="zen-research__notice" role="alert">
+        <OctantAlert className="zen-research__notice" tone="warning">
           {message}
-        </p>
+        </OctantAlert>
       )}
     </aside>
   );

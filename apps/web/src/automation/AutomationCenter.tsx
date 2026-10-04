@@ -56,6 +56,7 @@ import {
   type AutomationCenterController,
   type AutomationCenterFilter,
 } from "./useAutomationCenterController";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * The shared Automation Center: one host-owned surface for Work and Code
@@ -1157,7 +1158,7 @@ function AutomationHistoryBody(props: {
   }
   if (controller.history.status === "unavailable") {
     return (
-      <div role="alert">
+      <OctantAlert tone="warning">
         <p>{controller.history.message}</p>
         <OctantButton
           onClick={() => void controller.expandHistory()}
@@ -1166,7 +1167,7 @@ function AutomationHistoryBody(props: {
         >
           Retry history
         </OctantButton>
-      </div>
+      </OctantAlert>
     );
   }
   if (controller.history.runs.length === 0) {

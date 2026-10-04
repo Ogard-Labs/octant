@@ -25,6 +25,7 @@ export function InlineThreadPlan(props: InlineThreadPlanProps = {}) {
         {...(props.changedFiles === undefined ? {} : { changedFiles: props.changedFiles })}
       />
       {controller.commandMessage === undefined ? null : (
+        /* ui-boundary-exception: inline-field-error */
         <p className="thread-plan__command-error" role="alert">
           {controller.commandMessage}
         </p>

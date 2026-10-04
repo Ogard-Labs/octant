@@ -63,9 +63,9 @@ export function ThemeAppearanceEditor(props: {
     <div className="settings-theme-editor" aria-label="Appearance preview controls">
       <div className="settings-feedback-slot" aria-live="polite">
         {theme.error !== undefined ? (
-          <p className="settings-view__error" role="alert">
+          <OctantAlert className="settings-view__error" tone="danger">
             {theme.error}
-          </p>
+          </OctantAlert>
         ) : null}
       </div>
       <SettingsSection
@@ -388,9 +388,9 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
   return (
     <div className="settings-view__theme-transfer">
       {dropped.length === 0 ? null : (
-        <p className="settings-view__error" role="alert">
+        <OctantAlert className="settings-view__error" tone="danger">
           {`The export left out ${String(dropped.length)} override this theme does not accept: ${[...new Set(dropped)].join(", ")}.`}
-        </p>
+        </OctantAlert>
       )}
       <SettingRow
         focused={props.focused}
@@ -460,3 +460,4 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
 }
 
 import { useState, type ReactNode } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";

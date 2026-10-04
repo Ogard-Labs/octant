@@ -7,6 +7,12 @@ import {
   type CredentialPurgeStore,
   type CredentialStore,
 } from "./credentialStore";
+import {
+  createHostOAuthRuntime,
+  handleHostOAuthBrokerRoute,
+  isHostOAuthGrantMaterial,
+  type HostOAuthRuntime,
+} from "./hostOAuth";
 
 // A purge request may carry the bounded set of 128 canonical UUIDs accepted by
 // the native helper. Keep the broker limit aligned with that helper protocol;
@@ -21,6 +27,10 @@ const ROUTES = new Set([
   "/v1/credentials/set",
   "/v1/credentials/delete",
   "/v1/credentials/purge",
+  "/v1/oauth/begin",
+  "/v1/oauth/status",
+  "/v1/oauth/refresh",
+  "/v1/oauth/access",
 ]);
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {
@@ -40,11 +50,24 @@ export interface CredentialBroker {
 export async function startCredentialBroker(
   store: CredentialStore,
   purgeStore?: CredentialPurgeStore,
+  oauth?: {
+    readonly fetch?: typeof fetch;
+    readonly now?: () => number;
+    readonly timeoutMs?: number;
+    readonly sleep?: (ms: number) => Promise<void>;
+  },
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
+  const runtime = createHostOAuthRuntime({
+    store,
+    ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
+    ...(oauth?.now === undefined ? {} : { now: oauth.now }),
+    ...(oauth?.timeoutMs === undefined ? {} : { timeoutMs: oauth.timeoutMs }),
+    ...(oauth?.sleep === undefined ? {} : { sleep: oauth.sleep }),
+  });
   let brokerUrl: string | undefined;
   const server = createServer((incoming, outgoing) => {
-    void handleIncoming(incoming, brokerUrl, token, store, purgeStore).then(
+    void handleIncoming(incoming, brokerUrl, token, store, purgeStore, runtime).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
         response.headers.forEach((value, name) => {
@@ -85,14 +108,17 @@ export async function startCredentialBroker(
   let closing: Promise<void> | undefined;
   const close = (): Promise<void> => {
     if (closing !== undefined) return closing;
-    closing = new Promise<void>((resolve, reject) => {
-      if (!server.listening) {
-        resolve();
-        return;
-      }
-      server.close((error) => (error === undefined ? resolve() : reject(error)));
-      server.closeAllConnections();
-    });
+    closing = (async () => {
+      await runtime.close();
+      await new Promise<void>((resolve, reject) => {
+        if (!server.listening) {
+          resolve();
+          return;
+        }
+        server.close((error) => (error === undefined ? resolve() : reject(error)));
+        server.closeAllConnections();
+      });
+    })();
     return closing;
   };
 
@@ -101,7 +127,7 @@ export async function startCredentialBroker(
     token,
     close,
     fetchForTest: (request: Request, peerAddress = "127.0.0.1") =>
-      handleBrokerRequest(request, peerAddress, token, store, purgeStore),
+      handleBrokerRequest(request, peerAddress, token, store, purgeStore, runtime),
   });
 }
 
@@ -111,6 +137,7 @@ async function handleIncoming(
   token: string,
   store: CredentialStore,
   purgeStore: CredentialPurgeStore | undefined,
+  runtime: HostOAuthRuntime,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -139,6 +166,7 @@ async function handleIncoming(
         token,
         store,
         purgeStore,
+        runtime,
       ),
     ),
   };
@@ -150,6 +178,7 @@ async function handleBrokerRequest(
   token: string,
   store: CredentialStore,
   purgeStore: CredentialPurgeStore | undefined,
+  runtime: HostOAuthRuntime,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -163,6 +192,10 @@ async function handleBrokerRequest(
     "application/json"
   ) {
     return failure("unsupported-media-type", 415);
+  }
+
+  if (url.pathname.startsWith("/v1/oauth/")) {
+    return handleHostOAuthBrokerRoute(url.pathname, request, runtime);
   }
 
   if (url.pathname === "/v1/credentials/purge") {
@@ -211,7 +244,9 @@ async function handleBrokerRequest(
       await store.delete(decoded.providerInstanceId);
       return Response.json({ deleted: true });
     }
-    return Response.json({ credential: await store.resolve(decoded.providerInstanceId) });
+    const credential = await store.resolve(decoded.providerInstanceId);
+    if (isHostOAuthGrantMaterial(credential)) return failure("oauth-material", 403);
+    return Response.json({ credential });
   } catch (error) {
     return credentialStoreFailure(error);
   }

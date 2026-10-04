@@ -22,6 +22,7 @@ Welcome to the Octant guide. Use these pages to install the app, configure provi
 - [Projects](/guide/projects) — create, manage, and organize Projects across modes
 - [Shared Memory](/guide/memory) — persist decisions, facts, and context across threads
 - [Promotions](/guide/promotions) — escalate Work work to a linked Code thread
+- [Sync artifacts across your computers](/guide/sync-artifacts) — what leaves this computer, where it goes, and how to turn sync off
 
 ## Concepts
 

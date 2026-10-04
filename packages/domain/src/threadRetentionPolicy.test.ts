@@ -261,8 +261,13 @@ describe("purge scope report", () => {
       "thread-projections",
       "thread-content",
       "thread-attachments",
+      "thread-canvases",
+      "thread-sessions",
+      "managed-worktrees",
     ]);
     expect(THREAD_PURGE_RETAINED_SCOPES).toContain("other-threads");
+    expect(THREAD_PURGE_RETAINED_SCOPES).toContain("usage-records");
+    expect(THREAD_PURGE_RETAINED_SCOPES).toContain("purge-tombstone");
     expect(THREAD_PURGE_RETAINED_SCOPES).toContain("sqlite-free-pages");
     expect(THREAD_PURGE_RETAINED_SCOPES).not.toContain("thread-journal");
   });
