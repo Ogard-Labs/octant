@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
@@ -23,6 +23,24 @@ export interface ManagedToolDescriptor {
   readonly entrypoint: string;
   /** Platforms the tool can actually serve on; it is absent elsewhere. */
   readonly platforms: ReadonlyArray<NodeJS.Platform>;
+  /**
+   * `node` runs under the desktop runtime. `executable` is a native binary
+   * spawned directly. Lifecycle scripts are never run either way.
+   */
+  readonly runtime?: "node" | "executable";
+  /**
+   * Platform package that holds the binary. Version checks still use
+   * `packageName`; the staged bytes are this package at the same version.
+   * Keys are `${platform}-${arch}`.
+   */
+  readonly platformPackages?: Readonly<Partial<Record<string, string>>>;
+  /** Archive byte cap. Absent uses the channel default. */
+  readonly maxArchiveBytes?: number;
+  /**
+   * When false, the packager does not vendor the tree into the app. Updates
+   * still stage into the managed location on demand.
+   */
+  readonly shipInApp?: boolean;
 }
 
 export interface ManagedToolRelease {
@@ -56,6 +74,24 @@ export const MANAGED_TOOLS: ReadonlyArray<ManagedToolDescriptor> = [
     // serve-avd drives adb; Octant's device surfaces exist on macOS and Linux.
     platforms: ["darwin", "linux"],
   },
+  {
+    tool: "opencode",
+    packageName: "@opencode/cli",
+    entrypoint: "bin/opencode",
+    platforms: ["darwin", "linux"],
+    runtime: "executable",
+    // The platform package is a native binary larger than the device-tool
+    // trees, and its wrapper runs a lifecycle script. Stage the platform
+    // package on demand instead of shipping that script or the binary in the app.
+    shipInApp: false,
+    maxArchiveBytes: 128 * 1024 * 1024,
+    platformPackages: {
+      "darwin-arm64": "@opencode/cli-darwin-arm64",
+      "darwin-x64": "@opencode/cli-darwin-x64",
+      "linux-arm64": "@opencode/cli-linux-arm64",
+      "linux-x64": "@opencode/cli-linux-x64",
+    },
+  },
 ];
 
 /**
@@ -79,6 +115,13 @@ export const BUNDLED_MANAGED_TOOL_RELEASES: ReadonlyArray<ManagedToolRelease> = 
     integrity:
       "sha512-Ya3eQFp17YHcjXYIzWdLLPG9lNLgaXgnd8D+RDY8xLvGQQtPsMHBCOUyPqtYJ5VeePchQDbkCg6h9ch2q5PrLQ==",
   },
+  {
+    packageName: "@opencode/cli",
+    version: "2.0.22",
+    url: "https://registry.npmjs.org/@opencode/cli/-/cli-2.0.22.tgz",
+    integrity:
+      "sha512-BJzGgplZ3owjPh4Cq5vbe7zMSgYXugOMJmrdlRriUl/9/rKitvK/F+ruk5JJOlIe4fw0bQ+UBAvN8+XGbUqTPw==",
+  },
 ];
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -99,6 +142,67 @@ export function isManagedToolRelease(value: ManagedToolRelease): boolean {
     value.url ===
     `https://${REGISTRY_ORIGIN}/${value.packageName}/-/${fileBase}-${value.version}.tgz`
   );
+}
+
+/** Platform package for this host, when the descriptor stages one instead of `packageName`. */
+export function platformPackageName(
+  descriptor: ManagedToolDescriptor,
+  platform: NodeJS.Platform,
+  arch: string,
+): string | undefined {
+  return descriptor.platformPackages?.[`${platform}-${arch}`];
+}
+
+function releasePackageAllowed(descriptor: ManagedToolDescriptor, packageName: string): boolean {
+  if (descriptor.platformPackages === undefined) return packageName === descriptor.packageName;
+  return Object.values(descriptor.platformPackages).includes(packageName);
+}
+
+/**
+ * True when `candidate` is the managed root or a path inside it. An update
+ * may write only there. Choosing Octant's copy selects that location; it
+ * never authorizes replacing a binary stored somewhere else.
+ */
+export function isInsideManagedToolLocation(managedRoot: string, candidate: string): boolean {
+  const root = resolve(managedRoot);
+  const target = resolve(candidate);
+  return target === root || target.startsWith(`${root}${sep}`);
+}
+
+/**
+ * Turns the upstream package's latest release into the bytes this host
+ * stages. A platform package is read at the same version; its lifecycle
+ * script is never executed.
+ */
+export async function resolveManagedToolRelease(
+  descriptor: ManagedToolDescriptor,
+  upstream: ManagedToolRelease,
+  fetchJson: ManagedFetch,
+  signal: AbortSignal,
+  host: { readonly platform: NodeJS.Platform; readonly arch: string } = {
+    platform: process.platform,
+    arch: process.arch,
+  },
+): Promise<ManagedToolRelease> {
+  if (upstream.packageName !== descriptor.packageName || !isManagedToolRelease(upstream))
+    throw new Error("Tool release is invalid.");
+  const platformPackage = platformPackageName(descriptor, host.platform, host.arch);
+  if (platformPackage === undefined) {
+    if (descriptor.platformPackages !== undefined)
+      throw new Error("Tool has no build for this host.");
+    return upstream;
+  }
+  if (!PACKAGE_NAME.test(platformPackage)) throw new Error("Tool name is invalid.");
+  const bytes = await fetchJson(
+    `https://${REGISTRY_ORIGIN}/${platformPackage}/${upstream.version}`,
+    signal,
+  );
+  if (bytes.byteLength > MAX_DOCUMENT_BYTES) throw new Error("Tool metadata is too large.");
+  const document: unknown = JSON.parse(new TextDecoder().decode(bytes));
+  const release = managedToolReleaseFromResponse(platformPackage, document);
+  if (release === undefined || release.version !== upstream.version)
+    throw new Error("No verifiable tool release was found.");
+  return release;
 }
 
 /** Reads one version entry of the registry package document into a verifiable release. */
@@ -462,8 +566,10 @@ export async function stageManagedTool(
   fetchBytes: ManagedFetch,
   signal: AbortSignal,
 ): Promise<StagedManagedTool> {
-  if (release.packageName !== descriptor.packageName || !isManagedToolRelease(release))
+  if (!releasePackageAllowed(descriptor, release.packageName) || !isManagedToolRelease(release))
     throw new Error("Tool release is invalid.");
+  if (!isInsideManagedToolLocation(root, join(root, release.version)))
+    throw new Error("Tool activation path is invalid.");
   await mkdir(root, { recursive: true, mode: 0o700 });
   const rootMetadata = await lstat(root);
   if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink())
@@ -482,7 +588,8 @@ export async function stageManagedTool(
   await mkdir(staging, { mode: 0o700 });
   try {
     const archiveBytes = await fetchBytes(release.url, signal);
-    if (archiveBytes.byteLength > MAX_ARCHIVE_BYTES)
+    const archiveLimit = descriptor.maxArchiveBytes ?? MAX_ARCHIVE_BYTES;
+    if (archiveBytes.byteLength > archiveLimit)
       throw new Error("Tool archive exceeds the size limit.");
     verifySha512(archiveBytes, release.integrity);
     const archive = join(staging, "release.tgz");
@@ -524,10 +631,11 @@ export async function stageManagedTool(
         throw new Error("Tool dependency version does not match its release.");
     }
 
-    if (manifest.bin === undefined) throw new Error("Tool package entry point is missing.");
-    const binMetadata = await lstat(join(packageRoot, manifest.bin)).catch(() => undefined);
-    if (binMetadata === undefined || !binMetadata.isFile())
-      throw new Error("Tool binary path is missing from its package.");
+    if (manifest.bin !== undefined) {
+      const binMetadata = await lstat(join(packageRoot, manifest.bin)).catch(() => undefined);
+      if (binMetadata === undefined || !binMetadata.isFile())
+        throw new Error("Tool binary path is missing from its package.");
+    }
     const entrypointPath = join(packageRoot, descriptor.entrypoint);
     const entrypointMetadata = await lstat(entrypointPath).catch(() => undefined);
     if (entrypointMetadata === undefined || !entrypointMetadata.isFile())
@@ -551,10 +659,12 @@ async function verifyStagedTool(
   root: string,
   version: string,
 ): Promise<void> {
-  const manifest = manifestFrom(
-    JSON.parse(await readFile(join(root, "package.json"), "utf8")),
-    descriptor.packageName,
-  );
+  const parsed: unknown = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+  if (!record(parsed)) throw new Error("Tool package manifest is invalid.");
+  const name = readString(parsed.name);
+  if (name === undefined || !releasePackageAllowed(descriptor, name))
+    throw new Error("Tool package identity does not match its release.");
+  const manifest = manifestFrom(parsed, name);
   if (manifest.version !== version) throw new Error("Installed tool version is invalid.");
   const entrypoint = await lstat(join(root, descriptor.entrypoint)).catch(() => undefined);
   if (entrypoint === undefined || !entrypoint.isFile())
@@ -579,7 +689,11 @@ export async function readInstalledManagedTool(
 }
 
 export async function commitManagedTool(root: string, staged: StagedManagedTool): Promise<void> {
-  if (!VERSION.test(staged.version) || staged.path !== join(root, staged.version))
+  if (
+    !VERSION.test(staged.version) ||
+    staged.path !== join(root, staged.version) ||
+    !isInsideManagedToolLocation(root, staged.path)
+  )
     throw new Error("Tool activation path is invalid.");
   const temporary = join(root, `.current-${randomUUID()}.json`);
   await writeFile(temporary, JSON.stringify({ version: staged.version }), {

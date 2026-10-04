@@ -22,6 +22,7 @@ import { OctantPopover } from "../ui/base/OctantPopover";
 import { groupLocalServerListeners, type LocalServerListenerGroup } from "./localServerGroups";
 import type { LocalServersController } from "./useLocalServersController";
 import { EnvironmentGroup } from "./EnvironmentGroup";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface LocalServersGroupProps {
   readonly controller: Pick<
@@ -69,9 +70,9 @@ export function LocalServersGroup(props: LocalServersGroupProps) {
   }
   if (props.controller.status === "error") {
     return (
-      <p className="local-servers__error" role="alert">
+      <OctantAlert className="local-servers__error" tone="danger">
         {props.controller.errorMessage ?? "Local servers are unavailable."}
-      </p>
+      </OctantAlert>
     );
   }
   if (props.controller.snapshot === undefined) {
@@ -90,10 +91,10 @@ export function LocalServersGroup(props: LocalServersGroupProps) {
   return (
     <div aria-label="Local servers" className="local-servers">
       {props.controller.failure === undefined ? null : (
-        <p className="local-servers__error" role="alert">
+        <OctantAlert className="local-servers__error" tone="danger">
           <ShieldAlert aria-hidden="true" size={16} strokeWidth={1.8} />
           {props.controller.failure.message}
-        </p>
+        </OctantAlert>
       )}
 
       {total === 0 ? (
@@ -315,6 +316,7 @@ function LocalServerRow(props: {
         </OctantPopover>
 
         {feedback === undefined ? null : (
+          /* ui-boundary-exception: compact-status */
           <span
             className={`local-servers__action-feedback local-servers__action-feedback--${feedback.kind}`}
             role={feedback.kind === "failure" ? "alert" : "status"}

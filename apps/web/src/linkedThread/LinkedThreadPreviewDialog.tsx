@@ -2,6 +2,7 @@ import type { LinkedThreadPreview } from "@octant/contracts";
 import { useId } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface LinkedThreadPreviewDialogProps {
   readonly open: boolean;
@@ -84,9 +85,9 @@ export function LinkedThreadPreviewDialog(props: LinkedThreadPreviewDialogProps)
       ) : null}
 
       {props.error === undefined ? null : (
-        <p className="linked-thread-preview-dialog__error" role="alert">
+        <OctantAlert className="linked-thread-preview-dialog__error" tone="danger">
           {props.error}
-        </p>
+        </OctantAlert>
       )}
 
       <div className="linked-thread-preview-dialog__actions">

@@ -51,6 +51,7 @@ export interface WorkComposerImages {
   readonly takeForSend: () => ReadonlyArray<File>;
   readonly filesForSend: () => ReadonlyArray<File>;
   readonly clearAfterAccepted: () => void;
+  readonly consume: (files: ReadonlyArray<File>) => void;
   readonly consumePaste: (clipboard: DataTransfer | null) => boolean;
 }
 
@@ -189,6 +190,14 @@ export function useWorkComposerImages(): WorkComposerImages {
     takeForSend,
     filesForSend,
     clearAfterAccepted,
+    consume: (files) =>
+      apply((list) =>
+        list.filter((entry) => {
+          if (!files.includes(entry.file)) return true;
+          forget(entry.previewUrl);
+          return false;
+        }),
+      ),
     consumePaste,
   };
 }

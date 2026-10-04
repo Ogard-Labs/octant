@@ -61,6 +61,7 @@ export function ZenNotes({ element, onSave }: ZenNotesProps) {
         value={draft}
       />
       {status === "error" ? (
+        /* ui-boundary-exception: compact-status */
         <p
           aria-label={statusLabel}
           className="zen-widget-status zen-widget-status--error"

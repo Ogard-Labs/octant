@@ -85,6 +85,7 @@ import { WelcomeHeading } from "../composer/WelcomeHeading";
 import type { RunningNowCard } from "./runningNow";
 import type { OctantHostBridge } from "./hostBridge";
 import { WorkKindSwitch } from "./WorkKindSwitch";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 // Cloning a repository from GitHub is a first-time step, not a start-screen
 // staple; its onboarding stays out of the first bundle.
@@ -1172,9 +1173,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             }}
           />
           {props.errorMessage === undefined ? null : (
-            <p className="draft-thread__error" role="alert">
+            <OctantAlert className="draft-thread__error" tone="danger">
               {props.errorMessage}
-            </p>
+            </OctantAlert>
           )}
           <p className="draft-thread__hint">
             Press Enter to start · Shift+Enter for a new line · Escape to close

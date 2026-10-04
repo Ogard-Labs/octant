@@ -239,4 +239,20 @@ describe("createHostControlClient", () => {
 
     await expect(client.status()).rejects.toBeInstanceOf(HostControlClientError);
   });
+
+  it("refuses a host export the server will not cut", async () => {
+    const fetchImpl = fetchReturning(403, { kind: "refused", reason: "local-owner-only" });
+    const client = createHostControlClient({
+      baseUrl: "http://127.0.0.1:4100",
+      fetch: fetchImpl,
+      windowCapability: capability,
+    });
+    await expect(client.exportHost()).resolves.toEqual({
+      kind: "refused",
+      reason: "local-owner-only",
+    });
+    const call = fetchImpl.mock.calls[0] as unknown as [string, RequestInit] | undefined;
+    expect(call?.[0]).toBe("http://127.0.0.1:4100/api/host-control/export");
+    expect(call?.[1].method).toBe("GET");
+  });
 });

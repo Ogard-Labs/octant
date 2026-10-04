@@ -37,6 +37,7 @@ import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
 import { useProductFeedback } from "./useProductFeedback";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { useNativeBrowserSurface } from "./useNativeBrowserSurface";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * Renderer chrome a native page must never be painted over. A native view is a
@@ -600,9 +601,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         </span>
       </header>
       {message === undefined ? null : (
-        <p className="browser-workspace__message" role="alert">
+        <OctantAlert className="browser-workspace__message" tone="warning">
           {message}
-        </p>
+        </OctantAlert>
       )}
       {!activeContext ? (
         <div className="browser-workspace__empty">
@@ -625,12 +626,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           ref={nativeSurface.mount}
         >
           {nativeSurface.failed ? (
-            <div className="browser-workspace__native-error" role="alert">
+            <OctantAlert className="browser-workspace__native-error" tone="danger">
               <p>The live Chromium page could not attach to this pane.</p>
               <OctantButton onClick={nativeSurface.retry} type="button" variant="secondary">
                 Retry
               </OctantButton>
-            </div>
+            </OctantAlert>
           ) : null}
         </div>
       ) : (

@@ -96,6 +96,7 @@ export function OpenInMenu(props: OpenInMenuProps) {
         value={first.id}
       />
       {error === undefined ? null : (
+        /* ui-boundary-exception: screen-reader-announcement */
         <span className="sr-only" role="alert">
           {error}
         </span>

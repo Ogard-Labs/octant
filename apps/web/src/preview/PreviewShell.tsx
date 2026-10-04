@@ -4,6 +4,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import type { PreviewControllerModel } from "./usePreviewController";
 import { selectPreviewViewer } from "./previewViewers";
 import { renderPreviewViewer } from "./PreviewRegistry";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface PreviewShellProps {
   readonly target: PreviewTarget | undefined;
@@ -138,7 +139,7 @@ function renderBody(props: PreviewShellProps): ReactNode {
     case "reconnecting":
       return <p role="status">{model.message ?? "Reconnecting…"}</p>;
     case "unauthorized":
-      return <p role="alert">You do not have access to this preview.</p>;
+      return <OctantAlert tone="warning">You do not have access to this preview.</OctantAlert>;
     case "unavailable":
       return (
         <p role="status">
@@ -176,10 +177,10 @@ function renderBody(props: PreviewShellProps): ReactNode {
       );
     case "failure":
       return (
-        <p role="alert">
+        <OctantAlert tone="warning">
           {model.message ?? "Preview could not be loaded."}
           {model.canRetry ? " Select Retry to try again." : ""}
-        </p>
+        </OctantAlert>
       );
   }
 }

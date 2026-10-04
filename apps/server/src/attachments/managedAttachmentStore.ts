@@ -71,12 +71,42 @@ export interface ManagedAttachmentRecoveryOptions {
   readonly isFinalizedAttachmentReferenced?: (scopeId: string, attachmentId: string) => boolean;
 }
 
+export type ManagedAttachmentQueueResult =
+  | { readonly status: "ok" }
+  | {
+      readonly status: "refused";
+      readonly reason:
+        | "busy"
+        | "already-queued"
+        | "owner-conflict"
+        | "unknown-owner"
+        | "unavailable";
+    };
+
+export type QueuedAttachmentRelease<AttachmentId> =
+  | { readonly disposition: "turn" | "draft" }
+  | {
+      readonly disposition: "removed";
+      /** Read the current durable turn references before deleting any bytes. */
+      readonly isTurnOwned: (attachmentId: AttachmentId) => boolean;
+    };
+
+interface QueuedAttachments {
+  readonly scopeId: string;
+  readonly references: ReadonlyArray<ManagedAttachmentFinalized>;
+}
+
 const STAGED_FILE = "staged.bin.tmp";
 const FINALIZED_FILE = "finalized.bin";
 
 export class ManagedAttachmentStore {
   readonly #root: string;
   readonly #options: ManagedAttachmentStoreOptions;
+  readonly #queued = new Map<string, QueuedAttachments>();
+  readonly #pins = new Map<string, string>();
+  readonly #mutating = new Set<string>();
+  readonly #queueOperations = new Set<string>();
+  readonly #purging = new Set<string>();
 
   constructor(dataDirectory: string, options: ManagedAttachmentStoreOptions) {
     this.#root = join(dataDirectory, options.scopesDirectory);
@@ -87,7 +117,17 @@ export class ManagedAttachmentStore {
     return sanitizeManagedAttachmentDisplayName(name, this.#options.invalidDisplayName);
   }
 
-  async stage(input: {
+  stage(input: {
+    readonly scopeId: string;
+    readonly attachmentId: string;
+    readonly displayName: string;
+    readonly bytes: Uint8Array;
+    readonly signal?: AbortSignal;
+  }): Promise<ManagedAttachmentStaged> {
+    return this.#mutate(input.scopeId, input.attachmentId, () => this.#stage(input));
+  }
+
+  async #stage(input: {
     readonly scopeId: string;
     readonly attachmentId: string;
     readonly displayName: string;
@@ -147,7 +187,11 @@ export class ManagedAttachmentStore {
     };
   }
 
-  async finalize(staged: ManagedAttachmentStaged): Promise<ManagedAttachmentFinalized> {
+  finalize(staged: ManagedAttachmentStaged): Promise<ManagedAttachmentFinalized> {
+    return this.#mutate(staged.scopeId, staged.attachmentId, () => this.#finalize(staged));
+  }
+
+  async #finalize(staged: ManagedAttachmentStaged): Promise<ManagedAttachmentFinalized> {
     const scopeId = this.#options.decodeScopeId(staged.scopeId);
     const attachmentId = this.#options.decodeAttachmentId(staged.attachmentId);
     const displayName = this.sanitizeDisplayName(staged.displayName);
@@ -221,7 +265,11 @@ export class ManagedAttachmentStore {
     return attachmentBytes;
   }
 
-  async remove(scopeId: string, attachmentId: string): Promise<void> {
+  remove(scopeId: string, attachmentId: string): Promise<void> {
+    return this.#mutate(scopeId, attachmentId, () => this.#remove(scopeId, attachmentId));
+  }
+
+  async #remove(scopeId: string, attachmentId: string): Promise<void> {
     const decodedScopeId = this.#options.decodeScopeId(scopeId);
     const decodedAttachmentId = this.#options.decodeAttachmentId(attachmentId);
     let attachmentDir: string;
@@ -241,6 +289,7 @@ export class ManagedAttachmentStore {
       try {
         await access(finalizedPath);
         if (
+          !this.isQueued(entry.scopeId, entry.attachmentId) &&
           options.isFinalizedAttachmentReferenced?.(entry.scopeId, entry.attachmentId) === false
         ) {
           await this.remove(entry.scopeId, entry.attachmentId);
@@ -267,6 +316,25 @@ export class ManagedAttachmentStore {
   }
 
   async purgeScope(scopeId: string): Promise<void> {
+    const decoded = this.#options.decodeScopeId(scopeId);
+    if (
+      this.#purging.has(decoded) ||
+      [...this.#mutating].some((key) => key.startsWith(`${decoded}/`))
+    ) {
+      throw new Error("Attachment storage is busy.");
+    }
+    if ([...this.#queued.values()].some((item) => item.scopeId === decoded)) {
+      throw new Error("Attachments belong to a queued message.");
+    }
+    this.#purging.add(decoded);
+    try {
+      await this.#purgeScope(decoded);
+    } finally {
+      this.#purging.delete(decoded);
+    }
+  }
+
+  async #purgeScope(scopeId: string): Promise<void> {
     const decodedScopeId = this.#options.decodeScopeId(scopeId);
     const scopeDir = join(this.#root, decodedScopeId);
     try {
@@ -277,6 +345,116 @@ export class ManagedAttachmentStore {
     await assertPlainDirectory(this.#root);
     await assertPlainDirectory(scopeDir);
     await rm(scopeDir, { recursive: true, force: true });
+  }
+
+  /** Pins are rebuilt from the queue's private payload before recovery or routing. */
+  pinQueued(
+    scopeId: string,
+    ownerId: string,
+    references: ReadonlyArray<ManagedAttachmentFinalized>,
+  ): ManagedAttachmentQueueResult {
+    const scope = this.#options.decodeScopeId(scopeId);
+    const owner = `${scope}/${ownerId}`;
+    const ids = references.map((reference) =>
+      this.#options.decodeAttachmentId(reference.attachmentId),
+    );
+    if (
+      ownerId.length === 0 ||
+      new Set(ids).size !== ids.length ||
+      references.some((ref) => ref.scopeId !== scope)
+    ) {
+      return { status: "refused", reason: "owner-conflict" };
+    }
+    if (this.#queueOperations.has(owner)) return { status: "refused", reason: "busy" };
+    const existing = this.#queued.get(owner);
+    if (existing !== undefined) {
+      const same =
+        existing.references.length === references.length &&
+        existing.references.every((ref, index) => {
+          const candidate = references[index];
+          return (
+            candidate !== undefined &&
+            ref.scopeId === candidate.scopeId &&
+            ref.attachmentId === candidate.attachmentId &&
+            ref.displayName === candidate.displayName &&
+            ref.size === candidate.size &&
+            ref.hash === candidate.hash &&
+            ref.finalizedAt === candidate.finalizedAt
+          );
+        });
+      return same ? { status: "ok" } : { status: "refused", reason: "owner-conflict" };
+    }
+    if (this.#purging.has(scope) || ids.some((id) => this.#mutating.has(`${scope}/${id}`))) {
+      return { status: "refused", reason: "busy" };
+    }
+    if (ids.some((id) => this.#pins.has(`${scope}/${id}`))) {
+      return { status: "refused", reason: "already-queued" };
+    }
+    this.#queued.set(owner, { scopeId: scope, references: references.map((ref) => ({ ...ref })) });
+    for (const id of ids) this.#pins.set(`${scope}/${id}`, owner);
+    return { status: "ok" };
+  }
+
+  isQueued(scopeId: string, attachmentId: string): boolean {
+    return this.#pins.has(`${scopeId}/${attachmentId}`);
+  }
+
+  async verifyQueued(scopeId: string, ownerId: string): Promise<ManagedAttachmentQueueResult> {
+    const owner = `${scopeId}/${ownerId}`;
+    const queued = this.#queued.get(owner);
+    if (queued === undefined) return { status: "refused", reason: "unknown-owner" };
+    if (this.#queueOperations.has(owner)) return { status: "refused", reason: "busy" };
+    this.#queueOperations.add(owner);
+    try {
+      for (const reference of queued.references) await this.read(reference);
+      return { status: "ok" };
+    } catch {
+      return { status: "refused", reason: "unavailable" };
+    } finally {
+      this.#queueOperations.delete(owner);
+    }
+  }
+
+  async releaseQueued(
+    scopeId: string,
+    ownerId: string,
+    options: QueuedAttachmentRelease<string>,
+  ): Promise<ManagedAttachmentQueueResult> {
+    const owner = `${scopeId}/${ownerId}`;
+    const queued = this.#queued.get(owner);
+    // Retrying cleanup must neither add a reference nor remove a later owner's bytes.
+    if (queued === undefined) return { status: "ok" };
+    if (this.#queueOperations.has(owner)) return { status: "refused", reason: "busy" };
+    this.#queueOperations.add(owner);
+    try {
+      if (options.disposition === "removed") {
+        for (const ref of queued.references) {
+          if (!options.isTurnOwned(ref.attachmentId)) await this.#remove(scopeId, ref.attachmentId);
+        }
+      }
+      for (const ref of queued.references) this.#pins.delete(`${scopeId}/${ref.attachmentId}`);
+      this.#queued.delete(owner);
+      return { status: "ok" };
+    } catch {
+      return { status: "refused", reason: "unavailable" };
+    } finally {
+      this.#queueOperations.delete(owner);
+    }
+  }
+
+  async #mutate<T>(scopeId: string, attachmentId: string, operation: () => Promise<T>): Promise<T> {
+    const scope = this.#options.decodeScopeId(scopeId);
+    const id = this.#options.decodeAttachmentId(attachmentId);
+    const key = `${scope}/${id}`;
+    if (this.isQueued(scope, id)) throw new Error("Attachment belongs to a queued message.");
+    if (this.#purging.has(scope) || this.#mutating.has(key))
+      throw new Error("Attachment storage is busy.");
+    this.#mutating.add(key);
+    try {
+      return await operation();
+    } finally {
+      this.#mutating.delete(key);
+    }
   }
 
   async *#managedAttachments(): AsyncGenerator<{

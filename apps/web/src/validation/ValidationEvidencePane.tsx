@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export type ValidationPaneStatus =
   | "loading"
@@ -137,6 +138,7 @@ export function ValidationEvidencePane(props: ValidationEvidencePaneProps) {
           <span>{label}</span>
         </header>
         {props.errorMessage === undefined ? null : (
+          /* ui-boundary-exception: compact-status */
           <p
             className="validation-pane__message"
             role={props.status === "denied" ? "alert" : undefined}
@@ -166,9 +168,9 @@ export function ValidationEvidencePane(props: ValidationEvidencePaneProps) {
           <span>Validation evidence failed</span>
         </header>
         {props.errorMessage !== undefined ? (
-          <p className="validation-pane__message" role="alert">
+          <OctantAlert className="validation-pane__message" tone="warning">
             {props.errorMessage}
-          </p>
+          </OctantAlert>
         ) : null}
         {props.onRetry !== undefined ? (
           <OctantButton

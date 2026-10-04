@@ -70,7 +70,9 @@ Produces:
 - `out/Octant-<version>-linux-x64.AppImage` — portable dogfood artifact
 - `out/Octant-linux-x64/` — electron-packager directory kept beside it for inspection
 
-The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. It is an **unsigned dogfood** artifact. Packaging it (locally or from the release matrix) is not the same as shipping signed auto-update: the signed `<ring>/linux-x64.json` feeds are published, and the desktop updater still refuses Linux installs, because replacing a running AppImage is a path Octant has not built. A signed feed is necessary, not sufficient, and macOS is the only platform with an in-app update channel today.
+The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. The image file is not code-signed the way the Apple Silicon app is. When you launch that image, Octant checks the same signed `<ring>/linux-x64.json` feed, downloads the new image, and verifies the signature and the hash before it writes anything. It then writes the new image beside the one you started, flushes it to disk, renames it into place, and relaunches. If relaunch fails, the previous image is restored.
+
+It will not update a package or an unpacked archive, and it will not update an image it cannot write. The reason appears in **Settings → General → Updates**. It also will not relaunch while an agent is still working or a thread is waiting on you — the same rule as on macOS. A launch that is not the portable image does not contact the update service.
 
 Launch:
 
@@ -174,12 +176,17 @@ you — finish or checkpoint that work first.
 An update is only ever installed if Octant can prove where it came from.
 Trust comes from a signature, never from the server that answered: Octant
 verifies a signature over the release notice against a key built into the app,
-checks the downloaded bytes against the hash that notice named, and macOS
-then verifies the replacement's own code signature before swapping anything.
-If any of those refuses — a bad signature, a download that does not match, a
-version that is not newer, a build for another kind of Mac, or an update
-service it cannot reach — Octant tells you which and installs nothing. There
-is no way to wave a failed check through.
+and checks the downloaded bytes against the hash that notice named, before
+anything is installed. On macOS the platform then verifies the replacement's
+own code signature before swapping anything. On Linux there is no
+operating-system code signature; the same feed signature and hash are the
+gates, and Octant replaces the portable image you launched only after they
+pass. If any of those refuses — a bad signature, a download that does not
+match, a version that is not newer, a build for another computer, a Linux
+install that is not a portable image, an image Octant cannot write, or an
+update service it cannot reach — Octant tells you which and installs nothing.
+The reason is shown in **Settings → General → Updates**. There is no way to
+wave a failed check through.
 
 Because the bytes are verified rather than the host, the download may be
 served from anywhere the release notice points, and pointing Octant at a
@@ -259,7 +266,7 @@ update the desktop app, and it does not fetch notes.
 ### What an update check sends
 
 A check is a plain HTTPS GET for a small JSON file listing the latest
-version. Octant still compares versions on your Mac, so a service that
+version. Octant still compares versions on this computer, so a service that
 ignores what you send works identically. The request User-Agent is `Octant`
 with no version, so it cannot reconstruct one. Cookies and stored credentials
 are omitted. It sends:
@@ -278,8 +285,9 @@ checks and nothing else.
 If the release notice points the download at a release hosted elsewhere,
 that host sees your IP address when the download itself is fetched — a
 download, not a check, and only when you ask for one. Octant hashes those
-bytes locally and then serves them to the platform updater over loopback, so
-the artifact host is contacted once.
+bytes locally before anything is installed. On macOS it then serves them to
+the platform updater over loopback. On Linux it writes them beside the
+portable image. Either way the artifact host is contacted once.
 
 A remote browser or phone client never runs this path: only the desktop app
 updates itself. See [Privacy and security](/advanced/privacy-and-security#host-initiated-network)

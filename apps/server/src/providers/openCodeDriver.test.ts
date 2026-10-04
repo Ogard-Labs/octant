@@ -1255,6 +1255,28 @@ describe("OpenCode driver", () => {
       expect(fixture.calls).not.toContain("session.promptAsync");
     },
   );
+
+  it("marks a version-selected 2.x catalogue as listing only", async () => {
+    const fixture = driverFixture({
+      process: {
+        start: () =>
+          Effect.acquireRelease(
+            Effect.succeed({
+              authorization: "Basic redacted",
+              pid: process.pid,
+              runtime: "beta" as const,
+              version: "opencode v2.0.22",
+              url: new URL("http://127.0.0.1:1/"),
+            }),
+            () => Effect.void,
+          ),
+      },
+    });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("ready");
+    expect(probe.models.length).toBeGreaterThan(0);
+    expect(probe.message).toBe("OpenCode 2 is listing only, turns not yet supported.");
+  });
 });
 
 function driverFixture(

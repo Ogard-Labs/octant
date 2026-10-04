@@ -13,6 +13,7 @@ import { FolderOpen, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { FileName, pathBasename, pathParent } from "../lib/fileName";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 type FileEntry = Extract<WorkFileListingEntry, { readonly kind: "file" }>;
 
@@ -167,9 +168,9 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
       ) : null}
 
       {status === "error" ? (
-        <p className="work-files-panel__error" role="alert">
+        <OctantAlert className="work-files-panel__error" tone="danger">
           {message ?? "Work files are unavailable."}
-        </p>
+        </OctantAlert>
       ) : null}
 
       {truncated ? (

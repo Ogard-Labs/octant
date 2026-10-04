@@ -238,9 +238,9 @@ export class ProductFeedbackService {
 
   /**
    * Hand a thread's waiting notes to the turn about to run, and record that
-   * each one went. A note is carried exactly once: marking it delivered is the
-   * same journal write the turn's identity is recorded in, so a note cannot be
-   * silently sent twice or lost between two turns.
+   * each one went. Call synchronously after the turn's final admission check:
+   * refused preparation leaves notes pending, while an admitted or uncertain
+   * delivery keeps its journaled claim so another turn cannot send it again.
    */
   deliver(input: {
     readonly threadId: string;

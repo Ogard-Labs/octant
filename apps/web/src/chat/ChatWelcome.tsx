@@ -245,6 +245,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
           />
         </div>
         {visibleStatusMessage === undefined ? null : (
+          /* ui-boundary-exception: compact-status */
           <p
             className="draft-thread__error"
             role={props.errorMessage === undefined ? "status" : "alert"}

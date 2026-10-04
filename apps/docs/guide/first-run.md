@@ -37,7 +37,9 @@ the Providers section:
 1. Create a new provider instance (for example, OpenCode, Codex, Claude, or an
    OpenAI-compatible endpoint).
 2. Provide the required configuration:
-   - **OpenCode**: absolute path to the `opencode` binary. Run `opencode login`
+   - **OpenCode**: absolute path to the `opencode` binary, or use **Update** in
+     Providers to install Octant's copy and agree before switching to it.
+     Update never replaces an OpenCode you installed elsewhere. Run `opencode login`
      outside Octant if authentication is required.
    - **Codex**: absolute path to the `codex` binary. Run `codex login` outside
      Octant if authentication is required.

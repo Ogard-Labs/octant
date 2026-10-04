@@ -46,6 +46,7 @@ import {
   IdeogramImageFields,
   OpenAiImageFields,
 } from "./ImageConfigurationForms";
+import { OctantAlert } from "../../ui/base/OctantAlert";
 
 export type ProviderCreateFormProps = Pick<
   ProviderSettingsViewProps,
@@ -868,9 +869,9 @@ export function ProviderCreateForm(
               </p>
             ) : null}
             {validationMessage === undefined ? null : (
-              <p className="provider-settings__alert" role="alert">
+              <OctantAlert className="provider-settings__alert" tone="warning">
                 {validationMessage}
-              </p>
+              </OctantAlert>
             )}
             <OctantButton
               className="settings-view__action window-no-drag"

@@ -1,3 +1,4 @@
+import type { CodeOperationExecuteOptions } from "./code/codeOperationService";
 import {
   decodeGitHistoryQuery,
   decodeGitHistoryResult,
@@ -219,7 +220,7 @@ export interface CodeRouteService {
   readonly executeOperation?: (
     authenticatedWindowId: WindowId,
     command: CodeOperationCommand,
-    options?: { readonly initiator?: "user" | "agent" },
+    options?: CodeOperationExecuteOptions,
   ) => Promise<CodeOperationResult> | CodeOperationResult;
   readonly inspectTerminal?: (
     authenticatedWindowId: WindowId,

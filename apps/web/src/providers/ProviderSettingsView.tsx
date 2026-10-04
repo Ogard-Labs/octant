@@ -39,12 +39,15 @@ import type { ReactNode } from "react";
 import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OpenCodeManagedUpdate } from "./OpenCodeManagedUpdate";
+import type { OctantHostBridge } from "../shell/hostBridge";
 import {
   ProviderCreateForm,
   type ProviderCreateProviderType,
 } from "./ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "./ProviderSettingsList";
 import type { TransientProviderCredential } from "./useProviderController";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ProviderSettingsViewProps {
   readonly status: "loading" | "ready" | "disconnected";
@@ -64,6 +67,7 @@ export interface ProviderSettingsViewProps {
   readonly busy: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly message?: string;
+  readonly hostBridge?: OctantHostBridge;
   /** Open provider-owned sign-in pages through the desktop host bridge. */
   readonly onOpenExternalUrl?: (url: string) => void;
   readonly onCreate: (
@@ -360,11 +364,23 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           </OctantButton>
         ) : null}
         {props.message === undefined ? null : (
-          <p className="provider-settings__alert" role="alert">
+          <OctantAlert className="provider-settings__alert" tone="warning">
             {props.message}
-          </p>
+          </OctantAlert>
         )}
       </div>
+      <OpenCodeManagedUpdate
+        instances={props.instances
+          .filter((instance) => instance.driverKind === "opencode")
+          .map((instance) => ({
+            id: instance.id,
+            displayName: instance.displayName,
+            binaryPath:
+              "binaryPath" in instance.configuration ? instance.configuration.binaryPath : "",
+          }))}
+        {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+        onChangeBinary={props.onChangeBinary}
+      />
       {props.discovery}
       <ProviderSettingsList
         busy={props.busy}

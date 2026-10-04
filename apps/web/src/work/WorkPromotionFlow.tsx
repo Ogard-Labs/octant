@@ -7,6 +7,7 @@ import { SurfaceEmpty, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface WorkPromotionFlowProps {
   readonly controller: WorkPromotionController;
@@ -54,9 +55,9 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
   return (
     <div className="work-promotion">
       {errorMessage !== undefined ? (
-        <p className="oct-meta work-promotion__error" role="alert">
+        <OctantAlert className="oct-meta work-promotion__error" tone="danger">
           {errorMessage}
-        </p>
+        </OctantAlert>
       ) : null}
       <SurfaceSection
         className="work-promotion__propose"

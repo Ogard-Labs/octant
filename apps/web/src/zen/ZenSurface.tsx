@@ -1033,6 +1033,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
       ) : null}
 
       {manualPanel === null ? null : (
+        /* ui-boundary-exception: non-modal-panel */
         <OctantCard
           aria-label={manualPanel === "appearance" ? "Zen appearance" : "Add to this space"}
           className="zen-panel zen-surface__manual-panel window-no-drag px-6"
