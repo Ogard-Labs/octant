@@ -93,6 +93,7 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
         exportClient?.prepareExport !== undefined &&
         exportClient.decideExport !== undefined ? (
           <CanvasExportPanel
+            key={String(exportOffers.canvasId)}
             offers={exportOffers}
             onDecide={exportClient.decideExport}
             onPrepare={exportClient.prepareExport}
