@@ -1,0 +1,462 @@
+/**
+ * The in-tree replica store for a folder the person picked.
+ *
+ * Writes stay under `<folder>/Octant Sync/`. Each publish lands in a temporary
+ * file in the same directory, then an atomic publish onto the key. An existing
+ * key is not replaced. A file the sync client has not downloaded, and a
+ * conflict copy the sync client left behind, are reported instead of being
+ * treated as entries. A half-written temporary file is not listed.
+ *
+ * Authority matches the artifact mirror's global folder: inside the user's
+ * home, unless the standing access-outside-project approval exists.
+ */
+
+import { execFile as execFileCallback } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { promisify } from "node:util";
+import {
+  REPLICA_STORE_CONTRIBUTION_KIND,
+  type ReplicaStore,
+  type ReplicaStoreGetResult,
+  type ReplicaStoreListResult,
+  type ReplicaStorePutResult,
+  type ReplicaStoreSkipReason,
+  type ReplicaStoreStatus,
+} from "@octant/plugin-api/replica-store";
+import { callOfferedReplicaStore } from "@octant/plugin-host/replica-store";
+import { isInsideHomeDirectory } from "../canvas/artifactMirrorFilePort";
+
+const execFile = promisify(execFileCallback);
+
+/** The only directory this store writes. The person picks the parent. */
+export const SYNCED_FOLDER_REPLICA_DIRECTORY = "Octant Sync";
+
+/**
+ * Synthetic flag from the platform stat word. A set bit means the file is a
+ * cloud placeholder that has not been downloaded. Reading it can fetch it, so
+ * the store never opens one.
+ */
+export const DATALESS_FLAG = 0x40000000;
+
+const LIST_PAGE_SIZE = 64;
+
+export interface OpenSyncedFolderReplicaStoreInput {
+  readonly folder: string;
+  readonly homeDirectory: string;
+  readonly outsideHomeApproved: boolean;
+  readonly installed: boolean;
+  readonly enabled: boolean;
+  /**
+   * Platform file flags for one path. Tests pass a stand-in; production reads
+   * the dataless bit without opening the file.
+   */
+  readonly readFileFlags?: (absolutePath: string) => Promise<number>;
+  /** Bound for one list page. Production uses the default. */
+  readonly pageSize?: number;
+}
+
+export type OpenSyncedFolderReplicaStoreResult =
+  | { readonly status: "withheld"; readonly reason: "not-installed" | "disabled" }
+  | { readonly status: "offered"; readonly store: ReplicaStore };
+
+type ReadyRoot = {
+  readonly status: "ready";
+  readonly folder: string;
+  readonly syncRoot: string;
+};
+
+type RootResolution =
+  | ReadyRoot
+  | { readonly status: "not-connected" }
+  | { readonly status: "refused" };
+
+/**
+ * Open the folder store, or withhold it.
+ *
+ * A disabled or uninstalled store is not constructed and not called. The
+ * folder is not inspected on that path.
+ */
+export function openSyncedFolderReplicaStore(
+  input: OpenSyncedFolderReplicaStoreInput,
+): OpenSyncedFolderReplicaStoreResult {
+  const opened = callOfferedReplicaStore(
+    { installed: input.installed, enabled: input.enabled },
+    () => createSyncedFolderReplicaStore(input),
+  );
+  if ("reason" in opened) return opened;
+  return { status: "offered", store: opened };
+}
+
+export function createSyncedFolderReplicaStore(
+  input: OpenSyncedFolderReplicaStoreInput,
+): ReplicaStore {
+  const readFileFlags = input.readFileFlags ?? readPlatformFileFlags;
+  const pageSize = input.pageSize ?? LIST_PAGE_SIZE;
+
+  async function resolveRoot(): Promise<RootResolution> {
+    if (!isAbsolute(input.folder)) return { status: "refused" };
+    const lexical = resolve(input.folder);
+    if (!folderAllowed(lexical, input.homeDirectory, input.outsideHomeApproved)) {
+      return { status: "refused" };
+    }
+    let canonical: string;
+    try {
+      canonical = await realpath(lexical);
+    } catch {
+      return { status: "not-connected" };
+    }
+    if (!folderAllowed(canonical, input.homeDirectory, input.outsideHomeApproved)) {
+      return { status: "refused" };
+    }
+    try {
+      const metadata = await lstat(canonical);
+      if (!metadata.isDirectory()) return { status: "not-connected" };
+    } catch {
+      return { status: "not-connected" };
+    }
+    return {
+      status: "ready",
+      folder: canonical,
+      syncRoot: join(canonical, SYNCED_FOLDER_REPLICA_DIRECTORY),
+    };
+  }
+
+  return {
+    kind: REPLICA_STORE_CONTRIBUTION_KIND,
+    async status(): Promise<ReplicaStoreStatus> {
+      const root = await resolveRoot();
+      if (root.status === "refused") return "refused";
+      if (root.status === "not-connected") return "not-connected";
+      return "ready";
+    },
+
+    async list(afterCursor?: string): Promise<ReplicaStoreListResult> {
+      const root = await resolveRoot();
+      if (root.status === "refused") return { status: "refused", reason: "outside-home" };
+      if (root.status === "not-connected") return { status: "not-connected" };
+      return listSyncRoot(root.syncRoot, afterCursor, pageSize, readFileFlags);
+    },
+
+    async get(key: string): Promise<ReplicaStoreGetResult> {
+      const root = await resolveRoot();
+      if (root.status === "refused") return { status: "refused", reason: "outside-home" };
+      if (root.status === "not-connected") return { status: "not-connected" };
+      const destination = resolveReplicaKey(root.syncRoot, key);
+      if (destination === undefined) return { status: "refused", reason: "key-refused" };
+      const named = skipReason(key, 0);
+      if (named !== undefined) return { status: "refused", reason: named };
+      try {
+        const metadata = await lstat(destination);
+        if (metadata.isSymbolicLink()) return { status: "refused", reason: "key-refused" };
+        if (!metadata.isFile()) return { status: "missing" };
+      } catch (error) {
+        if (isEnoent(error)) return { status: "missing" };
+        return { status: "refused", reason: "key-refused" };
+      }
+      if (isDataless(await flagsOf(destination, readFileFlags))) {
+        return { status: "refused", reason: "not-downloaded" };
+      }
+      try {
+        const bytes = await readFile(destination);
+        return { status: "ready", bytes: new Uint8Array(bytes) };
+      } catch (error) {
+        if (isEnoent(error)) return { status: "missing" };
+        return { status: "refused", reason: "key-refused" };
+      }
+    },
+
+    async putIfAbsent(key: string, bytes: Uint8Array): Promise<ReplicaStorePutResult> {
+      const root = await resolveRoot();
+      if (root.status === "refused") return { status: "refused", reason: "outside-home" };
+      if (root.status === "not-connected") return { status: "not-connected" };
+      const destination = resolveReplicaKey(root.syncRoot, key);
+      if (destination === undefined || skipReason(key, 0) !== undefined) {
+        return { status: "refused", reason: "key-refused" };
+      }
+      if (await pathExists(destination)) return { status: "already-exists" };
+      const confined = await ensureConfinedDirectory(root.folder, root.syncRoot, destination);
+      if (!confined) return { status: "refused", reason: "key-refused" };
+      if (await pathExists(destination)) return { status: "already-exists" };
+      return publishIfAbsent(destination, bytes);
+    },
+  };
+}
+
+/**
+ * Read the platform file-flag word without opening the file.
+ *
+ * On macOS the dataless bit is in that word. Opening the file can download
+ * it, which is the opposite of ignoring a placeholder. Other platforms have
+ * no equivalent bit; name-based stubs are still recognized.
+ */
+export async function readPlatformFileFlags(absolutePath: string): Promise<number> {
+  if (process.platform !== "darwin") return 0;
+  try {
+    const { stdout } = await execFile("/usr/bin/stat", ["-f", "%f", absolutePath], {
+      timeout: 2_000,
+      encoding: "utf8",
+    });
+    const flags = Number.parseInt(stdout.trim(), 10);
+    // A flag word we cannot read is treated as not downloaded. Opening the
+    // file to find out would fetch a placeholder.
+    return Number.isFinite(flags) ? flags : DATALESS_FLAG;
+  } catch {
+    return DATALESS_FLAG;
+  }
+}
+
+export function isSyncedFolderWriteTempName(name: string): boolean {
+  return name.startsWith(".") && name.includes(".octant-write-") && name.endsWith(".tmp");
+}
+
+function folderAllowed(
+  folder: string,
+  homeDirectory: string,
+  outsideHomeApproved: boolean,
+): boolean {
+  return isInsideHomeDirectory(folder, homeDirectory) || outsideHomeApproved;
+}
+
+function isContained(root: string, candidate: string): boolean {
+  const relation = relative(resolve(root), resolve(candidate));
+  return (
+    relation === "" ||
+    (!relation.startsWith(`..${sep}`) && relation !== ".." && !isAbsolute(relation))
+  );
+}
+
+/**
+ * A key is a relative path under the sync directory. Anything that could
+ * leave that directory, or that is one of our own temporary names, is refused
+ * before a write.
+ */
+function resolveReplicaKey(syncRoot: string, key: string): string | undefined {
+  if (key.length === 0 || key.length > 512 || key.includes("\0") || key.includes("\\")) {
+    return undefined;
+  }
+  if (key.startsWith("/") || key.startsWith(".")) return undefined;
+  const segments = key.split("/");
+  if (
+    segments.some(
+      (segment) =>
+        segment.length === 0 || segment === "." || segment === ".." || segment.startsWith("."),
+    )
+  ) {
+    return undefined;
+  }
+  const destination = resolve(syncRoot, key);
+  if (!isContained(syncRoot, destination) || destination === resolve(syncRoot)) return undefined;
+  return destination;
+}
+
+function skipReason(key: string, flags: number): ReplicaStoreSkipReason | undefined {
+  const name = key.slice(key.lastIndexOf("/") + 1);
+  if (isConflictCopyName(name)) return "conflict-copy";
+  if (isPlaceholderName(name) || isDataless(flags)) return "not-downloaded";
+  return undefined;
+}
+
+function isConflictCopyName(name: string): boolean {
+  return / \(conflicted copy\b/i.test(name) || name.includes(".sync-conflict-");
+}
+
+function isPlaceholderName(name: string): boolean {
+  return name.endsWith(".icloud");
+}
+
+function isDataless(flags: number): boolean {
+  return (flags & DATALESS_FLAG) !== 0;
+}
+
+async function flagsOf(
+  absolutePath: string,
+  readFileFlags: (absolutePath: string) => Promise<number>,
+): Promise<number> {
+  try {
+    return await readFileFlags(absolutePath);
+  } catch {
+    return DATALESS_FLAG;
+  }
+}
+
+async function listSyncRoot(
+  syncRoot: string,
+  afterCursor: string | undefined,
+  pageSize: number,
+  readFileFlags: (absolutePath: string) => Promise<number>,
+): Promise<ReplicaStoreListResult> {
+  const files = await walkFiles(syncRoot);
+  let index = 0;
+  if (afterCursor !== undefined) {
+    const next = files.findIndex((file) => file > afterCursor);
+    index = next < 0 ? files.length : next;
+  }
+  const entries: { key: string }[] = [];
+  const reports: { key: string; reason: ReplicaStoreSkipReason }[] = [];
+  let lastExamined: string | undefined;
+  let examined = 0;
+  for (let cursor = index; cursor < files.length; cursor += 1) {
+    const key = files[cursor];
+    if (key === undefined) break;
+    lastExamined = key;
+    examined += 1;
+    const name = key.slice(key.lastIndexOf("/") + 1);
+    if (isSyncedFolderWriteTempName(name)) {
+      if (examined >= pageSize) break;
+      continue;
+    }
+    const conflictOrPlaceholder = skipReason(key, 0);
+    if (conflictOrPlaceholder === "conflict-copy" || isPlaceholderName(name)) {
+      reports.push({ key, reason: conflictOrPlaceholder ?? "not-downloaded" });
+      if (examined >= pageSize) break;
+      continue;
+    }
+    const absolute = resolve(syncRoot, key);
+    if (!isContained(syncRoot, absolute)) {
+      if (examined >= pageSize) break;
+      continue;
+    }
+    let metadata;
+    try {
+      metadata = await lstat(absolute);
+    } catch {
+      if (examined >= pageSize) break;
+      continue;
+    }
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      if (examined >= pageSize) break;
+      continue;
+    }
+    const flags = await flagsOf(absolute, readFileFlags);
+    if (isDataless(flags)) {
+      reports.push({ key, reason: "not-downloaded" });
+      if (examined >= pageSize) break;
+      continue;
+    }
+    entries.push({ key });
+    if (examined >= pageSize || entries.length >= pageSize) break;
+  }
+  const more = index + examined < files.length;
+  return {
+    status: "ready",
+    entries,
+    reports,
+    ...(more && lastExamined !== undefined ? { nextCursor: lastExamined } : {}),
+  };
+}
+
+async function walkFiles(syncRoot: string): Promise<readonly string[]> {
+  let listed: Dirent[];
+  try {
+    listed = await readdir(syncRoot, { recursive: true, withFileTypes: true });
+  } catch (error) {
+    if (isEnoent(error)) return [];
+    throw error;
+  }
+  const files: string[] = [];
+  for (const entry of listed) {
+    if (!entry.isFile()) continue;
+    const parent = entry.parentPath;
+    const absolute =
+      parent !== undefined && parent.length > 0
+        ? join(parent, entry.name)
+        : join(syncRoot, entry.name);
+    if (!isContained(syncRoot, absolute)) continue;
+    files.push(relative(syncRoot, absolute).split(sep).join("/"));
+  }
+  files.sort();
+  return files;
+}
+
+/**
+ * Create the sync directory and the key's parent, then prove both still sit
+ * inside the folder. A symlink planted at either name would otherwise publish
+ * outside the folder the person picked.
+ */
+async function ensureConfinedDirectory(
+  folder: string,
+  syncRoot: string,
+  destination: string,
+): Promise<boolean> {
+  if (await isEscapingLink(syncRoot, folder)) return false;
+  try {
+    await mkdir(syncRoot, { recursive: true });
+    const canonicalSync = await realpath(syncRoot);
+    if (!isContained(folder, canonicalSync)) return false;
+    const parent = dirname(destination);
+    if (await isEscapingLink(parent, canonicalSync)) return false;
+    await mkdir(parent, { recursive: true });
+    const canonicalParent = await realpath(parent);
+    return isContained(canonicalSync, canonicalParent);
+  } catch {
+    return false;
+  }
+}
+
+async function isEscapingLink(path: string, root: string): Promise<boolean> {
+  try {
+    const metadata = await lstat(path);
+    if (!metadata.isSymbolicLink()) return false;
+    const target = await realpath(path);
+    return !isContained(root, target);
+  } catch (error) {
+    if (isEnoent(error)) return false;
+    return true;
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (isEnoent(error)) return false;
+    return true;
+  }
+}
+
+/**
+ * Write the complete bytes beside the key, then rename them onto it.
+ *
+ * The temporary file is in the same directory, so the rename is atomic and
+ * cannot cross a device. A reader never sees a partial file under the key.
+ * rename also replaces, so it runs only when the key is absent. An existing
+ * key is returned as already-exists and its bytes are not written.
+ */
+async function publishIfAbsent(
+  destination: string,
+  bytes: Uint8Array,
+): Promise<ReplicaStorePutResult> {
+  const name = destination.split(sep).pop() ?? "entry";
+  const temp = join(dirname(destination), `.${name}.octant-write-${randomUUID()}.tmp`);
+  try {
+    await writeFile(temp, bytes, { flag: "wx" });
+    if (await pathExists(destination)) return { status: "already-exists" };
+    await rename(temp, destination);
+    return { status: "stored" };
+  } catch {
+    return { status: "refused", reason: "write-failed" };
+  } finally {
+    await unlink(temp).catch(() => undefined);
+  }
+}
+
+function isEnoent(error: unknown): boolean {
+  return isNodeError(error) && error.code === "ENOENT";
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}

@@ -874,6 +874,18 @@ flowchart LR
   host that joins in the middle cannot have seen anything earlier. A member's
   revocation is an entry the member writes; it is refused for a revoked
   instance rather than re-admitting it, because re-joining is a new identity.
+- **Artifact replica store.** A replica-store contribution offers list, get, and
+  put-if-absent. put-if-absent returns already-exists and leaves the existing
+  bytes unchanged. The store's status is ready, not-connected, or refused. A
+  disabled or uninstalled store is not offered and is not called. The in-tree
+  folder store writes only under `<folder>/Octant Sync/`. A write lands in a
+  temporary file in that same directory, then an atomic rename onto the key
+  only when that key is absent. A half-written temporary file is not an entry. A
+  file the sync client has not downloaded, and a conflict copy the sync client
+  left behind, are reported instead of being treated as entries. A folder
+  outside the user's home is refused unless the standing access-outside-project
+  approval exists — the same rule as the artifact mirror's global folder.
+  Publish and pull are not this store; they call it.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -1372,6 +1384,9 @@ Simulator.app, `serve-sim`, or `serve-avd`.
 The approved design bounds a feature's reach through public, provider-neutral
 ports. New providers and tools use `@octant/provider-sdk`, `@octant/plugin-api`,
 and `@octant/plugin-host`; they do not gain direct access to host internals.
+A replica-store contribution offers list, get, and put-if-absent. The
+synced-folder store ships in-tree on that seam and writes only under the
+folder the person picked.
 Integration and board modules receive typed, capability-scoped ports, without raw
 filesystem, shell, or credential handles. OAuth access and refresh tokens remain
 in the host credential service; plugin state contains only opaque references.
