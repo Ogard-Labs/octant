@@ -23,7 +23,7 @@ export interface ThreadSearchProject {
 }
 
 /** The folder word shown beside a thread. A label, never a filter. */
-export type ThreadSearchUnfiledLabel = "Unfiled" | "Recents";
+export type ThreadSearchUnfiledLabel = "No project" | "Unfiled" | "Recents";
 
 export interface ThreadSearchMatchRange {
   readonly start: number;
@@ -107,7 +107,7 @@ export function buildThreadSearchResults(
   const needle = normalize(input.query);
   const limit = input.limit ?? THREAD_SEARCH_GROUP_LIMIT;
   const projectNames = new Map(input.projects.map((project) => [project.id, project.name]));
-  const unfiledLabel = input.unfiledLabel ?? "Unfiled";
+  const unfiledLabel = input.unfiledLabel ?? "No project";
 
   const titleMatches = input.threads
     .filter((thread) => thread.mode === input.mode)

@@ -25,6 +25,14 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+The Project tree places each active thread under its listed Project or under
+**No project**, never both. No project is a collapsible folder row following
+the Projects with no horizontal divider or separate section heading. It is
+absent when empty and does not create a Project or filesystem authority.
+Sidebar search reveals matches inside collapsed groups and restores their
+collapse state when cleared. The Activity feed is an alternative view of the
+same threads; it is not shown as a duplicate list beneath the Project tree.
+
 Chat, Work, and Code keep the active mode's sidebar current with projection-only
 navigation reads (`GET /api/chat/navigation`, `GET /api/work/navigation`,
 `GET /api/code/navigation`). Work bootstrap still validates Project roots, while

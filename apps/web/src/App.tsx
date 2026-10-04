@@ -6172,11 +6172,11 @@ function LaunchedShell(
                       ? {
                           addProjectLabel: "chat-project" as const,
                           onAddProject: () => openProjectCreate(),
-                          unfiledLabel: "Recents" as const,
+                          unfiledLabel: "No project" as const,
                         }
                       : {
                           onAddProject: () => openProjectCreate(),
-                          unfiledLabel: "Recents" as const,
+                          unfiledLabel: "No project" as const,
                         })}
                     onArchive={(projectId) => void projectController.setArchived(projectId, true)}
                     onColorChange={(projectId, color) => {
