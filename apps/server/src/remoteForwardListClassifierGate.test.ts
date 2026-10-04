@@ -13,17 +13,22 @@ describe("remote forward list vs route classifier", () => {
     expect(compareRemoteForwardListToClassifier()).toEqual([]);
   });
 
-  it("does not forward host-wide usage purges or diagnostics export", () => {
+  it("does not forward host-wide usage purges, diagnostics export, or host export", () => {
     const policy = createRemoteRoutePolicy({ origin });
-    for (const path of ["/api/usage/reset", "/api/usage/retain", "/api/diagnostics/export"]) {
+    for (const probe of [
+      { path: "/api/usage/reset", method: "POST" },
+      { path: "/api/usage/retain", method: "POST" },
+      { path: "/api/diagnostics/export", method: "POST" },
+      { path: "/api/host-control/export", method: "GET" },
+    ]) {
       const decision = policy.inspect(
-        new Request(`${origin}${path}`, {
-          method: "POST",
+        new Request(`${origin}${probe.path}`, {
+          method: probe.method,
           headers: {
             host: "octant.example:8443",
             origin,
             "sec-fetch-site": "same-origin",
-            "content-type": "application/json",
+            ...(probe.method === "GET" ? {} : { "content-type": "application/json" }),
           },
         }),
       );

@@ -55,6 +55,7 @@ export * from "./goalLoopPolicy";
 export * from "./shipPolicy";
 export * from "./threadPlanPolicy";
 export * from "./hostControlPolicy";
+export * from "./hostExportPolicy";
 export * from "./hostPolicy";
 export * from "./hostCreateSelectionPolicy";
 export * from "./remoteAccessPolicy";

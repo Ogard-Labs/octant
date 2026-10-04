@@ -65,6 +65,7 @@
     "./host": "./src/host.ts",
     "./host-control": "./src/hostControl.ts",
     "./host-data-map": "./src/hostDataMap.ts",
+    "./host-export": "./src/hostExport.ts",
     "./integration": "./src/integration.ts",
     "./linear-issues": "./src/linearIssues.ts",
     "./linear-issue-context": "./src/linearIssueContext.ts",

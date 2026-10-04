@@ -132,6 +132,7 @@ const LOCAL_HOST_ACTIONS = new Set([
   "host.store.retention",
   "host.store.purge",
   "host.store.data-map",
+  "host.store.export",
   "host.store.spend-ceiling",
   "diagnostics.export",
 ]);

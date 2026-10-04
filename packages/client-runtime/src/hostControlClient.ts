@@ -20,6 +20,8 @@ import {
   type SetThreadRetentionRequest,
   type ThreadRetentionState,
 } from "@octant/contracts/thread-retention";
+import type { HostExportBundle } from "@octant/contracts/host-export";
+import { assembleHostExportBundle, threadExportContainsForbiddenKey } from "@octant/domain";
 import { bindFetchPort } from "./bindFetchPort";
 
 /**
@@ -43,6 +45,7 @@ export interface HostControlClient {
   readThreadRetention(): Promise<ThreadRetentionState>;
   setThreadRetention(request: SetThreadRetentionRequest): Promise<SetThreadRetentionOutcome>;
   purgeThreads(request: PurgeThreadsRequest): Promise<PurgeThreadsOutcome>;
+  exportHost(): Promise<HostExportClientResult>;
 }
 
 export class HostControlClientError extends Error {
@@ -52,7 +55,15 @@ export class HostControlClientError extends Error {
   }
 }
 
+export type HostExportClientResult =
+  | { readonly kind: "exported"; readonly bundle: HostExportBundle }
+  | {
+      readonly kind: "refused";
+      readonly reason: "local-owner-only" | "unrepresentable" | "incomplete";
+    };
+
 const REQUEST_TIMEOUT_MS = 30_000;
+const EXPORT_TIMEOUT_MS = 120_000;
 
 export function createHostControlClient(options: HostControlClientOptions): HostControlClient {
   const resolvedFetch = bindFetchPort(options.fetch);
@@ -156,5 +167,72 @@ export function createHostControlClient(options: HostControlClientOptions): Host
       });
       return decodeOrThrow(decodePurgeThreadsOutcome, body);
     },
+    async exportHost() {
+      let response: Response;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), EXPORT_TIMEOUT_MS);
+      try {
+        response = await resolvedFetch(
+          new URL("/api/host-control/export", options.baseUrl).toString(),
+          {
+            method: "GET",
+            headers: { "x-octant-window-capability": options.windowCapability },
+            signal: controller.signal,
+          },
+        );
+      } catch {
+        throw new HostControlClientError("The host control service is unreachable.");
+      } finally {
+        clearTimeout(timer);
+      }
+      if (response.status === 403) {
+        let body: unknown;
+        try {
+          body = await response.json();
+        } catch {
+          throw new HostControlClientError("Host control returned an invalid response.");
+        }
+        if (isHostExportRefusal(body)) return body;
+        throw new HostControlClientError("Host export was refused.");
+      }
+      if (!response.ok) {
+        throw new HostControlClientError(
+          `Host control request failed with status ${response.status}.`,
+        );
+      }
+      let text: string;
+      try {
+        text = await response.text();
+      } catch {
+        throw new HostControlClientError("Host control returned an invalid response.");
+      }
+      const pages: unknown[] = [];
+      for (const line of text.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed.length === 0) continue;
+        try {
+          pages.push(JSON.parse(trimmed));
+        } catch {
+          throw new HostControlClientError("Host control returned an invalid response.");
+        }
+      }
+      const assembled = assembleHostExportBundle(pages);
+      if (assembled.kind === "refused") return assembled;
+      if (threadExportContainsForbiddenKey(assembled.bundle)) {
+        return { kind: "refused", reason: "unrepresentable" };
+      }
+      return assembled;
+    },
   };
+}
+
+function isHostExportRefusal(
+  value: unknown,
+): value is { readonly kind: "refused"; readonly reason: "local-owner-only" | "unrepresentable" } {
+  if (typeof value !== "object" || value === null) return false;
+  if (!("kind" in value) || !("reason" in value)) return false;
+  return (
+    value.kind === "refused" &&
+    (value.reason === "local-owner-only" || value.reason === "unrepresentable")
+  );
 }
