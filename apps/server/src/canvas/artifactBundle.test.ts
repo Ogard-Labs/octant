@@ -1,4 +1,5 @@
 import type { CanvasVersion } from "@octant/contracts/canvas";
+import { decodeArtifactBundle, encodeArtifactBundle } from "@octant/contracts/artifact-bundle";
 import { describe, expect, it } from "vitest";
 import { ARTIFACT_BUNDLE_FORMAT, buildArtifactBundle, readArtifactBundle } from "./artifactBundle";
 
@@ -89,6 +90,22 @@ describe("writing an artifact out as files", () => {
 
     expect(read?.header.canvasId).toBe("1a2b3c4d-0000-4000-8000-000000000001");
     expect(read?.definition).toMatchObject({ title: "Launch plan" });
+  });
+
+  it("writes the same bundle the contract encodes", () => {
+    const base = version({
+      blocks: [
+        { blockId: "t1", schemaVersion: 1, kind: "rich-text", text: "Ship the preview first." },
+      ],
+    });
+    const valid = {
+      ...base,
+      definition: { ...base.definition, sourceManifest: [] },
+    } as CanvasVersion;
+    const written = buildArtifactBundle(valid);
+    const decoded = decodeArtifactBundle(JSON.parse(written.bundle));
+    expect(decoded.octant.format).toBe(ARTIFACT_BUNDLE_FORMAT);
+    expect(encodeArtifactBundle(decoded)).toBe(written.bundle);
   });
 
   it.each([

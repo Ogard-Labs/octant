@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { decodeThreadMessageQueueCommand } from "@octant/contracts";
+import { readQueueReceipts, saveQueueReceipt } from "../messageQueue/threadMessageQueueReceipts";
 import {
   COMPOSER_THREAD_DRAFTS_STORAGE_KEY,
   applyComposerCaret,
@@ -31,6 +33,46 @@ const workThread = "00000000-0000-4000-8000-000000000802";
 const codeThread = "00000000-0000-4000-8000-000000000803";
 
 describe("composer thread draft store", () => {
+  it.each(["caret", "unchanged", "empty write", "empty clear"] as const)(
+    "keeps queue draft identity across a %s update",
+    (update) => {
+      const storage = memoryStorage();
+      const store = createComposerThreadDraftStore(storage);
+      const empty = update === "empty write" || update === "empty clear";
+      const draft = { text: "Original", caretIndex: 8, stagedDropped: false };
+      if (!empty) store.write("code", codeThread, draft);
+      const receipt = {
+        host: "local",
+        command: decodeThreadMessageQueueCommand({
+          kind: "enqueue",
+          scope: { mode: "code", threadId: codeThread },
+          requestId: "22222222-2222-4222-8222-222222222222",
+          messageId: "33333333-3333-4333-8333-333333333333",
+          expectedVersion: 0,
+          payload: { mode: "code", prompt: draft.text },
+        }),
+      };
+      expect(saveQueueReceipt(receipt, storage)).toBe(true);
+      const restored = createComposerThreadDraftStore(storage);
+      const result =
+        update === "empty clear"
+          ? restored.clear("code", codeThread)
+          : restored.write("code", codeThread, {
+              ...draft,
+              text: empty ? "   " : draft.text,
+              caretIndex: update === "caret" ? 2 : draft.caretIndex,
+            });
+      expect(result).toEqual({ status: "ok" });
+      expect(readQueueReceipts(receipt.host, receipt.command.scope, storage)).toEqual({
+        status: "ready",
+        receipts: [receipt],
+      });
+      expect(createComposerThreadDraftStore(storage).read("code", codeThread)).toEqual(
+        empty ? undefined : { ...draft, caretIndex: update === "caret" ? 2 : draft.caretIndex },
+      );
+    },
+  );
+
   it("persists text and caret, then restores them from ordinary client storage", () => {
     const storage = memoryStorage();
     const store = createComposerThreadDraftStore(storage);

@@ -1249,7 +1249,16 @@ and Tooltip. Composition rules:
   announce as `alert`; neutral, accent, and success announce as `status`.
   Placement belongs to the feature; the callout recipe owns its appearance.
   Permission decisions and confirmation side effects stay with the host and
-  their existing dialog callers.
+  their existing dialog callers. A new raw `role="alert"` or `role="dialog"` in
+  feature source fails `bun run ui:check` unless it is a recorded exception:
+  an inline field error tied to its input, a compact status row that already
+  owns its mark or switches between status and alert, a screen-reader-only
+  announcement, a positioned banner whose placement is not a callout, an
+  empty-state live region owned by `ShellState` or `OctantEmpty`, or a
+  non-modal glass panel. Zen's thread picker, assistant, and add/appearance
+  panels stay anchored in the surface; `OctantDialog` would add a backdrop,
+  focus trap, and portal. The recipe owners (`OctantAlert`, `OctantToast`,
+  `OctantApprovalCard`, `FieldError`, and `ShellState`) set the role themselves.
 - Product notices use `OctantToast`: a semantic icon, short title, supporting
   detail, and an explicit Dismiss button. An optional inline action can open the
   relevant destination without implicitly dismissing the notice. Success and
@@ -1589,11 +1598,22 @@ diff presentation; file disclosures mount only their open preview.
 ### Compact task controls
 
 The right Tools launcher starts directly beneath the window control rail, without
-an extra top spacer. While a Code or Work turn runs, its composer keeps its send
-action (**Queue message** in Code, **Send follow-up** in Work) and shows a
+an extra top spacer. While a turn runs, its composer keeps a **Queue message**
+action and shows a
 **Stop turn** control beside it; that control stays disabled until the host has
-admitted the turn. An accepted queued message shows **Queued** instead of
-instructions about Enter. The idle action sends normally.
+admitted the turn. Accepted messages appear in the queue count. The idle action
+sends normally when there are no pending messages or queue holds.
+
+Accepted messages appear in a compact, initially collapsed queue above the
+composer in Chat, Work and Code. Its header shows the message count and status;
+expanding it reveals pending text, edit, move and remove controls, plus pause
+and resume. A held reason remains visible when collapsed. Controls operate on the
+host's current version; conflicting edits refresh the list and preserve the
+person's unsent text. A failed enqueue leaves the draft and attachments in the
+composer. Reopening a thread reads the accepted queue from the host without
+resending it. Queue controls remain keyboard accessible and wrap at narrow
+widths. A running-turn steering control is separate and appears only where the
+runtime supports it.
 
 Native Code approvals use a compact 216px surface above the composer, with a
 scrollable action and scope description, collapsible authority details, and a

@@ -3,7 +3,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { decodeCanvasBlock } from "@octant/contracts";
 import { createManagedMcpTools } from "../providers/managedMcpTools";
-import { CANVAS_TOOL_NAME, createCanvasAgentTools } from "./canvasAgentTools";
+import {
+  CANVAS_TOOL_NAME,
+  createCanvasAgentTools,
+  createChildCanvasAgentTools,
+} from "./canvasAgentTools";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
 
 const windowId = "11111111-1111-4111-8111-111111111111" as never;
@@ -748,5 +752,150 @@ describe("createCanvasAgentTools", () => {
       expect(outcome.isError).toBe(true);
       expect(outcome.result).toEqual({ error: "That Canvas is unavailable." });
     });
+  });
+});
+
+describe("a managed child's Canvas tool", () => {
+  const runId = "12121212-1212-4121-8121-121212121212";
+  const parentThreadId = threadId;
+  const workspace = {
+    kind: "work-root" as const,
+    projectId,
+    rootId: "77777777-7777-4777-8777-777777777777",
+  };
+
+  function childTools(
+    resolution: {
+      readonly status: "ready" | "refused";
+      readonly reason?: "unresolved" | "foreign-project";
+      readonly binding?: {
+        readonly mode: "work";
+        readonly projectId: string;
+        readonly workspace: typeof workspace;
+        readonly project: {
+          readonly id: string;
+          readonly type: "work";
+          readonly lifecycle: "active";
+        };
+      };
+    } = {
+      status: "ready",
+      binding: {
+        mode: "work",
+        projectId,
+        workspace,
+        project: { id: projectId, type: "work", lifecycle: "active" },
+      },
+    },
+  ) {
+    const create = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+      kind: "accepted" as const,
+      card: { canvasId: "canvas-1", versionId: "version-1" },
+    }));
+    const revise = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+      kind: "accepted" as const,
+      receipt: { versionId: "version-2", sequence: 2 },
+    }));
+    const resolveChildWorkspace = vi.fn(() => resolution);
+    const port = {
+      activeContext: vi.fn(() => {
+        throw new Error("A child Canvas must not follow the window.");
+      }),
+      project: vi.fn(async () => {
+        throw new Error("A child Canvas must not ask the window for a Project.");
+      }),
+      canvas: { create, revise, threadReferenceCards: vi.fn(() => []), get: vi.fn() },
+      uuid: vi.fn(() => "55555555-5555-4555-8555-555555555555"),
+      hostId: "66666666-6666-4666-8666-666666666666",
+      resolveChildWorkspace,
+    } as never;
+    return {
+      create,
+      revise,
+      resolveChildWorkspace,
+      set: createChildCanvasAgentTools({
+        port,
+        run: {
+          id: runId,
+          parentThreadId,
+          mode: "work",
+          projectId,
+          providerInstanceId: "44444444-4444-4444-8444-444444444444" as never,
+          modelId: "octant-test-model" as never,
+        },
+      }),
+    };
+  }
+
+  it("lists the Canvas tool for a child", () => {
+    expect(childTools().set.definitions.map((definition) => definition.name)).toEqual([
+      CANVAS_TOOL_NAME,
+    ]);
+  });
+
+  it("creates and revises inside the child's host-resolved workspace and records the child as author", async () => {
+    const { create, revise, resolveChildWorkspace, set } = childTools();
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Plan", blocks: [diagram] }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(resolveChildWorkspace).toHaveBeenCalledWith({ runId });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "work",
+        workspace,
+        originThreadId: parentThreadId,
+      }),
+      expect.objectContaining({ mode: "work", projectId, workspace }),
+      expect.objectContaining({ id: projectId, type: "work" }),
+      [expect.objectContaining({ kind: "diagram" })],
+      expect.objectContaining({ kind: "agent", actorId: runId }),
+    );
+
+    const revised = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId: "77777777-7777-4777-8777-777777777777",
+        expectedSequence: 1,
+        blocks: [diagram],
+      }),
+    });
+    expect(revised.isError).not.toBe(true);
+    expect(revise).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace,
+        originThreadId: parentThreadId,
+        actor: expect.objectContaining({ kind: "agent", actorId: runId }),
+      }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("refuses a write when the child's checkout cannot be resolved", async () => {
+    const { create, set } = childTools({ status: "refused", reason: "unresolved" });
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", blocks: [diagram] }),
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.result).toEqual({
+      error: "This run's workspace is unavailable, so no Canvas can be bound to it.",
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a write aimed at another Project", async () => {
+    const { create, set } = childTools({ status: "refused", reason: "foreign-project" });
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", blocks: [diagram] }),
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.result).toEqual({ error: "The Canvas Project is unavailable." });
+    expect(create).not.toHaveBeenCalled();
   });
 });

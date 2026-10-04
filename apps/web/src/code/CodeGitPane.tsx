@@ -9,6 +9,7 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
 type ApprovalAction = "stage" | "unstage" | "discard" | "commit" | "push";
@@ -352,7 +353,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
           </OctantButton>
         </div>
       )}
-      {failure === undefined ? null : <p role="alert">{failure}</p>}
+      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
       {lastResult === undefined ? null : <p role="status">{lastResult}</p>}
     </section>
   );

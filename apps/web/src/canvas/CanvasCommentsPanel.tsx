@@ -15,6 +15,7 @@ import { canvasBlockLabel } from "./CanvasDocument";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface CanvasCommentsPanelProps {
   readonly canvasId: CanvasId;
@@ -421,9 +422,9 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
         </form>
       )}
       {message === undefined ? null : (
-        <p className="canvas-comments__note" role="alert">
+        <OctantAlert className="canvas-comments__note" tone="warning">
           {message}
-        </p>
+        </OctantAlert>
       )}
     </section>
   );

@@ -17,14 +17,14 @@ export interface ProductFeedbackTurnPortDeps {
  * direction to fail — a note that arrives twice reads as the user asking twice.
  */
 export function createProductFeedbackTurnPort(deps: ProductFeedbackTurnPortDeps) {
-  return async (input: {
+  return (input: {
     readonly threadId: string;
     readonly operationId: string;
     readonly supportsImages: boolean;
-  }): Promise<{
+  }): {
     readonly context?: string;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
-  }> => {
+  } => {
     const carried = deps.service.deliver({
       threadId: String(input.threadId),
       operationId: String(input.operationId),

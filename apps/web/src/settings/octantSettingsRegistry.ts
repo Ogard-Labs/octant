@@ -373,8 +373,15 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Providers & Models",
       scope: "app",
       keywords:
-        "providers models provider type opencode codex kimi code acp login claude agent sdk subscription anthropic openai-compatible http api-key api key base url endpoint authentication bearer protocol preference manual model ids permissions permission persistence runtime capabilities connection azure ai foundry deployment",
-      settings: [],
+        "providers models provider type opencode codex kimi code acp login claude agent sdk subscription anthropic openai-compatible http api-key api key base url endpoint authentication bearer protocol preference manual model ids permissions permission persistence runtime capabilities connection azure ai foundry deployment opencode update managed cli version",
+      settings: [
+        {
+          id: settingId("opencode-managed-update"),
+          label: "OpenCode update",
+          scope: "host",
+          keywords: "opencode update version managed cli installed available",
+        },
+      ],
     },
     {
       id: "harness",

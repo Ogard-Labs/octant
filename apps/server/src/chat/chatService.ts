@@ -461,6 +461,8 @@ interface PreparedChatTurn {
 }
 
 export interface ChatServiceExecutionContext {
+  /** Host-only revalidation after asynchronous preparation, before durable admission. */
+  readonly admissionCurrent?: () => boolean;
   /**
    * A renderer window the caller speaks for; absent for host-owned callers
    * (usage-limit recovery) that have no window to attach.
@@ -496,6 +498,8 @@ interface PreparedChatContent {
 }
 
 export interface ChatServiceOptions {
+  readonly attachmentStore?: ChatAttachmentStore;
+  readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly persistence: PersistenceService;
   readonly dataDirectory: string;
   readonly uuid: () => string;
@@ -761,6 +765,7 @@ export class ChatService {
     ChatServiceOptions["gatherMultiModelRuntimeFacts"]
   >;
   readonly #attachmentStore: ChatAttachmentStore;
+  readonly #beforeAttachmentPurge: ChatServiceOptions["beforeAttachmentPurge"];
   readonly #scratchStore: ChatScratchStore;
   readonly #turnRunner: ChatTurnRunner;
   readonly #researchRouter: ResearchRouter;
@@ -814,7 +819,9 @@ export class ChatService {
     this.#gatherMultiModelRuntimeFacts =
       options.gatherMultiModelRuntimeFacts ??
       ((input) => this.#probeMultiModelRuntimeFacts(input.pool));
-    this.#attachmentStore = new ChatAttachmentStore(options.dataDirectory);
+    this.#attachmentStore =
+      options.attachmentStore ?? new ChatAttachmentStore(options.dataDirectory);
+    this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
     this.#researchRouter = options.researchRouter;
     if (options.providerRuntimeRegistry !== undefined) {
@@ -1206,9 +1213,9 @@ export class ChatService {
             this.#cancelUsageResume(command),
           );
         case "delete-chat-thread":
-          return await this.#withThreadAdmission(command.threadId, () =>
-            this.#requestDeletion(command),
-          );
+          await this.#withThreadAdmission(command.threadId, () => this.#requestDeletion(command));
+          // Queue cleanup can wait for an admission that needs this thread lock.
+          return await this.finalizePendingDeletion(command.threadId);
         default:
           throw new ChatServiceError({
             category: "invalid",
@@ -1231,6 +1238,12 @@ export class ChatService {
     threadId: ChatThreadId,
   ): Promise<ChatAttachment> {
     this.#requireActiveThread(threadId);
+    if (this.#attachmentStore.isQueued(threadId, input.attachmentId)) {
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Attachment belongs to a queued message.",
+      });
+    }
     if (input.bytes.byteLength === 0) {
       throw new ChatServiceError({
         category: "invalid",
@@ -1325,6 +1338,13 @@ export class ChatService {
     const attachmentId = decodeChatAttachmentId(rawAttachmentId);
     return await this.#withThreadAdmission(threadId, async () => {
       this.#requireActiveThread(threadId);
+      // Refuse before the metadata event: retaining bytes cannot undo a purged projection.
+      if (this.#attachmentStore.isQueued(threadId, attachmentId)) {
+        throw new ChatServiceError({
+          category: "invalid",
+          message: "Attachment belongs to a queued message.",
+        });
+      }
       const row = this.#persistence.connection
         .prepare("SELECT attachment_json FROM chat_attachment_projection WHERE attachment_id = ?")
         .get(String(attachmentId)) as { readonly attachment_json: string } | undefined;
@@ -1429,6 +1449,7 @@ export class ChatService {
         });
       }
     }
+    await this.#beforeAttachmentPurge?.(threadId);
     await this.#attachmentStore.purgeThread(threadId);
     await this.#scratchStore.purge(threadId);
     purgeThreadContent(this.#persistence.connection, String(threadId));
@@ -1565,6 +1586,7 @@ export class ChatService {
       (attachment) =>
         attachment.status === "finalized" &&
         attachment.turnId === undefined &&
+        !this.#attachmentStore.isQueued(attachment.threadId, attachment.id) &&
         !referencedByThread.get(String(attachment.threadId))?.has(String(attachment.id)),
     );
     await this.#attachmentStore.recover({
@@ -1575,6 +1597,7 @@ export class ChatService {
           String(attachment.threadId) === String(threadId) &&
           attachment.status === "finalized" &&
           (attachment.turnId !== undefined ||
+            this.#attachmentStore.isQueued(threadId, attachmentId) ||
             referencedByThread.get(String(threadId))?.has(String(attachmentId)) === true)
         );
       },
@@ -1862,7 +1885,7 @@ export class ChatService {
       // agent's question, so it never blocks putting a thread away.
       const decision = decideCompleteThread({
         lifecycle: current.lifecycle,
-        executing: this.#isTurnActive(current.id),
+        executing: this.isTurnActive(current.id),
         awaitingInput: false,
       });
       if (decision.status === "refused") {
@@ -1884,7 +1907,7 @@ export class ChatService {
         updatedAt: timestamp,
       };
     } else if (command.kind === "snooze-chat-thread") {
-      const executing = this.#isTurnActive(current.id);
+      const executing = this.isTurnActive(current.id);
       const decision = decideSnoozeThread({
         lifecycle: current.lifecycle,
         awaitingInput: false,
@@ -2172,6 +2195,13 @@ export class ChatService {
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
+      if (executionContext?.admissionCurrent?.() === false) {
+        await prepared.appManagedTools?.close?.().catch(() => undefined);
+        throw new ChatServiceError({
+          category: "unauthorized",
+          message: "Queued Chat admission was revoked during preparation.",
+        });
+      }
       this.#persistence.journal.append(
         {
           aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
@@ -3252,7 +3282,7 @@ export class ChatService {
 
   async #requestDeletion(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "delete-chat-thread" }>,
-  ): Promise<ChatCommandResult> {
+  ): Promise<void> {
     const thread = this.#persistence.readChatThread(command.threadId);
     if (thread === undefined) {
       throw new ChatServiceError({
@@ -3286,7 +3316,6 @@ export class ChatService {
         }),
       ],
     });
-    return await this.finalizePendingDeletion(thread.id);
   }
 
   async #prepareTurnExecution(
@@ -5380,7 +5409,7 @@ export class ChatService {
   }
 
   /** A queued or streaming attempt, or an execution this process still owns. */
-  #isTurnActive(threadId: ChatThreadId): boolean {
+  isTurnActive(threadId: ChatThreadId): boolean {
     const view = this.#persistence.readChatThreadView(threadId);
     return hasAttemptInFlight(view) || this.#activeThreadExecutions.has(String(threadId));
   }

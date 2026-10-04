@@ -95,10 +95,18 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/executionCapsule/gvisorPodmanExecutionCapsuleDriver.ts",
     "Execution-capsule Linux adapter driven by the real gVisor isolation and bundle-export evidence suite before Station product wiring lands. Remove once the Station launch path constructs the driver or the tracer is retired.",
   ],
+  [
+    "apps/server/src/providers/oauth/hostOAuthService.ts",
+    "Host OAuth sign-in service for direct endpoint drivers. Settings sign-in and the driver seam are the product callers; until they land, the fake authorization-server tests are the caller. Remove once a provider route or Settings sign-in imports it.",
+  ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
   [
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
+  ],
+  [
+    "packages/domain/src/replicaEntryPolicy.ts",
+    "Pure reconcile policy for artifact replica entries and their membership. Nothing pulls a store yet, so no product caller imports it. Remove once the pull path imports reconcileReplicaEntry.",
   ],
 ]);
 

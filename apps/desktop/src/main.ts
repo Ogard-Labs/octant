@@ -60,6 +60,7 @@ import {
 import { type AppVersion, isAppReleaseRing } from "@octant/contracts/app-updates";
 import { decodeCodeOperationApprovalRequest } from "@octant/contracts/code-operations";
 import { createAppUpdateService } from "./appUpdateService";
+import { createPortableImagePort } from "./portableImageUpdate";
 import { buildApplicationMenuTemplate } from "./applicationMenu";
 import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
@@ -2915,11 +2916,13 @@ function installIpcHandlers(): void {
       };
     return managedToolService.status();
   });
-  ipcMain.handle(IPC_CHANNELS.managedToolsCheckUpdates, async (event) => {
+  ipcMain.handle(IPC_CHANNELS.managedToolsCheckUpdates, async (event, tool: unknown) => {
     ownedTopLevelWindowContext(event);
     if (managedToolService === undefined)
       throw new Error("Managed tools are unavailable for this host.");
-    return managedToolService.checkUpdates();
+    if (tool !== undefined && typeof tool !== "string")
+      throw new TypeError("Invalid managed tool.");
+    return managedToolService.checkUpdates(tool);
   });
   ipcMain.handle(IPC_CHANNELS.managedToolsConfigure, async (event, settings) => {
     ownedTopLevelWindowContext(event);
@@ -3156,6 +3159,7 @@ function bundledWhatsNewOptions(): {
 function appUpdates(): ReturnType<typeof createAppUpdateService> {
   appUpdateService ??= createAppUpdateService({
     updater: electronAutoUpdater,
+    portableImage: createPortableImagePort({ quit: () => app.quit() }),
     feedBaseUrl: resolveUpdateFeedBaseUrl(process.env),
     app: {
       version: app.getVersion() as AppVersion,

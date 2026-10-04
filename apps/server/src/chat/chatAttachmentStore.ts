@@ -8,6 +8,8 @@ import {
   ManagedAttachmentStore,
   MAX_MANAGED_ATTACHMENT_DISPLAY_NAME_LENGTH,
   sanitizeManagedAttachmentDisplayName,
+  type ManagedAttachmentQueueResult,
+  type QueuedAttachmentRelease,
 } from "../attachments/managedAttachmentStore";
 
 export const MAX_CHAT_ATTACHMENT_BYTES = 26_214_400;
@@ -155,6 +157,59 @@ export class ChatAttachmentStore {
 
   remove(threadId: ChatThreadId, attachmentId: ChatAttachmentId): Promise<void> {
     return this.#store.remove(String(threadId), String(attachmentId));
+  }
+
+  /** The caller supplies finalized references from Chat's authorized projection. */
+  claimQueued(
+    threadId: ChatThreadId,
+    ownerId: string,
+    references: ReadonlyArray<ChatAttachmentFinalized>,
+  ): ManagedAttachmentQueueResult {
+    return this.restoreQueuedOwnership(threadId, ownerId, references);
+  }
+
+  restoreQueuedOwnership(
+    threadId: ChatThreadId,
+    ownerId: string,
+    references: ReadonlyArray<ChatAttachmentFinalized>,
+  ): ManagedAttachmentQueueResult {
+    return this.#store.pinQueued(
+      String(threadId),
+      ownerId,
+      references.map((ref) => ({
+        scopeId: String(ref.chatThreadId),
+        attachmentId: String(ref.chatAttachmentId),
+        displayName: ref.displayName,
+        size: ref.size,
+        hash: ref.hash,
+        finalizedAt: ref.finalizedAt,
+      })),
+    );
+  }
+
+  prepareQueued(threadId: ChatThreadId, ownerId: string): Promise<ManagedAttachmentQueueResult> {
+    return this.#store.verifyQueued(String(threadId), ownerId);
+  }
+
+  releaseQueued(
+    threadId: ChatThreadId,
+    ownerId: string,
+    options: QueuedAttachmentRelease<ChatAttachmentId>,
+  ): Promise<ManagedAttachmentQueueResult> {
+    return this.#store.releaseQueued(
+      String(threadId),
+      ownerId,
+      options.disposition === "removed"
+        ? {
+            disposition: "removed",
+            isTurnOwned: (id) => options.isTurnOwned(decodeChatAttachmentId(id)),
+          }
+        : options,
+    );
+  }
+
+  isQueued(threadId: ChatThreadId, attachmentId: ChatAttachmentId): boolean {
+    return this.#store.isQueued(String(threadId), String(attachmentId));
   }
 
   recover(options: ChatAttachmentRecoveryOptions = {}): Promise<void> {

@@ -423,9 +423,13 @@ window, or approves an action class the host policy reserves for the local user.
 
 ### Consumer subscription OAuth delta (0111)
 
-Design only. Host-driven `subscription-oauth` for direct HTTP drivers. Distinct from directory ID /
-cloud-IAM in [`enterprise-provider-identity.md`](../enterprise-provider-identity.md). No new trust
-boundary moves credentials into `apps/server` or the renderer.
+Design only for directory and cloud-IAM, which stay a different note
+([`enterprise-provider-identity.md`](../enterprise-provider-identity.md)).
+Host-driven `subscription-oauth` plumbing now runs in the credential broker:
+generic PKCE and device-code runners, broker-stored refresh, and a terms
+acknowledgment gate. Driver probe binding and Settings sign-in are not this
+control. No new trust boundary moves refresh tokens into `apps/server` or the
+renderer.
 
 | ID  | Delta                              | Control                                                                                                                                                                                                                             |
 | --- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

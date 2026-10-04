@@ -1,5 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts/canvas";
+import type { CanvasChartBlock } from "@octant/contracts/canvas";
 import { chartExampleBlocks } from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import { CanvasDocument } from "../CanvasDocument";
@@ -69,4 +71,85 @@ describe("chart marks", () => {
     expect(figure.querySelector("svg [data-series='0']")).toBeNull();
     expect(figure.querySelector("svg [data-series='1']")).not.toBeNull();
   });
+
+  it("caps pie legend buttons without dropping slices from the chart or data table", () => {
+    const pie = chartBlock({
+      blockId: "many-slices",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "chart",
+      chartType: "pie",
+      series: [
+        {
+          seriesId: "share",
+          label: "Share",
+          points: Array.from({ length: 30 }, (_, index) => ({
+            x: `Slice ${String(index + 1)}`,
+            y: 1,
+          })),
+        },
+      ],
+    });
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [pie] }} />);
+
+    const figure = document.querySelector(".canvas-block__chart--pie");
+    if (figure === null) throw new Error("Pie chart was not drawn.");
+    expect(within(figure as HTMLElement).getAllByRole("button")).toHaveLength(24);
+    expect(figure.querySelectorAll("svg [data-slice]")).toHaveLength(30);
+    expect(within(figure as HTMLElement).getAllByRole("row")).toHaveLength(31);
+  });
+
+  it("keeps numeric and string categories distinct in the axis and data table", () => {
+    const grouped = chartBlock({
+      blockId: "mixed-x",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "chart",
+      chartType: "grouped-bar",
+      series: [
+        {
+          seriesId: "east",
+          label: "East",
+          points: [
+            { x: 1, y: 10 },
+            { x: "1", y: 20 },
+          ],
+        },
+        {
+          seriesId: "west",
+          label: "West",
+          points: [
+            { x: 1, y: 3 },
+            { x: "1", y: 7 },
+          ],
+        },
+      ],
+    });
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [grouped] }} />);
+
+    const figure = document.querySelector(".canvas-block__chart--grouped-bar");
+    if (figure === null) throw new Error("Grouped bar chart was not drawn.");
+    const labels = [...figure.querySelectorAll(".canvas-block__chart-label")].map(
+      (node) => node.textContent,
+    );
+    expect(labels).toEqual(["1", "1"]);
+    const rows = within(figure as HTMLElement).getAllByRole("row");
+    expect(rows).toHaveLength(3);
+    expect(
+      within(rows[1] as HTMLElement)
+        .getAllByRole("cell")
+        .map((cell) => cell.textContent),
+    ).toEqual(["10", "3"]);
+    expect(
+      within(rows[2] as HTMLElement)
+        .getAllByRole("cell")
+        .map((cell) => cell.textContent),
+    ).toEqual(["20", "7"]);
+  });
 });
+
+function chartBlock(value: unknown): CanvasChartBlock {
+  const block = decodeCanvasBlock(value);
+  if (block.kind !== "chart") {
+    throw new Error("Chart fixture did not decode as a chart block.");
+  }
+  return block;
+}

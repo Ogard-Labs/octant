@@ -9,6 +9,7 @@ import { decodeHostDataMap } from "@octant/contracts/host-data-map";
 import { desktopCredentialStore } from "./hostDataMap";
 import type { HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
+import { decodeWindowId } from "@octant/contracts";
 import {
   createHostControlRouteHandler,
   type HostControlRouteDependencies,
@@ -468,5 +469,49 @@ describe("host control routes", () => {
       makeRequest("/api/host-control/data-map", { capability, body: {} }),
     );
     expect(response?.status).toBe(405);
+  });
+});
+
+describe("host export route", () => {
+  it("is not a product route", async () => {
+    const { classifyProductAction } = await import("./authenticatedProductRoutes");
+    expect(
+      classifyProductAction(new Request("http://127.0.0.1:3100/api/host-control/export")),
+    ).toBeUndefined();
+  });
+
+  it("refuses a paired remote device", async () => {
+    const { bindPrincipalRouteContext } = await import("./principalRouteContext");
+    const { Schema } = await import("effect");
+    const { DeviceId, StableHostId, RemoteSessionId } =
+      await import("@octant/contracts/remote-access");
+    const seen: { principal?: string } = {};
+    const exportPages = vi.fn(async function* (input: { readonly principal: string }) {
+      seen.principal = input.principal;
+      yield { kind: "refused" as const, reason: "local-owner-only" as const };
+    });
+    const { handler } = setup({ hostExport: { exportPages } });
+    const request = makeRequest("/api/host-control/export", { method: "GET", capability });
+    bindPrincipalRouteContext(request, {
+      principal: {
+        kind: "remote-device",
+        deviceId: Schema.decodeUnknownSync(DeviceId)("00000000-0000-4000-8000-00000000c001"),
+        hostId: Schema.decodeUnknownSync(StableHostId)("00000000-0000-4000-8000-00000000c002"),
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+          "00000000-0000-4000-8000-00000000c003",
+        ),
+      },
+      scopeId: decodeWindowId("00000000-0000-4000-8000-00000000c001"),
+    });
+    const response = await handler(request);
+    expect(response?.status).toBe(403);
+    const body = await response?.json();
+    expect(body).toEqual({ kind: "refused", reason: "local-owner-only" });
+    expect(exportPages).toHaveBeenCalled();
+    expect(seen.principal).toBe("remote-device");
   });
 });

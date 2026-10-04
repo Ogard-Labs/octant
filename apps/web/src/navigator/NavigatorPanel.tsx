@@ -9,6 +9,7 @@ import type {
   NavigatorAssistantController,
   NavigatorAssistantState,
 } from "./useNavigatorAssistant";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface NavigatorPanelProps {
   /**
@@ -111,7 +112,7 @@ export function NavigatorPanel(props: NavigatorPanelProps) {
       ) : null}
 
       {state.kind === "unavailable" ? (
-        <div className="navigator-panel__notice" role="alert">
+        <OctantAlert className="navigator-panel__notice" tone="warning">
           <strong>Navigator is unavailable</strong>
           <p>{state.reason}</p>
           <OctantButton onClick={() => void navigator.refresh()} type="button" variant="secondary">
@@ -126,7 +127,7 @@ export function NavigatorPanel(props: NavigatorPanelProps) {
               Open Navigator settings
             </OctantButton>
           )}
-        </div>
+        </OctantAlert>
       ) : null}
 
       {state.kind === "ready" ? (
@@ -161,7 +162,9 @@ export function NavigatorPanel(props: NavigatorPanelProps) {
               Stop reading
             </OctantButton>
           ) : null}
-          {readAloud.error === undefined ? null : <p role="alert">{readAloud.error}</p>}
+          {readAloud.error === undefined ? null : (
+            <OctantAlert tone="warning">{readAloud.error}</OctantAlert>
+          )}
         </div>
       ) : null}
 

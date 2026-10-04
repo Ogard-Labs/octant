@@ -132,7 +132,7 @@ export function CodeOverview(props: CodeOverviewProps) {
       </header>
 
       {thread.lifecycle === "waiting" || thread.lifecycle === "interrupted" ? (
-        <div className="project-overview__warning" role="alert">
+        <OctantAlert className="project-overview__warning" tone="warning">
           <div className="project-overview__warning-copy">
             <strong>{lifecycleLabel(thread.lifecycle)}</strong>
             <p>
@@ -141,7 +141,7 @@ export function CodeOverview(props: CodeOverviewProps) {
                 : "This thread was interrupted and requires an explicit retry."}
             </p>
           </div>
-        </div>
+        </OctantAlert>
       ) : null}
 
       <section

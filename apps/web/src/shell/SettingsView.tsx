@@ -1198,6 +1198,7 @@ function ProvidersSection(props: {
         observedByInstance={props.providerController.observedByInstance}
         presentationObservedByInstance={props.providerController.presentationObservedByInstance}
         onOpenExternalUrl={(url) => openExternalUrl(props.hostBridge, url)}
+        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         onChangeBinary={props.providerController.changeBinary}
         onChangeClaudeConfiguration={props.providerController.changeClaudeConfiguration}
         onChangeDevinConfiguration={props.providerController.changeDevinConfiguration}

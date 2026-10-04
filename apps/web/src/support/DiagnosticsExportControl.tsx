@@ -11,6 +11,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * Browser-first support flow: a local authenticated user picks a
@@ -114,7 +115,7 @@ export function DiagnosticsExportControl({ client }: DiagnosticsExportControlPro
       </OctantButton>
 
       {state.kind === "done" ? <DiagnosticsExportOutcomeView outcome={state.outcome} /> : null}
-      {state.kind === "error" ? <p role="alert">{state.message}</p> : null}
+      {state.kind === "error" ? <OctantAlert tone="warning">{state.message}</OctantAlert> : null}
     </div>
   );
 }
@@ -139,7 +140,7 @@ function downloadDiagnosticsPacket(packet: DiagnosticEvidencePacket): void {
 
 function DiagnosticsExportOutcomeView({ outcome }: { readonly outcome: DiagnosticsExportOutcome }) {
   if (outcome.kind === "failed") {
-    return <p role="alert">{outcome.failure.message}</p>;
+    return <OctantAlert tone="warning">{outcome.failure.message}</OctantAlert>;
   }
   return (
     <div aria-live="polite">

@@ -23,6 +23,7 @@ import {
 } from "../code/CodeProjectPullRequests";
 import { OctantButton } from "../ui/base/OctantButton";
 import { EnvironmentGroup } from "./EnvironmentGroup";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface EnvironmentPullRequestsProps {
   /**
@@ -187,9 +188,9 @@ export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
             Reading pull requests…
           </p>
         ) : view === undefined ? (
-          <p className="environment-pull-requests__status" role="alert">
+          <OctantAlert className="environment-pull-requests__status" tone="warning">
             {state.status === "error" ? state.message : "Pull requests unavailable."}
-          </p>
+          </OctantAlert>
         ) : !connected ? (
           <p className="environment-pull-requests__status" role="status">
             This Project is not on GitHub.
@@ -202,9 +203,9 @@ export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
               {truncationCopy(view, true)}
             </p>
             {state.status === "error" ? (
-              <p className="environment-pull-requests__status" role="alert">
+              <OctantAlert className="environment-pull-requests__status" tone="warning">
                 {state.message}
-              </p>
+              </OctantAlert>
             ) : null}
             {rows.length === 0 ? (
               <p className="environment-pull-requests__status">

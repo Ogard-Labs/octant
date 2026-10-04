@@ -136,7 +136,16 @@ on that selected host against its configured binary; no updater command or
 shell authority is sent to the renderer. Stop active sessions before updating.
 Unsupported or unverified
 commands stay unavailable. Octant never silently replaces a CLI or updates
-providers without an explicit action. On a headless
+providers without an explicit action. OpenCode is not updated by that
+provider-owned command. **Settings → Providers & Models** shows the installed
+and available versions of Octant's managed OpenCode copy and an **Update**
+action. Update checks the same managed tool channel as device tools, verifies
+the registry integrity hash, stages the release, and keeps the previous copy
+if the new one does not start. A failure says why. Update writes only inside
+Octant's managed location. It never replaces an OpenCode you installed
+elsewhere. **Use Octant's copy** appears only after you agree, and it switches
+this provider to the managed executable instead of overwriting your other
+install. On a headless
 host, use the provider's device/non-interactive login when available; no
 desktop browser window is required by the architecture.
 
@@ -156,22 +165,12 @@ installation action outside Octant.
 
 Released OpenCode 2 installs the `opencode` executable; `opencode2` names the
 earlier beta build, which discovery still accepts as a fallback and shows as
-**OpenCode 2 preview**. When both names are installed, discovery and
-automatic registration prefer `opencode` so the released runtime is not
-shadowed by the beta executable.
-Octant uses its bounded loopback HTTP API to discover the provider catalog and
-models, then uses the executable's ACP transport for Code and Work sessions.
-The ACP path carries `session/request_permission`, model and mode selection,
-streaming updates, resume, and cancellation through the shared ACP driver. Chat
-and Plan sessions stay unavailable because the beta `acp` entrypoint starts a
-same-binary server child and those modes do not grant process-spawn authority.
-Octant never falls back to an unconfined session or treats the beta version as
-the legacy OpenCode runtime. App-managed browser tools remain a separate
-capability and are not implied by this ACP transport.
-The launch keeps the user's existing global OpenCode config readable while
-writing runtime cache, state, and temporary files under Octant's managed home;
-the provider-owned auth directory is the only host data path with write access.
-Custom plugins and discovered skills are suppressed for the ACP child process.
+**OpenCode 2 preview**. When both names are installed, discovery prefers
+`opencode`. Which routes run is selected by the installed binary's version,
+not by that name: a 1.x binary keeps the legacy session API, and a 2.x binary
+lists providers and models from its HTTP catalogue. OpenCode 2 is listing
+only, turns not yet supported. Octant never falls back to an unconfined
+session or treats the 2.x version as the legacy runtime.
 
 ### API endpoints
 
