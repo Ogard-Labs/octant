@@ -879,8 +879,9 @@ flowchart LR
   bytes unchanged. The store's status is ready, not-connected, or refused. A
   disabled or uninstalled store is not offered and is not called. The in-tree
   folder store writes only under `<folder>/Octant Sync/`. A write lands in a
-  temporary file in that same directory, then an atomic rename onto the key
-  only when that key is absent. A half-written temporary file is not an entry. A
+  temporary file in that same directory, then an exclusive hard link onto the
+  key only when that key is absent, so a published key is never replaced or
+  half-written. A half-written temporary file is not an entry. A
   file the sync client has not downloaded, and a conflict copy the sync client
   left behind, are reported instead of being treated as entries. A folder
   outside the user's home is refused unless the standing access-outside-project
