@@ -484,11 +484,17 @@ function adaptBetaSession(body: unknown): OpenCodeSessionRecord {
  * so a version-selected stream is folded into that shape before it is mapped.
  * A payload the mapper does not recognise still fails the turn closed.
  */
+function nonEmptyRecord(value: unknown): Record<string, unknown> | undefined {
+  const record = asRecord(value);
+  if (record === undefined || Object.keys(record).length === 0) return undefined;
+  return record;
+}
+
 export function adaptBetaOpenCodeEvent(value: unknown): Event | undefined {
   const record = asRecord(value);
   const type = record === undefined ? undefined : betaString(record.type);
   if (record === undefined || type === undefined) return undefined;
-  const properties = asRecord(record.properties) ?? asRecord(record.data);
+  const properties = nonEmptyRecord(record.properties) ?? asRecord(record.data);
   if (properties === undefined && record.properties !== undefined && record.data !== undefined) {
     return undefined;
   }
@@ -1272,7 +1278,10 @@ function makeConnection(
             ),
             Effect.flatMap((runtimeClient) => {
               if (betaWritesUnenforceable(runtimeKind, mode, input.executionPolicy)) {
-                return Effect.promise(() => closeRuntime()).pipe(
+                return Effect.promise(async () => {
+                  await releaseManagedTools(state);
+                  await closeRuntime();
+                }).pipe(
                   Effect.zipRight(Effect.fail(fail("unsupported", BETA_WRITE_REFUSAL_MESSAGE))),
                 );
               }
@@ -1346,6 +1355,7 @@ function makeConnection(
                 resumeCursor: { driverKind: "opencode" as const, value: session.id },
               });
             }),
+            Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
             Effect.ensuring(
               Effect.sync(() => {
                 sessionSetupInFlight = false;
@@ -1400,7 +1410,10 @@ function makeConnection(
                 ),
                 Effect.flatMap((runtimeClient) => {
                   if (betaWritesUnenforceable(runtimeKind, mode, input.executionPolicy)) {
-                    return Effect.promise(() => closeRuntime()).pipe(
+                    return Effect.promise(async () => {
+                      await releaseManagedTools(state);
+                      await closeRuntime();
+                    }).pipe(
                       Effect.zipRight(Effect.fail(fail("unsupported", BETA_WRITE_REFUSAL_MESSAGE))),
                     );
                   }

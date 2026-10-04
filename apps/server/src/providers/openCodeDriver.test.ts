@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  adaptBetaOpenCodeEvent,
   makeOpenCodeDriver,
   normalizeOpenCodeProbe,
   openCodePromptParts,
@@ -1336,6 +1337,63 @@ describe("OpenCode driver", () => {
     expect(planFixture.createdPermissions.at(-1)).toEqual(
       expect.arrayContaining([{ permission: "edit", pattern: "*", action: "deny" }]),
     );
+  });
+
+  it("closes the managed-tool bridge when a 2.x write-unenforceable start includes tools", async () => {
+    const fixture = betaDriver();
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("cannot enforce session permission rules");
+    expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
+  });
+
+  it("adapts a 2.x event from data when properties is empty", () => {
+    expect(
+      adaptBetaOpenCodeEvent({
+        type: "session.idle",
+        properties: {},
+        data: { sessionID: "provider-session" },
+      }),
+    ).toEqual({
+      type: "session.idle",
+      properties: { sessionID: "provider-session" },
+    });
+  });
+
+  it("adapts a 2.x event from data when properties is not an object", () => {
+    expect(
+      adaptBetaOpenCodeEvent({
+        type: "session.next.text.delta",
+        properties: "not-an-object",
+        data: {
+          sessionID: "provider-session",
+          messageID: "m",
+          partID: "p",
+          delta: "hello",
+        },
+      }),
+    ).toEqual({
+      type: "session.next.text.delta",
+      properties: {
+        sessionID: "provider-session",
+        messageID: "m",
+        partID: "p",
+        delta: "hello",
+      },
+    });
   });
 });
 
