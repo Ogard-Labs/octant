@@ -92,6 +92,11 @@ export interface AgentRunProcessSupervisorPort {
   }) => Promise<"steered" | "unsupported">;
 }
 
+export interface AgentRunParentSessionPort {
+  /** Whether the parent thread's session starts nothing new until a person resumes it. */
+  readonly isHeld: (parentThreadId: AgentRunParentThreadId) => boolean;
+}
+
 export interface AgentRunOrchestrationServiceOptions {
   readonly persistence: AgentRunPersistenceService;
   readonly capacity: AgentRunCapacityPort;
@@ -99,6 +104,7 @@ export interface AgentRunOrchestrationServiceOptions {
   readonly workBinding?: AgentRunWorkBindingPort;
   readonly approvals: AgentRunApprovalPort;
   readonly processes?: AgentRunProcessSupervisorPort;
+  readonly parentSessions?: AgentRunParentSessionPort;
 }
 
 export interface AdmitAgentRunInput {
@@ -122,7 +128,16 @@ export class AgentRunOrchestrationService {
   readonly #workBinding: AgentRunWorkBindingPort | undefined;
   readonly #approvals: AgentRunApprovalPort;
   readonly #processes: AgentRunProcessSupervisorPort | undefined;
+  readonly #parentSessions: AgentRunParentSessionPort | undefined;
   readonly #reservations = new Map<AgentRunId, string>();
+  /**
+   * Runs already parked on their dependencies when this service was built,
+   * which is host boot. A restart never resumes work on its own, so their
+   * graph settling does not start them: a person resuming the run, or its
+   * parent's harness session, lets them go. Rebuilt the same way at every
+   * boot, so it needs no journal of its own.
+   */
+  readonly #heldSinceRestart = new Set<AgentRunId>();
   /**
    * Runs whose settled session outcome this service durably recorded. A run is
    * added only once an append succeeded: the marker suppresses the death the
@@ -141,6 +156,15 @@ export class AgentRunOrchestrationService {
     this.#workBinding = options.workBinding;
     this.#approvals = options.approvals;
     this.#processes = options.processes;
+    this.#parentSessions = options.parentSessions;
+    for (const run of this.#persistence.snapshot().values()) {
+      if (
+        run.lifecycleStatus === "waiting" &&
+        run.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON
+      ) {
+        this.#heldSinceRestart.add(run.id);
+      }
+    }
     options.processes?.subscribeToProcessDeath?.((runId) => {
       const current = this.#persistence.getById(runId);
       if (current === undefined || isAgentRunTerminalStatus(current.lifecycleStatus)) return;
@@ -320,6 +344,22 @@ export class AgentRunOrchestrationService {
     expectedVersion: number,
     liveAuthority: AgentRunAuthority,
   ): AgentRunCommandResult {
+    // A paused parent starts nothing new, and that includes a child parked on
+    // its dependencies: resuming the parent comes first, or the child's
+    // Resume would undo the pause the parent's own controls show.
+    const run = this.#persistence.getById(runId);
+    if (
+      run?.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON &&
+      this.#parentSessions?.isHeld(run.parentThreadId) === true
+    ) {
+      return {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: "The parent thread is paused. Resume it first, and this run continues.",
+      };
+    }
+    // A person resuming the run is the release a restart waits for.
+    this.#heldSinceRestart.delete(runId);
     return this.start(runId, expectedVersion, liveAuthority);
   }
 
@@ -674,7 +714,10 @@ export class AgentRunOrchestrationService {
   /**
    * Settle a run parked on its dependencies: fail it when one can no longer
    * complete, start it when all completed and a slot is free. A ready run
-   * with no free slot stays parked; the capacity queue starts it next.
+   * with no free slot stays parked; the capacity queue starts it next. A
+   * ready run that is held — parked since the host booted, or under a parent
+   * session that is paused or needs a check after restart — stays parked
+   * until {@link releaseAfterParentResumed} or a person's resume.
    */
   releaseDependencyWait(runId: AgentRunId): void {
     const run = this.#persistence.getById(runId);
@@ -689,8 +732,29 @@ export class AgentRunOrchestrationService {
       });
       return;
     }
-    if (decision.kind !== "ready") return;
+    if (decision.kind !== "ready" || this.#dependencyStartHeld(run)) return;
     this.#startReserved(run);
+  }
+
+  /**
+   * A person resumed the parent thread's harness session: lift the restart
+   * hold on its children and settle each one still parked on dependencies.
+   */
+  releaseAfterParentResumed(parentThreadId: AgentRunParentThreadId): void {
+    const parked: AgentRunId[] = [];
+    for (const run of this.#persistence.snapshot().values()) {
+      if (String(run.parentThreadId) !== String(parentThreadId)) continue;
+      this.#heldSinceRestart.delete(run.id);
+      if (run.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON) parked.push(run.id);
+    }
+    for (const runId of parked) this.releaseDependencyWait(runId);
+  }
+
+  #dependencyStartHeld(run: AgentRun): boolean {
+    return (
+      this.#heldSinceRestart.has(run.id) ||
+      this.#parentSessions?.isHeld(run.parentThreadId) === true
+    );
   }
 
   /** Reserve a slot and start the run; false when no slot is free. */
@@ -729,10 +793,11 @@ export class AgentRunOrchestrationService {
   #dequeueCapacityWaiter(): void {
     for (const run of this.#persistence.snapshot().values()) {
       // A run parked on dependencies that all completed is waiting only for a
-      // slot now, exactly like a capacity waiter.
+      // slot now, exactly like a capacity waiter — unless it is held.
       const waitsForSlot =
         run.recoveryReason === "provider-capacity-saturated" ||
-        decideAgentRunDependencies(run, (id) => this.#persistence.getById(id)).kind === "ready";
+        (decideAgentRunDependencies(run, (id) => this.#persistence.getById(id)).kind === "ready" &&
+          !this.#dependencyStartHeld(run));
       if (
         run.lifecycleStatus !== "waiting" ||
         !waitsForSlot ||
