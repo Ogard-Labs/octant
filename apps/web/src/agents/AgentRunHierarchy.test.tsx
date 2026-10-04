@@ -5,6 +5,7 @@ import { type AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { type AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { AgentRunHierarchy } from "./AgentRunHierarchy";
+import { AgentRunResults } from "./AgentRunResults";
 import { observedChildFixture, resultPacketFixture } from "./agentActivityFixtures";
 
 const parentThreadId = decodeAgentRunParentThreadId("11111111-1111-4111-8111-111111111111");
@@ -59,6 +60,42 @@ function summaryEntry(overrides: {
 }
 
 describe("AgentRunHierarchy", () => {
+  it.each([false, true])(
+    "qualifies an unlisted file when its captured comparison is truncated: %s",
+    (truncated) => {
+      const packet = resultPacketFixture();
+      render(
+        <AgentRunResults
+          packets={[
+            {
+              ...packet,
+              files: { ...packet.files, reviewStatus: "available" },
+              review: {
+                capturedAt: packet.occurredAt,
+                baseTree: "a".repeat(40),
+                resultTree: "b".repeat(40),
+                changedPaths: [],
+                truncated,
+              },
+            },
+          ]}
+          truncated={false}
+          onReviewChanges={vi.fn()}
+        />,
+      );
+      expect(
+        screen.getByText(
+          truncated
+            ? "Not in the retained part of the captured changes."
+            : "Not listed in captured changes.",
+        ),
+      ).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: "Review src/parser.ts" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
   it("inspects an observed child without sending its identity to managed conversation or controls", async () => {
     const user = userEvent.setup();
     const child = observedChildFixture({

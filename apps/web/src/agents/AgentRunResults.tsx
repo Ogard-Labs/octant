@@ -157,7 +157,11 @@ function ResultPacket(props: {
                   · {file.change}
                 </p>
                 {canReview && !packet.review?.changedPaths.includes(file.path) ? (
-                  <p>Not listed in captured changes.</p>
+                  <p>
+                    {packet.review?.truncated
+                      ? "Not in the retained part of the captured changes."
+                      : "Not listed in captured changes."}
+                  </p>
                 ) : null}
                 <EvidenceReference label="File reference" reference={file.reference} />
               </li>
