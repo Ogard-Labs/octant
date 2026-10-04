@@ -3093,7 +3093,6 @@ export function startOctantServer(
     const codeEvidence = new CodeEvidenceStore({ connection: persistence.connection });
     const codeAttachments = new CodeAttachmentStore(persistence.dataDirectory);
     const workAttachments = new WorkAttachmentStore(persistence.dataDirectory);
-    const chatAttachmentStore = new ChatAttachmentStore(persistence.dataDirectory);
     // Listing reads directory entries under the bound checkout and needs no
     // file helper, so it is available even when the helper transport is not.
     const codeFileListing = new CodeFileListingService();
@@ -3915,6 +3914,7 @@ export function startOctantServer(
       },
     });
     const chatDataDirectory = join(providerDataDirectory, "chat");
+    const chatAttachmentStore = new ChatAttachmentStore(chatDataDirectory);
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
       openCodeProcess,
       codexProcess,
