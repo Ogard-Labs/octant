@@ -19,18 +19,18 @@ import {
   type FeedVerifier,
   updateFeedUrl,
 } from "./appUpdateFeed";
+import type { PortableImageApplyResult, PortableImagePort } from "./portableImageUpdate";
 
 /**
- * Platforms that publish a signed desktop update feed today.
+ * Platforms that publish a signed desktop update feed.
  *
- * Linux desktop builds (unpackaged or AppImage) must fail closed: an updater on
- * an unsigned artifact is an unauthenticated code-delivery channel. The signed
- * `<ring>/linux-x64.json` feeds exist now, and the channel is still off,
- * because replacing a running AppImage is a path Octant has not built — a
- * signed feed is necessary, not sufficient.
+ * Linux publishes the same kind of feed. Reading it is not the same as being
+ * able to install: a package or archive launch still refuses before any
+ * request, because the only file this service will replace is the portable
+ * image it was started from.
  */
 export function supportsSignedDesktopUpdateChannel(platform: string): boolean {
-  return platform === "darwin";
+  return platform === "darwin" || platform === "linux";
 }
 
 /**
@@ -76,6 +76,15 @@ export interface AppUpdateServiceOptions {
   /** Injected so the automatic schedule is testable without waiting on a clock. */
   readonly schedule?: (delayMs: number, callback: () => void) => () => void;
   readonly onState?: (state: AppUpdateState) => void;
+  /**
+   * How a Linux portable image is found and replaced.
+   *
+   * Absent on macOS, where the platform updater applies a verified artifact.
+   * On Linux the service never asks that updater to swap anything: the image
+   * is replaced only after the signed hash matches, and only at the path the
+   * runtime named.
+   */
+  readonly portableImage?: PortableImagePort;
 }
 
 /**
@@ -115,6 +124,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     ring,
   };
   let staged: { readonly feedUrl: string; readonly close: () => void } | undefined;
+  let stagedImage: { readonly bytes: Uint8Array; readonly sha256: string } | undefined;
   let cancelScheduled: (() => void) | undefined;
 
   const publish = (next: Partial<AppUpdateState>): AppUpdateState => {
@@ -139,6 +149,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     // is available in this channel." - which is what happened.
     const { available: _withdrawn, message: _stale, refusal: _previous, ...rest } = state;
     state = { ...rest, ...next, currentVersion: options.app.version, automaticChecks, ring };
+    stagedImage = undefined;
     options.onState?.(state);
     return state;
   };
@@ -156,6 +167,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
   function releaseLoopback(): void {
     staged?.close();
     staged = undefined;
+    stagedImage = undefined;
   }
 
   function scheduleNextCheck(delayMs: number): void {
@@ -166,6 +178,86 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
         if (automaticChecks) scheduleNextCheck(AUTOMATIC_CHECK_INTERVAL_MS);
       });
     });
+  }
+
+  /**
+   * Refuse a Linux launch this service cannot replace, before any request.
+   *
+   * A missing runtime path is a package or archive. A path that is not
+   * writable cannot be swapped atomically, so offering a download would only
+   * fetch bytes we have already decided not to use.
+   */
+  async function linuxLaunchRefusal(): Promise<AppUpdateState | undefined> {
+    if (options.app.platform !== "linux") return undefined;
+    let location: Awaited<ReturnType<PortableImagePort["locate"]>>;
+    try {
+      location = await (options.portableImage?.locate() ??
+        Promise.resolve({ kind: "not-portable" as const }));
+    } catch {
+      location = { kind: "not-portable" };
+    }
+    if (location.kind === "portable") return undefined;
+    return publishWithoutOffer({
+      status: "refused",
+      refusal: location.kind === "not-writable" ? "not-writable" : "unsupported-install",
+      checkedAt: clock() as AppUpdateState["checkedAt"],
+      message:
+        location.kind === "not-writable" ? NOT_WRITABLE_MESSAGE : UNSUPPORTED_INSTALL_MESSAGE,
+    });
+  }
+
+  async function applyPortableImage(): Promise<
+    { readonly kind: "installing" } | { readonly kind: "not-ready" }
+  > {
+    const image = stagedImage;
+    const port = options.portableImage;
+    if (image === undefined || port === undefined) return { kind: "not-ready" };
+    const blocked = await linuxLaunchRefusal();
+    if (blocked !== undefined) return { kind: "not-ready" };
+    let applied: PortableImageApplyResult;
+    try {
+      applied = await port.replaceAndRelaunch(image.bytes, image.sha256);
+    } catch {
+      publish({
+        status: "failed",
+        message: "Octant could not replace the portable image, so nothing was installed.",
+      });
+      return { kind: "not-ready" };
+    }
+    if (applied.kind === "relaunched") return { kind: "installing" };
+    if (applied.kind === "rolled-back") {
+      const { refusal: _previous, ...rest } = state;
+      state = {
+        ...rest,
+        status: "ready",
+        message: ROLLED_BACK_MESSAGE,
+        currentVersion: options.app.version,
+        automaticChecks,
+        ring,
+      };
+      options.onState?.(state);
+      return { kind: "not-ready" };
+    }
+    if (applied.kind === "restore-failed") {
+      stagedImage = undefined;
+      publish({ status: "failed", message: RESTORE_FAILED_MESSAGE });
+      return { kind: "not-ready" };
+    }
+    if (applied.kind === "corrupt") {
+      publishWithoutOffer({
+        status: "refused",
+        refusal: "corrupt-artifact",
+        message: "The downloaded update did not match the signed release, so it was discarded.",
+      });
+      return { kind: "not-ready" };
+    }
+    publishWithoutOffer({
+      status: "refused",
+      refusal: applied.kind === "not-writable" ? "not-writable" : "unsupported-install",
+      checkedAt: clock() as AppUpdateState["checkedAt"],
+      message: applied.kind === "not-writable" ? NOT_WRITABLE_MESSAGE : UNSUPPORTED_INSTALL_MESSAGE,
+    });
+    return { kind: "not-ready" };
   }
 
   const service = Object.freeze({
@@ -202,6 +294,8 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
 
     async check(signal?: AbortSignal): Promise<AppUpdateState> {
       publish({ status: "checking" });
+      const blocked = await linuxLaunchRefusal();
+      if (blocked !== undefined) return blocked;
       if (!supportsSignedDesktopUpdateChannel(options.app.platform)) {
         return publishWithoutOffer({
           status: "refused",
@@ -293,6 +387,8 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     async download(signal?: AbortSignal): Promise<AppUpdateState> {
       const release = state.available;
       if (state.status !== "available" || release === undefined) return state;
+      const blocked = await linuxLaunchRefusal();
+      if (blocked !== undefined) return blocked;
       releaseLoopback();
       publish({ status: "downloading" });
       // Downloaded and hashed here, before the platform updater is told
@@ -319,6 +415,24 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
               : "The update could not be downloaded.",
         });
       }
+      if (options.app.platform === "linux") {
+        // The hash already matched. Hold the bytes until the person asks to
+        // relaunch — writing now would replace the image under work that has
+        // not been asked to stop. The platform updater is not told about the
+        // URL: it does not perform this replace, and giving it one would be a
+        // second fetch of bytes we have already verified.
+        stagedImage = { bytes: artifact.bytes, sha256: release.sha256 };
+        const { message: _stale, refusal: _previous, ...rest } = state;
+        state = {
+          ...rest,
+          status: "ready",
+          currentVersion: options.app.version,
+          automaticChecks,
+          ring,
+        };
+        options.onState?.(state);
+        return state;
+      }
       try {
         staged = await serveVerifiedArtifact(release, artifact.bytes);
       } catch {
@@ -335,17 +449,19 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
      * Never a delay that expires: while a turn or agent run is live this
      * refuses, and the person finishes or checkpoints the work first.
      */
-    install(work: UpdateWorkInFlight):
+    async install(work: UpdateWorkInFlight): Promise<
       | { readonly kind: "installing" }
       | {
           readonly kind: "wait";
           readonly activeAgentCount: number;
           readonly attentionRequired: boolean;
         }
-      | { readonly kind: "not-ready" } {
+      | { readonly kind: "not-ready" }
+    > {
       if (state.status !== "ready") return { kind: "not-ready" };
       const readiness = resolveUpdateInstallReadiness(work);
       if (readiness.kind === "wait") return readiness;
+      if (options.app.platform === "linux") return applyPortableImage();
       options.updater.quitAndInstall();
       return { kind: "installing" };
     },
@@ -370,6 +486,15 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
 const FIRST_AUTOMATIC_CHECK_DELAY_MS = 10 * 60 * 1000;
 const AUTOMATIC_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+const UNSUPPORTED_INSTALL_MESSAGE =
+  "This install cannot replace itself. Octant updates a portable image in place; a package or archive has to be replaced by hand.";
+const NOT_WRITABLE_MESSAGE =
+  "Octant cannot write a replacement beside this portable image, so it will not install an update.";
+const ROLLED_BACK_MESSAGE =
+  "Octant could not relaunch the update, so the previous copy was restored.";
+const RESTORE_FAILED_MESSAGE =
+  "Octant could not relaunch the update and could not restore the previous copy. Replace the image by hand.";
+
 function refusalMessage(refusal: string): string {
   switch (refusal) {
     case "untrusted-signature":
@@ -377,7 +502,7 @@ function refusalMessage(refusal: string): string {
     case "malformed":
       return "The update service answered with something Octant could not read.";
     case "wrong-platform":
-      return "That update is for a different kind of Mac.";
+      return "That update is not built for this computer.";
     case "wrong-ring":
       return "That update belongs to a different release ring, so it was refused.";
     default:

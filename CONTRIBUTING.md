@@ -147,9 +147,9 @@ Two rings, both built by GitHub Actions. Apple Silicon (`darwin-arm64`) is
 Developer ID signed and notarized; Linux x64 ships an unsigned AppImage dogfood
 artifact on the same matrix. Feed documents use the rings layout from
 [decision 0034](docs/decisions/0034-signed-updates.md):
-`<base>/<ring>/<platform>-<arch>.json`. A dogfood AppImage is not signed
-auto-update — the in-app Linux channel stays refuse-closed until a
-maintainer-published signed feed exists.
+`<base>/<ring>/<platform>-<arch>.json`. A dogfood AppImage is not code-signed.
+In-app update still requires that signed feed, and refuses a package, an
+archive, or a location it cannot write.
 
 - **Preview** — `.github/workflows/release-preview.yml` runs nightly, builds
   `main`, and publishes feeds under `<base>/preview/` for each matrix arch

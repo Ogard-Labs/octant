@@ -60,6 +60,7 @@ import {
 import { type AppVersion, isAppReleaseRing } from "@octant/contracts/app-updates";
 import { decodeCodeOperationApprovalRequest } from "@octant/contracts/code-operations";
 import { createAppUpdateService } from "./appUpdateService";
+import { createPortableImagePort } from "./portableImageUpdate";
 import { buildApplicationMenuTemplate } from "./applicationMenu";
 import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
@@ -3156,6 +3157,7 @@ function bundledWhatsNewOptions(): {
 function appUpdates(): ReturnType<typeof createAppUpdateService> {
   appUpdateService ??= createAppUpdateService({
     updater: electronAutoUpdater,
+    portableImage: createPortableImagePort({ quit: () => app.quit() }),
     feedBaseUrl: resolveUpdateFeedBaseUrl(process.env),
     app: {
       version: app.getVersion() as AppVersion,
