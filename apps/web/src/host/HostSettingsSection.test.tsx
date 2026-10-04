@@ -522,8 +522,10 @@ describe("HostSettingsSection", () => {
     await user.click(screen.getByLabelText("Mode"));
     await user.click(await screen.findByRole("option", { name: "Work" }));
     await user.type(screen.getByLabelText("Find a thread"), "dive");
+    expect(screen.getByRole("button", { name: "Set retention window" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Dive plan (work)" }));
-    expect(screen.getByLabelText("Find a thread")).toHaveValue("thread-1");
+    expect(screen.getByLabelText("Find a thread")).toHaveValue("Dive plan");
+    expect(screen.getByRole("button", { name: "Set retention window" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Dive notes (chat)" })).not.toBeInTheDocument();
   });
 

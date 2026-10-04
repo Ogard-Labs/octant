@@ -650,7 +650,9 @@ function ThreadRetentionPanel({
   const [state, setState] = useState<ThreadRetentionState | undefined>();
   const [scopeKind, setScopeKind] = useState<RetentionScope["kind"]>("host");
   const [mode, setMode] = useState<"chat" | "work" | "code">("chat");
+  const [threadQuery, setThreadQuery] = useState("");
   const [threadId, setThreadId] = useState("");
+  const [projectQuery, setProjectQuery] = useState("");
   const [projectId, setProjectId] = useState("");
   const [windowValue, setWindowValue] = useState("forever");
   const [confirmPurge, setConfirmPurge] = useState(false);
@@ -668,11 +670,15 @@ function ThreadRetentionPanel({
   const scope = (): RetentionScope | undefined => {
     if (scopeKind === "host") return { kind: "host" };
     if (scopeKind === "project") {
-      const trimmed = projectId.trim();
-      return trimmed === "" ? undefined : { kind: "project", projectId: trimmed as never };
+      const selected = projects.find((project) => project.id === projectId);
+      return selected === undefined
+        ? undefined
+        : { kind: "project", projectId: selected.id as never };
     }
-    const trimmed = threadId.trim();
-    return trimmed === "" ? undefined : { kind: "thread", mode, threadId: trimmed as never };
+    const selected = threads.find((thread) => thread.id === threadId && thread.mode === mode);
+    return selected === undefined
+      ? undefined
+      : { kind: "thread", mode, threadId: selected.id as never };
   };
 
   const selectedWindow =
@@ -713,9 +719,16 @@ function ThreadRetentionPanel({
           <PrivacyTargetSearch
             id="thread-retention-project"
             label="Find a Project"
-            onSelect={(id) => setProjectId(id)}
-            query={projectId}
-            setQuery={setProjectId}
+            onSelect={(id) => {
+              const selected = projects.find((project) => project.id === id);
+              setProjectId(id);
+              setProjectQuery(selected?.title ?? id);
+            }}
+            query={projectQuery}
+            setQuery={(value) => {
+              setProjectQuery(value);
+              setProjectId("");
+            }}
             targets={projects}
           />
         ) : null}
@@ -729,7 +742,10 @@ function ThreadRetentionPanel({
                   if (isThreadMode(value)) {
                     setMode(value);
                     const selected = threads.find((thread) => thread.id === threadId);
-                    if (selected !== undefined && selected.mode !== value) setThreadId("");
+                    if (selected !== undefined && selected.mode !== value) {
+                      setThreadId("");
+                      setThreadQuery("");
+                    }
                   }
                 }}
                 options={[
@@ -747,9 +763,13 @@ function ThreadRetentionPanel({
                 const selected = threads.find((thread) => thread.id === id);
                 if (selected !== undefined) setMode(selected.mode);
                 setThreadId(id);
+                setThreadQuery(selected?.title ?? id);
               }}
-              query={threadId}
-              setQuery={setThreadId}
+              query={threadQuery}
+              setQuery={(value) => {
+                setThreadQuery(value);
+                setThreadId("");
+              }}
               targets={threads.filter((thread) => thread.mode === mode)}
             />
           </>
