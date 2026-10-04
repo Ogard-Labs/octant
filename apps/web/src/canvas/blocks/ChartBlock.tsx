@@ -467,27 +467,62 @@ function SliceTable({ block }: { readonly block: CanvasChartBlock }) {
 
 function SeriesTable({ block }: { readonly block: CanvasChartBlock }) {
   const categories = categoryLabels(block.series);
+  const aligned =
+    block.chartType === "stacked-bar" ||
+    block.chartType === "grouped-bar" ||
+    block.chartType === "bar-line";
+  const repeats = block.series.some(
+    (series) =>
+      new Set(series.points.map((point) => categoryKey(point.x))).size !== series.points.length,
+  );
+  if (aligned && !repeats) {
+    return (
+      <table aria-label="Chart readings" className="ds-table">
+        <thead>
+          <tr>
+            <th scope="col">Category</th>
+            {block.series.map((series) => (
+              <th key={series.seriesId} scope="col">
+                {series.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {categories.map((category) => (
+            <tr key={category.key}>
+              <th scope="row">{category.label}</th>
+              {block.series.map((series) => (
+                <td key={series.seriesId}>{formatScalar(valueAt(series, category.key))}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+  // Scatter, line, area, bar, and distribution can repeat or skip categories,
+  // so the disclosed table lists every reading instead of a matrix that would
+  // collapse duplicates to their first y.
   return (
     <table aria-label="Chart readings" className="ds-table">
       <thead>
         <tr>
-          <th scope="col">Category</th>
-          {block.series.map((series) => (
-            <th key={series.seriesId} scope="col">
-              {series.label}
-            </th>
-          ))}
+          <th scope="col">Series</th>
+          <th scope="col">X</th>
+          <th scope="col">Y</th>
         </tr>
       </thead>
       <tbody>
-        {categories.map((category) => (
-          <tr key={category.key}>
-            <th scope="row">{category.label}</th>
-            {block.series.map((series) => (
-              <td key={series.seriesId}>{formatScalar(valueAt(series, category.key))}</td>
-            ))}
-          </tr>
-        ))}
+        {block.series.flatMap((series) =>
+          series.points.map((point, index) => (
+            <tr key={`${String(series.seriesId)}:${String(index)}`}>
+              <th scope="row">{series.label}</th>
+              <td>{String(point.x)}</td>
+              <td>{formatScalar(point.y)}</td>
+            </tr>
+          )),
+        )}
       </tbody>
     </table>
   );

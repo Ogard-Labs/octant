@@ -98,6 +98,34 @@ describe("chart marks", () => {
     expect(within(figure as HTMLElement).getAllByRole("row")).toHaveLength(31);
   });
 
+  it("lists every scatter reading in the data table when an x value repeats", () => {
+    const scatter = chartBlock({
+      blockId: "repeat-x",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "chart",
+      chartType: "scatter",
+      series: [
+        {
+          seriesId: "points",
+          label: "Points",
+          points: [
+            { x: 1, y: 2 },
+            { x: 1, y: 5 },
+          ],
+        },
+      ],
+    });
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [scatter] }} />);
+
+    const figure = document.querySelector(".canvas-block__chart--scatter");
+    if (figure === null) throw new Error("Scatter chart was not drawn.");
+    const rows = within(figure as HTMLElement).getAllByRole("row");
+    // one header plus one row per reading: neither duplicate x is collapsed.
+    expect(rows).toHaveLength(3);
+    expect(figure.textContent).toContain("2");
+    expect(figure.textContent).toContain("5");
+  });
+
   it("keeps numeric and string categories distinct in the axis and data table", () => {
     const grouped = chartBlock({
       blockId: "mixed-x",
