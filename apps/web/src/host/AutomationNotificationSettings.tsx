@@ -6,6 +6,7 @@ import {
 } from "@octant/client-runtime/automation-notification-client";
 import { OctantButton } from "../ui/base/OctantButton";
 import { SettingRow, SettingsFactList, SettingsSection } from "../settings/primitives";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * Host Settings → Automation notifications. Opt-in preferences plus honest
@@ -90,7 +91,7 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
   if (state.kind === "error") {
     return (
       <section aria-label="Automation notifications" className="host-settings__notifications">
-        <p role="alert">{state.message}</p>
+        <OctantAlert tone="warning">{state.message}</OctantAlert>
         <OctantButton onClick={() => void load()} type="button" variant="secondary">
           Retry
         </OctantButton>

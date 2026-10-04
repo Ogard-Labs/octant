@@ -10,6 +10,7 @@ import { MoreHorizontal } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { XtermTerminalAdapter, type XtermAdapterRuntime } from "../code/XtermTerminalAdapter";
 import { OctantMenu } from "../ui/base/OctantMenu";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ZenProjectTerminalCardProps {
   readonly client: ProjectTerminalClient;
@@ -163,7 +164,7 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
   const running = terminal.state === "running" && failure === undefined;
   return (
     <section aria-label="Project terminal" className="code-delivery-pane code-terminal-pane">
-      {failure === undefined ? null : <p role="alert">{failure}</p>}
+      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
       {terminal.state === "running" ? (
         <div className="code-terminal-pane__actions-menu">
           <OctantMenu

@@ -798,6 +798,7 @@ function CrossContextBanner(props: {
   readonly onOpenInNewWindow?: () => void;
 }) {
   return (
+    /* ui-boundary-exception: positioned-banner */
     <div
       className={`workspace-cross-context-banner${props.inline ? " workspace-cross-context-banner--inline" : ""}`}
       role="alert"

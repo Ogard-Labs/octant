@@ -13,6 +13,7 @@ import { GitHubRepositoryPicker } from "../code/GitHubRepositoryPicker";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -843,14 +844,18 @@ function UnavailableNotice(props: {
   readonly role: "alert" | "status";
 }) {
   return (
-    <div className="github-issue-browser__stale">
-      <p className="github-issue-browser__note" role={props.role}>
-        {props.message}
-      </p>
-      <OctantButton onClick={props.onRetry} size="sm" type="button" variant="secondary">
-        Retry
-      </OctantButton>
-    </div>
+    <OctantAlert
+      action={
+        <OctantButton onClick={props.onRetry} size="sm" type="button" variant="secondary">
+          Retry
+        </OctantButton>
+      }
+      className="github-issue-browser__stale"
+      role={props.role}
+      tone={props.role === "alert" ? "danger" : "neutral"}
+    >
+      <p className="github-issue-browser__note">{props.message}</p>
+    </OctantAlert>
   );
 }
 

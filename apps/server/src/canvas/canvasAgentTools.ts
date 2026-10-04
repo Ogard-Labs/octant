@@ -1,8 +1,10 @@
 import {
   CanvasBlock,
   CANVAS_SCHEMA_VERSION,
+  decodeCanvasActor,
   decodeCanvasBlock,
   decodeCanvasId,
+  type CanvasActor,
   type CanvasDocumentRecipe,
   type ChatThread,
   type HostId,
@@ -12,6 +14,7 @@ import {
 } from "@octant/contracts";
 import { JSONSchema, Schema } from "effect";
 import type { CanvasWorkspaceScope } from "@octant/contracts/canvas-cards";
+import type { ChildCanvasWorkspaceResolution } from "./childCanvasWorkspace";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { CanvasService } from "./canvasService";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
@@ -210,18 +213,29 @@ async function resolveCanvasTarget(
   };
 }
 
-function toolDescription(mode: "chat" | "work" | "code"): string {
+function toolDescription(
+  mode: "chat" | "work" | "code",
+  scope: "thread" | "run" = "thread",
+): string {
   const where =
     mode === "chat"
-      ? "this Chat Project"
+      ? scope === "run"
+        ? "this run"
+        : "this Chat Project"
       : mode === "work"
-        ? "this Work thread's folder"
-        : "this Code thread's checkout";
+        ? scope === "run"
+          ? "this run's folder"
+          : "this Work thread's folder"
+        : scope === "run"
+          ? "this run's checkout"
+          : "this Code thread's checkout";
   return [
     `Create, read, or revise an Octant Canvas: a structured, revisable document bound to ${where}.`,
     "When the user asks you to make, draft, write, design, plan, draw, compare, summarize, review, or audit something substantial (a plan, design or mockup, diagram, report, review, audit, comparison, table, chart, or dashboard), deliver it as a Canvas rather than as a long reply: author it here, then reply with one or two sentences saying what the Canvas contains. Do not repeat its content in the conversation.",
     "Keep short answers, clarifying questions, and conversation in the reply. If it is unclear whether the user wants a document, you may ask whether they want it as a Canvas.",
-    "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
+    scope === "run"
+      ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
+      : "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
     "Start with describe to see the block kinds, the document recipes, and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, and "summarise research" uses research-brief. Describe with no block kinds lists every offered recipe and its skeleton; fill those roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.',
     "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
@@ -382,11 +396,128 @@ export function createCanvasAgentTools(
     options.mode === "work" || options.mode === "code"
       ? { mode: options.mode, thread: options.thread }
       : { mode: "chat", thread: options.thread };
+  return canvasToolSet({
+    mode: owner.mode,
+    scope: "thread",
+    port: options.port,
+    originThreadId: owner.thread.id,
+    providerInstanceId: owner.thread.providerInstanceId,
+    modelId: owner.thread.modelId,
+    resolveTarget: () => resolveCanvasTarget(options.windowId, owner, options.port),
+  });
+}
+
+/**
+ * Lend one managed child the Canvas tool, bound to the workspace the host
+ * resolved for that run.
+ *
+ * The model cannot name a path or a Project. Discovery still lists the tool
+ * when the workspace cannot be resolved; create and revise then refuse. The
+ * child run is the author. The parent thread is the origin, so the document
+ * appears in that thread's dock.
+ */
+export function createChildCanvasAgentTools(options: {
+  readonly port: CanvasAgentToolPort & {
+    readonly resolveChildWorkspace: (input: {
+      readonly runId: string;
+    }) => ChildCanvasWorkspaceResolution | Promise<ChildCanvasWorkspaceResolution>;
+  };
+  readonly run: {
+    readonly id: string;
+    readonly parentThreadId: string;
+    readonly mode: "chat" | "work" | "code";
+    readonly projectId?: string;
+    readonly providerInstanceId: CanvasAuthoringThread["providerInstanceId"];
+    readonly modelId: CanvasAuthoringThread["modelId"];
+  };
+}): AppManagedToolSet {
+  const author = childAuthor(options.run.id);
+  return canvasToolSet({
+    mode: options.run.mode,
+    scope: "run",
+    port: options.port,
+    originThreadId: options.run.parentThreadId,
+    providerInstanceId: options.run.providerInstanceId,
+    modelId: options.run.modelId,
+    ...(author === undefined ? {} : { author }),
+    resolveTarget: () => resolveChildCanvasTarget(options),
+  });
+}
+
+function childAuthor(runId: string): CanvasActor | undefined {
+  try {
+    return decodeCanvasActor({ kind: "agent", actorId: runId });
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveChildCanvasTarget(options: {
+  readonly port: {
+    readonly resolveChildWorkspace: (input: {
+      readonly runId: string;
+    }) => ChildCanvasWorkspaceResolution | Promise<ChildCanvasWorkspaceResolution>;
+  };
+  readonly run: {
+    readonly id: string;
+    readonly mode: "chat" | "work" | "code";
+    readonly projectId?: string;
+    readonly parentThreadId: string;
+  };
+}): Promise<ResolvedCanvasTarget> {
+  if (options.run.mode === "chat" || options.run.projectId === undefined) {
+    return {
+      kind: "refused",
+      error: "This run's workspace is unavailable, so no Canvas can be bound to it.",
+    };
+  }
+  const resolved = await options.port.resolveChildWorkspace({ runId: options.run.id });
+  if (resolved.status === "refused") {
+    return {
+      kind: "refused",
+      error:
+        resolved.reason === "foreign-project"
+          ? "The Canvas Project is unavailable."
+          : "This run's workspace is unavailable, so no Canvas can be bound to it.",
+    };
+  }
+  const binding = resolved.binding;
+  if (
+    binding.mode !== options.run.mode ||
+    binding.projectId !== options.run.projectId ||
+    String(binding.workspace.projectId) !== options.run.projectId
+  ) {
+    return { kind: "refused", error: "The Canvas Project is unavailable." };
+  }
+  return {
+    kind: "ready",
+    mode: binding.mode,
+    workspace: binding.workspace,
+    context: {
+      mode: binding.mode,
+      projectId: binding.projectId,
+      workspace: binding.workspace,
+      originThreadId: options.run.parentThreadId,
+    },
+    project: binding.project,
+  };
+}
+
+function canvasToolSet(options: {
+  readonly mode: "chat" | "work" | "code";
+  readonly scope: "thread" | "run";
+  readonly port: CanvasAgentToolPort;
+  readonly originThreadId: string;
+  readonly providerInstanceId: CanvasAuthoringThread["providerInstanceId"];
+  readonly modelId: CanvasAuthoringThread["modelId"];
+  readonly author?: CanvasActor;
+  readonly resolveTarget: () => Promise<ResolvedCanvasTarget>;
+}): AppManagedToolSet {
   return {
     definitions: [
       {
         name: CANVAS_TOOL_NAME,
-        description: toolDescription(owner.mode),
+        description: toolDescription(options.mode, options.scope),
         inputSchema: canvasDefinitionSchema,
       },
     ],
@@ -424,16 +555,22 @@ export function createCanvasAgentTools(
         return { result: { blockSchema: JSONSchema.make(Schema.Union(...selected)) } };
       }
 
-      const target = await resolveCanvasTarget(options.windowId, owner, options.port);
+      const target = await options.resolveTarget();
       if (target.kind === "refused") {
         return { result: { error: target.error }, isError: true };
+      }
+      if (options.scope === "run" && options.author === undefined) {
+        return {
+          result: { error: "This run cannot be recorded as a Canvas author." },
+          isError: true,
+        };
       }
 
       if (input.operation === "list") {
         const canvases = options.port.canvas
           .threadReferenceCards({
             mode: target.mode,
-            threadId: owner.thread.id,
+            threadId: options.originThreadId,
             projectId: target.context.projectId,
           })
           .flatMap((card) => {
@@ -473,25 +610,30 @@ export function createCanvasAgentTools(
       }
 
       if (input.operation === "create") {
-        const result = options.port.canvas.create(
-          {
-            schemaVersion: 1,
-            kind: "canvas-create",
-            requestId: options.port.uuid(),
-            intent: input.prompt === undefined ? "blank" : "prompt",
-            hostId: options.port.hostId,
-            mode: target.mode,
-            workspace: target.workspace,
-            originThreadId: owner.thread.id,
-            title: input.title ?? "Canvas",
-            ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
-            sourceManifest: [],
-            requestedAuthority: documentAuthority(),
-          },
-          target.context,
-          target.project,
-          input.blocks,
-        );
+        const request = {
+          schemaVersion: 1 as const,
+          kind: "canvas-create" as const,
+          requestId: options.port.uuid(),
+          intent: input.prompt === undefined ? ("blank" as const) : ("prompt" as const),
+          hostId: options.port.hostId,
+          mode: target.mode,
+          workspace: target.workspace,
+          originThreadId: options.originThreadId,
+          title: input.title ?? "Canvas",
+          ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
+          sourceManifest: [],
+          requestedAuthority: documentAuthority(),
+        };
+        const result =
+          options.author === undefined
+            ? options.port.canvas.create(request, target.context, target.project, input.blocks)
+            : options.port.canvas.create(
+                request,
+                target.context,
+                target.project,
+                input.blocks,
+                options.author,
+              );
         if (result.kind !== "accepted") {
           return { result: { error: result.message }, isError: true };
         }
@@ -511,6 +653,8 @@ export function createCanvasAgentTools(
           isError: true,
         };
       }
+      const actor =
+        options.author ?? decodeCanvasActor({ kind: "agent", actorId: options.port.uuid() });
       const result = options.port.canvas.revise(
         {
           schemaVersion: 1,
@@ -521,11 +665,11 @@ export function createCanvasAgentTools(
           hostId: options.port.hostId,
           mode: target.mode,
           workspace: target.workspace,
-          originThreadId: owner.thread.id,
+          originThreadId: options.originThreadId,
           prompt: input.prompt ?? "Authored revision",
-          actor: { kind: "agent", actorId: options.port.uuid() },
-          providerInstanceId: owner.thread.providerInstanceId,
-          modelId: owner.thread.modelId,
+          actor,
+          providerInstanceId: options.providerInstanceId,
+          modelId: options.modelId,
           requestedAuthority: documentAuthority(),
         },
         target.context,

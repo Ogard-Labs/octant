@@ -10,6 +10,7 @@ import {
   CanvasRefreshReceiptRecorded,
   CanvasVersionAppended,
   decodeCanvasId,
+  decodeCanvasActor,
   decodeCanvasVersion,
   type CanvasVersion,
 } from "@octant/contracts";
@@ -547,6 +548,23 @@ describe("CanvasService", () => {
         .byThread({ mode: "chat", projectId: ids.project as never, threadId: ids.thread })
         .some((entry) => String(entry.canvasId) === String(result.card.canvasId)),
     ).toBe(true);
+  });
+
+  it("records a managed child as the author when the host stamps that run", () => {
+    const { service, projection } = createService();
+    const child = decodeCanvasActor({ kind: "agent", actorId: ids.actor });
+    const result = service.create(
+      createRequest(),
+      { mode: "chat", projectId: ids.project },
+      { id: ids.project, type: "chat", lifecycle: "active" },
+      undefined,
+      child,
+    );
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    const version = projection.getById(result.card.canvasId)?.currentVersion;
+    expect(version?.createdBy).toEqual(child);
+    expect(version?.definition.provenance.actor).toEqual(child);
   });
 
   it("reauthorizes and journals a complete refresh, then replays duplicates idempotently", async () => {

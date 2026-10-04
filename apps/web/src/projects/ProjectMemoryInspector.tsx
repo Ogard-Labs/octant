@@ -12,6 +12,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { MemoryEntryDialog } from "./MemoryEntryDialog";
 import { MemoryTransferDialog } from "./MemoryTransferDialog";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 type InspectorDialog =
   | { readonly kind: "create" }
@@ -160,7 +161,7 @@ export function ProjectMemoryInspector(props: ProjectMemoryInspectorProps) {
             <p role="status">Reloading authoritative memory…</p>
           ) : null}
           {props.status === "error" ? (
-            <div className="project-memory-inspector__error" role="alert">
+            <OctantAlert className="project-memory-inspector__error" tone="danger">
               <p>{props.errorMessage ?? "Project memory is unavailable."}</p>
               <OctantButton
                 className="project-button"
@@ -170,7 +171,7 @@ export function ProjectMemoryInspector(props: ProjectMemoryInspectorProps) {
               >
                 Retry memory
               </OctantButton>
-            </div>
+            </OctantAlert>
           ) : null}
         </div>
       ) : null}

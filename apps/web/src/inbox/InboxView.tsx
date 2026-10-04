@@ -14,6 +14,7 @@ import {
   type InboxAttentionItem,
 } from "./inboxModel";
 import { markInboxKeySeen, readSeenInboxKeys } from "./inboxSeen";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface InboxViewProps {
   readonly attentionItems: ReadonlyArray<InboxAttentionItem>;
@@ -202,9 +203,9 @@ export function InboxView(props: InboxViewProps) {
               Loading assigned work…
             </p>
           ) : github.kind === "failed" ? (
-            <p className="surface-section__note" role="alert">
+            <OctantAlert className="surface-section__note" tone="warning">
               {github.message}
-            </p>
+            </OctantAlert>
           ) : github.page.items.length === 0 ? (
             <SurfaceEmpty title="Nothing is assigned to you." />
           ) : (
@@ -255,9 +256,9 @@ export function InboxView(props: InboxViewProps) {
               Loading assigned issues…
             </p>
           ) : linear.kind === "failed" ? (
-            <p className="surface-section__note" role="alert">
+            <OctantAlert className="surface-section__note" tone="warning">
               {linear.message}
-            </p>
+            </OctantAlert>
           ) : linear.page.rows.length === 0 ? (
             <SurfaceEmpty title="No Linear issues are assigned to you." />
           ) : (

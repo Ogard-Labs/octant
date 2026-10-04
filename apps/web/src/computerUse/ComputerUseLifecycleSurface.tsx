@@ -3,6 +3,7 @@ import type { ComputerUseSessionScope } from "@octant/contracts/computer-use";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ComputerUseLifecyclePane } from "./ComputerUseLifecyclePane";
 import { useComputerUseLifecycle } from "./useComputerUseLifecycle";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export function ComputerUseLifecycleSurface(props: {
   readonly client: ComputerUseClient;
@@ -21,7 +22,7 @@ export function ComputerUseLifecycleSurface(props: {
   if (controller.status !== "ready" || controller.view === undefined) {
     return (
       <section aria-label="Computer use">
-        <div role="alert">
+        <OctantAlert tone="warning">
           <strong>
             {controller.status === "interrupted"
               ? "Computer use interrupted"
@@ -30,7 +31,7 @@ export function ComputerUseLifecycleSurface(props: {
                 : "Computer use unavailable"}
           </strong>
           <p>{controller.errorMessage ?? "The authoritative host lifecycle is unavailable."}</p>
-        </div>
+        </OctantAlert>
         <OctantButton onClick={controller.retry} type="button" variant="secondary">
           Retry
         </OctantButton>

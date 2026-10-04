@@ -1972,6 +1972,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         footer={
           <div aria-live="polite" className="composer-status">
             {errorMessage === undefined ? null : (
+              /* ui-boundary-exception: compact-status */
               <span className="composer-status__notice" role="alert" title={errorMessage}>
                 {errorMessage}
               </span>

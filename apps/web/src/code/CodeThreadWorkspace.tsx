@@ -1983,11 +1983,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               </span>
             )}
             {forkMessage === undefined ? null : (
+              /* ui-boundary-exception: compact-status */
               <span className="code-thread-workspace__hint" role="alert" title={forkMessage}>
                 {forkMessage}
               </span>
             )}
             {sendNotice === undefined ? null : (
+              /* ui-boundary-exception: compact-status */
               <span className="code-thread-workspace__hint" role="alert" title={sendNotice}>
                 {sendNotice}
               </span>

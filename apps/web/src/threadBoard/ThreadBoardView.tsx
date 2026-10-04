@@ -5,6 +5,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import type { ReactNode } from "react";
 import { ThreadBoardStatusMark } from "./ThreadBoardCardParts";
 import { lastUsefulView, type ThreadBoardState } from "./threadBoardState";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ThreadBoardCardPresentation {
   readonly layout: "list" | "card";
@@ -253,9 +254,9 @@ export function ThreadBoardBody<
         Refreshing local board state.
       </p>
     ) : props.board.status === "error" ? (
-      <p className="code-board__note" role="alert">
+      <OctantAlert className="code-board__note" tone="warning">
         {props.board.message} Showing the last useful view.
-      </p>
+      </OctantAlert>
     ) : null;
   const cards = props.cardsOf(view);
   const empty = props.activeFilterSummary === undefined;

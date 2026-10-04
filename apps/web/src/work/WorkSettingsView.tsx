@@ -5,6 +5,7 @@ import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { WorkSettingsController } from "./useWorkSettings";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 const ACCESS_NOTES: Readonly<Record<WorkAccess, string>> = {
   "ask-first": "The agent asks before it changes any file in the Project folder.",
@@ -60,9 +61,9 @@ export function WorkSettingsView(props: {
     >
       <div className="settings-feedback-slot" aria-live="polite">
         {props.controller.message === undefined ? null : (
-          <p className="settings-view__error" role="alert">
+          <OctantAlert className="settings-view__error" tone="danger">
             {props.controller.message}
-          </p>
+          </OctantAlert>
         )}
       </div>
       <div className="setgroup">

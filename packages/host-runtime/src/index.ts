@@ -66,6 +66,15 @@ export { CONFIGURATION_FAILURE_EXIT_CODE, startupFailureExitCode } from "./start
 export { redactHostRuntimeValue } from "./redaction";
 export { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
 export {
+  createHostOAuthRuntime,
+  isHostOAuthGrantMaterial,
+  type HostOAuthBeginResult,
+  type HostOAuthDescriptor,
+  type HostOAuthPublicState,
+  type HostOAuthRefreshResult,
+  type HostOAuthRuntime,
+} from "./hostOAuth";
+export {
   CredentialPurgeFailure,
   CredentialStoreFailure,
   type CredentialPurgeFailureCategory,

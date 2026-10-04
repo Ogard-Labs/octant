@@ -10,6 +10,7 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { ProjectPullRequestReviewPane } from "../code/ProjectPullRequestReviewPane";
 import { ShellState } from "./ShellState";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface DockProjectPullRequestReviewToolProps {
   readonly query: CodeProjectPullRequestDetailQuery;
@@ -152,9 +153,9 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
   return (
     <>
       {workspace.status === "error" ? (
-        <p className="code-project-pull-requests__status" role="alert">
+        <OctantAlert className="code-project-pull-requests__status" tone="warning">
           {workspace.message}
-        </p>
+        </OctantAlert>
       ) : null}
       <ProjectPullRequestReviewPane
         detail={view.detail}

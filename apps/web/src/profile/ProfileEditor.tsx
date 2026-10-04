@@ -271,6 +271,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
       </div>
 
       {notice === undefined ? null : (
+        /* ui-boundary-exception: compact-status */
         <p
           className="profile-editor__notice"
           data-tone={notice.tone}
@@ -298,6 +299,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
           value={nameDraft}
         />
         {nameMessage === undefined ? null : (
+          /* ui-boundary-exception: inline-field-error */
           <p
             className="profile-editor__hint"
             id={`${nameId}-problem`}

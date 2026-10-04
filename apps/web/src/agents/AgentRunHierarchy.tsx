@@ -17,6 +17,7 @@ import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
 import { AgentRunDetail } from "./AgentRunDetail";
 import { buildAgentHierarchyModel, isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
 import { useAgentRunConversation } from "./useAgentRunConversation";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 const ACTIVE_CHILD_REFRESH_MS = 2_000;
 
@@ -268,9 +269,9 @@ export function AgentRunHierarchy(props: {
   const effectivePosture = posture ?? "ask";
   const error =
     errorMessage === undefined ? null : (
-      <p className="code-thread-workspace__error" role="alert">
+      <OctantAlert className="code-thread-workspace__error" tone="danger">
         {errorMessage}
-      </p>
+      </OctantAlert>
     );
   const selectedRow =
     selectedRunId === undefined

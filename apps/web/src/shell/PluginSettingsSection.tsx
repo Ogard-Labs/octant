@@ -3,6 +3,7 @@ import {
   loadPluginSettingsSectionModule,
   type PluginSettingsSectionProps,
 } from "./pluginModuleRegistry";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 interface PluginSettingsSectionPropsWithEntryPoint extends PluginSettingsSectionProps {
   readonly entryPoint: string;
@@ -32,7 +33,7 @@ export function PluginSettingsSection(props: PluginSettingsSectionPropsWithEntry
   if (state.kind === "error") {
     return (
       <section aria-label="Settings section error">
-        <p role="alert">{state.message}</p>
+        <OctantAlert tone="warning">{state.message}</OctantAlert>
       </section>
     );
   }

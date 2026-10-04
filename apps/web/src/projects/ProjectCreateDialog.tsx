@@ -13,6 +13,7 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { FolderPicker } from "./FolderPicker";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 const GitHubRepositoryOnboardingFlow = lazy(() =>
   import("../code/GitHubRepositoryOnboarding").then((module) => ({
@@ -503,10 +504,10 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             ×
           </OctantButton>
         </div>
-        <p role="alert">
+        <OctantAlert tone="warning">
           Folder selection is unavailable. Authenticated web needs the host folder browser; Electron
           needs the native picker bridge.
-        </p>
+        </OctantAlert>
         <div className="project-dialog__actions">
           <OctantButton onClick={props.onClose} type="button" variant="ghost">
             Close

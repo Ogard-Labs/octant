@@ -68,16 +68,14 @@ describe("provider Settings presentation", () => {
       observedAt: "2026-07-14T10:00:00.000Z",
     });
     expect(providerRefusalGuidance(instance, observed)).toEqual({
-      reason:
-        "This OpenCode runtime is discovery-only and cannot carry Octant's session permission rules yet.",
-      nextStep: "Use a supported OpenCode 1.x runtime, then check the connection again.",
+      reason: "OpenCode 2 is listing only, turns not yet supported.",
+      nextStep: "Review the listed models. Turns are not available on this runtime yet.",
     });
     expect(incompatibleReadinessFacts(instance, observed)).toEqual(
       expect.arrayContaining([
         {
           label: "Host check",
-          value:
-            "This OpenCode runtime is discovery-only and cannot carry Octant's session permission rules yet.",
+          value: "OpenCode 2 is listing only, turns not yet supported.",
         },
         { label: "Version", value: "v0.0.0-beta-18721" },
       ]),
