@@ -277,6 +277,9 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
   ) => Promise<ProviderCredentialStatus>;
   readonly onClearProviderCredential: (instanceId: ProviderInstanceId) => Promise<boolean>;
+  readonly onProviderOAuth?: (
+    command: import("./ProviderOAuthSignIn").ProviderOAuthCommand,
+  ) => Promise<import("./ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
   readonly onSetEnabled: (instanceId: ProviderInstanceId, enabled: boolean) => Promise<boolean>;
   readonly onDataTagsChange: (
     instanceId: ProviderInstanceId,
@@ -437,6 +440,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
         onChangePiConfiguration={props.onChangePiConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
+        {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
         {...(props.onUpdateProviderCli === undefined
           ? {}

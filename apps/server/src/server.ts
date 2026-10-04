@@ -442,6 +442,11 @@ import {
   makeCredentialBrokerClient,
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
+import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
+import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
+import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
+import { createProviderOAuthRouteHandler } from "./providers/oauth/providerOAuthRoutes";
+import { subscriptionOAuthHostFromBroker } from "./providers/oauth/subscriptionOAuthHost";
 import type { CompatibleFetch } from "./providers/openAiCompatibleEndpoint";
 import { makeClaudeAgentSdkPort, type ClaudeAgentSdkPort } from "./providers/claudeAgentSdkPort";
 import type { ClaudeResumeIdentityPort } from "./providers/claudeDriver";
@@ -884,6 +889,7 @@ interface ConfiguredProviderDriverOptions {
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly credentialResolver?: ProviderCredentialResolver;
+  readonly subscriptionOAuth?: import("@octant/provider-sdk/subscription-oauth").SubscriptionOAuthHost;
   readonly fetch?: CompatibleFetch;
   readonly ollamaHistoryStore?: OllamaHistoryStore;
   /** Shared by every harness driver built from these options, so a later turn can resume an earlier one. */
@@ -921,6 +927,9 @@ export function makeConfiguredProviderDriver(
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
+      ...(options.subscriptionOAuth === undefined
+        ? {}
+        : { subscriptionOAuth: options.subscriptionOAuth }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
   } else if (instance.driverKind === "anthropic-compatible") {
@@ -934,6 +943,9 @@ export function makeConfiguredProviderDriver(
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
+      ...(options.subscriptionOAuth === undefined
+        ? {}
+        : { subscriptionOAuth: options.subscriptionOAuth }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
   } else if (instance.driverKind === "azure-foundry") {
@@ -3818,6 +3830,36 @@ export function startOctantServer(
             url: options.credentialBrokerUrl,
             token: options.credentialBrokerToken,
           });
+    const oauthBroker =
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeHostOAuthBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          });
+    const oauthJournal =
+      oauthBroker === undefined
+        ? undefined
+        : hostOAuthEventJournal({
+            journal: persistence.journal,
+            connection: persistence.connection,
+            uuid: randomUUID,
+            now: () => new Date().toISOString(),
+          });
+    const hostOAuth =
+      oauthBroker === undefined || oauthJournal === undefined
+        ? undefined
+        : createHostOAuthService({
+            journal: oauthJournal,
+            broker: oauthBroker,
+          });
+    if (hostOAuth !== undefined && oauthJournal !== undefined) {
+      for (const acknowledgment of oauthJournal.acknowledgments()) {
+        hostOAuth.restoreAcknowledgment(acknowledgment);
+      }
+    }
+    const subscriptionOAuth =
+      oauthBroker === undefined ? undefined : subscriptionOAuthHostFromBroker(oauthBroker);
     const providerService = new ProviderService({
       persistence,
       runtimeRegistry: providerRuntimeRegistry,
@@ -3848,6 +3890,7 @@ export function startOctantServer(
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
             onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
+            ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
           }),
           () => workRequestRuntime,
         ),
@@ -3870,6 +3913,39 @@ export function startOctantServer(
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
     });
+    const providerOAuthRoutes =
+      hostOAuth === undefined
+        ? async () => undefined
+        : createProviderOAuthRouteHandler({
+            service: hostOAuth,
+            windowAuthorityStore,
+            ...(credentialResolver === undefined ? {} : { credentials: credentialResolver }),
+            readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+            bindDescriptor: async (instance, descriptorId, windowId) => {
+              const authenticatedWindow = decodeWindowId(windowId);
+              if (instance.driverKind === "openai-compatible") {
+                await providerService.execute(authenticatedWindow, {
+                  kind: "change-openai-compatible-configuration",
+                  instanceId: instance.id,
+                  expectedVersion: instance.version,
+                  configuration: {
+                    ...instance.configuration,
+                    oauthDescriptorId: descriptorId,
+                  },
+                });
+              } else if (instance.driverKind === "anthropic-compatible") {
+                await providerService.execute(authenticatedWindow, {
+                  kind: "change-anthropic-compatible-configuration",
+                  instanceId: instance.id,
+                  expectedVersion: instance.version,
+                  configuration: {
+                    ...instance.configuration,
+                    oauthDescriptorId: descriptorId,
+                  },
+                });
+              }
+            },
+          });
     const discoveryService = makeDiscoveryService({ hostId: LOCAL_HOST_ID });
     const createProviderFromDiscovery = async (
       candidate: DiscoveryCandidate,
@@ -3924,6 +4000,7 @@ export function startOctantServer(
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
+      ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
       localUsageHistorySourceForInstance: (instance) =>
         createLocalUsageHistorySourceForDriver({
           driverKind: instance.driverKind,
@@ -8871,6 +8948,7 @@ export function startOctantServer(
       (await appleToolchainRoutes(request)) ??
       (await androidToolchainRoutes(request)) ??
       (await providerRoutes(request)) ??
+      (await providerOAuthRoutes(request)) ??
       (await providerUsageLimitsRoutes(request)) ??
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??

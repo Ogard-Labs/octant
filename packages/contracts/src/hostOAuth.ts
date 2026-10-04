@@ -154,6 +154,11 @@ export const HostOAuthJournalRecord = Schema.Union(
     attemptId: Schema.optional(AttemptId),
     reason: Schema.String.pipe(Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/)),
   }).annotations(strict),
+  Schema.Struct({
+    name: Schema.Literal("host-oauth.signed-out"),
+    descriptorId: DescriptorId,
+    credentialRef: CredentialRef,
+  }).annotations(strict),
 );
 export type HostOAuthJournalRecord = typeof HostOAuthJournalRecord.Type;
 
@@ -164,3 +169,25 @@ export const decodeHostOAuthJournalRecord = Schema.decodeUnknownSync(HostOAuthJo
 export const decodeHostOAuthTermsAcknowledgment = Schema.decodeUnknownSync(
   HostOAuthTermsAcknowledgment,
 );
+
+const AccountLabel = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9 .@_-]{0,63}$/));
+
+/**
+ * A descriptor that offers host-driven sign-in beside an API key.
+ * Vendor flows are not listed here; a later catalog entry is the only way a
+ * descriptor starts offering sign-in.
+ */
+export const SubscriptionOAuthOffer = Schema.Struct({
+  descriptor: HostOAuthDescriptor,
+  accountLabel: AccountLabel,
+  termsSummary: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(280)),
+  driverKinds: Schema.Array(Schema.Literal("openai-compatible", "anthropic-compatible")).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(2),
+  ),
+}).annotations(strict);
+export type SubscriptionOAuthOffer = typeof SubscriptionOAuthOffer.Type;
+
+export function subscriptionOAuthOffers(): readonly SubscriptionOAuthOffer[] {
+  return [];
+}

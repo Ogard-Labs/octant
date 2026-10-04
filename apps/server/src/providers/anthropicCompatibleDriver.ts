@@ -29,6 +29,11 @@ import {
 } from "../harness/nativeHarnessTranscriptStore";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
+  directEndpointRequestResolver,
+  honestDirectEndpointCapabilities,
+  inspectDirectEndpointCredential,
+} from "./directEndpointSubscriptionOAuth";
+import {
   makeAnthropicCompatibleEndpoint,
   markAnthropicModelVerified,
   probeAnthropicModels,
@@ -42,6 +47,7 @@ import {
   type AnthropicTurnResult,
 } from "./anthropicMessages";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
 
 const initialCapabilities: ProviderCapabilities = {
   streaming: "unavailable",
@@ -75,6 +81,8 @@ export interface AnthropicCompatibleDriverOptions {
   readonly onConnectionReleased?: () => void;
   /** Where harness sessions keep their conversation; see the OpenAI-compatible driver. */
   readonly transcripts?: NativeHarnessTranscriptStore;
+  /** Host refresh and access for a subscription-oauth credential. */
+  readonly subscriptionOAuth?: SubscriptionOAuthHost;
 }
 
 export function makeAnthropicCompatibleDriver(
@@ -90,9 +98,37 @@ export function makeAnthropicCompatibleDriver(
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.tryPromise({
             try: async () => {
-              const endpoint = endpointFor(options, options.credentialResolver);
-              const result = await probeAnthropicModels(endpoint);
               const observedAt = clock() as UtcTimestamp;
+              const gate = await inspectDirectEndpointCredential({
+                authentication: options.configuration.authentication,
+                expectedDescriptorId: options.configuration.oauthDescriptorId,
+                credentialResolver: options.credentialResolver,
+                instanceId,
+                host: options.subscriptionOAuth,
+                now: () => Date.parse(observedAt),
+              });
+              if (gate.kind === "report") {
+                const refused = decodeProviderObservedState({
+                  instanceId,
+                  readiness: gate.readiness,
+                  processState: "stopped",
+                  credentialStatus: gate.credentialStatus,
+                  models: [],
+                  capabilities: honestDirectEndpointCapabilities,
+                  message: gate.message,
+                  observedAt,
+                });
+                options.runtimeRegistry.setObservedState(refused);
+                return refused;
+              }
+              const endpoint = endpointFor(
+                options,
+                gate.kind === "oauth"
+                  ? directEndpointRequestResolver(anthropicOAuthInput(options, clock))
+                  : options.credentialResolver,
+                gate.kind === "oauth",
+              );
+              const result = await probeAnthropicModels(endpoint);
               const probe = decodeProviderObservedState({
                 instanceId,
                 readiness: result.readiness,
@@ -171,12 +207,34 @@ function anthropicCompatibleTransport(
 ): NativeHarnessTransport {
   return {
     open: async () => {
-      const credential = await resolveSessionCredential(options);
+      const observedAt = clock();
+      const gate = await inspectDirectEndpointCredential({
+        authentication: options.configuration.authentication,
+        expectedDescriptorId: options.configuration.oauthDescriptorId,
+        credentialResolver: options.credentialResolver,
+        instanceId: options.instanceId,
+        host: options.subscriptionOAuth,
+        now: () => Date.parse(observedAt),
+      });
+      if (gate.kind === "report") throw failure(gate.readiness, gate.message);
+      const plainCredential = gate.kind === "plain" ? gate.credential : undefined;
+      if (
+        options.configuration.authentication !== "none" &&
+        gate.kind !== "oauth" &&
+        (plainCredential === undefined || plainCredential.length === 0)
+      ) {
+        throw failure("unauthenticated", "The provider credential is missing or unavailable.");
+      }
+      const resolver =
+        gate.kind === "oauth"
+          ? directEndpointRequestResolver(anthropicOAuthInput(options, clock))
+          : plainCredential !== undefined && plainCredential.length > 0
+            ? { has: async () => true, resolve: async () => plainCredential }
+            : undefined;
       let endpoint: AnthropicCompatibleEndpoint | undefined = endpointFor(
         options,
-        credential === undefined
-          ? undefined
-          : { has: async () => true, resolve: async () => credential },
+        resolver,
+        gate.kind === "oauth",
       );
       return {
         fits: (request) => endpoint !== undefined && requestFits(options, endpoint, request),
@@ -265,26 +323,29 @@ function recordObservedTurn(
 function endpointFor(
   options: AnthropicCompatibleDriverOptions,
   credentialResolver: ProviderCredentialResolver | undefined,
+  bearerOverride = false,
 ): AnthropicCompatibleEndpoint {
+  const configuration =
+    bearerOverride && options.configuration.authentication === "api-key"
+      ? { ...options.configuration, authentication: "bearer" as const }
+      : options.configuration;
   return makeAnthropicCompatibleEndpoint({
     instanceId: options.instanceId,
-    configuration: options.configuration,
+    configuration,
     ...(credentialResolver === undefined ? {} : { credentialResolver }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
 }
 
-async function resolveSessionCredential(
-  options: AnthropicCompatibleDriverOptions,
-): Promise<string | undefined> {
-  if (options.configuration.authentication === "none") return undefined;
-  try {
-    const credential = (await options.credentialResolver?.resolve(options.instanceId)) ?? "";
-    if (credential.length === 0) throw new Error("missing");
-    return credential;
-  } catch {
-    throw failure("unauthenticated", "The provider credential is missing or unavailable.");
-  }
+function anthropicOAuthInput(options: AnthropicCompatibleDriverOptions, clock: () => string) {
+  return {
+    authentication: options.configuration.authentication,
+    expectedDescriptorId: options.configuration.oauthDescriptorId,
+    credentialResolver: options.credentialResolver,
+    instanceId: options.instanceId,
+    host: options.subscriptionOAuth,
+    now: () => Date.parse(clock()),
+  };
 }
 
 function manualModels(modelIds: readonly ProviderModelId[]) {

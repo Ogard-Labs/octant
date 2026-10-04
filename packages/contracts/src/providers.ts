@@ -398,12 +398,15 @@ export type ProviderCredentialStatus = typeof ProviderCredentialStatus.Type;
 const UniqueManualModelIds = Schema.Array(ProviderModelId).pipe(
   Schema.filter((modelIds) => new Set(modelIds).size === modelIds.length),
 );
+const OAuthDescriptorId = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
 export const OpenAiCompatibleProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("openai-compatible-http"),
   baseUrl: Schema.NonEmptyTrimmedString,
   authentication: Schema.Literal("bearer", "none"),
   protocol: OpenAiCompatibleProtocol,
   manualModelIds: UniqueManualModelIds,
+  /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
+  oauthDescriptorId: Schema.optional(OAuthDescriptorId),
 }).annotations(strict);
 export type OpenAiCompatibleProviderConfiguration =
   typeof OpenAiCompatibleProviderConfiguration.Type;
@@ -418,6 +421,8 @@ export const AnthropicCompatibleProviderConfiguration = Schema.Struct({
   protocol: AnthropicCompatibleProtocol,
   protocolVersion: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
   manualModelIds: UniqueManualModelIds,
+  /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
+  oauthDescriptorId: Schema.optional(OAuthDescriptorId),
 }).annotations(strict);
 export type AnthropicCompatibleProviderConfiguration =
   typeof AnthropicCompatibleProviderConfiguration.Type;

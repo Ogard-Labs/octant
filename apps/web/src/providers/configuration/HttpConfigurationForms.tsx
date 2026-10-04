@@ -1,4 +1,5 @@
 import { type ProviderInstance } from "@octant/contracts";
+import { subscriptionOAuthOffers, type SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { useRef } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
@@ -12,6 +13,7 @@ import {
   type CredentialStatusController,
 } from "../ProviderSettingsCredentials";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
+import { ProviderOAuthSignInPanel, type ProviderOAuthCommand } from "../ProviderOAuthSignIn";
 import {
   configurationFrom,
   anthropicConfigurationFrom,
@@ -25,6 +27,9 @@ interface HttpConfigurationFormProps {
   readonly credential: CredentialStatusController;
   readonly onChange: ProviderSettingsViewProps["onChangeOpenAiCompatibleConfiguration"];
   readonly onClearCredential: ProviderSettingsViewProps["onClearProviderCredential"];
+  readonly onProviderOAuth?: (
+    command: ProviderOAuthCommand,
+  ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
 }
 
 export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
@@ -35,7 +40,12 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        const configuration = configurationFrom(new FormData(event.currentTarget));
+        const configuration = {
+          ...configurationFrom(new FormData(event.currentTarget)),
+          ...(props.instance.configuration.oauthDescriptorId === undefined
+            ? {}
+            : { oauthDescriptorId: props.instance.configuration.oauthDescriptorId }),
+        };
         const enteredCredential = transientCredential(credentialInput.current);
         const key =
           configuration.authentication === "bearer"
@@ -78,6 +88,13 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         credentialInput={credentialInput}
         credentialLabel={`API key for ${props.instance.displayName}`}
         credentialManagementAvailable={props.credentialManagementAvailable}
+      />
+      <DirectEndpointSignIn
+        disabled={props.disabled}
+        driverKind="openai-compatible"
+        instanceId={props.instance.id}
+        {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
+        onUseApiKey={() => credentialInput.current?.focus()}
       />
       <SettingRow
         label="Protocol preference"
@@ -155,6 +172,9 @@ interface AnthropicConfigurationFormProps {
   readonly credential: CredentialStatusController;
   readonly onChange: ProviderSettingsViewProps["onChangeAnthropicCompatibleConfiguration"];
   readonly onClearCredential: ProviderSettingsViewProps["onClearProviderCredential"];
+  readonly onProviderOAuth?: (
+    command: ProviderOAuthCommand,
+  ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
 }
 
 export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProps) {
@@ -165,7 +185,12 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        const configuration = anthropicConfigurationFrom(new FormData(event.currentTarget));
+        const configuration = {
+          ...anthropicConfigurationFrom(new FormData(event.currentTarget)),
+          ...(props.instance.configuration.oauthDescriptorId === undefined
+            ? {}
+            : { oauthDescriptorId: props.instance.configuration.oauthDescriptorId }),
+        };
         const enteredCredential = transientCredential(credentialInput.current);
         const key =
           configuration.authentication !== "none"
@@ -209,6 +234,13 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         credentialLabel={`API key for ${props.instance.displayName}`}
         credentialManagementAvailable={props.credentialManagementAvailable}
         supportsApiKey
+      />
+      <DirectEndpointSignIn
+        disabled={props.disabled}
+        driverKind="anthropic-compatible"
+        instanceId={props.instance.id}
+        {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
+        onUseApiKey={() => credentialInput.current?.focus()}
       />
       <SettingRow
         label="Anthropic protocol version"
@@ -415,5 +447,31 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
         ) : null}
       </div>
     </form>
+  );
+}
+
+function DirectEndpointSignIn(props: {
+  readonly instanceId: string;
+  readonly driverKind: "openai-compatible" | "anthropic-compatible";
+  readonly disabled: boolean;
+  readonly onUseApiKey: () => void;
+  readonly onProviderOAuth?: (
+    command: ProviderOAuthCommand,
+  ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
+}) {
+  const offer = subscriptionOAuthOffers().find((candidate: SubscriptionOAuthOffer) =>
+    candidate.driverKinds.includes(props.driverKind),
+  );
+  if (offer === undefined) return null;
+  return (
+    <ProviderOAuthSignInPanel
+      accountLabel={offer.accountLabel}
+      descriptorId={offer.descriptor.descriptorId}
+      disabled={props.disabled}
+      instanceId={props.instanceId}
+      onUseApiKey={props.onUseApiKey}
+      {...(props.onProviderOAuth === undefined ? {} : { run: props.onProviderOAuth })}
+      termsSummary={offer.termsSummary}
+    />
   );
 }
