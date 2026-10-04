@@ -261,6 +261,13 @@ recipes through its Canvas contribution; a skill that is not enabled contributes
 none, and a contributed recipe cannot replace an in-tree id. A recipe is a
 starting shape, not a document and not authority. Describe reads no Project
 data and creates no artifact.
+A chart is a closed type: line, area, bar, scatter, distribution, pie, donut,
+stacked bar, grouped bar, or bar-and-line. Pie and donut are one series of
+labeled non-negative slices. Stacked, grouped, and bar-and-line charts share
+categories across series; a bar-and-line series names itself as a bar or a line.
+The accessible table lists every reading. A pie or donut legend toggles at most
+24 slices; the rest stay in the picture and the table. A shared snapshot keeps
+the chart and drops no series mark.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the

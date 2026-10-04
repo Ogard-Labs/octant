@@ -98,7 +98,7 @@ function PieMarks({
   if (series === undefined) return null;
   const visible = series.points
     .map((point, index) => ({ point, index }))
-    .filter((item) => !hidden.has(sliceId(item.index)));
+    .filter((item) => !hidden.has(sliceId(String(item.point.x))));
   const wedges = pieWedges(visible.map((item) => item.point.y));
   const cx = PLOT_WIDTH / 2;
   const cy = 78;
@@ -503,7 +503,7 @@ function legendItems(block: CanvasChartBlock): ReadonlyArray<{
     return (block.series[0]?.points ?? [])
       .slice(0, MAX_INTERACTIVE_LEGEND_ITEMS)
       .map((point, index) => ({
-        id: sliceId(index),
+        id: sliceId(String(point.x)),
         label: String(point.x),
         keyClass: `chart-key is-block ${seriesClass(index)}`,
         seriesAttr: String(index % 6),
@@ -558,8 +558,8 @@ function seriesClass(index: number): string {
   return `ser-${String((index % 6) + 1)}`;
 }
 
-function sliceId(index: number): string {
-  return `slice:${String(index)}`;
+function sliceId(label: string): string {
+  return `slice:${label}`;
 }
 
 function plotY(value: number, domain: YDomain): number {
