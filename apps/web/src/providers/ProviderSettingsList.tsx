@@ -1142,6 +1142,9 @@ function ProviderRow(props: ProviderRowProps) {
                   {...(props.onProviderOAuth === undefined
                     ? {}
                     : { onProviderOAuth: props.onProviderOAuth })}
+                  {...(props.onOpenExternalUrl === undefined
+                    ? {}
+                    : { onOpenExternalUrl: props.onOpenExternalUrl })}
                 />
               ) : isFoundry ? (
                 <FoundryConfigurationForm
@@ -1205,6 +1208,9 @@ function ProviderRow(props: ProviderRowProps) {
                   {...(props.onProviderOAuth === undefined
                     ? {}
                     : { onProviderOAuth: props.onProviderOAuth })}
+                  {...(props.onOpenExternalUrl === undefined
+                    ? {}
+                    : { onOpenExternalUrl: props.onOpenExternalUrl })}
                 />
               ) : null}
             </section>

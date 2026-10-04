@@ -30,6 +30,7 @@ interface HttpConfigurationFormProps {
   readonly onProviderOAuth?: (
     command: ProviderOAuthCommand,
   ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
+  readonly onOpenExternalUrl?: (url: string) => void;
 }
 
 export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
@@ -94,6 +95,9 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         driverKind="openai-compatible"
         instanceId={props.instance.id}
         {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
+        {...(props.onOpenExternalUrl === undefined
+          ? {}
+          : { onOpenExternalUrl: props.onOpenExternalUrl })}
         onUseApiKey={() => credentialInput.current?.focus()}
       />
       <SettingRow
@@ -175,6 +179,7 @@ interface AnthropicConfigurationFormProps {
   readonly onProviderOAuth?: (
     command: ProviderOAuthCommand,
   ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
+  readonly onOpenExternalUrl?: (url: string) => void;
 }
 
 export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProps) {
@@ -240,6 +245,9 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         driverKind="anthropic-compatible"
         instanceId={props.instance.id}
         {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
+        {...(props.onOpenExternalUrl === undefined
+          ? {}
+          : { onOpenExternalUrl: props.onOpenExternalUrl })}
         onUseApiKey={() => credentialInput.current?.focus()}
       />
       <SettingRow
@@ -458,6 +466,7 @@ function DirectEndpointSignIn(props: {
   readonly onProviderOAuth?: (
     command: ProviderOAuthCommand,
   ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
+  readonly onOpenExternalUrl?: (url: string) => void;
 }) {
   const offer = subscriptionOAuthOffers().find((candidate: SubscriptionOAuthOffer) =>
     candidate.driverKinds.includes(props.driverKind),
@@ -471,6 +480,7 @@ function DirectEndpointSignIn(props: {
       instanceId={props.instanceId}
       onUseApiKey={props.onUseApiKey}
       {...(props.onProviderOAuth === undefined ? {} : { run: props.onProviderOAuth })}
+      {...(props.onOpenExternalUrl === undefined ? {} : { openUrl: props.onOpenExternalUrl })}
       termsSummary={offer.termsSummary}
     />
   );

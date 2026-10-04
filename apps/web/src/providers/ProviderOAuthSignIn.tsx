@@ -3,7 +3,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 
 export type ProviderOAuthSignInState =
   | { readonly kind: "signed-out" }
-  | { readonly kind: "awaiting-consent"; readonly detail: string }
+  | { readonly kind: "awaiting-consent"; readonly detail: string; readonly href?: string }
   | { readonly kind: "signed-in"; readonly accountLabel: string }
   | { readonly kind: "expired" }
   | { readonly kind: "refused"; readonly message: string };
@@ -37,7 +37,17 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
       {props.state.kind === "expired" ? <p>Sign in again to use this provider.</p> : null}
       {props.state.kind === "refused" ? <p>{props.state.message}</p> : null}
       {props.state.kind === "awaiting-consent" ? (
-        <p aria-live="polite">{props.state.detail}</p>
+        <p aria-live="polite">
+          {props.state.detail}
+          {props.state.href === undefined ? null : (
+            <>
+              {" "}
+              <a href={props.state.href} rel="noreferrer">
+                Open the sign-in page
+              </a>
+            </>
+          )}
+        </p>
       ) : null}
       {showTerms ? (
         <div>
@@ -105,6 +115,7 @@ export function ProviderOAuthSignInPanel(props: {
   readonly disabled?: boolean;
   readonly onUseApiKey: () => void;
   readonly run?: (command: ProviderOAuthCommand) => Promise<ProviderOAuthCommandResult | undefined>;
+  readonly openUrl?: (url: string) => void;
 }) {
   const [termsRequired, setTermsRequired] = useState(true);
   const [state, setState] = useState<ProviderOAuthSignInState>({ kind: "signed-out" });
@@ -117,7 +128,7 @@ export function ProviderOAuthSignInPanel(props: {
       .run({ kind: "status", instanceId: props.instanceId, descriptorId: props.descriptorId })
       .then((result) => {
         if (cancelled || result === undefined) return;
-        apply(result, setState, setTermsRequired, setAttemptId);
+        apply(result, setState, setTermsRequired, setAttemptId, props.openUrl);
       });
     return () => {
       cancelled = true;
@@ -137,7 +148,7 @@ export function ProviderOAuthSignInPanel(props: {
         })
         .then((result) => {
           if (result === undefined) return;
-          apply(result, setState, setTermsRequired, setAttemptId);
+          apply(result, setState, setTermsRequired, setAttemptId, props.openUrl);
         });
     }, 2000);
     return () => clearInterval(timer);
@@ -156,7 +167,7 @@ export function ProviderOAuthSignInPanel(props: {
           })
           .then((result) => {
             if (result === undefined) return;
-            apply(result, setState, setTermsRequired, setAttemptId);
+            apply(result, setState, setTermsRequired, setAttemptId, props.openUrl);
           });
       }}
       onSignIn={() => {
@@ -164,7 +175,7 @@ export function ProviderOAuthSignInPanel(props: {
           .run?.({ kind: "begin", instanceId: props.instanceId, descriptorId: props.descriptorId })
           .then((result) => {
             if (result === undefined) return;
-            apply(result, setState, setTermsRequired, setAttemptId);
+            apply(result, setState, setTermsRequired, setAttemptId, props.openUrl);
           });
       }}
       onSignOut={() => {
@@ -176,7 +187,7 @@ export function ProviderOAuthSignInPanel(props: {
           })
           .then((result) => {
             if (result === undefined) return;
-            apply(result, setState, setTermsRequired, setAttemptId);
+            apply(result, setState, setTermsRequired, setAttemptId, props.openUrl);
           });
       }}
       onUseApiKey={props.onUseApiKey}
@@ -192,6 +203,7 @@ function apply(
   setState: (state: ProviderOAuthSignInState) => void,
   setTermsRequired: (value: boolean) => void,
   setAttemptId: (value: string | undefined) => void,
+  openUrl?: (url: string) => void,
 ) {
   if (result.termsRequired !== undefined) setTermsRequired(result.termsRequired);
   if (result.kind === "signed-out") {
@@ -215,9 +227,15 @@ function apply(
     return;
   }
   setAttemptId(result.attemptId);
+  const href = result.authorizationUrl ?? result.verificationUri;
+  if (href !== undefined) openUrl?.(href);
   const detail =
     result.userCode !== undefined
       ? `Enter code ${result.userCode} at the verification page.`
       : "Continue in the browser to finish signing in.";
-  setState({ kind: "awaiting-consent", detail });
+  setState(
+    href === undefined
+      ? { kind: "awaiting-consent", detail }
+      : { kind: "awaiting-consent", detail, href },
+  );
 }

@@ -152,6 +152,8 @@ async function dispatch(input: {
     };
   }
   if (command.kind === "begin") {
+    const unmatched = unmatchedInstance(dependencies, command.instanceId, offer);
+    if (unmatched !== undefined) return unmatched;
     const started = await dependencies.service.begin({
       principalKind: principal,
       actorId,
@@ -200,6 +202,8 @@ async function finish(
   windowId: string,
 ): Promise<ProviderOAuthView> {
   if (state.kind === "signed-in") {
+    const unmatched = unmatchedInstance(dependencies, command.instanceId, offer);
+    if (unmatched !== undefined) return unmatched;
     await storePointer(dependencies, command.instanceId, offer, state.credentialRef, windowId);
     return { kind: "signed-in", accountLabel: offer.accountLabel };
   }
@@ -242,6 +246,20 @@ async function signedInOrOut(
     termsSummary: offer.termsSummary,
     accountLabel: offer.accountLabel,
   };
+}
+
+function unmatchedInstance(
+  dependencies: ProviderOAuthRouteDependencies,
+  instanceId: ProviderInstanceId,
+  offer: SubscriptionOAuthOffer,
+): ProviderOAuthView | undefined {
+  if (dependencies.readInstance === undefined) return undefined;
+  const instance = dependencies.readInstance(instanceId);
+  if (instance === undefined) return { kind: "refused", reason: "unknown-instance" };
+  if (!offer.driverKinds.some((kind) => kind === instance.driverKind)) {
+    return { kind: "refused", reason: "unsupported-driver" };
+  }
+  return undefined;
 }
 
 async function storePointer(
