@@ -10,13 +10,13 @@ import {
 } from "./extensions";
 
 // A Canvas skill contribution is the schema-only, provider-neutral description
-// of what a *trusted and enabled* skill offers to the Canvas renderer: reusable
-// layouts, the source *kinds* it can present, and declarative presentation
-// rules. It deliberately carries no authority, capabilities, concrete source
+// of what a *trusted and enabled* skill offers: reusable layouts, the source
+// *kinds* it can present, declarative presentation rules, and document recipes.
+// It deliberately carries no authority, capabilities, concrete source
 // references, hosts, projects, credentials, queries, or executable code. A
 // contribution therefore cannot grant authority: installing, selecting, or
 // mentioning a skill only ever contributes presentation metadata that the
-// server reauthorizes and the renderer applies without side effects.
+// server reauthorizes. A recipe is a starting shape, not a document.
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const CANVAS_SKILL_MAX_SUPPORTED_SOURCES = 8;
@@ -25,6 +25,10 @@ export const CANVAS_SKILL_MAX_SLOTS = 64;
 export const CANVAS_SKILL_MAX_PRESENTATION_RULES = 64;
 export const CANVAS_SKILL_DIRECTIVE_MAX_CHARS = 512;
 export const CANVAS_SKILL_LABEL_MAX_CHARS = 256;
+export const CANVAS_DOCUMENT_RECIPE_MAX = 16;
+export const CANVAS_DOCUMENT_RECIPE_SKELETON_MAX = 12;
+export const CANVAS_DOCUMENT_RECIPE_WHEN_MAX_CHARS = 280;
+export const CANVAS_DOCUMENT_RECIPE_ROLE_MAX_CHARS = 120;
 
 const boundedToken = <B extends string>(brand: B) =>
   Schema.NonEmptyTrimmedString.pipe(
@@ -85,6 +89,33 @@ export const CanvasSkillPresentationRule = Schema.Struct({
 }).annotations(strict);
 export type CanvasSkillPresentationRule = typeof CanvasSkillPresentationRule.Type;
 
+/**
+ * One block in a document recipe.
+ *
+ * `kind` must already exist in the block catalogue. `role` says what that
+ * block is for. A skeleton carries neither a source id nor a body, so a
+ * recipe cannot attach a file, invent a reference, or name a block that
+ * does not exist.
+ */
+export const CanvasDocumentRecipeId = boundedToken("CanvasDocumentRecipeId");
+export type CanvasDocumentRecipeId = typeof CanvasDocumentRecipeId.Type;
+
+export const CanvasDocumentRecipeSkeletonBlock = Schema.Struct({
+  kind: CanvasBlockKind,
+  role: boundedText(CANVAS_DOCUMENT_RECIPE_ROLE_MAX_CHARS),
+}).annotations(strict);
+export type CanvasDocumentRecipeSkeletonBlock = typeof CanvasDocumentRecipeSkeletonBlock.Type;
+
+export const CanvasDocumentRecipe = Schema.Struct({
+  id: CanvasDocumentRecipeId,
+  title: boundedText(CANVAS_SKILL_LABEL_MAX_CHARS),
+  whenToUse: boundedText(CANVAS_DOCUMENT_RECIPE_WHEN_MAX_CHARS),
+  skeleton: Schema.NonEmptyArray(CanvasDocumentRecipeSkeletonBlock).pipe(
+    Schema.maxItems(CANVAS_DOCUMENT_RECIPE_SKELETON_MAX),
+  ),
+}).annotations(strict);
+export type CanvasDocumentRecipe = typeof CanvasDocumentRecipe.Type;
+
 export const CanvasSkillContribution = Schema.Struct({
   schemaVersion: CanvasCardSchemaVersion,
   kind: Schema.Literal("canvas-skill-contribution"),
@@ -105,6 +136,15 @@ export const CanvasSkillContribution = Schema.Struct({
   layouts: Schema.Array(CanvasSkillLayout).pipe(Schema.maxItems(CANVAS_SKILL_MAX_LAYOUTS)),
   presentationRules: Schema.Array(CanvasSkillPresentationRule).pipe(
     Schema.maxItems(CANVAS_SKILL_MAX_PRESENTATION_RULES),
+  ),
+  recipes: Schema.optional(
+    Schema.Array(CanvasDocumentRecipe).pipe(
+      Schema.maxItems(CANVAS_DOCUMENT_RECIPE_MAX),
+      Schema.filter(
+        (recipes) => new Set(recipes.map((recipe) => String(recipe.id))).size === recipes.length,
+        { message: () => "Canvas document recipe ids must be unique." },
+      ),
+    ),
   ),
   scope: Schema.optional(StandaloneSkillScope),
 })
@@ -164,6 +204,7 @@ export const decodeCanvasSkillLayout = Schema.decodeUnknownSync(CanvasSkillLayou
 export const decodeCanvasSkillPresentationRule = Schema.decodeUnknownSync(
   CanvasSkillPresentationRule,
 );
+export const decodeCanvasDocumentRecipe = Schema.decodeUnknownSync(CanvasDocumentRecipe);
 export const decodeCanvasSkillContribution = Schema.decodeUnknownSync(CanvasSkillContribution);
 export const decodeCanvasSkillContributionResolution = Schema.decodeUnknownSync(
   CanvasSkillContributionResolution,

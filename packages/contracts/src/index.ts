@@ -143,3 +143,5 @@ export * from "./canvasBoard";
 export * from "./computerUsePlugin";
 export * from "./simulatorDevice";
 export * from "./gitHistory";
+
+export * from "./threadMessageQueue";

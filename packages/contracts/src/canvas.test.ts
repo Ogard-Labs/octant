@@ -227,6 +227,37 @@ describe("Canvas contracts", () => {
         edges: [{ edgeId: "a-b", source: "a", target: "b" }],
       },
       {
+        blockId: "sequence-1",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "sequence",
+        participants: [
+          { participantId: "person", label: "Person" },
+          { participantId: "auth", label: "Auth" },
+        ],
+        messages: [{ messageId: "submit", from: "person", to: "auth", label: "Sign in" }],
+        activations: [
+          {
+            activationId: "auth-active",
+            participantId: "auth",
+            startMessageId: "submit",
+            endMessageId: "submit",
+          },
+        ],
+        notes: [{ noteId: "keep", text: "Credentials stay in the request" }],
+      },
+      {
+        blockId: "state-1",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "state",
+        states: [
+          { stateId: "start", label: "Start", role: "initial" },
+          { stateId: "paid", label: "Paid" },
+          { stateId: "captured", label: "Captured", parentId: "paid" },
+          { stateId: "closed", label: "Closed", role: "final" },
+        ],
+        transitions: [{ transitionId: "pay", source: "start", target: "paid", label: "pay" }],
+      },
+      {
         blockId: "code-1",
         schemaVersion: CANVAS_SCHEMA_VERSION,
         kind: "code-excerpt",
@@ -386,6 +417,32 @@ describe("Canvas contracts", () => {
           kind: "image",
           sourceId: ids.source,
           alt: "image",
+        })),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        blockId: "sequence",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "sequence",
+        participants: Array.from({ length: CANVAS_MAX_DIAGRAM_NODES + 1 }, (_, index) => ({
+          participantId: `person-${index}`,
+          label: "Person",
+        })),
+        messages: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        blockId: "state",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "state",
+        states: [{ stateId: "start", label: "Start" }],
+        transitions: Array.from({ length: CANVAS_MAX_DIAGRAM_EDGES + 1 }, (_, index) => ({
+          transitionId: `step-${index}`,
+          source: "start",
+          target: "start",
+          label: "again",
         })),
       }),
     ).toThrow();

@@ -201,45 +201,27 @@ describe("ChatComposer", () => {
     expect(document.querySelector(".chat-composer--running")).toBeNull();
   });
 
-  it("says a message sent during a running turn was sent, without asking the user to manage it", async () => {
+  it("keeps a newer draft editable beside the queue while the response runs", async () => {
     const onSend = vi.fn(async () => true);
-    const { rerender, props } = renderComposer({
-      draft: "",
-      hasPendingMessage: true,
+    renderComposer({
+      draft: "A newer message",
       isSending: true,
       onSend,
+      queue: <div>2 queued</div>,
     });
-
-    const draft = screen.getByLabelText("Message");
-    expect(draft).toBeEnabled();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Sent. It runs when the response in progress finishes.",
-    );
-    expect(screen.queryByRole("button", { name: /discard/i })).not.toBeInTheDocument();
-
-    rerender(
-      <ChatComposer
-        {...props}
-        draft="A newer message"
-        hasPendingMessage
-        isSending
-        onSend={onSend}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+    expect(screen.getByLabelText("Message")).toBeEnabled();
+    expect(screen.getByText("2 queued")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled();
   });
 
-  it("sends on Enter during a running turn instead of refusing until it finishes", async () => {
+  it("submits an explicit Enter press to the queue callback during a running response", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(async () => true);
     renderComposer({ draft: "After this", isSending: true, onSend, onStop: vi.fn() });
-
-    const draft = screen.getByLabelText("Message");
-    expect(draft).toBeEnabled();
-    await user.click(draft);
+    await user.click(screen.getByLabelText("Message"));
     await user.keyboard("{Enter}");
     expect(onSend).toHaveBeenCalledWith("After this");
-    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled();
   });
 
   it("passes only the chosen File to the attachment callback and explains unsupported attachments", async () => {

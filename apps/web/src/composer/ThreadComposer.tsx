@@ -33,8 +33,7 @@ export interface ThreadComposerStop {
  * single send control pushed right by the flexible gap; Chat swaps the same
  * spot between send and stop while a response streams, in its own actions
  * cell (its bar lays cells out itself, so it carries no gap). Send stays
- * available throughout a running response: a message sent then is sent, not
- * parked for the user to administer.
+ * available throughout a running response so the surface can queue a follow-up.
  */
 export type ThreadComposerActions =
   | {
@@ -96,6 +95,7 @@ export interface ThreadComposerProps {
    * thread's own composer never takes it: its context is already fixed.
    */
   readonly startContext?: ReactNode;
+  readonly queue?: ReactNode;
   /** Attachment and mention chips shown above the input. */
   readonly chips?: ReactNode;
   readonly label?: ThreadComposerLabel | undefined;
@@ -116,6 +116,7 @@ export function ThreadComposer(props: ThreadComposerProps) {
   const message = (
     <>
       {props.startContext}
+      {props.queue}
       <ComposerFollowUpSuggestions />
       {props.chips}
       {props.label === undefined ? (

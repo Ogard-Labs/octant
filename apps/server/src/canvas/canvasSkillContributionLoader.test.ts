@@ -10,6 +10,7 @@ import { createCanvasSkillContributionResolver } from "./canvasSkillContribution
 import {
   canvasSkillTrustFactsFromRecord,
   createCanvasSkillContributionLookup,
+  offeredCanvasDocumentRecipes,
 } from "./canvasSkillContributionLoader";
 
 const digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
@@ -195,5 +196,100 @@ describe("Canvas skill contribution production path (loader + resolver)", () => 
       kind: "denied",
       denialCode: "not-effective",
     });
+  });
+});
+
+const fieldNotes = {
+  id: "field-notes",
+  title: "Field notes",
+  whenToUse: "When a trusted skill offers a note.",
+  skeleton: [{ kind: "rich-text", role: "The note." }],
+} as const;
+
+function contributionWith(recipes: ReadonlyArray<unknown>) {
+  return { ...contributionDocument, recipes };
+}
+
+describe("offeredCanvasDocumentRecipes", () => {
+  it("offers an enabled skill's recipe beside the in-tree catalog", () => {
+    const offered = offeredCanvasDocumentRecipes([
+      record({ canvasContribution: contributionWith([fieldNotes]) }),
+    ]);
+    const idsOffered = offered.map((recipe) => String(recipe.id));
+    expect(idsOffered).toContain("implementation-plan");
+    expect(idsOffered).toContain("field-notes");
+    expect(offered.find((recipe) => String(recipe.id) === "implementation-plan")?.skeleton).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "plan" })]),
+    );
+  });
+
+  it("does not offer document recipes from a skill that is not enabled", () => {
+    const offered = offeredCanvasDocumentRecipes([
+      record({
+        desiredEnabled: false,
+        canvasContribution: contributionWith([fieldNotes]),
+      }),
+    ]);
+    expect(offered.map((recipe) => String(recipe.id))).not.toContain("field-notes");
+    expect(offered.map((recipe) => String(recipe.id))).toContain("audit-report");
+  });
+
+  it("does not offer document recipes from a skill that is not trusted", () => {
+    const offered = offeredCanvasDocumentRecipes([
+      record({
+        reviewed: false,
+        canvasContribution: contributionWith([fieldNotes]),
+      }),
+    ]);
+    expect(offered.map((recipe) => String(recipe.id))).not.toContain("field-notes");
+  });
+
+  it("does not let a skill replace an in-tree document recipe", () => {
+    const offered = offeredCanvasDocumentRecipes([
+      record({
+        canvasContribution: contributionWith([
+          {
+            id: "implementation-plan",
+            title: "Replaced",
+            whenToUse: "Should not win.",
+            skeleton: [{ kind: "rich-text", role: "Replacement." }],
+          },
+        ]),
+      }),
+    ]);
+    const plan = offered.find((recipe) => String(recipe.id) === "implementation-plan");
+    expect(plan?.title).toBe("Implementation plan");
+    expect(plan?.skeleton.some((block) => block.kind === "plan")).toBe(true);
+  });
+
+  it("treats a recipe that names an unknown block as no contribution", () => {
+    const offered = offeredCanvasDocumentRecipes([
+      record({
+        canvasContribution: contributionWith([
+          {
+            id: "wireframe",
+            title: "Wireframe",
+            whenToUse: "Should not decode.",
+            skeleton: [{ kind: "mockup", role: "A screen." }],
+          },
+        ]),
+      }),
+    ]);
+    expect(offered.map((recipe) => String(recipe.id))).not.toContain("wireframe");
+    expect(offered.map((recipe) => String(recipe.id))).toContain("postmortem");
+  });
+
+  it("does not offer recipes from a skill scoped to a thread", () => {
+    const offered = offeredCanvasDocumentRecipes([
+      record({
+        canvasContribution: contributionWith([fieldNotes]),
+        scope: {
+          mode: "code",
+          projectId: ids.project,
+          threadRef: ids.thread,
+        } as StandaloneSkillRecord["scope"],
+      }),
+    ]);
+    expect(offered.map((recipe) => String(recipe.id))).not.toContain("field-notes");
   });
 });

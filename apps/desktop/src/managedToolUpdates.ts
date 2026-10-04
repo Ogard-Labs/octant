@@ -131,13 +131,19 @@ export function createManagedToolUpdates<
           availableVersion: verified.version,
         });
         await applyWhenIdle();
-      } catch {
-        if (run === generation && !closed)
+      } catch (error) {
+        if (run === generation && !closed) {
+          const reason = error instanceof Error ? error.message : "";
+          const message =
+            reason.startsWith("Tool ") || reason.startsWith("The ")
+              ? reason.slice(0, 240)
+              : "The tool update failed verification or could not be downloaded.";
           publish({
             status: "failed",
             currentVersion: state.currentVersion,
-            message: "The tool update failed verification or could not be downloaded.",
+            message,
           });
+        }
       }
     })();
     try {

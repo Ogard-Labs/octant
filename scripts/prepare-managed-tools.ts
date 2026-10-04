@@ -26,6 +26,7 @@ export async function prepareManagedTools(
     if (release === undefined) {
       throw new Error(`No bundled release is pinned for ${descriptor.tool}.`);
     }
+    if (descriptor.shipInApp === false) continue;
     const staged = await stageManagedTool(
       descriptor,
       release,

@@ -155,4 +155,46 @@ describe("CanvasSkillContribution contract", () => {
     });
     expect(resolution).toMatchObject({ kind: "denied", denialCode: "untrusted" });
   });
+
+  it("round-trips a document recipe and rejects a skeleton that names an unknown block", () => {
+    const decoded = decodeCanvasSkillContribution({
+      ...contribution,
+      recipes: [
+        {
+          id: "field-notes",
+          title: "Field notes",
+          whenToUse: "When a trusted skill offers a note.",
+          skeleton: [{ kind: "rich-text", role: "The note." }],
+        },
+      ],
+    });
+    expect(decoded.recipes?.[0]?.id).toBe("field-notes");
+    expect(decoded.recipes?.[0]?.skeleton[0]?.kind).toBe("rich-text");
+    expect(() =>
+      decodeCanvasSkillContribution({
+        ...contribution,
+        recipes: [
+          {
+            id: "wireframe",
+            title: "Wireframe",
+            whenToUse: "Should not decode.",
+            skeleton: [{ kind: "mockup", role: "A screen." }],
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasSkillContribution({
+        ...contribution,
+        recipes: [
+          {
+            id: "field-notes",
+            title: "Field notes",
+            whenToUse: "When a trusted skill offers a note.",
+            skeleton: [{ kind: "rich-text", role: "The note.", sourceId: "secret" }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
 });

@@ -44,6 +44,7 @@ import { ClaudeResumeIdentityStore } from "./providers/claudeResumeIdentityStore
 import { ChatService } from "./chat/chatService";
 import { WorkThreadService } from "./work/workThreadService";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
+import { ThreadMessageQueueService } from "./messageQueue/threadMessageQueueService";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
 
 const directories: Array<string> = [];
@@ -58,7 +59,9 @@ describe("startOctantServer", () => {
   it("recovers Chat sessions, attachments, and pending deletions before accepting requests", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-chat-recovery-"));
     directories.push(directory);
+    let queueResponse: Response | Promise<Response> | undefined;
     const reconcile = vi.spyOn(AgentRunPersistenceService.prototype, "reconcileAfterRestart");
+    const recoverQueue = vi.spyOn(ThreadMessageQueueService.prototype, "recover");
     const recover = vi.spyOn(ChatService.prototype, "recoverPendingDeletions").mockResolvedValue();
     const recoverAttachments = vi
       .spyOn(ChatService.prototype, "recoverManagedAttachments")
@@ -72,11 +75,20 @@ describe("startOctantServer", () => {
         startOctantServer({
           hostname: "127.0.0.1",
           port: 0,
-          serve: () => {
+          serve: (options) => {
             expect(reapSessions).toHaveBeenCalledOnce();
             expect(recoverAttachments).toHaveBeenCalledOnce();
+            expect(recoverQueue).toHaveBeenCalledOnce();
+            expect(recoverQueue.mock.invocationCallOrder[0]).toBeLessThan(
+              recoverAttachments.mock.invocationCallOrder[0] ?? 0,
+            );
             expect(recover).toHaveBeenCalledOnce();
             expect(reconcile).toHaveBeenCalledOnce();
+            queueResponse = options.fetch(
+              new Request(
+                "http://127.0.0.1:13773/api/thread-message-queue?mode=chat&threadId=92000000-0000-4000-8000-000000000001",
+              ),
+            );
             return {
               url: new URL("http://127.0.0.1:13773"),
               stop: () => undefined,
@@ -85,10 +97,12 @@ describe("startOctantServer", () => {
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       ),
     );
+    expect((await queueResponse)?.status).toBe(401);
     recover.mockRestore();
     recoverAttachments.mockRestore();
     reapSessions.mockRestore();
     reconcile.mockRestore();
+    recoverQueue.mockRestore();
   });
 
   it("releases server-owned GitHub authentication children during shutdown", async () => {

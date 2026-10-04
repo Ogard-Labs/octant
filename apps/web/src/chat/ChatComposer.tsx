@@ -123,7 +123,8 @@ export interface ChatComposerProps {
    * flight to finish. The composer only says so; it never asks the user to
    * manage that message.
    */
-  readonly hasPendingMessage?: boolean;
+  readonly queue?: ReactNode;
+  readonly queueing?: boolean;
   readonly provider: ChatComposerSelection;
   readonly research: ChatComposerResearch;
   /**
@@ -151,6 +152,7 @@ export interface ChatComposerProps {
     readonly id: ChatAttachmentId;
     readonly displayName: string;
   }>;
+  readonly attachmentRemovalDisabled?: boolean;
   readonly onRemoveAttachment?: (attachmentId: ChatAttachmentId) => void;
   /**
    * Explicit, source-versioned preview selections attached as agent context.
@@ -300,7 +302,6 @@ export function ChatComposer(props: ChatComposerProps) {
         : undefined),
     stopDisabledReason,
     isSending: props.isSending,
-    hasPendingMessage: props.hasPendingMessage === true,
     ...(props.threadMentions?.statusMessage === undefined
       ? {}
       : { mentionMessage: props.threadMentions.statusMessage }),
@@ -490,6 +491,7 @@ export function ChatComposer(props: ChatComposerProps) {
               {props.onRemoveAttachment === undefined ? null : (
                 <OctantButton
                   aria-label={`Remove ${attachmentSelection.displayName} attachment`}
+                  disabled={props.attachmentRemovalDisabled}
                   className="chip-x window-no-drag"
                   onClick={() => props.onRemoveAttachment?.(attachmentSelection.id)}
                   type="button"
@@ -856,6 +858,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   return (
     <ThreadComposer
+      queue={props.queue}
       presentation="follow-up"
       ariaLabel="Chat composer"
       chips={chips}
@@ -889,7 +892,8 @@ export function ChatComposer(props: ChatComposerProps) {
           cellClassName: "chat-composer__actions",
           sending: props.isSending,
           send: {
-            ariaLabel: "Send message",
+            ariaLabel:
+              props.queueing === true || props.isSending ? "Queue message" : "Send message",
             disabledReason: sendDisabledReason,
             onSend: send,
           },
@@ -912,7 +916,6 @@ function composeStatus(input: {
   readonly imageAttachment?: ChatComposerAttachmentCapability;
   readonly isSending: boolean;
   readonly mentionMessage?: string | undefined;
-  readonly hasPendingMessage: boolean;
   readonly research: ChatComposerResearchBackend;
   readonly sendDisabledReason?: string | undefined;
   readonly sendError?: string | undefined;
@@ -940,16 +943,13 @@ function composeStatus(input: {
   }
   if (input.statusMessage !== undefined) loud.push(input.statusMessage);
   if (input.sendError !== undefined) loud.push(input.sendError);
-  if (input.hasPendingMessage) {
-    loud.push("Sent. It runs when the response in progress finishes.");
-  }
   if (input.sendPending) {
     loud.push("Sending message…");
   } else if (input.isSending && input.stopDisabledReason !== undefined) {
     loud.push(input.stopDisabledReason);
-  } else if (input.isSending && !input.hasPendingMessage) {
-    loud.push("Response is streaming. Sending now runs when it finishes.");
-  } else if (input.sendDisabledReason !== undefined && !input.hasPendingMessage) {
+  } else if (input.isSending) {
+    loud.push("Response is streaming. Submit to add a message to the host queue.");
+  } else if (input.sendDisabledReason !== undefined) {
     quiet.push(input.sendDisabledReason);
   }
   const messages = [...new Set([...quiet, ...loud])];

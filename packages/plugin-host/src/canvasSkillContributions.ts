@@ -1,4 +1,5 @@
 import type {
+  CanvasDocumentRecipe,
   CanvasSkillContribution,
   CanvasSkillContributionDenialCode,
   CanvasSkillContributionResolution,
@@ -85,7 +86,10 @@ export function admitCanvasSkillContribution(
     );
   }
   if (!facts.desiredEnabled) {
-    return deny("not-enabled", "Skill is not enabled and contributes no layouts or rules.");
+    return deny(
+      "not-enabled",
+      "Skill is not enabled and contributes no layouts, rules, or recipes.",
+    );
   }
   if (facts.effectiveState.kind !== "effective") {
     return deny(
@@ -111,4 +115,43 @@ export function filterCanvasSkillContributions(
     if (resolution.kind === "admitted") admitted.push(resolution.contribution);
   }
   return admitted;
+}
+
+/**
+ * How many document recipes describe may hand an agent.
+ *
+ * The catalog is read into the agent's context. In-tree recipes are always
+ * offered; contributed recipes fill only the remaining room, in candidate
+ * order, so a skill cannot flood the catalogue.
+ */
+export const CANVAS_OFFERED_DOCUMENT_RECIPE_MAX = 32;
+
+/**
+ * Document recipes a set of skill contributions may offer.
+ *
+ * Only an admitted contribution contributes recipes. A disabled, untrusted,
+ * or ineffective skill contributes none. A recipe whose id is already
+ * offered is dropped, so a skill cannot replace a canonical recipe or an
+ * earlier admitted one.
+ */
+export function canvasDocumentRecipesFromAdmitted(
+  candidates: ReadonlyArray<AdmitCanvasSkillContributionInput>,
+  builtin: ReadonlyArray<CanvasDocumentRecipe> = [],
+): ReadonlyArray<CanvasDocumentRecipe> {
+  const offered: CanvasDocumentRecipe[] = [...builtin];
+  const seen = new Set(builtin.map((recipe) => String(recipe.id)));
+  for (const candidate of candidates) {
+    if (offered.length >= CANVAS_OFFERED_DOCUMENT_RECIPE_MAX) break;
+    const resolution = admitCanvasSkillContribution(candidate);
+    if (resolution.kind !== "admitted") continue;
+    const recipes = resolution.contribution.recipes ?? [];
+    for (const recipe of recipes) {
+      if (offered.length >= CANVAS_OFFERED_DOCUMENT_RECIPE_MAX) break;
+      const id = String(recipe.id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      offered.push(recipe);
+    }
+  }
+  return offered;
 }

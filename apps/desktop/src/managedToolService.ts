@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ManagedToolStatus, ManagedToolsStatus } from "@octant/contracts/managed-tooling";
@@ -9,8 +9,10 @@ import {
   MANAGED_TOOLS,
   boundedRegistryDownload,
   commitManagedTool,
+  isInsideManagedToolLocation,
   latestManagedToolRelease,
   readInstalledManagedTool,
+  resolveManagedToolRelease,
   stageManagedTool,
   type ManagedFetch,
   type ManagedToolDescriptor,
@@ -100,17 +102,26 @@ export function createManagedToolService(options: {
     const root = join(rootDirectory, descriptor.tool);
     const state = { active: bundled, running: 0 };
     const updates = createManagedToolUpdates({
-      currentVersion: bundled.version,
-      check: (signal) => latestManagedToolRelease(descriptor.packageName, registryBytes, signal),
+      currentVersion: existsSync(bundled.entrypoint) ? bundled.version : "0.0.0",
+      check: async (signal) => {
+        const upstream = await latestManagedToolRelease(
+          descriptor.packageName,
+          registryBytes,
+          signal,
+        );
+        return resolveManagedToolRelease(descriptor, upstream, registryBytes, signal);
+      },
       stage: (release, signal) =>
         stageManagedTool(descriptor, release, root, registryBytes, signal),
       isBusy: () => state.running > 0 || (options.isBusy?.() ?? false),
       activate: async (candidate) => {
         if (closed || state.running > 0) return false;
-        // The staged tree launches under the desktop runtime before it replaces
-        // the installed release; a tree that cannot start keeps the old one.
-        if (!(await smokeManagedTool(candidate.entrypoint))) return false;
+        // The staged tree must start before it replaces the installed release.
+        // A tree that cannot start keeps the previous one.
+        if (!(await smokeManagedTool(descriptor, candidate.entrypoint))) return false;
+        if (!isInsideManagedToolLocation(root, candidate.path)) return false;
         await commitManagedTool(root, candidate);
+        if (descriptor.runtime === "executable") await publishCurrentLink(root, candidate.version);
         state.active = candidate;
         return true;
       },
@@ -119,14 +130,44 @@ export function createManagedToolService(options: {
   });
 
   /** Runs the staged entrypoint briefly: surviving past startup counts as runnable. */
-  async function smokeManagedTool(entrypoint: string): Promise<boolean> {
+  async function smokeManagedTool(
+    descriptor: ManagedToolDescriptor,
+    entrypoint: string,
+  ): Promise<boolean> {
     if (closed) return false;
-    return await new Promise<boolean>((resolve) => {
+    if (descriptor.runtime === "executable") return smokeExecutable(entrypoint);
+    return smokeNodeEntrypoint(entrypoint);
+  }
+
+  async function smokeExecutable(entrypoint: string): Promise<boolean> {
+    return await new Promise<boolean>((resolvePromise) => {
       let settled = false;
       const finish = (value: boolean) => {
         if (settled) return;
         settled = true;
-        resolve(value);
+        resolvePromise(value);
+      };
+      const child = spawn(entrypoint, ["--version"], { stdio: "ignore" });
+      child.once("error", () => finish(false));
+      child.once("exit", (code, signal) => {
+        finish(code === 0 && signal === null);
+      });
+      const timer = setTimeout(() => {
+        child.kill("SIGTERM");
+        finish(false);
+      }, options.smokeTimeoutMs ?? 3_000);
+      timer.unref();
+      child.once("exit", () => clearTimeout(timer));
+    });
+  }
+
+  async function smokeNodeEntrypoint(entrypoint: string): Promise<boolean> {
+    return await new Promise<boolean>((resolvePromise) => {
+      let settled = false;
+      const finish = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolvePromise(value);
       };
       const child = spawn(options.execPath, [entrypoint], {
         env: toolEnvironment(),
@@ -147,6 +188,19 @@ export function createManagedToolService(options: {
     });
   }
 
+  /** Relative link so a consented provider path keeps tracking the active release. */
+  async function publishCurrentLink(root: string, version: string): Promise<void> {
+    const temporary = join(root, `.current-link-${randomUUID()}`);
+    await symlink(version, temporary);
+    await rename(temporary, join(root, "current"));
+  }
+
+  /** A tool that is not in the app waits for an explicit Update before the first download. */
+  function automaticFor(descriptor: ManagedToolDescriptor, installed: boolean): boolean {
+    if (descriptor.shipInApp === false && !installed) return false;
+    return settingsAutomaticUpdates;
+  }
+
   async function initialize(): Promise<void> {
     initializing ??= (async () => {
       settingsAutomaticUpdates = await readSettings();
@@ -155,10 +209,12 @@ export function createManagedToolService(options: {
         if (installed !== undefined) {
           instance.state.active = installed;
           instance.updates.restoreVerifiedVersion(installed.version);
+          if (instance.descriptor.runtime === "executable")
+            await publishCurrentLink(instance.root, installed.version);
         }
         instance.updates.configure({
-          enabled: supported && settingsAutomaticUpdates,
-          automaticUpdates: settingsAutomaticUpdates,
+          enabled: supported,
+          automaticUpdates: automaticFor(instance.descriptor, installed !== undefined),
         });
       }
     })();
@@ -168,16 +224,27 @@ export function createManagedToolService(options: {
   function toolStatus(instance: ManagedToolInstance): ManagedToolStatus {
     const state: ManagedToolUpdateState = instance.updates.state();
     const available = existsSync(instance.state.active.entrypoint);
+    const stable = join(instance.root, "current", instance.descriptor.entrypoint);
+    const managedExecutable =
+      instance.descriptor.runtime === "executable" && existsSync(stable)
+        ? stable
+        : instance.descriptor.runtime === "executable" &&
+            available &&
+            isInsideManagedToolLocation(instance.root, instance.state.active.entrypoint)
+          ? instance.state.active.entrypoint
+          : undefined;
     return {
       tool: instance.descriptor.tool,
       packageName: instance.descriptor.packageName,
       channel: "npm",
       available,
       installed: instance.state.active.path !== instance.bundled.path,
-      version: instance.state.active.version,
+      version: available ? instance.state.active.version : "0.0.0",
       update: state.status,
       ...(state.availableVersion === undefined ? {} : { availableVersion: state.availableVersion }),
       ...(state.message === undefined ? {} : { message: state.message }),
+      ...(instance.descriptor.runtime === "executable" ? { managedDirectory: instance.root } : {}),
+      ...(managedExecutable === undefined ? {} : { executablePath: managedExecutable }),
     };
   }
 
@@ -193,6 +260,11 @@ export function createManagedToolService(options: {
       const instance = instances.find((candidate) => candidate.descriptor.tool === tool);
       if (instance === undefined || closed || !existsSync(instance.state.active.entrypoint))
         return undefined;
+      if (instance.descriptor.runtime === "executable") {
+        const env = { ...process.env };
+        delete env.ELECTRON_RUN_AS_NODE;
+        return { command: instance.state.active.entrypoint, args, env };
+      }
       return {
         command: options.execPath,
         args: [instance.state.active.entrypoint, ...args],
@@ -221,16 +293,23 @@ export function createManagedToolService(options: {
       await initialize();
       if (settingsAutomaticUpdates === next.automaticUpdates) return;
       settingsAutomaticUpdates = next.automaticUpdates;
-      for (const instance of instances)
+      for (const instance of instances) {
+        const installed = instance.state.active.path !== instance.bundled.path;
         instance.updates.configure({
-          enabled: supported && settingsAutomaticUpdates,
-          automaticUpdates: settingsAutomaticUpdates,
+          enabled: supported,
+          automaticUpdates: automaticFor(instance.descriptor, installed),
         });
+      }
       await writeSettings();
     },
-    checkUpdates: async (): Promise<ManagedToolsStatus> => {
+    checkUpdates: async (tool?: string): Promise<ManagedToolsStatus> => {
       await initialize();
-      for (const instance of instances) await instance.updates.check();
+      if (tool !== undefined && !MANAGED_TOOLS.some((descriptor) => descriptor.tool === tool))
+        throw new TypeError("Invalid managed tool.");
+      for (const instance of instances) {
+        if (tool !== undefined && instance.descriptor.tool !== tool) continue;
+        await instance.updates.check();
+      }
       return {
         supported,
         automaticUpdates: settingsAutomaticUpdates,
