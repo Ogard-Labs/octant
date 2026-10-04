@@ -1071,4 +1071,58 @@ describe("createAgentRunSessionRuntime", () => {
     // reserved tokens stay honestly ambiguous rather than leaking as running.
     expect(capacityScheduler.getReservation(reservationId as never)?.state).toBe("ambiguous");
   });
+
+  it("lists the Canvas tool for a managed child when the transport can carry it", async () => {
+    const provider = fakeProvider({
+      onSend: (emit) => {
+        void emit({ kind: "text-delta", sessionId, text: "Drafted." }).then(() =>
+          emit({ kind: "completed", sessionId }),
+        );
+      },
+    });
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        appManagedTools: () => ({
+          definitions: [
+            {
+              name: "octant_canvas",
+              description: "Author a Canvas in this run's workspace.",
+              inputSchema: { type: "object" },
+            },
+          ],
+          execute: async () => ({ result: { ok: true } }),
+        }),
+        appManagedToolTransport: () => "supported",
+      }),
+    );
+
+    await settled(runtime.start(agentRun()));
+
+    expect(provider.turns[0]?.tools.map((tool) => tool.name)).toContain("octant_canvas");
+    expect(provider.acquired).toHaveLength(1);
+  });
+
+  it("fails closed when the provider transport cannot carry the child's tools", () => {
+    const provider = fakeProvider();
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        appManagedTools: () => ({
+          definitions: [
+            {
+              name: "octant_canvas",
+              description: "Author a Canvas in this run's workspace.",
+              inputSchema: { type: "object" },
+            },
+          ],
+          execute: async () => ({ result: { ok: true } }),
+        }),
+        appManagedToolTransport: () => "unsupported",
+      }),
+    );
+
+    expect(() => runtime.start(agentRun())).toThrowError(
+      expect.objectContaining({ reason: "tools-unsupported" }),
+    );
+    expect(provider.acquired).toEqual([]);
+  });
 });

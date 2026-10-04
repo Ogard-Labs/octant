@@ -30,6 +30,7 @@ import {
   type AppleRpcEnvelope,
   type AndroidRpcEnvelope,
   decodeAgentRunParentThreadId,
+  decodeAgentRunId,
   decodeChatThreadId,
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
@@ -738,6 +739,7 @@ import {
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
   isProviderAllowedByProjectPolicy,
+  effectiveAgentRunExecutionTarget,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   type PreviewPosture,
@@ -746,7 +748,12 @@ import {
 import { ZenThreadCatalog } from "./zen/zenThreadCatalog";
 import { localHostDisplayName } from "./localHostDisplayName";
 import { ZenAssistantTools } from "./zen/zenAssistantTools";
-import { createCanvasAgentTools, type CanvasAgentToolPort } from "./canvas/canvasAgentTools";
+import {
+  createCanvasAgentTools,
+  createChildCanvasAgentTools,
+  type CanvasAgentToolPort,
+} from "./canvas/canvasAgentTools";
+import { loadChildCanvasWorkspace } from "./canvas/childCanvasWorkspace";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "./providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "./providers/appManagedToolTaint";
 import {
@@ -1927,7 +1934,91 @@ export function startOctantServer(
       port: createAgentRunSessionRuntime({
         capacityScheduler,
         spendCeiling,
-        appManagedTools: (input) => nativeHarnessComposition?.forAgentRun(input),
+        appManagedTools: (input) => {
+          const native = nativeHarnessComposition?.forAgentRun(input);
+          const target = effectiveAgentRunExecutionTarget(input.run.routingReceipt);
+          const canvas =
+            canvasAgentToolPort === undefined
+              ? undefined
+              : createChildCanvasAgentTools({
+                  port: {
+                    ...canvasAgentToolPort,
+                    resolveChildWorkspace: (query) =>
+                      loadChildCanvasWorkspace(
+                        {
+                          readRun: (runId) => {
+                            try {
+                              return agentRunPersistence.getById(decodeAgentRunId(runId));
+                            } catch {
+                              return undefined;
+                            }
+                          },
+                          readProject: (projectId) => {
+                            try {
+                              const project = persistence.readProject(decodeProjectId(projectId));
+                              if (project === undefined) return undefined;
+                              if (project.type === "chat") {
+                                return {
+                                  id: String(project.id),
+                                  type: project.type,
+                                  lifecycle: project.lifecycle,
+                                };
+                              }
+                              return {
+                                id: String(project.id),
+                                type: project.type,
+                                lifecycle: project.lifecycle,
+                                binding: project.binding,
+                                bindingHistory: project.bindingHistory,
+                              };
+                            } catch {
+                              return undefined;
+                            }
+                          },
+                          readCodeThread: (threadId) => {
+                            try {
+                              return persistence.readCodeThread(decodeCodeThreadId(threadId));
+                            } catch {
+                              return undefined;
+                            }
+                          },
+                          readCodeCheckout: (checkoutId) => {
+                            try {
+                              return persistence.readCodeCheckout(decodeCodeCheckoutId(checkoutId));
+                            } catch {
+                              return undefined;
+                            }
+                          },
+                          loadManagedReceipt: (receiptId) =>
+                            managedWorktreeReceipts.load(receiptId),
+                        },
+                        query.runId,
+                      ),
+                  },
+                  run: {
+                    id: String(input.run.id),
+                    parentThreadId: String(input.run.parentThreadId),
+                    mode: input.run.routingReceipt.mode,
+                    ...("projectId" in input.run.workspaceReceipt
+                      ? { projectId: String(input.run.workspaceReceipt.projectId) }
+                      : {}),
+                    providerInstanceId: target.providerInstanceId,
+                    modelId: target.modelId,
+                  },
+                });
+          if (native === undefined && canvas === undefined) return undefined;
+          return combineAppManagedToolSets(native, canvas);
+        },
+        appManagedToolTransport: ({ providerInstanceId, modelId }) => {
+          const observed = providerRuntimeRegistry.observedState(providerInstanceId);
+          const supported =
+            observed?.capabilities.appManagedTools === "supported" ||
+            observed?.verifiedToolModelIds?.some(
+              (candidate: unknown) => String(candidate) === String(modelId),
+            ) === true;
+          if (supported) return "supported" as const;
+          return observed === undefined ? ("unavailable" as const) : ("unsupported" as const);
+        },
         // `configuredDriverOptions` is declared later in this scope; the closure
         // only runs when a child starts, long after boot, so the reference is safe.
         resolveDriver: (providerInstanceId) => {
