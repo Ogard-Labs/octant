@@ -178,6 +178,48 @@ describe("Canvas share contracts", () => {
     expect(decodeCanvasStaticExportReceipt(receipt)).toEqual(receipt);
   });
 
+  it("round-trips sequence, state, and mockup blocks in a static export document", () => {
+    const blocks = [
+      {
+        blockId: "login",
+        schemaVersion: 1,
+        kind: "sequence",
+        participants: [
+          { participantId: "person", label: "Person" },
+          { participantId: "auth", label: "Auth" },
+        ],
+        messages: [{ messageId: "submit", from: "person", to: "auth", label: "Submit" }],
+      },
+      {
+        blockId: "order",
+        schemaVersion: 1,
+        kind: "state",
+        states: [
+          { stateId: "start", label: "Start", role: "initial" },
+          { stateId: "placed", label: "Placed" },
+        ],
+        transitions: [{ transitionId: "place", source: "start", target: "placed", label: "place" }],
+      },
+      {
+        blockId: "settings",
+        schemaVersion: 1,
+        kind: "mockup",
+        device: "phone",
+        title: "Settings",
+        nodes: [
+          { nodeId: "window", component: "window", label: "Settings" },
+          { nodeId: "wifi", component: "toggle", label: "Wi-Fi", parentId: "window", on: true },
+        ],
+      },
+    ];
+    expect(
+      decodeCanvasStaticExportDocument({
+        ...document,
+        blocks,
+      }),
+    ).toEqual({ ...document, blocks });
+  });
+
   it("rejects secret-bearing export text and credential query URLs at decode time", () => {
     expect(() =>
       decodeCanvasStaticExportDocument({
