@@ -786,6 +786,8 @@ import {
   createHostControlRouteHandler,
   type HostControlServicePolicyPort,
 } from "./hostControlRoutes";
+import { createReplicaMembershipRouteHandler } from "./replica/replicaMembershipRoutes";
+import { ReplicaMembershipService } from "./replica/replicaMembershipService";
 import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
 import { createLiveHostExportService } from "./hostExportService";
@@ -9307,6 +9309,45 @@ export function startOctantServer(
         },
       }),
     });
+    const replicaMembershipService = new ReplicaMembershipService({
+      store: {
+        kind: "replica-store",
+        async status() {
+          return "not-connected";
+        },
+        async list() {
+          return { status: "not-connected" };
+        },
+        async get() {
+          return { status: "not-connected" };
+        },
+        async putIfAbsent() {
+          return { status: "not-connected" };
+        },
+      },
+      credentials: {
+        ensure: async () => {
+          throw new Error("not-connected");
+        },
+        sign: async () => {
+          throw new Error("not-connected");
+        },
+      },
+      journal: {
+        append: () => undefined,
+      },
+      facts: () => ({
+        localInstanceId: "00000000-0000-4000-8000-000000000000" as never,
+        members: [],
+        revocations: [],
+      }),
+      nextSequence: () => 1,
+      clock: () => Date.now(),
+    });
+    const replicaMembershipRoutes = createReplicaMembershipRouteHandler({
+      service: replicaMembershipService,
+      windowAuthorityStore,
+    });
     return yield* Effect.acquireRelease(
       Effect.tryPromise({
         try: async () => {
@@ -9339,6 +9380,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
+                (await replicaMembershipRoutes(request)) ??
                 (await dispatchMeasuredProductRoutes(request)) ??
                 (await webAssets(request)) ??
                 new Response("Not Found", { status: 404 })

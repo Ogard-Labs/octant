@@ -287,6 +287,76 @@ export function encodeReplicaEntry(entry: ReplicaEntry): string {
   return `${JSON.stringify(body, null, 2)}\n`;
 }
 
+/**
+ * Host commands for managing who may write to a replica store. These travel
+ * only over the loopback host route; a paired phone is refused there.
+ */
+export const ReplicaMembershipCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("create-replica"),
+    displayName: ReplicaDisplayName,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("write-join-request"),
+    displayName: ReplicaDisplayName,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("approve-join"),
+    joinRequest: ReplicaMembershipEntry,
+    confirmationCode: Schema.String.pipe(Schema.pattern(/^\d{6}$/)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("revoke"),
+    subject: ReplicaInstanceId,
+  }).annotations(strict),
+);
+export type ReplicaMembershipCommand = typeof ReplicaMembershipCommand.Type;
+
+export const ReplicaMembershipResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("replica-created"),
+    instanceId: ReplicaInstanceId,
+    entry: ReplicaMembershipEntry,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("join-requested"),
+    instanceId: ReplicaInstanceId,
+    entry: ReplicaMembershipEntry,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("join-approved"),
+    subject: ReplicaInstanceId,
+    entry: ReplicaMembershipEntry,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("revoked"),
+    subject: ReplicaInstanceId,
+    entry: ReplicaMembershipEntry,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    reason: Schema.Literal(
+      "already-member",
+      "revoked-instance",
+      "code-mismatch",
+      "expired-join-request",
+      "unknown-instance",
+      "not-a-member",
+      "store-unavailable",
+      "key-unavailable",
+    ),
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("store-failed"),
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
+);
+export type ReplicaMembershipResult = typeof ReplicaMembershipResult.Type;
+
+export const decodeReplicaMembershipCommand = Schema.decodeUnknownSync(ReplicaMembershipCommand);
+export const decodeReplicaMembershipResult = Schema.decodeUnknownSync(ReplicaMembershipResult);
+
 function isMembershipEntry(entry: ReplicaEntry): entry is ReplicaMembershipEntry {
   return (
     entry.kind === "join-request" || entry.kind === "join-approved" || entry.kind === "revocation"

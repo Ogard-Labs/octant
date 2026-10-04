@@ -67,6 +67,7 @@ export * from "./remoteSessionBridge";
 export * from "./connectionSupervisor";
 export * from "./shellClient";
 export * from "./threadMentionClient";
+export * from "./replicaMembershipClient";
 export * from "./fileMentionClient";
 export * from "./projectBrowserClient";
 export * from "./projectTerminalClient";
