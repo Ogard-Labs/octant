@@ -71,12 +71,17 @@ and close controls.
 Octant is one Electron application that hosts a Bun HTTP server, a React
 renderer, and (optionally) remote clients that connect to that same server.
 Everything the user cares about — Projects, threads, memory, event history,
-credential references, layouts — stays on the host machine.
+credential references, layouts — stays on the host machine. Artifact versions
+are the exception once sync is on: they are copied into a store the user owns,
+not into a store Octant operates. The journal does not leave. See
+[Persistence](#persistence).
 
 The design rests on a small set of invariants that every package obeys:
 
 - **Local-first.** No Octant cloud account, relay, or telemetry is required.
-  Remote access is host-to-device over the user's own network. Three host-initiated
+  Artifact sync, when the person turns it on, uses a store that person owns.
+  Octant operates none of it. Remote access is host-to-device over the user's
+  own network. Three host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
   device-tool update checks against the npm registry, and server marketplace
   fetches when the person searches, inspects, previews, or installs from the
@@ -248,7 +253,14 @@ same guidance through MCP, dynamic tools, or direct tool calls without a
 separate global tool installation or prompt catalogue. Browser shares one
 definition across modes. Canvas's `describe` operation lists the closed block
 catalogue and a creation example, or returns canonical schemas for up to three
-requested block kinds. It reads no Project data and creates no artifact.
+requested block kinds. Unscoped describe also lists document recipes: an id, a
+title, when to use one, and a skeleton of block kinds that already exist. The
+host offers an implementation plan, an audit or test report, a code review, a
+research brief, and a postmortem. A trusted, enabled, unscoped skill may add
+recipes through its Canvas contribution; a skill that is not enabled contributes
+none, and a contributed recipe cannot replace an in-tree id. A recipe is a
+starting shape, not a document and not authority. Describe reads no Project
+data and creates no artifact.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -849,6 +861,47 @@ flowchart LR
   controller footing for small teams lives in
   `docs/legal/shared-host-controller.md` and aligns with
   `docs/decisions/0040` without shipping the shared team host.
+- **Artifact replicas.** A replica is an append-only log in a store the user
+  owns — a synced folder, or an S3-compatible bucket. Each host writes only
+  its own write-once entries, one per committed artifact version or deletion,
+  named by host id and sequence. No file is written by two computers, so a
+  sync client's conflict copies and lost updates cannot happen. An entry is a
+  readable JSON bundle in the
+  [0029](decisions/0029-artifact-storage-mirror.md) format, with a detached
+  signature from the writing host's own identity key. The storage provider can
+  read those files; they are not encrypted. Before an entry is written, and
+  before an imported entry is accepted, the host applies the same refusal and
+  redaction as a shared bundle: credentials, secret-shaped values, and absolute
+  filesystem paths in free-form text do not leave, and a bundle that still
+  contains them is refused. Each host's own journal stays the source of truth.
+  A pull imports other hosts' entries as appended versions with provenance —
+  the computer's name, the host id, and the origin sequence. It never adopts
+  another journal and never overwrites a version. An imported entry keeps that
+  origin identity. The importing host does not publish it again under its own
+  sequence. A later edit on this host is a new version and a new entry. If two
+  computers revise the same artifact from the same parent, the library shows
+  both heads. The person picks one or merges them, and the merge is a new
+  version. Nothing is silently chosen. Deletion is a tombstone entry. A
+  tombstone and a revision from the same parent are two heads: the revision
+  stays visible, and the tombstone is not discarded. Other computers hide the
+  artifact only when the tombstone is the only head, and they offer to undo.
+  A later version from another computer after a tombstone is a new version;
+  the tombstone stays in the log. Each host's own erase and purge rules still
+  apply locally. The mirror and the export stay separate. They still write
+  plain files for people and other tools, and they still never push to git.
+  Sync is Octant to Octant through the store. The log holds every artifact
+  version, so a computer that joins can import those versions. It does not
+  recreate threads, Projects, or settings. Binding an imported version to a
+  local Project follows the existing artifact import rule and is not widened
+  here. Scope is artifact and Canvas versions and tombstones.
+  Canvas comments are not in this log. Threads and settings are not. A
+  replica-store contribution offers list, get, and put-if-absent. A folder
+  store and an S3-compatible store ship in-tree on that seam. Direct cloud
+  APIs for a host with no desktop sync client come later as plugins. Every
+  publish, pull, refusal, and failure is journaled. A failed upload never
+  unwinds a local version. Plan mode, and a host with sync off, make no store
+  calls. See
+  [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
 - **Artifact replica entries.** A store a person sets aside for sync holds one
   write-once JSON entry per committed artifact version or deletion, at
   `<instanceId>/<sequence>.json`, with a detached signature beside it at
@@ -882,6 +935,44 @@ flowchart LR
   selections do not, and the composer says so when a restored draft dropped
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
+
+- **Accepted message queue.** Chat, Work, and Code share a host-owned ordered
+  queue for messages the user submits while a turn runs. A successful enqueue
+  acknowledges durable storage; the renderer then relinquishes the submitted
+  draft and attachment ownership without clearing newer edits. Queue metadata,
+  ordering and delivery identities are journaled. Prompt bodies, selected
+  context and trusted attachment metadata stay in purgeable private storage.
+  Versioned edit, reorder and removal commands detect concurrent clients;
+  stable submission identities prevent an acknowledgement retry from adding
+  another message.
+  Code dispatch records a distinct operation identity for each attempt before
+  admission begins. A durable pre-launch refusal keeps the queued message and
+  attachments; explicit resume creates a fresh attempt instead of replaying a
+  cached refusal. Recovery reconciles the recorded attempt before any retry,
+  while genuine failures after admission remain terminal for that attempt.
+  Before sending a queue command, the client saves a bounded local retry receipt
+  containing the exact command and original draft identity, without window
+  capabilities. An unresolved receipt survives navigation and reload and blocks
+  a fresh submission until the original outcome is reconciled. Acknowledgement
+  clears only the unchanged original draft. Receipt cleanup follows composer
+  draft deletion and purge; a storage failure is visible and prevents an unsafe
+  submission or retry.
+  One dispatcher per thread sends through the mode's ordinary turn admission,
+  regardless of harness. Every dispatch checks the current Project, provider,
+  model, checkout, access and context policy. Only normal turn completion
+  advances the queue automatically. Cancellation, failure, changed authority,
+  unavailable attachments and uncertain delivery hold it with a visible reason.
+  Restart recovery also holds pending work until an authenticated user resumes
+  it; recovery never restores a temporary grant or guesses that an ambiguous
+  send failed. Closing a composer cannot delete an accepted queued attachment.
+  Thread purge removes queued private content and retained attachments.
+  A queued message remains bound to the provider, model and authority settings
+  present at enqueue. After changing those settings, restore them before
+  resuming, or remove and resubmit the message with the new settings. Local
+  authenticated windows share the queue; paired remote queue commands remain
+  unavailable until dispatch can revalidate the originating device's grants.
+  Queuing a future message is distinct from steering a running turn; steering
+  remains subject to the active runtime's actual capability.
 
 - **Composer placeholder.** An empty follow-up composer in a Chat, Work, or
   Code thread says "Reply…" and nothing else: a rotating feature tip in the
@@ -1358,7 +1449,17 @@ survives a smoke launch. A staged tree that cannot start keeps the previous
 release. Settings shows each tool's channel, version, and update state.
 Verification is the registry's package-level integrity hash — npm publishes
 no per-package signature — so the design pins URL plus hash and reports
-honestly when they disagree. See
+honestly when they disagree. OpenCode is a descriptor on this same channel,
+not a second updater. Version checks use the `@opencode/cli` registry
+package; the staged bytes are the host's platform package at that version.
+Its wrapper lifecycle script is never run. The platform binary is not
+vendored into the app; Update stages it into the managed location on demand.
+Settings › Providers shows the installed and available versions, an Update
+action, and the reason when a check or activation fails. A release that fails
+verification or does not start keeps the previous managed copy. Update never
+replaces a binary outside that managed location. Choosing Octant's copy
+switches the provider's configured path to the managed executable; it does
+not overwrite an OpenCode the person installed elsewhere. See
 [decisions/0162-managed-npm-device-tools-share-one-release-channel.md](decisions/0162-managed-npm-device-tools-share-one-release-channel.md).
 
 The Simulator pane attaches `serve-sim` for an already booted Simulator and
@@ -1641,6 +1742,25 @@ mechanisms are:
   classifier. A remote principal can never exceed host, mode, provider, Project,
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal.
+- **Artifact replica membership.** Each replica entry carries a detached
+  signature from the writing host's own identity key — the host-owned identity,
+  not a paired client's device key. There is no replica key. An entry from an
+  unknown or revoked host, or one that fails verification, is refused and
+  journaled. A new computer joins by writing a join request into the store. A
+  computer that is already a member approves it by name. A short matching code,
+  shown on both screens, guards against a stranger's request. Revoke writes a
+  signed revocation. Store setup, joining, and revoking happen on the host,
+  never from a paired phone. Store credentials live in the host credential
+  store — macOS Keychain or freedesktop Secret Service — and are not written
+  into the replica. An S3-compatible store is contacted only over authenticated
+  TLS. A plaintext endpoint is refused, and store credentials are not sent on
+  it. The storage provider can read the synced content: the artifact versions
+  and tombstones are plain files. Settings and the user guide
+  (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
+  Opt-in encryption of replicas is not this rule. A replica import appends
+  versions to this journal and adopts nothing else. Membership accepts an entry
+  signed by a known, non-revoked host identity key as authentic. It does not
+  delegate host authority between hosts.
 - **Hosts never trust each other.** Multi-host views merge read models
   client-side; credentials and mutable authority never cross hosts. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client
@@ -1691,6 +1811,12 @@ The first shipping surface is the Apple Silicon technical preview with the
 provider-neutral plugin and skill marketplace, signed and self-updating per
 [0034](decisions/0034-signed-updates.md). Cross-platform desktop is authorized
 and sequenced by [0058](decisions/0058-cross-platform-desktop.md).
+
+Artifact replicas, when the person turns sync on, go only to a store that
+person owns — a synced folder or an S3-compatible bucket. Octant operates no
+storage and no relay for them. The storage provider can read the files. That
+does not open a hosted relay or an Octant cloud account. See
+[0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
 
 Two holds stay Later until documented approved designs, published seams, and an
 explicit maintainer request open them:

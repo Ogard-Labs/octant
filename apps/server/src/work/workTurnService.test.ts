@@ -64,6 +64,114 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
+  it.each([false, true])(
+    "refuses a host turn revoked while its file context is loading (native conversation: %s)",
+    async (nativeConversation) => {
+      const release = deferred<void>();
+      const entered = deferred<void>();
+      let current = true;
+      const run = vi.fn<WorkTurnRuntimePort["run"]>().mockResolvedValue({
+        kind: "completed",
+        response: "Should not run",
+      });
+      const fixture = serviceFixture({
+        nativeConversation,
+        turnRuntime: { run },
+        resolveFileMentionContext: async () => {
+          entered.resolve();
+          await release.promise;
+          return [];
+        },
+      });
+      const pending = fixture.service.startFirstTurn(
+        ids.window,
+        { ...startCommand(), fileMentionPaths: ["notes.md"] },
+        { admissionCurrent: () => current },
+      );
+      const refused = expect(pending).rejects.toMatchObject({
+        failure: { category: "unauthorized" },
+      });
+      await entered.promise;
+      current = false;
+      release.resolve();
+      await refused;
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+      expect(run).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails an accepted host turn revoked during the model context probe without starting it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
+    attachmentRoots.push(root);
+    const connection = openSqlite(join(root, "context.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      let sequence = 0;
+      const contextHarness = new ContextHarnessService({
+        persistence: { connection, journal, status: () => ({ state: "current", integrity: "ok" }) },
+        uuid: () => `83000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+        clock: () => now,
+      });
+      const release = deferred<void>();
+      const entered = deferred<void>();
+      let current = true;
+      const run = vi.fn<WorkTurnRuntimePort["run"]>().mockResolvedValue({
+        kind: "completed",
+        response: "Should not run",
+      });
+      const close = vi.fn(async () => undefined);
+      const fixture = serviceFixture({
+        contextHarness,
+        turnRuntime: { run },
+        resolveAppManagedTools: () => ({
+          definitions: [],
+          execute: async () => ({ result: {} }),
+          close,
+        }),
+        contextFacts: {
+          observeModelLimits: () =>
+            Effect.promise(async () => {
+              entered.resolve();
+              await release.promise;
+              return [];
+            }),
+          observeServiceLimits: () =>
+            Effect.succeed(
+              unavailableProviderServiceLimits(
+                decodeProviderInstanceId(ids.provider),
+                now,
+                "runtime-reported",
+              ),
+            ),
+        },
+      });
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand(), {
+          admissionCurrent: () => current,
+        }),
+      ).resolves.toMatchObject({ kind: "accepted" });
+      await entered.promise;
+      current = false;
+      release.resolve();
+      await fixture.waitForIdle();
+      expect(run).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledOnce();
+      expect(await fixture.service.lookupFirstTurn(ids.window, ids.request)).toMatchObject({
+        kind: "accepted",
+        turn: { status: "failed", failure: { category: "unauthorized" } },
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
   it("holds a goal-loop round ask-first on an auto-accept thread for as long as it runs", async () => {
     for (const holdAskFirst of [true, false]) {
       const release = deferred<void>();

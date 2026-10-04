@@ -5,6 +5,7 @@ import {
   decodeCanvasBlock,
   decodeCanvasId,
   type CanvasActor,
+  type CanvasDocumentRecipe,
   type ChatThread,
   type HostId,
   type PermissionPersistence,
@@ -16,6 +17,7 @@ import type { CanvasWorkspaceScope } from "@octant/contracts/canvas-cards";
 import type { ChildCanvasWorkspaceResolution } from "./childCanvasWorkspace";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { CanvasService } from "./canvasService";
+import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
 
 export const CANVAS_TOOL_NAME = "octant_canvas";
 
@@ -106,6 +108,12 @@ export interface CanvasAgentToolPort {
     readonly mode: "work" | "code";
     readonly threadId: string;
   }) => CanvasWorkspaceScope | undefined;
+  /**
+   * Document recipes describe may list. Absent means the in-tree catalog.
+   * The host passes the offered set, which already drops a skill that is not
+   * enabled. Describe does not read a Project to build this list.
+   */
+  readonly documentRecipes?: () => ReadonlyArray<CanvasDocumentRecipe>;
 }
 
 /** The Work or Code thread a Canvas tool authors for. */
@@ -228,7 +236,8 @@ function toolDescription(
     scope === "run"
       ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
       : "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
-    "Start with describe to see the block kinds and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
+    "Start with describe to see the block kinds, the document recipes, and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
+    'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, and "summarise research" uses research-brief. Describe with no block kinds lists every offered recipe and its skeleton; fill those roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.',
     "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
@@ -252,6 +261,20 @@ type CanvasToolInput =
     }
   | { readonly operation: "list" }
   | { readonly operation: "read"; readonly canvasId: string };
+
+function listedDocumentRecipes(recipes: ReadonlyArray<CanvasDocumentRecipe>): ReadonlyArray<{
+  readonly id: string;
+  readonly title: string;
+  readonly whenToUse: string;
+  readonly skeleton: ReadonlyArray<{ readonly kind: string; readonly role: string }>;
+}> {
+  return recipes.map((recipe) => ({
+    id: String(recipe.id),
+    title: recipe.title,
+    whenToUse: recipe.whenToUse,
+    skeleton: recipe.skeleton.map((block) => ({ kind: block.kind, role: block.role })),
+  }));
+}
 
 /**
  * The authority a Canvas an agent wrote carries: none.
@@ -508,6 +531,9 @@ function canvasToolSet(options: {
           return {
             result: {
               blockKinds,
+              recipes: listedDocumentRecipes(
+                options.port.documentRecipes?.() ?? inTreeCanvasDocumentRecipes(),
+              ),
               example: {
                 operation: "create",
                 title: "Report",
