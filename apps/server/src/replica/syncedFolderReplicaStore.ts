@@ -19,7 +19,7 @@ import {
   readFile,
   readdir,
   realpath,
-  rename,
+  link,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -146,7 +146,11 @@ export function createSyncedFolderReplicaStore(
       const root = await resolveRoot();
       if (root.status === "refused") return { status: "refused", reason: "outside-home" };
       if (root.status === "not-connected") return { status: "not-connected" };
-      return listSyncRoot(root.syncRoot, afterCursor, pageSize, readFileFlags);
+      try {
+        return await listSyncRoot(root.syncRoot, afterCursor, pageSize, readFileFlags);
+      } catch {
+        return { status: "not-connected" };
+      }
     },
 
     async get(key: string): Promise<ReplicaStoreGetResult> {
@@ -157,6 +161,15 @@ export function createSyncedFolderReplicaStore(
       if (destination === undefined) return { status: "refused", reason: "key-refused" };
       const named = skipReason(key, 0);
       if (named !== undefined) return { status: "refused", reason: named };
+      try {
+        const canonicalParent = await realpath(dirname(destination));
+        if (!isContained(root.syncRoot, canonicalParent)) {
+          return { status: "refused", reason: "key-refused" };
+        }
+      } catch (error) {
+        if (isEnoent(error)) return { status: "missing" };
+        return { status: "refused", reason: "key-refused" };
+      }
       try {
         const metadata = await lstat(destination);
         if (metadata.isSymbolicLink()) return { status: "refused", reason: "key-refused" };
@@ -428,12 +441,11 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 /**
- * Write the complete bytes beside the key, then rename them onto it.
+ * Write the complete bytes beside the key, then link them onto it.
  *
- * The temporary file is in the same directory, so the rename is atomic and
- * cannot cross a device. A reader never sees a partial file under the key.
- * rename also replaces, so it runs only when the key is absent. An existing
- * key is returned as already-exists and its bytes are not written.
+ * The temporary file is in the same directory. `link` fails if the key
+ * already exists, so two publishers cannot replace each other. A reader
+ * never sees a partial file under the key.
  */
 async function publishIfAbsent(
   destination: string,
@@ -443,10 +455,15 @@ async function publishIfAbsent(
   const temp = join(dirname(destination), `.${name}.octant-write-${randomUUID()}.tmp`);
   try {
     await writeFile(temp, bytes, { flag: "wx" });
-    if (await pathExists(destination)) return { status: "already-exists" };
-    await rename(temp, destination);
-    return { status: "stored" };
   } catch {
+    await unlink(temp).catch(() => undefined);
+    return { status: "refused", reason: "write-failed" };
+  }
+  try {
+    await link(temp, destination);
+    return { status: "stored" };
+  } catch (error) {
+    if (isNodeError(error) && error.code === "EEXIST") return { status: "already-exists" };
     return { status: "refused", reason: "write-failed" };
   } finally {
     await unlink(temp).catch(() => undefined);

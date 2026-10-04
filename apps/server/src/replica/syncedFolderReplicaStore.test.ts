@@ -190,6 +190,16 @@ describe("synced folder replica store", () => {
     expect(existsSync(join(folder, "escaped.txt"))).toBe(false);
   });
 
+  it("refuses a get whose parent directory is a symlink out of the folder", async () => {
+    const folder = temporaryDirectory(homedir());
+    const outside = temporaryDirectory(homedir());
+    mkdirSync(join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY));
+    symlinkSync(outside, join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY, "id"));
+    writeFileSync(join(outside, "1.json"), "secret");
+    const store = await offeredStore(folder);
+    expect(await store.get("id/1.json")).toEqual({ status: "refused", reason: "key-refused" });
+  });
+
   it("does not offer or call a disabled or uninstalled store", async () => {
     const folder = temporaryDirectory(homedir());
     expect(openFolder(folder, { installed: false })).toEqual({
