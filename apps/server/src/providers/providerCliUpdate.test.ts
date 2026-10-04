@@ -26,7 +26,7 @@ describe("provider-owned CLI updates", () => {
     expect(providerCliUpdateArgs("grok")).toEqual(["update"]);
     expect(providerCliUpdateArgs("codex")).toEqual(["update"]);
     expect(providerCliUpdateArgs("claude")).toEqual(["update"]);
-    expect(providerCliUpdateArgs("opencode")).toEqual(["upgrade"]);
+    expect(providerCliUpdateArgs("opencode")).toBeUndefined();
     expect(providerCliUpdateArgs("gemini")).toBeUndefined();
     expect(providerCliUpdateArgs("cline")).toEqual(["update"]);
     expect(providerCliUpdateArgs("copilot")).toEqual(["update"]);

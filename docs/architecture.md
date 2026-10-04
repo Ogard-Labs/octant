@@ -1354,7 +1354,17 @@ survives a smoke launch. A staged tree that cannot start keeps the previous
 release. Settings shows each tool's channel, version, and update state.
 Verification is the registry's package-level integrity hash — npm publishes
 no per-package signature — so the design pins URL plus hash and reports
-honestly when they disagree. See
+honestly when they disagree. OpenCode is a descriptor on this same channel,
+not a second updater. Version checks use the `@opencode/cli` registry
+package; the staged bytes are the host's platform package at that version.
+Its wrapper lifecycle script is never run. The platform binary is not
+vendored into the app; Update stages it into the managed location on demand.
+Settings › Providers shows the installed and available versions, an Update
+action, and the reason when a check or activation fails. A release that fails
+verification or does not start keeps the previous managed copy. Update never
+replaces a binary outside that managed location. Choosing Octant's copy
+switches the provider's configured path to the managed executable; it does
+not overwrite an OpenCode the person installed elsewhere. See
 [decisions/0162-managed-npm-device-tools-share-one-release-channel.md](decisions/0162-managed-npm-device-tools-share-one-release-channel.md).
 
 The Simulator pane attaches `serve-sim` for an already booted Simulator and

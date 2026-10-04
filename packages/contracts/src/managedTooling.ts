@@ -25,6 +25,10 @@ export const ManagedToolStatus = Schema.Struct({
   update: ManagedToolUpdateState,
   availableVersion: Schema.optional(text(64)),
   message: Schema.optional(text(1_024)),
+  /** Managed directory updates may write. Absent for tools that are not executables. */
+  managedDirectory: Schema.optional(text(4_096)),
+  /** Stable path of the managed executable, when one is installed. */
+  executablePath: Schema.optional(text(4_096)),
 }).annotations(strict);
 export type ManagedToolStatus = typeof ManagedToolStatus.Type;
 
