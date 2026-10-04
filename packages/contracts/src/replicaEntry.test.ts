@@ -7,11 +7,14 @@ import {
 import {
   REPLICA_ENTRY_FORMAT,
   decodeReplicaEntry,
+  decodeReplicaArtifactEntry,
+  decodeReplicaMembershipEntry,
   decodeReplicaEntryText,
   encodeReplicaEntry,
   replicaEntryContentPreimage,
   replicaEntryRelativePaths,
   type ReplicaEntry,
+  type ReplicaArtifactEntry,
 } from "./replicaEntry";
 
 const ids = {
@@ -69,8 +72,8 @@ function bundle(text?: string) {
 
 function entry(
   overrides: { readonly kind?: ReplicaEntry["kind"]; readonly text?: string } = {},
-): ReplicaEntry {
-  return decodeReplicaEntry({
+): ReplicaArtifactEntry {
+  return decodeReplicaArtifactEntry({
     format: REPLICA_ENTRY_FORMAT,
     kind: overrides.kind ?? "artifact-version",
     origin: {
@@ -174,8 +177,50 @@ describe("replica entry contract", () => {
   });
 
   it("hashes the canonical bundle, not a second document", () => {
-    const value = entry();
+    const value: ReplicaArtifactEntry = entry();
     expect(replicaEntryContentPreimage(value)).toBe(encodeArtifactBundle(value.bundle));
     expect(value.bundle.octant.format).toBe(ARTIFACT_BUNDLE_FORMAT);
+  });
+
+  it("signs the whole entry, not just its bundle", () => {
+    const base = encodeReplicaEntry(entry());
+    expect(base).not.toBe(encodeReplicaEntry(entry({ text: "A different bundle." })));
+    const moved = JSON.parse(base) as { origin: { sequence: number } };
+    const sameBodyOtherSequence = decodeReplicaEntry({
+      ...JSON.parse(base),
+      origin: { ...moved.origin, sequence: 2 },
+    });
+    expect(encodeReplicaEntry(sameBodyOtherSequence)).not.toBe(base);
+    const grafted = decodeReplicaEntry({
+      ...JSON.parse(base),
+      parents: [{ versionId: "44444444-4444-4444-8444-444444444444" }],
+    });
+    expect(encodeReplicaEntry(grafted)).not.toBe(base);
+  });
+
+  it("round-trips a membership record the same way", () => {
+    const request = decodeReplicaMembershipEntry({
+      format: REPLICA_ENTRY_FORMAT,
+      kind: "join-request",
+      origin: { instanceId: ids.instance, displayName: "North", sequence: 1 },
+      subject: ids.instance,
+      subjectDisplayName: "North",
+    });
+    const encoded = encodeReplicaEntry(request);
+    expect(Object.keys(JSON.parse(encoded) as Record<string, unknown>)).toEqual([
+      "format",
+      "kind",
+      "origin",
+      "subject",
+      "subjectDisplayName",
+    ]);
+    expect(decodeReplicaEntryText(encoded)).toEqual(request);
+    expect(() =>
+      decodeReplicaEntry({
+        ...JSON.parse(encoded),
+        kind: "join-request",
+        subject: ids.otherVersion,
+      }),
+    ).toThrow();
   });
 });

@@ -830,6 +830,19 @@ flowchart LR
   that names a local artifact as foreign is refused. An unknown entry format
   fails closed. A later version after a tombstone appends; the tombstone stays
   in the history.
+  The detached signature covers an entry's encoded bytes whole - origin, kind,
+  parents, the claimed content hash, and the bundle - so a rewrite of any of
+  those is a different signature, not the same one the log recorded. The log
+  also carries membership: a computer that is not yet a member writes a join
+  request at its own next sequence and names itself, and a member returns that
+  request for approval instead of refusing it. Approving journals the new
+  instance on the member; confirming the same approval on the joining computer
+  journals the member there, which is how a computer that was never part of
+  the store learns who the members are. A pull walks each instance's entries in
+  sequence order from the start, because the sequence is per instance and a
+  host that joins in the middle cannot have seen anything earlier. A member's
+  revocation is an entry the member writes; it is refused for a revoked
+  instance rather than re-admitting it, because re-joining is a new identity.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a

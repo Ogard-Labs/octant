@@ -4,8 +4,12 @@
  * The file is `<instanceId>/<sequence>.json`. A detached signature sits beside
  * it at `<instanceId>/<sequence>.sig`. Both are write-once. This module names
  * those paths and decodes the JSON; it does not write either file and it does
- * not verify a signature. The payload is the artifact bundle, not a second
- * document.
+ * not verify a signature. An artifact entry's payload is the bundle the
+ * mirror writes, not a second document. A membership entry is a record about
+ * who shares the store and carries no artifact at all. The detached
+ * signature covers an entry's encoded bytes whole - origin, kind, parents,
+ * the claimed content hash, and the bundle - so a rewrite of any of them is
+ * a different signature.
  *
  * An unknown format fails closed. A decoder that guessed would apply a record
  * this host does not know how to read.
@@ -80,8 +84,10 @@ export const ReplicaContentHash = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{6
 export type ReplicaContentHash = typeof ReplicaContentHash.Type;
 
 /**
- * A verdict the host already reached. Missing is not verified: an entry whose
- * signature was not checked is not an entry that passed.
+ * A verdict the host already reached. `verified` means the detached signature
+ * over `encodeReplicaEntry(entry)` matched, so every field the record
+ * carries was covered. Missing is not verified: an entry whose signature was
+ * not checked is not an entry that passed.
  */
 export const ReplicaSignatureVerdict = Schema.Literal("verified", "bad-signature", "missing");
 export type ReplicaSignatureVerdict = typeof ReplicaSignatureVerdict.Type;
@@ -107,10 +113,52 @@ export const ReplicaTombstoneEntry = Schema.Struct({
 }).annotations(strict);
 export type ReplicaTombstoneEntry = typeof ReplicaTombstoneEntry.Type;
 
-export const ReplicaEntry = Schema.Union(ReplicaVersionEntry, ReplicaTombstoneEntry);
+export const ReplicaArtifactEntry = Schema.Union(ReplicaVersionEntry, ReplicaTombstoneEntry);
+export type ReplicaArtifactEntry = typeof ReplicaArtifactEntry.Type;
+
+/**
+ * Membership lifecycle, carried in the same log so a computer that is not yet
+ * a member can be discovered and approved by name instead of being invisible.
+ *
+ * `join-request` is written by the joining computer as its own next sequence
+ * and names itself. `join-approved` and `revocation` are written by a member
+ * as that member's next sequence and name the instance they act on. None of
+ * the three carries an artifact, a parent chain, or a content hash: their
+ * body is the record, and the signature covers it whole.
+ */
+export const ReplicaMembershipEntryKind = Schema.Literal(
+  "join-request",
+  "join-approved",
+  "revocation",
+);
+export type ReplicaMembershipEntryKind = typeof ReplicaMembershipEntryKind.Type;
+
+const ReplicaMembershipEntryFields = {
+  format: Schema.Literal(REPLICA_ENTRY_FORMAT),
+  kind: ReplicaMembershipEntryKind,
+  origin: ReplicaOrigin,
+  /** The instance this record is about. A join request names itself. */
+  subject: ReplicaInstanceId,
+  subjectDisplayName: ReplicaDisplayName,
+} as const;
+
+export const ReplicaMembershipEntry = Schema.Struct(ReplicaMembershipEntryFields)
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (entry) =>
+        entry.kind !== "join-request" || String(entry.subject) === String(entry.origin.instanceId),
+      { message: () => "A join request names the instance that wrote it." },
+    ),
+  );
+export type ReplicaMembershipEntry = typeof ReplicaMembershipEntry.Type;
+
+export const ReplicaEntry = Schema.Union(ReplicaArtifactEntry, ReplicaMembershipEntry);
 export type ReplicaEntry = typeof ReplicaEntry.Type;
 
 export const decodeReplicaEntry = Schema.decodeUnknownSync(ReplicaEntry);
+export const decodeReplicaArtifactEntry = Schema.decodeUnknownSync(ReplicaArtifactEntry);
+export const decodeReplicaMembershipEntry = Schema.decodeUnknownSync(ReplicaMembershipEntry);
 export const decodeReplicaSignatureVerdict = Schema.decodeUnknownSync(ReplicaSignatureVerdict);
 
 /**
@@ -133,7 +181,7 @@ export function decodeReplicaEntryText(text: string): ReplicaEntry {
  * The bytes a content hash covers: the canonical artifact bundle, including
  * its trailing newline, in the same shape the mirror writes.
  */
-export function replicaEntryContentPreimage(entry: ReplicaEntry): string {
+export function replicaEntryContentPreimage(entry: ReplicaArtifactEntry): string {
   return encodeArtifactBundle(entry.bundle);
 }
 
@@ -143,7 +191,7 @@ export function replicaEntryContentPreimage(entry: ReplicaEntry): string {
  * A bundle that names another artifact is not this entry's payload, however
  * it got there. Applying it would graft one document onto another's history.
  */
-export function replicaEntryBundleAgrees(entry: ReplicaEntry): boolean {
+export function replicaEntryBundleAgrees(entry: ReplicaArtifactEntry): boolean {
   return (
     String(entry.bundle.octant.canvasId) === String(entry.artifact.canvasId) &&
     String(entry.bundle.octant.hostId) === String(entry.artifact.hostId)
@@ -182,22 +230,39 @@ export function replicaEntryRelativePaths(
  * sentence shows one changed line.
  */
 export function encodeReplicaEntry(entry: ReplicaEntry): string {
-  const bundle = decodeArtifactBundle(JSON.parse(encodeArtifactBundle(entry.bundle)));
-  const body = {
-    format: entry.format,
-    kind: entry.kind,
-    origin: {
-      instanceId: entry.origin.instanceId,
-      displayName: entry.origin.displayName,
-      sequence: entry.origin.sequence,
-    },
-    artifact: {
-      canvasId: entry.artifact.canvasId,
-      hostId: entry.artifact.hostId,
-    },
-    parents: entry.parents.map((parent) => ({ versionId: parent.versionId })),
-    contentHash: entry.contentHash,
-    bundle,
-  };
+  const body = isMembershipEntry(entry)
+    ? {
+        format: entry.format,
+        kind: entry.kind,
+        origin: {
+          instanceId: entry.origin.instanceId,
+          displayName: entry.origin.displayName,
+          sequence: entry.origin.sequence,
+        },
+        subject: entry.subject,
+        subjectDisplayName: entry.subjectDisplayName,
+      }
+    : {
+        format: entry.format,
+        kind: entry.kind,
+        origin: {
+          instanceId: entry.origin.instanceId,
+          displayName: entry.origin.displayName,
+          sequence: entry.origin.sequence,
+        },
+        artifact: {
+          canvasId: entry.artifact.canvasId,
+          hostId: entry.artifact.hostId,
+        },
+        parents: entry.parents.map((parent) => ({ versionId: parent.versionId })),
+        contentHash: entry.contentHash,
+        bundle: decodeArtifactBundle(JSON.parse(encodeArtifactBundle(entry.bundle))),
+      };
   return `${JSON.stringify(body, null, 2)}\n`;
+}
+
+function isMembershipEntry(entry: ReplicaEntry): entry is ReplicaMembershipEntry {
+  return (
+    entry.kind === "join-request" || entry.kind === "join-approved" || entry.kind === "revocation"
+  );
 }

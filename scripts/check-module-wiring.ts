@@ -102,7 +102,7 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   [
     "packages/domain/src/replicaEntryPolicy.ts",
-    "Pure reconcile policy for artifact replica entries. Nothing pulls a store yet, so no product caller imports it. Remove once the pull path imports reconcileReplicaEntry.",
+    "Pure reconcile policy for artifact replica entries and their membership. Nothing pulls a store yet, so no product caller imports it. Remove once the pull path imports reconcileReplicaEntry.",
   ],
 ]);
 
