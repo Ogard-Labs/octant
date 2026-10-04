@@ -181,6 +181,7 @@ export const THREAD_PURGE_RETAINED_SCOPES: ReadonlyArray<ThreadRetentionRetained
   "other-threads",
   "projects",
   "usage-records",
+  "purge-tombstone",
   "credentials",
   "external-repositories",
   "sqlite-free-pages",
@@ -191,6 +192,9 @@ export const THREAD_PURGE_DELETED_SCOPES: ReadonlyArray<ThreadRetentionDeletedSc
   "thread-projections",
   "thread-content",
   "thread-attachments",
+  "thread-canvases",
+  "thread-sessions",
+  "managed-worktrees",
 ];
 
 export function selectThreadsForPurge(input: {
