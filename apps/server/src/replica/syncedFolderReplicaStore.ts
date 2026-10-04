@@ -191,6 +191,7 @@ export function createSyncedFolderReplicaStore(
     },
 
     async putIfAbsent(key: string, bytes: Uint8Array): Promise<ReplicaStorePutResult> {
+      const snapshot = new Uint8Array(bytes);
       const root = await resolveRoot();
       if (root.status === "refused") return { status: "refused", reason: "outside-home" };
       if (root.status === "not-connected") return { status: "not-connected" };
@@ -202,7 +203,7 @@ export function createSyncedFolderReplicaStore(
       const confined = await ensureConfinedDirectory(root.folder, root.syncRoot, destination);
       if (!confined) return { status: "refused", reason: "key-refused" };
       if (await pathExists(destination)) return { status: "already-exists" };
-      return publishIfAbsent(destination, bytes);
+      return publishIfAbsent(destination, snapshot);
     },
   };
 }
