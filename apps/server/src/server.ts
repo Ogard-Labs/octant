@@ -264,6 +264,7 @@ import { FileOperationPort } from "./code/fileOperationPort";
 import { createManagedWorktreeNodePorts, listWorktreeRefs } from "./code/managedWorktreeNodePorts";
 import {
   ManagedWorktreeService,
+  managedWorktreeRoot,
   type ManagedWorktreeRepositoryPort,
 } from "./code/managedWorktreeService";
 import { ManagedRootGrantStore } from "./code/managedRootGrantStore";
@@ -340,6 +341,7 @@ import {
   type VerifiedStoreBackupReceipt,
 } from "./persistence/persistenceService";
 import { readAgentRunAdmittedContext } from "./persistence/agentRunContentStore";
+import { purgeThreadArtifacts } from "./persistence/threadArtifactPurge";
 import { readHostIdentity } from "./persistence/remoteAccessProjection";
 import { createProjectBindingRouteHandler } from "./projectBindingRoutes";
 import { createProjectRouteHandler } from "./projectRoutes";
@@ -9071,15 +9073,25 @@ export function startOctantServer(
       forgetWorkThread: (threadId) => {
         workThreadProjection.forget(threadId as never);
       },
-      purgeThreadArtifacts: async ({ mode, threadId }) => {
-        if (mode === "chat") await chatAttachmentStore.purgeThread(threadId as never);
-        await agentMessageService.purgeThread(threadId);
-        try {
-          await generatedImageStore.purgeScope(decodeImageGenerationScopeId(String(threadId)));
-        } catch {
-          // A thread id that is not a generated-image scope is not an image basin.
-        }
-      },
+      purgeThreadArtifacts: ({ mode, threadId }) =>
+        purgeThreadArtifacts({
+          connection: persistence.connection,
+          dataDirectory: persistence.dataDirectory,
+          mode,
+          threadId: String(threadId),
+          managedWorktreeRootPath: managedWorktreeRoot,
+          purgeChatAttachments: (id) => chatAttachmentStore.purgeThread(decodeChatThreadId(id)),
+          purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
+          purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),
+          purgeGeneratedImages: async (id) => {
+            try {
+              await generatedImageStore.purgeScope(decodeImageGenerationScopeId(id));
+            } catch {
+              // A thread id that is not a generated-image scope is not an image basin.
+            }
+          },
+          purgeAgentMessages: (id) => agentMessageService.purgeThread(id),
+        }),
     });
     const hostRuntimePlatform =
       process.platform === "darwin" || process.platform === "linux" ? process.platform : undefined;

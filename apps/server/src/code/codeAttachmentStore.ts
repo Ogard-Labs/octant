@@ -192,4 +192,12 @@ export class CodeAttachmentStore {
   recover(): Promise<void> {
     return this.#store.recover();
   }
+
+  /** Removes every attachment file this thread staged or sent. */
+  purgeThread(threadId: CodeThreadId): Promise<void> {
+    const threadKey = String(threadId);
+    this.#pending.delete(threadKey);
+    this.#inFlight.delete(threadKey);
+    return this.#store.purgeScope(threadKey);
+  }
 }

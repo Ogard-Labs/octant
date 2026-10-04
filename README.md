@@ -109,10 +109,11 @@ Octant is an **Apple Silicon technical preview**. Releases are signed with a
 Developer ID, notarized, and update themselves — you choose when an update
 applies, and it never replaces a running app or interrupts work in flight. It
 ships no signed Intel, Windows, or Linux desktop builds; a Linux x64 AppImage
-can be built locally as an unsigned dogfood artifact (see below). Expect rough
-edges and breaking changes to local data formats between previews. Remote clients, the
-Expo mobile app, and packaged native checks are separate evidence gates from the
-local test suite.
+can be built locally as an unsigned dogfood artifact (see below). An AppImage
+launch can update itself from the signed feed when the file is writable.
+Expect rough edges and breaking changes to local data formats between
+previews. Remote clients, the Expo mobile app, and packaged native checks are
+separate evidence gates from the local test suite.
 
 ## Requirements
 
@@ -161,11 +162,12 @@ Local data lives in `~/Library/Application Support/Octant/` (override with
 
 On x64 Linux the same command produces
 `out/Octant-<version>-linux-x64.AppImage` (plus `out/Octant-linux-x64/` for
-inspection). That AppImage is an unsigned dogfood artifact: Electron still owns
-the local server as a peer Machine, but a dogfood AppImage is not signed
-auto-update. Release workflows may scaffold `<ring>/linux-x64.json`; the
-updater still refuses Linux installs until a maintainer-published signed feed
-exists. Mark the AppImage executable and launch it directly. AppRun
+inspection). That AppImage is not code-signed. When you launch it, Octant
+checks the signed `<ring>/linux-x64.json` feed, verifies the signature and
+hash before writing, replaces the image in place, and relaunches. A package,
+an unpacked archive, or a location Octant cannot write is refused, and the
+reason is shown in Settings. Mark the AppImage executable and launch it
+directly. AppRun
 keeps the Chromium sandbox when unprivileged user namespaces work, and only
 adds `--no-sandbox` when that probe fails (AppImage mounts are `nosuid`).
 Ubuntu 24.04+ AppArmor may still restrict Chromium userns; a dedicated profile

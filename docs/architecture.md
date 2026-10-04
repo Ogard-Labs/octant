@@ -806,9 +806,21 @@ flowchart LR
   implicitly. Removing a paired host or Project deletes what it owns and
   reports what it retained. A retention window (host default, Project
   override, or thread override) never deletes on its own; only a confirmed
-  purge erases a thread's bulk content, derived projections, and that
-  thread's own journal events, then records a tombstone so a rebuild cannot
-  resurrect the transcript. See `docs/decisions/0035`. The one self-applying
+  purge erases a thread's bulk content, derived projections, attachments,
+  canvases authored in that thread (including their comments, shares,
+  refreshes, actions, and mirrored files), agent-run session and content
+  stores, harness sessions, and a managed worktree only when no other
+  thread still references it, and only at a path inside that repository's
+  managed worktree directory: a receipt that names any other path, or one
+  the sweep cannot read, leaves every owned worktree in place and keeps
+  its file so the leftover is visible. It then records a tombstone so a
+  rebuild cannot resurrect the transcript. Usage records stay and are
+  named in the outcome; deciding whether they should be erased is a later
+  choice.
+  The tombstone, other threads, Projects, credentials, external
+  repositories, and SQLite free pages are named retained scopes rather
+  than hidden leftovers. A remote principal cannot purge. See
+  `docs/decisions/0035`. The one self-applying
   exception is startup journal compaction, which removes a
   `code.checkout-observed@1` event only when the next event of the same
   checkout observes the identical state; it preserves every answer a
@@ -1790,10 +1802,12 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with
   `out/Octant-linux-x64/` kept for inspection). Linux packages skip Darwin
-  helpers. A dogfood AppImage is not a signed auto-update channel: release
-  workflows scaffold `<base>/<ring>/linux-x64.json` beside
-  `darwin-arm64.json`, and in-app Linux updates stay fail-closed until a
-  maintainer-published signed feed exists. Override with
+  helpers. A dogfood AppImage is not code-signed. An AppImage launch checks
+  the signed `<base>/<ring>/linux-x64.json` feed, verifies the signature and
+  hash before use, replaces the image atomically (write beside, fsync,
+  rename), and relaunches. A bad signature, a non-writable location, or a
+  launch that is not that image fails closed, and the reason is shown in
+  Settings. Windows stays out. Override with
   `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64` on a matching host only.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.

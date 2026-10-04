@@ -101,11 +101,20 @@ describe("ThreadPurgeReport", () => {
         "other-threads",
         "projects",
         "usage-records",
+        "purge-tombstone",
         "credentials",
         "external-repositories",
         "sqlite-free-pages",
       ],
-      deleted: ["thread-journal", "thread-projections", "thread-content", "thread-attachments"],
+      deleted: [
+        "thread-journal",
+        "thread-projections",
+        "thread-content",
+        "thread-attachments",
+        "thread-canvases",
+        "thread-sessions",
+        "managed-worktrees",
+      ],
       occurredAt: timestamp,
     });
     expect(report.purged).toHaveLength(1);

@@ -60,8 +60,9 @@ const RELEASE_VERSION_PATTERN =
  * Desktop packaging targets this repository knows how to emit.
  *
  * `darwin-arm64` is the signed Apple Silicon path. `linux-x64` is the Ubuntu
- * dogfood AppImage path: unsigned, fail-closed for updates until a signed Linux
- * feed exists. Windows and other arches stay refused rather than half-shipped.
+ * dogfood image: the file is not code-signed, and in-app update replaces it
+ * only after the signed feed and its hash verify. Windows and other arches
+ * stay refused rather than half-shipped.
  */
 export type DesktopPackageTargetId = "darwin-arm64" | "linux-x64";
 
@@ -961,8 +962,8 @@ async function packageDarwinDesktop(
  * Package the Linux peer Machine as an AppImage (and keep the portable
  * electron-packager directory beside it for inspection).
  *
- * Darwin helpers are never built here: Secret Service is host-runtime, and an
- * updater channel does not exist until Linux artifacts are signed separately.
+ * Darwin helpers are never built here: Secret Service is host-runtime. The
+ * image is not code-signed; in-app update still requires the signed feed.
  */
 async function packageLinuxDesktop(
   repositoryRoot: string,
@@ -1551,14 +1552,16 @@ if (import.meta.main) {
       );
     }
   } else {
-    // Linux dogfood ships unsigned. A signed update channel is a separate
-    // deliverable; until then the app refuses install so an AppImage cannot
-    // become an unauthenticated code-delivery path.
-    console.log(`Packaged UNSIGNED Linux AppImage: ${packaged.artifactPath}`);
+    // The image is not code-signed. In-app update still refuses unless the
+    // signed feed and its hash verify, and only replaces the file the runtime
+    // named.
+    console.log(`Packaged UNSIGNED Linux image: ${packaged.artifactPath}`);
     if (packaged.portableDirectoryPath !== undefined) {
       console.log(`Portable electron-packager directory: ${packaged.portableDirectoryPath}`);
     }
-    console.log("Linux has no signed update channel yet; this build will not auto-update.");
+    console.log(
+      "In-app update replaces this image only after a signed feed and its hash verify, and only when it was launched from a writable path.",
+    );
   }
 }
 
