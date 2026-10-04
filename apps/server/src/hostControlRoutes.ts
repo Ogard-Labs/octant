@@ -24,14 +24,17 @@ import type { ThreadRetentionService } from "./threadRetentionService";
 import {
   authorizeHostControlAction,
   deriveHostLifecycleControls,
+  encodeHostExportPage,
   type HostControlOperation,
   type HostControlServiceModeInput,
   type HostLifecycleControls,
 } from "@octant/domain";
 import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { isLoopbackHostname } from "./shellRoutes";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRoutePrincipal, authenticateRouteWindowId } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
+import type { HostExportPage } from "@octant/contracts/host-export";
+import type { WindowId } from "@octant/contracts";
 
 /**
  * The one authenticated web entry point for host
@@ -69,9 +72,10 @@ const ROUTES = {
   restore: "/api/host-control/restore",
   retention: "/api/host-control/thread-retention",
   purge: "/api/host-control/thread-purge",
+  export: "/api/host-control/export",
 } as const;
 
-const GET_ROUTES = new Set<string>([ROUTES.status, ROUTES.dataMap]);
+const GET_ROUTES = new Set<string>([ROUTES.status, ROUTES.dataMap, ROUTES.export]);
 
 const RESTORE_GUIDANCE =
   "Stop the Octant host, then run the offline restore command with --confirm.";
@@ -86,6 +90,13 @@ export interface HostControlBackupReceipt {
   readonly migrationVersion: number;
   readonly journalHead: number;
   readonly byteLength: number;
+}
+
+export interface HostExportRoutePort {
+  exportPages(input: {
+    readonly principal: "local-window" | "remote-device" | "paired-device";
+    readonly windowId: WindowId;
+  }): AsyncIterable<HostExportPage>;
 }
 
 export interface HostControlRouteDependencies {
@@ -107,6 +118,7 @@ export interface HostControlRouteDependencies {
    */
   readonly dataMap?: HostDataMapRouteDependencies;
   readonly threadRetention?: ThreadRetentionService;
+  readonly hostExport?: HostExportRoutePort;
   readonly now?: () => number;
   /** Defers the drain until after the response is written. Test seam. */
   readonly scheduleStop?: (callback: () => void) => void;
@@ -175,6 +187,9 @@ export function createHostControlRouteHandler(
     }
     if (route === ROUTES.dataMap) {
       return authorized("data-map", origin, () => handleDataMap(dependencies, origin));
+    }
+    if (route === ROUTES.export) {
+      return authorized("export", origin, () => handleExport(dependencies, request, origin, now()));
     }
     if (route === ROUTES.retention && request.method === "GET") {
       return authorized("retention", origin, () => handleReadRetention(dependencies, origin));
@@ -251,6 +266,73 @@ async function authorized(
     return failure("Host control is unauthorized.", 401, origin);
   }
   return handle();
+}
+
+async function handleExport(
+  dependencies: HostControlRouteDependencies,
+  request: Request,
+  origin: string | null,
+  now: number,
+): Promise<Response> {
+  if (dependencies.hostExport === undefined) {
+    return failure("Host export is unavailable while the owner is starting.", 503, origin);
+  }
+  let principalKind: "local-window" | "remote-device";
+  let windowId;
+  try {
+    const context = authenticateRoutePrincipal({
+      request,
+      store: dependencies.windowAuthorityStore,
+      now,
+    });
+    principalKind = context.principal.kind === "remote-device" ? "remote-device" : "local-window";
+    windowId = context.scopeId;
+  } catch (error) {
+    if (error instanceof WindowAuthorityError) {
+      return failure("Host control is unauthorized.", 401, origin);
+    }
+    return failure("Host control request is invalid.", 400, origin);
+  }
+
+  const pages = dependencies.hostExport.exportPages({ principal: principalKind, windowId });
+  const iterator = pages[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  if (first.done) {
+    return json({ kind: "refused", reason: "unrepresentable" }, 403, origin);
+  }
+  if (first.value.kind === "refused") {
+    return json({ kind: "refused", reason: first.value.reason }, 403, origin);
+  }
+
+  const encoder = new TextEncoder();
+  const firstPage = first.value;
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const write = (page: HostExportPage): boolean => {
+        const encoded = encodeHostExportPage(page);
+        if (encoded.kind === "refused") {
+          controller.enqueue(
+            encoder.encode(`${JSON.stringify({ kind: "refused", reason: "unrepresentable" })}\n`),
+          );
+          controller.close();
+          return false;
+        }
+        controller.enqueue(encoder.encode(encoded.line));
+        return true;
+      };
+      if (!write(firstPage)) return;
+      for (;;) {
+        const next = await iterator.next();
+        if (next.done) break;
+        if (!write(next.value)) return;
+      }
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: { "content-type": "application/x-ndjson", ...corsHeaders(origin) },
+  });
 }
 
 function handleDataMap(

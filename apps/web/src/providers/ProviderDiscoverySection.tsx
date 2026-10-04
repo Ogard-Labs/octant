@@ -2,6 +2,7 @@ import type { DiscoveryCandidate, DiscoverySnapshot, ProviderInstance } from "@o
 import { useState } from "react";
 import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ProviderDiscoverySectionProps {
   readonly snapshot: DiscoverySnapshot | undefined;
@@ -63,7 +64,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
         ) : null}
 
         {props.message === undefined ? null : (
-          <p className="settings-section-line" role="alert">
+          <OctantAlert className="settings-section-line" tone="warning">
             {props.message}{" "}
             <OctantButton
               size="sm"
@@ -74,7 +75,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
             >
               Retry
             </OctantButton>
-          </p>
+          </OctantAlert>
         )}
 
         {snapshot !== undefined && snapshot.status === "cancelled" ? (
@@ -98,7 +99,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
         ) : null}
 
         {snapshot !== undefined && snapshot.status === "failed" ? (
-          <p className="settings-section-line" role="alert">
+          <OctantAlert className="settings-section-line" tone="warning">
             {snapshot.message ?? "Discovery scan failed."}{" "}
             <OctantButton
               size="sm"
@@ -108,7 +109,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
             >
               Retry
             </OctantButton>
-          </p>
+          </OctantAlert>
         ) : null}
       </div>
 

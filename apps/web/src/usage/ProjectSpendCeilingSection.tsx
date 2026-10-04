@@ -6,6 +6,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { spendCeilingLimits, spendCeilingRemainingPhrases } from "./spendCeilingLimits";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 type CalendarPeriod = "day" | "week" | "month";
 
@@ -150,7 +151,7 @@ export function ProjectSpendCeilingSection(props: {
           </OctantButton>
         ) : null}
       </form>
-      {message === undefined ? null : <p role="alert">{message}</p>}
+      {message === undefined ? null : <OctantAlert tone="warning">{message}</OctantAlert>}
     </section>
   );
 }

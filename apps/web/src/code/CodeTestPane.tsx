@@ -10,6 +10,7 @@ import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 type TestResult = Extract<CodeOperationResult, { readonly kind: "repository-test-state" }>;
 
@@ -250,11 +251,11 @@ export function CodeTestPane(props: CodeTestPaneProps) {
         <p className="code-delivery-pane__status">{outcomeCopy(result)}</p>
       ) : null}
       {activeRun === undefined && result !== undefined && result.concerns.length > 0 ? (
-        <p className="code-delivery-pane__warning" role="alert">
+        <OctantAlert className="code-delivery-pane__warning" tone="warning">
           {result.concerns.map(concernLabel).join(" · ")}
-        </p>
+        </OctantAlert>
       ) : null}
-      {failure === undefined ? null : <p role="alert">{failure}</p>}
+      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
       {activeRun !== undefined || evidence === undefined ? null : (
         <pre className="code-delivery-pane__evidence">{evidence}</pre>
       )}

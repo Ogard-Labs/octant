@@ -12,6 +12,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { SettingsDisclosure } from "../settings/primitives";
 import { useKeybindings, type KeybindingController } from "./useKeybindings";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 type KeybindingAction = (typeof OCTANT_KEYBINDING_ACTIONS)[number];
 type KeybindingArea = KeybindingAction["area"];
@@ -138,17 +139,20 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
           </section>
         );
       })}
-      {recordError === undefined ? null : <p role="alert">{recordError}</p>}
+      {recordError === undefined ? null : (
+        /* ui-boundary-exception: inline-field-error */
+        <p role="alert">{recordError}</p>
+      )}
       {controller.keybindings.rejected.map((rejection) => (
-        <p key={`${rejection.actionId}-${rejection.chord}`} role="alert">
+        <OctantAlert key={`${rejection.actionId}-${rejection.chord}`} tone="warning">
           {rejection.actionId}: {rejection.reason} Using the default instead.
-        </p>
+        </OctantAlert>
       ))}
       {controller.documentError === undefined ? null : (
-        <p role="alert">
+        <OctantAlert tone="warning">
           Saved keybindings could not be read: {controller.documentError} Every action is on its
           default.
-        </p>
+        </OctantAlert>
       )}
       <SettingsDisclosure
         className="keybinding-settings__advanced"
@@ -190,7 +194,10 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
               Reset all to defaults
             </OctantButton>
           </div>
-          {draftError === undefined ? null : <p role="alert">{draftError}</p>}
+          {draftError === undefined ? null : (
+            /* ui-boundary-exception: inline-field-error */
+            <p role="alert">{draftError}</p>
+          )}
         </div>
       </SettingsDisclosure>
     </div>

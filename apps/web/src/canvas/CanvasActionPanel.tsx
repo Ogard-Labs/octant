@@ -265,6 +265,7 @@ function ActionStatus(props: { readonly run: ActionRun; readonly statusId: strin
         ? "Cancelled."
         : run.reason;
   return (
+    /* ui-boundary-exception: compact-status */
     <p
       className="canvas-action__status"
       id={props.statusId}

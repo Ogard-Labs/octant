@@ -433,6 +433,7 @@ import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePane
 import { OctantCommandProvider } from "./palette/CommandRegistry";
 import { buildOctantCommands, type CommandProject } from "./palette/buildOctantCommands";
 import { useCommandExtensions } from "./palette/useCommandSkills";
+import { OctantAlert } from "./ui/base/OctantAlert";
 
 export type { ShellLaunch } from "./shell/shellLaunch";
 export { launchFromLocation } from "./shell/shellLaunch";
@@ -6098,7 +6099,7 @@ function LaunchedShell(
                     Loading Projects…
                   </p>
                 ) : projectController.status === "disconnected" ? (
-                  <div className="project-nav__status" role="alert">
+                  <OctantAlert className="project-nav__status" tone="warning">
                     <span>{projectController.errorMessage}</span>
                     <OctantButton
                       onClick={projectController.retry}
@@ -6107,7 +6108,7 @@ function LaunchedShell(
                     >
                       Retry
                     </OctantButton>
-                  </div>
+                  </OctantAlert>
                 ) : (
                   <ProjectSidebarSection
                     projectViewsEnabled

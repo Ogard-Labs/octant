@@ -356,7 +356,11 @@ export function queryUsageRecords(
   limit: number,
   afterSequence: number,
   projectScope: UsageProjectScope,
-): { readonly records: ReadonlyArray<UsageRecord>; readonly hasMore: boolean } {
+): {
+  readonly records: ReadonlyArray<UsageRecord>;
+  readonly hasMore: boolean;
+  readonly nextAfterSequence: number | undefined;
+} {
   const conditions: Array<string> = ["last_sequence > ?"];
   const params: Array<string | number> = [afterSequence];
 
@@ -398,7 +402,8 @@ export function queryUsageRecords(
   }
   if (filter.mode !== undefined) {
     const condition = usageModeCondition(filter.mode);
-    if (condition === undefined) return { records: [], hasMore: false };
+    if (condition === undefined)
+      return { records: [], hasMore: false, nextAfterSequence: undefined };
     conditions.push(condition.sql);
     params.push(...condition.params);
   }
@@ -416,7 +421,9 @@ export function queryUsageRecords(
   if (projectScope.kind === "unfiled") {
     conditions.push(usageUnfiledConditionSql());
   } else {
-    if (projectScope.projectIds.length === 0) return { records: [], hasMore: false };
+    if (projectScope.projectIds.length === 0) {
+      return { records: [], hasMore: false, nextAfterSequence: undefined };
+    }
     conditions.push(usageProjectConditionSql(projectScope.projectIds.length));
     params.push(...usageProjectConditionParams(projectScope.projectIds));
   }
@@ -428,8 +435,14 @@ export function queryUsageRecords(
     )
     .all(...params, limit + 1) as ReadonlyArray<UsageRecordProjectionRow>;
 
+  const included = rows.slice(0, limit);
+  const last = included.at(-1);
   const hasMore = rows.length > limit;
-  return { records: rows.slice(0, limit).map(decodeUsageRow), hasMore };
+  return {
+    records: included.map(decodeUsageRow),
+    hasMore,
+    nextAfterSequence: last === undefined ? undefined : last.last_sequence,
+  };
 }
 
 /**

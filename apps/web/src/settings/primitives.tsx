@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import type { SettingsScope } from "./registry";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 const SCOPE_LABELS: Readonly<Record<SettingsScope, string>> = {
   app: "This app",
@@ -306,11 +307,15 @@ export function SettingsState(props: {
   readonly kind: "empty" | "loading" | "error" | "success";
   readonly children: ReactNode;
 }) {
+  if (props.kind === "error") {
+    return (
+      <OctantAlert className="settings-state settings-state--error" tone="danger">
+        {props.children}
+      </OctantAlert>
+    );
+  }
   return (
-    <p
-      className={`settings-state settings-state--${props.kind}`}
-      role={props.kind === "error" ? "alert" : "status"}
-    >
+    <p className={`settings-state settings-state--${props.kind}`} role="status">
       {props.children}
     </p>
   );

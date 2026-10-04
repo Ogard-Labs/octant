@@ -194,6 +194,7 @@ export function ZenChecklist(props: ZenChecklistProps) {
         </OctantButton>
       </form>
       {status === "error" ? (
+        /* ui-boundary-exception: compact-status */
         <p className="zen-widget-status zen-widget-status--error" role="alert">
           Checklist update failed. The saved list is unchanged.
         </p>

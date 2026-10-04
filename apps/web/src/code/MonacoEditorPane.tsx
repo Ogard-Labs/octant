@@ -11,6 +11,7 @@ import type { CodeEvidenceReference } from "@octant/contracts/code-operations";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { MonacoEditorAdapter, type MonacoAdapterRuntime } from "./MonacoEditorAdapter";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 interface CodeEditorFileFields {
   readonly checkoutId: CodeCheckoutId;
@@ -247,7 +248,7 @@ function AvailableEditor(
       </header>
 
       {conflict !== undefined ? (
-        <div className="code-editor-pane__warning" role="alert">
+        <OctantAlert className="code-editor-pane__warning" tone="warning">
           <strong>
             {conflict === "save"
               ? "This file changed outside this editor."
@@ -257,17 +258,20 @@ function AvailableEditor(
           <OctantButton onClick={discardDraftAndReload} size="sm" type="button" variant="secondary">
             Discard draft and reload
           </OctantButton>
-        </div>
+        </OctantAlert>
       ) : null}
 
       {message !== undefined ? (
+        /* ui-boundary-exception: compact-status */
         <p role={message === "Saved" ? "status" : "alert"}>{message}</p>
       ) : dirty && conflict === undefined ? (
         <p role="status">Unsaved changes</p>
       ) : null}
 
       {loadState.kind === "loading" ? <p role="status">Loading file…</p> : null}
-      {loadState.kind === "unavailable" ? <p role="alert">{loadState.message}</p> : null}
+      {loadState.kind === "unavailable" ? (
+        <OctantAlert tone="warning">{loadState.message}</OctantAlert>
+      ) : null}
       {loadState.kind === "ready" ? (
         <MonacoEditorAdapter
           ariaLabel={`Editor for ${props.file.path}`}
@@ -315,7 +319,7 @@ function UnavailableFile(props: {
   return (
     <section aria-label={`Unavailable file ${props.file.path}`} className="code-editor-pane">
       <h1>{props.file.path}</h1>
-      <p role="alert">{props.file.reason}</p>
+      <OctantAlert tone="warning">{props.file.reason}</OctantAlert>
     </section>
   );
 }

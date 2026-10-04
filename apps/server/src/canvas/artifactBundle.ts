@@ -1,6 +1,9 @@
 import type { CanvasDefinition, CanvasVersion } from "@octant/contracts/canvas";
+import { ARTIFACT_BUNDLE_FORMAT } from "@octant/contracts/artifact-bundle";
 import { MAX_ARTIFACT_BUNDLE_BYTES } from "@octant/contracts/artifact-mirror";
 import { escapeXml, renderArtifactSidecarSvg } from "./artifactRender";
+
+export { ARTIFACT_BUNDLE_FORMAT };
 
 /**
  * The files one artifact becomes.
@@ -13,8 +16,6 @@ import { escapeXml, renderArtifactSidecarSvg } from "./artifactRender";
  * out in a fixed order, indentation is stable, and the file ends with a
  * newline, so a revision that changed one sentence shows one changed line.
  */
-
-export const ARTIFACT_BUNDLE_FORMAT = "octant.artifact-bundle/1" as const;
 
 export interface ArtifactBundleFiles {
   readonly bundle: string;

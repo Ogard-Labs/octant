@@ -489,7 +489,12 @@ function SectionBody(props: {
       ? "status"
       : "alert";
   const empty = <SurfaceEmpty title={message} />;
-  return role === "alert" ? <div role="alert">{empty}</div> : empty;
+  return role === "alert" ? (
+    /* ui-boundary-exception: empty-state */
+    <div role="alert">{empty}</div>
+  ) : (
+    empty
+  );
 }
 
 function defaultMessage(status: OverviewSectionStatus): string {

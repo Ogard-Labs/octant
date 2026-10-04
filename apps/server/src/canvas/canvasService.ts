@@ -599,6 +599,11 @@ export class CanvasService {
     context: CanvasAuthorizationContext,
     project: CanvasProjectRecord | undefined,
     blocks?: ReadonlyArray<CanvasDefinition["blocks"][number]>,
+    /**
+     * Host-stamped author for a managed child. Routes never pass this: a
+     * renderer cannot choose who a Canvas says wrote it.
+     */
+    authoredBy?: CanvasActor,
   ): CanvasCreateResult {
     let request;
     try {
@@ -639,7 +644,7 @@ export class CanvasService {
         canvasId,
         versionId,
         projectId: project.id as never,
-        actor: this.#actor,
+        actor: authoredBy ?? this.#actor,
         providerInstanceId: this.#providerInstanceId,
         modelId: this.#modelId,
         createdAt: admitted.receipt.createdAt,

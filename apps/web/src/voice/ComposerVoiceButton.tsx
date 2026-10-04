@@ -143,6 +143,7 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
         </span>
       ) : null}
       {failure === undefined ? null : (
+        /* ui-boundary-exception: compact-status */
         <span className="composer-voice__error" role="alert">
           {failure}
         </span>

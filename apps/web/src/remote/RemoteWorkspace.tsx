@@ -17,6 +17,7 @@ import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import type { RemoteProductClients } from "./remoteProductClients";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface RemoteWorkspaceProps {
   readonly clients: RemoteProductClients;
@@ -267,6 +268,7 @@ function RemoteThreadPane<T extends RemoteThread>(props: RemoteThreadPaneProps<T
           {props.action}
         </div>
         {props.status === "disconnected" ? (
+          /* ui-boundary-exception: empty-state */
           <div role="alert">
             <SurfaceEmpty
               detail={props.errorMessage ?? `${label} could not be read from the host.`}
@@ -302,9 +304,9 @@ function RemoteThreadPane<T extends RemoteThread>(props: RemoteThreadPaneProps<T
           </ul>
         )}
         {props.status === "disconnected" || props.errorMessage === undefined ? null : (
-          <p className="remote-shell__hint" role="alert">
+          <OctantAlert className="remote-shell__hint" tone="warning">
             {props.errorMessage}
-          </p>
+          </OctantAlert>
         )}
       </nav>
       <div className="remote-workspace__thread-view">

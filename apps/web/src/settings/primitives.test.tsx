@@ -229,6 +229,7 @@ describe("shared Settings surfaces", () => {
 
     rerender(<SettingsState kind="error">Host is unavailable.</SettingsState>);
     expect(screen.getByRole("alert")).toHaveClass("settings-state", "settings-state--error");
+    expect(screen.getByRole("alert")).toHaveAttribute("data-tone", "danger");
   });
 });
 

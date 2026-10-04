@@ -72,6 +72,7 @@ import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { ShellState } from "../shell/ShellState";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ChatWorkspaceProps {
   readonly controller: ChatController;
@@ -759,9 +760,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   return (
     <section aria-label="Chat workspace" className="chat-workspace">
       {props.controller.errorMessage === undefined ? null : (
-        <p className="chat-workspace__error" role="alert">
+        <OctantAlert className="chat-workspace__error" tone="danger">
           {props.controller.errorMessage}
-        </p>
+        </OctantAlert>
       )}
       <div className="chat-workspace__conversation">
         <header className="chat-workspace__header">

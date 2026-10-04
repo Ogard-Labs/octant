@@ -14,6 +14,11 @@ agent through `collect`. You watch and control subagents from the composer and
 the **Agents** dock tool, but you do not start them there; a subagent a person
 started by hand would have no agent to hand its result back to.
 
+A managed child can also author a Canvas in the workspace the host resolved for
+that run. The document appears on the parent thread, and the child is recorded
+as its author. A provider that cannot carry Octant's tools does not start the
+child.
+
 ## Availability
 
 Subagent infrastructure — contracts, journaling, projection, the
@@ -110,6 +115,12 @@ Cancellation is leaf-first; a run is **Cancelled** only after its stop is
 confirmed. After a restart, Octant rebuilds the hierarchy, resumable runs
 reconnect, and non-resumable runs become **Interrupted** with a restart or
 retry. Approvals, tasks, outputs, transcripts, and usage are retained.
+
+A run waiting for other runs to finish never starts on its own after a
+restart, even once they finish: **Resume** on the run, or resuming the parent
+thread, lets it go. While the parent thread is paused, or needs a check after
+a restart, a waiting run stays waiting too, and its own **Resume** asks you to
+resume the parent thread first.
 
 ## Following up on results
 

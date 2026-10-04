@@ -1244,7 +1244,16 @@ and Tooltip. Composition rules:
   announce as `alert`; neutral, accent, and success announce as `status`.
   Placement belongs to the feature; the callout recipe owns its appearance.
   Permission decisions and confirmation side effects stay with the host and
-  their existing dialog callers.
+  their existing dialog callers. A new raw `role="alert"` or `role="dialog"` in
+  feature source fails `bun run ui:check` unless it is a recorded exception:
+  an inline field error tied to its input, a compact status row that already
+  owns its mark or switches between status and alert, a screen-reader-only
+  announcement, a positioned banner whose placement is not a callout, an
+  empty-state live region owned by `ShellState` or `OctantEmpty`, or a
+  non-modal glass panel. Zen's thread picker, assistant, and add/appearance
+  panels stay anchored in the surface; `OctantDialog` would add a backdrop,
+  focus trap, and portal. The recipe owners (`OctantAlert`, `OctantToast`,
+  `OctantApprovalCard`, `FieldError`, and `ShellState`) set the role themselves.
 - Product notices use `OctantToast`: a semantic icon, short title, supporting
   detail, and an explicit Dismiss button. An optional inline action can open the
   relevant destination without implicitly dismissing the notice. Success and
