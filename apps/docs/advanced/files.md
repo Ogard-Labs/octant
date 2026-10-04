@@ -109,6 +109,14 @@ agent's revisions. Older versions stay intact and can still be opened; a board
 opened at an older version is read-only. If the host has moved on since you
 opened the board, the drag is refused, the board reloads, and you drag again on
 the current version. Boards keep the diagram budgets (512 nodes, 1,024 edges).
+
+A login or request flow is a sequence: participants across the top, messages
+in order down the page, an activation on a lifeline, and notes. A lifecycle
+such as an order is a state machine: states that may nest, labeled
+transitions, and an initial and a final state. Both use the same node and
+edge budgets as a board. Comments can sit on a participant, a message, a
+state, or a transition.
+
 The document fills the Canvas tab and the dock. Its header holds the version
 picker (choose an earlier version, or **Compare with** the previous one to see
 which blocks were added, changed, or removed), **Comments** with the number of
@@ -118,7 +126,8 @@ open threads, and a `⋯` menu for **Share**, **Refresh**, and **Refine**.
 block and select its comment marker to read or add comments on that block;
 blocks with open threads always show their marker and count. The panel filters
 open, resolved, or all threads. A comment is anchored to a
-block or to a board node; replies, resolving, and deleting are journaled by
+block, to a board node, to a sequence participant or message, or to a state
+or its transition; replies, resolving, and deleting are journaled by
 the host, so they survive restart and reload. Every comment is authored as you,
 with the device it came through noted ("paired device" when it arrived from a
 paired phone or browser). A comment whose block has since left the canvas is

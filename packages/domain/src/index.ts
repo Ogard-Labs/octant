@@ -21,6 +21,8 @@ export * from "./codeWorktreeSourcePolicy";
 export * from "./deliveryTargetPolicy";
 export * from "./canvasPolicy";
 export * from "./canvasDiagramLayout";
+export * from "./canvasKindLayout";
+export * from "./canvasDiagramExamples";
 export * from "./canvasActionPolicy";
 export * from "./canvasActionExecutionPolicy";
 export * from "./canvasActionAvailabilityPolicy";

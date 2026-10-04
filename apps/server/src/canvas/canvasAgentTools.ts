@@ -18,6 +18,7 @@ import type { ChildCanvasWorkspaceResolution } from "./childCanvasWorkspace";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { CanvasService } from "./canvasService";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
+import { loginSequenceExample, orderStateExample } from "@octant/domain";
 
 export const CANVAS_TOOL_NAME = "octant_canvas";
 
@@ -152,6 +153,15 @@ type ResolvedCanvasTarget =
 
 const MODE_NAMES = { chat: "Chat", work: "Work", code: "Code" } as const;
 
+function diagramKindExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown> {
+  const examples: unknown[] = [];
+  for (const kind of kinds) {
+    if (kind === "sequence") examples.push(loginSequenceExample);
+    if (kind === "state") examples.push(orderStateExample);
+  }
+  return examples;
+}
+
 /**
  * Where a thread's Canvas belongs, decided by the host rather than the agent.
  *
@@ -239,6 +249,7 @@ function toolDescription(
     "Start with describe to see the block kinds, the document recipes, and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, and "summarise research" uses research-brief. Describe with no block kinds lists every offered recipe and its skeleton; fill those roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.',
     "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
+    "A login or request flow is a sequence block: participants, ordered messages, activations, and notes. A lifecycle such as an order is a state block: states that may nest, labeled transitions, and an initial and a final state. Use diagram for a generic graph of nodes and edges. Describe sequence or state to get an example.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
   ].join(" ");
@@ -552,7 +563,13 @@ function canvasToolSet(options: {
         const selected = CanvasBlock.members.filter((block) =>
           input.blockKinds?.includes(block.fields.kind.literals[0]),
         );
-        return { result: { blockSchema: JSONSchema.make(Schema.Union(...selected)) } };
+        const examples = diagramKindExamples(input.blockKinds ?? []);
+        return {
+          result: {
+            blockSchema: JSONSchema.make(Schema.Union(...selected)),
+            ...(examples.length === 0 ? {} : { examples }),
+          },
+        };
       }
 
       const target = await options.resolveTarget();

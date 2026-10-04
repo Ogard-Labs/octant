@@ -31,6 +31,8 @@ const DRAWN_KINDS = new Set<CanvasBlock["kind"]>([
   "chart",
   "timeline",
   "diagram",
+  "sequence",
+  "state",
   "code-excerpt",
   "pseudocode",
   "diff",
@@ -187,6 +189,10 @@ function drawBlock(
       return { markup: timeline(y, width, palette), height: 18 };
     case "diagram":
       return { markup: diagram(block, y, width, palette), height: 46 };
+    case "sequence":
+      return { markup: sequence(block, y, width, palette), height: 64 };
+    case "state":
+      return { markup: stateMachine(block, y, width, palette), height: 64 };
     case "code-excerpt":
     case "pseudocode":
     case "diff":
@@ -300,6 +306,82 @@ function diagram(
     )
     .join("");
   return edges + boxes;
+}
+
+function sequence(
+  block: Extract<CanvasBlock, { readonly kind: "sequence" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const participants = block.participants.slice(0, 4);
+  if (participants.length === 0) return lines(y, 2, width, palette);
+  const slot = width / participants.length;
+  const lifelines = participants
+    .map((_participant, index) => {
+      const x = Math.round(PADDING + slot * index + slot / 2);
+      return `<line x1="${String(x)}" y1="${String(y)}" x2="${String(x)}" y2="${String(y + 52)}" stroke="${palette.muted}" stroke-width="1" stroke-dasharray="2 2"/>`;
+    })
+    .join("");
+  const arrows = block.messages.slice(0, 3).map((message, index) => {
+    const from = participants.findIndex(
+      (participant) => String(participant.participantId) === String(message.from),
+    );
+    const to = participants.findIndex(
+      (participant) => String(participant.participantId) === String(message.to),
+    );
+    const fromX = Math.round(PADDING + slot * Math.max(from, 0) + slot / 2);
+    const toX = Math.round(PADDING + slot * Math.max(to, 0) + slot / 2);
+    const lineY = y + 14 + index * 14;
+    return (
+      `<line x1="${String(fromX)}" y1="${String(lineY)}" x2="${String(toX)}" y2="${String(lineY)}" stroke="${palette.accent}" stroke-width="1.2"/>` +
+      text(Math.min(fromX, toX) + 4, lineY - 2, clamp(message.label, 18), 7, palette.ink)
+    );
+  });
+  const names = participants
+    .map((participant, index) =>
+      text(
+        Math.round(PADDING + slot * index),
+        y + 8,
+        clamp(participant.label, 10),
+        7,
+        palette.ink,
+        600,
+      ),
+    )
+    .join("");
+  return lifelines + arrows.join("") + names;
+}
+
+function stateMachine(
+  block: Extract<CanvasBlock, { readonly kind: "state" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const states = block.states.filter((state) => state.parentId === undefined).slice(0, 4);
+  if (states.length === 0) return lines(y, 2, width, palette);
+  const slot = width / states.length;
+  const boxWidth = Math.max(24, Math.round(slot - 10));
+  const boxes = states
+    .map((state, index) => {
+      const x = Math.round(PADDING + index * slot);
+      const mark =
+        state.role === "initial" || state.role === "final"
+          ? `<circle cx="${String(x + 8)}" cy="${String(y + 10)}" r="5" fill="${state.role === "initial" ? palette.accent : "none"}" stroke="${palette.accent}" stroke-width="1.2"/>`
+          : `<rect x="${String(x)}" y="${String(y)}" width="${String(boxWidth)}" height="18" rx="3" fill="none" stroke="${palette.accent}" stroke-width="1.2"/>`;
+      return mark + text(x, y + 32, clamp(state.label, 12), 7, palette.ink);
+    })
+    .join("");
+  const arrows = block.transitions.slice(0, 3).map((transition, index) => {
+    const from = states.findIndex((state) => String(state.stateId) === String(transition.source));
+    const to = states.findIndex((state) => String(state.stateId) === String(transition.target));
+    if (from < 0 || to < 0) return "";
+    const fromX = Math.round(PADDING + from * slot + boxWidth);
+    const toX = Math.round(PADDING + to * slot);
+    return `<line x1="${String(fromX)}" y1="${String(y + 9)}" x2="${String(toX)}" y2="${String(y + 9 + index)}" stroke="${palette.muted}" stroke-width="1"/>`;
+  });
+  return arrows.join("") + boxes;
 }
 
 function text(
