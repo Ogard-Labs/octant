@@ -26,8 +26,16 @@ const boundedToken = <B extends string>(brand: B) =>
     Schema.brand(brand),
   );
 
-export const CANVAS_SHARE_SCHEMA_VERSION = 1 as const;
-export const CanvasShareSchemaVersion = Schema.Literal(CANVAS_SHARE_SCHEMA_VERSION);
+// Share wire contracts version independently from Canvas wire contracts, and
+// the same way: the accept list covers every historical version plus the
+// current one, so a rolled-forward snapshot stays readable here, while a
+// rolled-back runtime whose literal stops at the older number refuses a
+// document that declares the newer version cleanly at the schemaVersion field
+// — before any block decodes — instead of partially decoding it. Version 2
+// accompanies Canvas schema version 3: static exports and snapshots may now
+// carry mockup blocks.
+export const CANVAS_SHARE_SCHEMA_VERSION = 2 as const;
+export const CanvasShareSchemaVersion = Schema.Literal(1, CANVAS_SHARE_SCHEMA_VERSION);
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
 
 export const CanvasExportId = brandedUuid("CanvasExportId");
@@ -607,7 +615,19 @@ export const CanvasStaticExportDocument = Schema.Struct({
     "canvas-share-static-export-v1",
     "canvas-share-authenticated-snapshot-v1",
   ),
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    // Same version gate as the live definition: mockup blocks are declared by
+    // share version 2, which accompanies Canvas schema version 3. A v1
+    // document carrying one is refused at decode, not partially rendered.
+    Schema.filter(
+      (document) =>
+        document.schemaVersion === CANVAS_SHARE_SCHEMA_VERSION ||
+        !document.blocks.some((block) => block.kind === "mockup"),
+      { message: () => "Mockup blocks require Canvas share version 2." },
+    ),
+  );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;
 
 export const CanvasStaticExportReceipt = Schema.Struct({

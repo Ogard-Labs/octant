@@ -212,12 +212,11 @@ describe("Canvas share contracts", () => {
         ],
       },
     ];
-    expect(
-      decodeCanvasStaticExportDocument({
-        ...document,
-        blocks,
-      }),
-    ).toEqual({ ...document, blocks });
+    const exported = { ...document, schemaVersion: 2, blocks };
+    expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+    // A v1 share document carrying a mockup is a rolled-back runtime's failure
+    // mode: the decode refuses it instead of dropping the block.
+    expect(() => decodeCanvasStaticExportDocument({ ...document, blocks })).toThrow();
   });
 
   it("round-trips pie, donut, stacked-bar, grouped-bar, and bar-line charts in a static export document", () => {

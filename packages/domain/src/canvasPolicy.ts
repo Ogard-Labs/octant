@@ -11,6 +11,7 @@ import {
   CANVAS_MAX_SERIES,
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
+  CANVAS_SCHEMA_VERSION,
   CanvasBlock,
   CanvasDefinition,
   CanvasVersion,
@@ -20,6 +21,11 @@ import {
 } from "@octant/contracts/canvas";
 
 const encoder = new TextEncoder();
+
+// Versions this runtime decodes: every historical version plus the current
+// one. A document declaring anything else is refused as a future version,
+// before its blocks are read, so a newer contract never reaches a renderer.
+const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [1, 2, CANVAS_SCHEMA_VERSION];
 
 export type CanvasPolicyRejectionCode =
   | "invalid-schema"
@@ -238,10 +244,48 @@ function calculateBudgetUsage(
   };
 }
 
+/**
+ * A document a newer runtime declared with a version this runtime has never
+ * seen — either a future schema version or a version-gated block (mockup)
+ * inside a document that declares an older version — must fail closed as an
+ * unsupported schema version, before any content is read, rather than
+ * collapsing into a generic "corrupt" decode failure. Works on both a
+ * definition (`blocks` at the top level) and a version envelope (blocks under
+ * `definition`).
+ */
+function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | undefined {
+  if (typeof input !== "object" || input === null) return undefined;
+  const envelope = input as {
+    schemaVersion?: unknown;
+    blocks?: unknown;
+    definition?: { blocks?: unknown };
+  };
+  const declared = envelope.schemaVersion;
+  if (typeof declared !== "number") return undefined;
+  if (!SUPPORTED_CANVAS_SCHEMA_VERSIONS.includes(declared)) return "unsupported-schema-version";
+  if (declared === CANVAS_SCHEMA_VERSION) return undefined;
+  const blocks = Array.isArray(envelope.blocks)
+    ? envelope.blocks
+    : Array.isArray(envelope.definition?.blocks)
+      ? envelope.definition?.blocks
+      : undefined;
+  if (
+    blocks?.some(
+      (block) =>
+        typeof block === "object" &&
+        block !== null &&
+        (block as { kind?: unknown }).kind === "mockup",
+    )
+  ) {
+    return "unsupported-schema-version";
+  }
+  return undefined;
+}
+
 function decodeDefinitionOrReject(input: unknown): CanvasDefinition {
   try {
     const definition = decodeCanvasDefinition(input);
-    if (definition.schemaVersion !== 1 && definition.schemaVersion !== 2) {
+    if (!SUPPORTED_CANVAS_SCHEMA_VERSIONS.includes(definition.schemaVersion)) {
       return reject(
         "unsupported-schema-version",
         `Canvas schema version ${String(definition.schemaVersion)} is unsupported.`,
@@ -250,19 +294,13 @@ function decodeDefinitionOrReject(input: unknown): CanvasDefinition {
     return definition;
   } catch (error) {
     if (error instanceof CanvasPolicyRejected) throw error;
+    const schemaRejection = declaredSchemaRejection(input);
+    if (schemaRejection !== undefined) {
+      return reject(schemaRejection, "Canvas schema version is unsupported.");
+    }
     const structuralBudget = inferStructuralBudgetCode(input);
     if (structuralBudget !== undefined) {
       return reject(structuralBudget, "Canvas structural budget is exceeded.");
-    }
-    if (
-      typeof input === "object" &&
-      input !== null &&
-      "schemaVersion" in input &&
-      typeof (input as { schemaVersion?: unknown }).schemaVersion === "number" &&
-      (input as { schemaVersion?: unknown }).schemaVersion !== 1 &&
-      (input as { schemaVersion?: unknown }).schemaVersion !== 2
-    ) {
-      return reject("unsupported-schema-version", "Canvas schema version is unsupported.");
     }
     return reject("invalid-schema", "Canvas definition failed strict schema validation.");
   }
@@ -776,6 +814,10 @@ export function validateCanvasVersion(input: unknown): CanvasVersion {
     version = decodeCanvasVersion(input);
   } catch (error) {
     if (error instanceof CanvasPolicyRejected) throw error;
+    const schemaRejection = declaredSchemaRejection(input);
+    if (schemaRejection !== undefined) {
+      return reject(schemaRejection, "Canvas schema version is unsupported.");
+    }
     return reject("invalid-schema", "Canvas version failed strict schema validation.");
   }
   if (version.schemaVersion !== version.definition.schemaVersion) {

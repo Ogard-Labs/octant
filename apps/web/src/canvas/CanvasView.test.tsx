@@ -265,7 +265,7 @@ describe("Hostile content and authority confinement", () => {
   it("denies an unsupported schema version before any content is exposed", () => {
     render(<CanvasView input={canvasFixture} />);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    render(<CanvasView input={{ schemaVersion: 2, title: "future" }} />);
+    render(<CanvasView input={{ schemaVersion: 9, title: "future" }} />);
     expect(screen.getByRole("alert")).toBeInTheDocument();
   });
 });

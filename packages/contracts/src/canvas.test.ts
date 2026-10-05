@@ -88,11 +88,33 @@ describe("Canvas contracts", () => {
   });
 
   it("rejects unknown or malformed schema versions", () => {
-    expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: 3 })).toThrow();
+    expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: 4 })).toThrow();
     expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: "1" })).toThrow();
     expect(() =>
-      decodeCanvasDefinition({ ...definition, blocks: [{ ...heading, schemaVersion: 3 }] }),
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...heading, schemaVersion: 4 }] }),
     ).toThrow();
+  });
+
+  it("admits mockup blocks only under the version that declared them", () => {
+    const mockup = {
+      blockId: "mockup-1",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "mockup",
+      device: "phone",
+      title: "Settings",
+      nodes: [{ nodeId: "screen", component: "window", label: "Settings" }],
+    } as const;
+    // A mockup carried by a document that declares an older version is a
+    // rolled-back runtime's failure mode: the decode refuses it outright.
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 2, blocks: [mockup] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 1, blocks: [mockup] }),
+    ).toThrow();
+    expect(decodeCanvasDefinition({ ...definition, blocks: [mockup] })).toMatchObject({
+      blocks: [mockup],
+    });
   });
 
   it("rejects unknown blocks and executable or renderer-owned fields", () => {

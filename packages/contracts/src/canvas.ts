@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
 import {
+  CANVAS_SCHEMA_VERSION,
   CanvasActor,
   CanvasBlockId,
   CanvasEdgeId,
@@ -24,7 +25,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 // Canvas wire contracts are deliberately versioned independently from event
 // envelopes. A decoder must reject a future version until its renderer and
-// policy have been reviewed together.
+// policy have been reviewed together. The current schema version is declared
+// in `canvasIdentity.ts`: version 3 added the mockup block, which the
+// definition filter below admits only under that declared version.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -939,7 +942,22 @@ export const CanvasDefinition = Schema.Struct({
         { message: () => `Canvas image blocks exceed ${CANVAS_MAX_IMAGES}.` },
       ),
     ),
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    // Version-gated blocks: a mockup is declared only under version 3. An older
+    // runtime that never learned the kind must see a mockup-carrying document as
+    // a declared future version, not as a v2 document that failed to decode.
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion === CANVAS_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "mockup"),
+      {
+        message: () =>
+          `Mockup blocks require Canvas schema version ${String(CANVAS_SCHEMA_VERSION)}.`,
+      },
+    ),
+  );
 export type CanvasDefinition = typeof CanvasDefinition.Type;
 
 export const CanvasVersion = Schema.Struct({

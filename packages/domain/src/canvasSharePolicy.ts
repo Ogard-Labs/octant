@@ -1,4 +1,5 @@
 import {
+  CANVAS_SHARE_SCHEMA_VERSION,
   decodeCanvasStaticExportRequest,
   type CanvasRedactedProvenance,
   type CanvasStaticExportBlock,
@@ -298,7 +299,7 @@ export function buildCanvasStaticExportDocument(input: {
   const exportedAt = exportedAtRaw as UtcTimestamp;
 
   return {
-    schemaVersion: 1,
+    schemaVersion: CANVAS_SHARE_SCHEMA_VERSION,
     kind: "canvas-static-export-document",
     exportId: input.request.exportId,
     canvasId: input.current.canvasId,
@@ -341,7 +342,7 @@ export function buildCanvasStaticExportReceipt(input: {
     assertNoSecretShape(request.note, "note");
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: CANVAS_SHARE_SCHEMA_VERSION,
     kind: "canvas-static-export-receipt",
     exportId: request.exportId,
     canvasId: current.canvasId,
