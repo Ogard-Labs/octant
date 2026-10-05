@@ -1913,6 +1913,38 @@ describe("provider registry contracts", () => {
     expect(() => decodeProviderModel({ ...model, inputModalities: [] })).toThrow();
   });
 
+  it("carries normalized model configuration choices without provider payloads or duplicate axes", () => {
+    const model = {
+      id: "paired-model",
+      displayName: "Paired model",
+      source: "discovered",
+      verification: "verified",
+      reasoning: "supported",
+      inputModalities: ["text"],
+      options: [],
+      configuration: {
+        family: "Fusion",
+        choices: [
+          { id: "lead", displayName: "Lead", value: "Frontier" },
+          { id: "sidekick", displayName: "Sidekick", value: "Executor" },
+        ],
+      },
+    };
+    expect(decodeProviderModel(model)).toEqual(model);
+    expect(() =>
+      decodeProviderModel({ ...model, configuration: { ...model.configuration, raw: {} } }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderModel({
+        ...model,
+        configuration: {
+          family: "Fusion",
+          choices: [model.configuration.choices[0], model.configuration.choices[0]],
+        },
+      }),
+    ).toThrow();
+  });
+
   it("keeps image input a driver-reported tri-state that defaults to absent", () => {
     const model = {
       id: "image-capable-model",

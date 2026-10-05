@@ -378,8 +378,16 @@ High") and reset above, and Faster and Smarter at the track's two ends. The fill
 is a dot grain that grows denser, brighter, and more purple, with a soft glow,
 the higher the level; a chosen level shows at once and never snaps back while
 it saves. Explicit model and reasoning choices are remembered
-locally for new threads; reasoning is keyed by provider/model and restored only while
-supported. Existing thread selections remain authoritative.
+locally for new threads; model settings are keyed by provider/model and restored only
+while supported. Existing thread selections remain authoritative. The same picker
+shows every declared model setting in Chat, Work, and Code. Paired model families
+show Lead and Sidekick selectors drawn from available catalog entries; choosing
+one preserves the other choice and carries still-supported explicit effort and
+speed settings. Devin's Speed selector offers Standard and Fast where the CLI
+supports Fast Mode, plus Default to use the provider's choice. The settings area
+scrolls within the bounded popup at narrow or short viewport sizes.
+Model choices and settings wait for an asynchronous model change to finish before
+accepting another edit, so the next configuration choice uses the confirmed pairing.
 
 The screen sits on the application ground (0091, 0129), set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, or the

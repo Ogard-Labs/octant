@@ -1881,7 +1881,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                         modelOptionValues: values,
                       });
                     }}
-                    onSelect={(selection) => void changeProvider(selection)}
+                    onSelect={changeProvider}
                     {...(props.onOpenSettings === undefined
                       ? {}
                       : { onOpenSettings: props.onOpenSettings })}
