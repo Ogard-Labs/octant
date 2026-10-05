@@ -194,7 +194,9 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
               </OctantMenuGroup>
             ) : null}
             {props.profileName === undefined ? null : (
-              <OctantMenuGroupLabel>Started under {props.profileName}</OctantMenuGroupLabel>
+              <OctantMenuGroup>
+                <OctantMenuGroupLabel>Started under {props.profileName}</OctantMenuGroupLabel>
+              </OctantMenuGroup>
             )}
           </OctantMenuPopup>
         </OctantMenuPositioner>
