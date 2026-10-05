@@ -262,6 +262,23 @@ describe("context contracts", () => {
     } as const;
     expect(decodeUsageReconciliation(reconciliation)).toEqual(reconciliation);
     expect(() => decodeUsageReconciliation({ ...reconciliation, varianceTokens: -5 })).toThrow();
+    const priced = decodeUsageReconciliation({
+      ...reconciliation,
+      cost: { kind: "provider-recorded", usdMicros: 1_250_000 },
+    });
+    expect(priced.cost?.usdMicros).toBe(1_250_000);
+    expect(() =>
+      decodeUsageReconciliation({
+        ...reconciliation,
+        cost: { kind: "provider-recorded", usdMicros: 12.5 },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeUsageReconciliation({
+        ...reconciliation,
+        cost: { kind: "api-estimate", usdMicros: -1 },
+      }),
+    ).toThrow();
     const { planId: _planId, ...reconciliationWithoutPlan } = reconciliation;
     expect(
       decodeUsageReconciliation({

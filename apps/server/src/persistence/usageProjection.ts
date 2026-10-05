@@ -122,6 +122,7 @@ export class UsageProjection implements Projection {
       ...(reconciliation.providerExecutionDurationMs === undefined
         ? {}
         : { providerExecutionDurationMs: reconciliation.providerExecutionDurationMs }),
+      ...(reconciliation.cost === undefined ? {} : { cost: reconciliation.cost }),
       plannedInputTokens: reconciliation.plannedInputTokens,
       varianceTokens: reconciliation.varianceTokens,
       attribution,
@@ -134,16 +135,18 @@ export class UsageProjection implements Projection {
           reconciliation_id, subject_type, subject_id, provider_instance_id,
           model_id, request_shape, quality, input_tokens, output_tokens,
           reasoning_tokens, cache_read_input_tokens, cache_write_input_tokens,
-          provider_execution_duration_ms,
+          provider_execution_duration_ms, cost_usd_micros, cost_kind,
           planned_input_tokens, variance_tokens, schema_version,
           attribution_json, observed_at, last_sequence, host_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (reconciliation_id) DO UPDATE SET
           quality = excluded.quality,
           reasoning_tokens = excluded.reasoning_tokens,
           cache_read_input_tokens = excluded.cache_read_input_tokens,
           cache_write_input_tokens = excluded.cache_write_input_tokens,
           provider_execution_duration_ms = excluded.provider_execution_duration_ms,
+          cost_usd_micros = excluded.cost_usd_micros,
+          cost_kind = excluded.cost_kind,
           attribution_json = excluded.attribution_json,
           last_sequence = excluded.last_sequence
         WHERE excluded.last_sequence > usage_record_projection.last_sequence
@@ -162,6 +165,8 @@ export class UsageProjection implements Projection {
         record.cacheReadInputTokens ?? null,
         record.cacheWriteInputTokens ?? null,
         record.providerExecutionDurationMs ?? null,
+        record.cost?.usdMicros ?? null,
+        record.cost?.kind ?? null,
         record.plannedInputTokens ?? 0,
         record.varianceTokens ?? 0,
         USAGE_PROJECTION_SCHEMA_VERSION,
@@ -554,6 +559,14 @@ function decodeUsageRow(row: UsageRecordProjectionRow): UsageRecord {
     ...(row.provider_execution_duration_ms === null
       ? {}
       : { providerExecutionDurationMs: row.provider_execution_duration_ms }),
+    ...(row.cost_usd_micros === null
+      ? {}
+      : {
+          cost: {
+            kind: row.cost_kind,
+            usdMicros: row.cost_usd_micros,
+          },
+        }),
     ...(row.planning_available === 0
       ? {}
       : {

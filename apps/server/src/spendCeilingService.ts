@@ -348,6 +348,10 @@ export class SpendCeilingService {
     const needsTurns =
       ceiling.policy.turnBudget !== undefined || ceiling.policy.runTimeBudgetSeconds !== undefined;
     const used = needsTurns ? this.#turnUse(ceiling.scope, from, now) : undefined;
+    const cost =
+      ceiling.policy.costBudgetUsdCents === undefined
+        ? undefined
+        : this.#costUse(ceiling.scope, childIds, from);
     return {
       scopeKind: ceiling.scope.kind,
       scopeId:
@@ -359,7 +363,62 @@ export class SpendCeilingService {
       reservedTokens: this.#reservedFor(ceiling.scope),
       ...(ceiling.overrun === undefined ? {} : { overrun: ceiling.overrun }),
       ...(used === undefined ? {} : { usedTurns: used.turns, usedRunTimeMs: used.runTimeMs }),
+      ...(cost === undefined ? {} : { usedCostUsdCents: cost }),
     };
+  }
+
+  /**
+   * Settled US-dollar spend in the window, in whole cents. Undefined when any
+   * in-window record is unpriced or the sum cannot be measured: a monetary
+   * ceiling then refuses rather than counting unpriced usage as free.
+   */
+  #costUse(
+    scope: SpendCeilingScope,
+    childIds: ReadonlyArray<string>,
+    from: string | undefined,
+  ): number | undefined {
+    const subjects: Array<{ readonly type: string; readonly id: string }> = [];
+    if (scope.kind === "thread") {
+      subjects.push({ type: scope.threadType, id: String(scope.threadId) });
+    }
+    for (const id of childIds) subjects.push({ type: "agent-run", id });
+    if (subjects.length === 0 && scope.kind !== "project") return undefined;
+    const conditions: Array<string> = [];
+    const params: Array<string | number> = [];
+    if (subjects.length > 0) {
+      const subjectTerms = subjects.map(() => "(subject_type = ? AND subject_id = ?)");
+      conditions.push(`(${subjectTerms.join(" OR ")})`);
+      for (const subject of subjects) params.push(subject.type, subject.id);
+    }
+    if (scope.kind === "project") {
+      conditions.push(usageProjectConditionSql(1));
+      params.push(...usageProjectConditionParams([String(scope.projectId)]));
+    }
+    if (conditions.length === 0) return undefined;
+    const clauses = [`(${conditions.join(" OR ")})`];
+    if (from !== undefined) {
+      clauses.push("observed_at >= ?");
+      params.push(from);
+    }
+    let row: { readonly unpriced: number; readonly micros: number } | undefined;
+    try {
+      row = this.#connection
+        .prepare(
+          `SELECT
+            COALESCE(SUM(CASE WHEN cost_usd_micros IS NULL THEN 1 ELSE 0 END), 0) AS unpriced,
+            COALESCE(SUM(cost_usd_micros), 0) AS micros
+          FROM usage_record_projection
+          WHERE ${clauses.join(" AND ")}`,
+        )
+        .get(...params) as { readonly unpriced: number; readonly micros: number } | undefined;
+    } catch {
+      return undefined;
+    }
+    if (row === undefined || row.unpriced > 0) return undefined;
+    if (!Number.isSafeInteger(row.micros) || row.micros < 0) return undefined;
+    // Whole cents: a partial cent of estimated spend still counts against the
+    // ceiling once it reaches one cent.
+    return Math.floor(row.micros / 10_000);
   }
 
   /**

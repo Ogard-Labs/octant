@@ -287,6 +287,28 @@ describe("UsageProjection", () => {
     ]);
   });
 
+  it("stores the request cost and replays it after a journal rebuild", () => {
+    const { connection, journal } = openDatabase();
+    appendFullUsageCycle(journal, { cost: { kind: "provider-recorded", usdMicros: 1_250_000 } });
+
+    const record = readUsageRecord(connection, ids.usage);
+    expect(record?.cost).toEqual({ kind: "provider-recorded", usdMicros: 1_250_000 });
+
+    const projection = createPhase1RuntimeRegistries().projections.get("usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    const replayed = readUsageRecord(connection, ids.usage);
+    expect(replayed?.cost).toEqual({ kind: "provider-recorded", usdMicros: 1_250_000 });
+  });
+
+  it("keeps a record without cost unpriced rather than free", () => {
+    const { connection, journal } = openDatabase();
+    appendFullUsageCycle(journal);
+
+    const record = readUsageRecord(connection, ids.usage);
+    expect(record?.cost).toBeUndefined();
+  });
+
   it("builds a usage record from a full context event cycle", () => {
     const { connection, journal } = openDatabase();
     appendFullUsageCycle(journal);

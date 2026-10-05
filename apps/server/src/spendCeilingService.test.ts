@@ -67,6 +67,8 @@ function insertUsage(
     readonly quality?: string;
     readonly sequence: number;
     readonly observedAt?: string;
+    readonly costUsdMicros?: number;
+    readonly costKind?: "provider-recorded" | "api-estimate";
   },
 ): void {
   connection
@@ -75,9 +77,10 @@ function insertUsage(
         reconciliation_id, subject_type, subject_id, provider_instance_id, model_id,
         request_shape, quality, input_tokens, output_tokens, reasoning_tokens,
         cache_read_input_tokens, cache_write_input_tokens, provider_execution_duration_ms,
+        cost_usd_micros, cost_kind,
         planned_input_tokens, variance_tokens, schema_version, attribution_json,
         observed_at, last_sequence, host_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.id,
@@ -93,6 +96,8 @@ function insertUsage(
       null,
       null,
       null,
+      input.costUsdMicros ?? null,
+      input.costUsdMicros === undefined ? null : (input.costKind ?? "provider-recorded"),
       input.tokens.input,
       0,
       2,
@@ -343,6 +348,67 @@ describe("SpendCeilingService", () => {
       tokenBudget: 5_000,
     });
     expect(raise.kind).toBe("raised");
+  });
+
+  it("refuses a turn once the monetary ceiling is used up", () => {
+    const { connection, service } = openService();
+    expect(
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { costBudgetUsdCents: 25_00 },
+        window: { kind: "lifetime" },
+      }).kind,
+    ).toBe("set");
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000301",
+      subjectType: "chat-thread",
+      subjectId: ids.thread,
+      tokens: { input: 100, output: 0 },
+      sequence: 1,
+      costUsdMicros: 25_000_000,
+    });
+    const admission = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      turnUpperBoundTokens: 100,
+    });
+    expect(admission).toMatchObject({
+      status: "refused",
+      refusal: { kind: "exhausted", dimension: "monetary" },
+    });
+  });
+
+  it("refuses a monetary ceiling when in-window usage has no price", () => {
+    const { connection, service } = openService();
+    expect(
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { costBudgetUsdCents: 25_00 },
+        window: { kind: "lifetime" },
+      }).kind,
+    ).toBe("set");
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000302",
+      subjectType: "chat-thread",
+      subjectId: ids.thread,
+      tokens: { input: 100, output: 0 },
+      sequence: 1,
+    });
+    const admission = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      turnUpperBoundTokens: 100,
+    });
+    expect(admission).toMatchObject({
+      status: "refused",
+      refusal: { kind: "unknown-spend", dimension: "monetary" },
+    });
   });
 
   it("counts only scoped usage inside the calendar window", () => {

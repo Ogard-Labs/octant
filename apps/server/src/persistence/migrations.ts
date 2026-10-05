@@ -1926,6 +1926,14 @@ ALTER TABLE code_runtime_projection
     sql: SPEND_TURN_PROJECTION_SQL,
   },
   { version: 67, name: "create_thread_message_queue", sql: THREAD_MESSAGE_QUEUE_SQL },
+  {
+    version: 68,
+    name: "record_usage_cost",
+    sql: `ALTER TABLE usage_record_projection
+      ADD COLUMN cost_usd_micros INTEGER CHECK(cost_usd_micros IS NULL OR cost_usd_micros >= 0);
+      ALTER TABLE usage_record_projection
+      ADD COLUMN cost_kind TEXT CHECK(cost_kind IS NULL OR cost_kind IN ('provider-recorded', 'api-estimate'));`,
+  },
 ];
 
 interface AppliedMigrationRow {
