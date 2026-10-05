@@ -5,6 +5,7 @@ import type {
   RetentionWindow,
   ThreadRetentionDeletedScope,
   ThreadRetentionRetainedScope,
+  ThreadRetentionDelinkedScope,
   ThreadRetentionThreadId,
 } from "@octant/contracts";
 import {
@@ -180,11 +181,19 @@ export const THREAD_PURGE_RETAINED_SCOPES: ReadonlyArray<ThreadRetentionRetained
   "store-schema",
   "other-threads",
   "projects",
-  "usage-records",
   "purge-tombstone",
   "credentials",
   "external-repositories",
   "sqlite-free-pages",
+];
+
+/**
+ * Usage aggregates stay for spend accounting, but the purged thread's id
+ * leaves them (OCT-366 decision 1). The purge outcome reports this as its
+ * own scope so "retained" never overstates what was kept.
+ */
+export const THREAD_PURGE_DELINKED_SCOPES: ReadonlyArray<ThreadRetentionDelinkedScope> = [
+  "usage-records",
 ];
 
 export const THREAD_PURGE_DELETED_SCOPES: ReadonlyArray<ThreadRetentionDeletedScope> = [

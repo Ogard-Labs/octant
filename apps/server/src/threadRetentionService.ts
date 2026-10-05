@@ -21,6 +21,7 @@ import {
   selectThreadsForPurge,
   THREAD_PURGE_DELETED_SCOPES,
   THREAD_PURGE_RETAINED_SCOPES,
+  THREAD_PURGE_DELINKED_SCOPES,
   type PrincipalKind,
   type ThreadRetentionSubject,
 } from "@octant/domain";
@@ -162,6 +163,10 @@ export class ThreadRetentionService {
       });
       if (subject.mode === "work") this.#forgetWorkThread?.(String(subject.threadId));
     }
+    const projectScopeDeleted =
+      request.scope.kind === "project" && selected.length > 0
+        ? eraseProjectData(this.#connection, String(request.scope.projectId))
+        : [];
     return {
       operation: "purge-threads",
       scope: request.scope,
@@ -172,8 +177,11 @@ export class ThreadRetentionService {
       })),
       alreadyPurged,
       retained: [...THREAD_PURGE_RETAINED_SCOPES],
+      delinked: [...THREAD_PURGE_DELINKED_SCOPES],
       deleted:
-        selected.length === 0 && alreadyPurged.length > 0 ? [] : [...THREAD_PURGE_DELETED_SCOPES],
+        selected.length === 0 && alreadyPurged.length > 0
+          ? []
+          : [...THREAD_PURGE_DELETED_SCOPES, ...projectScopeDeleted],
       occurredAt,
     };
   }
@@ -249,4 +257,39 @@ export class ThreadRetentionService {
       ],
     });
   }
+}
+
+/**
+ * A Project-scoped erase removes Project-owned data a thread purge cannot
+ * reach (OCT-366, decision 2): the Project's memory entries and its Canvas
+ * history. Memory is keyed by Project; Canvases are journaled aggregates whose
+ * provenance names the Project, so both are deleted by Project identity and
+ * the in-memory Canvas projection rebuilds without them on restart. Returns
+ * the scopes this pass deleted so the report names what actually went.
+ */
+function eraseProjectData(
+  connection: SqliteConnection,
+  projectId: string,
+): ReadonlyArray<"project-memory" | "project-canvases"> {
+  const deleted: Array<"project-memory" | "project-canvases"> = [];
+  const memory = connection
+    .prepare("DELETE FROM project_memory_projection WHERE project_id = ?")
+    .run(projectId);
+  if (memory.changes > 0) deleted.push("project-memory");
+  const canvasIds = connection
+    .prepare(
+      `SELECT DISTINCT aggregate_id FROM event_journal
+       WHERE aggregate_type = 'canvas'
+         AND json_extract(payload_json, '$.version.definition.provenance.projectId') = ?`,
+    )
+    .all(projectId) as ReadonlyArray<{ readonly aggregate_id: string }>;
+  if (canvasIds.length > 0) {
+    for (const canvas of canvasIds) {
+      connection
+        .prepare(`DELETE FROM event_journal WHERE aggregate_type = 'canvas' AND aggregate_id = ?`)
+        .run(canvas.aggregate_id);
+    }
+    deleted.push("project-canvases");
+  }
+  return deleted;
 }

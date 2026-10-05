@@ -35,7 +35,11 @@ The durable event journal is an SQLite-backed append-only store. Everything
 Octant does that matters is journaled as versioned events, and every
 projection can be rebuilt from the journal. A confirmed thread purge is the
 one data-lifecycle exception that removes that thread's own journal events
-and derived projections so a rebuild cannot resurrect the transcript. See
+and derived projections so a rebuild cannot resurrect the transcript.
+Usage rows are de-linked rather than kept whole: their aggregates stay for
+spend accounting while the purged thread's identity leaves them, and a
+Project-scoped purge also erases that Project's memory and Canvases and
+reports the scopes it deleted. See
 [Recovery and troubleshooting](/advanced/recovery) for how the journal backs
 recovery.
 

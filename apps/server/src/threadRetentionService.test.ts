@@ -2,7 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decodeChatThread, decodeChatThreadId } from "@octant/contracts";
+import {
+  decodeChatThread,
+  decodeChatThreadId,
+  decodeProject,
+  decodeProjectId,
+} from "@octant/contracts";
 import { decodeThreadRetentionThreadId } from "@octant/contracts/thread-retention";
 import { afterEach, describe, expect, it } from "vitest";
 import { writeChatContent, readChatThread, readChatThreads } from "./persistence/chatProjection";
@@ -156,5 +161,97 @@ describe("ThreadRetentionService", () => {
     rebuildProjection({ connection, journal, projection: chat, clock: () => now });
     expect(readChatThread(connection, decodeChatThreadId(ids.thread))).toBeUndefined();
     expect(readChatThread(connection, decodeChatThreadId(ids.other))?.title).toBe("Keep this one");
+  });
+  it("erases a Project's memory and Canvases on a Project-scoped purge and reports the scopes", async () => {
+    const { connection, service } = openHarness();
+    const projectId = "c1000000-0000-4000-8000-0000000000a1";
+    const past = "2026-08-01T12:00:00.000Z";
+    const seededProject = decodeProject({
+      id: projectId,
+      name: "Erased project",
+      type: "chat",
+      lifecycle: "active",
+      pinned: false,
+      rank: "1/1",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    connection
+      .prepare(
+        `INSERT INTO project_projection (
+          project_id, schema_version, project_type, lifecycle, pinned, project_json, aggregate_version
+        ) VALUES (?, 1, 'chat', 'active', 0, ?, 1)`,
+      )
+      .run(projectId, JSON.stringify(seededProject));
+    connection
+      .prepare(
+        `INSERT INTO code_thread_projection (
+          thread_id, project_id, checkout_id, lifecycle, schema_version, thread_json,
+          aggregate_version, updated_at, last_sequence
+        ) VALUES (?, ?, 'checkout-a', 'active', 1, '{}', 1, ?, 1)`,
+      )
+      .run(ids.thread, projectId, past);
+    expect(
+      await service.setWindow(
+        {
+          scope: { kind: "project", projectId: decodeProjectId(projectId) },
+          window: { kind: "duration-days", days: 7 },
+        },
+        "local-window",
+      ),
+    ).toBeDefined();
+    connection
+      .prepare(
+        `INSERT INTO project_memory_projection (
+          project_id, entry_id, schema_version, status, memory_kind, entry_json, aggregate_version
+        ) VALUES (?, ?, 1, 'active', 'summary', ?, 1)`,
+      )
+      .run(
+        projectId,
+        "c1000000-0000-4000-8000-0000000000a2",
+        JSON.stringify({ kind: "summary", text: "Prefers small PRs." }),
+      );
+    const canvasId = "c1000000-0000-4000-8000-0000000000a3";
+    connection
+      .prepare(
+        `INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name, event_version,
+          correlation_id, actor_kind, actor_id, occurred_at, payload_json, host_id
+        ) VALUES (?, 'canvas', ?, 1, 'canvas.version-created@1', 1, ?, 'system', ?, ?, ?, 'local')`,
+      )
+      .run(
+        randomUUID(),
+        canvasId,
+        ids.correlation,
+        ids.actor,
+        now,
+        JSON.stringify({
+          version: { definition: { provenance: { projectId } } },
+        }),
+      );
+
+    const report = await service.purge(
+      { scope: { kind: "project", projectId: decodeProjectId(projectId) }, confirm: true },
+      "local-window",
+    );
+    expect(report).toMatchObject({ operation: "purge-threads" });
+    if (!("deleted" in report) || "kind" in report) throw new Error("purge did not report scopes");
+    expect(report.deleted).toContain("project-memory");
+    expect(report.deleted).toContain("project-canvases");
+    expect(
+      (
+        connection.prepare("SELECT COUNT(*) AS count FROM project_memory_projection").get() as {
+          readonly count: number;
+        }
+      ).count,
+    ).toBe(0);
+    expect(
+      (
+        connection
+          .prepare("SELECT COUNT(*) AS count FROM event_journal WHERE aggregate_type = 'canvas'")
+          .get() as { readonly count: number }
+      ).count,
+    ).toBe(0);
   });
 });

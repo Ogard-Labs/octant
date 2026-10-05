@@ -89,6 +89,7 @@ describe("thread purge sweep", () => {
     const harness = openHarness();
     seedControlThread(harness);
     for (const thread of Object.values(threads)) seedThreadTraces(harness, thread);
+    seedProjectMemory(harness.connection);
 
     const retained = new Set<string>();
     for (const thread of Object.values(threads)) {
@@ -118,7 +119,13 @@ describe("thread purge sweep", () => {
     expect(unexplained.map(formatHit)).toEqual([]);
     expect(readControl(harness.connection)).toBe(controlMarker);
     expect(sharedWorktreeRemains(harness.directory)).toBe(true);
-    expect(usageRowsRemain(harness.connection)).toBe(3);
+    // De-linked usage rows keep their aggregates but carry no thread identity.
+    expect(usageRowsByThread(harness.connection)).toBe(0);
+    expect(usageRowsDeLinked(harness.connection)).toBe(3);
+    // Project memory is Project data: the entry survives a thread purge, but
+    // its provenance no longer names the purged thread.
+    expect(projectMemoryEntriesRemain(harness.connection)).toBeGreaterThan(0);
+    expect(projectMemoryNamesThread(harness.connection, threads.code.id)).toBe(false);
   });
 
   it("leaves a managed worktree in place whose receipt names a path outside the managed worktree directory", async () => {
@@ -601,7 +608,7 @@ function readControl(connection: SqliteConnection): string | undefined {
   return row?.body_text;
 }
 
-function usageRowsRemain(connection: SqliteConnection): number {
+function usageRowsByThread(connection: SqliteConnection): number {
   const row = connection
     .prepare(
       `SELECT COUNT(*) AS count FROM usage_record_projection
@@ -609,6 +616,52 @@ function usageRowsRemain(connection: SqliteConnection): number {
     )
     .get(threads.chat.id, threads.work.id, threads.code.id) as { readonly count: number };
   return row.count;
+}
+
+function usageRowsDeLinked(connection: SqliteConnection): number {
+  const row = connection
+    .prepare(
+      `SELECT COUNT(*) AS count FROM usage_record_projection
+       WHERE subject_id IS NULL AND input_tokens = 3 AND output_tokens = 1`,
+    )
+    .get() as { readonly count: number };
+  return row.count;
+}
+
+function seedProjectMemory(connection: SqliteConnection): void {
+  connection
+    .prepare(
+      `INSERT INTO project_memory_projection (
+        project_id, entry_id, schema_version, status, memory_kind, entry_json, aggregate_version
+      ) VALUES (?, ?, 1, 'active', 'summary', ?, 1)`,
+    )
+    .run(
+      projectId,
+      "c3630000-0000-4000-8000-0000000000m1",
+      JSON.stringify({
+        kind: "summary",
+        projectId,
+        entryId: "c3630000-0000-4000-8000-0000000000m1",
+        text: "The team prefers small focused PRs.",
+        provenance: { threadId: threads.code.id },
+        createdAt: now,
+        updatedAt: now,
+      }),
+    );
+}
+
+function projectMemoryEntriesRemain(connection: SqliteConnection): number {
+  const row = connection
+    .prepare("SELECT COUNT(*) AS count FROM project_memory_projection")
+    .get() as { readonly count: number };
+  return row.count;
+}
+
+function projectMemoryNamesThread(connection: SqliteConnection, threadId: string): boolean {
+  const row = connection
+    .prepare("SELECT COUNT(*) AS count FROM project_memory_projection WHERE entry_json LIKE ?")
+    .get(`%${threadId}%`) as { readonly count: number };
+  return row.count > 0;
 }
 
 function sharedWorktreeRemains(directory: string): boolean {

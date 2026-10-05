@@ -32,6 +32,8 @@ export function erasePurgedThread(input: {
   input.connection.pragma("foreign_keys = OFF");
   try {
     purgeDerivedContent(input.connection, input.mode, threadId);
+    delinkUsageRecords(input.connection, input.mode, threadId);
+    delinkProjectMemoryProvenance(input.connection, threadId);
     deleteThreadScopedProjectionRows(input.connection, threadId);
     deleteJournalEvents(input.connection, aggregates);
     input.connection.exec(
@@ -281,6 +283,63 @@ function harnessSessionIds(connection: SqliteConnection, threadId: string): Read
     if (typeof row.session_id === "string" && row.session_id.length > 0) ids.push(row.session_id);
   }
   return ids;
+}
+
+/**
+ * Usage rows are host accounting: their token and cost aggregates stay, but a
+ * purged thread's identity leaves them. The row keeps its aggregate meaning
+ * while spending nothing that names the person's thread (OCT-366, decision 1:
+ * de-link, never retain the id, never delete the aggregates).
+ */
+function delinkUsageRecords(
+  connection: SqliteConnection,
+  mode: OctantMode,
+  threadId: string,
+): void {
+  connection
+    .prepare(
+      `UPDATE usage_record_projection
+       SET subject_id = NULL
+       WHERE subject_id = ? AND subject_type = ?`,
+    )
+    .run(threadId, THREAD_AGGREGATE_BY_MODE[mode]);
+}
+
+/**
+ * Project memory is Project data and survives a thread purge (OCT-366,
+ * decision 2), but an entry's provenance no longer names the purged thread.
+ * The entry's text stays; only the thread reference is removed.
+ */
+function delinkProjectMemoryProvenance(connection: SqliteConnection, threadId: string): void {
+  const rows = connection
+    .prepare(
+      `SELECT project_id, entry_id, entry_json FROM project_memory_projection
+       WHERE entry_json LIKE ?`,
+    )
+    .all(`%${threadId}%`) as ReadonlyArray<{
+    readonly project_id: string;
+    readonly entry_id: string;
+    readonly entry_json: string;
+  }>;
+  for (const row of rows) {
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(row.entry_json) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (parsed.provenance === undefined || typeof parsed.provenance !== "object") continue;
+    const provenance = parsed.provenance as Record<string, unknown>;
+    if (provenance.threadId !== threadId) continue;
+    delete parsed.provenance;
+    connection
+      .prepare(
+        `UPDATE project_memory_projection
+         SET entry_json = ?
+         WHERE project_id = ? AND entry_id = ?`,
+      )
+      .run(JSON.stringify(parsed), row.project_id, row.entry_id);
+  }
 }
 
 function purgeDerivedContent(
