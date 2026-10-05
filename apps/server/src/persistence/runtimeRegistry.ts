@@ -1,4 +1,8 @@
 import {
+  registerThreadMessageQueueEvents,
+  ThreadMessageQueueProjection,
+} from "../messageQueue/threadMessageQueuePersistence";
+import {
   ContextCapacityReservationUpdated,
   ContextManifestCreated,
   ContextOverridesUpdated,
@@ -140,6 +144,7 @@ import {
   AgentMessageRefused,
   AgentMessageAcknowledged,
 } from "@octant/contracts";
+import { HostOAuthJournalRecord } from "@octant/contracts/host-oauth";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
   DeviceKeyRotatedV1,
@@ -286,6 +291,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.instance-removed@1", 1, ProviderInstanceRemoved)
     .register("provider.defaults-updated@1", 1, ProviderDefaultsUpdated)
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
+    .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("context.manifest-created@1", 1, ContextManifestCreated)
     .register("context.overrides-updated@1", 1, ContextOverridesUpdated)
@@ -415,6 +421,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerFollowUpSuggestionEvents(events);
   registerSideTaskEvents(events);
   registerShipEvents(events);
+  registerThreadMessageQueueEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();
@@ -459,6 +466,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ThreadRetentionProjection())
       .register(new ExternalContentTaintProjection())
       .register(new UsageResumeProjection())
-      .register(new SpendCeilingProjection()),
+      .register(new SpendCeilingProjection())
+      .register(new ThreadMessageQueueProjection()),
   };
 }

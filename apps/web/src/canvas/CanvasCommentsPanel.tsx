@@ -69,21 +69,59 @@ function anchorChoices(definition: CanvasDefinition): ReadonlyArray<AnchorChoice
         });
       }
     }
+    if (block.kind === "sequence") {
+      for (const participant of block.participants) {
+        choices.push({
+          id: `node:${String(block.blockId)}:${String(participant.participantId)}`,
+          label: `Sequence · ${participant.label}`,
+          anchor: { kind: "node", blockId: block.blockId, nodeId: participant.participantId },
+        });
+      }
+      for (const message of block.messages) {
+        choices.push({
+          id: `edge:${String(block.blockId)}:${String(message.messageId)}`,
+          label: `Sequence · ${message.label}`,
+          anchor: { kind: "edge", blockId: block.blockId, edgeId: message.messageId },
+        });
+      }
+    }
+    if (block.kind === "state") {
+      for (const state of block.states) {
+        choices.push({
+          id: `node:${String(block.blockId)}:${String(state.stateId)}`,
+          label: `State · ${state.label}`,
+          anchor: { kind: "node", blockId: block.blockId, nodeId: state.stateId },
+        });
+      }
+      for (const transition of block.transitions) {
+        choices.push({
+          id: `edge:${String(block.blockId)}:${String(transition.transitionId)}`,
+          label: `State · ${transition.label}`,
+          anchor: { kind: "edge", blockId: block.blockId, edgeId: transition.transitionId },
+        });
+      }
+    }
   }
   return choices;
 }
 
 function anchorLabel(anchor: CanvasCommentAnchor, choices: ReadonlyArray<AnchorChoice>): string {
-  const match = choices.find((choice) => {
-    if (choice.anchor.kind !== anchor.kind) return false;
-    if (anchor.kind === "node" && choice.anchor.kind === "node") {
-      return String(choice.anchor.nodeId) === String(anchor.nodeId);
-    }
-    return String(choice.anchor.blockId) === String(anchor.blockId);
-  });
+  const match = choices.find((choice) => sameAnchor(choice.anchor, anchor));
   // A comment whose anchor left the document is shown, not dropped: the
   // conversation outlives the block it was about.
   return match?.label ?? OUTDATED_ANCHOR_LABEL;
+}
+
+function sameAnchor(left: CanvasCommentAnchor, right: CanvasCommentAnchor): boolean {
+  if (left.kind !== right.kind) return false;
+  if (String(left.blockId) !== String(right.blockId)) return false;
+  if (left.kind === "node" && right.kind === "node") {
+    return String(left.nodeId) === String(right.nodeId);
+  }
+  if (left.kind === "edge" && right.kind === "edge") {
+    return String(left.edgeId) === String(right.edgeId);
+  }
+  return left.kind === "block" || left.kind === "region";
 }
 
 const OUTDATED_ANCHOR_LABEL = "No longer on the canvas";

@@ -63,6 +63,7 @@ export interface ShellSettingsSurfaceProps {
   readonly themeController: ThemeController;
   readonly diagnosticsExportClient: DiagnosticsExportClient;
   readonly hostControlClient: HostControlClient;
+  readonly workThreads?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
   readonly hostBridge?: OctantHostBridge;
   readonly githubClient: GithubClient;
@@ -132,6 +133,7 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
               : { backgroundImageLibrary: props.backgroundImageLibrary })}
             diagnosticsExportClient={props.diagnosticsExportClient}
             hostControlClient={props.hostControlClient}
+            {...(props.workThreads === undefined ? {} : { workThreads: props.workThreads })}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             {...(props.hostFederationLifecycle === undefined
               ? {}

@@ -134,10 +134,10 @@ describe("octantSettingsRegistry", () => {
   });
 
   it("keeps opaque sections without individual settings and registers the Code setup destinations", () => {
-    for (const id of ["providers", "usage"] as const) {
-      const section = octantSettingsRegistry.sections.find((s) => s.id === id);
-      expect(section?.settings).toEqual([]);
-    }
+    const usage = octantSettingsRegistry.sections.find((s) => s.id === "usage");
+    expect(usage?.settings).toEqual([]);
+    const providers = octantSettingsRegistry.sections.find((s) => s.id === "providers");
+    expect(providers?.settings.map((setting) => setting.id)).toEqual(["opencode-managed-update"]);
     const code = octantSettingsRegistry.sections.find((section) => section.id === "code");
     expect(code?.settings.map((setting) => setting.id)).toEqual([
       "code-default-folder-threads",

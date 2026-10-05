@@ -72,6 +72,10 @@ artifact is.
 - A **synced folder is how artifacts reach another device.** That is the user's
   own sync, chosen by them; Octant adds no cloud of its own.
 
+0163 amends that summary. For a store the user explicitly set up for sync,
+Octant writes to it and reads from it. The mirror and the export are
+unchanged, and still never push to git.
+
 ## Consequences
 
 - Artifacts become openable by everything else a person owns, without the
@@ -120,3 +124,5 @@ reconcile, and what a bundle proves about who wrote it.
 - 0028 The artifact library
 - 0118 Amends the default: files mirror under the default folder's
   `Artifacts` subfolder until a mirror setting is chosen
+- 0163 Artifact replicas in storage the user owns (amends the synced-folder
+  summary above)

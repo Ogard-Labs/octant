@@ -4,6 +4,7 @@ import { DataBlocks } from "./DataBlocks";
 import { PlanBlock, type PlanTaskRuntime } from "./PlanBlock";
 import { ReferenceBlocks } from "./ReferenceBlocks";
 import type { DiagramBoardLayoutRuntime } from "./DiagramBoard";
+import { SequenceDiagram, StateDiagram } from "./KindDiagrams";
 import { StructuredBlocks } from "./StructuredBlocks";
 import { TextBlocks } from "./TextBlocks";
 
@@ -41,6 +42,10 @@ export function CanvasBlockRenderer({
           {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
         />
       );
+    case "sequence":
+      return <SequenceDiagram block={block} />;
+    case "state":
+      return <StateDiagram block={block} />;
     case "code-excerpt":
     case "pseudocode":
     case "diff":

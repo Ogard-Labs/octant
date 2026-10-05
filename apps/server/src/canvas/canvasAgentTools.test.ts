@@ -8,6 +8,7 @@ import {
   createCanvasAgentTools,
   createChildCanvasAgentTools,
 } from "./canvasAgentTools";
+import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
 
 const windowId = "11111111-1111-4111-8111-111111111111" as never;
 const projectId = "22222222-2222-4222-8222-222222222222";
@@ -126,6 +127,34 @@ describe("createCanvasAgentTools", () => {
     expect(revise).not.toHaveBeenCalled();
   });
 
+  it("lists document recipes and maps common requests to one", async () => {
+    const { create, set } = tools({
+      activeContext: () => {
+        throw new Error("Recipe listing must not read window state.");
+      },
+    });
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe" }),
+    });
+
+    expect(outcome.isError).not.toBe(true);
+    expect(outcome.result).toMatchObject({
+      recipes: inTreeCanvasDocumentRecipes().map((recipe) => ({
+        id: String(recipe.id),
+        title: recipe.title,
+        whenToUse: recipe.whenToUse,
+        skeleton: recipe.skeleton.map((block) => ({ kind: block.kind, role: block.role })),
+      })),
+    });
+    const description = set.definitions[0]?.description ?? "";
+    expect(description).toContain('"write a plan" uses implementation-plan');
+    expect(description).toContain('"review this PR" uses code-review');
+    expect(description).toContain('"summarise research" uses research-brief');
+    expect(JSON.stringify(outcome.result)).not.toContain("mockup");
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("discloses only the requested block schemas, including the fields needed to draw a diagram", async () => {
     const { create, set } = tools();
     const outcome = await set.execute({
@@ -167,6 +196,53 @@ describe("createCanvasAgentTools", () => {
       },
     });
     expect(JSON.stringify(outcome.result)).toContain("blocked");
+  });
+
+  it("lets an agent create a login sequence and an order state machine from the examples describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["sequence", "state"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.kind)).toEqual(["sequence", "state"]);
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks[0]).toMatchObject({
+      kind: "sequence",
+      participants: expect.arrayContaining([expect.objectContaining({ label: "Person" })]),
+      messages: expect.arrayContaining([expect.objectContaining({ label: "Submit credentials" })]),
+    });
+    expect(blocks[1]).toMatchObject({
+      kind: "state",
+      states: expect.arrayContaining([
+        expect.objectContaining({ label: "Paid" }),
+        expect.objectContaining({ label: "Closed", role: "final" }),
+        expect.objectContaining({ label: "Authorized", parentId: "paid" }),
+      ]),
+      transitions: expect.arrayContaining([expect.objectContaining({ label: "pay" })]),
+    });
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Checkout",
+        blocks: examples,
+      }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Checkout" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
   });
 
   it.each([

@@ -46,7 +46,9 @@ export type CanvasPolicyRejectionCode =
   | "duplicate-plan-task-id"
   | "unknown-plan-phase"
   | "dangling-plan-dependency"
-  | "plan-dependency-cycle";
+  | "plan-dependency-cycle"
+  | "dangling-diagram-ref"
+  | "state-nesting-cycle";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -199,6 +201,14 @@ function calculateBudgetUsage(
         diagramNodes += block.nodes.length;
         diagramEdges += block.edges.length;
         break;
+      case "sequence":
+        diagramNodes += block.participants.length;
+        diagramEdges += block.messages.length;
+        break;
+      case "state":
+        diagramNodes += block.states.length;
+        diagramEdges += block.transitions.length;
+        break;
       case "image":
         imageCount += 1;
         break;
@@ -269,6 +279,10 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       series?: unknown;
       nodes?: unknown;
       edges?: unknown;
+      participants?: unknown;
+      messages?: unknown;
+      states?: unknown;
+      transitions?: unknown;
     };
     if (block.kind === "image") imageCount += 1;
     if (
@@ -290,6 +304,16 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
         return "node-budget-exceeded";
       }
       if (Array.isArray(block.edges) && block.edges.length > CANVAS_MAX_DIAGRAM_EDGES) {
+        return "edge-budget-exceeded";
+      }
+    }
+    if (block.kind === "sequence" || block.kind === "state") {
+      const nodes = block.kind === "sequence" ? block.participants : block.states;
+      const edges = block.kind === "sequence" ? block.messages : block.transitions;
+      if (Array.isArray(nodes) && nodes.length > CANVAS_MAX_DIAGRAM_NODES) {
+        return "node-budget-exceeded";
+      }
+      if (Array.isArray(edges) && edges.length > CANVAS_MAX_DIAGRAM_EDGES) {
         return "edge-budget-exceeded";
       }
     }
@@ -386,6 +410,153 @@ function validateCrossReferences(definition: CanvasDefinition): void {
           grouped.add(nodeId);
         }
       }
+    }
+
+    if (block.kind === "sequence") validateSequence(block);
+    if (block.kind === "state") validateState(block);
+  }
+}
+
+/**
+ * A sequence's messages, activations, and notes name participants and messages
+ * by id. A reference that does not resolve, or an activation that runs backward
+ * through the message order, would draw a lifeline the author did not write.
+ */
+function validateSequence(block: Extract<CanvasBlock, { readonly kind: "sequence" }>): void {
+  const participants = new Set<string>();
+  for (const participant of block.participants) {
+    const id = String(participant.participantId);
+    if (participants.has(id)) {
+      reject("duplicate-node-id", `Canvas sequence ${block.blockId} has duplicate participants.`);
+    }
+    participants.add(id);
+  }
+  const messages = new Map<string, number>();
+  for (const [index, message] of block.messages.entries()) {
+    const id = String(message.messageId);
+    if (messages.has(id)) {
+      reject("duplicate-edge-id", `Canvas sequence ${block.blockId} has duplicate messages.`);
+    }
+    if (!participants.has(String(message.from)) || !participants.has(String(message.to))) {
+      reject(
+        "dangling-edge",
+        `Canvas sequence ${block.blockId} has a message to a missing participant.`,
+      );
+    }
+    messages.set(id, index);
+  }
+  const activations = new Set<string>();
+  for (const activation of block.activations ?? []) {
+    const id = String(activation.activationId);
+    if (activations.has(id)) {
+      reject("duplicate-group-id", `Canvas sequence ${block.blockId} has duplicate activations.`);
+    }
+    activations.add(id);
+    if (!participants.has(String(activation.participantId))) {
+      reject(
+        "dangling-diagram-ref",
+        `Canvas sequence ${block.blockId} activates a missing participant.`,
+      );
+    }
+    const start = messages.get(String(activation.startMessageId));
+    const end = messages.get(String(activation.endMessageId));
+    if (start === undefined || end === undefined || start > end) {
+      reject(
+        "dangling-diagram-ref",
+        `Canvas sequence ${block.blockId} has an activation that does not span its messages in order.`,
+      );
+    }
+  }
+  const notes = new Set<string>();
+  for (const note of block.notes ?? []) {
+    const id = String(note.noteId);
+    if (notes.has(id)) {
+      reject("duplicate-group-id", `Canvas sequence ${block.blockId} has duplicate notes.`);
+    }
+    notes.add(id);
+    if (note.participantId !== undefined && !participants.has(String(note.participantId))) {
+      reject(
+        "dangling-diagram-ref",
+        `Canvas sequence ${block.blockId} notes a missing participant.`,
+      );
+    }
+    if (note.afterMessageId !== undefined && !messages.has(String(note.afterMessageId))) {
+      reject("dangling-diagram-ref", `Canvas sequence ${block.blockId} notes a missing message.`);
+    }
+  }
+}
+
+/**
+ * A state's parent and a transition's ends must be states in the same block.
+ * Nesting is a parent chain, so a cycle or a chain past the depth budget would
+ * draw a box inside itself.
+ */
+function validateState(block: Extract<CanvasBlock, { readonly kind: "state" }>): void {
+  const states = new Map<
+    string,
+    { readonly role?: "initial" | "final"; readonly parentId?: string }
+  >();
+  for (const state of block.states) {
+    const id = String(state.stateId);
+    if (states.has(id)) {
+      reject("duplicate-node-id", `Canvas state diagram ${block.blockId} has duplicate states.`);
+    }
+    states.set(id, {
+      ...(state.role === undefined ? {} : { role: state.role }),
+      ...(state.parentId === undefined ? {} : { parentId: String(state.parentId) }),
+    });
+  }
+  for (const [id, state] of states) {
+    if (state.parentId === undefined) continue;
+    const parent = states.get(state.parentId);
+    if (parent === undefined) {
+      reject(
+        "dangling-diagram-ref",
+        `Canvas state diagram ${block.blockId} nests a state it does not hold.`,
+      );
+    }
+    if (parent.role === "initial" || parent.role === "final") {
+      reject(
+        "dangling-diagram-ref",
+        `Canvas state diagram ${block.blockId} nests a state inside an initial or final state.`,
+      );
+    }
+    const seen = new Set<string>([id]);
+    let current: string | undefined = state.parentId;
+    let depth = 1;
+    while (current !== undefined) {
+      if (seen.has(current)) {
+        reject(
+          "state-nesting-cycle",
+          `Canvas state diagram ${block.blockId} nests a state inside itself.`,
+        );
+      }
+      seen.add(current);
+      depth += 1;
+      if (depth > CANVAS_MAX_DEPTH) {
+        reject(
+          "depth-budget-exceeded",
+          `Canvas state diagram ${block.blockId} nests states deeper than ${CANVAS_MAX_DEPTH}.`,
+        );
+      }
+      current = states.get(current)?.parentId;
+    }
+  }
+  const transitions = new Set<string>();
+  for (const transition of block.transitions) {
+    const id = String(transition.transitionId);
+    if (transitions.has(id)) {
+      reject(
+        "duplicate-edge-id",
+        `Canvas state diagram ${block.blockId} has duplicate transitions.`,
+      );
+    }
+    transitions.add(id);
+    if (!states.has(String(transition.source)) || !states.has(String(transition.target))) {
+      reject(
+        "dangling-edge",
+        `Canvas state diagram ${block.blockId} has a transition to a missing state.`,
+      );
     }
   }
 }

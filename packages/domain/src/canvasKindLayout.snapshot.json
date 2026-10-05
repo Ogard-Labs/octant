@@ -1,0 +1,345 @@
+{
+  "sequence": {
+    "width": 816,
+    "height": 220,
+    "participants": [
+      {
+        "participantId": "person",
+        "label": "Person",
+        "x": 24,
+        "y": 24,
+        "width": 128,
+        "height": 36,
+        "lifelineX": 88,
+        "lifelineY1": 60,
+        "lifelineY2": 196
+      },
+      {
+        "participantId": "browser",
+        "label": "Browser",
+        "x": 200,
+        "y": 24,
+        "width": 128,
+        "height": 36,
+        "lifelineX": 264,
+        "lifelineY1": 60,
+        "lifelineY2": 196
+      },
+      {
+        "participantId": "auth",
+        "label": "Auth",
+        "x": 376,
+        "y": 24,
+        "width": 128,
+        "height": 36,
+        "lifelineX": 440,
+        "lifelineY1": 60,
+        "lifelineY2": 196
+      }
+    ],
+    "messages": [
+      {
+        "messageId": "submit",
+        "label": "Submit credentials",
+        "self": false,
+        "points": [
+          {
+            "x": 88,
+            "y": 80
+          },
+          {
+            "x": 264,
+            "y": 80
+          }
+        ],
+        "labelX": 176,
+        "labelY": 72
+      },
+      {
+        "messageId": "sign-in",
+        "label": "Sign in",
+        "self": false,
+        "points": [
+          {
+            "x": 264,
+            "y": 120
+          },
+          {
+            "x": 440,
+            "y": 120
+          }
+        ],
+        "labelX": 352,
+        "labelY": 112
+      },
+      {
+        "messageId": "session",
+        "label": "Session",
+        "self": false,
+        "points": [
+          {
+            "x": 440,
+            "y": 160
+          },
+          {
+            "x": 264,
+            "y": 160
+          }
+        ],
+        "labelX": 352,
+        "labelY": 152
+      }
+    ],
+    "activations": [
+      {
+        "activationId": "browser-active",
+        "participantId": "browser",
+        "x": 259,
+        "y": 72,
+        "width": 10,
+        "height": 96
+      },
+      {
+        "activationId": "auth-active",
+        "participantId": "auth",
+        "x": 435,
+        "y": 112,
+        "width": 10,
+        "height": 56
+      }
+    ],
+    "notes": [
+      {
+        "noteId": "credential-note",
+        "text": "Credentials stay in the request",
+        "x": 552,
+        "y": 64,
+        "width": 240,
+        "height": 32
+      }
+    ]
+  },
+  "state": {
+    "width": 256,
+    "height": 670,
+    "states": [
+      {
+        "stateId": "start",
+        "label": "Start",
+        "role": "initial",
+        "nested": false,
+        "x": 24,
+        "y": 24,
+        "width": 18,
+        "height": 18
+      },
+      {
+        "stateId": "placed",
+        "label": "Placed",
+        "role": "state",
+        "nested": false,
+        "x": 24,
+        "y": 98,
+        "width": 140,
+        "height": 44
+      },
+      {
+        "stateId": "paid",
+        "label": "Paid",
+        "role": "state",
+        "nested": true,
+        "x": 24,
+        "y": 198,
+        "width": 172,
+        "height": 200
+      },
+      {
+        "stateId": "authorized",
+        "label": "Authorized",
+        "role": "state",
+        "nested": false,
+        "x": 40,
+        "y": 238,
+        "width": 140,
+        "height": 44
+      },
+      {
+        "stateId": "captured",
+        "label": "Captured",
+        "role": "state",
+        "nested": false,
+        "x": 40,
+        "y": 338,
+        "width": 140,
+        "height": 44
+      },
+      {
+        "stateId": "shipped",
+        "label": "Shipped",
+        "role": "state",
+        "nested": false,
+        "x": 24,
+        "y": 454,
+        "width": 140,
+        "height": 44
+      },
+      {
+        "stateId": "cancelled",
+        "label": "Cancelled",
+        "role": "final",
+        "nested": false,
+        "x": 24,
+        "y": 554,
+        "width": 18,
+        "height": 18
+      },
+      {
+        "stateId": "closed",
+        "label": "Closed",
+        "role": "final",
+        "nested": false,
+        "x": 24,
+        "y": 628,
+        "width": 18,
+        "height": 18
+      }
+    ],
+    "transitions": [
+      {
+        "transitionId": "place",
+        "label": "place",
+        "self": false,
+        "points": [
+          {
+            "x": 39,
+            "y": 42
+          },
+          {
+            "x": 79,
+            "y": 98
+          }
+        ],
+        "labelX": 59,
+        "labelY": 62
+      },
+      {
+        "transitionId": "pay",
+        "label": "pay",
+        "self": false,
+        "points": [
+          {
+            "x": 96,
+            "y": 142
+          },
+          {
+            "x": 101,
+            "y": 198
+          }
+        ],
+        "labelX": 99,
+        "labelY": 162
+      },
+      {
+        "transitionId": "authorize",
+        "label": "authorize",
+        "self": false,
+        "points": [
+          {
+            "x": 110,
+            "y": 222
+          },
+          {
+            "x": 110,
+            "y": 238
+          }
+        ],
+        "labelX": 110,
+        "labelY": 222
+      },
+      {
+        "transitionId": "capture",
+        "label": "capture",
+        "self": false,
+        "points": [
+          {
+            "x": 110,
+            "y": 282
+          },
+          {
+            "x": 110,
+            "y": 338
+          }
+        ],
+        "labelX": 110,
+        "labelY": 302
+      },
+      {
+        "transitionId": "ship",
+        "label": "ship",
+        "self": false,
+        "points": [
+          {
+            "x": 107,
+            "y": 382
+          },
+          {
+            "x": 97,
+            "y": 454
+          }
+        ],
+        "labelX": 102,
+        "labelY": 410
+      },
+      {
+        "transitionId": "cancel",
+        "label": "cancel",
+        "self": false,
+        "points": [
+          {
+            "x": 164,
+            "y": 120
+          },
+          {
+            "x": 232,
+            "y": 120
+          },
+          {
+            "x": 232,
+            "y": 563
+          },
+          {
+            "x": 42,
+            "y": 563
+          }
+        ],
+        "labelX": 232,
+        "labelY": 112
+      },
+      {
+        "transitionId": "deliver",
+        "label": "deliver",
+        "self": false,
+        "points": [
+          {
+            "x": 164,
+            "y": 476
+          },
+          {
+            "x": 232,
+            "y": 476
+          },
+          {
+            "x": 232,
+            "y": 637
+          },
+          {
+            "x": 42,
+            "y": 637
+          }
+        ],
+        "labelX": 232,
+        "labelY": 468
+      }
+    ]
+  }
+}

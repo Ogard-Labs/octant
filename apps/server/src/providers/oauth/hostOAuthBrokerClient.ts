@@ -17,6 +17,8 @@ export interface HostOAuthBrokerPort {
   }) => Promise<unknown>;
   readonly status: (attemptId: string) => Promise<unknown>;
   readonly refresh: (credentialRef: string) => Promise<unknown>;
+  readonly access: (credentialRef: string) => Promise<unknown>;
+  readonly forget: (credentialRef: string) => Promise<void>;
 }
 
 export function makeHostOAuthBrokerClient(options: {
@@ -75,6 +77,28 @@ export function makeHostOAuthBrokerClient(options: {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));
       }
       return post("/v1/oauth/refresh", { credentialRef });
+    },
+    access: (credentialRef) => {
+      if (!UUID_PATTERN.test(credentialRef)) {
+        return Promise.reject(new Error("Octant host OAuth broker refused the request."));
+      }
+      return post("/v1/oauth/access", { credentialRef });
+    },
+    forget: async (credentialRef) => {
+      if (!UUID_PATTERN.test(credentialRef)) {
+        throw new Error("Octant host OAuth broker refused the request.");
+      }
+      const response = await fetchImpl(new URL("/v1/credentials/delete", options.url), {
+        method: "POST",
+        redirect: "error",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-credential-broker-token": options.token,
+        },
+        body: JSON.stringify({ providerInstanceId: credentialRef }),
+      });
+      if (response.status === 404) return;
+      if (!response.ok) throw new Error("Octant host OAuth broker refused the request.");
     },
   };
   return client;

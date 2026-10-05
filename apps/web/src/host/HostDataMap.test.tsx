@@ -106,7 +106,8 @@ const populated: HostDataMap = {
     { kind: "thread-retention", settings: { section: "data", setting: "thread-retention" } },
     {
       kind: "thread-export",
-      guidance: "Export a thread from that thread's menu. This map does not export or purge.",
+      guidance:
+        "Export everything this host holds from Data & privacy. This map does not export or purge.",
     },
   ],
 };
@@ -132,7 +133,9 @@ describe("HostDataMapView", () => {
       "href",
       "#settings-thread-retention",
     );
-    expect(screen.getByText(/Export a thread from that thread's menu/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Export everything this host holds from Data & privacy/),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /purge/i })).not.toBeInTheDocument();
   });
 

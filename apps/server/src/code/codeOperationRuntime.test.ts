@@ -6,6 +6,8 @@ import {
   ActorId,
   CodeOperationEventFrame,
   CodeRuntimeWorkUpdated,
+  ProductFeedbackCaptured,
+  ProductFeedbackDelivered,
   MAX_CODE_OPERATION_SUMMARY_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
   decodeCodeCheckoutId,
@@ -42,6 +44,13 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
+import { ProductFeedbackService } from "../browser/productFeedbackService";
+import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
+import {
+  ProductFeedbackProjection,
+  readProductFeedbackNote,
+  readProductFeedbackNotes,
+} from "../persistence/productFeedbackProjection";
 import {
   CodeProjection,
   readCodeRuntimeWorks,
@@ -467,6 +476,177 @@ describe("CodeOperationRuntime", () => {
     );
     expect(onProviderTurnRequested).not.toHaveBeenCalled();
     fixture.close();
+  });
+
+  it("keeps feedback images pending through refused credentials and sends them once on retry", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const entered = Promise.withResolvers<void>();
+    const credential = Promise.withResolvers<string>();
+    let current = true;
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+      credentialResolver: {
+        resolve: () => {
+          entered.resolve();
+          return credential.promise;
+        },
+      },
+    });
+    try {
+      await fixture.feedback.execute(windowId, {
+        kind: "capture-product-feedback",
+        threadId,
+        mode: "code",
+        contextId: operationId(40),
+        point: { x: 0.3, y: 0.5 },
+        comment: "Align this button.",
+      });
+      const command = {
+        kind: "start-provider-turn",
+        operationId: operationId(13),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      } as const;
+      const pending = fixture.runtime.execute(windowId, command, {
+        admissionCurrent: () => current,
+      });
+      await entered.promise;
+      current = false;
+      credential.resolve("credential-value");
+      await expect(pending).resolves.toMatchObject({ admission: "refused" });
+      expect(connection.send).not.toHaveBeenCalled();
+      expect(await fixture.feedback.list(windowId, threadId)).toMatchObject([
+        { lifecycle: "pending", crop: { contentId: expect.any(String) } },
+      ]);
+
+      current = true;
+      const retry = { ...command, operationId: operationId(14), sessionId: operationId(14) };
+      await expect(
+        fixture.runtime.execute(windowId, retry, { admissionCurrent: () => current }),
+      ).resolves.toMatchObject({ state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      expect(connection.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          context: expect.arrayContaining([
+            expect.objectContaining({ text: expect.stringContaining("Align this button.") }),
+          ]),
+          attachments: [
+            expect.objectContaining({ bytes: new TextEncoder().encode("captured image") }),
+          ],
+        }),
+      );
+      await fixture.runtime.execute(windowId, retry);
+      expect(connection.send).toHaveBeenCalledOnce();
+      expect(await fixture.feedback.list(windowId, threadId)).toMatchObject([
+        { lifecycle: "delivered", version: 2 },
+      ]);
+      expect(fixture.feedback.deliver({ threadId, operationId: operationId(15) })).toEqual([]);
+      await fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(16),
+        threadId,
+        checkoutId,
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("keeps feedback claimed when an admitted send loses its acknowledgement", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const acknowledgement = Promise.withResolvers<void>();
+    const connection = {
+      ...providerConnection(queue),
+      send: vi.fn<ProviderConnection["send"]>(() =>
+        Effect.tryPromise({
+          try: () => acknowledgement.promise,
+          catch: () => ({ category: "provider-failed", message: "Send acknowledgement lost." }),
+        }),
+      ),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    try {
+      await fixture.feedback.execute(windowId, {
+        kind: "capture-product-feedback",
+        threadId,
+        mode: "code",
+        contextId: operationId(40),
+        point: { x: 0.3, y: 0.5 },
+        comment: "Align this button.",
+      });
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(13),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).resolves.toMatchObject({ state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      expect(fixture.feedback.deliver({ threadId, operationId: operationId(14) })).toEqual([]);
+      acknowledgement.reject(new Error("connection closed"));
+      await vi.waitFor(() => expect(fixture.runtimeWorks().at(-1)?.state).toBe("failed"));
+      expect(await fixture.feedback.list(windowId, threadId)).toMatchObject([
+        { lifecycle: "delivered", version: 2 },
+      ]);
+      expect(fixture.feedback.deliver({ threadId, operationId: operationId(15) })).toEqual([]);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses a host turn revoked during runtime provider preparation without starting the provider", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const driver = providerDriver(connection);
+    const release = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    let current = true;
+    const fixture = runtimeFixture({
+      provider: driver,
+      approvalValidator: false,
+      resolveProviderDriver: async () => {
+        entered.resolve();
+        await release.promise;
+        return driver;
+      },
+    });
+    try {
+      const pending = fixture.runtime.execute(
+        windowId,
+        {
+          kind: "start-provider-turn",
+          operationId: operationId(13),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        },
+        { admissionCurrent: () => current },
+      );
+      await entered.promise;
+      current = false;
+      release.resolve();
+      await expect(pending).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "failed",
+        admission: "refused",
+        failure: { category: "unauthorized" },
+      });
+      expect(connection.start).not.toHaveBeenCalled();
+    } finally {
+      fixture.close();
+    }
   });
 
   it("refuses a saved reasoning choice that discovery no longer offers before admitting the turn", async () => {
@@ -2768,6 +2948,7 @@ function runtimeFixture(options: {
     typeof createCodeOperationRuntime
   >[0]["repositoryTestProcessPort"];
   credential?: string | undefined;
+  credentialResolver?: Parameters<typeof createCodeOperationRuntime>[0]["credentialResolver"];
   credentialReferences?: readonly { environmentName: string; reference: string }[];
   gitObservation?: GitObservationResult;
   gitRemotes?: ReadonlyArray<{
@@ -2796,6 +2977,9 @@ function runtimeFixture(options: {
   throwRuntimeWorkReporter?: boolean;
   onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   probeProvider?: Parameters<typeof createCodeOperationRuntime>[0]["probeProvider"];
+  readonly resolveProviderDriver?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolveProviderDriver"];
   isProviderModelAllowed?: (thread: CodeThread) => boolean;
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
   evidencePut?: (
@@ -2811,10 +2995,13 @@ function runtimeFixture(options: {
     connection,
     registry: new EventRegistry()
       .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
-      .register(CODE_RUNTIME_WORK_UPDATED, 1, CodeRuntimeWorkUpdated),
+      .register(CODE_RUNTIME_WORK_UPDATED, 1, CodeRuntimeWorkUpdated)
+      .register("feedback.note-captured@1", 1, ProductFeedbackCaptured)
+      .register("feedback.note-delivered@1", 1, ProductFeedbackDelivered),
     projections: new ProjectionRegistry()
       .register(new AggregateHeadsProjection())
-      .register(new CodeProjection()),
+      .register(new CodeProjection())
+      .register(new ProductFeedbackProjection()),
     clock: () => now,
   });
   if (options.failRuntimeWorkJournal === true) {
@@ -2853,6 +3040,27 @@ function runtimeFixture(options: {
   ]);
   let evidenceCounter = 50;
   let uuidCounter = 100;
+  const feedbackCrop = `data:image/png;base64,${Buffer.from("captured image").toString("base64")}`;
+  const feedback = new ProductFeedbackService({
+    journal,
+    browser: {
+      describePoint: async () => ({
+        status: "described",
+        element: {
+          selector: "button",
+          bounds: { x: 0.2, y: 0.4, width: 0.2, height: 0.2 },
+        },
+        cropDataUrl: feedbackCrop,
+      }),
+    },
+    crops: { put: (content) => storedEvidence(45, content), read: () => feedbackCrop },
+    readNote: (id) => readProductFeedbackNote(connection, id),
+    readNotes: (id) => readProductFeedbackNotes(connection, id),
+    canAccessThread: access,
+    uuid: () => String(operationId(++uuidCounter)),
+    clock: () => now,
+    actor,
+  });
   const runtimeWorkFailures: string[] = [];
   let exitTerminal: (() => void) | undefined;
   const runtime = createCodeOperationRuntime({
@@ -2873,7 +3081,7 @@ function runtimeFixture(options: {
       credentialReferences: options.credentialReferences ?? [],
       environment: {},
     }),
-    resolveProviderDriver: async () => options.provider,
+    resolveProviderDriver: options.resolveProviderDriver ?? (async () => options.provider),
     ...(options.computerUseTools === undefined
       ? {}
       : { computerUseTools: options.computerUseTools }),
@@ -2906,7 +3114,9 @@ function runtimeFixture(options: {
     ...(options.supportsModelSwitch === undefined
       ? {}
       : { supportsModelSwitch: () => options.supportsModelSwitch ?? false }),
-    credentialResolver: { resolve: async () => options.credential },
+    credentialResolver: options.credentialResolver ?? { resolve: async () => options.credential },
+    supportsAttachments: () => true,
+    takeProductFeedbackForTurn: createProductFeedbackTurnPort({ service: feedback }),
     resolvePullRequestTarget: async () =>
       options.pullRequestTarget === true
         ? {
@@ -3020,6 +3230,7 @@ function runtimeFixture(options: {
   });
   return {
     runtime,
+    feedback,
     access,
     prompt,
     response,

@@ -81,6 +81,9 @@ describe("remote access policy", () => {
     expect(classifyRemoteAction("provider.oauth.begin")).toEqual({
       kind: "local-host-required",
     });
+    expect(classifyRemoteAction("provider.oauth.sign-out")).toEqual({
+      kind: "local-host-required",
+    });
     expect(classifyRemoteAction("extension.trust")).toEqual({ kind: "local-host-required" });
     expect(classifyRemoteAction("project.root.bind")).toEqual({ kind: "local-host-required" });
     expect(classifyRemoteAction("code.remember-full-access")).toEqual({

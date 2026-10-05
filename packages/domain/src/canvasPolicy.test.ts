@@ -11,6 +11,7 @@ import {
   decodeCanvasDefinition,
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
+import { loginSequenceExample, orderStateExample } from "./canvasDiagramExamples";
 import {
   CanvasPolicyRejected,
   measureCanvasBudget,
@@ -151,6 +152,19 @@ function image(blockId: string) {
     kind: "image" as const,
     sourceId: ids.source,
     alt: "image",
+  };
+}
+
+function sequenceParticipants(blockId: string, count: number) {
+  return {
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "sequence" as const,
+    participants: Array.from({ length: count }, (_, index) => ({
+      participantId: `p-${blockId}-${index}`,
+      label: "Person",
+    })),
+    messages: [],
   };
 }
 
@@ -472,6 +486,64 @@ describe("Canvas validation policy", () => {
     expectPolicyCode(
       () => validateCanvasDefinition({ ...baseDefinition, payload: "<script>" }),
       "invalid-schema",
+    );
+  });
+});
+
+describe("sequence and state diagram validation", () => {
+  it("accepts a login sequence and an order state machine and counts them as diagram nodes and edges", () => {
+    const validated = validateCanvasDefinition(
+      withBlocks([loginSequenceExample, orderStateExample]),
+    );
+    expect(measureCanvasBudget(validated)).toMatchObject({
+      diagramNodes: loginSequenceExample.participants.length + orderStateExample.states.length,
+      diagramEdges: loginSequenceExample.messages.length + orderStateExample.transitions.length,
+    });
+  });
+
+  it("refuses a message to a participant the sequence does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...loginSequenceExample,
+              messages: [{ messageId: "submit", from: "person", to: "missing", label: "Sign in" }],
+            },
+          ]),
+        ),
+      "dangling-edge",
+    );
+  });
+
+  it("refuses a state nested inside itself", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              blockId: "loop",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "state",
+              states: [{ stateId: "paid", label: "Paid", parentId: "paid" }],
+              transitions: [],
+            },
+          ]),
+        ),
+      "state-nesting-cycle",
+    );
+  });
+
+  it("counts sequence participants toward the same node budget as a board", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            sequenceParticipants("people-a", CANVAS_MAX_DIAGRAM_NODES),
+            sequenceParticipants("people-b", 1),
+          ]),
+        ),
+      "node-budget-exceeded",
     );
   });
 });

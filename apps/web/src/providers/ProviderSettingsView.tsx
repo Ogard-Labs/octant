@@ -39,6 +39,8 @@ import type { ReactNode } from "react";
 import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OpenCodeManagedUpdate } from "./OpenCodeManagedUpdate";
+import type { OctantHostBridge } from "../shell/hostBridge";
 import {
   ProviderCreateForm,
   type ProviderCreateProviderType,
@@ -65,6 +67,7 @@ export interface ProviderSettingsViewProps {
   readonly busy: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly message?: string;
+  readonly hostBridge?: OctantHostBridge;
   /** Open provider-owned sign-in pages through the desktop host bridge. */
   readonly onOpenExternalUrl?: (url: string) => void;
   readonly onCreate: (
@@ -277,6 +280,9 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
   ) => Promise<ProviderCredentialStatus>;
   readonly onClearProviderCredential: (instanceId: ProviderInstanceId) => Promise<boolean>;
+  readonly onProviderOAuth?: (
+    command: import("./ProviderOAuthSignIn").ProviderOAuthCommand,
+  ) => Promise<import("./ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
   readonly onSetEnabled: (instanceId: ProviderInstanceId, enabled: boolean) => Promise<boolean>;
   readonly onDataTagsChange: (
     instanceId: ProviderInstanceId,
@@ -366,6 +372,18 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           </OctantAlert>
         )}
       </div>
+      <OpenCodeManagedUpdate
+        instances={props.instances
+          .filter((instance) => instance.driverKind === "opencode")
+          .map((instance) => ({
+            id: instance.id,
+            displayName: instance.displayName,
+            binaryPath:
+              "binaryPath" in instance.configuration ? instance.configuration.binaryPath : "",
+          }))}
+        {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+        onChangeBinary={props.onChangeBinary}
+      />
       {props.discovery}
       <ProviderSettingsList
         busy={props.busy}
@@ -437,6 +455,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
         onChangePiConfiguration={props.onChangePiConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
+        {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
         {...(props.onUpdateProviderCli === undefined
           ? {}

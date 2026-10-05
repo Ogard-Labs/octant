@@ -26,6 +26,9 @@ interface DetachedCodeAttachment {
 }
 
 export interface CodeAttachments {
+  readonly claimForQueue: () => ReadonlyArray<StagedCodeAttachment>;
+  readonly releaseQueueClaim: (entries: ReadonlyArray<StagedCodeAttachment>) => void;
+  readonly acceptQueueClaim: (entries: ReadonlyArray<StagedCodeAttachment>) => void;
   readonly staged: ReadonlyArray<StagedCodeAttachment>;
   readonly message: string | undefined;
   /** Whether an upload is still in flight. Sending waits for it. */
@@ -85,6 +88,10 @@ export function useCodeAttachments(input: {
   const current = useRef<ReadonlyArray<StagedCodeAttachment>>([]);
   const detached = useRef<ReadonlyArray<DetachedCodeAttachment>>([]);
   const inFlight = useRef(0);
+  const queueClaims = useRef(new Set<string>());
+  const mounted = useRef(true);
+  const activeThread = useRef(threadId);
+  activeThread.current = threadId;
 
   const apply = useCallback(
     (next: (list: ReadonlyArray<StagedCodeAttachment>) => ReadonlyArray<StagedCodeAttachment>) => {
@@ -109,8 +116,10 @@ export function useCodeAttachments(input: {
     setMessage(undefined);
   }, [apply, forget, threadId]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       for (const previewUrl of previews.current) URL.revokeObjectURL(previewUrl);
       previews.current.clear();
       const inFlight = detached.current.filter((entry) => entry.inFlight);
@@ -124,9 +133,8 @@ export function useCodeAttachments(input: {
           .catch(() => undefined);
       }
       detached.current = inFlight;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const attach = useCallback(
     async (files: ReadonlyArray<File>) => {
@@ -177,6 +185,7 @@ export function useCodeAttachments(input: {
 
   const remove = useCallback(
     (attachmentId: CodeAttachmentId) => {
+      if (queueClaims.current.has(String(attachmentId))) return;
       apply((list) => {
         const removed = list.find((entry) => entry.reference.attachmentId === attachmentId);
         if (removed !== undefined) forget(removed.previewUrl);
@@ -291,6 +300,32 @@ export function useCodeAttachments(input: {
   }, [apply, forget]);
 
   return {
+    claimForQueue: () => {
+      const entries = current.current;
+      for (const entry of entries) queueClaims.current.add(String(entry.reference.attachmentId));
+      return entries;
+    },
+    releaseQueueClaim: (entries) => {
+      for (const entry of entries) {
+        if (!queueClaims.current.delete(String(entry.reference.attachmentId))) continue;
+        if (
+          threadId === undefined ||
+          (mounted.current && String(activeThread.current) === String(threadId))
+        )
+          continue;
+        void client
+          .discardAttachment(threadId, entry.reference.attachmentId)
+          .catch(() => undefined);
+      }
+    },
+    acceptQueueClaim: (entries) => {
+      const ids = new Set(entries.map((entry) => String(entry.reference.attachmentId)));
+      for (const entry of entries) {
+        queueClaims.current.delete(String(entry.reference.attachmentId));
+        forget(entry.previewUrl);
+      }
+      apply((list) => list.filter((entry) => !ids.has(String(entry.reference.attachmentId))));
+    },
     staged,
     message,
     busy,
