@@ -8,7 +8,8 @@
     "./manifest": "./src/manifest.ts",
     "./contributions": "./src/contributions.ts",
     "./integration": "./src/integration.ts",
-    "./computer-use": "./src/computerUse.ts"
+    "./computer-use": "./src/computerUse.ts",
+    "./replica-store": "./src/replicaStore.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",
