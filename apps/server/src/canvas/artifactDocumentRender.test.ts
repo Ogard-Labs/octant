@@ -57,6 +57,24 @@ describe("rendering a canvas as a document", () => {
     });
   });
 
+  it("keeps a table cell that ends in a backslash from splitting the row", () => {
+    const table = {
+      blockId: "table-1",
+      schemaVersion: 1,
+      kind: "table",
+      columns: [{ columnId: "path", label: "Path" }],
+      rows: [["C:\\temp\\|x"]],
+    } as unknown as CanvasBlock;
+
+    const rendered = renderArtifactMarkdown(definition([table]));
+
+    expect(rendered.kind).toBe("rendered");
+    if (rendered.kind !== "rendered") return;
+    const row = rendered.body.split("\n").find((line) => line.includes("temp"));
+    // One cell: every pipe inside it is escaped, so only the two outer pipes delimit.
+    expect(row).toBe("| C:\\\\temp\\\\\\|x |");
+  });
+
   it("does not emit script or an external reference", () => {
     const html = renderArtifactHtml(definition([], "</title><script>alert(1)</script><title>"));
 

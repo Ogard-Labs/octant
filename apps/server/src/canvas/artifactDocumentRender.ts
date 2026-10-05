@@ -359,7 +359,9 @@ function inline(value: string): string {
 }
 
 function cell(value: string): string {
-  return inline(value).replace(/\|/g, "\\|").replace(/\n/g, " ");
+  // Backslashes first: a cell ending in `\` would otherwise cancel the escape on
+  // the next pipe and split the row.
+  return inline(value).replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
 function htmlDocument(title: string, pieces: ReadonlyArray<Piece>): string {
