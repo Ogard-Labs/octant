@@ -17,9 +17,11 @@ import {
 } from "node:crypto";
 import type { CredentialStore } from "@octant/host-runtime";
 
-export const REPLICA_DEVICE_KEY_CREDENTIAL_PREFIX = "app.octant.replica-device-key.v1";
 /** Ed25519 keys are small and verification is fast on every supported host. */
 export const REPLICA_DEVICE_KEY_TYPE = "ed25519" as const;
+/** The credential store keys by UUID and is already scoped per host data store. */
+export const REPLICA_DEVICE_KEY_CREDENTIAL_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export type ReplicaDeviceKeyFailureCategory = "failed" | "invalid" | "missing" | "unavailable";
 
@@ -50,7 +52,11 @@ export interface ReplicaDeviceSigner {
 }
 
 function credentialId(instanceId: string): string {
-  return `${REPLICA_DEVICE_KEY_CREDENTIAL_PREFIX}:${instanceId}`;
+  const normalized = instanceId.toLowerCase();
+  if (!REPLICA_DEVICE_KEY_CREDENTIAL_ID_PATTERN.test(normalized)) {
+    throw new ReplicaDeviceKeyFailure("invalid");
+  }
+  return normalized;
 }
 
 /** Load or create the device signing key for one replica instance. */
