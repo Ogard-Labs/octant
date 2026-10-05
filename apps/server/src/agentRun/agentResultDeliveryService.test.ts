@@ -15,6 +15,7 @@ import {
 } from "./agentResultDeliveryService";
 
 import {
+  agentResultDeliveryReceipt,
   agentRunResultGeneration,
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
@@ -333,6 +334,52 @@ describe("AgentResultDeliveryService", () => {
     expect(restarted.chat.dispatch).toHaveBeenNthCalledWith(2, [newSibling]);
     expect(restarted.runs.get(second.id)?.resultDelivery?.outcome).toBe("delivered");
     expect(restarted.runs.get(newSibling.id)?.resultDelivery?.outcome).toBe("delivered");
+  });
+
+  it("settles a replayed batch that overlaps an earlier wider group by reporting only the requested members", async () => {
+    const first = finishedRun();
+    const second = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000005" });
+    const earlierMark: AgentRunResultDeliveryMark = {
+      kind: "agent-result",
+      runId: first.id,
+      runIds: [first.id, second.id],
+    };
+    // The earlier group's first member already settled; the parent replays the
+    // second alone and the adapter finds the durable mark of the wider group.
+    const fixture = deliveryFixture({
+      runs: [second],
+      chat: {
+        dispatch: vi.fn(async (batch: ReadonlyArray<AgentRun>) => {
+          const [primary] = batch;
+          if (primary === undefined) throw new Error("Empty batch");
+          return agentResultDeliveryReceipt(
+            { runId: primary.id, runIds: batch.map((run) => run.id) },
+            earlierMark,
+          );
+        }),
+      },
+    });
+    fixture.service.start();
+    await fixture.flush();
+    expect(fixture.chat.dispatch).toHaveBeenCalledTimes(1);
+    expect(fixture.runs.get(second.id)?.resultDelivery?.outcome).toBe("delivered");
+    expect(fixture.timers).toHaveLength(0);
+  });
+
+  it("refuses a delivery receipt when the durable mark covers none of the requested results", () => {
+    const first = finishedRun();
+    const other = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000005" });
+    const mark: AgentRunResultDeliveryMark = {
+      kind: "agent-result",
+      runId: other.id,
+      runIds: [other.id],
+    };
+    expect(agentResultDeliveryReceipt({ runId: first.id }, mark)).toMatchObject({
+      kind: "refused",
+    });
+    expect(agentResultDeliveryReceipt({ runId: first.id }, undefined)).toMatchObject({
+      kind: "refused",
+    });
   });
 
   it("serializes a parent while a child resumes and never settles the new generation with an old receipt", async () => {

@@ -374,7 +374,7 @@ import {
   admittedParentWorkContext,
   admittedParentCodeContext,
 } from "./agentRun/agentRunParentContext";
-import { agentResultDeliveryMembers } from "./agentRun/agentResultDeliveryBatch";
+import { agentResultDeliveryReceipt } from "./agentRun/agentResultDeliveryBatch";
 import { NATIVE_HARNESS_BUILT_IN_SLOTS, type AgentRunResultDeliveryMark } from "@octant/contracts";
 import { createAgentsManagedTools } from "./agentRun/agentRunManagedTools";
 import {
@@ -7263,17 +7263,6 @@ export function startOctantServer(
     // its result. The service watches committed appends and dispatches through
     // each mode's ordinary turn admission — the mark on that turn is what
     // keeps a replayed delivery from minting a second one.
-    const deliveredAgentResultMark = (mark: AgentRunResultDeliveryMark | undefined) =>
-      mark === undefined
-        ? {
-            kind: "refused" as const,
-            detail: "The parent did not journal a child-result delivery mark.",
-          }
-        : {
-            kind: "dispatched" as const,
-            runIds: agentResultDeliveryMembers(mark).map((member) => member.runId),
-            runGenerations: agentResultDeliveryMembers(mark),
-          };
     const agentResultDeliveryService = new AgentResultDeliveryService({
       journal: persistence.journal,
       agentRuns: agentRunPersistence,
@@ -7312,7 +7301,8 @@ export function startOctantServer(
                 runIds: delivery.runIds,
                 runGenerations: delivery.runGenerations,
               });
-              return deliveredAgentResultMark(
+              return agentResultDeliveryReceipt(
+                delivery,
                 result.kind === "turn-created" ? result.turn.delivery : undefined,
               );
             } catch (error) {
@@ -7376,7 +7366,7 @@ export function startOctantServer(
                 delivery,
               });
               return result.kind === "accepted"
-                ? deliveredAgentResultMark(result.turn.delivery)
+                ? agentResultDeliveryReceipt(delivery, result.turn.delivery)
                 : {
                     kind: "refused",
                     detail:
@@ -7447,7 +7437,7 @@ export function startOctantServer(
                 (result.state === "running" ||
                   result.state === "waiting" ||
                   result.state === "completed")
-                ? deliveredAgentResultMark(result.delivery)
+                ? agentResultDeliveryReceipt(delivery, result.delivery)
                 : {
                     kind: "refused",
                     detail:

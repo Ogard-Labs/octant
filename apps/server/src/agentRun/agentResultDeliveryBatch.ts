@@ -48,6 +48,40 @@ export function coveredAgentResultDeliveryMembers(
   );
 }
 
+/**
+ * What a mode adapter reports back to the delivery service for one admitted
+ * batch. A replay can land on a durable mark written for an earlier, wider
+ * group, so the receipt names only the members this batch asked for; naming
+ * the whole mark makes the service refuse it and retry the same batch forever.
+ */
+export function agentResultDeliveryReceipt(
+  requested: Pick<AgentRunResultDeliveryMark, "runId" | "runIds" | "runGenerations">,
+  mark: AgentRunResultDeliveryMark | undefined,
+):
+  | {
+      readonly kind: "dispatched";
+      readonly runIds: ReadonlyArray<AgentRunId>;
+      readonly runGenerations: ReadonlyArray<AgentResultDeliveryMember>;
+    }
+  | { readonly kind: "refused"; readonly detail: string } {
+  if (mark === undefined)
+    return {
+      kind: "refused",
+      detail: "The parent did not journal a child-result delivery mark.",
+    };
+  const covered = coveredAgentResultDeliveryMembers(requested, [mark]);
+  if (covered.length === 0)
+    return {
+      kind: "refused",
+      detail: "The parent's delivery mark covers none of the requested results.",
+    };
+  return {
+    kind: "dispatched",
+    runIds: covered.map((member) => member.runId),
+    runGenerations: covered,
+  };
+}
+
 export function validateAgentResultDelivery(input: {
   readonly delivery: Pick<AgentRunResultDeliveryMark, "runId" | "runIds" | "runGenerations">;
   readonly threadId: string;
