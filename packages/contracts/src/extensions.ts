@@ -269,6 +269,7 @@ export const ExtensionComponentKind = Schema.Literal(
   "appearance-pack",
   "preview-viewer",
   "provider-driver",
+  "replica-store",
 );
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
 export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(

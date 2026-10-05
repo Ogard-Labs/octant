@@ -1,3 +1,4 @@
+import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
 import { createNativeCodeApprovalViewHost } from "./nativeCodeApprovalView";
 import { startComputerUseBroker, type ComputerUseBroker } from "./computerUseBroker";
 import { startSimulatorDeviceBroker, type SimulatorDeviceBroker } from "./simulatorDeviceBroker";
@@ -188,6 +189,7 @@ import {
 import { markHostInteraction } from "./interactionTrace";
 
 const IPC_CHANNELS = {
+  nativeMenu: "octant:menu:popup",
   menuBarTasks: "octant:menu:tasks",
   menuBarTask: "octant:menu:task",
   attentionBadge: "octant:attention:badge",
@@ -420,6 +422,17 @@ interface ProviderCredentialIpcPort {
     channel: string,
     handler: (event: unknown, ...args: readonly unknown[]) => unknown,
   ) => void;
+}
+
+export function installNativeMenuIpcHandlers<Window>(options: {
+  readonly handle: (channel: string, handler: (event: unknown, value: unknown) => unknown) => void;
+  readonly resolveOwnedTopLevelWindow: (event: unknown) => Window;
+  readonly popup: (window: Window, value: unknown) => unknown;
+}): void {
+  options.handle(IPC_CHANNELS.nativeMenu, (event, value) => {
+    const window = options.resolveOwnedTopLevelWindow(event);
+    return options.popup(window, value);
+  });
 }
 
 export function installPrivateListenerIpcHandlers(options: {
@@ -1875,6 +1888,7 @@ async function createWindow(): Promise<void> {
       return window;
     },
     prepare: (window, closeAuthority) => {
+      installNativeEditingMenus(window);
       mainWindow = window;
       if (state.maximized) window.maximize();
       projectRootPicker = createProjectRootPicker<BrowserWindow>({
@@ -2106,6 +2120,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         return window;
       },
       prepare: (window, closeAuthority) => {
+        installNativeEditingMenus(window);
         if (windowCapability === undefined) {
           throw new Error("Octant Project window capability is unavailable.");
         }
@@ -2619,6 +2634,12 @@ function installIpcHandlers(): void {
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
     service: getHostIdentitySigningService(),
+  });
+  installNativeMenuIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    resolveOwnedTopLevelWindow: (event) =>
+      ownedTopLevelWindowContext(event as IpcMainInvokeEvent).window,
+    popup: popupNativeMenu,
   });
   ipcMain.handle(IPC_CHANNELS.menuBarTasks, (event, value: unknown) => {
     const { window } = ownedTopLevelWindowContext(event);

@@ -32,6 +32,14 @@ import { ListArrangementMenu } from "../shell/ListArrangementMenu";
 import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import {
+  OctantMenuRoot,
+  OctantMenuTrigger,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuPopup,
+  OctantMenuItem,
+} from "../ui/base/OctantMenu";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -111,7 +119,6 @@ export function AutomationCenter(props: AutomationCenterProps) {
   const controller = useAutomationCenterController({ client: props.client });
   const [editor, setEditor] = useState<EditorState>({ kind: "closed" });
   const [describeRequest, setDescribeRequest] = useState<string>();
-  const [openMenuId, setOpenMenuId] = useState<string | undefined>(undefined);
   const [pendingFocusId, setPendingFocusId] = useState<string | undefined>(undefined);
   const [deliveryStatus, setDeliveryStatus] = useState<
     AutomationNotificationDeliveryQueryResponse["status"] | undefined
@@ -190,7 +197,6 @@ export function AutomationCenter(props: AutomationCenterProps) {
     command: AutomationClientCommand,
     successNotice: string,
   ) {
-    setOpenMenuId(undefined);
     await controller.execute(command, successNotice);
   }
 
@@ -446,14 +452,12 @@ export function AutomationCenter(props: AutomationCenterProps) {
                 listRef={listRef}
                 onRunCommand={runSummaryCommand}
                 onSelect={selectRow}
-                openMenuId={openMenuId}
                 projectNames={projectNames}
                 environmentLabel={environmentLabel}
                 {...(props.localHostId === undefined ? {} : { localHostId: props.localHostId })}
                 now={nowInstant}
                 includeCompleted={includeCompleted}
                 generateId={generateId}
-                setOpenMenuId={setOpenMenuId}
               />
             )}
           </div>
@@ -517,7 +521,6 @@ function AutomationListBody(props: {
     successNotice: string,
   ) => Promise<void>;
   readonly onSelect: (automationId: string) => void;
-  readonly openMenuId: string | undefined;
   readonly projectNames: ReadonlyMap<string, string>;
   readonly environmentLabel: (hostId: string) => string;
   readonly localHostId?: string;
@@ -525,7 +528,6 @@ function AutomationListBody(props: {
   readonly now: string;
   readonly includeCompleted: boolean;
   readonly generateId: () => string;
-  readonly setOpenMenuId: (automationId: string | undefined) => void;
 }) {
   const { controller } = props;
   if (controller.list.status === "loading") {
@@ -649,102 +651,89 @@ function AutomationListBody(props: {
                   )}
                 </div>
                 <div className="automation-row__menu-wrap">
-                  <OctantButton
-                    aria-expanded={props.openMenuId === String(summary.id)}
-                    aria-haspopup="true"
-                    aria-label={`Actions for ${summary.displayName}`}
-                    className="automation-row__menu-toggle"
-                    onClick={() =>
-                      props.setOpenMenuId(
-                        props.openMenuId === String(summary.id) ? undefined : String(summary.id),
-                      )
-                    }
-                    type="button"
-                    variant="ghost"
-                  >
-                    <span>Actions</span>
-                    <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
-                  </OctantButton>
-                  {props.openMenuId !== String(summary.id) ? null : (
-                    <div className="automation-row__menu menu">
-                      {summary.lifecycle === "enabled" ? (
-                        <OctantButton
-                          onClick={() =>
-                            void props.onRunCommand(
-                              summary,
-                              {
-                                kind: "pause-automation",
-                                automationId: summary.id,
-                                expectedVersion: summary.version,
-                              },
-                              "Automation paused.",
-                            )
-                          }
-                          type="button"
-                          variant="ghost"
-                        >
-                          Pause
-                        </OctantButton>
-                      ) : summary.lifecycle === "paused" ? (
-                        <OctantButton
-                          onClick={() =>
-                            void props.onRunCommand(
-                              summary,
-                              {
-                                kind: "resume-automation",
-                                automationId: summary.id,
-                                expectedVersion: summary.version,
-                              },
-                              "Automation resumed.",
-                            )
-                          }
-                          type="button"
-                          variant="ghost"
-                        >
-                          Resume
-                        </OctantButton>
-                      ) : null}
-                      {summary.lifecycle === "archived" ? null : (
-                        <>
-                          <OctantButton
-                            onClick={() =>
-                              void props.onRunCommand(
-                                summary,
-                                {
-                                  kind: "run-now-automation",
-                                  automationId: summary.id,
-                                  expectedVersion: summary.version,
-                                  runNowRequestId: props.generateId(),
-                                } as unknown as AutomationClientCommand,
-                                "Run requested.",
-                              )
-                            }
-                            type="button"
-                            variant="ghost"
-                          >
-                            Run now
-                          </OctantButton>
-                          <OctantButton
-                            onClick={() =>
-                              void props.onRunCommand(
-                                summary,
-                                {
-                                  kind: "archive-automation",
-                                  automationId: summary.id,
-                                  expectedVersion: summary.version,
-                                },
-                                "Automation archived.",
-                              )
-                            }
-                            type="button"
-                            variant="ghost"
-                          >
-                            Archive
-                          </OctantButton>
-                        </>
-                      )}
-                    </div>
-                  )}
+                  <OctantMenuRoot>
+                    <OctantMenuTrigger
+                      aria-label={`Actions for ${summary.displayName}`}
+                      className="automation-row__menu-toggle"
+                    >
+                      <span>Actions</span>
+                      <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
+                    </OctantMenuTrigger>
+                    <OctantMenuPortal>
+                      <OctantMenuPositioner align="end">
+                        <OctantMenuPopup aria-label={`Actions for ${summary.displayName}`}>
+                          {summary.lifecycle === "enabled" ? (
+                            <OctantMenuItem
+                              onClick={() =>
+                                void props.onRunCommand(
+                                  summary,
+                                  {
+                                    kind: "pause-automation",
+                                    automationId: summary.id,
+                                    expectedVersion: summary.version,
+                                  },
+                                  "Automation paused.",
+                                )
+                              }
+                            >
+                              Pause
+                            </OctantMenuItem>
+                          ) : summary.lifecycle === "paused" ? (
+                            <OctantMenuItem
+                              onClick={() =>
+                                void props.onRunCommand(
+                                  summary,
+                                  {
+                                    kind: "resume-automation",
+                                    automationId: summary.id,
+                                    expectedVersion: summary.version,
+                                  },
+                                  "Automation resumed.",
+                                )
+                              }
+                            >
+                              Resume
+                            </OctantMenuItem>
+                          ) : null}
+                          {summary.lifecycle === "archived" ? null : (
+                            <>
+                              <OctantMenuItem
+                                onClick={() =>
+                                  void props.onRunCommand(
+                                    summary,
+                                    {
+                                      kind: "run-now-automation",
+                                      automationId: summary.id,
+                                      expectedVersion: summary.version,
+                                      runNowRequestId: props.generateId(),
+                                    } as unknown as AutomationClientCommand,
+                                    "Run requested.",
+                                  )
+                                }
+                              >
+                                Run now
+                              </OctantMenuItem>
+                              <OctantMenuItem
+                                onClick={() =>
+                                  void props.onRunCommand(
+                                    summary,
+                                    {
+                                      kind: "archive-automation",
+                                      automationId: summary.id,
+                                      expectedVersion: summary.version,
+                                    },
+                                    "Automation archived.",
+                                  )
+                                }
+                              >
+                                Archive
+                              </OctantMenuItem>
+                            </>
+                          )}
+                        </OctantMenuPopup>
+                      </OctantMenuPositioner>
+                    </OctantMenuPortal>
+                  </OctantMenuRoot>
                 </div>
               </li>
             ))}

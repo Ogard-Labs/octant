@@ -10,7 +10,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "../shadcn/dropdown-menu";
+} from "./NativeDropdownMenu";
 import {
   DropdownMenu as OctantMenuRoot,
   DropdownMenuCheckboxItem as OctantMenuCheckboxItem,
@@ -27,7 +27,7 @@ import {
   DropdownMenuSubPopup as OctantMenuSubPopup,
   DropdownMenuSubTrigger as OctantMenuSubTrigger,
   DropdownMenuTrigger as OctantMenuTrigger,
-} from "../shadcn/dropdown-menu";
+} from "./NativeDropdownMenu";
 import { cn } from "../shadcn/utils";
 
 export {

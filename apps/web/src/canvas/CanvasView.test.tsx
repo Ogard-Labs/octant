@@ -54,7 +54,9 @@ describe("Canvas accessibility basics", () => {
 
   it("exposes the table with a real table structure and column headers", () => {
     render(<CanvasDocument definition={canvasFixture} />);
-    const table = screen.getByRole("table");
+    const name = screen.getByRole("columnheader", { name: "Name" });
+    const table = name.closest("table");
+    if (table === null) throw new Error("Name column is not in a table.");
     const headers = within(table).getAllByRole("columnheader");
     expect(headers.map((h) => h.textContent)).toEqual(["Name", "Count"]);
     expect(within(table).getAllByRole("row")).toHaveLength(3);
@@ -77,7 +79,11 @@ describe("Canvas accessibility basics", () => {
   it("renders charts as accessible images with an aria label", () => {
     render(<CanvasDocument definition={canvasFixture} />);
     const chart = screen.getByRole("img", { name: /line chart/i });
-    expect(chart.querySelector("svg")).not.toBeNull();
+    expect(chart.tagName).toBe("svg");
+    expect(screen.getByRole("button", { name: "Requests" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("renders key-value blocks as a semantic definition list", () => {

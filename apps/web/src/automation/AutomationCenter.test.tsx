@@ -200,7 +200,7 @@ describe("AutomationCenter row actions", () => {
     const row = within(rows).getByRole("listitem", { name: "Weekly summary" });
 
     await userEvent.click(within(row).getByText("Actions"));
-    await userEvent.click(within(row).getByRole("button", { name: "Pause" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Pause" }));
     await waitFor(() =>
       expect(client.execute).toHaveBeenLastCalledWith({
         kind: "pause-automation",
@@ -211,7 +211,7 @@ describe("AutomationCenter row actions", () => {
     expect(await screen.findByText("Automation paused.")).toBeVisible();
 
     await userEvent.click(within(row).getByText("Actions"));
-    await userEvent.click(within(row).getByRole("button", { name: "Run now" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Run now" }));
     await waitFor(() =>
       expect(client.execute).toHaveBeenLastCalledWith({
         kind: "run-now-automation",
@@ -222,7 +222,7 @@ describe("AutomationCenter row actions", () => {
     );
 
     await userEvent.click(within(row).getByText("Actions"));
-    await userEvent.click(within(row).getByRole("button", { name: "Archive" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
     await waitFor(() =>
       expect(client.execute).toHaveBeenLastCalledWith({
         kind: "archive-automation",
@@ -237,7 +237,7 @@ describe("AutomationCenter row actions", () => {
     const rows = await screen.findByRole("list", { name: "Automations" });
     const row = within(rows).getByRole("listitem", { name: "Nightly build check" });
     await userEvent.click(within(row).getByText("Actions"));
-    expect(within(row).getByRole("button", { name: "Resume" })).toBeVisible();
+    expect(await screen.findByRole("menuitem", { name: "Resume" })).toBeVisible();
     expect(within(row).queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
   });
 });
@@ -542,7 +542,7 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
     const rows = await screen.findByRole("list", { name: "Automations" });
     const row = within(rows).getByRole("listitem", { name: "Weekly summary" });
     await userEvent.click(within(row).getByText("Actions"));
-    await userEvent.click(within(row).getByRole("button", { name: "Pause" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Pause" }));
 
     const notice = await screen.findByText("Automation paused.");
     expect(notice.closest("[role='status']")).not.toBeNull();

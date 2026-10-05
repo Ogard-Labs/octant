@@ -2,6 +2,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ProviderDriverKind } from "@octant/contracts/providers";
 import type { HiddenProviderModelRef, ProviderInstance } from "@octant/contracts/providers";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
+import type { ProviderModelOptionValues } from "@octant/contracts/providers";
 import type { ProviderModel } from "@octant/contracts/providers";
 import type { ProviderCapabilitySupport } from "@octant/contracts/providers";
 import type { ProviderObservedState } from "@octant/contracts/providers";
@@ -250,6 +251,7 @@ export interface PickerGroup {
 export interface ModelPickerSelection {
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
+  readonly modelOptionValues?: ProviderModelOptionValues;
 }
 
 export function findPickerModel(

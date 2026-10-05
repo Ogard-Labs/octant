@@ -26,6 +26,36 @@ import { ComputerUseSettings } from "./computerUseSettings";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR, UserProfile } from "./userProfile";
 import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
 
+/** Native menu contributions carry presentation and opaque action IDs only. */
+export type NativeMenuEntry =
+  | { readonly kind: "separator" }
+  | {
+      readonly kind: "item" | "checkbox" | "radio";
+      readonly id: string;
+      readonly label: string;
+      readonly enabled: boolean;
+      readonly checked?: boolean;
+      readonly description?: string;
+    }
+  | {
+      readonly kind: "submenu";
+      readonly label: string;
+      readonly enabled: boolean;
+      readonly items: ReadonlyArray<NativeMenuEntry>;
+    };
+
+export interface NativeMenuRequest {
+  readonly placement?: "above";
+  readonly x: number;
+  readonly y: number;
+  readonly items: ReadonlyArray<NativeMenuEntry>;
+}
+
+export type NativeMenuOutcome =
+  | { readonly kind: "selected"; readonly id: string }
+  | { readonly kind: "dismissed" }
+  | { readonly kind: "refused" };
+
 export const MIN_SIDEBAR_WIDTH = 220;
 export const MAX_SIDEBAR_WIDTH = 420;
 export const MIN_CONTEXT_SIDEBAR_WIDTH = 280;

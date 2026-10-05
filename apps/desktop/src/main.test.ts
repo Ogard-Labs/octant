@@ -28,6 +28,7 @@ vi.mock("electron", () => ({
 }));
 
 import {
+  installNativeMenuIpcHandlers,
   installProviderCredentialIpcHandlers,
   installPrivateListenerIpcHandlers,
   installRemoteDeviceIpcHandlers,
@@ -1393,5 +1394,28 @@ describe("local host identity IPC handlers", () => {
       /unauthorized host-identity request/,
     );
     expect(service.ensureIdentityKey).toHaveBeenCalledOnce();
+  });
+});
+
+describe("native menu authority", () => {
+  it("refuses untrusted and embedded windows before presenting any native menu", () => {
+    let invoke: (event: unknown, value: unknown) => unknown = () => undefined;
+    const popup = vi.fn(() => ({ kind: "dismissed" }));
+    const owner = { id: "workspace" };
+    installNativeMenuIpcHandlers({
+      handle: (_channel, handler) => {
+        invoke = handler;
+      },
+      resolveOwnedTopLevelWindow: (event) => {
+        if (event !== "trusted-main-frame") throw new Error("Untrusted window");
+        return owner;
+      },
+      popup,
+    });
+    expect(() => invoke("external-origin", {})).toThrow("Untrusted window");
+    expect(() => invoke("embedded-frame", {})).toThrow("Untrusted window");
+    expect(popup).not.toHaveBeenCalled();
+    expect(invoke("trusted-main-frame", { items: [] })).toEqual({ kind: "dismissed" });
+    expect(popup).toHaveBeenCalledWith(owner, { items: [] });
   });
 });
