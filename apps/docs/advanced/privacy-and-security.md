@@ -74,9 +74,10 @@ carry a forbidden key are left out, with a generic entry on the export's
 omissions page; a forbidden key in a thread or emitted page can instead
 refuse the export. A confirmed thread purge
 deletes that thread's journal events, projections, and bulk content, so a
-later host export carries no content trace of it; the purge outcome names
-the retained scopes — the tombstone and usage attribution — where the
-thread id remains by design.
+later host export carries no content trace of it. Its id remains only in
+the purge tombstone, by design. Its usage rows stay for accounting but are
+de-linked, so they carry token counts and no thread id, and Project memory
+is kept.
 
 ## Credentials
 
