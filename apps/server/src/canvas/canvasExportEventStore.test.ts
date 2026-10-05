@@ -61,12 +61,13 @@ function store(connection: SqliteConnection, uuid: () => string): CanvasExportEv
   return new CanvasExportEventStore({
     journal,
     uuid,
-    actor: Schema.decodeUnknownSync(EventActor)({
-      kind: "local-user",
-      actorId: "99999999-9999-4999-8999-999999999999",
-    }),
   });
 }
+
+const localActor = Schema.decodeUnknownSync(EventActor)({
+  kind: "local-user",
+  actorId: "99999999-9999-4999-8999-999999999999",
+});
 
 describe("canvas export journal", () => {
   it("replays an export after the journal is reopened", () => {
@@ -78,7 +79,7 @@ describe("canvas export journal", () => {
     store(first, () => {
       n += 1;
       return `55555555-5555-4555-8555-${n.toString(16).padStart(12, "0")}`;
-    }).append({ record: record(), occurredAt: decodeUtcTimestamp(now) });
+    }).append({ record: record(), occurredAt: decodeUtcTimestamp(now), actor: localActor });
     first.close();
 
     const reopened = openConnection(path);

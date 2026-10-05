@@ -38,6 +38,8 @@ import type { CanvasService } from "./canvas/canvasService";
 import type { CanvasCommentService } from "./canvas/canvasCommentService";
 import type { CanvasShareService } from "./canvas/canvasShareService";
 import type { CanvasExportService } from "./canvas/canvasExportService";
+import { canvasExportEventActor } from "./canvas/canvasExportActor";
+import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvas/canvasProjection";
 import type { ClientPrincipal } from "./clientPrincipal";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
@@ -988,6 +990,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               approvalId: requestBody.approvalId,
               decision: requestBody.decision,
               permitted: context.kind === "ok",
+              // The envelope names the transport principal this host
+              // authenticated for the approval, never a fixed local user.
+              actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
             }),
           ),
           200,

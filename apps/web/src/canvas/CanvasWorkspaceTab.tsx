@@ -252,9 +252,10 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       if (result.kind !== "accepted") return false;
       await loadCanvas();
       await loadHistory();
+      await loadExportOffers();
       return true;
     },
-    [props.client, loadCanvas, loadHistory],
+    [props.client, loadCanvas, loadExportOffers, loadHistory],
   );
 
   // A drag is a version of the selected head only: editing an older version
@@ -287,11 +288,13 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         if (result.kind === "accepted") {
           await loadCanvas();
           await loadHistory();
+          await loadExportOffers();
           return { kind: "accepted" };
         }
         if (result.denialCode === "stale-version") {
           await loadCanvas();
           await loadHistory();
+          await loadExportOffers();
           return {
             kind: "denied",
             message:
@@ -304,6 +307,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   }, [
     expectedSequence,
     loadCanvas,
+    loadExportOffers,
     loadHistory,
     props.client,
     props.tab.canvasId,
@@ -355,6 +359,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         });
         await loadCanvas();
         await loadHistory();
+        await loadExportOffers();
         if (result.kind === "accepted") return { kind: "accepted" };
         return {
           kind: "denied",
@@ -368,6 +373,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   }, [
     expectedSequence,
     loadCanvas,
+    loadExportOffers,
     loadHistory,
     props.client,
     props.onStartPlanTask,
@@ -440,9 +446,10 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       if (result.kind === "accepted" && result.receipt.outcome === "ready") {
         await loadCanvas();
         await loadHistory();
+        await loadExportOffers();
       }
     },
-    [loadCanvas, loadHistory],
+    [loadCanvas, loadExportOffers, loadHistory],
   );
 
   const handleRefresh = useCallback(

@@ -8043,9 +8043,11 @@ export function startOctantServer(
       },
       { authorize: authorizeCanvas },
     );
-    // Destinations arrive through the export contribution. None are bundled, so
-    // the offer list stays empty until a plugin is admitted. Rendering, approval,
-    // and the journal stay here.
+    // Destinations arrive through the export contribution. The registration
+    // path from admitted plugins is held on the maintainer's Export-surface
+    // decision (what this list shows while no destination plugin is admitted),
+    // so the provider stays empty here; rendering, approval, and the journal
+    // are already wired through the same seam a plugin will reach.
     const canvasExportService = new CanvasExportService({
       load: (canvasId, versionId) => {
         const entry = persistence.canvasProjection.getById(canvasId);
@@ -8067,7 +8069,6 @@ export function startOctantServer(
       eventStore: new CanvasExportEventStore({
         journal: persistence.journal,
         uuid: randomUUID,
-        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       }),
       uuid: randomUUID,
       clock: () => new Date().toISOString() as never,

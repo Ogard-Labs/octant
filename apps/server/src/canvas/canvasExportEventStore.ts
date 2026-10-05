@@ -46,33 +46,35 @@ type JournalPort = Pick<Journal, "append" | "replay">;
 export interface CanvasExportEventStoreOptions {
   readonly journal: JournalPort;
   readonly uuid: () => string;
-  readonly actor: typeof EventActor.Type;
 }
 
 /**
  * One completed export is one `canvas-export` aggregate at version 1.
  * Replay rebuilds the records from the journal alone, in commit order.
+ * The actor is supplied per append, derived from the authenticated transport
+ * principal, so a remote approval never replays as a local one.
  */
 export class CanvasExportEventStore {
   readonly #journal: JournalPort;
   readonly #uuid: () => string;
-  readonly #actor: typeof EventActor.Type;
 
   constructor(options: CanvasExportEventStoreOptions) {
     this.#journal = options.journal;
     this.#uuid = options.uuid;
-    try {
-      this.#actor = decodeActor(options.actor);
-    } catch {
-      throw new CanvasExportEventStoreError("invalid", "Canvas export event actor is invalid.");
-    }
   }
 
   append(input: {
     readonly record: CanvasExportRecord;
     readonly occurredAt: UtcTimestamp;
+    readonly actor: typeof EventActor.Type;
   }): EventEnvelope {
     const payload = decodeCanvasExportRecorded(input.record);
+    let actor: typeof EventActor.Type;
+    try {
+      actor = decodeActor(input.actor);
+    } catch {
+      throw new CanvasExportEventStoreError("invalid", "Canvas export event actor is invalid.");
+    }
     const aggregateId = decodeAggregateId(payload.exportId);
     const eventId = decodeEventId(this.#uuid());
     const correlationId = decodeCorrelationId(this.#uuid());
@@ -87,7 +89,7 @@ export class CanvasExportEventStore {
             eventName: CANVAS_EXPORT_RECORDED,
             eventVersion: 1,
             correlationId,
-            actor: this.#actor,
+            actor,
             occurredAt: input.occurredAt,
             payload,
           },

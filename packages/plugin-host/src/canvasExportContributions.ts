@@ -103,16 +103,27 @@ export function admitCanvasExportContribution(
 
 /**
  * Destinations a person may see. Omitted candidates are absent, not listed as
- * refused. The first admitted target id wins so a later contribution cannot
- * replace it.
+ * refused. An id declared by more than one binding is never offered: which
+ * implementation a delivery would reach is decided by binding order, not by
+ * the offer, so the approval card could name one destination while another
+ * received the payload. Ambiguous ids are refused outright and only a uniquely
+ * declared id is offered; among bindings that share nothing, the first
+ * admitted target id wins so a later contribution cannot replace it.
  */
 export function offerCanvasExportTargets(
   candidates: ReadonlyArray<AdmitCanvasExportContributionInput>,
 ): ReadonlyArray<CanvasExportTargetOffer> {
+  const declared = new Map<string, number>();
+  for (const candidate of candidates) {
+    const id = String(candidate.contribution.targetId);
+    declared.set(id, (declared.get(id) ?? 0) + 1);
+  }
   const offered: CanvasExportTargetOffer[] = [];
   const seen = new Set<string>();
   for (const candidate of candidates) {
-    if (seen.has(String(candidate.contribution.targetId))) continue;
+    const id = String(candidate.contribution.targetId);
+    if ((declared.get(id) ?? 0) > 1) continue;
+    if (seen.has(id)) continue;
     const admission = admitCanvasExportContribution(candidate);
     if (admission.kind !== "offered") continue;
     seen.add(String(admission.offer.targetId));

@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { CanvasId, CanvasVersionId } from "./canvas";
 import { isCanvasShareSafeText } from "./canvasShare";
+import { UtcTimestamp } from "./events";
 
 // A destination plugin receives a rendered Canvas and returns a receipt or a
 // typed refusal. The server renders, shows the payload and destination on an
@@ -21,9 +22,32 @@ export const CANVAS_EXPORT_SCHEMA_VERSION = 1 as const;
 export const CanvasExportSchemaVersion = Schema.Literal(CANVAS_EXPORT_SCHEMA_VERSION);
 export type CanvasExportSchemaVersion = typeof CanvasExportSchemaVersion.Type;
 
-export const CANVAS_EXPORT_BODY_MAX_CHARS = 262_144;
+export const CANVAS_EXPORT_BODY_MAX_BYTES = 262_144;
 export const CANVAS_EXPORT_LABEL_MAX_CHARS = 128;
 export const CANVAS_EXPORT_MESSAGE_MAX_CHARS = 1_024;
+
+/** A held approval is answered or forgotten. This is how long it waits. */
+export const CANVAS_EXPORT_APPROVAL_TTL_MS = 10 * 60_000;
+
+/**
+ * Per-canvas bound on held approvals. The oldest is evicted as expired when a
+ * prepare would exceed it, so a closed dialog cannot pin a payload forever.
+ */
+export const CANVAS_EXPORT_MAX_PENDING_PER_CANVAS = 8;
+
+const bodyEncoder = new TextEncoder();
+
+/** UTF-8 byte length of a rendered body; the budget is bytes, not code units. */
+export function canvasExportBodyByteLength(body: string): number {
+  return bodyEncoder.encode(body).length;
+}
+
+const exportBody = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.filter((value) => canvasExportBodyByteLength(value) <= CANVAS_EXPORT_BODY_MAX_BYTES, {
+    message: () => "A Canvas export body must fit the UTF-8 byte budget.",
+  }),
+);
 
 /** Formats a destination may declare. Only markdown and html are rendered. */
 export const CanvasExportFormat = Schema.Literal("markdown", "html", "pdf", "png");
@@ -119,7 +143,7 @@ export const CanvasExportMetadata = Schema.Struct({
   sequence: Schema.Int.pipe(Schema.positive()),
   byteLength: Schema.Int.pipe(
     Schema.nonNegative(),
-    Schema.lessThanOrEqualTo(CANVAS_EXPORT_BODY_MAX_CHARS),
+    Schema.lessThanOrEqualTo(CANVAS_EXPORT_BODY_MAX_BYTES),
   ),
   contentDigest: CanvasExportPayloadDigest,
 }).annotations(strict);
@@ -130,7 +154,7 @@ export const CanvasExportRenderedOutput = Schema.Struct({
   kind: Schema.Literal("canvas-export-output"),
   format: CanvasExportImplementedFormat,
   title: safeBounded(256),
-  body: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(CANVAS_EXPORT_BODY_MAX_CHARS)),
+  body: exportBody,
   metadata: CanvasExportMetadata,
 }).annotations(strict);
 export type CanvasExportRenderedOutput = typeof CanvasExportRenderedOutput.Type;
@@ -183,6 +207,7 @@ export const CanvasExportRefusalCode = Schema.Literal(
   "too-large",
   "unauthorized",
   "unavailable",
+  "expired",
 );
 export type CanvasExportRefusalCode = typeof CanvasExportRefusalCode.Type;
 
@@ -214,12 +239,14 @@ export const CanvasExportApprovalCard = Schema.Struct({
   format: CanvasExportImplementedFormat,
   title: safeBounded(256),
   /** The rendered document the person is approving. Not a summary of it. */
-  payload: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(CANVAS_EXPORT_BODY_MAX_CHARS)),
+  payload: exportBody,
   payloadDigest: CanvasExportPayloadDigest,
   byteLength: Schema.Int.pipe(
     Schema.nonNegative(),
-    Schema.lessThanOrEqualTo(CANVAS_EXPORT_BODY_MAX_CHARS),
+    Schema.lessThanOrEqualTo(CANVAS_EXPORT_BODY_MAX_BYTES),
   ),
+  /** Past this instant the host drops the held approval; answering it expires. */
+  expiresAt: UtcTimestamp,
 }).annotations(strict);
 export type CanvasExportApprovalCard = typeof CanvasExportApprovalCard.Type;
 

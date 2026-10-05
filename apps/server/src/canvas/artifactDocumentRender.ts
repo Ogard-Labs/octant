@@ -1,6 +1,7 @@
 import type { CanvasBlock, CanvasDefinition } from "@octant/contracts/canvas";
 import {
-  CANVAS_EXPORT_BODY_MAX_CHARS,
+  CANVAS_EXPORT_BODY_MAX_BYTES,
+  canvasExportBodyByteLength,
   type CanvasExportImplementedFormat,
 } from "@octant/contracts/canvas-export";
 import { isCanvasShareSafeText } from "@octant/contracts/canvas-share";
@@ -52,7 +53,7 @@ type Piece =
   | { readonly kind: "rule" };
 
 function finish(title: string, body: string): ArtifactDocumentRender {
-  return body.length <= CANVAS_EXPORT_BODY_MAX_CHARS
+  return canvasExportBodyByteLength(body) <= CANVAS_EXPORT_BODY_MAX_BYTES
     ? { kind: "rendered", title, body }
     : { kind: "too-large" };
 }

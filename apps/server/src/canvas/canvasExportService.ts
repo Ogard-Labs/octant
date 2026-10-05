@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import type { CanvasBlock, CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
 import {
+  CANVAS_EXPORT_APPROVAL_TTL_MS,
+  CANVAS_EXPORT_MAX_PENDING_PER_CANVAS,
+  canvasExportBodyByteLength,
   decodeCanvasExportApprovalCard,
   decodeCanvasExportDecideResult,
   decodeCanvasExportDelivery,
@@ -28,7 +31,7 @@ import {
   offerCanvasExportTargets,
   type CanvasExportActivationFacts,
 } from "@octant/plugin-host/canvas-export-contributions";
-import type { UtcTimestamp } from "@octant/contracts";
+import type { EventActor, UtcTimestamp } from "@octant/contracts";
 import { Schema } from "effect";
 import { renderArtifactDocument } from "./artifactDocumentRender";
 import { CanvasExportEventStore } from "./canvasExportEventStore";
@@ -66,10 +69,24 @@ export interface CanvasExportServiceOptions {
   readonly clock: () => UtcTimestamp;
 }
 
-interface PendingExport {
-  readonly card: CanvasExportPrepareResult & { readonly kind: "approval" };
-  readonly output: CanvasExportRenderedOutput;
-}
+/**
+ * A held approval, or a tombstone for one already released. The tombstone
+ * keeps a closed-or-evicted dialog answerable exactly once — as an `expired`
+ * refusal — while dropping the payload it used to pin.
+ */
+type PendingExport =
+  | {
+      readonly released?: undefined;
+      readonly canvasId: CanvasId;
+      readonly card: CanvasExportPrepareResult & { readonly kind: "approval" };
+      readonly output: CanvasExportRenderedOutput;
+      /** Instant past which answering this approval is an `expired` refusal. */
+      readonly expiresAtMs: number;
+    }
+  | {
+      readonly released: true;
+      readonly canvasId: CanvasId;
+    };
 
 const decodeApprovalId = Schema.decodeUnknownSync(CanvasExportApprovalId);
 const decodeRecordId = Schema.decodeUnknownSync(CanvasExportRecordId);
@@ -163,6 +180,7 @@ export class CanvasExportService {
     }
     const payloadDigest = decodeCanvasExportPayloadDigest(digestOf(rendered.body));
     const approvalId = decodeApprovalId(this.#uuid());
+    const byteLength = canvasExportBodyByteLength(rendered.body);
     let output: CanvasExportRenderedOutput;
     try {
       output = decodeCanvasExportRenderedOutput({
@@ -175,7 +193,7 @@ export class CanvasExportService {
           canvasId: document.canvasId,
           versionId: document.versionId,
           sequence: document.sequence,
-          byteLength: rendered.body.length,
+          byteLength,
           contentDigest: payloadDigest,
         },
       });
@@ -184,6 +202,8 @@ export class CanvasExportService {
         refused("malformed", "The rendered document cannot be exported."),
       );
     }
+    const nowMs = Date.parse(this.#clock());
+    const expiresAtMs = nowMs + CANVAS_EXPORT_APPROVAL_TTL_MS;
     const card = decodeCanvasExportApprovalCard({
       schemaVersion: 1,
       kind: "canvas-export-approval",
@@ -197,29 +217,43 @@ export class CanvasExportService {
       title: rendered.title,
       payload: rendered.body,
       payloadDigest,
-      byteLength: rendered.body.length,
+      byteLength,
+      expiresAt: new Date(expiresAtMs).toISOString(),
     });
     const result = decodeCanvasExportPrepareResult({ kind: "approval", card });
     if (result.kind === "approval") {
-      this.#pending.set(String(card.approvalId), { card: result, output });
+      this.#holdPending(document.canvasId, { card: result, output, expiresAtMs });
     }
     return result;
   }
 
   /**
-   * Release a held approval. A denial, a missing approval, and a destination
-   * that is no longer ready never call the plugin.
+   * Release a held approval. A denial, an expired or missing approval, and a
+   * destination that is no longer ready never call the plugin. The completed
+   * export is journaled under `actor` — the authenticated transport principal
+   * of the request that was approved — so a remote approval never replays as
+   * a local one.
    */
   async decide(input: {
     readonly canvasId: CanvasId;
     readonly approvalId: CanvasExportApprovalId;
     readonly decision: "approved" | "denied";
     readonly permitted: boolean;
+    readonly actor: EventActor;
   }): Promise<CanvasExportDecideResult> {
-    const pending = this.#pending.get(String(input.approvalId));
+    const key = String(input.approvalId);
+    const pending = this.#pending.get(key);
     if (pending === undefined) {
       return decodeCanvasExportDecideResult(
         refused("approval-required", "Export requires approval."),
+      );
+    }
+    // An evicted or swept approval keeps a payload-free tombstone so the closed
+    // dialog is answered once as expired, then forgotten.
+    if (pending.released === true) {
+      this.#pending.delete(key);
+      return decodeCanvasExportDecideResult(
+        refused("expired", "This export approval has expired."),
       );
     }
     if (String(pending.card.card.canvasId) !== String(input.canvasId)) {
@@ -228,7 +262,7 @@ export class CanvasExportService {
       );
     }
     if (!input.permitted || input.decision === "denied") {
-      this.#pending.delete(String(input.approvalId));
+      this.#pending.delete(key);
       if (!input.permitted) {
         return decodeCanvasExportDecideResult(
           refused("unauthorized", "Export is not authorized for this canvas."),
@@ -239,23 +273,33 @@ export class CanvasExportService {
         message: "Export was not approved.",
       });
     }
+    if (pending.expiresAtMs <= Date.parse(this.#clock())) {
+      this.#pending.delete(key);
+      return decodeCanvasExportDecideResult(
+        refused("expired", "This export approval has expired."),
+      );
+    }
 
     const offer = this.#offerFor(pending.card.card.targetId);
     if (offer === undefined || offer.status !== "ready") {
-      this.#pending.delete(String(input.approvalId));
+      this.#pending.delete(key);
       return decodeCanvasExportDecideResult(
         refused("not-offered", "That destination is not offered."),
       );
     }
-    const binding = this.#bindingFor(pending.card.card.targetId);
+    // Delivery goes through the binding the offer was made from. Two bindings
+    // sharing one id is ambiguous: the offer omits it, and a stale approval
+    // for it is refused rather than resolved by binding order.
+    const bindings = this.#targetBindings(pending.card.card.targetId);
+    const binding = bindings.length === 1 ? bindings[0] : undefined;
     if (binding === undefined) {
-      this.#pending.delete(String(input.approvalId));
+      this.#pending.delete(key);
       return decodeCanvasExportDecideResult(
         refused("not-offered", "That destination is not offered."),
       );
     }
 
-    this.#pending.delete(String(input.approvalId));
+    this.#pending.delete(key);
     const delivery = await this.#deliver(binding.target, pending.output);
     const record = decodeCanvasExportRecorded({
       schemaVersion: 1,
@@ -271,8 +315,44 @@ export class CanvasExportService {
       approvalId: pending.card.card.approvalId,
       outcome: delivery,
     });
-    this.#eventStore.append({ record, occurredAt: this.#clock() });
+    this.#eventStore.append({ record, occurredAt: this.#clock(), actor: input.actor });
     return decodeCanvasExportDecideResult({ kind: "exported", record });
+  }
+
+  /**
+   * Hold a new approval within the per-canvas bound. An expired or evicted
+   * entry releases its payload; nothing is held past its expiry in practice,
+   * and eviction is reported as `expired` when an answer arrives.
+   */
+  #holdPending(
+    canvasId: CanvasId,
+    pending: Omit<Extract<PendingExport, { readonly released?: undefined }>, "canvasId">,
+  ): void {
+    const canvasKey = String(canvasId);
+    this.#sweepExpired();
+    const held = [...this.#pending.entries()].filter(
+      (entry): entry is [string, Extract<PendingExport, { readonly released?: undefined }>] =>
+        entry[1].released !== true && String(entry[1].canvasId) === canvasKey,
+    );
+    while (held.length >= CANVAS_EXPORT_MAX_PENDING_PER_CANVAS) {
+      const oldest = held.shift();
+      if (oldest !== undefined) {
+        // Release the payload, but keep the id answerable once as expired.
+        this.#pending.set(oldest[0], { released: true, canvasId });
+      }
+    }
+    this.#pending.set(String(pending.card.card.approvalId), { ...pending, canvasId });
+  }
+
+  /** Drop payloads whose deadline passed; an unanswered dialog cannot pin one. */
+  #sweepExpired(): void {
+    const nowMs = Date.parse(this.#clock());
+    for (const [key, entry] of this.#pending) {
+      if (entry.released === true) continue;
+      if (entry.expiresAtMs <= nowMs) {
+        this.#pending.set(key, { released: true, canvasId: entry.canvasId });
+      }
+    }
   }
 
   #offerFor(targetId: CanvasExportTargetId) {
@@ -284,8 +364,8 @@ export class CanvasExportService {
     ).find((offer) => String(offer.targetId) === String(targetId));
   }
 
-  #bindingFor(targetId: CanvasExportTargetId): CanvasExportTargetBinding | undefined {
-    return this.#targets().find(
+  #targetBindings(targetId: CanvasExportTargetId): ReadonlyArray<CanvasExportTargetBinding> {
+    return this.#targets().filter(
       (binding) => String(binding.target.contribution.targetId) === String(targetId),
     );
   }

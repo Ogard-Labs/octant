@@ -767,4 +767,28 @@ describe("CanvasWorkspaceTab", () => {
     expect(changes).toHaveTextContent("Addedrich text");
     expect(changes).toHaveTextContent("Removeddivider");
   });
+
+  it("refetches export offers after a revision advances the canvas", async () => {
+    const exportOffers = vi.fn(async () => ({
+      schemaVersion: 1 as const,
+      canvasId: quarterlyCanvasId,
+      versionId: quarterlyInventoryEntry.currentVersionId,
+      targets: [],
+    }));
+    const revise = vi.fn(async () => ({ kind: "accepted" as const }));
+    const client = createCanvasClient(readyVersion, undefined, {
+      exportOffers,
+      revise,
+    } as unknown as Partial<CanvasClient>);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    await screen.findByRole("heading", { name: "Signed Q3 report" });
+    await waitFor(() => expect(exportOffers).toHaveBeenCalledTimes(1));
+
+    await openCanvasTool("Refine…");
+    fireEvent.change(screen.getByRole("textbox", { name: "Revision prompt" }), {
+      target: { value: "Tighten the summary" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Revise" }));
+    await waitFor(() => expect(exportOffers).toHaveBeenCalledTimes(2));
+  });
 });
