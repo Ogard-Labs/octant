@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import "./agent-hierarchy.css";
@@ -66,11 +67,7 @@ export function FollowUpControl(props: {
           value={message}
         />
       </label>
-      {error === undefined ? null : (
-        <p className="agent-run-detail__note" role="alert">
-          {error}
-        </p>
-      )}
+      {error === undefined ? null : <OctantAlert tone="danger">{error}</OctantAlert>}
       <div className="agent-run-detail__steer-actions">
         <OctantButton
           disabled={busy || message.trim().length === 0 || message.trim().length > 4096}
