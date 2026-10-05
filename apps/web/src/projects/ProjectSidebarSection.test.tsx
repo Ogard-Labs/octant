@@ -577,6 +577,28 @@ describe("ProjectSidebarSection threads filed in no Project", () => {
     expect(screen.queryByRole("region", { name: "No project" })).toBeNull();
   });
 
+  it("keeps the status rollup when No project is collapsed", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projects={[]}
+        threads={[{ threadId: "loose", title: "Loose thread", activity: "working" }]}
+      />,
+    );
+    expect(screen.queryByRole("img", { name: "No project: Working" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Collapse No project" }));
+    expect(screen.getByRole("img", { name: "No project: Working" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Loose thread/ })).toBeNull();
+  });
+
   it("keeps a Chat started without a Project under Recents in the All Projects view", () => {
     window.localStorage.clear();
     render(

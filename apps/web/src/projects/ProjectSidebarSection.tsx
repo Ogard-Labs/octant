@@ -770,6 +770,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                     <Folder aria-hidden="true" size={16} strokeWidth={1.5} />
                     <span className="project-row__copy">{unfiledLabel}</span>
                   </OctantButton>
+                  {unfiledExpanded ? null : (
+                    <ProjectStatusRollup projectName={unfiledLabel} threads={unfiled} />
+                  )}
                 </div>
                 {unfiledExpanded ? (
                   <div className="project-threads" id={unfiledThreadsId}>
