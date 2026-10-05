@@ -171,7 +171,10 @@ not by that name: a 1.x binary keeps the legacy session API, and a 2.x binary
 lists providers and models from its HTTP catalogue and can run a turn where
 the process jail already enforces the permission boundary. Chat turns run.
 Work and Code writes stay refused until session permission rules can be
-enforced. Octant never falls back to an unconfined
+enforced. OpenCode 2 resolves a project inside a Git work tree by starting
+Git, which the Chat and Plan jail does not allow, so a runtime whose confined
+server cannot answer for a work tree is shown as **Incompatible**: its models
+are listed and no turn is offered. Octant never falls back to an unconfined
 session or treats the 2.x version as the legacy runtime.
 
 ### API endpoints

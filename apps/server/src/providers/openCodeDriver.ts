@@ -1,5 +1,7 @@
 import { OpenCodeMessageParts } from "./openCodeMessageParts";
-import { isAbsolute, resolve } from "node:path";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 import {
   type CorrelationId,
   type PermissionPersistence,
@@ -197,6 +199,52 @@ function openCodeBetaCapabilities(reported: ProviderCapabilities): ProviderCapab
     fileChanges: "unsupported",
     appManagedTools: "unsupported",
   };
+}
+
+/**
+ * A 2.x runtime whose confined catalogue is readable but whose jail cannot
+ * serve a Git work tree. Models stay visible; no turn is offered.
+ */
+const BETA_GIT_WORKTREE_REFUSAL_MESSAGE =
+  "OpenCode 2 cannot resolve a Git project inside the Chat and Plan jail, so turns are not offered.";
+
+const BETA_LISTING_ONLY_CAPABILITIES = {
+  streaming: "unsupported",
+  resume: "unsupported",
+  interruption: "unsupported",
+  approvals: "unsupported",
+  userQuestions: "unsupported",
+  reasoning: "unsupported",
+  usage: "unsupported",
+  toolActivity: "unsupported",
+  fileChanges: "unsupported",
+  diffs: "unsupported",
+  taskProgress: "unsupported",
+  nativeChildAgents: "unsupported",
+  harnessAutoReview: "unsupported",
+  modelSwitch: "unsupported",
+  ...unsupportedChatCapabilities,
+} as const satisfies ProviderCapabilities;
+
+/**
+ * Project resolution on 2.x spawns the Git binary for any directory inside a
+ * work tree, and the Chat and Plan jail refuses that spawn. Observed with
+ * 2.0.22 on macOS: the confined provider and model routes answered 500 for a
+ * work tree and 200 for a plain directory, while the same binary unconfined
+ * answered 200 for both. A `.git` marker is enough to take the Git path, so
+ * the probe can attest the jail without a real repository or a Git binary.
+ */
+function makeBetaWorktreeMarker(): string {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-probe-")));
+  try {
+    mkdirSync(join(root, ".git", "objects"), { recursive: true });
+    mkdirSync(join(root, ".git", "refs"));
+    writeFileSync(join(root, ".git", "HEAD"), "ref: refs/heads/main\n");
+    return root;
+  } catch (error) {
+    rmSync(root, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function fail(
@@ -728,6 +776,26 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               runtime.isolatedConfiguration === true && mcpAccepted,
             );
             if (runtime.runtime === "beta" && normalized.models.length > 0) {
+              const marker = yield* Effect.acquireRelease(
+                Effect.try({
+                  try: makeBetaWorktreeMarker,
+                  catch: () => fail("unavailable", "OpenCode probe workspace is unavailable."),
+                }),
+                (owned) => Effect.sync(() => rmSync(owned, { recursive: true, force: true })),
+              );
+              const servesWorktree = yield* request(clientFactory(runtime, marker).providers).pipe(
+                Effect.as(true),
+                Effect.orElseSucceed(() => false),
+              );
+              if (!servesWorktree) {
+                return decodeProviderProbeResult({
+                  ...normalized,
+                  readiness: "incompatible",
+                  reason: "runtime-incompatible",
+                  message: BETA_GIT_WORKTREE_REFUSAL_MESSAGE,
+                  capabilities: BETA_LISTING_ONLY_CAPABILITIES,
+                });
+              }
               return {
                 ...normalized,
                 capabilities: openCodeBetaCapabilities(normalized.capabilities),

@@ -7,6 +7,8 @@ import {
 } from "@octant/contracts";
 import type { Event, PermissionRuleset, Provider, Session } from "@opencode-ai/sdk/v2/types";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -1288,6 +1290,21 @@ describe("OpenCode driver", () => {
     });
   });
 
+  it("lists a 2.x runtime without offering turns when its confined server cannot resolve a Git work tree", async () => {
+    const fixture = betaDriver({ worktreeProviders: "refused" });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("incompatible");
+    expect(probe.reason).toBe("runtime-incompatible");
+    expect(probe.message).toContain("Git");
+    expect(probe.models.length).toBeGreaterThan(0);
+    expect(Object.values(probe.capabilities).every((support) => support === "unsupported")).toBe(
+      true,
+    );
+    const marker = fixture.catalogueRoots.find((root) => root.includes("octant-opencode-probe-"));
+    expect(marker).toBeDefined();
+    expect(existsSync(marker!)).toBe(false);
+  });
+
   it("refuses a 2.x Work or Code write and still starts a Chat or Plan turn", async () => {
     const writeFixture = betaDriver();
     const writeExit = await Effect.runPromiseExit(
@@ -1426,8 +1443,9 @@ describe("OpenCode driver", () => {
   });
 });
 
-function betaDriver() {
+function betaDriver(options: { readonly worktreeProviders?: "refused" } = {}) {
   return driverFixture({
+    ...options,
     process: {
       start: () =>
         Effect.acquireRelease(
@@ -1461,9 +1479,12 @@ function driverFixture(
     };
     readonly mcpSupported?: boolean;
     readonly streamEnd?: "hang" | "eof" | "throw";
+    /** The confined server answers 500 for a directory inside a Git work tree. */
+    readonly worktreeProviders?: "refused";
   } = {},
 ) {
   const calls: string[] = [];
+  const catalogueRoots: string[] = [];
   const processInputs: OpenCodeProcessStartInput[] = [];
   const createdPermissions: PermissionRuleset[] = [];
   const registry = new ProviderRuntimeRegistry();
@@ -1557,6 +1578,7 @@ function driverFixture(
   };
   return {
     calls,
+    catalogueRoots,
     processInputs,
     createdPermissions,
     registry,
@@ -1565,7 +1587,16 @@ function driverFixture(
       binaryPath: "/opt/homebrew/bin/opencode",
       process: options.process ?? processPort,
       runtimeRegistry: registry,
-      clientFactory: () => client,
+      clientFactory: (_runtime, root) => ({
+        ...client,
+        providers: async () => {
+          catalogueRoots.push(root);
+          if (options.worktreeProviders === "refused" && existsSync(join(root, ".git"))) {
+            throw new Error("opencode server GET /api/provider -> 500");
+          }
+          return client.providers();
+        },
+      }),
       permissionPersistence: () =>
         typeof options.permissionPersistence === "function"
           ? options.permissionPersistence()

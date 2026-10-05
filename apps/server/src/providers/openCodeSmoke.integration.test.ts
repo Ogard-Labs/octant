@@ -14,6 +14,21 @@ import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const enabled = process.env.OCTANT_OPENCODE_SMOKE === "1";
 
+/**
+ * The driver probes from the process working directory. Run from a plain
+ * directory so a refusal reflects the runtime and jail, not a checkout this
+ * suite happens to live in.
+ */
+function inPlainDirectory<A>(run: () => Promise<A>): Promise<A> {
+  const previous = process.cwd();
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-smoke-")));
+  process.chdir(scratch);
+  return run().finally(() => {
+    process.chdir(previous);
+    rmSync(scratch, { recursive: true, force: true });
+  });
+}
+
 describe("real OpenCode integration", () => {
   it.skipIf(!enabled)(
     "runs only with OCTANT_OPENCODE_SMOKE=1 because it starts the installed authenticated CLI",
@@ -32,7 +47,16 @@ describe("real OpenCode integration", () => {
         permissionPersistence: () => "current-session",
       });
       const projectRoot = process.cwd();
-      const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+      const probe = await inPlainDirectory(() =>
+        Effect.runPromise(Effect.scoped(driver.probe({ instanceId }))),
+      );
+      if (probe.readiness === "incompatible") {
+        // A runtime the confined jail cannot serve is listed, never offered for turns.
+        expect(probe.reason).toBe("runtime-incompatible");
+        expect(probe.capabilities.streaming).toBe("unsupported");
+        await registry.closeAll();
+        return;
+      }
       expect(probe.readiness).toBe("ready");
       expect(probe.detectedVersion).toMatch(/^\d+\.\d+\.\d+/);
       expect(probe.models.length).toBeGreaterThan(0);
@@ -78,7 +102,13 @@ describe("real OpenCode integration", () => {
       const kinds: string[] = [];
       const failures: string[] = [];
       try {
-        const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+        const probe = await inPlainDirectory(() =>
+          Effect.runPromise(Effect.scoped(driver.probe({ instanceId }))),
+        );
+        if (probe.readiness === "incompatible") {
+          expect(probe.reason).toBe("runtime-incompatible");
+          return;
+        }
         if (probe.readiness !== "ready" || probe.models.length === 0) {
           throw new Error(
             `Installed OpenCode did not offer a usable model (${probe.readiness}). Credentials were not available for a live Chat turn.`,

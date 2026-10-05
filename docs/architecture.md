@@ -1031,7 +1031,12 @@ modelId }`, and the model picker is provider-first. Discovery can find
   providers and models, then runs a turn where the process jail already
   enforces the permission boundary. Chat turns run. Work and Code writes stay
   refused until session permission rules can be enforced; resume, interruption,
-  and tool activity are reported, and anything not mapped fails closed. fx runs in a per-instance managed
+  and tool activity are reported, and anything not mapped fails closed. The probe
+  also asks the confined 2.x server to answer for a directory carrying a Git
+  marker: project resolution starts Git, which the Chat and Plan jail refuses
+  (observed with 2.0.22 on macOS as HTTP 500 for any work tree), so a runtime
+  that cannot answer reports `incompatible` with its models listed and every
+  capability unsupported, and no turn is offered. fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable; see
   [fx-acp-compatibility.md](fx-acp-compatibility.md) and
   [0130](decisions/0130-fx-runs-in-a-managed-home.md). Image profiles are
