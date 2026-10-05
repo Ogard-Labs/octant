@@ -2438,6 +2438,81 @@ describe("Devin model configuration", () => {
     });
   });
 
+  it("keeps usable models when one advertised model is refused during discovery", async () => {
+    const { driver, client, registry, active, released } = fixture(devin);
+    const model = {
+      type: "select" as const,
+      id: "model",
+      name: "Model",
+      currentValue: "agent-k2",
+      options: [
+        { value: "agent-k2", name: "Agent K2" },
+        { value: "unavailable", name: "Unavailable model" },
+        { value: pairing, name: "Fusion (GPT-6.1 Sol High Thinking + SWE-2 Medium)" },
+      ],
+    };
+    client.newSession.mockResolvedValue({ sessionId: "probe", configOptions: [model, speed] });
+    client.setConfigOption.mockImplementation(async (_sessionId, _id, value) => {
+      if (value === "unavailable") throw new AcpFailure("remote", "ACP request failed.", "model");
+      return { configOptions: [model, ...(value === pairing ? [thinking] : [])] };
+    });
+
+    const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("ready");
+    expect(probe.models.map((model) => String(model.id))).toEqual(["agent-k2", pairing]);
+    expect(probe.models[0]?.options).toEqual([]);
+    expect(probe.models[1]?.options).toEqual([
+      {
+        id: "thought_level",
+        displayName: "Thinking",
+        kind: "selection",
+        values: ["low", "high"],
+      },
+    ]);
+    expect(registry.observedState(instanceId)).toEqual(probe);
+    expect(active()).toBe(0);
+    expect(released()).toBe(1);
+  });
+
+  it("reports no selectable models when every advertised model is refused", async () => {
+    const { driver, client, registry } = fixture(devin);
+    client.setConfigOption.mockRejectedValue(
+      new AcpFailure("remote", "ACP request failed.", "model"),
+    );
+
+    const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("degraded");
+    expect(probe.models).toEqual([]);
+    expect(registry.observedState(instanceId)).toEqual(probe);
+  });
+
+  it.each([
+    [new AcpFailure("timeout", "ACP request timed out."), "unavailable"],
+    [new AcpFailure("closed", "ACP transport failed."), "interrupted"],
+    [new AcpFailure("protocol", "ACP response was invalid."), "protocol"],
+    [new AcpFailure("remote", "ACP request failed.", "network"), "provider-failed"],
+    [new AcpFailure("remote", "ACP request failed.", "configuration"), "provider-failed"],
+    [new AcpFailure("remote", "ACP request failed.", "unknown"), "provider-failed"],
+    [
+      new AcpFailure("remote", "ACP authentication is required.", "authentication"),
+      "unauthenticated",
+    ],
+  ] as const)(
+    "fails discovery on %s instead of advertising a partial catalog",
+    async (error, category) => {
+      const { driver, client, registry, active, released } = fixture(devin);
+      client.setConfigOption.mockRejectedValueOnce(error);
+
+      const failure = await Effect.runPromise(
+        Effect.scoped(Effect.flip(driver.probe({ instanceId }))),
+      );
+      expect(failure.category).toBe(category);
+      expect(registry.observedState(instanceId)).toBeUndefined();
+      expect(active()).toBe(0);
+      expect(released()).toBe(1);
+    },
+  );
+
   it.each(["start", "resume"] as const)(
     "applies effort and speed before a %s session can send",
     async (operation) => {

@@ -320,7 +320,11 @@ function normalizeModels(
       .filter((item) => item._meta !== undefined)
       .map((item) => [item.modelId, item._meta] as const),
   );
-  return selectable.map((item) => {
+  const eligible =
+    optionsByModel === undefined
+      ? selectable
+      : selectable.filter((item) => optionsByModel.has(item.value));
+  return eligible.map((item) => {
     const modelOptions = optionsByModel?.get(item.value) ?? options;
     const reasoning = resolveReasoningOption(profile, modelOptions);
     const reasoningValues = (reasoning?.options ?? [])
@@ -689,10 +693,25 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
             scratch.models,
           )) {
             const result = yield* request(
-              () => client.setConfigOption(scratch.sessionId, "model", String(model.id)),
+              async () => {
+                try {
+                  return await client.setConfigOption(scratch.sessionId, "model", String(model.id));
+                } catch (error) {
+                  // An advertised model may be unavailable to this account. Only
+                  // a classified model refusal is recoverable; connection and
+                  // configuration failures must still fail the probe.
+                  if (
+                    error instanceof AcpFailure &&
+                    error.kind === "remote" &&
+                    error.remoteReason === "model"
+                  )
+                    return undefined;
+                  throw error;
+                }
+              },
               { stage: "model-discovery", detectedVersion: connection.version },
             );
-            optionsByModel.set(String(model.id), result.configOptions);
+            if (result !== undefined) optionsByModel.set(String(model.id), result.configOptions);
           }
         }
         if (profile.closesSessions) yield* request(() => client.closeSession(scratch.sessionId));

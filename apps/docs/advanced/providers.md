@@ -316,6 +316,9 @@ With an eligible paid Devin account and a current Devin CLI, check the Devin ACP
 connection in **Settings → Providers & Models**. Discovery reads the options for
 each model, so a large catalog can take tens of seconds to finish checking.
 Turn preparation also refreshes discovery and can take a similar amount of time.
+If Devin explicitly refuses an advertised model as unavailable, Octant omits it
+and keeps the other usable models. Authentication and connection failures still
+fail the connection check.
 
 Choose a Fusion pairing in the composer model picker. Its **Lead** and
 **Sidekick** controls select available pairings; **Thinking** sets the lead's

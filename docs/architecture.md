@@ -1016,7 +1016,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   validated by the server and applied before both new and resumed sessions send.
   Devin discovery selects each advertised model in a disposable, non-generating
   ACP session to obtain its own effort and speed choices. This can take tens of
-  seconds for a large catalog. Its model-config options exclude model and mode:
+  seconds for a large catalog. An explicit model-unavailable refusal omits only
+  that model from the selectable catalog; authentication, configuration, transport,
+  timeout, and protocol failures still fail discovery. Its model-config options exclude model and mode:
   they cannot change thread access, workspace roots, or approval policy. A choice
   the runtime stops offering or fails to confirm refuses session startup rather
   than silently falling back. Fusion remains a provider-owned model pairing;
