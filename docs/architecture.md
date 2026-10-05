@@ -49,6 +49,18 @@ windows, not an additional host task registry. Titles never enter the public
 health response or redacted diagnostics. Separately managed hosts retain their
 existing lifecycle restrictions.
 
+## Desktop context menus
+
+Trusted top-level desktop windows may contribute a bounded native context menu
+through the preload bridge: at most 160 entries, four submenu levels, and labels
+up to 256 characters. Contributions contain presentation and opaque action IDs;
+they cannot supply Electron roles, callbacks, paths, URLs, or native commands.
+The shell returns the selected ID to the same window, which invokes its existing
+renderer action and ordinary server authority checks. Dismissed, refused, closed,
+or navigated windows select no action. Each window owns at most one contributed
+native popup. The desktop's own text editing menu uses Chromium's edit flags and
+fixed native roles; embedded browser frames cannot contribute workspace menus.
+
 ## Repository test cancellation
 
 An authorized repository test remains cancellable while the host rediscovers its
@@ -941,6 +953,19 @@ flowchart LR
   host that joins in the middle cannot have seen anything earlier. A member's
   revocation is an entry the member writes; it is refused for a revoked
   instance rather than re-admitting it, because re-joining is a new identity.
+- **Artifact replica store.** A replica-store contribution offers list, get, and
+  put-if-absent. put-if-absent returns already-exists and leaves the existing
+  bytes unchanged. The store's status is ready, not-connected, or refused. A
+  disabled or uninstalled store is not offered and is not called. The in-tree
+  folder store writes only under `<folder>/Octant Sync/`. A write lands in a
+  temporary file in that same directory, then an exclusive hard link onto the
+  key only when that key is absent, so a published key is never replaced or
+  half-written. A half-written temporary file is not an entry. A
+  file the sync client has not downloaded, and a conflict copy the sync client
+  left behind, are reported instead of being treated as entries. A folder
+  outside the user's home is refused unless the standing access-outside-project
+  approval exists — the same rule as the artifact mirror's global folder.
+  Publish and pull are not this store; they call it.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -1016,6 +1041,20 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   `answerUserInput`, and `answerTool`. Every driver passes
   the shared conformance harness (chat, child-agent, and context-facts
   suites) before it is selectable.
+- **Model configuration.** Model variants may carry normalized family and choice
+  labels (for example a Fusion lead and sidekick). Choosing a label binds an
+  already advertised model id; the renderer never constructs provider ids or
+  adds combinations. Reasoning and other model settings remain declared options,
+  validated by the server and applied before both new and resumed sessions send.
+  Devin discovery selects each advertised model in a disposable, non-generating
+  ACP session to obtain its own effort and speed choices. This can take tens of
+  seconds for a large catalog. An explicit model-unavailable refusal omits only
+  that model from the selectable catalog; authentication, configuration, transport,
+  timeout, and protocol failures still fail discovery. Its model-config options exclude model and mode:
+  they cannot change thread access, workspace roots, or approval policy. A choice
+  the runtime stops offering or fails to confirm refuses session startup rather
+  than silently falling back. Fusion remains a provider-owned model pairing;
+  native subagent tools stay disabled and Octant still owns AgentRun delegation.
 - **Registry.** Providers are multi-instance: each instance has a stable id,
   driver kind, configuration, readiness state, model list, capability report,
   and environment policy. A selected model is `{ hostId, providerInstanceId,
@@ -1092,7 +1131,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   those tokens. **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
-  id). PKCE binds a one-shot loopback redirect on a random port, checks state
+  id). Direct endpoint drivers accept a `subscription-oauth` credential
+  pointer from the broker and refresh through the host service per request.
+  A missing or expired grant is `unauthenticated`, and a binding mismatch is
+  `incompatible`; neither claims capabilities the endpoint has not shown.
+  PKCE binds a one-shot loopback redirect on a random port, checks state
   and the code verifier, and times out. Device-code polling waits with backoff
   until consent, denial, or expiry. Refresh and access material stay in the
   0054 broker as opaque refs — never journaled, logged, exported, or
@@ -1487,6 +1530,9 @@ Simulator.app, `serve-sim`, or `serve-avd`.
 The approved design bounds a feature's reach through public, provider-neutral
 ports. New providers and tools use `@octant/provider-sdk`, `@octant/plugin-api`,
 and `@octant/plugin-host`; they do not gain direct access to host internals.
+A replica-store contribution offers list, get, and put-if-absent. The
+synced-folder store ships in-tree on that seam and writes only under the
+folder the person picked.
 Integration and board modules receive typed, capability-scoped ports, without raw
 filesystem, shell, or credential handles. OAuth access and refresh tokens remain
 in the host credential service; plugin state contains only opaque references.

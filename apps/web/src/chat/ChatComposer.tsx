@@ -135,7 +135,7 @@ export interface ChatComposerProps {
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
-  readonly onSelectModel?: (selection: ModelPickerSelection) => void;
+  readonly onSelectModel?: (selection: ModelPickerSelection) => void | Promise<void>;
   /** Lets the model picker's "no provider ready" state open Settings. */
   readonly onOpenSettings?: () => void;
   readonly attachment?: ChatComposerAttachmentCapability;
@@ -274,12 +274,12 @@ export function ChatComposer(props: ChatComposerProps) {
   const settingsLocked = props.isSending;
   const [modelOptionsOpen, setModelOptionsOpen] = useState(false);
   const declaredModelOptions = props.modelOptions ?? [];
-  // The picker draws the model's effort/reasoning level inline, so the
-  // options surface keeps every other declared option and stays hidden when
-  // there is nothing left for it to own.
-  const optionsSurfaceModelOptions = declaredModelOptions.filter(
-    (option) => !isComposerReasoningOption(option),
-  );
+  // The compact picker owns all model settings. The fallback composer keeps
+  // its separate option controls, and this surface still owns pool controls.
+  const optionsSurfaceModelOptions =
+    props.providerGroups !== undefined && props.onSelectModel !== undefined
+      ? []
+      : declaredModelOptions.filter((option) => !isComposerReasoningOption(option));
   const hasModelOptionControls =
     optionsSurfaceModelOptions.length > 0 || props.poolControl !== undefined;
   // "Set" mirrors the select's own fallback: a stored value the model no

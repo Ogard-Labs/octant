@@ -107,6 +107,7 @@ const LOCAL_HOST_ACTIONS = new Set([
   "provider.oauth.acknowledge-terms",
   "provider.oauth.begin",
   "provider.oauth.refresh",
+  "provider.oauth.sign-out",
   "extension.install",
   "extension.trust",
   "project.root.bind",

@@ -11,6 +11,18 @@ import {
   SelectValue,
 } from "../shadcn/select";
 import { cn } from "../shadcn/utils";
+import { ChevronDown } from "lucide-react";
+import {
+  OctantMenuRoot,
+  OctantMenuTrigger,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuPopup,
+  OctantMenuRadioGroup,
+  OctantMenuRadioItem,
+  OctantMenuGroup,
+  OctantMenuGroupLabel,
+} from "./OctantMenu";
 
 export {
   AuthoredSelect as OctantSelectRoot,
@@ -106,6 +118,65 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
     return () => form.removeEventListener("reset", onReset);
   }, [props.defaultValue, props.options, props.value]);
 
+  const changeValue = (next: string) => {
+    if (props.value === undefined) setUncontrolledValue(next);
+    props.onValueChange?.(next);
+  };
+  if (window.octantHost?.popupNativeMenu !== undefined)
+    return (
+      <span className="contents" ref={rootRef}>
+        <OctantMenuRoot>
+          <OctantMenuTrigger
+            aria-label={props["aria-label"]}
+            data-testid={props["data-testid"]}
+            id={props.id}
+            disabled={props.disabled}
+            className={cn(
+              "flex h-8 w-full items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm text-foreground whitespace-nowrap disabled:opacity-50 window-no-drag",
+              props.triggerClassName,
+              props.className,
+            )}
+          >
+            {selectedOption?.label ?? props.placeholder}
+            <ChevronDown aria-hidden="true" size={16} />
+          </OctantMenuTrigger>
+          <OctantMenuPortal>
+            <OctantMenuPositioner>
+              <OctantMenuPopup>
+                <OctantMenuRadioGroup
+                  value={encodeSelectValue(selectedId)}
+                  onValueChange={(value) => {
+                    if (typeof value === "string") changeValue(decodeSelectValue(value));
+                  }}
+                >
+                  {segmentOptions(props.options).map((segment, index) => (
+                    <OctantMenuGroup key={index}>
+                      {segment.group === undefined ? null : (
+                        <OctantMenuGroupLabel>{segment.group}</OctantMenuGroupLabel>
+                      )}
+                      {segment.options.map((option) => (
+                        <OctantMenuRadioItem
+                          key={encodeSelectValue(option.id)}
+                          value={encodeSelectValue(option.id)}
+                          disabled={option.disabled}
+                          title={option.disabledReason}
+                          closeOnClick
+                        >
+                          {option.label}
+                        </OctantMenuRadioItem>
+                      ))}
+                    </OctantMenuGroup>
+                  ))}
+                </OctantMenuRadioGroup>
+              </OctantMenuPopup>
+            </OctantMenuPositioner>
+          </OctantMenuPortal>
+        </OctantMenuRoot>
+        {props.name === undefined ? null : (
+          <input name={props.name} type="hidden" value={selectedId} />
+        )}
+      </span>
+    );
   return (
     <span className="contents" ref={rootRef}>
       <AuthoredSelect
@@ -113,8 +184,7 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
         onValueChange={(value) => {
           if (typeof value !== "string") return;
           const next = decodeSelectValue(value);
-          if (props.value === undefined) setUncontrolledValue(next);
-          props.onValueChange?.(next);
+          changeValue(next);
         }}
         value={encodeSelectValue(selectedId)}
       >

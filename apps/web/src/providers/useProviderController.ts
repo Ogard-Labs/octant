@@ -43,6 +43,8 @@ import {
   ProviderClientFailure,
   type ProviderClient,
 } from "@octant/client-runtime/provider-client";
+import { runProviderOAuthCommand } from "./providerOAuthClient";
+import type { ProviderOAuthCommand } from "./ProviderOAuthSignIn";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import {
@@ -3143,6 +3145,16 @@ export function useProviderController(options: ProviderControllerOptions) {
     updateProviderOrder,
     updateAgentEligibleModels,
     updateHiddenModels,
+    providerOAuth: (command: ProviderOAuthCommand) => {
+      if (options.serverUrl === undefined || options.windowCapability === undefined) {
+        return Promise.resolve(undefined);
+      }
+      return runProviderOAuthCommand({
+        baseUrl: options.serverUrl,
+        windowCapability: options.windowCapability,
+        command,
+      }).catch(() => undefined);
+    },
   };
 }
 
