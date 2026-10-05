@@ -18,6 +18,7 @@ import {
   decodeProjectId,
   decodeWorkThreadId,
 } from "@octant/contracts";
+import { decodeHostExportUsageRow } from "@octant/contracts";
 import { decodeThreadRetentionThreadId } from "@octant/contracts/thread-retention";
 import { afterEach, describe, expect, it } from "vitest";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
@@ -28,6 +29,8 @@ import { writeChatContent } from "./chatProjection";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
+import { toSafeExportRow } from "./usageExport";
+import { queryUsageRecords, readAllUsageRecords } from "./usageProjection";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { purgeThreadArtifacts } from "./threadArtifactPurge";
 import { managedWorktreeRoot } from "../code/managedWorktreeService";
@@ -122,6 +125,28 @@ describe("thread purge sweep", () => {
     // De-linked usage rows keep their aggregates but carry no thread identity.
     expect(usageRowsByThread(harness.connection)).toBe(0);
     expect(usageRowsDeLinked(harness.connection)).toBe(3);
+    // Retained spend stays readable everywhere the host reads usage: the full
+    // ledger, the unfiled read, and the host export, which must not drop a
+    // de-linked row as unrepresentable.
+    const ledger = readAllUsageRecords(harness.connection);
+    expect(ledger.map((record) => record.subject)).toEqual([
+      expect.objectContaining({ deLinked: true }),
+      expect.objectContaining({ deLinked: true }),
+      expect.objectContaining({ deLinked: true }),
+    ]);
+    expect(ledger.reduce((total, record) => total + record.inputTokens, 0)).toBe(9);
+    expect(
+      queryUsageRecords(harness.connection, {}, 100, 0, { kind: "unfiled" }).records,
+    ).toHaveLength(3);
+    expect(
+      queryUsageRecords(harness.connection, {}, 100, 0, {
+        kind: "projects",
+        projectIds: [projectId],
+      }).records,
+    ).toHaveLength(0);
+    expect(
+      ledger.map((record) => decodeHostExportUsageRow(toSafeExportRow(record)).subjectId),
+    ).toEqual([null, null, null]);
     // Project memory is Project data: the entry survives a thread purge, but
     // its provenance no longer names the purged thread.
     expect(projectMemoryEntriesRemain(harness.connection)).toBeGreaterThan(0);
@@ -489,7 +514,7 @@ function seedUsage(connection: SqliteConnection, thread: SeededThread): void {
         reconciliation_id, subject_type, subject_id, provider_instance_id, model_id,
         request_shape, quality, input_tokens, output_tokens, planned_input_tokens,
         variance_tokens, schema_version, attribution_json, observed_at, last_sequence, host_id
-      ) VALUES (?, ?, ?, ?, 'model-a', 'turn', 'exact', 3, 1, 3, 0, 2, '{}', ?, 1, 'local')`,
+      ) VALUES (?, ?, ?, ?, 'model-a', 'turn', 'exact', 3, 1, 3, 0, 2, '[]', ?, 1, 'local')`,
     )
     .run(uuidFor(thread.mode, "usage"), subjectType, thread.id, providerId, now);
 }

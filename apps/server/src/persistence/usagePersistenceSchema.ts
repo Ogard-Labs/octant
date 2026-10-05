@@ -3,7 +3,8 @@ export const USAGE_PROJECTION_SCHEMA_VERSION = 2;
 export interface UsageRecordProjectionRow {
   readonly reconciliation_id: string;
   readonly subject_type: string;
-  readonly subject_id: string;
+  /** NULL once the subject thread was purged: the row keeps its aggregates, not its identity. */
+  readonly subject_id: string | null;
   readonly provider_instance_id: string;
   readonly model_id: string;
   readonly request_shape: string;

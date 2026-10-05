@@ -1,3 +1,4 @@
+import { USAGE_ERASED_THREADS_KEY } from "@octant/contracts";
 import { createContext, useContext, type ReactNode } from "react";
 
 const UsageNames = createContext<ReadonlyMap<string, string>>(new Map());
@@ -21,14 +22,14 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
 
 /**
  * Resolve only already-loaded identities; opening Usage never fetches task
- * content. A de-linked subject (its thread was purged) has no identity to
- * name, so it reads as what it is rather than as a broken reference.
+ * content. Usage from a purged thread has no identity to name, so it reads as
+ * erased threads rather than as a broken reference.
  */
 export function UsageName(props: { readonly kind: string; readonly id: string | null }) {
-  if (props.id === null) {
-    return <span title="The thread this usage named was purged.">De-linked</span>;
-  }
   const names = useContext(UsageNames);
+  if (props.id === null || (props.kind === "thread" && props.id === USAGE_ERASED_THREADS_KEY)) {
+    return <span title={ERASED_THREADS_TITLE}>Erased threads</span>;
+  }
   const known = names.get(props.kind === "thread" ? props.id : `${props.kind}/${props.id}`);
   const fallback =
     props.id.length > 24
@@ -36,3 +37,6 @@ export function UsageName(props: { readonly kind: string; readonly id: string | 
       : props.id;
   return <span title={props.id}>{known ?? fallback}</span>;
 }
+
+const ERASED_THREADS_TITLE =
+  "These threads were purged. Their token counts stay in the totals; their identity does not.";

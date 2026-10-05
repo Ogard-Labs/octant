@@ -348,12 +348,16 @@ export function usageProjectConditionParams(
  * SQL predicate for a usage row the host cannot place in any Project: the exact
  * complement of `usageProjectConditionSql`, so the two scopes partition the
  * ledger and neither can reach the other's rows. It covers an unfiled thread, a
- * thread with no ownership record at all, and a subject type that carries no
- * Project.
+ * thread with no ownership record at all, a subject type that carries no
+ * Project, and a de-linked row.
+ *
+ * A de-linked row (its thread was purged, so `subject_id` is NULL) is named
+ * explicitly: SQL would otherwise propagate NULL through `NOT (...)` and drop
+ * the row from both scopes, erasing retained spend from every read.
  */
 export function usageUnfiledConditionSql(): string {
   const terms = projectBearingSubjectTerms((column) => `${column} IS NOT NULL`);
-  return `NOT (\n  ${terms.join("\n  OR ")}\n)`;
+  return `(subject_id IS NULL OR NOT (\n  ${terms.join("\n  OR ")}\n))`;
 }
 
 export function queryUsageRecords(

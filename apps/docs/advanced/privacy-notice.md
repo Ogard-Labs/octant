@@ -182,7 +182,8 @@ purgeable bulk content, removes derived projection rows, physically
 deletes that thread's own journal events so a rebuild cannot resurrect the
 transcript or title, then appends a tombstone. Usage rows keep their token
 and cost aggregates for accounting but the thread's id leaves them, so a
-purged thread is no longer named anywhere in usage attribution. Canvas
+purged thread is no longer named anywhere in usage attribution. That
+usage appears as erased threads in Usage and in the host export. Canvas
 documents, credentials, Projects, and other threads stay unless a later
 request names them. Project memory belongs to the Project: it survives a
 thread purge with its provenance de-linked, it is included in the host

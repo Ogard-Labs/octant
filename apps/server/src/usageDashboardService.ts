@@ -65,13 +65,16 @@ export function readUsageDashboard(
       continue;
     }
     const mode = deriveModeFromSubjectType(row.subject_type);
-    const projectId = resolveProjectId(
-      connection,
-      projectCache,
-      row.subject_type,
-      row.subject_id,
-      options.cacheStats,
-    );
+    const projectId =
+      row.subject_id === null
+        ? undefined
+        : resolveProjectId(
+            connection,
+            projectCache,
+            row.subject_type,
+            row.subject_id,
+            options.cacheStats,
+          );
     sourceRows.push({
       reconciliationId: row.reconciliation_id,
       hostId: row.host_id,

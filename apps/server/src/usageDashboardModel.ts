@@ -1,20 +1,21 @@
-import type {
-  UsageActivityCell,
-  UsageActivityState,
-  UsageAttributionDimension,
-  UsageAttributionEntry,
-  UsageBreakdownGroup,
-  UsageBreakdownRow,
-  UsageCacheStat,
-  UsageCacheStats,
-  UsageCoverageSlice,
-  UsageDashboardResponse,
-  UsageDetailRow,
-  UsageDimensionSource,
-  UsageHostCoverage,
-  UsageLatencyStats,
-  UsageProviderTokenCacheStat,
-  UsageQuality,
+import {
+  USAGE_ERASED_THREADS_KEY,
+  type UsageActivityCell,
+  type UsageActivityState,
+  type UsageAttributionDimension,
+  type UsageAttributionEntry,
+  type UsageBreakdownGroup,
+  type UsageBreakdownRow,
+  type UsageCacheStat,
+  type UsageCacheStats,
+  type UsageCoverageSlice,
+  type UsageDashboardResponse,
+  type UsageDetailRow,
+  type UsageDimensionSource,
+  type UsageHostCoverage,
+  type UsageLatencyStats,
+  type UsageProviderTokenCacheStat,
+  type UsageQuality,
 } from "@octant/contracts";
 
 /**
@@ -29,7 +30,8 @@ export interface UsageDashboardSourceRow {
   readonly modelId: string;
   readonly requestShape: string;
   readonly subjectType: string;
-  readonly subjectId: string;
+  /** NULL for usage whose thread was purged. */
+  readonly subjectId: string | null;
   readonly quality: string;
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -168,7 +170,13 @@ export function buildUsageDashboard(
     addDimension(dimensions, "model", row.modelId, row, unavailable);
     addDimension(dimensions, "host", row.hostId, row, unavailable);
     addDimension(dimensions, "request-shape", row.requestShape, row, unavailable);
-    addDimension(dimensions, "thread", `${row.subjectType}/${row.subjectId}`, row, unavailable);
+    addDimension(
+      dimensions,
+      "thread",
+      row.subjectId === null ? USAGE_ERASED_THREADS_KEY : `${row.subjectType}/${row.subjectId}`,
+      row,
+      unavailable,
+    );
     addDimension(dimensions, "mode", row.mode, row, unavailable);
     addDimension(dimensions, "project", row.projectId, row, unavailable);
     for (const entry of row.attribution) {
@@ -679,7 +687,7 @@ function buildDimensionSources(observed: {
       dimension: "thread",
       status: "recorded",
       detail:
-        "Threads are identified by their immutable subject reference. No thread title or transcript text enters the projection.",
+        "Threads are identified by their immutable subject reference. No thread title or transcript text enters the projection. Usage from a purged thread keeps its token counts and appears as erased threads, with no identity.",
     },
     {
       dimension: "request-shape",
