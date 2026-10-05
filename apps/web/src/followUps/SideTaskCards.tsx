@@ -8,6 +8,7 @@ import {
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import "./follow-up-suggestions.css";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface SideTaskCardsProps {
   readonly client: Pick<SideTaskClient, "sideTasks" | "start" | "dismiss">;
@@ -150,9 +151,9 @@ export function SideTaskCards(props: SideTaskCardsProps) {
         </article>
       ))}
       {error === undefined ? null : (
-        <p className="composer-follow-ups__error" role="alert">
+        <OctantAlert className="composer-follow-ups__error" tone="danger">
           {error}
-        </p>
+        </OctantAlert>
       )}
     </div>
   );

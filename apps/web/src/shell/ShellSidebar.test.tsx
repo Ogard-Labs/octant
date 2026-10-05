@@ -666,8 +666,8 @@ describe("ShellSidebar", () => {
     expect(screen.getByText("All environments")).toBeVisible();
     // The filter menu starts closed; open the toggle to see the host rows.
     await user.click(screen.getByRole("button", { name: "All environments" }));
-    expect(screen.getByText("Local")).toBeVisible();
-    expect(screen.getByText("Devbox")).toBeVisible();
+    expect(await screen.findByRole("menuitemcheckbox", { name: /Local/ })).toBeVisible();
+    expect(screen.getByRole("menuitemcheckbox", { name: /Devbox/ })).toBeVisible();
     expect(screen.getByText("unreachable")).toBeVisible();
   });
 

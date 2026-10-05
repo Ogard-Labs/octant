@@ -31,6 +31,7 @@ describe("remote access policy", () => {
     "host.store.retention",
     "host.store.purge",
     "host.store.data-map",
+    "host.store.export",
     "host.store.spend-ceiling",
   ])("requires a local principal for %s", (action) => {
     expect(authorizePrincipalAction({ principalKind: "remote-device", action })).toMatchObject({
@@ -75,6 +76,12 @@ describe("remote access policy", () => {
       kind: "local-host-required",
     });
     expect(classifyRemoteAction("provider.credentials.write")).toEqual({
+      kind: "local-host-required",
+    });
+    expect(classifyRemoteAction("provider.oauth.begin")).toEqual({
+      kind: "local-host-required",
+    });
+    expect(classifyRemoteAction("provider.oauth.sign-out")).toEqual({
       kind: "local-host-required",
     });
     expect(classifyRemoteAction("extension.trust")).toEqual({ kind: "local-host-required" });

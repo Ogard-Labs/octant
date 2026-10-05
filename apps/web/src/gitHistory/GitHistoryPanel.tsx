@@ -10,6 +10,7 @@ import { ShellState } from "../shell/ShellState";
 import { CommitDetail } from "./CommitDetail";
 import { layoutCommitGraph } from "./commitGraph";
 import "./git-history.css";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface GitHistoryPanelProps {
   readonly reader: GitHistoryReader;
@@ -209,7 +210,7 @@ function BoundHistory(props: GitHistoryPanelProps) {
           <p className="git-history__notice">Some repository refs are outside the history limit.</p>
         ) : null}
         {message === undefined ? null : (
-          <div className="git-history__notice" role="alert">
+          <OctantAlert className="git-history__notice" tone="warning">
             {message}{" "}
             <OctantButton
               size="sm"
@@ -221,7 +222,7 @@ function BoundHistory(props: GitHistoryPanelProps) {
             >
               Retry
             </OctantButton>
-          </div>
+          </OctantAlert>
         )}
         {page === undefined && busy ? <ShellState state="loading" title="Loading history" /> : null}
         {page !== undefined && commits.length === 0 ? (

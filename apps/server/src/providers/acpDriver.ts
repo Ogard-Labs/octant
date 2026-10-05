@@ -303,6 +303,7 @@ function normalizeModels(
   profile: AcpProviderProfile,
   options: ReadonlyArray<AcpSessionConfigOption>,
   models: AcpSessionModelState | undefined,
+  optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
 ) {
   const model = options.find((option) => option.id === "model");
   // The config option and the session's model state are two ACP spellings of
@@ -313,16 +314,23 @@ function normalizeModels(
       ? model.options.map((item) => ({ value: item.value, name: item.name }))
       : (models?.availableModels.map((item) => ({ value: item.modelId, name: item.name })) ?? []);
   if (selectable.length === 0) return [];
-  const reasoning = resolveReasoningOption(profile, options);
-  const reasoningValues = (reasoning?.options ?? [])
-    .map((choice) => choice.value.trim())
-    .filter((value) => value.length > 0);
+
   const modelMeta = new Map(
     (models?.availableModels ?? [])
       .filter((item) => item._meta !== undefined)
       .map((item) => [item.modelId, item._meta] as const),
   );
-  return selectable.map((item) => {
+  const eligible =
+    optionsByModel === undefined
+      ? selectable
+      : selectable.filter((item) => optionsByModel.has(item.value));
+  return eligible.map((item) => {
+    const modelOptions = optionsByModel?.get(item.value) ?? options;
+    const reasoning = resolveReasoningOption(profile, modelOptions);
+    const reasoningValues = (reasoning?.options ?? [])
+      .map((choice) => choice.value.trim())
+      .filter((value) => value.length > 0);
+    const configuration = profile.modelConfiguration?.(item);
     // An agent may publish a model's levels in the model's own session
     // metadata rather than a session config option, one set per model. Grok
     // Build sends no config options at all, so reading only the option read
@@ -333,6 +341,7 @@ function normalizeModels(
     return {
       id: decodeProviderModelId(item.value),
       displayName: item.name,
+      ...(configuration === undefined ? {} : { configuration }),
       source: "discovered" as const,
       verification: "verified" as const,
       reasoning:
@@ -346,8 +355,8 @@ function normalizeModels(
       // it starts or resumes a session, so the control the composer draws is
       // one the agent honours rather than a preference that is saved and
       // dropped.
-      options:
-        levels.length === 0
+      options: [
+        ...(levels.length === 0
           ? []
           : [
               {
@@ -356,7 +365,29 @@ function normalizeModels(
                 kind: "selection" as const,
                 values: levels as [string, ...string[]],
               },
-            ],
+            ]),
+        ...modelOptions
+          .filter(
+            (option) =>
+              option.category === "model_config" &&
+              option.id !== "model" &&
+              option.id !== "mode" &&
+              option.id !== reasoning?.id,
+          )
+          .flatMap((option) => {
+            const values = option.options.map((choice) => choice.value);
+            return values.length === 0
+              ? []
+              : [
+                  {
+                    id: option.id,
+                    displayName: option.name,
+                    kind: "selection" as const,
+                    values: values as [string, ...string[]],
+                  },
+                ];
+          }),
+      ],
     };
   });
 }
@@ -391,8 +422,9 @@ function normalizeProbe(
   sessionModels: AcpSessionModelState | undefined,
   observedAt: string,
   credentialStatus?: "stored",
+  optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
 ): ProviderProbeResult {
-  const models = normalizeModels(profile, options, sessionModels);
+  const models = normalizeModels(profile, options, sessionModels, optionsByModel);
   const reasoning =
     resolveReasoningOption(profile, options) !== undefined ||
     models.some((model) => model.reasoning === "supported")
@@ -650,6 +682,38 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
                 connection.root,
                 connection.version,
               );
+        const optionsByModel = new Map<string, ReadonlyArray<AcpSessionConfigOption>>();
+        if (profile.discoverModelOptions === true) {
+          // Devin's first session reports only its default model's settings.
+          // Selecting every advertised model in this disposable, non-generating
+          // session reveals its actual effort and speed choices.
+          for (const model of normalizeModels(
+            profile,
+            scratch.configOptions ?? [],
+            scratch.models,
+          )) {
+            const result = yield* request(
+              async () => {
+                try {
+                  return await client.setConfigOption(scratch.sessionId, "model", String(model.id));
+                } catch (error) {
+                  // An advertised model may be unavailable to this account. Only
+                  // a classified model refusal is recoverable; connection and
+                  // configuration failures must still fail the probe.
+                  if (
+                    error instanceof AcpFailure &&
+                    error.kind === "remote" &&
+                    error.remoteReason === "model"
+                  )
+                    return undefined;
+                  throw error;
+                }
+              },
+              { stage: "model-discovery", detectedVersion: connection.version },
+            );
+            if (result !== undefined) optionsByModel.set(String(model.id), result.configOptions);
+          }
+        }
         if (profile.closesSessions) yield* request(() => client.closeSession(scratch.sessionId));
         const observed = normalizeProbe(
           profile,
@@ -660,6 +724,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           scratch.models,
           factories.clock(),
           options.authentication === "api-key" ? "stored" : undefined,
+          profile.discoverModelOptions === true ? optionsByModel : undefined,
         );
         options.runtimeRegistry.setObservedState(observed);
         return observed;
@@ -1297,28 +1362,56 @@ function makeConnection(
             } else {
               await client.call(setModeCall.method, setModeCall.params);
             }
-            // ACP reports the agent's reasoning control as a session config
-            // option, and a chat turn carries only the prompt, so the level the
-            // user chose for this model is applied here. A value the agent does
-            // not offer is left alone: the probe declares the option from the
-            // agent's own choices, which is the same check from the other side.
-            const reasoningOption = resolveReasoningOption(profile, configOptions);
-            const requestedReasoning =
-              reasoningOption === undefined
-                ? undefined
-                : input.modelOptionValues?.[reasoningOption.id];
-            if (
-              reasoningOption !== undefined &&
-              requestedReasoning !== undefined &&
-              requestedReasoning.trim().length > 0 &&
-              reasoningOption.options.some((choice) => choice.value === requestedReasoning)
-            ) {
-              await client.setConfigOption(
-                source.sessionId,
-                reasoningOption.id,
-                requestedReasoning,
+            // Turns carry only the prompt. Restore model settings against the
+            // selected session's fresh choices before it can send; apply effort
+            // first because dependent controls can change with it.
+            const reasoningId = resolveReasoningOption(profile, configOptions)?.id;
+            const requestedSettings = Object.entries(input.modelOptionValues ?? {}).sort(
+              ([left], [right]) => Number(right === reasoningId) - Number(left === reasoningId),
+            );
+            for (const [id, value] of requestedSettings) {
+              const reasoningOption = resolveReasoningOption(profile, configOptions);
+              const option = configOptions.find(
+                (candidate) =>
+                  candidate.id === id &&
+                  candidate.id !== "mode" &&
+                  candidate.id !== "model" &&
+                  (candidate.id === reasoningOption?.id || candidate.category === "model_config"),
               );
+              if (
+                option === undefined ||
+                !option.options.some((choice) => choice.value === value)
+              ) {
+                if (profile.discoverModelOptions === true)
+                  throw failure(
+                    "invalid-configuration",
+                    `${name} no longer offers the selected model setting.`,
+                  );
+                continue;
+              }
+              const result = await client.setConfigOption(source.sessionId, option.id, value);
+              configOptions = result.configOptions;
+              if (
+                profile.discoverModelOptions === true &&
+                result.configOptions.find((candidate) => candidate.id === id)?.currentValue !==
+                  value
+              )
+                throw failure(
+                  "invalid-configuration",
+                  `${name} did not apply the selected model setting.`,
+                );
             }
+            if (
+              profile.discoverModelOptions === true &&
+              requestedSettings.some(
+                ([id, value]) =>
+                  configOptions.find((option) => option.id === id)?.currentValue !== value,
+              )
+            )
+              throw failure(
+                "invalid-configuration",
+                `${name} did not retain the selected model settings.`,
+              );
             if (connectionClosing || shutdownRequested)
               throw failure("interrupted", "ACP connection is closing.");
             let closed = false;

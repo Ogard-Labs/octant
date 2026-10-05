@@ -1,3 +1,4 @@
+import type { ProviderModelOptionValues } from "@octant/contracts";
 import {
   decodeChatAttachmentId,
   type ChatAttachmentId,
@@ -24,8 +25,9 @@ import { decodeProviderModelId } from "@octant/contracts/providers";
 import { startedConversationPickerGroups, type PickerGroup } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
 import { useEffect, useRef, useState } from "react";
-import { useSteeredSend } from "../composer/useSteeredSend";
-import type { TurnSettlement } from "../composer/steeredSend";
+import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
+import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
+import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { ComposerPoolControl } from "../providers/ComposerPoolControl";
 import {
   ChatComposer,
@@ -71,6 +73,7 @@ import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { ShellState } from "../shell/ShellState";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ChatWorkspaceProps {
   readonly controller: ChatController;
@@ -88,6 +91,7 @@ export interface ChatWorkspaceProps {
   readonly onRemoveExtensionSelection?: ChatComposerProps["onRemoveExtensionSelection"];
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly hostId?: HostId;
@@ -124,19 +128,7 @@ interface PendingAttachment {
   readonly displayName: string;
 }
 
-/**
- * A message the user sent while a response was still streaming.
- *
- * Only the words travel with it: the images, chips, and selections stay in the
- * composer until the host accepts the message, so a refusal leaves the whole
- * message retryable rather than half-gone.
- */
-interface ChatSteeredMessage {
-  readonly id: string;
-  readonly threadId: ChatThread["id"];
-  readonly prompt: string;
-  readonly draftEditRevision: number;
-  readonly attachments: ReadonlyArray<PendingAttachment>;
+interface ChatSendContext {
   readonly attachmentIds: ReadonlyArray<ChatAttachmentId>;
   readonly previewSelections: ReadonlyArray<PreviewContextSelection>;
   readonly canvasSelections: ReadonlyArray<CanvasContextSelection>;
@@ -145,17 +137,6 @@ interface ChatSteeredMessage {
   readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
   readonly threadMentionChips: ReadonlyArray<ChatComposerThreadMentionChip>;
 }
-
-type ChatSendContext = Pick<
-  ChatSteeredMessage,
-  | "attachmentIds"
-  | "previewSelections"
-  | "canvasSelections"
-  | "quotes"
-  | "extensionReceipts"
-  | "threadMentionIds"
-  | "threadMentionChips"
->;
 
 /**
  * The authoritative thread state a queued model option change builds on.
@@ -227,7 +208,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // on screen.
   const turnActive = view !== undefined && latestActiveAttempt(view) !== undefined;
   const pendingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
-  // Attachments captured by a steered message stay visible in the composer,
+  // Attachments captured by a queue submission stay visible in the composer,
   // but their cleanup ownership moves here until that message is accepted or
   // abandoned. This keeps unmount cleanup from purging bytes the host accepted.
   const deferredAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
@@ -238,78 +219,38 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const pendingCanvasRef = useRef<ReadonlyArray<CanvasContextSelection>>([]);
   const pendingPreviewRef = useRef<ReadonlyArray<PreviewContextSelection>>([]);
   const pendingQuotesRef = useRef<ReadonlyArray<TranscriptQuoteChip>>([]);
-  const threadMentionsRestoreRef = useRef<
-    (chips: ReadonlyArray<ChatComposerThreadMentionChip>) => void
-  >(() => {});
-  const restoreContextAllowedRef = useRef(false);
   const discardAttachmentRef = useRef(props.controller.discard);
   const markDraftStagedDroppedRef = useRef(props.controller.markDraftStagedDropped);
   const mountedRef = useRef(true);
   const activeThreadIdRef = useRef<string | undefined>(
     activeThread === undefined ? undefined : String(activeThread.id),
   );
-  const submitTurnRef = useRef<(message: ChatSteeredMessage) => Promise<boolean>>(
-    async () => false,
-  );
-  // Read after an await, so a message sent mid-response sees the draft the user
-  // has typed since rather than the one the render that started it captured.
-  const pendingDraftRef = useRef(props.controller.pendingDraft);
-  pendingDraftRef.current = props.controller.pendingDraft;
   const draftEditRevisionRef = useRef(0);
-  const setPendingDraftRef = useRef(props.controller.setPendingDraft);
-  setPendingDraftRef.current = props.controller.setPendingDraft;
-  const steered = useSteeredSend<ChatSteeredMessage>({
-    threadKey: activeThreadId === undefined ? undefined : String(activeThreadId),
-    settlement: chatTurnSettlement(view),
-    ready: uploadingAttachments.length === 0 && attachmentStatus.kind !== "removing",
-    send: async (message) => {
-      const laterDraft = pendingDraftRef.current;
-      const draftEditRevision = draftEditRevisionRef.current;
-      const restoreAllowed = () => {
-        restoreContextAllowedRef.current =
-          laterDraft.length === 0 &&
-          draftEditRevisionRef.current === draftEditRevision &&
-          draftEditRevision === message.draftEditRevision;
-      };
-      try {
-        const sent = await submitTurnRef.current(message);
-        restoreAllowed();
-        if (sent) restoreContextAllowedRef.current = false;
-        // The send path owns the composer for the message it is sending: it
-        // clears the draft, and puts the message back if the host refused it.
-        // A draft the user typed while this message was waiting belongs to
-        // neither, so it goes back over whatever that left behind.
-        if (laterDraft.length > 0 && draftEditRevisionRef.current === draftEditRevision) {
-          setPendingDraftRef.current(laterDraft);
-        }
-        return sent;
-      } catch (error) {
-        // A throw follows the same retry/abandon policy as a false result. The
-        // restore callback needs the same revision gate before the hook turns
-        // the exception into a refused send.
-        restoreAllowed();
-        throw error;
-      }
+  const messageQueue = useThreadMessageQueue({
+    mode: "chat",
+    hostId: props.hostId,
+    draft: {
+      text: props.controller.pendingDraft,
+      revision: draftEditRevisionRef.current,
+      clear: () => props.controller.setPendingDraft(""),
     },
-    // The images, chips, and selections were never taken, so putting the words
-    // back leaves the whole message retryable. A newer draft the user typed
-    // while this one waited is the one worth keeping.
-    restore: (message) => {
-      const canRestore =
-        mountedRef.current &&
-        activeThreadIdRef.current === message.threadId &&
-        restoreContextAllowedRef.current &&
-        draftEditRevisionRef.current === message.draftEditRevision;
-      if (!canRestore) {
-        abandonDeferredContext(message);
-        restoreContextAllowedRef.current = false;
+    onRecoveredRefused: async (command) => {
+      if (
+        command.kind !== "enqueue" ||
+        command.payload.mode !== "chat" ||
+        activeThreadId === undefined
+      )
         return;
-      }
-      if (pendingDraftRef.current.length === 0) setPendingDraftRef.current(message.prompt);
-      threadMentionsRestoreRef.current(message.threadMentionChips);
-      restoreDeferredAttachments();
-      restoreContextAllowedRef.current = false;
+      await Promise.allSettled(
+        (command.payload.attachmentIds ?? []).map((attachmentId) =>
+          props.controller.discard({ threadId: activeThreadId, attachmentId }),
+        ),
+      );
     },
+    threadId: activeThreadId === undefined ? undefined : String(activeThreadId),
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    client: props.messageQueueClient,
   });
   const checkpoints = useThreadCheckpoints({
     threadId: String(activeThreadId ?? ""),
@@ -412,7 +353,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     dialogueEnabled: true,
     ...(props.onOpenSideChat === undefined ? {} : { onSideChatOpened: props.onOpenSideChat }),
   });
-  threadMentionsRestoreRef.current = threadMentions.restore;
   threadMentionChipsRef.current = threadMentions.chips;
   const parallelReview = useLinkedThreadParallelReview({
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -484,6 +424,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const providerState = providerPresentation(props.providerSnapshot, view);
   const activeAttempt = latestActiveAttempt(view);
   const isSending = activeAttempt !== undefined;
+  const queueFollowUp =
+    isSending ||
+    view.turns.at(-1)?.attempts.at(-1)?.outcome === "waiting" ||
+    messageQueue.busy ||
+    messageQueue.uncertain ||
+    (messageQueue.snapshot?.items.length ?? 0) > 0 ||
+    messageQueue.snapshot?.paused === true ||
+    messageQueue.snapshot?.holdReason !== undefined;
   // Chat pool routing is server-owned and evaluated against LOCAL_HOST_ID, so
   // composer pool candidates always carry the "local" host.
   const composerPoolModel = buildComposerPoolModel({
@@ -610,14 +558,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   function selectProviderModel(selection: {
     readonly providerInstanceId: ChatThread["providerInstanceId"];
     readonly modelId: ChatThread["modelId"];
+    readonly modelOptionValues?: ProviderModelOptionValues;
   }) {
-    void enqueueThreadCommand(async (previous) => {
+    return enqueueThreadCommand(async (previous) => {
       const result = await props.controller.execute({
         kind: "change-chat-provider",
         threadId: thread.id,
         expectedVersion: queuedVersion(previous),
         providerInstanceId: selection.providerInstanceId,
         modelId: selection.modelId,
+        ...(selection.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: selection.modelOptionValues }),
       });
       return { value: undefined, base: baseFromResult(result) };
     }).catch(() => undefined);
@@ -652,47 +604,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       );
       return next;
     });
-  }
-
-  function detachDeferredAttachments(message: ChatSteeredMessage): void {
-    const capturedIds = new Set(message.attachments.map((attachment) => String(attachment.id)));
-    pendingAttachmentsRef.current = pendingAttachmentsRef.current.filter(
-      (attachment) => !capturedIds.has(String(attachment.id)),
-    );
-    deferredAttachmentsRef.current = message.attachments;
-  }
-
-  function restoreDeferredAttachments(): void {
-    const owned = deferredAttachmentsRef.current;
-    if (owned.length === 0) return;
-    deferredAttachmentsRef.current = [];
-    const ownedIds = new Set(owned.map((attachment) => String(attachment.id)));
-    pendingAttachmentsRef.current = [
-      ...owned,
-      ...pendingAttachmentsRef.current.filter((attachment) => !ownedIds.has(String(attachment.id))),
-    ];
-    // The visible list still contains these entries while a deferred send
-    // waits, so restoring ownership only needs to repair the cleanup ledger.
-  }
-
-  function abandonDeferredContext(message: ChatSteeredMessage): void {
-    const owned = deferredAttachmentsRef.current;
-    if (owned.length === 0) return;
-    deferredAttachmentsRef.current = [];
-    const ownedIds = new Set(owned.map((attachment) => String(attachment.id)));
-    if (mountedRef.current && activeThreadIdRef.current === message.threadId) {
-      setPendingAttachments((current) =>
-        current.filter((attachment) => !ownedIds.has(String(attachment.id))),
-      );
-      pendingAttachmentsRef.current = pendingAttachmentsRef.current.filter(
-        (attachment) => !ownedIds.has(String(attachment.id)),
-      );
-    }
-    for (const attachment of owned) {
-      void discardAttachmentRef
-        .current({ threadId: message.threadId, attachmentId: attachment.id })
-        .catch(() => undefined);
-    }
   }
 
   function consumeContext(context: ChatSendContext): void {
@@ -756,14 +667,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     }
   }
 
-  const submitTurn = async (
-    draft: string,
-    steeredMessage?: ChatSteeredMessage,
-  ): Promise<boolean> => {
-    const deferred = steeredMessage !== undefined;
-    const extensionReceiptsForSend = deferred
-      ? steeredMessage.extensionReceipts
-      : pendingExtensionRef.current;
+  const submitTurn = async (draft: string): Promise<boolean> => {
+    const extensionReceiptsForSend = pendingExtensionRef.current;
     // Refusing before anything is claimed keeps the staged attachments and
     // context with the draft the user fixes.
     const unattachedMentions = unattachedCapabilityMentions(
@@ -777,18 +682,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       return false;
     }
     setSendNotice(undefined);
-    const claimedAttachments = deferred ? [] : pendingAttachmentsRef.current;
-    if (!deferred) pendingAttachmentsRef.current = [];
-    const quotesForSend = deferred ? steeredMessage.quotes : pendingQuotesRef.current;
-    const previewSelectionsForSend = deferred
-      ? steeredMessage.previewSelections
-      : pendingPreviewSelections;
-    const canvasSelectionsForSend = deferred
-      ? steeredMessage.canvasSelections
-      : pendingCanvasSelections;
-    const threadMentionChipsForSend = deferred
-      ? steeredMessage.threadMentionChips
-      : [...threadMentions.chips];
+    const claimedAttachments = pendingAttachmentsRef.current;
+    pendingAttachmentsRef.current = [];
+    const quotesForSend = pendingQuotesRef.current;
+    const previewSelectionsForSend = pendingPreviewSelections;
+    const canvasSelectionsForSend = pendingCanvasSelections;
+    const threadMentionChipsForSend = [...threadMentions.chips];
     // A `#thread` chip names a thread; it never carries one. The turn
     // sends chip ids and the host resolves each one as the turn runs,
     // re-checking that the sender may still open it, so the message
@@ -797,14 +696,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     // report: a chip the host refuses is shown as unavailable rather
     // than silently dropped.
     const sendingThreadId = String(view.thread.id);
-    const threadMentionIds = deferred
-      ? steeredMessage.threadMentionIds
-      : await threadMentions.resolveForSend();
+    const threadMentionIds = await threadMentions.resolveForSend();
     if (activeThreadIdRef.current !== sendingThreadId) return false;
     const outgoing = formatOutgoingMessageWithQuotes({ draft, quotes: quotesForSend });
-    const attachmentIds = deferred
-      ? steeredMessage.attachmentIds
-      : claimedAttachments.map((attachment) => attachment.id);
+    const attachmentIds = claimedAttachments.map((attachment) => attachment.id);
     if (outgoing.trim().length === 0 && attachmentIds.length === 0) return false;
     const context: ChatSendContext = {
       attachmentIds,
@@ -842,7 +737,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         ),
       }));
     } catch (error) {
-      if (!deferred) {
+      {
         recoverClaimedAttachments(
           claimedAttachments,
           mountedRef.current,
@@ -854,9 +749,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       throw error;
     }
     if (sent) {
-      if (deferred) deferredAttachmentsRef.current = [];
       consumeContext(context);
-    } else if (!deferred) {
+    } else {
       recoverClaimedAttachments(
         claimedAttachments,
         mountedRef.current,
@@ -867,14 +761,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     }
     return sent;
   };
-  submitTurnRef.current = (message) => submitTurn(message.prompt, message);
 
   return (
     <section aria-label="Chat workspace" className="chat-workspace">
       {props.controller.errorMessage === undefined ? null : (
-        <p className="chat-workspace__error" role="alert">
+        <OctantAlert className="chat-workspace__error" tone="danger">
           {props.controller.errorMessage}
-        </p>
+        </OctantAlert>
       )}
       <div className="chat-workspace__conversation">
         <header className="chat-workspace__header">
@@ -988,7 +881,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         )}
         <ChatTranscript
           busy={isSending || branchPending}
-          {...(steered.pending === undefined ? {} : { pendingUserMessage: steered.pending.prompt })}
           {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
           {...(checkpoints.available
             ? {
@@ -1211,7 +1103,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           ? {}
           : { onCaretIndexChange: props.controller.setPendingDraftCaret })}
         isSending={isSending}
-        hasPendingMessage={steered.pending !== undefined}
+        queueing={queueFollowUp}
+        queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
         model={{
           // Without picker groups there is no ownership to reason about, so a
           // started thread's fallback keeps only its own model.
@@ -1330,6 +1223,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               onSelectModel: (selection: {
                 readonly providerInstanceId: (typeof view.thread)["providerInstanceId"];
                 readonly modelId: (typeof view.thread)["modelId"];
+                readonly modelOptionValues?: ProviderModelOptionValues;
               }) => selectProviderModel(selection),
             })}
         onProviderChange={(providerId) => {
@@ -1350,53 +1244,92 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           void changeResearch({ enabled: view.thread.researchEnabled, routing })
         }
         onSend={async (draft) => {
-          if (steered.pending !== undefined) return false;
-          // Sending during a streaming response is still sending: the message
-          // leaves the composer now and joins the transcript, and the host runs
-          // it as soon as this thread stops running one.
-          if (isSending) {
-            const draftRevision = draftEditRevisionRef.current;
-            const snapshot = {
-              id: globalThis.crypto.randomUUID(),
-              threadId: view.thread.id,
-              prompt: draft,
-              draftEditRevision: draftRevision,
-              attachments: [...pendingAttachmentsRef.current],
-              attachmentIds: pendingAttachmentsRef.current.map((attachment) => attachment.id),
-              previewSelections: [...pendingPreviewRef.current],
-              canvasSelections: [...pendingCanvasRef.current],
-              quotes: [...pendingQuotesRef.current],
-              extensionReceipts: [...pendingExtensionRef.current],
-              threadMentionChips: [...threadMentions.chips],
-            };
-            // Resolve before steering so this message carries the host's
-            // availability receipt. The returned ids stay with this snapshot;
-            // a later edit must not replace them.
-            const threadMentionIds = await threadMentions.resolveForSend();
-            if (!mountedRef.current) return false;
-            const steeredMessage: ChatSteeredMessage = {
-              ...snapshot,
-              threadMentionIds,
-            };
-            if (!steered.steer(steeredMessage)) return false;
-            detachDeferredAttachments(steeredMessage);
-            // The textarea remains editable while mention resolution is in
-            // flight. Never clear text typed after this send began.
-            if (draftEditRevisionRef.current === draftRevision) {
-              props.controller.setPendingDraft("");
-            }
-            return true;
+          if (!queueFollowUp) return await submitTurn(draft);
+          if (!messageQueue.available || messageQueue.busy || messageQueue.uncertain) return false;
+          const revision = draftEditRevisionRef.current;
+          const origin = String(view.thread.id);
+          const claimed = [...pendingAttachmentsRef.current];
+          const context = {
+            attachmentIds: claimed.map((attachment) => attachment.id),
+            previewSelections: [...pendingPreviewRef.current],
+            canvasSelections: [...pendingCanvasRef.current],
+            quotes: [...pendingQuotesRef.current],
+            extensionReceipts: [...pendingExtensionRef.current],
+            threadMentionChips: [...threadMentions.chips],
+          };
+          const extensionSelections = context.extensionReceipts.flatMap((receipt) =>
+            receipt.selection === undefined ? [] : [receipt.selection],
+          );
+          const unattached = unattachedCapabilityMentions(draft, extensionSelections);
+          if (unattached.length > 0) {
+            setSendNotice(unattachedCapabilityMentionCopy(unattached));
+            return false;
           }
-          return await submitTurn(draft);
+          pendingAttachmentsRef.current = [];
+          deferredAttachmentsRef.current = claimed;
+          const releaseClaim = () => {
+            const ids = new Set(claimed.map((entry) => String(entry.id)));
+            deferredAttachmentsRef.current = deferredAttachmentsRef.current.filter(
+              (entry) => !ids.has(String(entry.id)),
+            );
+          };
+          const restoreClaim = () => {
+            releaseClaim();
+            recoverClaimedAttachments(
+              claimed,
+              mountedRef.current && activeThreadIdRef.current === origin,
+              view.thread.id,
+              pendingAttachmentsRef,
+              discardAttachmentRef,
+            );
+          };
+          try {
+            const threadMentionIds = await threadMentions.resolveForSend();
+            if (!mountedRef.current || activeThreadIdRef.current !== origin) {
+              restoreClaim();
+              return false;
+            }
+            const result = await messageQueue.enqueue(
+              {
+                mode: "chat",
+                prompt: formatOutgoingMessageWithQuotes({ draft, quotes: context.quotes }),
+                attachmentIds: context.attachmentIds,
+                previewSelections: context.previewSelections,
+                canvasSelections: context.canvasSelections,
+                extensionSelections,
+                threadMentionIds,
+              },
+              () => {
+                releaseClaim();
+                if (!mountedRef.current || activeThreadIdRef.current !== origin) return;
+                consumeContext({ ...context, threadMentionIds });
+                if (draftEditRevisionRef.current === revision) props.controller.setPendingDraft("");
+              },
+              restoreClaim,
+              { text: draft, revision },
+            );
+            return result === "accepted";
+          } catch {
+            restoreClaim();
+            return false;
+          }
         }}
         pendingCanvasSelections={pendingCanvasSelections}
         pendingAttachments={pendingAttachments}
+        attachmentRemovalDisabled={messageQueue.busy || messageQueue.uncertain}
         pendingPreviewSelections={pendingPreviewSelections}
         pendingQuotes={pendingQuotes}
         pendingExtensionSelections={pendingExtensionSelections}
-        {...(steered.pending === undefined
+        {...(!queueFollowUp ||
+        (messageQueue.available && !messageQueue.uncertain && !messageQueue.busy)
           ? {}
-          : { sendDisabledReason: "A message is already waiting to run." })}
+          : {
+              sendDisabledReason: !messageQueue.available
+                ? "The host message queue is unavailable."
+                : messageQueue.uncertain
+                  ? "Check the previous queue change before sending another message."
+                  : "Waiting for the host queue…",
+            })}
         onRemoveExtensionSelection={removeExtensionSelection}
         onRemoveQuote={(quoteId) => {
           setPendingQuotes((current) => current.filter((quote) => quote.id !== quoteId));
@@ -1590,39 +1523,6 @@ function latestActiveAttempt(view: ChatThreadView): ChatAttempt | undefined {
     }
   }
   return undefined;
-}
-
-function latestAttempt(view: ChatThreadView): ChatAttempt | undefined {
-  for (let turnIndex = view.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
-    const turn = view.turns[turnIndex];
-    if (turn === undefined) continue;
-    const attempts = turn.attempts;
-    const attempt = attempts[attempts.length - 1];
-    if (attempt !== undefined) return attempt;
-  }
-  return undefined;
-}
-
-function chatTurnSettlement(view: ChatThreadView | undefined): TurnSettlement | "idle" {
-  if (view === undefined) return "idle";
-  const active = latestActiveAttempt(view);
-  if (active !== undefined) return "running";
-  const latest = latestAttempt(view);
-  if (latest === undefined) return "idle";
-  switch (latest.outcome) {
-    case "queued":
-    case "streaming":
-      return "running";
-    case "waiting":
-      return "waiting";
-    case "completed":
-      return "completed";
-    case "cancelled":
-    case "interrupted":
-      return "cancelled";
-    case "failed":
-      return "failed";
-  }
 }
 
 function providerPresentation(

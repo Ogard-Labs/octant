@@ -378,8 +378,16 @@ High") and reset above, and Faster and Smarter at the track's two ends. The fill
 is a dot grain that grows denser, brighter, and more purple, with a soft glow,
 the higher the level; a chosen level shows at once and never snaps back while
 it saves. Explicit model and reasoning choices are remembered
-locally for new threads; reasoning is keyed by provider/model and restored only while
-supported. Existing thread selections remain authoritative.
+locally for new threads; model settings are keyed by provider/model and restored only
+while supported. Existing thread selections remain authoritative. The same picker
+shows every declared model setting in Chat, Work, and Code. Paired model families
+show Lead and Sidekick selectors drawn from available catalog entries; choosing
+one preserves the other choice and carries still-supported explicit effort and
+speed settings. Devin's Speed selector offers Standard and Fast where the CLI
+supports Fast Mode, plus Default to use the provider's choice. The settings area
+scrolls within the bounded popup at narrow or short viewport sizes.
+Model choices and settings wait for an asynchronous model change to finish before
+accepting another edit, so the next configuration choice uses the confirmed pairing.
 
 The screen sits on the application ground (0091, 0129), set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, or the
@@ -467,6 +475,20 @@ shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 `ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
 menus now use the shared `OctantContextMenu` adapter; do not add a new direct
 primitive import.
+
+Desktop context menus and ordinary dropdown menus (including More, the account
+menu, action menus, plain select fields, Project/thread filters, and checkbox/radio choices) use Electron's native OS menus through that adapter.
+The OS owns their font, material, spacing, highlighting, submenu behavior,
+accessibility, and light/dark appearance; renderer theme tokens do not repaint
+native menus. The account menu opens above its footer control and More beside
+its sidebar row. Activity › Custom range opens a date-range dialog.
+The existing action composition supplies labels, grouping,
+disabled and checked states, and nested actions. Native menus dismiss after
+a selection, including checkbox/radio changes; reopening reads the current state. Ordinary editable text and text selections
+receive the platform editing/copy menu. The Code editor and both diff sides
+use native editing/find actions that run through the existing editor commands. Browser clients retain the accessible
+Base UI menus. Searchable pickers and popovers with embedded controls remain
+renderer surfaces.
 
 ### Turn header
 
@@ -1249,7 +1271,16 @@ and Tooltip. Composition rules:
   announce as `alert`; neutral, accent, and success announce as `status`.
   Placement belongs to the feature; the callout recipe owns its appearance.
   Permission decisions and confirmation side effects stay with the host and
-  their existing dialog callers.
+  their existing dialog callers. A new raw `role="alert"` or `role="dialog"` in
+  feature source fails `bun run ui:check` unless it is a recorded exception:
+  an inline field error tied to its input, a compact status row that already
+  owns its mark or switches between status and alert, a screen-reader-only
+  announcement, a positioned banner whose placement is not a callout, an
+  empty-state live region owned by `ShellState` or `OctantEmpty`, or a
+  non-modal glass panel. Zen's thread picker, assistant, and add/appearance
+  panels stay anchored in the surface; `OctantDialog` would add a backdrop,
+  focus trap, and portal. The recipe owners (`OctantAlert`, `OctantToast`,
+  `OctantApprovalCard`, `FieldError`, and `ShellState`) set the role themselves.
 - Product notices use `OctantToast`: a semantic icon, short title, supporting
   detail, and an explicit Dismiss button. An optional inline action can open the
   relevant destination without implicitly dismissing the notice. Success and
@@ -1589,11 +1620,22 @@ diff presentation; file disclosures mount only their open preview.
 ### Compact task controls
 
 The right Tools launcher starts directly beneath the window control rail, without
-an extra top spacer. While a Code or Work turn runs, its composer keeps its send
-action (**Queue message** in Code, **Send follow-up** in Work) and shows a
+an extra top spacer. While a turn runs, its composer keeps a **Queue message**
+action and shows a
 **Stop turn** control beside it; that control stays disabled until the host has
-admitted the turn. An accepted queued message shows **Queued** instead of
-instructions about Enter. The idle action sends normally.
+admitted the turn. Accepted messages appear in the queue count. The idle action
+sends normally when there are no pending messages or queue holds.
+
+Accepted messages appear in a compact, initially collapsed queue above the
+composer in Chat, Work and Code. Its header shows the message count and status;
+expanding it reveals pending text, edit, move and remove controls, plus pause
+and resume. A held reason remains visible when collapsed. Controls operate on the
+host's current version; conflicting edits refresh the list and preserve the
+person's unsent text. A failed enqueue leaves the draft and attachments in the
+composer. Reopening a thread reads the accepted queue from the host without
+resending it. Queue controls remain keyboard accessible and wrap at narrow
+widths. A running-turn steering control is separate and appears only where the
+runtime supports it.
 
 Native Code approvals use a compact 216px surface above the composer, with a
 scrollable action and scope description, collapsible authority details, and a

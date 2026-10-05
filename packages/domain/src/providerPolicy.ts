@@ -112,14 +112,13 @@ export function isImageProfileDriverKind(
  * Verified provider-owned self-update argv from the official CLI docs and the
  * binaries' own help output. Gemini CLI has no documented update subcommand
  * (installs via npm; /upgrade is a billing-tier action), so it stays
- * unavailable.
+ * unavailable. OpenCode is updated on the managed tool channel instead, so a
+ * provider-owned upgrade is not offered: that command would replace a binary
+ * outside Octant's managed location.
  */
 const PROVIDER_CLI_UPDATE_COMMANDS: Partial<Record<ProviderDriverKind, ReadonlyArray<string>>> = {
   codex: ["update"],
   claude: ["update"],
-  // The binary's own help lists `upgrade, update`; `upgrade` is the name it
-  // documents first and the one an older install has always answered to.
-  opencode: ["upgrade"],
   devin: ["update"],
   "mistral-vibe": ["update"],
   grok: ["update"],
@@ -254,6 +253,7 @@ export interface OpenAiCompatibleConfigurationInput {
   readonly authentication: OpenAiCompatibleProviderConfiguration["authentication"];
   readonly protocol: OpenAiCompatibleProviderConfiguration["protocol"];
   readonly manualModelIds: ReadonlyArray<string>;
+  readonly oauthDescriptorId?: OpenAiCompatibleProviderConfiguration["oauthDescriptorId"];
 }
 
 function normalizeOpenAiCompatibleConfiguration(
@@ -270,6 +270,9 @@ function normalizeOpenAiCompatibleConfiguration(
     manualModelIds: normalizeManualModelIds(
       configuration.manualModelIds,
     ) as OpenAiCompatibleProviderConfiguration["manualModelIds"],
+    ...(configuration.oauthDescriptorId === undefined
+      ? {}
+      : { oauthDescriptorId: configuration.oauthDescriptorId }),
   };
 }
 
@@ -280,6 +283,7 @@ export interface AnthropicCompatibleConfigurationInput {
   readonly protocol: AnthropicCompatibleProviderConfiguration["protocol"];
   readonly protocolVersion: string;
   readonly manualModelIds: ReadonlyArray<string>;
+  readonly oauthDescriptorId?: AnthropicCompatibleProviderConfiguration["oauthDescriptorId"];
 }
 
 function normalizeAnthropicCompatibleConfiguration(
@@ -303,6 +307,9 @@ function normalizeAnthropicCompatibleConfiguration(
     manualModelIds: normalizeManualModelIds(
       configuration.manualModelIds,
     ) as AnthropicCompatibleProviderConfiguration["manualModelIds"],
+    ...(configuration.oauthDescriptorId === undefined
+      ? {}
+      : { oauthDescriptorId: configuration.oauthDescriptorId }),
   };
 }
 

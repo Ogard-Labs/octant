@@ -15,7 +15,9 @@ import type {
   ThreadRetentionState,
 } from "@octant/contracts/thread-retention";
 import { ProviderDriverKind } from "@octant/contracts/providers";
+import { THREAD_PURGE_DELETED_SCOPES, THREAD_PURGE_RETAINED_SCOPES } from "@octant/domain";
 import { purgeComposerThreadDrafts } from "../composer/composerThreadDraftStore";
+import { HostPrivacyExport } from "./HostPrivacyExport";
 import { driverLabel } from "../providers/providerSettingsPresentation";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -36,6 +38,7 @@ import { FederatedHostsLifecyclePanel } from "./FederatedHostsLifecyclePanel";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { HostDataMap } from "@octant/contracts/host-data-map";
 import { HostDataMapView } from "./HostDataMap";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
  * The Settings host card for one local or headless
@@ -391,9 +394,11 @@ export function HostSettingsSection({
 export function HostDataSettingsSection({
   client,
   focusedSetting,
+  threads = [],
 }: {
   readonly client: HostControlClient;
   readonly focusedSetting?: string | undefined;
+  readonly threads?: ReadonlyArray<PrivacyTarget>;
 }) {
   const backupLabelId = useId();
   const retentionRef = useRef<HTMLDivElement>(null);
@@ -521,9 +526,15 @@ export function HostDataSettingsSection({
         </div>
       </SettingsPanel>
 
+      <HostPrivacyExport exportHost={() => client.exportHost()} />
+
       {/* Purging history is the page's destructive group, so it sits last. */}
       <div ref={retentionRef}>
-        <ThreadRetentionPanel client={client} />
+        <ThreadRetentionPanel
+          client={client}
+          projects={privacyProjects(dataMapState)}
+          threads={threads}
+        />
       </div>
     </section>
   );
@@ -562,6 +573,63 @@ const WINDOW_OPTIONS: ReadonlyArray<{ readonly value: string; readonly window: R
     { value: "365", window: { kind: "duration-days", days: 365 } },
   ];
 
+export interface PrivacyTarget {
+  readonly id: string;
+  readonly title: string;
+  readonly mode: "chat" | "work" | "code";
+}
+
+function privacyProjects(state: DataMapState): ReadonlyArray<PrivacyTarget> {
+  if (state.kind !== "ready" || state.report.projects.kind !== "known") return [];
+  return state.report.projects.projects.map((project) => ({
+    id: project.projectId,
+    title: project.name,
+    mode: project.type,
+  }));
+}
+
+function PrivacyTargetSearch({
+  id,
+  label,
+  onSelect,
+  query,
+  setQuery,
+  targets,
+}: {
+  readonly id: string;
+  readonly label: string;
+  readonly onSelect: (id: string) => void;
+  readonly query: string;
+  readonly setQuery: (value: string) => void;
+  readonly targets: ReadonlyArray<PrivacyTarget>;
+}) {
+  const needle = query.trim().toLowerCase();
+  const matches = targets.filter((target) => {
+    if (needle === "") return true;
+    return target.title.toLowerCase().includes(needle) || target.id.toLowerCase().includes(needle);
+  });
+  return (
+    <div className="host-settings__field">
+      <label htmlFor={id}>{label}</label>
+      <OctantInput
+        id={id}
+        onChange={(event) => setQuery(event.currentTarget.value)}
+        value={query}
+      />
+      <ul>
+        {matches.map((target) => (
+          <li key={target.id}>
+            <OctantButton onClick={() => onSelect(target.id)} type="button" variant="secondary">
+              {target.title} ({target.mode})
+            </OctantButton>
+          </li>
+        ))}
+      </ul>
+      {matches.length === 0 ? <p className="host-settings__note">No matches.</p> : null}
+    </div>
+  );
+}
+
 function isRetentionScopeKind(value: string): value is RetentionScope["kind"] {
   return value === "host" || value === "project" || value === "thread";
 }
@@ -570,11 +638,21 @@ function isThreadMode(value: string): value is "chat" | "work" | "code" {
   return value === "chat" || value === "work" || value === "code";
 }
 
-function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }) {
+function ThreadRetentionPanel({
+  client,
+  projects,
+  threads,
+}: {
+  readonly client: HostControlClient;
+  readonly projects: ReadonlyArray<PrivacyTarget>;
+  readonly threads: ReadonlyArray<PrivacyTarget>;
+}) {
   const [state, setState] = useState<ThreadRetentionState | undefined>();
   const [scopeKind, setScopeKind] = useState<RetentionScope["kind"]>("host");
   const [mode, setMode] = useState<"chat" | "work" | "code">("chat");
+  const [threadQuery, setThreadQuery] = useState("");
   const [threadId, setThreadId] = useState("");
+  const [projectQuery, setProjectQuery] = useState("");
   const [projectId, setProjectId] = useState("");
   const [windowValue, setWindowValue] = useState("forever");
   const [confirmPurge, setConfirmPurge] = useState(false);
@@ -592,11 +670,15 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
   const scope = (): RetentionScope | undefined => {
     if (scopeKind === "host") return { kind: "host" };
     if (scopeKind === "project") {
-      const trimmed = projectId.trim();
-      return trimmed === "" ? undefined : { kind: "project", projectId: trimmed as never };
+      const selected = projects.find((project) => project.id === projectId);
+      return selected === undefined
+        ? undefined
+        : { kind: "project", projectId: selected.id as never };
     }
-    const trimmed = threadId.trim();
-    return trimmed === "" ? undefined : { kind: "thread", mode, threadId: trimmed as never };
+    const selected = threads.find((thread) => thread.id === threadId && thread.mode === mode);
+    return selected === undefined
+      ? undefined
+      : { kind: "thread", mode, threadId: selected.id as never };
   };
 
   const selectedWindow =
@@ -634,14 +716,21 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
           />
         </div>
         {scopeKind === "project" ? (
-          <div className="host-settings__field">
-            <label htmlFor="thread-retention-project">Project id</label>
-            <OctantInput
-              id="thread-retention-project"
-              onChange={(event) => setProjectId(event.currentTarget.value)}
-              value={projectId}
-            />
-          </div>
+          <PrivacyTargetSearch
+            id="thread-retention-project"
+            label="Find a Project"
+            onSelect={(id) => {
+              const selected = projects.find((project) => project.id === id);
+              setProjectId(id);
+              setProjectQuery(selected?.title ?? id);
+            }}
+            query={projectQuery}
+            setQuery={(value) => {
+              setProjectQuery(value);
+              setProjectId("");
+            }}
+            targets={projects}
+          />
         ) : null}
         {scopeKind === "thread" ? (
           <>
@@ -650,7 +739,14 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
               <OctantSelectField
                 id="thread-retention-mode"
                 onValueChange={(value) => {
-                  if (isThreadMode(value)) setMode(value);
+                  if (isThreadMode(value)) {
+                    setMode(value);
+                    const selected = threads.find((thread) => thread.id === threadId);
+                    if (selected !== undefined && selected.mode !== value) {
+                      setThreadId("");
+                      setThreadQuery("");
+                    }
+                  }
                 }}
                 options={[
                   { id: "chat", label: "Chat" },
@@ -660,14 +756,22 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
                 value={mode}
               />
             </div>
-            <div className="host-settings__field">
-              <label htmlFor="thread-retention-thread">Thread id</label>
-              <OctantInput
-                id="thread-retention-thread"
-                onChange={(event) => setThreadId(event.currentTarget.value)}
-                value={threadId}
-              />
-            </div>
+            <PrivacyTargetSearch
+              id="thread-retention-thread"
+              label="Find a thread"
+              onSelect={(id) => {
+                const selected = threads.find((thread) => thread.id === id);
+                if (selected !== undefined) setMode(selected.mode);
+                setThreadId(id);
+                setThreadQuery(selected?.title ?? id);
+              }}
+              query={threadQuery}
+              setQuery={(value) => {
+                setThreadQuery(value);
+                setThreadId("");
+              }}
+              targets={threads.filter((thread) => thread.mode === mode)}
+            />
           </>
         ) : null}
         <div className="host-settings__field">
@@ -713,6 +817,10 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
           />{" "}
           I understand this permanently erases the selected thread history.
         </label>
+        <p className="host-settings__note">
+          This will delete {THREAD_PURGE_DELETED_SCOPES.join(", ")}. It will retain{" "}
+          {THREAD_PURGE_RETAINED_SCOPES.join(", ")}.
+        </p>
         <div className="host-settings__controls">
           <OctantButton
             disabled={busy || !confirmPurge || scope() === undefined}
@@ -770,9 +878,9 @@ function Identifier({ children }: { readonly children: string }) {
 function BackupOutcomeView({ outcome }: { readonly outcome: HostBackupOutcome }) {
   if (outcome.kind === "failed") {
     return (
-      <p className="settings-section-line" role="alert">
+      <OctantAlert className="settings-section-line" tone="warning">
         The backup was not created ({outcome.code}). Check the host logs.
-      </p>
+      </OctantAlert>
     );
   }
   return (

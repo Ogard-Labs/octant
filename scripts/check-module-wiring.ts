@@ -100,6 +100,14 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
+  [
+    "packages/domain/src/replicaEntryPolicy.ts",
+    "Pure reconcile policy for artifact replica entries and their membership. Nothing pulls a store yet, so no product caller imports it. Remove once the pull path imports reconcileReplicaEntry.",
+  ],
+  [
+    "apps/server/src/replica/syncedFolderReplicaStore.ts",
+    "Synced-folder replica store. Nothing publishes or pulls yet, so no product caller imports it. Remove once the replica service opens the store.",
+  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */

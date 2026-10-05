@@ -11,7 +11,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ProviderDriverKind, ProviderExecutionPolicy } from "@octant/contracts";
+import type { ProviderModel, ProviderDriverKind, ProviderExecutionPolicy } from "@octant/contracts";
 import type { AcpInitializeResult } from "./acpProtocol";
 
 export type AcpProviderKind = Extract<
@@ -134,6 +134,13 @@ export interface AcpProviderProfile {
   readonly displayName: string;
   /** Session config option that toggles reasoning, when the agent exposes one. */
   readonly reasoningOptionId: "effort" | "thinking";
+  /** The runtime exposes model-specific settings only after selecting each model. */
+  readonly discoverModelOptions?: boolean;
+  /** Normalize provider-owned variant labels before they cross to the renderer. */
+  readonly modelConfiguration?: (model: {
+    readonly value: string;
+    readonly name: string;
+  }) => ProviderModel["configuration"];
   /** Reasoning the agent publishes and takes in the session metadata instead. */
   readonly sessionMetaReasoning?: AcpSessionMetaReasoning;
   /** ACP `mode` config value for a product mode and execution policy. */
@@ -381,6 +388,24 @@ function devinMcpConfigPath(managedHome: string): string {
 const devinProfile: AcpProviderProfile = {
   kind: "devin",
   displayName: "Devin",
+  discoverModelOptions: true,
+  modelConfiguration: (model) => {
+    if (!model.value.startsWith("fusion-")) return undefined;
+    const labels = /^Fusion \((.+) \+ (.+)\)$/.exec(model.name);
+    const lead = labels?.[1]?.replace(
+      / (?:Low|Medium|High|XHigh|Max)(?: Thinking)?(?: Fast)?$/,
+      "",
+    );
+    const sidekick = labels?.[2];
+    if (lead === undefined || sidekick === undefined) return undefined;
+    return {
+      family: "Fusion",
+      choices: [
+        { id: "lead", displayName: "Lead", value: lead },
+        { id: "sidekick", displayName: "Sidekick", value: sidekick },
+      ],
+    };
+  },
   reasoningOptionId: "thinking",
   sessionMode: (mode, policy) => {
     if (mode === "chat") return "ask";

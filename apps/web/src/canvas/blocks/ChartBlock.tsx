@@ -20,6 +20,12 @@ const PLOT_WIDTH = 320;
 const PLOT_HEIGHT = 168;
 const INSET = 12;
 const AXIS_Y = 148;
+const MAX_INTERACTIVE_LEGEND_ITEMS = 24;
+
+type ChartCategory = {
+  readonly key: string;
+  readonly label: string;
+};
 
 export function ChartBlock({ block }: { readonly block: CanvasChartBlock }) {
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
@@ -92,7 +98,7 @@ function PieMarks({
   if (series === undefined) return null;
   const visible = series.points
     .map((point, index) => ({ point, index }))
-    .filter((item) => !hidden.has(sliceId(item.index)));
+    .filter((item) => !hidden.has(sliceId(String(item.point.x))));
   const wedges = pieWedges(visible.map((item) => item.point.y));
   const cx = PLOT_WIDTH / 2;
   const cy = 78;
@@ -364,7 +370,7 @@ function Axis({
   categories,
   zero,
 }: {
-  readonly categories: ReadonlyArray<string>;
+  readonly categories: ReadonlyArray<ChartCategory>;
   readonly zero: number | undefined;
 }) {
   const y = zero ?? AXIS_Y;
@@ -372,15 +378,15 @@ function Axis({
     <g>
       <line className="canvas-block__chart-axis" x1={INSET} x2={PLOT_WIDTH - INSET} y1={y} y2={y} />
       {categories.length <= 6
-        ? categories.map((label, index) => (
+        ? categories.map((category, index) => (
             <text
-              key={label}
+              key={category.key}
               className="canvas-block__chart-label"
               textAnchor="middle"
               x={categoryCenter(index, categories.length, PLOT_WIDTH, INSET)}
               y={164}
             >
-              {shortLabel(label)}
+              {shortLabel(category.label)}
             </text>
           ))
         : null}
@@ -461,27 +467,62 @@ function SliceTable({ block }: { readonly block: CanvasChartBlock }) {
 
 function SeriesTable({ block }: { readonly block: CanvasChartBlock }) {
   const categories = categoryLabels(block.series);
+  const aligned =
+    block.chartType === "stacked-bar" ||
+    block.chartType === "grouped-bar" ||
+    block.chartType === "bar-line";
+  const repeats = block.series.some(
+    (series) =>
+      new Set(series.points.map((point) => categoryKey(point.x))).size !== series.points.length,
+  );
+  if (aligned && !repeats) {
+    return (
+      <table aria-label="Chart readings" className="ds-table">
+        <thead>
+          <tr>
+            <th scope="col">Category</th>
+            {block.series.map((series) => (
+              <th key={series.seriesId} scope="col">
+                {series.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {categories.map((category) => (
+            <tr key={category.key}>
+              <th scope="row">{category.label}</th>
+              {block.series.map((series) => (
+                <td key={series.seriesId}>{formatScalar(valueAt(series, category.key))}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+  // Scatter, line, area, bar, and distribution can repeat or skip categories,
+  // so the disclosed table lists every reading instead of a matrix that would
+  // collapse duplicates to their first y.
   return (
     <table aria-label="Chart readings" className="ds-table">
       <thead>
         <tr>
-          <th scope="col">Category</th>
-          {block.series.map((series) => (
-            <th key={series.seriesId} scope="col">
-              {series.label}
-            </th>
-          ))}
+          <th scope="col">Series</th>
+          <th scope="col">X</th>
+          <th scope="col">Y</th>
         </tr>
       </thead>
       <tbody>
-        {categories.map((label) => (
-          <tr key={label}>
-            <th scope="row">{label}</th>
-            {block.series.map((series) => (
-              <td key={series.seriesId}>{formatScalar(valueAt(series, label))}</td>
-            ))}
-          </tr>
-        ))}
+        {block.series.flatMap((series) =>
+          series.points.map((point, index) => (
+            <tr key={`${String(series.seriesId)}:${String(index)}`}>
+              <th scope="row">{series.label}</th>
+              <td>{String(point.x)}</td>
+              <td>{formatScalar(point.y)}</td>
+            </tr>
+          )),
+        )}
       </tbody>
     </table>
   );
@@ -494,12 +535,14 @@ function legendItems(block: CanvasChartBlock): ReadonlyArray<{
   readonly seriesAttr: string;
 }> {
   if (block.chartType === "pie" || block.chartType === "donut") {
-    return (block.series[0]?.points ?? []).map((point, index) => ({
-      id: sliceId(index),
-      label: String(point.x),
-      keyClass: `chart-key is-block ${seriesClass(index)}`,
-      seriesAttr: String(index % 6),
-    }));
+    return (block.series[0]?.points ?? [])
+      .slice(0, MAX_INTERACTIVE_LEGEND_ITEMS)
+      .map((point, index) => ({
+        id: sliceId(String(point.x)),
+        label: String(point.x),
+        keyClass: `chart-key is-block ${seriesClass(index)}`,
+        seriesAttr: String(index % 6),
+      }));
   }
   return block.series.map((series, index) => ({
     id: series.seriesId,
@@ -524,30 +567,34 @@ function visibleSeries(block: CanvasChartBlock, hidden: ReadonlySet<string>) {
     .filter((item) => !hidden.has(item.series.seriesId));
 }
 
-function categoryLabels(series: ReadonlyArray<CanvasChartSeries>): ReadonlyArray<string> {
+function categoryKey(x: number | string): string {
+  return typeof x === "number" ? `n:${String(x)}` : `s:${x}`;
+}
+
+function categoryLabels(series: ReadonlyArray<CanvasChartSeries>): ReadonlyArray<ChartCategory> {
   const seen = new Set<string>();
-  const labels: string[] = [];
+  const labels: ChartCategory[] = [];
   for (const item of series) {
     for (const point of item.points) {
-      const key = typeof point.x === "number" ? `n:${String(point.x)}` : `s:${point.x}`;
+      const key = categoryKey(point.x);
       if (seen.has(key)) continue;
       seen.add(key);
-      labels.push(String(point.x));
+      labels.push({ key, label: String(point.x) });
     }
   }
   return labels;
 }
 
-function valueAt(series: CanvasChartSeries, label: string): number | undefined {
-  return series.points.find((point) => String(point.x) === label)?.y;
+function valueAt(series: CanvasChartSeries, key: string): number | undefined {
+  return series.points.find((point) => categoryKey(point.x) === key)?.y;
 }
 
 function seriesClass(index: number): string {
   return `ser-${String((index % 6) + 1)}`;
 }
 
-function sliceId(index: number): string {
-  return `slice:${String(index)}`;
+function sliceId(label: string): string {
+  return `slice:${label}`;
 }
 
 function plotY(value: number, domain: YDomain): number {

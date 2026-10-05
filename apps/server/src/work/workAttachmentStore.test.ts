@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -124,4 +124,159 @@ describe("WorkAttachmentStore", () => {
     expect(accepted).toHaveLength(limit);
     expect(refused).toHaveLength(3);
   });
+});
+
+describe("queued attachment ownership", () => {
+  const owner = "queued-message-1";
+  const upload = (thread: WorkThreadId, id: WorkAttachmentId) =>
+    store.stage({
+      threadId: thread,
+      attachmentId: id,
+      displayName: "queued.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([1, 2, 3]),
+    });
+
+  it("pins accepted images idempotently and frees the draft budget only after acknowledgement", async () => {
+    const thread = threadId(20);
+    const refs = await Promise.all(
+      Array.from({ length: MAX_WORK_TURN_ATTACHMENTS * 2 }, (_, i) =>
+        upload(thread, attachmentId(200 + i)),
+      ),
+    );
+    const ids = refs.map((ref) => ref.attachmentId);
+    expect(store.claimQueued(thread, owner, ids)).toEqual({ status: "ok", attachments: refs });
+    expect(store.claimQueued(thread, owner, ids)).toEqual({ status: "ok", attachments: refs });
+    expect(store.claimQueued(thread, "another-message", ids)).toMatchObject({ status: "refused" });
+    await expect(upload(thread, attachmentId(299))).rejects.toBeInstanceOf(WorkAttachmentInvalid);
+    const first = refs[0];
+    if (first === undefined) throw new Error("Fixture is missing an attachment.");
+    await expect(store.discard(thread, first.attachmentId)).rejects.toThrow("queued");
+    await expect(upload(thread, first.attachmentId)).rejects.toThrow();
+    expect(store.commitQueued(thread, owner)).toEqual({ status: "ok" });
+    expect(store.peek(thread, ids)).toMatchObject({ status: "unknown" });
+    await expect(upload(thread, attachmentId(299))).resolves.toBeDefined();
+    expect(store.claimQueued(thread, owner, ids)).toEqual({ status: "ok", attachments: refs });
+    expect(
+      await store.releaseQueued(thread, owner, {
+        disposition: "removed",
+        isTurnOwned: () => false,
+      }),
+    ).toEqual({ status: "ok" });
+    expect(store.isQueued(thread, first.attachmentId)).toBe(false);
+    await expect(store.read(thread, first)).rejects.toThrow();
+  });
+
+  it("restores durable pins before serving clients and verifies bytes before restoring dispatch metadata", async () => {
+    const thread = threadId(21);
+    const id = attachmentId(310);
+    const ref = await upload(thread, id);
+    store = new WorkAttachmentStore(root);
+    expect(store.restoreQueuedOwnership(thread, owner, [ref])).toEqual({ status: "ok" });
+    await store.recover();
+    expect(store.peek(thread, [id])).toEqual({ status: "unknown", attachmentId: id });
+    await expect(store.discard(thread, id)).rejects.toThrow("queued");
+    expect(await store.prepareQueued(thread, owner)).toEqual({ status: "ok", attachments: [ref] });
+    expect(store.peek(thread, [id])).toEqual({ status: "ok", attachments: [ref] });
+    store.release(thread, [id]);
+    expect(await store.releaseQueued(thread, owner, { disposition: "turn" })).toEqual({
+      status: "ok",
+    });
+    await store.discard(thread, id);
+    await expect(store.read(thread, ref)).resolves.toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it.each([new Uint8Array([8, 9, 0]), new Uint8Array([1, 2])])(
+    "holds corrupt bytes instead of restoring them for dispatch",
+    async (bytes) => {
+      const thread = threadId(22);
+      const id = attachmentId(320);
+      const ref = await upload(thread, id);
+      store = new WorkAttachmentStore(root);
+      expect(store.restoreQueuedOwnership(thread, owner, [ref])).toEqual({ status: "ok" });
+      await writeFile(join(root, "work-threads", thread, id, "finalized.bin"), bytes);
+      expect(await store.prepareQueued(thread, owner)).toMatchObject({
+        status: "refused",
+        reason: "unavailable",
+      });
+      expect(store.peek(thread, [id])).toEqual({ status: "unknown", attachmentId: id });
+      await expect(store.discard(thread, id)).rejects.toThrow("queued");
+    },
+  );
+
+  it("preserves turn-owned bytes when removing a recovered queue item", async () => {
+    const thread = threadId(23);
+    const ref = await upload(thread, attachmentId(330));
+    store = new WorkAttachmentStore(root);
+    expect(store.restoreQueuedOwnership(thread, owner, [ref])).toEqual({ status: "ok" });
+    expect(
+      await store.releaseQueued(thread, owner, {
+        disposition: "removed",
+        isTurnOwned: (id) => id === ref.attachmentId,
+      }),
+    ).toEqual({ status: "ok" });
+    await expect(store.read(thread, ref)).resolves.toHaveLength(3);
+  });
+
+  it("refuses a queue claim while deletion is already in flight", async () => {
+    const thread = threadId(24);
+    const ref = await upload(thread, attachmentId(340));
+    const discarded = store.discard(thread, ref.attachmentId);
+    expect(store.peek(thread, [ref.attachmentId])).toMatchObject({ status: "unknown" });
+    expect(store.claimQueued(thread, owner, [ref.attachmentId])).toMatchObject({
+      status: "refused",
+    });
+    await discarded;
+    expect(store.isQueued(thread, ref.attachmentId)).toBe(false);
+  });
+
+  it("rolls an unacknowledged reservation back to the draft without deleting bytes", async () => {
+    const thread = threadId(25);
+    const ref = await upload(thread, attachmentId(350));
+    expect(store.claimQueued(thread, owner, [ref.attachmentId])).toMatchObject({ status: "ok" });
+    expect(await store.releaseQueued(thread, owner, { disposition: "draft" })).toEqual({
+      status: "ok",
+    });
+    expect(store.peek(thread, [ref.attachmentId])).toEqual({ status: "ok", attachments: [ref] });
+    await store.discard(thread, ref.attachmentId);
+    await expect(store.read(thread, ref)).rejects.toThrow();
+  });
+});
+
+it("refuses ownership changes while dispatch verification or removal is in flight", async () => {
+  const thread = threadId(26);
+  const id = attachmentId(360);
+  const ref = await store.stage({
+    threadId: thread,
+    attachmentId: id,
+    displayName: "race.png",
+    mediaType: "image/png",
+    bytes: new Uint8Array([1]),
+  });
+  expect(store.claimQueued(thread, "owner", [id])).toMatchObject({ status: "ok" });
+  store.commitQueued(thread, "owner");
+  const preparing = store.prepareQueued(thread, "owner");
+  expect(
+    await store.releaseQueued(thread, "owner", {
+      disposition: "removed",
+      isTurnOwned: () => false,
+    }),
+  ).toMatchObject({ status: "refused", reason: "busy" });
+  expect(store.commitQueued(thread, "owner")).toMatchObject({ status: "refused", reason: "busy" });
+  expect(await preparing).toMatchObject({ status: "ok" });
+  const removing = store.releaseQueued(thread, "owner", {
+    disposition: "removed",
+    isTurnOwned: () => false,
+  });
+  expect(store.claimQueued(thread, "owner", [id])).toMatchObject({
+    status: "refused",
+    reason: "busy",
+  });
+  expect(store.restoreQueuedOwnership(thread, "owner", [ref])).toMatchObject({
+    status: "refused",
+    reason: "busy",
+  });
+  expect(await removing).toEqual({ status: "ok" });
+  expect(store.peek(thread, [id])).toMatchObject({ status: "unknown" });
+  expect(store.isQueued(thread, id)).toBe(false);
 });

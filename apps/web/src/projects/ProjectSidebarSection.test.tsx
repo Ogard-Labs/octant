@@ -1177,6 +1177,8 @@ describe("ProjectSidebarSection code project views", () => {
     trigger.focus();
     await user.keyboard("{ArrowDown}");
     await user.click(await screen.findByRole("menuitem", { name: "Activity" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Custom range" }));
+    expect(await screen.findByRole("dialog", { name: "Custom activity range" })).toBeVisible();
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Start date must be on or before end date.",
     );

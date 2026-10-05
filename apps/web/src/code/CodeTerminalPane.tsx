@@ -9,6 +9,7 @@ import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { XtermTerminalAdapter, type XtermAdapterRuntime } from "./XtermTerminalAdapter";
 import { ShellState } from "../shell/ShellState";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 type TerminalResult = Extract<CodeOperationResult, { readonly kind: "terminal-state" }>;
 
@@ -361,11 +362,11 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         </p>
       )}
       {result.transcript?.truncated === true ? (
-        <p className="code-delivery-pane__warning" role="alert">
+        <OctantAlert className="code-delivery-pane__warning" tone="warning">
           Terminal output is truncated. Earlier output is no longer available.
-        </p>
+        </OctantAlert>
       ) : null}
-      {failure === undefined ? null : <p role="alert">{failure}</p>}
+      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
       {notice === undefined ? null : <p role="status">{notice}</p>}
       {props.executionPolicy === "plan" ? (
         <p className="code-delivery-pane__notice">Plan mode keeps terminal replay read-only.</p>

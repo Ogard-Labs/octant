@@ -9,7 +9,8 @@ release is signed with a Developer ID, notarized, and updates itself. A
 package you build locally is unsigned because signing needs maintainer
 credentials. The preview includes no signed Intel, Windows, or Linux
 packaging; a Linux x64 AppImage can be built locally as an unsigned dogfood
-artifact that the updater will not update.
+artifact. An AppImage launch can update itself from the signed feed when the
+file is writable. A package, archive, or non-writable location cannot.
 Physical Apple devices, TestFlight, and App Store distribution are
 post-preview. This page records what that means for compatibility and
 migration.
@@ -22,7 +23,9 @@ and its database are created owner-only (mode 0700). Releases on other
 platforms are not shipped in the preview. The source headless runtime now uses
 safe XDG defaults on Linux, but signed or maintainer-published Linux release
 artifacts and real-host release validation remain post-preview work. The local
-unsigned x64 AppImage is a dogfood exception, not that release channel.
+unsigned x64 AppImage is a dogfood exception: it is not code-signed, and
+in-app update applies only when that image was launched from a writable path
+and the signed feed verifies.
 
 ## Compatibility notes
 
@@ -61,8 +64,8 @@ unsigned x64 AppImage is a dogfood exception, not that release channel.
 - Hosted relay, Octant cloud account, and cross-host command routing (a
   paired client can register several hosts, but every command runs on the
   one host that owns the thread)
-- Signed Intel, Windows, and Linux packaging with auto-update, and native
-  mobile store distribution
+- Signed Intel and Windows packaging, an operating-system code signature on
+  the Linux image, and native mobile store distribution
 - Mutating PR review and merge operations
 - Schedules, connector/OAuth marketplace, and data migration from current
   Octant

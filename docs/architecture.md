@@ -49,6 +49,18 @@ windows, not an additional host task registry. Titles never enter the public
 health response or redacted diagnostics. Separately managed hosts retain their
 existing lifecycle restrictions.
 
+## Desktop context menus
+
+Trusted top-level desktop windows may contribute a bounded native context menu
+through the preload bridge: at most 160 entries, four submenu levels, and labels
+up to 256 characters. Contributions contain presentation and opaque action IDs;
+they cannot supply Electron roles, callbacks, paths, URLs, or native commands.
+The shell returns the selected ID to the same window, which invokes its existing
+renderer action and ordinary server authority checks. Dismissed, refused, closed,
+or navigated windows select no action. Each window owns at most one contributed
+native popup. The desktop's own text editing menu uses Chromium's edit flags and
+fixed native roles; embedded browser frames cannot contribute workspace menus.
+
 ## Repository test cancellation
 
 An authorized repository test remains cancellable while the host rediscovers its
@@ -71,12 +83,17 @@ and close controls.
 Octant is one Electron application that hosts a Bun HTTP server, a React
 renderer, and (optionally) remote clients that connect to that same server.
 Everything the user cares about — Projects, threads, memory, event history,
-credential references, layouts — stays on the host machine.
+credential references, layouts — stays on the host machine. Artifact versions
+are the exception once sync is on: they are copied into a store the user owns,
+not into a store Octant operates. The journal does not leave. See
+[Persistence](#persistence).
 
 The design rests on a small set of invariants that every package obeys:
 
 - **Local-first.** No Octant cloud account, relay, or telemetry is required.
-  Remote access is host-to-device over the user's own network. Three host-initiated
+  Artifact sync, when the person turns it on, uses a store that person owns.
+  Octant operates none of it. Remote access is host-to-device over the user's
+  own network. Three host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
   device-tool update checks against the npm registry, and server marketplace
   fetches when the person searches, inspects, previews, or installs from the
@@ -256,6 +273,13 @@ recipes through its Canvas contribution; a skill that is not enabled contributes
 none, and a contributed recipe cannot replace an in-tree id. A recipe is a
 starting shape, not a document and not authority. Describe reads no Project
 data and creates no artifact.
+A chart is a closed type: line, area, bar, scatter, distribution, pie, donut,
+stacked bar, grouped bar, or bar-and-line. Pie and donut are one series of
+labeled non-negative slices. Stacked, grouped, and bar-and-line charts share
+categories across series; a bar-and-line series names itself as a bar or a line.
+The accessible table lists every reading. A pie or donut legend toggles at most
+24 slices; the rest stay in the picture and the table. A shared snapshot keeps
+the chart and drops no series mark.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -815,9 +839,21 @@ flowchart LR
   implicitly. Removing a paired host or Project deletes what it owns and
   reports what it retained. A retention window (host default, Project
   override, or thread override) never deletes on its own; only a confirmed
-  purge erases a thread's bulk content, derived projections, and that
-  thread's own journal events, then records a tombstone so a rebuild cannot
-  resurrect the transcript. See `docs/decisions/0035`. The one self-applying
+  purge erases a thread's bulk content, derived projections, attachments,
+  canvases authored in that thread (including their comments, shares,
+  refreshes, actions, and mirrored files), agent-run session and content
+  stores, harness sessions, and a managed worktree only when no other
+  thread still references it, and only at a path inside that repository's
+  managed worktree directory: a receipt that names any other path, or one
+  the sweep cannot read, leaves every owned worktree in place and keeps
+  its file so the leftover is visible. It then records a tombstone so a
+  rebuild cannot resurrect the transcript. Usage records stay and are
+  named in the outcome; deciding whether they should be erased is a later
+  choice.
+  The tombstone, other threads, Projects, credentials, external
+  repositories, and SQLite free pages are named retained scopes rather
+  than hidden leftovers. A remote principal cannot purge. See
+  `docs/decisions/0035`. The one self-applying
   exception is startup journal compaction, which removes a
   `code.checkout-observed@1` event only when the next event of the same
   checkout observes the identical state; it preserves every answer a
@@ -831,7 +867,19 @@ flowchart LR
   of the journal — transcript, evidence, and provenance, named with the
   instant it was taken. Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
-  journal are listed as omissions. See `docs/decisions/0036`. User-facing
+  journal are listed as omissions. A local owner can also take one
+  `octant.host-export/1` cut of what this host holds: a thread bundle for
+  every thread of every mode, Projects, Project memory, Canvases, a
+  non-secret settings summary, usage export rows, and retention windows
+  with purge tombstones. That call is a host-control read on the loopback
+  route chain. A remote principal and a paired device are refused, and the
+  remote forward list does not carry the path. The same forbidden-key walk
+  runs over the assembled cut. Large stores are read and written in bounded
+  pages, so a transcript, usage row, or tombstone table is not loaded all
+  at once; each page is walked before it is written. The cut names what it
+  leaves out — credentials, filesystem paths, attachment bytes, raw
+  provider payloads, unsent drafts, paired-device keys, and window
+  capabilities — and why. See `docs/decisions/0036`. User-facing
   drafts of the privacy notice, sub-processor position, data-residency
   statement, DPA template, SCC position, and EULA governing-law placeholders
   live in `apps/docs/advanced/` and are marked pending legal review; they
@@ -839,6 +887,85 @@ flowchart LR
   controller footing for small teams lives in
   `docs/legal/shared-host-controller.md` and aligns with
   `docs/decisions/0040` without shipping the shared team host.
+- **Artifact replicas.** A replica is an append-only log in a store the user
+  owns — a synced folder, or an S3-compatible bucket. Each host writes only
+  its own write-once entries, one per committed artifact version or deletion,
+  named by host id and sequence. No file is written by two computers, so a
+  sync client's conflict copies and lost updates cannot happen. An entry is a
+  readable JSON bundle in the
+  [0029](decisions/0029-artifact-storage-mirror.md) format, with a detached
+  signature from the writing host's own identity key. The storage provider can
+  read those files; they are not encrypted. Before an entry is written, and
+  before an imported entry is accepted, the host applies the same refusal and
+  redaction as a shared bundle: credentials, secret-shaped values, and absolute
+  filesystem paths in free-form text do not leave, and a bundle that still
+  contains them is refused. Each host's own journal stays the source of truth.
+  A pull imports other hosts' entries as appended versions with provenance —
+  the computer's name, the host id, and the origin sequence. It never adopts
+  another journal and never overwrites a version. An imported entry keeps that
+  origin identity. The importing host does not publish it again under its own
+  sequence. A later edit on this host is a new version and a new entry. If two
+  computers revise the same artifact from the same parent, the library shows
+  both heads. The person picks one or merges them, and the merge is a new
+  version. Nothing is silently chosen. Deletion is a tombstone entry. A
+  tombstone and a revision from the same parent are two heads: the revision
+  stays visible, and the tombstone is not discarded. Other computers hide the
+  artifact only when the tombstone is the only head, and they offer to undo.
+  A later version from another computer after a tombstone is a new version;
+  the tombstone stays in the log. Each host's own erase and purge rules still
+  apply locally. The mirror and the export stay separate. They still write
+  plain files for people and other tools, and they still never push to git.
+  Sync is Octant to Octant through the store. The log holds every artifact
+  version, so a computer that joins can import those versions. It does not
+  recreate threads, Projects, or settings. Binding an imported version to a
+  local Project follows the existing artifact import rule and is not widened
+  here. Scope is artifact and Canvas versions and tombstones.
+  Canvas comments are not in this log. Threads and settings are not. A
+  replica-store contribution offers list, get, and put-if-absent. A folder
+  store and an S3-compatible store ship in-tree on that seam. Direct cloud
+  APIs for a host with no desktop sync client come later as plugins. Every
+  publish, pull, refusal, and failure is journaled. A failed upload never
+  unwinds a local version. Plan mode, and a host with sync off, make no store
+  calls. See
+  [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
+- **Artifact replica entries.** A store a person sets aside for sync holds one
+  write-once JSON entry per committed artifact version or deletion, at
+  `<instanceId>/<sequence>.json`, with a detached signature beside it at
+  `<instanceId>/<sequence>.sig`. The payload is the artifact bundle from
+  [0029](decisions/0029-artifact-storage-mirror.md) (`octant.artifact-bundle/1`),
+  not a second document. Reconciling an entry appends a version, keeps both
+  heads when two computers revise the same parent, or records a tombstone. It
+  cannot overwrite. A gap in an instance's sequence, an unknown or revoked
+  instance, a bad or missing signature, a content-hash mismatch, or an entry
+  that names a local artifact as foreign is refused. An unknown entry format
+  fails closed. A later version after a tombstone appends; the tombstone stays
+  in the history.
+  The detached signature covers an entry's encoded bytes whole - origin, kind,
+  parents, the claimed content hash, and the bundle - so a rewrite of any of
+  those is a different signature, not the same one the log recorded. The log
+  also carries membership: a computer that is not yet a member writes a join
+  request at its own next sequence and names itself, and a member returns that
+  request for approval instead of refusing it. Approving journals the new
+  instance on the member; confirming the same approval on the joining computer
+  journals the member there, which is how a computer that was never part of
+  the store learns who the members are. A pull walks each instance's entries in
+  sequence order from the start, because the sequence is per instance and a
+  host that joins in the middle cannot have seen anything earlier. A member's
+  revocation is an entry the member writes; it is refused for a revoked
+  instance rather than re-admitting it, because re-joining is a new identity.
+- **Artifact replica store.** A replica-store contribution offers list, get, and
+  put-if-absent. put-if-absent returns already-exists and leaves the existing
+  bytes unchanged. The store's status is ready, not-connected, or refused. A
+  disabled or uninstalled store is not offered and is not called. The in-tree
+  folder store writes only under `<folder>/Octant Sync/`. A write lands in a
+  temporary file in that same directory, then an exclusive hard link onto the
+  key only when that key is absent, so a published key is never replaced or
+  half-written. A half-written temporary file is not an entry. A
+  file the sync client has not downloaded, and a conflict copy the sync client
+  left behind, are reported instead of being treated as entries. A folder
+  outside the user's home is refused unless the standing access-outside-project
+  approval exists — the same rule as the artifact mirror's global folder.
+  Publish and pull are not this store; they call it.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -847,6 +974,44 @@ flowchart LR
   selections do not, and the composer says so when a restored draft dropped
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
+
+- **Accepted message queue.** Chat, Work, and Code share a host-owned ordered
+  queue for messages the user submits while a turn runs. A successful enqueue
+  acknowledges durable storage; the renderer then relinquishes the submitted
+  draft and attachment ownership without clearing newer edits. Queue metadata,
+  ordering and delivery identities are journaled. Prompt bodies, selected
+  context and trusted attachment metadata stay in purgeable private storage.
+  Versioned edit, reorder and removal commands detect concurrent clients;
+  stable submission identities prevent an acknowledgement retry from adding
+  another message.
+  Code dispatch records a distinct operation identity for each attempt before
+  admission begins. A durable pre-launch refusal keeps the queued message and
+  attachments; explicit resume creates a fresh attempt instead of replaying a
+  cached refusal. Recovery reconciles the recorded attempt before any retry,
+  while genuine failures after admission remain terminal for that attempt.
+  Before sending a queue command, the client saves a bounded local retry receipt
+  containing the exact command and original draft identity, without window
+  capabilities. An unresolved receipt survives navigation and reload and blocks
+  a fresh submission until the original outcome is reconciled. Acknowledgement
+  clears only the unchanged original draft. Receipt cleanup follows composer
+  draft deletion and purge; a storage failure is visible and prevents an unsafe
+  submission or retry.
+  One dispatcher per thread sends through the mode's ordinary turn admission,
+  regardless of harness. Every dispatch checks the current Project, provider,
+  model, checkout, access and context policy. Only normal turn completion
+  advances the queue automatically. Cancellation, failure, changed authority,
+  unavailable attachments and uncertain delivery hold it with a visible reason.
+  Restart recovery also holds pending work until an authenticated user resumes
+  it; recovery never restores a temporary grant or guesses that an ambiguous
+  send failed. Closing a composer cannot delete an accepted queued attachment.
+  Thread purge removes queued private content and retained attachments.
+  A queued message remains bound to the provider, model and authority settings
+  present at enqueue. After changing those settings, restore them before
+  resuming, or remove and resubmit the message with the new settings. Local
+  authenticated windows share the queue; paired remote queue commands remain
+  unavailable until dispatch can revalidate the originating device's grants.
+  Queuing a future message is distinct from steering a running turn; steering
+  remains subject to the active runtime's actual capability.
 
 - **Composer placeholder.** An empty follow-up composer in a Chat, Work, or
   Code thread says "Reply…" and nothing else: a rotating feature tip in the
@@ -876,6 +1041,20 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   `answerUserInput`, and `answerTool`. Every driver passes
   the shared conformance harness (chat, child-agent, and context-facts
   suites) before it is selectable.
+- **Model configuration.** Model variants may carry normalized family and choice
+  labels (for example a Fusion lead and sidekick). Choosing a label binds an
+  already advertised model id; the renderer never constructs provider ids or
+  adds combinations. Reasoning and other model settings remain declared options,
+  validated by the server and applied before both new and resumed sessions send.
+  Devin discovery selects each advertised model in a disposable, non-generating
+  ACP session to obtain its own effort and speed choices. This can take tens of
+  seconds for a large catalog. An explicit model-unavailable refusal omits only
+  that model from the selectable catalog; authentication, configuration, transport,
+  timeout, and protocol failures still fail discovery. Its model-config options exclude model and mode:
+  they cannot change thread access, workspace roots, or approval policy. A choice
+  the runtime stops offering or fails to confirm refuses session startup rather
+  than silently falling back. Fusion remains a provider-owned model pairing;
+  native subagent tools stay disabled and Octant still owns AgentRun delegation.
 - **Registry.** Providers are multi-instance: each instance has a stable id,
   driver kind, configuration, readiness state, model list, capability report,
   and environment policy. A selected model is `{ hostId, providerInstanceId,
@@ -893,7 +1072,9 @@ modelId }`, and the model picker is provider-first. Discovery can find
   `acquire`, so its probe reports `unavailable` and it never reaches a
   picker), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
-  GitHub Copilot, Cline, Qwen Code, fx). fx runs in a per-instance managed
+  GitHub Copilot, Cline, Qwen Code, fx). The installed OpenCode binary's
+  version selects its routes: 1.x keeps the legacy session API, and 2.x lists
+  providers and models and is listing only, turns not yet supported. fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable; see
   [fx-acp-compatibility.md](fx-acp-compatibility.md) and
   [0130](decisions/0130-fx-runs-in-a-managed-home.md). Image profiles are
@@ -948,9 +1129,22 @@ modelId }`, and the model picker is provider-first. Discovery can find
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
   those tokens. **Host-driven** (`subscription-oauth`, direct HTTP drivers):
-  the host runs PKCE and/or device flow; the 0054 broker holds refresh and
-  access material as opaque refs — never journaled, logged, exported, or
-  renderer-visible. Secrets
+  the host runs a generic authorization-code PKCE runner and a device-code
+  runner from a provider descriptor (endpoints, scopes, and a public client
+  id). Direct endpoint drivers accept a `subscription-oauth` credential
+  pointer from the broker and refresh through the host service per request.
+  A missing or expired grant is `unauthenticated`, and a binding mismatch is
+  `incompatible`; neither claims capabilities the endpoint has not shown.
+  PKCE binds a one-shot loopback redirect on a random port, checks state
+  and the code verifier, and times out. Device-code polling waits with backoff
+  until consent, denial, or expiry. Refresh and access material stay in the
+  0054 broker as opaque refs — never journaled, logged, exported, or
+  renderer-visible. The raw credential resolve path refuses that material, so
+  a refresh token is not handed out as an API key. Refresh runs in the broker.
+  A revoked, expired, or reused refresh token becomes a typed sign-in-again
+  state. An API-key path stays available beside every sign-in. The effective
+  authority rule is in [security and authority](#security-and-authority); the
+  historical record remains Proposed. Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
   never receive raw token material. Broker URLs and tokens are stripped from
@@ -1320,7 +1514,17 @@ survives a smoke launch. A staged tree that cannot start keeps the previous
 release. Settings shows each tool's channel, version, and update state.
 Verification is the registry's package-level integrity hash — npm publishes
 no per-package signature — so the design pins URL plus hash and reports
-honestly when they disagree. See
+honestly when they disagree. OpenCode is a descriptor on this same channel,
+not a second updater. Version checks use the `@opencode/cli` registry
+package; the staged bytes are the host's platform package at that version.
+Its wrapper lifecycle script is never run. The platform binary is not
+vendored into the app; Update stages it into the managed location on demand.
+Settings › Providers shows the installed and available versions, an Update
+action, and the reason when a check or activation fails. A release that fails
+verification or does not start keeps the previous managed copy. Update never
+replaces a binary outside that managed location. Choosing Octant's copy
+switches the provider's configured path to the managed executable; it does
+not overwrite an OpenCode the person installed elsewhere. See
 [decisions/0162-managed-npm-device-tools-share-one-release-channel.md](decisions/0162-managed-npm-device-tools-share-one-release-channel.md).
 
 The Simulator pane attaches `serve-sim` for an already booted Simulator and
@@ -1338,6 +1542,9 @@ Simulator.app, `serve-sim`, or `serve-avd`.
 The approved design bounds a feature's reach through public, provider-neutral
 ports. New providers and tools use `@octant/provider-sdk`, `@octant/plugin-api`,
 and `@octant/plugin-host`; they do not gain direct access to host internals.
+A replica-store contribution offers list, get, and put-if-absent. The
+synced-folder store ships in-tree on that seam and writes only under the
+folder the person picked.
 Integration and board modules receive typed, capability-scoped ports, without raw
 filesystem, shell, or credential handles. OAuth access and refresh tokens remain
 in the host credential service; plugin state contains only opaque references.
@@ -1589,7 +1796,13 @@ mechanisms are:
   reaches the target.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
-  Each adapter turns its provider's own subagent feature off, because a child
+  A managed child, whether driven by Octant's harness or a provider harness,
+  receives `octant_canvas` bound to the workspace and Project the host resolved
+  for that run. The model cannot name a path. Create and revise succeed only
+  inside that scope; another Project or an unresolved checkout is refused, and
+  the child run is the author. A provider transport that cannot carry
+  app-managed tools fails the start with a typed reason rather than dropping
+  the tool. Each adapter turns its provider's own subagent feature off, because a child
   the provider starts itself runs outside the journal and the approval path.
 - **Remote clients.** Pairing issues a revocable device key; the private
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.
@@ -1597,6 +1810,25 @@ mechanisms are:
   classifier. A remote principal can never exceed host, mode, provider, Project,
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal.
+- **Artifact replica membership.** Each replica entry carries a detached
+  signature from the writing host's own identity key — the host-owned identity,
+  not a paired client's device key. There is no replica key. An entry from an
+  unknown or revoked host, or one that fails verification, is refused and
+  journaled. A new computer joins by writing a join request into the store. A
+  computer that is already a member approves it by name. A short matching code,
+  shown on both screens, guards against a stranger's request. Revoke writes a
+  signed revocation. Store setup, joining, and revoking happen on the host,
+  never from a paired phone. Store credentials live in the host credential
+  store — macOS Keychain or freedesktop Secret Service — and are not written
+  into the replica. An S3-compatible store is contacted only over authenticated
+  TLS. A plaintext endpoint is refused, and store credentials are not sent on
+  it. The storage provider can read the synced content: the artifact versions
+  and tombstones are plain files. Settings and the user guide
+  (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
+  Opt-in encryption of replicas is not this rule. A replica import appends
+  versions to this journal and adopts nothing else. Membership accepts an entry
+  signed by a known, non-revoked host identity key as authentic. It does not
+  delegate host authority between hosts.
 - **Hosts never trust each other.** Multi-host views merge read models
   client-side; credentials and mutable authority never cross hosts. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client
@@ -1606,24 +1838,36 @@ mechanisms are:
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
   into authority on another.
+- **Host-driven provider sign-in.** A local principal may start a descriptor-driven
+  PKCE or device-code sign-in. The host, not a provider child and not the
+  renderer, owns the loopback redirect, the device poll, and refresh. State and
+  the code verifier are checked, the redirect is one-shot, and an unanswered
+  consent times out. Tokens stay in the credential broker. The journal records
+  the terms acknowledgment (who and when) and the public sign-in state, never
+  an access token, refresh token, authorization code, or verifier. A remote
+  principal cannot acknowledge terms, start the flow, or refresh. A revoked,
+  expired, or reused refresh token is a typed sign-in-again state and drops the
+  stored grant. The API-key path remains available beside that sign-in.
+  [0111](decisions/0111-host-driven-provider-oauth.md) stays a Proposed
+  historical record; this section is the effective rule.
 
 ## Package map
 
-| Package                   | Responsibility                                                                                                                        | Depends on                                                        |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `packages/contracts`      | Effect Schema entities, commands, events, RPC and wire contracts; no runtime logic                                                    | `effect`                                                          |
-| `packages/domain`         | Pure policies and state transitions (modes, tool calls, approvals, remote access, boards, canvas, …)                                  | contracts, theme                                                  |
-| `packages/theme`          | Semantic theme schema, presets, backgrounds, typography, importer, contrast                                                           | contracts                                                         |
-| `packages/provider-sdk`   | `ProviderDriver` interface, normalized runtime events, discovery, conformance harnesses                                               | contracts, `effect`                                               |
-| `packages/plugin-host`    | Extension manifests, component model, activation ladder, addressing, bundled skills and provider-driver plugins, Agent Plugins loader | contracts, `yaml`                                                 |
-| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties (re-exports contracts/extensions)                       | contracts                                                         |
-| `packages/host-runtime`   | Host paths, owner receipts, service lifecycle, bridge secret, diagnostics, redaction (shared by desktop and CLI)                      | —                                                                 |
-| `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads                    | contracts, domain                                                 |
-| `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                                       | contracts, host-runtime                                           |
-| `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway                     | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
-| `apps/desktop`            | Electron shell: windows, menus, native credential-store integration, pickers, signed updates, server process lifecycle, packaging     | contracts, domain, host-runtime                                   |
-| `apps/web`                | React renderer for desktop and paired browsers                                                                                        | client-runtime, contracts, domain, plugin-host, theme             |
-| `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                | client-runtime, contracts, domain                                 |
+| Package                   | Responsibility                                                                                                                                          | Depends on                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `packages/contracts`      | Effect Schema entities, commands, events, RPC and wire contracts; no runtime logic                                                                      | `effect`                                                          |
+| `packages/domain`         | Pure policies and state transitions (modes, tool calls, approvals, remote access, boards, canvas, …)                                                    | contracts, theme                                                  |
+| `packages/theme`          | Semantic theme schema, presets, backgrounds, typography, importer, contrast                                                                             | contracts                                                         |
+| `packages/provider-sdk`   | `ProviderDriver` interface, normalized runtime events, discovery, conformance harnesses                                                                 | contracts, `effect`                                               |
+| `packages/plugin-host`    | Extension manifests, component model, activation ladder, addressing, bundled skills and provider-driver plugins, Agent Plugins loader                   | contracts, `yaml`                                                 |
+| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties (re-exports contracts/extensions)                                         | contracts                                                         |
+| `packages/host-runtime`   | Host paths, owner receipts, service lifecycle, credential broker, host OAuth runners, bridge secret, diagnostics, redaction (shared by desktop and CLI) | —                                                                 |
+| `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads                                      | contracts, domain                                                 |
+| `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                                                         | contracts, host-runtime                                           |
+| `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway                                       | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
+| `apps/desktop`            | Electron shell: windows, menus, native credential-store integration, pickers, signed updates, server process lifecycle, packaging                       | contracts, domain, host-runtime                                   |
+| `apps/web`                | React renderer for desktop and paired browsers                                                                                                          | client-runtime, contracts, domain, plugin-host, theme             |
+| `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                                  | client-runtime, contracts, domain                                 |
 
 Dependencies point inward: no package imports an app, and `contracts` imports
 nothing first-party.
@@ -1635,6 +1879,12 @@ The first shipping surface is the Apple Silicon technical preview with the
 provider-neutral plugin and skill marketplace, signed and self-updating per
 [0034](decisions/0034-signed-updates.md). Cross-platform desktop is authorized
 and sequenced by [0058](decisions/0058-cross-platform-desktop.md).
+
+Artifact replicas, when the person turns sync on, go only to a store that
+person owns — a synced folder or an S3-compatible bucket. Octant operates no
+storage and no relay for them. The storage provider can read the files. That
+does not open a hosted relay or an Octant cloud account. See
+[0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
 
 Two holds stay Later until documented approved designs, published seams, and an
 explicit maintainer request open them:
@@ -1679,10 +1929,12 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with
   `out/Octant-linux-x64/` kept for inspection). Linux packages skip Darwin
-  helpers. A dogfood AppImage is not a signed auto-update channel: release
-  workflows scaffold `<base>/<ring>/linux-x64.json` beside
-  `darwin-arm64.json`, and in-app Linux updates stay fail-closed until a
-  maintainer-published signed feed exists. Override with
+  helpers. A dogfood AppImage is not code-signed. An AppImage launch checks
+  the signed `<base>/<ring>/linux-x64.json` feed, verifies the signature and
+  hash before use, replaces the image atomically (write beside, fsync,
+  rename), and relaunches. A bad signature, a non-writable location, or a
+  launch that is not that image fails closed, and the reason is shown in
+  Settings. Windows stays out. Override with
   `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64` on a matching host only.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.

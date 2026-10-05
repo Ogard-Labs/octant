@@ -257,6 +257,25 @@ describe("AppUpdateSettings", () => {
     expect(screen.getByRole("note")).toHaveTextContent("The dock keeps pins.");
   });
 
+  it("shows a portable-image refusal in the Updates group", () => {
+    view({
+      subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {
+        listener({
+          status: "refused",
+          currentVersion: "0.1.0" as AppUpdateStateView["currentVersion"],
+          automaticChecks: true,
+          ring: "stable",
+          refusal: "unsupported-install",
+          message:
+            "This install cannot replace itself. Octant updates a portable image in place; a package or archive has to be replaced by hand.",
+        });
+        return () => undefined;
+      }),
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/cannot replace itself/);
+  });
+
   it("does not display notes from a feed that was refused", () => {
     view({
       subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {

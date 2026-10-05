@@ -222,6 +222,7 @@ describe("remote route policy", () => {
       "/api/host-control/thread-retention",
       "/api/host-control/thread-purge",
       "/api/host-control/data-map",
+      "/api/host-control/export",
       "/api/missing",
     ]) {
       expect((await fixture.route(request(path, { method: "POST" }))).status).toBe(404);
@@ -250,6 +251,7 @@ describe("remote route policy", () => {
     const blocked: Response[] = [];
     for (const path of [
       "/api/providers/commands",
+      "/api/providers/oauth",
       "/api/providers/discovery/scan",
       "/api/providers/instance-1/packaged-smoke-turn",
       "/api/providers/instance-1/probe",
@@ -273,7 +275,7 @@ describe("remote route policy", () => {
     expect(bootstrap.status).toBe(200);
     await bootstrap.arrayBuffer();
     expect(bootstrapMutation.status).toBe(405);
-    expect(blocked.map((response) => response.status)).toEqual([404, 404, 404, 404, 404]);
+    expect(blocked.map((response) => response.status)).toEqual([404, 404, 404, 404, 404, 404]);
     expect(fixture.authenticatedProduct).toHaveBeenCalledOnce();
   });
 

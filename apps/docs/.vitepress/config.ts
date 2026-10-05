@@ -68,6 +68,7 @@ export default defineConfig({
             { text: "Projects", link: "/guide/projects" },
             { text: "Shared Memory", link: "/guide/memory" },
             { text: "Promotions", link: "/guide/promotions" },
+            { text: "Sync artifacts across your computers", link: "/guide/sync-artifacts" },
           ],
         },
       ],

@@ -10,7 +10,8 @@
     "./chat-conformance": "./src/chatConformance.ts",
     "./discovery": "./src/discovery.ts",
     "./driver": "./src/driver.ts",
-    "./driver-plugins": "./src/driverPlugins.ts"
+    "./driver-plugins": "./src/driverPlugins.ts",
+    "./subscription-oauth": "./src/subscriptionOAuth.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

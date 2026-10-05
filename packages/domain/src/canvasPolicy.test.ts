@@ -19,6 +19,7 @@ import {
   CanvasPolicyRejected,
   measureCanvasBudget,
   validateCanvasDefinition,
+  validateCanvasVersion,
 } from "./canvasPolicy";
 
 const ids = {
@@ -197,12 +198,44 @@ describe("Canvas validation policy", () => {
 
   it("fails closed for unknown schema versions", () => {
     expectPolicyCode(
-      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 3 }),
+      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 4 }),
       "unsupported-schema-version",
     );
     expectPolicyCode(
       () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: "1" }),
       "invalid-schema",
+    );
+  });
+
+  it("refuses a mockup block inside a document declaring an older schema version", () => {
+    const mockup = {
+      blockId: "mockup-1",
+      schemaVersion: 2,
+      kind: "mockup",
+      device: "desktop",
+      title: "Settings",
+      nodes: [{ nodeId: "screen", component: "window", label: "Settings" }],
+    } as const;
+    expectPolicyCode(
+      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 2, blocks: [mockup] }),
+      "unsupported-schema-version",
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 1, blocks: [mockup] }),
+      "unsupported-schema-version",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasVersion({
+          schemaVersion: 2,
+          canvasId: "99999999-9999-4999-8999-999999999999",
+          versionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          sequence: 1,
+          definition: { ...baseDefinition, schemaVersion: 2, blocks: [mockup] },
+          createdBy: { kind: "local-user", actorId: ids.actor },
+          createdAt: "2026-08-01T21:00:01.000Z",
+        }),
+      "unsupported-schema-version",
     );
   });
 

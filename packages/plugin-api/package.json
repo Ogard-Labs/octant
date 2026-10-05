@@ -9,7 +9,8 @@
     "./contributions": "./src/contributions.ts",
     "./integration": "./src/integration.ts",
     "./computer-use": "./src/computerUse.ts",
-    "./canvas-export": "./src/canvasExport.ts"
+    "./canvas-export": "./src/canvasExport.ts",
+    "./replica-store": "./src/replicaStore.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

@@ -5,6 +5,7 @@ import type {
   MonacoDiffRuntime,
   MonacoDiffSession,
 } from "./MonacoEditorAdapter";
+import { installNativeEditorMenu } from "./nativeEditorMenu";
 import { installMonacoEnvironment } from "./monacoEnvironment";
 import {
   DEFAULT_EDITOR_TYPOGRAPHY,
@@ -40,6 +41,7 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     minimap: { enabled: false },
     theme: "vs-dark",
   });
+  const disposeMenu = installNativeEditorMenu(editor);
   const change = lease.model.onDidChangeContent(() => {
     if (lease.controlledUpdateDepth === 0) options.onChange(lease.model.getValue());
   });
@@ -49,6 +51,7 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      disposeMenu();
       change.dispose();
       editor.dispose();
       releaseModelLease(key, lease);
@@ -94,12 +97,16 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
     theme: "vs-dark",
   });
   editor.setModel({ original, modified });
+  const disposeOriginalMenu = installNativeEditorMenu(editor.getOriginalEditor());
+  const disposeModifiedMenu = installNativeEditorMenu(editor.getModifiedEditor());
   let disposed = false;
 
   return {
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      disposeOriginalMenu();
+      disposeModifiedMenu();
       editor.dispose();
       original.dispose();
       modified.dispose();

@@ -3,6 +3,7 @@ import type { CanvasDiagramNodePosition } from "@octant/contracts/canvas-board";
 import { layoutCanvasDiagram } from "@octant/domain";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
+import { OctantAlert } from "../../ui/base/OctantAlert";
 
 /**
  * How the board hands a finished drag to the host. Absent when the surface
@@ -351,9 +352,9 @@ export function DiagramBoard(props: DiagramBoardProps) {
         ))}
       </svg>
       {message === undefined ? null : (
-        <p className="canvas-board__message" role="alert">
+        <OctantAlert className="canvas-board__message" tone="warning">
           {message}
-        </p>
+        </OctantAlert>
       )}
     </div>
   );

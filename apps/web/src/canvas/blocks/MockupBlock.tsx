@@ -88,6 +88,11 @@ function MockupItem({ branch }: { readonly branch: MockupBranchNode }) {
       </li>
     );
   }
+  // A tabs node draws every child as a strip label in its Face; only the
+  // selected tab — the first child, since this wireframe never changes
+  // selection — also gets the panel beneath the strip. The other children
+  // stay labels: a wireframe shows one tab's content, not all of them at once.
+  const panel = branch.node.component === "tabs" ? branch.children.slice(0, 1) : branch.children;
   return (
     <li
       className={`canvas-mockup__node canvas-mockup__node--${branch.node.component}`}
@@ -99,7 +104,7 @@ function MockupItem({ branch }: { readonly branch: MockupBranchNode }) {
       <span className="canvas-mockup__face" aria-hidden="true">
         <Face branch={branch} />
       </span>
-      <MockupGroup branches={branch.children} />
+      <MockupGroup branches={panel} />
     </li>
   );
 }

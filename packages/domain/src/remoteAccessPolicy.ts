@@ -104,6 +104,10 @@ const LOCAL_HOST_ACTIONS = new Set([
   "desktop.device.rename",
   "provider.credentials.write",
   "provider.credentials.read",
+  "provider.oauth.acknowledge-terms",
+  "provider.oauth.begin",
+  "provider.oauth.refresh",
+  "provider.oauth.sign-out",
   "extension.install",
   "extension.trust",
   "project.root.bind",
@@ -132,6 +136,7 @@ const LOCAL_HOST_ACTIONS = new Set([
   "host.store.retention",
   "host.store.purge",
   "host.store.data-map",
+  "host.store.export",
   "host.store.spend-ceiling",
   "diagnostics.export",
 ]);

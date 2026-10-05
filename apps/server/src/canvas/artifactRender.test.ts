@@ -103,6 +103,114 @@ describe("drawing a preview of an artifact", () => {
     expect(renderArtifactThumbnail(definition(many)).length).toBeLessThanOrEqual(4_096);
   });
 
+  it("draws a pie as wedges and a donut as a ring, not as bars", () => {
+    const slices = [
+      { x: "Signups", y: 40 },
+      { x: "Activation", y: 30 },
+      { x: "Retention", y: 20 },
+      { x: "Referral", y: 10 },
+    ];
+    const series = [{ seriesId: "series-1", label: "Funnel", points: slices }];
+    const pieBlock = {
+      blockId: "pie-1",
+      schemaVersion: 1,
+      kind: "chart",
+      chartType: "pie",
+      series,
+    } as unknown as CanvasBlock;
+    const donutBlock = {
+      blockId: "donut-1",
+      schemaVersion: 1,
+      kind: "chart",
+      chartType: "donut",
+      series,
+    } as unknown as CanvasBlock;
+
+    const pieMarkup = renderArtifactThumbnail(definition([pieBlock], "Funnel"));
+    const donutMarkup = renderArtifactThumbnail(definition([donutBlock], "Funnel"));
+    const barMarkup = renderArtifactThumbnail(definition([chart], "Signups"));
+
+    // A pie draws wedge paths; the stock bar silhouette draws only rects.
+    expect(pieMarkup).toContain('<path d="M');
+    expect(pieMarkup).toContain("A ");
+    expect(barMarkup).not.toContain("<path");
+    // A donut is the pie with a punched hole; both stay distinct pictures.
+    expect(donutMarkup).toContain("<circle");
+    expect(donutMarkup).not.toBe(pieMarkup);
+    expect(pieMarkup).not.toBe(barMarkup);
+  });
+
+  it("draws a bar and line chart with columns and a polyline", () => {
+    const block = {
+      blockId: "bl-1",
+      schemaVersion: 1,
+      kind: "chart",
+      chartType: "bar-line",
+      series: [
+        {
+          seriesId: "revenue",
+          label: "Revenue",
+          mark: "bar",
+          points: [
+            { x: "Q1", y: 10 },
+            { x: "Q2", y: 30 },
+          ],
+        },
+        {
+          seriesId: "margin",
+          label: "Margin",
+          mark: "line",
+          points: [
+            { x: "Q1", y: 4 },
+            { x: "Q2", y: 9 },
+          ],
+        },
+      ],
+    } as unknown as CanvasBlock;
+
+    const markup = renderArtifactThumbnail(definition([block], "Quarterly"));
+
+    expect(markup).toContain("<polyline");
+    expect(markup).toContain("<rect");
+  });
+
+  it("keeps stacked and grouped charts distinct pictures of their values", () => {
+    const quarters = (seriesId: string, values: ReadonlyArray<number>) => ({
+      seriesId,
+      label: seriesId,
+      points: values.map((y, index) => ({ x: `Q${String(index + 1)}`, y })),
+    });
+    const stacked = {
+      blockId: "stacked-1",
+      schemaVersion: 1,
+      kind: "chart",
+      chartType: "stacked-bar",
+      series: [quarters("east", [10, 20, 30]), quarters("west", [30, 20, 10])],
+    } as unknown as CanvasBlock;
+    const grouped = {
+      blockId: "grouped-1",
+      schemaVersion: 1,
+      kind: "chart",
+      chartType: "grouped-bar",
+      series: [quarters("east", [10, 20, 30]), quarters("west", [30, 20, 10])],
+    } as unknown as CanvasBlock;
+
+    const stackedMarkup = renderArtifactThumbnail(definition([stacked], "Regions"));
+    const groupedMarkup = renderArtifactThumbnail(definition([grouped], "Regions"));
+
+    // Both draw columns; their geometry differs, and reversing one series'
+    // values changes the picture rather than leaving a stock shape.
+    expect(stackedMarkup).toContain("<rect");
+    expect(groupedMarkup).toContain("<rect");
+    expect(stackedMarkup).not.toBe(groupedMarkup);
+
+    const reshaped = {
+      ...(grouped as unknown as Record<string, unknown>),
+      series: [quarters("east", [10, 20, 30]), quarters("west", [10, 20, 30])],
+    } as unknown as CanvasBlock;
+    expect(renderArtifactThumbnail(definition([reshaped], "Regions"))).not.toBe(groupedMarkup);
+  });
+
   it("draws a login sequence and an order state machine as static pictures", () => {
     const sequence = {
       blockId: "login",
@@ -138,5 +246,36 @@ describe("drawing a preview of an artifact", () => {
     expect(sequenceMarkup).not.toMatch(/<\s*script/i);
     expect(stateMarkup).not.toMatch(/<\s*script/i);
     expect(sequenceMarkup).not.toBe(stateMarkup);
+  });
+
+  it("draws a phone mockup as a frame rather than leaving the preview blank", () => {
+    const mockup = {
+      blockId: "settings",
+      schemaVersion: 1,
+      kind: "mockup",
+      device: "phone",
+      title: "Settings",
+      nodes: [
+        { nodeId: "window", component: "window", label: "Settings" },
+        { nodeId: "wifi", component: "toggle", label: "Wi-Fi", parentId: "window", on: true },
+      ],
+    } as unknown as CanvasBlock;
+    const phone = renderArtifactThumbnail(definition([mockup], "Settings"));
+    const desktop = renderArtifactThumbnail(
+      definition(
+        [
+          {
+            ...(mockup as unknown as Record<string, unknown>),
+            device: "desktop",
+          } as unknown as CanvasBlock,
+        ],
+        "Settings",
+      ),
+    );
+
+    expect(phone.startsWith("<svg")).toBe(true);
+    expect(phone).toContain("<rect");
+    expect(phone).not.toMatch(/<\s*script/i);
+    expect(phone).not.toBe(desktop);
   });
 });

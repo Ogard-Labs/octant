@@ -33,6 +33,21 @@ describe("mockup wireframe", () => {
     expect(within(mockup).queryByRole("textbox")).toBeNull();
   });
 
+  it("shows one tab panel, not every tab's content", () => {
+    render(
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [settingsScreenExampleBlock] }} />,
+    );
+    const tree = within(screen.getByRole("region", { name: "Settings, Desktop mockup" })).getByRole(
+      "tree",
+      { name: "Settings" },
+    );
+    expect(within(tree).getByRole("treeitem", { name: "Tabs, Account" })).toBeVisible();
+    expect(within(tree).getByRole("treeitem", { name: "Card, Profile" })).toBeVisible();
+    expect(within(tree).getByRole("treeitem", { name: "Form field, Display name" })).toBeVisible();
+    expect(within(tree).queryByRole("treeitem", { name: "Card, Security" })).toBeNull();
+    expect(within(tree).queryByRole("treeitem", { name: "Text, Sign-in" })).toBeNull();
+  });
+
   it.each(devices)("names the %s preset without offering a live control", (device) => {
     const block = { ...settingsScreenExampleBlock, device };
     render(<CanvasDocument definition={{ ...canvasFixture, blocks: [block] }} />);

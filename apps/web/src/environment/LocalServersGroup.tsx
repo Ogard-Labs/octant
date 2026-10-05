@@ -18,10 +18,20 @@ import {
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
-import { OctantPopover } from "../ui/base/OctantPopover";
+import {
+  OctantMenuRoot,
+  OctantMenuTrigger,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuPopup,
+  OctantMenuItem,
+  OctantMenuGroupLabel,
+  OctantMenuGroup,
+} from "../ui/base/OctantMenu";
 import { groupLocalServerListeners, type LocalServerListenerGroup } from "./localServerGroups";
 import type { LocalServersController } from "./useLocalServersController";
 import { EnvironmentGroup } from "./EnvironmentGroup";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface LocalServersGroupProps {
   readonly controller: Pick<
@@ -69,9 +79,9 @@ export function LocalServersGroup(props: LocalServersGroupProps) {
   }
   if (props.controller.status === "error") {
     return (
-      <p className="local-servers__error" role="alert">
+      <OctantAlert className="local-servers__error" tone="danger">
         {props.controller.errorMessage ?? "Local servers are unavailable."}
-      </p>
+      </OctantAlert>
     );
   }
   if (props.controller.snapshot === undefined) {
@@ -90,10 +100,10 @@ export function LocalServersGroup(props: LocalServersGroupProps) {
   return (
     <div aria-label="Local servers" className="local-servers">
       {props.controller.failure === undefined ? null : (
-        <p className="local-servers__error" role="alert">
+        <OctantAlert className="local-servers__error" tone="danger">
           <ShieldAlert aria-hidden="true" size={16} strokeWidth={1.8} />
           {props.controller.failure.message}
-        </p>
+        </OctantAlert>
       )}
 
       {total === 0 ? (
@@ -207,7 +217,6 @@ function LocalServerRow(props: {
     readonly kind: "confirmation" | "failure";
     readonly text: string;
   }>();
-  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     if (feedback?.kind !== "confirmation") return;
@@ -263,58 +272,66 @@ function LocalServerRow(props: {
           </OctantButton>
         ) : null}
 
-        <OctantPopover
-          className="local-servers__menu"
-          onOpenChange={setMenuOpen}
-          open={menuOpen}
-          title="More actions"
-          trigger={
-            <>
-              <Ellipsis aria-hidden="true" size={14} strokeWidth={1.8} />
-              <span>More</span>
-            </>
-          }
-          triggerClassName="local-servers__more"
-          triggerLabel={`More actions for ${name} on port ${String(listener.port)}`}
-        >
-          {onCopyUrl === undefined
-            ? null
-            : urls.map((url) => (
-                <OctantButton
-                  aria-label={`Copy ${url}`}
-                  key={url}
-                  onClick={() =>
-                    void (async () => {
-                      setFeedback(undefined);
-                      try {
-                        await onCopyUrl(url);
-                        setFeedback({ kind: "confirmation", text: "Copied" });
-                        setMenuOpen(false);
-                      } catch {
-                        setFeedback({ kind: "failure", text: "Octant could not copy the URL." });
-                      }
-                    })()
-                  }
-                  type="button"
-                  variant="ghost"
-                >
-                  <Copy aria-hidden="true" size={14} strokeWidth={1.8} />
-                  <span>{urls.length === 1 ? "Copy URL" : `Copy ${url}`}</span>
-                </OctantButton>
-              ))}
-          <p className="local-servers__details">
-            <Radio aria-hidden="true" size={14} strokeWidth={1.8} />
-            {bindScopeLabel(props.group.listeners)}
-          </p>
-          <p className="local-servers__details">{startSourceLabel(listener)}</p>
-          {listener.workingDirectory === undefined ? null : (
-            <p className="local-servers__details" title={listener.workingDirectory}>
-              {listener.workspaceLabel ?? listener.workingDirectory}
-            </p>
-          )}
-        </OctantPopover>
+        <OctantMenuRoot>
+          <OctantMenuTrigger
+            className="local-servers__more"
+            aria-label={`More actions for ${name} on port ${String(listener.port)}`}
+          >
+            <Ellipsis aria-hidden="true" size={14} strokeWidth={1.8} />
+            <span>More</span>
+          </OctantMenuTrigger>
+          <OctantMenuPortal>
+            <OctantMenuPositioner>
+              <OctantMenuPopup aria-label="More actions">
+                {onCopyUrl === undefined
+                  ? null
+                  : urls.map((url) => (
+                      <OctantMenuItem
+                        aria-label={`Copy ${url}`}
+                        key={url}
+                        onClick={() =>
+                          void (async () => {
+                            setFeedback(undefined);
+                            try {
+                              await onCopyUrl(url);
+                              setFeedback({ kind: "confirmation", text: "Copied" });
+                            } catch {
+                              setFeedback({
+                                kind: "failure",
+                                text: "Octant could not copy the URL.",
+                              });
+                            }
+                          })()
+                        }
+                      >
+                        <Copy aria-hidden="true" size={14} strokeWidth={1.8} />
+                        <span>{urls.length === 1 ? "Copy URL" : `Copy ${url}`}</span>
+                      </OctantMenuItem>
+                    ))}
+                <OctantMenuGroup>
+                  <OctantMenuGroupLabel className="local-servers__details">
+                    <Radio aria-hidden="true" size={14} strokeWidth={1.8} />
+                    {bindScopeLabel(props.group.listeners)}
+                  </OctantMenuGroupLabel>
+                  <OctantMenuGroupLabel className="local-servers__details">
+                    {startSourceLabel(listener)}
+                  </OctantMenuGroupLabel>
+                  {listener.workingDirectory === undefined ? null : (
+                    <OctantMenuGroupLabel
+                      className="local-servers__details"
+                      title={listener.workingDirectory}
+                    >
+                      {listener.workspaceLabel ?? listener.workingDirectory}
+                    </OctantMenuGroupLabel>
+                  )}
+                </OctantMenuGroup>
+              </OctantMenuPopup>
+            </OctantMenuPositioner>
+          </OctantMenuPortal>
+        </OctantMenuRoot>
 
         {feedback === undefined ? null : (
+          /* ui-boundary-exception: compact-status */
           <span
             className={`local-servers__action-feedback local-servers__action-feedback--${feedback.kind}`}
             role={feedback.kind === "failure" ? "alert" : "status"}

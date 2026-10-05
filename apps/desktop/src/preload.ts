@@ -1,3 +1,4 @@
+import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarTasks, type MenuBarTask } from "./menuBar";
 import { contextBridge, ipcRenderer } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
@@ -7,6 +8,7 @@ import type { CodeOperationApprovalPalette } from "./codeOperationApprovalView";
 export const HOST_BRIDGE_KEY = "octantHost";
 
 export const IPC_CHANNELS = {
+  nativeMenu: "octant:menu:popup",
   menuBarTasks: "octant:menu:tasks",
   menuBarTask: "octant:menu:task",
   attentionBadge: "octant:attention:badge",
@@ -375,6 +377,7 @@ export interface AttentionNotificationBridgeRequest {
 }
 
 export interface OctantHostBridge {
+  readonly popupNativeMenu: (request: NativeMenuRequest) => Promise<NativeMenuOutcome>;
   readonly setMenuBarTasks: (tasks: ReadonlyArray<MenuBarTask>) => Promise<void>;
   readonly subscribeMenuBarTask: (
     listener: (target: Pick<MenuBarTask, "mode" | "threadId">) => void,
@@ -384,7 +387,7 @@ export interface OctantHostBridge {
   readonly openComputerUsePermissionSettings: () => Promise<void>;
   readonly checkComputerUseUpdates: () => Promise<unknown>;
   readonly getManagedToolsStatus: () => Promise<unknown>;
-  readonly checkManagedToolUpdates: () => Promise<unknown>;
+  readonly checkManagedToolUpdates: (tool?: string) => Promise<unknown>;
   readonly setManagedToolAutomaticUpdates: (enabled: boolean) => Promise<unknown>;
   readonly notifyAttention: (request: AttentionNotificationBridgeRequest) => Promise<void>;
   readonly setAttentionBadge: (count: number) => Promise<void>;
@@ -518,6 +521,20 @@ export function createHostBridge(
             threadId: initialProjectTarget.threadId,
           });
   return Object.freeze({
+    popupNativeMenu: async (request: NativeMenuRequest): Promise<NativeMenuOutcome> => {
+      try {
+        const result: unknown = await ipc.invoke(IPC_CHANNELS.nativeMenu, request);
+        if (isRecord(result)) {
+          if (result.kind === "dismissed" || result.kind === "refused")
+            return { kind: result.kind };
+          if (result.kind === "selected" && typeof result.id === "string")
+            return { kind: "selected", id: result.id };
+        }
+      } catch {
+        // A closed window or refused origin cannot select a renderer action.
+      }
+      return { kind: "refused" };
+    },
     setMenuBarTasks: async (tasks: ReadonlyArray<MenuBarTask>) => {
       await invoke(IPC_CHANNELS.menuBarTasks, decodeMenuBarTasks(tasks));
     },
@@ -603,8 +620,13 @@ export function createHostBridge(
     checkComputerUseUpdates: () => ipc.invoke(IPC_CHANNELS.computerUseCheckUpdates),
     getManagedToolsStatus: async () =>
       decodeManagedToolsStatus(await ipc.invoke(IPC_CHANNELS.managedToolsStatus)),
-    checkManagedToolUpdates: async () =>
-      decodeManagedToolsStatus(await ipc.invoke(IPC_CHANNELS.managedToolsCheckUpdates)),
+    checkManagedToolUpdates: async (tool?: string) => {
+      if (tool !== undefined && (typeof tool !== "string" || tool.length === 0 || tool.length > 64))
+        return Promise.reject(new TypeError("Invalid managed tool."));
+      return decodeManagedToolsStatus(
+        await ipc.invoke(IPC_CHANNELS.managedToolsCheckUpdates, tool),
+      );
+    },
     setManagedToolAutomaticUpdates: async (enabled: boolean) => {
       if (typeof enabled !== "boolean") {
         return Promise.reject(new TypeError("Invalid update setting."));
@@ -1719,7 +1741,11 @@ function decodeManagedToolStatus(value: unknown): ManagedToolStatus {
     typeof value.update !== "string" ||
     !MANAGED_TOOL_UPDATE_STATES.includes(value.update) ||
     (value.availableVersion !== undefined && typeof value.availableVersion !== "string") ||
-    (value.message !== undefined && typeof value.message !== "string")
+    (value.message !== undefined && typeof value.message !== "string") ||
+    (value.managedDirectory !== undefined &&
+      (typeof value.managedDirectory !== "string" || value.managedDirectory.length > 4_096)) ||
+    (value.executablePath !== undefined &&
+      (typeof value.executablePath !== "string" || value.executablePath.length > 4_096))
   ) {
     throw new TypeError("Invalid managed tool status.");
   }
@@ -1733,6 +1759,8 @@ function decodeManagedToolStatus(value: unknown): ManagedToolStatus {
     update: value.update as ManagedToolStatus["update"],
     ...(value.availableVersion === undefined ? {} : { availableVersion: value.availableVersion }),
     ...(value.message === undefined ? {} : { message: value.message }),
+    ...(value.managedDirectory === undefined ? {} : { managedDirectory: value.managedDirectory }),
+    ...(value.executablePath === undefined ? {} : { executablePath: value.executablePath }),
   });
 }
 
@@ -1746,6 +1774,8 @@ interface ManagedToolStatus {
   readonly update: "idle" | "checking" | "downloading" | "staged" | "current" | "failed";
   readonly availableVersion?: string;
   readonly message?: string;
+  readonly managedDirectory?: string;
+  readonly executablePath?: string;
 }
 
 interface ManagedToolsStatus {

@@ -13,6 +13,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export type UpdateChatSettingsCommand = Extract<
   ChatCommand,
@@ -376,19 +377,20 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
       {/* Outside the card so the reserved line never reads as an empty row. */}
       <div className="settings-feedback-slot" aria-live="polite">
         {props.message === undefined ? null : (
-          <p className="provider-settings__alert" role="alert">
+          <OctantAlert className="provider-settings__alert" tone="warning">
             {props.message}
-          </p>
+          </OctantAlert>
         )}
         {endpointError === undefined ? null : (
+          /* ui-boundary-exception: inline-field-error */
           <p className="provider-settings__alert" id="searxng-base-url-error" role="alert">
             {endpointError}
           </p>
         )}
         {formError === undefined ? null : (
-          <p className="provider-settings__alert" role="alert">
+          <OctantAlert className="provider-settings__alert" tone="warning">
             {formError}
-          </p>
+          </OctantAlert>
         )}
       </div>
     </SettingsSection>

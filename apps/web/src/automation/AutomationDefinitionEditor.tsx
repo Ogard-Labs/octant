@@ -378,6 +378,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       <h3 className="automation-editor__title">{editing ? "Edit automation" : "New automation"}</h3>
 
       {hasProblems ? (
+        /* ui-boundary-exception: inline-field-error */
         <div className="automation-editor__problems" role="alert">
           {serverMessage === undefined ? null : <p>{serverMessage}</p>}
           {issues.length === 0 ? null : (

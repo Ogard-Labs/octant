@@ -416,6 +416,8 @@ export class WorkTurnService {
        * command cannot carry it.
        */
       readonly limitRecovery?: boolean;
+      /** Host-only revocation check; never grants authority or travels on the wire. */
+      readonly admissionCurrent?: () => boolean;
     },
   ): Promise<WorkTurnLookupResult> {
     this.#assertReady();
@@ -425,6 +427,9 @@ export class WorkTurnService {
       return this.#lookupMatching(command, existing);
     }
 
+    if (options?.admissionCurrent?.() === false) {
+      throw this.#failure("unauthorized", "Work turn admission is no longer current.");
+    }
     const thread = await this.#threads.read(authenticatedWindowId, command.threadId);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
     const accessible = projectBootstrap.active.some(
@@ -726,6 +731,19 @@ export class WorkTurnService {
       }
     }
 
+    // Context and attachment reads can outlive the host's queue admission.
+    if (options?.admissionCurrent?.() === false) {
+      await Effect.runPromise(
+        Effect.promise(async () => {
+          await extensionTools?.close?.();
+        }).pipe(
+          Effect.timeout("2 seconds"),
+          Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
+        ),
+      );
+      throw this.#failure("unauthorized", "Work turn admission is no longer current.");
+    }
+
     const spendReservationId = decodeSpendCeilingReservationId(this.#uuid());
     const spendAdmission = this.#spendCeiling?.admit({
       reservationId: spendReservationId,
@@ -799,6 +817,9 @@ export class WorkTurnService {
       driver,
       attachments: attachmentInputs,
       contextPlan: planned,
+      ...(options?.admissionCurrent === undefined
+        ? {}
+        : { admissionCurrent: options.admissionCurrent }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       signal: controller.signal,
     }).finally(() => {
@@ -952,6 +973,7 @@ export class WorkTurnService {
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     readonly contextPlan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
+    readonly admissionCurrent?: () => boolean;
     /** The selected MCP servers' tools, resolved when the turn was accepted. */
     readonly extensionTools?: AppManagedToolSet;
     readonly signal: AbortSignal;
@@ -1047,7 +1069,8 @@ export class WorkTurnService {
             displayLabel: input.thread?.title ?? "Work task",
             signal: input.signal,
           });
-    if (input.signal.aborted || published?.snapshot.next.plan.blocked) {
+    const admissionRevoked = input.admissionCurrent?.() === false;
+    if (input.signal.aborted || published?.snapshot.next.plan.blocked || admissionRevoked) {
       observation?.finish();
       await Effect.runPromise(
         Effect.promise(async () => {
@@ -1059,9 +1082,10 @@ export class WorkTurnService {
       );
       if (!input.signal.aborted)
         this.#refuseTurn(input.command, {
-          category: "invalid",
-          message:
-            "The Work request exceeds the selected model's context budget. Remove context or start a new task.",
+          category: admissionRevoked ? "unauthorized" : "invalid",
+          message: admissionRevoked
+            ? "Work turn admission is no longer current."
+            : "The Work request exceeds the selected model's context budget. Remove context or start a new task.",
         });
       return;
     }

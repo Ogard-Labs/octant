@@ -17,7 +17,8 @@
     "./bundled-skills": "./src/bundledSkills.ts",
     "./capability-mentions": "./src/capabilityMentions.ts",
     "./computer-use": "./src/computerUsePlugin.ts",
-    "./browser-use": "./src/browserUsePlugin.ts"
+    "./browser-use": "./src/browserUsePlugin.ts",
+    "./replica-store": "./src/replicaStoreActivation.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",
