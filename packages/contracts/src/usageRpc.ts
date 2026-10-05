@@ -122,7 +122,7 @@ export type UsageCumulativePoint = typeof UsageCumulativePoint.Type;
 
 export const UsageTopConsumer = Schema.Struct({
   subjectType: Schema.NonEmptyTrimmedString,
-  subjectId: Schema.String,
+  subjectId: Schema.NullOr(Schema.String),
   inputTokens: NonNegativeInt,
   outputTokens: NonNegativeInt,
   requestCount: NonNegativeInt,

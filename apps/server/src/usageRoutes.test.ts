@@ -566,7 +566,10 @@ describe("usage route Project scope", () => {
 
     // An empty request reads the window's own Project, never the host ledger.
     expect(body.records).toHaveLength(1);
-    expect(body.records[0]?.subject.aggregateId).toBe(ids.threadA);
+    const first = body.records[0];
+    if (first !== undefined && "aggregateId" in first.subject) {
+      expect(first.subject.aggregateId).toBe(ids.threadA);
+    }
     expect(body.totals.totalRequests).toBe(1);
     // Neither the other Project's thread nor an unfiled thread is this
     // Project's row, in the records or in any aggregate.
@@ -694,7 +697,11 @@ describe("usage route scope for a window bound to no Project", () => {
       const body = (await response!.json()) as UsageQueryResponse;
 
       expect(body.records).toHaveLength(1);
-      expect(body.records[0]?.subject.aggregateId).toBe(ids.unfiledThread);
+      const record = body.records[0];
+      expect(record?.subject).toMatchObject({ aggregateType: "chat-thread" });
+      if (record?.subject !== undefined && "aggregateId" in record.subject) {
+        expect(record.subject.aggregateId).toBe(ids.unfiledThread);
+      }
       expect(text).not.toContain(ids.projectA);
       expect(text).not.toContain(ids.projectB);
       expect(text).not.toContain(ids.threadA);

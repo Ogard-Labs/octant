@@ -19,8 +19,15 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   thread: "Task",
 };
 
-/** Resolve only already-loaded identities; opening Usage never fetches task content. */
-export function UsageName(props: { readonly kind: string; readonly id: string }) {
+/**
+ * Resolve only already-loaded identities; opening Usage never fetches task
+ * content. A de-linked subject (its thread was purged) has no identity to
+ * name, so it reads as what it is rather than as a broken reference.
+ */
+export function UsageName(props: { readonly kind: string; readonly id: string | null }) {
+  if (props.id === null) {
+    return <span title="The thread this usage named was purged.">De-linked</span>;
+  }
   const names = useContext(UsageNames);
   const known = names.get(props.kind === "thread" ? props.id : `${props.kind}/${props.id}`);
   const fallback =

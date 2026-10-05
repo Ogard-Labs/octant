@@ -31,7 +31,9 @@ import { readAggregateVersion } from "./persistence/chatProjection";
 import type { Journal } from "./persistence/journal";
 import type { SqliteConnection } from "./persistence/sqlitePort";
 import {
+  collectCanvasFamilyAggregates,
   erasePurgedThread,
+  listProjectCanvasIds,
   listProjectedThreadSubjects,
   threadProjectionExists,
 } from "./persistence/threadPurge";
@@ -164,7 +166,7 @@ export class ThreadRetentionService {
       if (subject.mode === "work") this.#forgetWorkThread?.(String(subject.threadId));
     }
     const projectScopeDeleted =
-      request.scope.kind === "project" && selected.length > 0
+      request.scope.kind === "project"
         ? eraseProjectData(this.#connection, String(request.scope.projectId))
         : [];
     return {
@@ -275,21 +277,62 @@ function eraseProjectData(
   const memory = connection
     .prepare("DELETE FROM project_memory_projection WHERE project_id = ?")
     .run(projectId);
-  if (memory.changes > 0) deleted.push("project-memory");
-  const canvasIds = connection
+  // The journal is authoritative: the Project's memory aggregates must leave
+  // it too, or a rebuild resurrects what the report says was deleted.
+  connection
     .prepare(
-      `SELECT DISTINCT aggregate_id FROM event_journal
-       WHERE aggregate_type = 'canvas'
-         AND json_extract(payload_json, '$.version.definition.provenance.projectId') = ?`,
+      `DELETE FROM event_journal WHERE aggregate_type = 'project-memory' AND aggregate_id = ?`,
     )
-    .all(projectId) as ReadonlyArray<{ readonly aggregate_id: string }>;
+    .run(projectId);
+  if (memory.changes > 0) deleted.push("project-memory");
+  const canvasIds = listProjectCanvasIds(connection, projectId);
   if (canvasIds.length > 0) {
-    for (const canvas of canvasIds) {
-      connection
-        .prepare(`DELETE FROM event_journal WHERE aggregate_type = 'canvas' AND aggregate_id = ?`)
-        .run(canvas.aggregate_id);
+    for (const canvasId of canvasIds) {
+      for (const aggregate of collectCanvasFamilyAggregates(connection, canvasId)) {
+        connection
+          .prepare(
+            `DELETE FROM event_journal
+             WHERE aggregate_type = ? AND aggregate_id = ? AND event_name != ?`,
+          )
+          .run(aggregate.aggregateType, aggregate.aggregateId, "context.usage-reconciled@1");
+      }
     }
     deleted.push("project-canvases");
   }
+  reconcileAggregateHeads(connection);
   return deleted;
+}
+
+/**
+ * Aggregate heads whose journal history is gone must leave with it, and heads
+ * with remaining events fall back to the surviving sequence. This is the
+ * same reconciliation the thread-purge path runs; the Project path needs the
+ * invariant after deleting memory and Canvas history.
+ */
+function reconcileAggregateHeads(connection: SqliteConnection): void {
+  connection.exec(
+    `DELETE FROM aggregate_heads WHERE NOT EXISTS (
+       SELECT 1 FROM event_journal
+       WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
+         AND event_journal.aggregate_id = aggregate_heads.aggregate_id
+     )`,
+  );
+  connection.exec(
+    `UPDATE aggregate_heads
+     SET aggregate_version = (
+           SELECT MAX(event_journal.aggregate_version) FROM event_journal
+           WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
+             AND event_journal.aggregate_id = aggregate_heads.aggregate_id
+         ),
+         last_sequence = (
+           SELECT MAX(event_journal.global_sequence) FROM event_journal
+           WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
+             AND event_journal.aggregate_id = aggregate_heads.aggregate_id
+         )
+     WHERE EXISTS (
+       SELECT 1 FROM event_journal
+       WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
+         AND event_journal.aggregate_id = aggregate_heads.aggregate_id
+     )`,
+  );
 }

@@ -194,6 +194,44 @@ export function listThreadFileAnchors(
   };
 }
 
+/**
+ * Every journal aggregate a Canvas owns: its own history, its comments, and
+ * its artifact-mirror receipts. A Project-scoped erase uses the same
+ * ownership walk the thread purge uses, so a Canvas disappears completely —
+ * journal, projection rebuild, and mirrored files — instead of leaving
+ * subsidiary state a restart would resurrect.
+ */
+export function collectCanvasFamilyAggregates(
+  connection: SqliteConnection,
+  canvasId: string,
+): ReadonlyArray<AggregateKey> {
+  const keys = new Map<string, AggregateKey>();
+  const add = (aggregateType: string, aggregateId: string) => {
+    if (RETAINED_AGGREGATE_TYPES.has(aggregateType) || aggregateId.length === 0) return;
+    keys.set(`${aggregateType}:${aggregateId}`, { aggregateType, aggregateId });
+  };
+  add("canvas", canvasId);
+  followLinkedAggregates(connection, keys, add, "canvas", CANVAS_LINK_PATHS);
+  return [...keys.values()];
+}
+
+/**
+ * Canvas identities a Project owns, by the provenance the journal records.
+ */
+export function listProjectCanvasIds(
+  connection: SqliteConnection,
+  projectId: string,
+): ReadonlyArray<string> {
+  const rows = connection
+    .prepare(
+      `SELECT DISTINCT aggregate_id FROM event_journal
+       WHERE aggregate_type = 'canvas'
+         AND json_extract(payload_json, '$.version.definition.provenance.projectId') = ?`,
+    )
+    .all(projectId) as ReadonlyArray<{ readonly aggregate_id: string }>;
+  return rows.map((row) => row.aggregate_id);
+}
+
 function collectOwnedAggregates(
   connection: SqliteConnection,
   mode: OctantMode,
@@ -311,12 +349,17 @@ function delinkUsageRecords(
  * The entry's text stays; only the thread reference is removed.
  */
 function delinkProjectMemoryProvenance(connection: SqliteConnection, threadId: string): void {
+  const update = connection.prepare(
+    `UPDATE project_memory_projection
+     SET entry_json = ?
+     WHERE project_id = ? AND entry_id = ?`,
+  );
   const rows = connection
     .prepare(
       `SELECT project_id, entry_id, entry_json FROM project_memory_projection
-       WHERE entry_json LIKE ?`,
+       WHERE instr(entry_json, ?) > 0`,
     )
-    .all(`%${threadId}%`) as ReadonlyArray<{
+    .all(threadId) as ReadonlyArray<{
     readonly project_id: string;
     readonly entry_id: string;
     readonly entry_json: string;
@@ -331,14 +374,8 @@ function delinkProjectMemoryProvenance(connection: SqliteConnection, threadId: s
     if (parsed.provenance === undefined || typeof parsed.provenance !== "object") continue;
     const provenance = parsed.provenance as Record<string, unknown>;
     if (provenance.threadId !== threadId) continue;
-    delete parsed.provenance;
-    connection
-      .prepare(
-        `UPDATE project_memory_projection
-         SET entry_json = ?
-         WHERE project_id = ? AND entry_id = ?`,
-      )
-      .run(JSON.stringify(parsed), row.project_id, row.entry_id);
+    delete provenance.threadId;
+    update.run(JSON.stringify(parsed), row.project_id, row.entry_id);
   }
 }
 

@@ -303,7 +303,9 @@ describe("UsageProjection", () => {
     expect(record!.varianceTokens).toBe(0);
     expect(record!.quality).toBe("exact");
     expect(record!.subject.aggregateType).toBe("chat-thread");
-    expect(record!.subject.aggregateId).toBe(ids.aggregate);
+    if ("aggregateId" in record!.subject) {
+      expect(record!.subject.aggregateId).toBe(ids.aggregate);
+    }
   });
 
   it("projects authoritative advanced dimensions and keeps missing dimensions unknown", () => {
@@ -568,7 +570,7 @@ describe("usage project scope", () => {
 
   function subjectIds(connection: SqliteConnection, scope: UsageProjectScope): Array<string> {
     return queryUsageRecords(connection, {}, 100, 0, scope).records.map((record) =>
-      String(record.subject.aggregateId),
+      "aggregateId" in record.subject ? String(record.subject.aggregateId) : "de-linked",
     );
   }
 

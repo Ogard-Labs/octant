@@ -70,6 +70,12 @@ export class UsageProjection implements Projection {
       aggregateType: event.aggregateType,
       aggregateId: event.aggregateId,
     };
+    // A reconciled request whose subject thread was purged keeps its row and
+    // aggregates for accounting, but the projector must not re-link the
+    // purged thread's identity when the journal is replayed after a purge.
+    const deLinkedSubjectId = subjectPurged(connection, subject)
+      ? null
+      : String(subject.aggregateId);
 
     const attribution: ReadonlyArray<UsageAttributionEntry> =
       reconciliation.imageUnits !== undefined
@@ -151,7 +157,7 @@ export class UsageProjection implements Projection {
       .run(
         record.reconciliationId,
         record.subject.aggregateType,
-        record.subject.aggregateId,
+        deLinkedSubjectId,
         record.providerInstanceId,
         record.modelId,
         record.requestShape,
@@ -537,7 +543,10 @@ function decodeUsageRow(row: UsageRecordProjectionRow): UsageRecord {
   const attribution = JSON.parse(row.attribution_json) as ReadonlyArray<UsageAttributionEntry>;
   return decodeUsageRecord({
     reconciliationId: row.reconciliation_id,
-    subject: { aggregateType: row.subject_type, aggregateId: row.subject_id },
+    subject:
+      row.subject_id === null
+        ? { aggregateType: row.subject_type, deLinked: true }
+        : { aggregateType: row.subject_type, aggregateId: row.subject_id },
     providerInstanceId: row.provider_instance_id,
     modelId: row.model_id,
     requestShape: row.request_shape,
@@ -563,6 +572,37 @@ function decodeUsageRow(row: UsageRecordProjectionRow): UsageRecord {
     attribution,
     observedAt: row.observed_at,
   });
+}
+
+/**
+ * Whether the thread a usage subject names has a purge tombstone. The usage
+ * row itself survives the purge — its aggregates are host accounting — but
+ * replay must not re-link the thread's identity after it was erased.
+ */
+function subjectPurged(
+  connection: SqliteConnection,
+  subject: { readonly aggregateType: string; readonly aggregateId: string },
+): boolean {
+  const mode = usageSubjectMode(subject.aggregateType);
+  if (mode === undefined) return false;
+  return (
+    connection
+      .prepare(`SELECT 1 AS present FROM thread_purge_tombstone WHERE mode = ? AND thread_id = ?`)
+      .get(mode, String(subject.aggregateId)) !== undefined
+  );
+}
+
+function usageSubjectMode(aggregateType: string): "chat" | "work" | "code" | undefined {
+  switch (aggregateType) {
+    case "chat-thread":
+      return "chat";
+    case "work-thread":
+      return "work";
+    case "code-thread":
+      return "code";
+    default:
+      return undefined;
+  }
 }
 
 function assertProjection(condition: boolean): asserts condition {

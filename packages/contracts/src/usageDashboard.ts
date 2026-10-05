@@ -144,7 +144,7 @@ export const UsageDetailRow = Schema.Struct({
   modelId: ProviderModelId,
   requestShape: StableRequestShape,
   subjectType: Schema.NonEmptyTrimmedString,
-  subjectId: Schema.String,
+  subjectId: Schema.NullOr(Schema.String),
   mode: Schema.optional(OctantMode),
   projectId: Schema.optional(ProjectId),
   quality: UsageQuality,

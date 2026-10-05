@@ -231,6 +231,15 @@ describe("ThreadRetentionService", () => {
         }),
       );
 
+    connection
+      .prepare(
+        `INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name, event_version,
+          correlation_id, actor_kind, actor_id, occurred_at, payload_json, host_id
+        ) VALUES (?, 'canvas-comments', ?, 1, 'canvas.comment-created@1', 1, ?, 'system', ?, ?, ?, 'local')`,
+      )
+      .run(randomUUID(), canvasId, ids.correlation, ids.actor, now, JSON.stringify({ canvasId }));
+
     const report = await service.purge(
       { scope: { kind: "project", projectId: decodeProjectId(projectId) }, confirm: true },
       "local-window",
@@ -239,6 +248,17 @@ describe("ThreadRetentionService", () => {
     if (!("deleted" in report) || "kind" in report) throw new Error("purge did not report scopes");
     expect(report.deleted).toContain("project-memory");
     expect(report.deleted).toContain("project-canvases");
+    // A Canvas's subsidiary state (comments) follows the Canvas into the same
+    // purge, not only the primary canvas aggregate.
+    expect(
+      (
+        connection
+          .prepare(
+            "SELECT COUNT(*) AS count FROM event_journal WHERE aggregate_type = 'canvas-comments'",
+          )
+          .get() as { readonly count: number }
+      ).count,
+    ).toBe(0);
     expect(
       (
         connection.prepare("SELECT COUNT(*) AS count FROM project_memory_projection").get() as {
@@ -250,6 +270,17 @@ describe("ThreadRetentionService", () => {
       (
         connection
           .prepare("SELECT COUNT(*) AS count FROM event_journal WHERE aggregate_type = 'canvas'")
+          .get() as { readonly count: number }
+      ).count,
+    ).toBe(0);
+    // The journal is authoritative: the Project's memory history leaves it
+    // too, so a rebuild cannot resurrect what the report says was deleted.
+    expect(
+      (
+        connection
+          .prepare(
+            "SELECT COUNT(*) AS count FROM event_journal WHERE aggregate_type = 'project-memory'",
+          )
           .get() as { readonly count: number }
       ).count,
     ).toBe(0);
