@@ -231,7 +231,10 @@ function readEntries(
         const trigger = child.querySelector<HTMLElement>("[data-native-menu-sub-trigger]");
         result.push({
           kind,
-          label: trigger?.dataset.nativeMenuLabel ?? trigger?.textContent ?? "",
+          label: boundedMenuText(
+            trigger?.dataset.nativeMenuLabel ?? trigger?.textContent ?? "",
+            NATIVE_MENU_LABEL_LIMIT,
+          ),
           enabled: trigger?.dataset.nativeMenuEnabled !== "false",
           items: readEntries(
             child,
@@ -254,7 +257,12 @@ function readEntries(
         child.textContent ??
         "";
       if (kind === "label") {
-        result.push({ kind: "item", id, label, enabled: false });
+        result.push({
+          kind: "item",
+          id,
+          label: boundedMenuText(label, NATIVE_MENU_LABEL_LIMIT),
+          enabled: false,
+        });
       } else {
         if (
           ancestorsEnabled &&
@@ -266,18 +274,35 @@ function readEntries(
         result.push({
           kind: itemKind,
           id,
-          label,
+          label: boundedMenuText(label, NATIVE_MENU_LABEL_LIMIT),
           enabled:
             child.dataset.nativeMenuEnabled !== "false" &&
             child.getAttribute("aria-disabled") !== "true",
           ...(itemKind === "item"
             ? {}
             : { checked: child.getAttribute("aria-checked") === "true" }),
-          ...(child.title === "" ? {} : { description: child.title }),
+          ...(child.title === ""
+            ? {}
+            : { description: boundedMenuText(child.title, NATIVE_MENU_DESCRIPTION_LIMIT) }),
         });
       }
     }
   }
   visit(container);
   return result;
+}
+
+const NATIVE_MENU_LABEL_LIMIT = 256;
+const NATIVE_MENU_DESCRIPTION_LIMIT = 512;
+
+/**
+ * The desktop refuses the whole menu request when one entry exceeds its
+ * limits, so a deep checkout path or a long URL in any label would take the
+ * entire menu down with it. Bound the text here: one long entry reads as
+ * truncated, and every other action still opens.
+ */
+function boundedMenuText(text: string, limit: number): string {
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  if (trimmed.length <= limit) return trimmed;
+  return `${trimmed.slice(0, limit - 1)}…`;
 }

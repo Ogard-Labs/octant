@@ -72,6 +72,47 @@ describe("desktop context menus", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("bounds one long label and description so the desktop never refuses the whole menu", async () => {
+    const popup = vi.fn(async (_request: import("@octant/contracts/shell").NativeMenuRequest) => ({
+      kind: "dismissed" as const,
+    }));
+    Object.defineProperty(window, "octantHost", {
+      configurable: true,
+      value: { popupNativeMenu: popup },
+    });
+    const longLabel = "L".repeat(300);
+    const longDescription = "D".repeat(600);
+    render(
+      <OctantContextMenuRoot>
+        <OctantContextMenuTrigger render={<button type="button" />}>
+          Thread
+        </OctantContextMenuTrigger>
+        <OctantContextMenuContent>
+          <OctantContextMenuItem label={longLabel} title={longDescription}>
+            {longLabel}
+          </OctantContextMenuItem>
+          <OctantContextMenuItem label="Copy URL">Copy URL</OctantContextMenuItem>
+        </OctantContextMenuContent>
+      </OctantContextMenuRoot>,
+    );
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Thread" }), {
+      clientX: 10,
+      clientY: 20,
+    });
+    await waitFor(() => expect(popup).toHaveBeenCalled());
+    const request = popup.mock.calls[0]?.[0];
+    const items = request?.items ?? [];
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      if (item.kind === "separator") continue;
+      expect(item.label.length).toBeLessThanOrEqual(256);
+      if ("description" in item && item.description !== undefined) {
+        expect(item.description.length).toBeLessThanOrEqual(512);
+      }
+    }
+    expect(items[1]).toMatchObject({ kind: "item", label: "Copy URL" });
+  });
+
   it("restores trigger focus on dismissal and does not invoke disabled or stale actions", async () => {
     let finish: (value: unknown) => void = () => undefined;
     const popup = vi.fn(
