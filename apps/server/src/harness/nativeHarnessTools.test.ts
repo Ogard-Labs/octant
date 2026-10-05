@@ -360,6 +360,41 @@ describe("native harness tools", () => {
     );
   });
 
+  it("keeps a queued note for the next tool result when a collected child reply fills the budget", async () => {
+    const runId = "00000000-0000-4000-8000-000000000001";
+    const reply = {
+      status: "completed" as const,
+      runId,
+      version: 4,
+      generation: 1,
+      truncated: false,
+    };
+    const room = MAX_PROVIDER_TOOL_RESULT_BYTES - JSON.stringify({ ...reply, text: "" }).length;
+    const delegate: NativeHarnessDelegatePort = {
+      capabilities: async () => {
+        throw new Error("unexpected capabilities read");
+      },
+      start: async () => {
+        throw new Error("must not start a new child");
+      },
+      status: async () => [],
+      collect: async () => ({ ...reply, text: "x".repeat(room - 8) }),
+      wait: async () => ({ finished: true, children: [] }),
+    };
+    const notes = ["Skip the docs."];
+    const steered = await fixture({}, { delegate, steering: () => notes.splice(0) });
+    const collected = await call(steered.tools, "delegate", { operation: "collect", runId });
+    expect(collected.result).not.toHaveProperty("note_from_person");
+    expect(Buffer.byteLength(boundedToolResultJson(collected.result))).toBeLessThanOrEqual(
+      MAX_PROVIDER_TOOL_RESULT_BYTES,
+    );
+    expect(JSON.parse(boundedToolResultJson(collected.result))).not.toHaveProperty("error");
+    expect(notes).toEqual(["Skip the docs."]);
+    expect((await call(steered.tools, "read", { path: "a.ts" })).result).toMatchObject({
+      note_from_person: ["Skip the docs."],
+    });
+  });
+
   describe("goals", () => {
     const threadId = "00000000-0000-4000-8000-000000000301";
     async function goalFixture(input: {

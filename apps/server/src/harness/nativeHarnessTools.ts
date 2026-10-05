@@ -374,6 +374,12 @@ export function createNativeHarnessTools(
     } catch {
       return { ...refused("tool-execution-failed"), refused: false };
     }
+    // A collected child reply was budgeted to fit the provider limit exactly, so
+    // a note added now could push it into a lossy preview and be lost with it.
+    // Leave the notes queued for the next tool result.
+    if (name === "delegate" && (args as NativeHarnessDelegateArguments).operation === "collect") {
+      return outcome;
+    }
     const notes = options.ports.steering?.() ?? [];
     if (notes.length === 0 || typeof outcome.result !== "object" || outcome.result === null) {
       return outcome;
