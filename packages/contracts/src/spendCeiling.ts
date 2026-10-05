@@ -46,6 +46,20 @@ export type SpendCeilingTimeZone = typeof SpendCeilingTimeZone.Type;
 export const SpendCeilingCalendarPeriod = Schema.Literal("day", "week", "month");
 export type SpendCeilingCalendarPeriod = typeof SpendCeilingCalendarPeriod.Type;
 
+/**
+ * Monetary budgets are whole US cents so every ceiling check is integer
+ * arithmetic. A fractional amount is refused rather than rounded: a rounded
+ * ceiling is a different ceiling than the person set.
+ */
+export const PositiveUsdCents = Schema.Number.pipe(
+  Schema.positive(),
+  Schema.finite(),
+  Schema.filter((value) => Number.isSafeInteger(value), {
+    message: () => "A monetary budget must be whole US cents.",
+  }),
+);
+export type PositiveUsdCents = typeof PositiveUsdCents.Type;
+
 export const SpendCeilingWindow = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("lifetime") }).annotations(strict),
   Schema.Struct({
@@ -71,6 +85,8 @@ export const SpendCeilingPolicy = Schema.Struct({
   maxTokensPerTurn: Schema.optional(PositiveInt),
   turnBudget: Schema.optional(PositiveInt),
   runTimeBudgetSeconds: Schema.optional(PositiveInt),
+  /** Spend ceiling over provider-reported or estimated US dollars. */
+  costBudgetUsdCents: Schema.optional(PositiveUsdCents),
 })
   .annotations(strict)
   .pipe(
@@ -79,6 +95,7 @@ export const SpendCeilingPolicy = Schema.Struct({
         policy.tokenBudget !== undefined ||
         policy.turnBudget !== undefined ||
         policy.runTimeBudgetSeconds !== undefined ||
+        policy.costBudgetUsdCents !== undefined ||
         "A spend ceiling needs a token, turn, or run-time budget.",
     ),
   );
@@ -121,6 +138,7 @@ export const RaiseSpendCeilingCommand = Schema.Struct({
   tokenBudget: Schema.optional(PositiveInt),
   turnBudget: Schema.optional(PositiveInt),
   runTimeBudgetSeconds: Schema.optional(PositiveInt),
+  costBudgetUsdCents: Schema.optional(PositiveUsdCents),
 })
   .annotations(strict)
   .pipe(
@@ -129,6 +147,7 @@ export const RaiseSpendCeilingCommand = Schema.Struct({
         command.tokenBudget !== undefined ||
         command.turnBudget !== undefined ||
         command.runTimeBudgetSeconds !== undefined ||
+        command.costBudgetUsdCents !== undefined ||
         "Raising a spend ceiling needs a new token, turn, or run-time budget.",
     ),
   );
@@ -225,7 +244,7 @@ export const SpendCeilingRefusal = Schema.Struct({
   kind: SpendCeilingRefusalKind,
   scopeKind: Schema.Literal("project", "thread"),
   scopeId: Schema.UUID,
-  dimension: Schema.Literal("tokens", "turns", "run-time"),
+  dimension: Schema.Literal("tokens", "turns", "run-time", "monetary"),
   remainingTokens: Schema.optional(NonNegativeInt),
   overrunTokens: Schema.optional(PositiveInt),
   ceilingTokens: Schema.optional(PositiveInt),
@@ -233,6 +252,8 @@ export const SpendCeilingRefusal = Schema.Struct({
   ceilingTurns: Schema.optional(PositiveInt),
   remainingRunTimeSeconds: Schema.optional(NonNegativeInt),
   ceilingRunTimeSeconds: Schema.optional(PositiveInt),
+  remainingUsdCents: Schema.optional(NonNegativeInt),
+  ceilingUsdCents: Schema.optional(PositiveInt),
   recovery: Schema.Array(SpendCeilingRecovery).pipe(Schema.minItems(1), Schema.maxItems(4)),
   message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
 }).annotations(strict);
@@ -253,6 +274,9 @@ export const SpendCeilingRemaining = Schema.Struct({
   ceilingRunTimeSeconds: Schema.optional(PositiveInt),
   usedRunTimeSeconds: Schema.optional(NonNegativeInt),
   remainingRunTimeSeconds: Schema.optional(NonNegativeInt),
+  ceilingUsdCents: Schema.optional(PositiveUsdCents),
+  usedUsdCents: Schema.optional(NonNegativeInt),
+  remainingUsdCents: Schema.optional(NonNegativeInt),
   window: SpendCeilingWindow,
   overrun: Schema.optional(SpendCeilingOverrun),
   version: AggregateVersion,

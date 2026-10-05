@@ -157,6 +157,45 @@ describe("evaluateSpendCeilingAdmission turn and run-time budgets", () => {
     ).toEqual({ status: "admitted", reservedTokens: 0, reservations: [] });
   });
 
+  it("refuses a Project whose monetary budget is used up", () => {
+    const project = projectFacts({
+      policy: { costBudgetUsdCents: 25_00 },
+      committed: { status: "known", tokens: 0 },
+      usedCostUsdCents: 25_00,
+    });
+    const result = evaluateSpendCeilingAdmission({ project });
+    expect(result.status).toBe("refused");
+    if (result.status !== "refused") return;
+    expect(result.refusal).toMatchObject({
+      kind: "exhausted",
+      dimension: "monetary",
+      scopeKind: "project",
+      remainingUsdCents: 0,
+      ceilingUsdCents: 25_00,
+    });
+    expect(result.refusal.message).toContain("money ceiling");
+    expect(
+      evaluateSpendCeilingAdmission({
+        project: { ...project, usedCostUsdCents: 24_99 },
+      }),
+    ).toEqual({ status: "admitted", reservedTokens: 0, reservations: [] });
+  });
+
+  it("refuses a monetary ceiling when the scope's spend cannot be priced", () => {
+    const project = projectFacts({
+      policy: { costBudgetUsdCents: 25_00 },
+      committed: { status: "known", tokens: 0 },
+    });
+    const result = evaluateSpendCeilingAdmission({ project });
+    expect(result.status).toBe("refused");
+    if (result.status !== "refused") return;
+    expect(result.refusal).toMatchObject({
+      kind: "unknown-spend",
+      dimension: "monetary",
+      ceilingUsdCents: 25_00,
+    });
+  });
+
   it("refuses the turn past a thread turn budget and needs no token bound without a token budget", () => {
     const thread = threadFacts({ policy: { turnBudget: 2 }, usedTurns: 1 });
     expect(evaluateSpendCeilingAdmission({ thread }).status).toBe("admitted");
