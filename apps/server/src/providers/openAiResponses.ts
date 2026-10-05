@@ -39,12 +39,10 @@ export interface ProtocolToolCall {
 export type ProtocolTurnEvent =
   | { readonly kind: "text-delta"; readonly sequence: number; readonly text: string }
   | { readonly kind: "reasoning-delta"; readonly sequence: number; readonly text: string }
-  | {
+  | ({
       readonly kind: "usage";
       readonly sequence: number;
-      readonly inputTokens: number;
-      readonly outputTokens: number;
-    }
+    } & ProtocolUsage)
   | {
       readonly kind: "tool-call";
       readonly sequence: number;
@@ -68,9 +66,19 @@ export interface ProtocolTurnResult {
   readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
 }
 
+/**
+ * `inputTokens` counts all input, cached or not, so context math does not
+ * depend on whether an endpoint caches. The cache figures say how much of it
+ * was read from or written to the prompt cache; the reasoning figure is the
+ * part of `outputTokens` spent thinking. Each is absent when the endpoint did
+ * not report it, and zero only when the endpoint said zero.
+ */
 export interface ProtocolUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
+  readonly cacheReadInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+  readonly reasoningTokens?: number;
 }
 
 export interface ResponsesTurnInput {
@@ -1129,7 +1137,38 @@ function readUsage(value: unknown): ProtocolUsage | undefined {
   ) {
     throw protocol("The provider stream contained invalid usage.");
   }
-  return { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens };
+  const inputDetails = readDetails(usage.input_tokens_details);
+  const outputDetails = readDetails(usage.output_tokens_details);
+  const cacheRead = readOptionalCount(inputDetails, "cached_tokens");
+  const cacheWrite = readOptionalCount(inputDetails, "cache_write_tokens");
+  const reasoning = readOptionalCount(outputDetails, "reasoning_tokens");
+  if (
+    (cacheRead ?? 0) + (cacheWrite ?? 0) > usage.input_tokens ||
+    (reasoning ?? 0) > usage.output_tokens
+  ) {
+    throw protocol("The provider stream contained invalid usage.");
+  }
+  return {
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    ...(cacheRead === undefined ? {} : { cacheReadInputTokens: cacheRead }),
+    ...(cacheWrite === undefined ? {} : { cacheWriteInputTokens: cacheWrite }),
+    ...(reasoning === undefined ? {} : { reasoningTokens: reasoning }),
+  };
+}
+
+/** A detail object the endpoint may leave out or null; any other type is invalid usage. */
+function readDetails(value: unknown): Record<string, unknown> {
+  if (value === undefined || value === null) return {};
+  if (!isRecord(value)) throw protocol("The provider stream contained invalid usage.");
+  return value;
+}
+
+function readOptionalCount(details: Record<string, unknown>, key: string): number | undefined {
+  const value = details[key];
+  if (value === undefined || value === null) return undefined;
+  if (!isTokenCount(value)) throw protocol("The provider stream contained invalid usage.");
+  return value;
 }
 
 function isToolEvent(event: { readonly type: string }): boolean {

@@ -557,6 +557,41 @@ describe("makeOpenAiCompatibleDriver", () => {
       events.every((event, index) => index === 0 || event.sequence > events[index - 1]!.sequence),
     ).toBe(true);
   });
+
+  it("carries cache and reasoning tokens onto the runtime usage event", async () => {
+    const driver = makeDriver({
+      fetch: vi.fn(async () =>
+        chatStream("cached answer", {
+          prompt_tokens: 100,
+          completion_tokens: 12,
+          total_tokens: 112,
+          prompt_tokens_details: { cached_tokens: 64 },
+          completion_tokens_details: { reasoning_tokens: 5 },
+        }),
+      ),
+    });
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({ sessionId, prompt: "cache", attachments: [], tools: [] });
+          return Array.from(yield* Fiber.join(collected));
+        }),
+      ),
+    );
+
+    expect(events.find((event) => event.kind === "usage")).toMatchObject({
+      inputTokens: 100,
+      outputTokens: 12,
+      cacheReadInputTokens: 64,
+      reasoningTokens: 5,
+    });
+  });
 });
 
 function makeDriver(options: {
@@ -586,7 +621,10 @@ function modelsResponse(_url: string | URL | Request): Response {
   return Response.json({ data: [{ id: "discovered-model" }] });
 }
 
-function chatStream(text: string): Response {
+function chatStream(
+  text: string,
+  usage: Record<string, unknown> = { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+): Response {
   const chunks = [
     chatChunk({ role: "assistant", content: text }),
     chatChunk({}, "stop"),
@@ -594,7 +632,7 @@ function chatStream(text: string): Response {
       id: "chatcmpl_private",
       object: "chat.completion.chunk",
       choices: [],
-      usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+      usage,
     },
     "[DONE]",
   ];

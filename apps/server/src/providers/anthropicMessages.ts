@@ -42,16 +42,29 @@ export interface AnthropicHistoryMessage {
 export type AnthropicTurnEvent =
   | { readonly kind: "text-delta"; readonly sequence: number; readonly text: string }
   | { readonly kind: "reasoning-delta"; readonly sequence: number; readonly text: string }
-  | {
+  | ({
       readonly kind: "usage";
       readonly sequence: number;
-      readonly inputTokens: number;
-      readonly outputTokens: number;
-    };
+    } & AnthropicUsage);
 
+/**
+ * `inputTokens` counts all input: the endpoint reports uncached input,
+ * cache reads, and cache writes as disjoint figures, and this adds them so
+ * the number means the same thing as it does for every other protocol. The
+ * cache figures are absent when the endpoint did not report them.
+ */
 export interface AnthropicUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
+  readonly cacheReadInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+}
+
+/** The input figures as the endpoint reports them, before they are summed. */
+interface InputUsageParts {
+  readonly uncached: number;
+  readonly cacheRead: number | undefined;
+  readonly cacheWrite: number | undefined;
 }
 
 export interface AnthropicTurnResult {
@@ -98,6 +111,7 @@ interface StreamState {
   text: string;
   reasoning: string;
   usage?: AnthropicUsage;
+  inputParts?: InputUsageParts;
   readonly events: AnthropicTurnEvent[];
   readonly contentBlocks: Map<number, TrackedContentBlock>;
   readonly toolCalls: AnthropicToolCall[];
@@ -316,8 +330,13 @@ function validateMessageStart(event: Record<string, unknown>, state: StreamState
   ) {
     throw protocol("The provider stream contained invalid initial usage data.");
   }
+  const parts = readInputParts(usage, undefined);
+  if (parts === undefined) {
+    throw protocol("The provider stream contained invalid initial usage data.");
+  }
   if (state.usage === undefined) {
-    state.usage = { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens };
+    state.inputParts = parts;
+    state.usage = usageFrom(parts, usage.output_tokens);
   }
 }
 
@@ -482,22 +501,55 @@ function normalizeMessageDelta(
   }
   const usage = event.usage;
   if (usage !== undefined && usage !== null) {
-    if (
-      !isRecord(usage) ||
-      !isNonNegativeInt(usage.output_tokens) ||
-      (usage.input_tokens !== undefined &&
-        usage.input_tokens !== null &&
-        !isNonNegativeInt(usage.input_tokens))
-    ) {
+    if (!isRecord(usage) || !isNonNegativeInt(usage.output_tokens)) {
       throw protocol("The provider stream contained invalid usage data.");
     }
-    const inputTokens =
-      usage.input_tokens !== undefined && usage.input_tokens !== null
-        ? (usage.input_tokens as number)
-        : (state.usage?.inputTokens ?? 0);
-    state.usage = { inputTokens, outputTokens: usage.output_tokens };
+    // The closing usage may restate any input figure; one it leaves out keeps
+    // the value the opening usage reported.
+    const parts = readInputParts(usage, state.inputParts);
+    if (parts === undefined) {
+      throw protocol("The provider stream contained invalid usage data.");
+    }
+    state.inputParts = parts;
+    state.usage = usageFrom(parts, usage.output_tokens);
     emit({ kind: "usage", sequence: allocateSequence(state), ...state.usage }, state, onEvent);
   }
+}
+
+/**
+ * The input figures of one usage object, each falling back to `previous` when
+ * absent. A figure of the wrong type makes the whole object invalid, which is
+ * `undefined`.
+ */
+function readInputParts(
+  usage: Record<string, unknown>,
+  previous: InputUsageParts | undefined,
+): InputUsageParts | undefined {
+  const fields = [
+    usage.input_tokens,
+    usage.cache_read_input_tokens,
+    usage.cache_creation_input_tokens,
+  ];
+  if (fields.some((field) => field !== undefined && field !== null && !isNonNegativeInt(field))) {
+    return undefined;
+  }
+  const [uncached, cacheRead, cacheWrite] = fields.map((field) =>
+    field === undefined || field === null ? undefined : (field as number),
+  );
+  return {
+    uncached: uncached ?? previous?.uncached ?? 0,
+    cacheRead: cacheRead ?? previous?.cacheRead,
+    cacheWrite: cacheWrite ?? previous?.cacheWrite,
+  };
+}
+
+function usageFrom(parts: InputUsageParts, outputTokens: number): AnthropicUsage {
+  return {
+    inputTokens: parts.uncached + (parts.cacheRead ?? 0) + (parts.cacheWrite ?? 0),
+    outputTokens,
+    ...(parts.cacheRead === undefined ? {} : { cacheReadInputTokens: parts.cacheRead }),
+    ...(parts.cacheWrite === undefined ? {} : { cacheWriteInputTokens: parts.cacheWrite }),
+  };
 }
 
 function result(
