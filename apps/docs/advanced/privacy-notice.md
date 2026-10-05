@@ -179,13 +179,14 @@ copy, not the authoritative export.
 can project — across Chat, Work, and Code — plus Projects, memory,
 Canvases, settings, usage rows, and the retention state including purge
 tombstones, streamed as line-delimited JSON. It is local-owner-only: a
-remote or paired device principal is refused before any store is opened.
+remote or paired device principal is refused before any export data is read.
 The same unrepresentable rules as the thread bundle apply — no credentials,
-no filesystem paths, no raw provider payloads. Individual records that would
-carry a forbidden key are left out of the bundle and named on the export's
-omissions page, so the cut can complete while still disclosing every
-omitted record; if the walk itself cannot finish, the export is refused and
-nothing is saved.
+no filesystem paths, no raw provider payloads. Some non-thread records that
+carry a forbidden key are left out of the bundle; the export's omissions page
+adds a generic entry naming that class of omission without identifying the
+records or giving their count. A forbidden key inside a thread record or an
+emitted page instead causes the whole export to be refused, and if the walk
+cannot finish, nothing is saved.
 
 **Retain and purge.** Retention windows are per host, Project, or thread.
 The narrower scope wins. The host default is forever. Setting a window

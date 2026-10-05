@@ -275,14 +275,15 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
             new WorkAttachmentStore(store.directory).purgeThread(decodeWorkThreadId(id)),
           purgeCodeAttachments: (id) =>
             new CodeAttachmentStore(store.directory).purgeThread(decodeCodeThreadId(id)),
-          purgeGeneratedImages: async (id) => {
+          purgeGeneratedImages: (id) => {
+            let scopeId;
             try {
-              await new GeneratedImageStore(store.directory).purgeScope(
-                decodeImageGenerationScopeId(id),
-              );
+              scopeId = decodeImageGenerationScopeId(id);
             } catch {
-              // A thread id that is not an image scope is not an image basin.
+              // A work or code thread id is not an image scope; nothing to purge.
+              return Promise.resolve();
             }
+            return new GeneratedImageStore(store.directory).purgeScope(scopeId);
           },
           purgeAgentMessages: async () => undefined,
         }),
@@ -319,6 +320,8 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
     expect(scopeDirectoryExists(join(store.directory, "chat", "threads"), threads.chat.id)).toBe(
       false,
     );
+    // The generated-image scope is gone too; a purge failure would escape and fail here.
+    expect(readdirSync(join(store.directory, "generated-images"))).not.toContain(threads.chat.id);
 
     const second = await exportNdjson(exportService);
     // No content trace of the purged thread survives in the next cut.
