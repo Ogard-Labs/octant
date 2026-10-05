@@ -18,7 +18,7 @@ import type { ChildCanvasWorkspaceResolution } from "./childCanvasWorkspace";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { CanvasService } from "./canvasService";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
-import { loginSequenceExample, orderStateExample } from "@octant/domain";
+import { loginSequenceExample, orderStateExample, chartExamples } from "@octant/domain";
 
 export const CANVAS_TOOL_NAME = "octant_canvas";
 
@@ -31,7 +31,17 @@ export const CANVAS_TOOL_NAME = "octant_canvas";
 const MAX_AUTHORED_BLOCKS = 128;
 const MAX_TITLE_CHARS = 120;
 const MAX_DESCRIBED_BLOCK_KINDS = 3;
-const blockKinds = CanvasBlock.members.map((block) => block.fields.kind.literals[0]);
+
+function memberKind(member: (typeof CanvasBlock.members)[number]): string {
+  const struct = "fields" in member ? member : member.from;
+  const kind = struct.fields.kind.literals[0];
+  if (kind === undefined) {
+    throw new Error("A Canvas block kind is missing from the catalogue.");
+  }
+  return kind;
+}
+
+const blockKinds = CanvasBlock.members.map(memberKind);
 
 const canvasDefinitionSchema = {
   type: "object",
@@ -153,11 +163,12 @@ type ResolvedCanvasTarget =
 
 const MODE_NAMES = { chat: "Chat", work: "Work", code: "Code" } as const;
 
-function diagramKindExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown> {
+function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown> {
   const examples: unknown[] = [];
   for (const kind of kinds) {
     if (kind === "sequence") examples.push(loginSequenceExample);
     if (kind === "state") examples.push(orderStateExample);
+    if (kind === "chart") examples.push(...chartExamples);
   }
   return examples;
 }
@@ -250,6 +261,7 @@ function toolDescription(
     'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, and "summarise research" uses research-brief. Describe with no block kinds lists every offered recipe and its skeleton; fill those roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.',
     "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
     "A login or request flow is a sequence block: participants, ordered messages, activations, and notes. A lifecycle such as an order is a state block: states that may nest, labeled transitions, and an initial and a final state. Use diagram for a generic graph of nodes and edges. Describe sequence or state to get an example.",
+    "A share of a whole is a pie or a donut: one series of labeled slices whose values are not negative. Comparing series across the same categories is a stacked-bar or a grouped-bar; every series lists those categories in the same order, and a stacked bar's values are not negative. A bar-line pairs bar series and line series on those categories, and each series names its mark. Describe chart to get an example of each.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
   ].join(" ");
@@ -561,9 +573,9 @@ function canvasToolSet(options: {
           };
         }
         const selected = CanvasBlock.members.filter((block) =>
-          input.blockKinds?.includes(block.fields.kind.literals[0]),
+          input.blockKinds?.includes(memberKind(block)),
         );
-        const examples = diagramKindExamples(input.blockKinds ?? []);
+        const examples = describedExamples(input.blockKinds ?? []);
         return {
           result: {
             blockSchema: JSONSchema.make(Schema.Union(...selected)),

@@ -125,6 +125,154 @@
   color: var(--oct-muted);
 }
 
+.canvas-block__chart {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.canvas-block__chart-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 420px;
+}
+
+.canvas-block__chart-mark {
+  fill: var(--oct-ser, var(--oct-series-1));
+  stroke: none;
+}
+
+.canvas-block__chart-mark.is-line {
+  fill: none;
+  stroke: var(--oct-ser, var(--oct-series-1));
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: var(--oct-ser-dash, none);
+}
+
+.canvas-block__chart-mark.is-area {
+  opacity: 0.22;
+}
+
+.canvas-block__chart-slice {
+  stroke: var(--oct-surface);
+  stroke-width: 1;
+}
+
+.canvas-block__chart-axis {
+  stroke: var(--oct-chart-axis);
+  stroke-width: 1;
+}
+
+.canvas-block__chart-label {
+  fill: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__chart .chart-legend {
+  margin-top: 0;
+}
+
+.canvas-block__chart .chart-legend button,
+.canvas-block__chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  /* A bare button would otherwise collapse to text height; the workspace's
+     control rhythm is 28px, and that is the minimum hit area this keeps. */
+  min-height: 28px;
+  padding: 0 var(--oct-space-1);
+  border: 0;
+  background: transparent;
+  color: var(--oct-fg-2);
+  font: inherit;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  cursor: pointer;
+}
+
+.canvas-block__chart .chart-legend button[aria-pressed="false"],
+.canvas-block__chart-legend-item[aria-pressed="false"] {
+  color: var(--oct-meta);
+  text-decoration: line-through;
+}
+
+.canvas-block__chart .chart-legend button:focus-visible,
+.canvas-block__chart-legend-item:focus-visible,
+.canvas-block__chart-table:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.canvas-block__chart-data {
+  margin-top: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__chart-data summary {
+  cursor: pointer;
+}
+
+.canvas-block__chart-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* System colours and dash patterns keep series apart when the palette is replaced. */
+@media (forced-colors: active) {
+  .canvas-block__chart-mark,
+  .canvas-block__chart-slice {
+    fill: ButtonFace;
+    stroke: CanvasText;
+    stroke-width: 2;
+    stroke-dasharray: var(--oct-ser-dash, none);
+  }
+
+  .canvas-block__chart-mark.is-line {
+    fill: none;
+    stroke: CanvasText;
+  }
+
+  .canvas-block__chart-mark[data-series="0"],
+  .canvas-block__chart-mark[data-series="2"],
+  .canvas-block__chart-mark[data-series="4"],
+  .canvas-block__chart-slice[data-series="0"],
+  .canvas-block__chart-slice[data-series="2"],
+  .canvas-block__chart-slice[data-series="4"] {
+    fill: Highlight;
+  }
+
+  .canvas-block__chart-mark.is-line[data-series] {
+    fill: none;
+  }
+
+  .canvas-block__chart-axis,
+  .canvas-block__chart-label {
+    stroke: CanvasText;
+    fill: CanvasText;
+  }
+
+  .canvas-block__chart .chart-key {
+    background: CanvasText;
+    border-color: CanvasText;
+  }
+
+  .canvas-block__chart .chart-legend button[aria-pressed="false"],
+  .canvas-block__chart-legend-item[aria-pressed="false"] {
+    color: GrayText;
+  }
+
+  .canvas-block__chart .chart-legend button:focus-visible,
+  .canvas-block__chart-legend-item:focus-visible,
+  .canvas-block__chart-table:focus-visible {
+    outline-color: Highlight;
+  }
+}
+
 .canvas-block__timeline {
   list-style: none;
   margin: 0;

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { computeYDomain, scaleX, scaleY, type ChartSeriesData } from "./chartGeometry";
+import {
+  categoryCenter,
+  computeYDomain,
+  pieWedges,
+  ringPath,
+  scaleX,
+  scaleY,
+  type ChartSeriesData,
+} from "./chartGeometry";
 
 const series = (ys: number[]): ChartSeriesData => ({
   seriesId: "s",
@@ -31,5 +39,20 @@ describe("chartGeometry", () => {
     expect(a).toBeGreaterThanOrEqual(0);
     expect(b).toBeGreaterThan(a);
     expect(b).toBeLessThanOrEqual(300);
+  });
+
+  it("splits a whole into clockwise wedges that sum to one turn", () => {
+    const wedges = pieWedges([1, 1, 2]);
+    expect(wedges.map((wedge) => wedge.fraction)).toEqual([0.25, 0.25, 0.5]);
+    const span = wedges.reduce((sum, wedge) => sum + (wedge.end - wedge.start), 0);
+    expect(span).toBeCloseTo(Math.PI * 2);
+    expect(ringPath(10, 10, 8, 0, wedges[0]?.start ?? 0, wedges[0]?.end ?? 0)).toContain("A");
+    expect(ringPath(10, 10, 8, 4, -Math.PI / 2, Math.PI * 1.5)).toContain("A 4.00");
+    expect(ringPath(10, 10, 8, 0, 0, 0)).toBe("");
+  });
+
+  it("centers category slots across the plot", () => {
+    expect(categoryCenter(0, 2, 100, 0)).toBe(25);
+    expect(categoryCenter(1, 2, 100, 0)).toBe(75);
   });
 });
