@@ -560,7 +560,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     readonly modelId: ChatThread["modelId"];
     readonly modelOptionValues?: ProviderModelOptionValues;
   }) {
-    void enqueueThreadCommand(async (previous) => {
+    return enqueueThreadCommand(async (previous) => {
       const result = await props.controller.execute({
         kind: "change-chat-provider",
         threadId: thread.id,

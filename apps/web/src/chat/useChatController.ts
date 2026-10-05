@@ -698,6 +698,17 @@ export function useChatController(options: ChatControllerOptions) {
         "threadId" in command &&
         String(command.threadId) === String(currentThreadId)
       ) {
+        const currentView = activeViewRef.current;
+        if (
+          command.kind === "change-chat-provider" &&
+          result.kind === "thread-updated" &&
+          currentView !== undefined &&
+          String(currentView.thread.id) === String(result.thread.id)
+        ) {
+          // The picker waits on this command. Publish its confirmed pairing
+          // before returning; the background snapshot can arrive later.
+          applyAuthoritativeView({ ...currentView, thread: result.thread }, false);
+        }
         // A branch targets the active thread but mints a different one, so
         // reactivating the target alone would leave this controller's thread
         // list unaware of the thread the command just created.

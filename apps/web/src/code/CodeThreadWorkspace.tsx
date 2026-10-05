@@ -1815,7 +1815,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     value === undefined ? remaining : { ...remaining, [id]: value },
                   );
                 }}
-                onSelect={(selection) => void changeProvider(selection)}
+                onSelect={changeProvider}
                 selectedModelId={thread.modelId}
                 selectedProviderInstanceId={thread.providerInstanceId}
               />

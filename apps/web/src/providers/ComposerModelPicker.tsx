@@ -55,7 +55,8 @@ export interface ComposerModelPickerProps {
   readonly selectedProviderInstanceId?: ProviderInstanceId | undefined;
   readonly selectedModelId?: ProviderModelId | undefined;
   readonly unselectedLabel?: string;
-  readonly onSelect: (selection: ModelPickerSelection) => void;
+  /** Existing threads return the promise that confirms or refuses the model change. */
+  readonly onSelect: (selection: ModelPickerSelection) => void | Promise<void>;
   readonly onOpenSettings?: () => void;
   /** Opens Settings → Octant Harness, shown from the Octant entry. */
   readonly onOpenHarnessSettings?: () => void;
@@ -102,6 +103,8 @@ interface ModelRow {
 
 export function ComposerModelPicker(props: ComposerModelPickerProps) {
   const [open, setOpen] = useState(false);
+  const [selectionPending, setSelectionPending] = useState(false);
+  const controlsDisabled = props.disabled === true || selectionPending;
   const modelsElement = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [catalogFilter, setCatalogFilter] = useState<string | undefined>(undefined);
@@ -304,6 +307,19 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     });
   }
 
+  function selectModel(selection: ModelPickerSelection) {
+    if (controlsDisabled) return;
+    const confirmation = props.onSelect(selection);
+    if (confirmation === undefined) return;
+    // A second axis must use the pairing the parent confirmed. The parent
+    // reports refusals; either outcome releases the controls for another try.
+    setSelectionPending(true);
+    void confirmation.then(
+      () => setSelectionPending(false),
+      () => setSelectionPending(false),
+    );
+  }
+
   function renderModelRow(row: ModelRow, showCatalog: boolean) {
     const { picker, sectionId, sectionLabel, group } = row;
     const modelId = picker.model.id;
@@ -336,7 +352,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           aria-description={detail === "" ? undefined : detail}
           aria-selected={selected}
           className={`composer-model-picker__model${selected ? " composer-model-picker__model--selected" : ""}${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
-          disabled={unavailable || props.disabled}
+          disabled={unavailable || controlsDisabled}
           onClick={() => {
             if (unavailable) return;
             rememberModel(group.instance.id, modelId);
@@ -344,7 +360,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               rememberModelChoice({ providerInstanceId: group.instance.id, modelId });
             // The menu stays open: the next thing a person often does is set
             // the reasoning level for the model they just chose.
-            props.onSelect({ providerInstanceId: group.instance.id, modelId });
+            selectModel({ providerInstanceId: group.instance.id, modelId });
           }}
           role="option"
           title={picker.unavailableReason}
@@ -498,7 +514,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         triggerClassName="composer-model-picker__trigger"
         triggerLabel={ariaLabel}
         triggerVariant="ghost"
-        {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
+        triggerDisabled={controlsDisabled}
       >
         <div
           aria-label="Providers"
@@ -703,7 +719,12 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         <p className="sr-only">↓ Browse · Enter select · Esc close</p>
         {configuration === undefined &&
         (modelOptions.length === 0 || props.onModelOptionChange === undefined) ? null : (
-          <div aria-label="Model settings" className="composer-model-picker__settings" role="group">
+          <div
+            aria-label="Model settings"
+            aria-busy={selectionPending}
+            className="composer-model-picker__settings"
+            role="group"
+          >
             {configuration?.choices.map((choice) => {
               const candidates = configuredModels.filter((row) =>
                 configuration.choices.every(
@@ -719,7 +740,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                   <span>{choice.displayName}</span>
                   <OctantSelectField
                     aria-label={choice.displayName}
-                    disabled={props.disabled === true || candidates.length < 2}
+                    disabled={controlsDisabled || candidates.length < 2}
                     value={String(props.selectedModelId)}
                     options={candidates.map((row) => ({
                       id: String(row.picker.model.id),
@@ -754,7 +775,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                         for (const [id, value] of Object.entries(values))
                           rememberModelChoice(selection, { id, value });
                       }
-                      props.onSelect(
+                      selectModel(
                         Object.keys(values).length === 0
                           ? selection
                           : { ...selection, modelOptionValues: values },
@@ -767,7 +788,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             {levelOption === undefined || props.onModelOptionChange === undefined ? null : (
               <LevelSlider
                 displayName={levelOption.displayName}
-                disabled={props.disabled === true}
+                disabled={controlsDisabled}
                 labels={["Default", ...levelOption.values.map(levelLabel)]}
                 onIndexChange={(index) =>
                   changeModelOption(
@@ -787,7 +808,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                       <span>{option.displayName}</span>
                       <OctantSelectField
                         aria-label={option.displayName}
-                        disabled={props.disabled === true}
+                        disabled={controlsDisabled}
                         value={
                           option.value !== undefined && option.values.includes(option.value)
                             ? option.value

@@ -135,7 +135,7 @@ export interface ChatComposerProps {
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
-  readonly onSelectModel?: (selection: ModelPickerSelection) => void;
+  readonly onSelectModel?: (selection: ModelPickerSelection) => void | Promise<void>;
   /** Lets the model picker's "no provider ready" state open Settings. */
   readonly onOpenSettings?: () => void;
   readonly attachment?: ChatComposerAttachmentCapability;

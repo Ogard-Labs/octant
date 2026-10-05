@@ -326,6 +326,8 @@ in Chat, Work, and Code and are applied when a thread starts or resumes. New
 threads remember supported choices per provider and pairing; existing threads
 keep their saved settings. Changing lead or sidekick carries any explicit effort
 or speed choice that the new pairing also supports.
+Model settings pause while a pairing change is being checked, then become editable
+again when the change is confirmed or refused.
 
 Octant refuses a setting that Devin no longer offers rather than silently using
 a different one. Check the connection again to refresh the available choices.

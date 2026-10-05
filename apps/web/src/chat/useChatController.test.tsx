@@ -1975,6 +1975,45 @@ function createMockClient(
   };
 }
 
+describe("useChatController model changes", () => {
+  it("publishes the confirmed model before its change finishes while the snapshot refresh is pending", async () => {
+    const initial = threadView(1);
+    const updated = decodeChatThreadView({
+      ...initial,
+      thread: { ...initial.thread, modelId: "model-b", version: 2 },
+    });
+    const refresh = deferred<ChatThreadView>();
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn().mockResolvedValueOnce(initial).mockReturnValue(refresh.promise),
+      subscribe: vi.fn(async function* () {}),
+      execute: vi.fn(async () => ({ kind: "thread-updated" as const, thread: updated.thread })),
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        client,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+        activeThreadId: threadId,
+        navigationRefreshMs: 0,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.modelId).toBe("model-a"));
+    await act(async () => {
+      await result.current.execute({
+        kind: "change-chat-provider",
+        threadId,
+        expectedVersion: initial.thread.version,
+        providerInstanceId: updated.thread.providerInstanceId,
+        modelId: updated.thread.modelId,
+      });
+    });
+    expect(result.current.activeView?.thread.modelId).toBe("model-b");
+    expect(result.current.activeView?.thread.version).toBe(2);
+    await act(async () => refresh.resolve(updated));
+  });
+});
+
 describe("useChatController streaming", () => {
   it("grows a streaming reply from its frame without re-reading the thread", async () => {
     const turnId = "00000000-0000-4000-8000-000000000901";

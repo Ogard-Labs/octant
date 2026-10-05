@@ -386,6 +386,8 @@ one preserves the other choice and carries still-supported explicit effort and
 speed settings. Devin's Speed selector offers Standard and Fast where the CLI
 supports Fast Mode, plus Default to use the provider's choice. The settings area
 scrolls within the bounded popup at narrow or short viewport sizes.
+Model choices and settings wait for an asynchronous model change to finish before
+accepting another edit, so the next configuration choice uses the confirmed pairing.
 
 The screen sits on the application ground (0091, 0129), set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, or the
