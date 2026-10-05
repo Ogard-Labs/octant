@@ -62,17 +62,18 @@ describe("rendering a canvas as a document", () => {
       blockId: "table-1",
       schemaVersion: 1,
       kind: "table",
-      columns: [{ columnId: "path", label: "Path" }],
-      rows: [["C:\\temp\\|x"]],
+      columns: [{ columnId: "pattern", label: "Pattern" }],
+      rows: [["one\\|two"]],
     } as unknown as CanvasBlock;
 
     const rendered = renderArtifactMarkdown(definition([table]));
 
     expect(rendered.kind).toBe("rendered");
     if (rendered.kind !== "rendered") return;
-    const row = rendered.body.split("\n").find((line) => line.includes("temp"));
-    // One cell: every pipe inside it is escaped, so only the two outer pipes delimit.
-    expect(row).toBe("| C:\\\\temp\\\\\\|x |");
+    const row = rendered.body.split("\n").find((line) => line.includes("one"));
+    // One cell: the backslash and the pipe are both escaped, so only the two outer
+    // pipes delimit.
+    expect(row).toBe("| one\\\\\\|two |");
   });
 
   it("does not emit script or an external reference", () => {
