@@ -82,6 +82,7 @@ export type CodeTurnEventCategory =
   | "citation"
   | "research"
   | "completion"
+  | "retry"
   | "waiting"
   | "interruption"
   | "failure";
@@ -726,6 +727,15 @@ function normalizeProviderEvent(
         requestId: text(event.researchId),
         status: "completed",
         text: String(event.sourceCount),
+      });
+    case "retrying":
+      return Effect.succeed({
+        ...base,
+        category: "retry",
+        status: event.reason,
+        text: text(
+          `Retrying ${event.attempt}/${event.maxAttempts} in ${Math.max(1, Math.round(event.delayMs / 1000))} s.`,
+        ),
       });
     case "waiting":
       return Effect.succeed({ ...base, category: "waiting", text: text(event.message) });

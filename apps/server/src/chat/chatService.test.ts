@@ -3566,7 +3566,7 @@ describe("ChatService", () => {
       requestBodies.push(JSON.parse(String(init?.body)) as unknown);
       generatingTurn += 1;
       return generatingTurn === 1
-        ? new Response(null, { status: 500 })
+        ? new Response(null, { status: 400 })
         : genericChatStream("generic replay completed");
     });
     const runtimeRegistry = new ProviderRuntimeRegistry();

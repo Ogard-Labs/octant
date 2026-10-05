@@ -1311,7 +1311,45 @@ native harness in `apps/server/src/harness`:
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns
   and a per-slot circuit breaker. Child runs take their model from the role's
   slot through `admitAgentRunControlRequest`, the one path that starts a
-  subagent.
+  subagent. The lead is the exception: it runs on the model its thread chose,
+  and the `default` slot decides only where it continues once that model has
+  failed (below).
+- **Endpoint failures.** Each direct-endpoint transport sends through
+  `sendWithEndpointRetry`, one policy for both wire protocols. Retryable are
+  HTTP 408, 429, 500, 502, 503, 504, and 529 (classified `unavailable` or
+  `rate-limited`, with a provider's `Retry-After` carried on the failure), a
+  refused or reset connection, an idle stream, a stream that closes before its
+  terminal event, and a completion with no text and no tool call. A request goes
+  out at most five times, waiting 0.5 s doubling to 10 s with about a tenth of
+  jitter; `Retry-After` replaces the wait, capped at a minute. A request is
+  retried only while nothing of it has streamed (text or reasoning); tool calls
+  reach the loop only with the settled response, so they never count as output.
+  Each retry is a `retrying` runtime event emitted before its wait, and what a
+  failed attempt billed is added to the usage of the attempts after it. A
+  cancel ends a wait at once and stays `interrupted`. The stream idle limit is
+  120 s and restarts on any byte, so keep-alive comments and reasoning deltas
+  count. A spent allowance (`usageLimit` other than `temporary`), a rejected
+  credential, and a malformed event are never retried. Transports reject with
+  the typed `ProviderFailure` (`runProviderEffect`), not the Effect runtime's
+  wrapper, because the category is what these rules decide on.
+- **Lead fallback.** When a request's retries are spent, the loop asks its
+  `NativeHarnessLeadFallback` once per model it has not yet run on this turn.
+  `NativeHarnessLeadFallbackService` reports the failure to
+  `NativeHarnessRouter.reportFailure` (the model sits out its cooldown and the
+  slot's breaker counts it), resolves the `lead` job again under the running
+  turn's Project (a Project's table may only narrow the host's; turns of
+  different Projects that would pick different models get no fallback), journals
+  that decision on the thread's harness session, and opens the next model's
+  endpoint through the `NativeHarnessEndpointRegistry` that every direct-endpoint
+  driver fills as it is built. The target may belong to another provider
+  instance; it must be a harness endpoint and must admit the turn's input, or
+  the fallback is refused. The turn continues on it for its remaining steps and
+  the next turn starts on the thread's own model. With no other ready model the
+  turn fails with the endpoint's own failure and the typed refusal (`slot-empty`,
+  `no-eligible-candidate`, `circuit-open`, `no-other-model`, `not-routed`,
+  `refused`) in its message and, for the first three, in the journaled
+  `unroutable` decision. A failure that was not retried, or that happened after
+  output streamed, never moves the turn.
 - **Session.** `NativeHarnessSessionStore` journals one session per thread:
   routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool

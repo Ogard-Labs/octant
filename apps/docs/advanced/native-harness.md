@@ -110,7 +110,7 @@ performs map onto slots:
 
 | Job                           | Default slot | Named in Settings  |
 | ----------------------------- | ------------ | ------------------ |
-| Lead, Implementer, Custom     | `default`    | Main model         |
+| Implementer, Custom           | `default`    | Main model         |
 | Planner                       | `plan`       | Planning           |
 | Explorer, Researcher          | `task`       | Research and tasks |
 | Reviewer                      | `slow`       | Careful review     |
@@ -123,6 +123,41 @@ runs on `default` and the session says so. Every routing decision — the
 primary, a fallback with its reason and cooldown, a return to the primary, a
 warning about an unconfigured slot — is journaled and shown on the thread's
 harness card and in `octant harness session <thread-id>`.
+
+The lead is the one job that does not start from its slot. It runs on the
+model its thread chose, whatever the `default` slot lists. The slot only
+matters when that model stops answering: see
+[When the endpoint fails](#when-the-endpoint-fails).
+
+## When the endpoint fails
+
+A request to an endpoint is sent again when the failure is the kind that
+usually passes: HTTP 408, 429, 500, 502, 503, 504, or 529, a refused or reset
+connection, a stream that goes quiet, a stream that closes before its final
+event, or a reply with no text and no tool call. It is tried up to five times,
+waiting half a second, then one, two, and four seconds (never more than ten,
+give or take a tenth). When the endpoint sends `Retry-After`, that wait is used
+instead, up to a minute. A rejected key, an unsupported endpoint, or a spent
+allowance is not retried.
+
+Each retry is announced before its wait, so the thread can say "retrying 2/5 in
+4 s". A request is only sent again while nothing of it has appeared: once the
+reply has started to stream, a failure ends the turn rather than showing the
+start of the answer twice. Pressing stop during a wait ends it at once. The
+tokens a failed attempt used still count toward the turn.
+
+A stream that stays silent for two minutes is treated as down. Any byte the
+endpoint sends, including a keep-alive line or a reasoning update, restarts
+that clock.
+
+When the five attempts run out, the lead's model is reported to routing and the
+turn continues on the next model of the `default` slot that is ready and has
+not just failed, on whichever endpoint that model belongs to. The failed model
+sits out for a minute, or for the time the endpoint asked. If the slot has no
+other model, or none is ready, the turn fails with the endpoint's own error
+and says why nothing took over. The next turn starts on the thread's own model
+again. Delegated helpers and the advisor retry the same way, but they do not
+move to another model mid-request.
 
 ## Delegation
 
@@ -269,7 +304,8 @@ table.
 ## Honest limits
 
 - Only endpoint providers run the harness. Coding CLIs keep their own tools;
-  they can be delegated to as children, never made the lead.
+  they can be delegated to as children, never made the lead. A lead falls back
+  only to another endpoint model, never to a coding CLI.
 - Anthropic-compatible endpoints offer tools when the endpoint does; a model
   that ignores tool calls simply answers in text. Ollama is not a harness
   provider yet: its driver has no tool loop, so it is not offered as a slot

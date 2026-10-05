@@ -9,6 +9,7 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
+  type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
@@ -18,6 +19,7 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { Effect } from "effect";
+import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
 import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
 import type {
   NativeHarnessRequest,
@@ -28,6 +30,8 @@ import {
   type NativeHarnessTranscriptStore,
 } from "../harness/nativeHarnessTranscriptStore";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import { sendWithEndpointRetry } from "./endpointRetry";
+import { runProviderEffect } from "./runProviderEffect";
 import {
   directEndpointRequestResolver,
   honestDirectEndpointCapabilities,
@@ -81,6 +85,8 @@ export interface AnthropicCompatibleDriverOptions {
   readonly onConnectionReleased?: () => void;
   /** Where harness sessions keep their conversation; see the OpenAI-compatible driver. */
   readonly transcripts?: NativeHarnessTranscriptStore;
+  /** How the harness retries this endpoint and where its lead goes when it stays down. */
+  readonly harness?: NativeHarnessEndpointHooks;
   /** Host refresh and access for a subscription-oauth credential. */
   readonly subscriptionOAuth?: SubscriptionOAuthHost;
 }
@@ -91,6 +97,11 @@ export function makeAnthropicCompatibleDriver(
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? randomUUID;
   const transcripts = options.transcripts ?? new MemoryNativeHarnessTranscriptStore();
+  const transport = anthropicCompatibleTransport(options, clock);
+  options.harness?.endpoints?.register(options.instanceId, {
+    open: transport.open,
+    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
+  });
   return {
     kind: "anthropic-compatible",
     probe: ({ instanceId }) =>
@@ -157,7 +168,7 @@ export function makeAnthropicCompatibleDriver(
                 "Provider Project root must be an absolute normalized path.",
               ),
             )
-          : makeConnection(options, clock, makeCorrelation, transcripts, {
+          : makeConnection(options, transport, clock, makeCorrelation, transcripts, {
               projectRoot,
               mode: mode ?? "chat",
             }),
@@ -166,6 +177,7 @@ export function makeAnthropicCompatibleDriver(
 
 function makeConnection(
   options: AnthropicCompatibleDriverOptions,
+  transport: NativeHarnessTransport,
   clock: () => string,
   makeCorrelation: () => string,
   transcripts: NativeHarnessTranscriptStore,
@@ -176,13 +188,12 @@ function makeConnection(
     driverKind: "anthropic-compatible",
     projectRoot: input.projectRoot,
     mode: input.mode,
-    transport: anthropicCompatibleTransport(options, clock),
+    transport,
     transcripts,
-    admitTurn: (turn, modelId) => {
-      const observed = options.runtimeRegistry.observedState(options.instanceId);
-      const model = observed?.models.find((candidate) => candidate.id === modelId);
-      return validateChatTurnInput(turn, observed?.capabilities ?? initialCapabilities, model);
-    },
+    ...(options.harness?.leadFallback === undefined
+      ? {}
+      : { leadFallback: options.harness.leadFallback }),
+    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
     onSessionCountChange: (delta) =>
       options.runtimeRegistry.setActiveSessionCount(
         options.instanceId,
@@ -194,6 +205,17 @@ function makeConnection(
     clock,
     correlationId: makeCorrelation,
   });
+}
+
+/** Whether the endpoint accepts this turn's input for the session's model. */
+function admitTurn(
+  options: AnthropicCompatibleDriverOptions,
+  turn: ProviderTurnInput,
+  modelId: ProviderModelId,
+): ProviderFailure | undefined {
+  const observed = options.runtimeRegistry.observedState(options.instanceId);
+  const model = observed?.models.find((candidate) => candidate.id === modelId);
+  return validateChatTurnInput(turn, observed?.capabilities ?? initialCapabilities, model);
 }
 
 /**
@@ -241,45 +263,52 @@ function anthropicCompatibleTransport(
         send: async (request, stream) => {
           const active = endpoint;
           if (active === undefined) throw failure("protocol", "Provider session is not active.");
-          let result: AnthropicTurnResult;
-          try {
-            result = await Effect.runPromise(
-              sendAnthropicMessagesTurn({
-                endpoint: active,
-                modelId: request.modelId,
-                history: request.history,
-                prompt: "",
-                ...(request.system === undefined ? {} : { system: request.system }),
-                tools: request.tools,
-                toolAnswers: [],
-                signal: stream.signal,
-                onEvent: (event: AnthropicTurnEvent) =>
-                  stream.onEvent(
-                    event.kind === "usage"
-                      ? {
-                          kind: "usage",
-                          inputTokens: event.inputTokens,
-                          outputTokens: event.outputTokens,
-                        }
-                      : { kind: event.kind, text: event.text },
-                  ),
-              }),
-            );
-          } catch (error) {
-            if (stream.signal.aborted) {
-              throw failure("interrupted", "The provider request was cancelled.");
-            }
-            throw error;
-          }
-          recordObservedTurn(options, result, clock);
-          return {
-            text: result.text,
-            toolCalls: result.toolCalls,
-            ...(result.usage === undefined ? {} : { usage: result.usage }),
-            ...(result.rateLimitBuckets === undefined
-              ? {}
-              : { rateLimitBuckets: result.rateLimitBuckets }),
-          };
+          return sendWithEndpointRetry({
+            signal: stream.signal,
+            onEvent: stream.onEvent,
+            options: options.harness?.retry,
+            attempt: async (attempt) => {
+              let result: AnthropicTurnResult;
+              try {
+                result = await runProviderEffect(
+                  sendAnthropicMessagesTurn({
+                    endpoint: active,
+                    modelId: request.modelId,
+                    history: request.history,
+                    prompt: "",
+                    ...(request.system === undefined ? {} : { system: request.system }),
+                    tools: request.tools,
+                    toolAnswers: [],
+                    signal: attempt.signal,
+                    onEvent: (event: AnthropicTurnEvent) =>
+                      attempt.onEvent(
+                        event.kind === "usage"
+                          ? {
+                              kind: "usage",
+                              inputTokens: event.inputTokens,
+                              outputTokens: event.outputTokens,
+                            }
+                          : { kind: event.kind, text: event.text },
+                      ),
+                  }),
+                );
+              } catch (error) {
+                if (attempt.signal.aborted) {
+                  throw failure("interrupted", "The provider request was cancelled.");
+                }
+                throw error;
+              }
+              recordObservedTurn(options, result, clock);
+              return {
+                text: result.text,
+                toolCalls: result.toolCalls,
+                ...(result.usage === undefined ? {} : { usage: result.usage }),
+                ...(result.rateLimitBuckets === undefined
+                  ? {}
+                  : { rateLimitBuckets: result.rateLimitBuckets }),
+              };
+            },
+          });
         },
         release: () => {
           endpoint = undefined;
