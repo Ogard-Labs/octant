@@ -440,6 +440,33 @@ describe("CanvasWorkspaceTab", () => {
     expect(reviseDiagramLayout).not.toHaveBeenCalled();
   });
 
+  it("keeps Export disabled with an explanation while no destination is admitted", async () => {
+    const prepareExport = vi.fn();
+    const client = createCanvasClient(readyVersion, undefined, {
+      exportOffers: vi.fn(async () => ({
+        canvasId: quarterlyCanvasId,
+        versionId: quarterlyInventoryEntry.currentVersionId,
+        sequence: quarterlyInventoryEntry.currentSequence,
+        targets: [],
+      })),
+      prepareExport,
+    } as unknown as Partial<CanvasClient>);
+
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Signed Q3 report" })).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "More Canvas actions" }));
+    const exportItem = await screen.findByRole("menuitem", { name: /Export/ });
+    expect(exportItem).toHaveAttribute("aria-disabled", "true");
+    expect(exportItem).toHaveTextContent(/No export destination is installed/);
+    await user.click(exportItem);
+    expect(screen.queryByRole("dialog", { name: "Export canvas" })).toBeNull();
+    expect(prepareExport).not.toHaveBeenCalled();
+  });
+
   it("offers no refresh control when the host transport cannot refresh", async () => {
     render(<CanvasWorkspaceTab tab={canvasTab} client={createCanvasClient(readyVersion)} />);
 

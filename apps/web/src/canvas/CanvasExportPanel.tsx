@@ -105,7 +105,7 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
       </p>
       {props.offers.targets.length === 0 ? (
         <p className="canvas-export__note" data-testid="canvas-export-empty">
-          No destination is ready.
+          No export destination is installed yet.
         </p>
       ) : card === undefined ? (
         <form

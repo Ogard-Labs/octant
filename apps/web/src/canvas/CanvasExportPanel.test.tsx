@@ -81,6 +81,8 @@ describe("CanvasExportPanel", () => {
       />,
     );
 
-    expect(screen.getByTestId("canvas-export-empty")).toHaveTextContent("No destination is ready.");
+    expect(screen.getByTestId("canvas-export-empty")).toHaveTextContent(
+      "No export destination is installed yet.",
+    );
   });
 });

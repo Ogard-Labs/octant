@@ -582,7 +582,18 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     ...(exportOffers !== undefined &&
     selectedVersionId !== undefined &&
     String(selectedVersionId) === String(exportOffers.versionId)
-      ? [{ label: "Export…", value: "export" }]
+      ? [
+          {
+            label: "Export…",
+            value: "export",
+            ...(exportOffers.targets.length === 0
+              ? {
+                  disabled: true,
+                  description: "No export destination is installed yet.",
+                }
+              : {}),
+          },
+        ]
       : []),
   ];
 
