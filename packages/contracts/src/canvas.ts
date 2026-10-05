@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
 import {
+  CANVAS_SCHEMA_VERSION,
   CanvasActor,
   CanvasBlockId,
   CanvasEdgeId,
@@ -24,7 +25,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 // Canvas wire contracts are deliberately versioned independently from event
 // envelopes. A decoder must reject a future version until its renderer and
-// policy have been reviewed together.
+// policy have been reviewed together. The current schema version is declared
+// in `canvasIdentity.ts`: version 3 added the mockup block, which the
+// definition filter below admits only under that declared version.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -51,6 +54,9 @@ export const CANVAS_MAX_PLAN_PHASES = 32;
 export const CANVAS_MAX_PLAN_TASKS = 256;
 export const CANVAS_MAX_PLAN_TASK_DEPENDENCIES = 16;
 export const CANVAS_MAX_PLAN_TASK_SOURCES = 8;
+export const CANVAS_MAX_MOCKUP_DEPTH = 6;
+export const CANVAS_MAX_MOCKUP_NODES = 64;
+export const CANVAS_MAX_MOCKUP_TEXT_LENGTH = 120;
 
 // Descriptive aliases keep budget names discoverable without creating a
 // second source of truth.
@@ -221,6 +227,7 @@ export const CanvasBlockKind = Schema.Literal(
   "evidence-reference",
   "image",
   "plan",
+  "mockup",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -783,6 +790,52 @@ export const CanvasPlanTask = Schema.Struct({
 }).annotations(strict);
 export type CanvasPlanTask = typeof CanvasPlanTask.Type;
 
+export const CanvasMockupComponent = Schema.Literal(
+  "window",
+  "header",
+  "sidebar",
+  "list",
+  "list-row",
+  "form-field",
+  "button",
+  "toggle",
+  "tabs",
+  "card",
+  "image-placeholder",
+  "text",
+);
+export type CanvasMockupComponent = typeof CanvasMockupComponent.Type;
+
+export const CanvasMockupDevice = Schema.Literal("desktop", "tablet", "phone");
+export type CanvasMockupDevice = typeof CanvasMockupDevice.Type;
+
+const CanvasMockupText = boundedNonEmptyText(CANVAS_MAX_MOCKUP_TEXT_LENGTH);
+const CanvasMockupNodeId = boundedToken("CanvasMockupNodeId");
+
+/**
+ * One drawn part of a screen. The tree is a parent chain, not nested objects:
+ * a nested screen lands past the Canvas depth budget before a settings screen
+ * can name its rows.
+ */
+export const CanvasMockupNode = Schema.Struct({
+  nodeId: CanvasMockupNodeId,
+  component: CanvasMockupComponent,
+  label: CanvasMockupText,
+  parentId: Schema.optional(CanvasMockupNodeId),
+  /** Drawn state of a toggle. The control is not live. */
+  on: Schema.optional(Schema.Boolean),
+}).annotations(strict);
+export type CanvasMockupNode = typeof CanvasMockupNode.Type;
+
+export const CanvasMockupBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("mockup"),
+  device: CanvasMockupDevice,
+  title: CanvasMockupText,
+  nodes: Schema.Array(CanvasMockupNode).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_NODES)),
+}).annotations(strict);
+export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
+
 export const CanvasPlanBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("plan"),
@@ -867,6 +920,7 @@ export const CanvasBlock = Schema.Union(
   CanvasBrowserReferenceBlock,
   CanvasEvidenceReferenceBlock,
   CanvasImageBlock,
+  CanvasMockupBlock,
   CanvasPlanBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
@@ -888,7 +942,22 @@ export const CanvasDefinition = Schema.Struct({
         { message: () => `Canvas image blocks exceed ${CANVAS_MAX_IMAGES}.` },
       ),
     ),
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    // Version-gated blocks: a mockup is declared only under version 3. An older
+    // runtime that never learned the kind must see a mockup-carrying document as
+    // a declared future version, not as a v2 document that failed to decode.
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion === CANVAS_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "mockup"),
+      {
+        message: () =>
+          `Mockup blocks require Canvas schema version ${String(CANVAS_SCHEMA_VERSION)}.`,
+      },
+    ),
+  );
 export type CanvasDefinition = typeof CanvasDefinition.Type;
 
 export const CanvasVersion = Schema.Struct({

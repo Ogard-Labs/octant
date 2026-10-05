@@ -33,6 +33,7 @@ const DRAWN_KINDS = new Set<CanvasBlock["kind"]>([
   "diagram",
   "sequence",
   "state",
+  "mockup",
   "code-excerpt",
   "pseudocode",
   "diff",
@@ -193,6 +194,8 @@ function drawBlock(
       return { markup: sequence(block, y, width, palette), height: 64 };
     case "state":
       return { markup: stateMachine(block, y, width, palette), height: 64 };
+    case "mockup":
+      return { markup: mockupFrame(block, y, width, palette), height: 52 };
     case "code-excerpt":
     case "pseudocode":
     case "diff":
@@ -590,6 +593,27 @@ function stateMachine(
     return `<line x1="${String(fromX)}" y1="${String(y + 9)}" x2="${String(toX)}" y2="${String(y + 9 + index)}" stroke="${palette.muted}" stroke-width="1"/>`;
   });
   return arrows.join("") + boxes;
+}
+
+function mockupFrame(
+  block: Extract<CanvasBlock, { readonly kind: "mockup" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const frameWidth =
+    block.device === "phone"
+      ? Math.min(width, 40)
+      : block.device === "tablet"
+        ? Math.min(width, 88)
+        : width;
+  const x = PADDING;
+  const frame = `<rect x="${String(x)}" y="${String(y)}" width="${String(frameWidth)}" height="48" rx="4" fill="none" stroke="${palette.accent}" stroke-width="1.2"/>`;
+  const rows = block.nodes.slice(0, 4).map((node, index) => {
+    const rowWidth = Math.round((frameWidth - 8) * (node.component === "button" ? 0.42 : 0.78));
+    return `<rect x="${String(x + 4)}" y="${String(y + 6 + index * 10)}" width="${String(rowWidth)}" height="6" rx="1.5" fill="${palette.muted}" opacity="0.5"/>`;
+  });
+  return frame + rows.join("");
 }
 
 function text(

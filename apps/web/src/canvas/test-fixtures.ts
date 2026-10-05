@@ -1,5 +1,5 @@
 import { CANVAS_SCHEMA_VERSION, type CanvasDefinition } from "@octant/contracts/canvas";
-import { loginSequenceExample, orderStateExample } from "@octant/domain";
+import { loginSequenceExample, orderStateExample, settingsScreenExample } from "@octant/domain";
 import { decodeCanvasActionBlock, type CanvasActionBlock } from "@octant/contracts/canvas-actions";
 
 const ids = {
@@ -223,6 +223,7 @@ export const canvasFixture = {
       label: "Evidence",
     },
     { ...base, blockId: "image-1", kind: "image", sourceId: ids.source, alt: "A bounded diagram" },
+    settingsScreenExample,
   ],
 } as unknown as CanvasDefinition;
 

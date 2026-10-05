@@ -247,4 +247,35 @@ describe("drawing a preview of an artifact", () => {
     expect(stateMarkup).not.toMatch(/<\s*script/i);
     expect(sequenceMarkup).not.toBe(stateMarkup);
   });
+
+  it("draws a phone mockup as a frame rather than leaving the preview blank", () => {
+    const mockup = {
+      blockId: "settings",
+      schemaVersion: 1,
+      kind: "mockup",
+      device: "phone",
+      title: "Settings",
+      nodes: [
+        { nodeId: "window", component: "window", label: "Settings" },
+        { nodeId: "wifi", component: "toggle", label: "Wi-Fi", parentId: "window", on: true },
+      ],
+    } as unknown as CanvasBlock;
+    const phone = renderArtifactThumbnail(definition([mockup], "Settings"));
+    const desktop = renderArtifactThumbnail(
+      definition(
+        [
+          {
+            ...(mockup as unknown as Record<string, unknown>),
+            device: "desktop",
+          } as unknown as CanvasBlock,
+        ],
+        "Settings",
+      ),
+    );
+
+    expect(phone.startsWith("<svg")).toBe(true);
+    expect(phone).toContain("<rect");
+    expect(phone).not.toMatch(/<\s*script/i);
+    expect(phone).not.toBe(desktop);
+  });
 });

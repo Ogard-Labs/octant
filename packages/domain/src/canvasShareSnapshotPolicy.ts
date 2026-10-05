@@ -11,7 +11,10 @@ import {
   buildCanvasStaticExportDocument,
   type CanvasSharePolicyContext,
 } from "./canvasSharePolicy";
-import type { CanvasStaticExportRequest } from "@octant/contracts/canvas-share";
+import {
+  CANVAS_SHARE_SCHEMA_VERSION,
+  type CanvasStaticExportRequest,
+} from "@octant/contracts/canvas-share";
 
 export type CanvasShareSnapshotDenialCode =
   | "malformed-request"
@@ -165,7 +168,7 @@ export function createCanvasShareSnapshotRecord(input: {
   // Reuse the static-export payload sanitizer only. Authenticated snapshot
   // consent is already validated above and must not require offline-export consent.
   const sanitizerRequest = {
-    schemaVersion: 1,
+    schemaVersion: CANVAS_SHARE_SCHEMA_VERSION,
     kind: "canvas-static-export",
     exportId: request.exportId,
     canvasId: request.canvasId,
@@ -202,7 +205,7 @@ export function createCanvasShareSnapshotRecord(input: {
     );
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: CANVAS_SHARE_SCHEMA_VERSION,
     kind: "canvas-share-snapshot-record",
     snapshotId: request.snapshotId,
     exportId: request.exportId,
