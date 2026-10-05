@@ -729,17 +729,21 @@ function DetailSection(props: {
                   )}
                 </td>
                 <td>
-                  {props.onOpenSubject === undefined ? (
-                    <UsageName kind={row.subjectType} id={row.subjectId} />
-                  ) : (
-                    <OctantButton
-                      onClick={() => props.onOpenSubject?.(row.subjectType, row.subjectId)}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <UsageName kind={row.subjectType} id={row.subjectId} />
-                    </OctantButton>
-                  )}
+                  {(() => {
+                    const subjectId = row.subjectId;
+                    if (props.onOpenSubject === undefined || subjectId === null) {
+                      return <UsageName kind={row.subjectType} id={subjectId} />;
+                    }
+                    return (
+                      <OctantButton
+                        onClick={() => props.onOpenSubject?.(row.subjectType, subjectId)}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <UsageName kind={row.subjectType} id={subjectId} />
+                      </OctantButton>
+                    );
+                  })()}
                 </td>
                 <td>{row.requestShape}</td>
                 <td>{QUALITY_WORDS[row.quality]}</td>

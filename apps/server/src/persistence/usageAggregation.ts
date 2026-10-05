@@ -190,12 +190,12 @@ function buildTopConsumers(
 ): ReadonlyArray<UsageTopConsumer> {
   const consumers = new Map<string, UsageTopConsumer>();
   for (const record of records) {
-    const key = `${record.subject.aggregateType}\u0000${record.subject.aggregateId}`;
+    const key = `${record.subject.aggregateType}\u0000${"aggregateId" in record.subject ? record.subject.aggregateId : "de-linked"}`;
     const existing = consumers.get(key);
     if (existing === undefined) {
       consumers.set(key, {
         subjectType: record.subject.aggregateType,
-        subjectId: record.subject.aggregateId,
+        subjectId: "aggregateId" in record.subject ? record.subject.aggregateId : null,
         inputTokens: record.inputTokens,
         outputTokens: record.outputTokens,
         requestCount: 1,

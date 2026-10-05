@@ -134,6 +134,26 @@ export class CanvasProjection implements Projection {
     return new Map(this.#byId);
   }
 
+  /**
+   * Drop erased Canvases from every index. A purge removes their journal
+   * history, but this projection lives in memory and would keep serving them
+   * until the next restart.
+   */
+  evict(canvasIds: ReadonlyArray<string>): void {
+    const evicted = new Set(canvasIds);
+    for (const id of [...this.#byId.keys()]) {
+      if (evicted.has(String(id))) this.#byId.delete(id);
+    }
+    for (const index of [this.#byProject, this.#byThread]) {
+      for (const [key, ids] of index) {
+        for (const id of [...ids]) {
+          if (evicted.has(String(id))) ids.delete(id);
+        }
+        if (ids.size === 0) index.delete(key);
+      }
+    }
+  }
+
   clear(): void {
     this.#byId.clear();
     this.#byProject.clear();

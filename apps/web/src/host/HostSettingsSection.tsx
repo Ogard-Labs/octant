@@ -15,7 +15,11 @@ import type {
   ThreadRetentionState,
 } from "@octant/contracts/thread-retention";
 import { ProviderDriverKind } from "@octant/contracts/providers";
-import { THREAD_PURGE_DELETED_SCOPES, THREAD_PURGE_RETAINED_SCOPES } from "@octant/domain";
+import {
+  THREAD_PURGE_DELETED_SCOPES,
+  THREAD_PURGE_DELINKED_SCOPES,
+  THREAD_PURGE_RETAINED_SCOPES,
+} from "@octant/domain";
 import { purgeComposerThreadDrafts } from "../composer/composerThreadDraftStore";
 import { HostPrivacyExport } from "./HostPrivacyExport";
 import { driverLabel } from "../providers/providerSettingsPresentation";
@@ -819,7 +823,8 @@ function ThreadRetentionPanel({
         </label>
         <p className="host-settings__note">
           This will delete {THREAD_PURGE_DELETED_SCOPES.join(", ")}. It will retain{" "}
-          {THREAD_PURGE_RETAINED_SCOPES.join(", ")}.
+          {THREAD_PURGE_RETAINED_SCOPES.join(", ")}. It will keep the aggregates but remove the
+          thread identity from {THREAD_PURGE_DELINKED_SCOPES.join(", ")}.
         </p>
         <div className="host-settings__controls">
           <OctantButton

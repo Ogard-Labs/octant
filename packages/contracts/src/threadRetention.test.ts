@@ -100,12 +100,12 @@ describe("ThreadPurgeReport", () => {
         "store-schema",
         "other-threads",
         "projects",
-        "usage-records",
         "purge-tombstone",
         "credentials",
         "external-repositories",
         "sqlite-free-pages",
       ],
+      delinked: ["usage-records"],
       deleted: [
         "thread-journal",
         "thread-projections",

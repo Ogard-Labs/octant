@@ -2,7 +2,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { decodeUsageDashboardResponse, type UsageDashboardRequest } from "@octant/contracts";
+import {
+  USAGE_ERASED_THREADS_KEY,
+  decodeUsageDashboardResponse,
+  type UsageDashboardRequest,
+} from "@octant/contracts";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { openSqlite, type SqliteConnection } from "./persistence/sqlitePort";
 import { USAGE_PROJECTION_SCHEMA_VERSION } from "./persistence/usagePersistenceSchema";
@@ -44,7 +48,7 @@ function connect(): SqliteConnection {
 interface SeedOverrides {
   readonly reconciliationId?: string;
   readonly subjectType?: string;
-  readonly subjectId?: string;
+  readonly subjectId?: string | null;
   readonly quality?: string;
   readonly observedAt?: string;
   readonly hostId?: string;
@@ -67,7 +71,7 @@ function seedUsageRow(connection: SqliteConnection, overrides: SeedOverrides = {
     .run(
       overrides.reconciliationId ?? "67000000-0000-4000-8000-00000000000a",
       overrides.subjectType ?? "chat-thread",
-      overrides.subjectId ?? ids.chatThread,
+      overrides.subjectId === undefined ? ids.chatThread : overrides.subjectId,
       ids.provider,
       overrides.modelId ?? "gpt-4o",
       "chat-turn",
@@ -343,6 +347,37 @@ describe("readUsageDashboard", () => {
       ),
     );
     expect(dashboard.summary.totals.totalRequests).toBe(0);
+  });
+
+  it("reports usage from purged threads as erased threads in the unfiled read and in no Project's", () => {
+    const connection = connect();
+    seedChatThread(connection, ids.project);
+    seedUsageRow(connection);
+    seedUsageRow(connection, {
+      reconciliationId: "67000000-0000-4000-8000-00000000000e",
+      subjectId: null,
+      sequence: 2,
+    });
+    seedUsageRow(connection, {
+      reconciliationId: "67000000-0000-4000-8000-00000000000f",
+      subjectType: "code-thread",
+      subjectId: null,
+      sequence: 3,
+    });
+
+    const unfiled = read(connection);
+    expect(unfiled.summary.totals.totalRequests).toBe(2);
+    expect(unfiled.summary.totals.totalInputTokens).toBe(200);
+    expect(unfiled.detail.map((row) => row.subjectId)).toEqual([null, null]);
+    const threads = unfiled.breakdown.find((group) => group.dimension === "thread");
+    expect(threads?.rows.map((row) => [row.key, row.requestCount])).toEqual([
+      [USAGE_ERASED_THREADS_KEY, 2],
+    ]);
+
+    // The Project's own read keeps only the thread the host still places in it.
+    const project = read(connection, {}, { kind: "projects", projectIds: [ids.project] });
+    expect(project.summary.totals.totalRequests).toBe(1);
+    expect(project.detail.map((row) => row.subjectId)).toEqual([ids.chatThread]);
   });
 
   it("applies host, model, quality, and range filters", () => {

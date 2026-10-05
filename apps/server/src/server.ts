@@ -346,7 +346,7 @@ import {
   type VerifiedStoreBackupReceipt,
 } from "./persistence/persistenceService";
 import { readAgentRunAdmittedContext } from "./persistence/agentRunContentStore";
-import { purgeThreadArtifacts } from "./persistence/threadArtifactPurge";
+import { purgeThreadArtifacts, removeMirrorFiles } from "./persistence/threadArtifactPurge";
 import { readHostIdentity } from "./persistence/remoteAccessProjection";
 import { createProjectBindingRouteHandler } from "./projectBindingRoutes";
 import { createProjectRouteHandler } from "./projectRoutes";
@@ -9286,6 +9286,8 @@ export function startOctantServer(
       forgetWorkThread: (threadId) => {
         workThreadProjection.forget(threadId as never);
       },
+      forgetCanvases: (canvasIds) => persistence.canvasProjection.evict(canvasIds),
+      purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
       purgeThreadArtifacts: async ({ mode, threadId }) => {
         const released = await threadMessageQueue.purgeThread(
           decodeThreadMessageQueueScope({ mode, threadId }),

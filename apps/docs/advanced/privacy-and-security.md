@@ -35,7 +35,11 @@ The durable event journal is an SQLite-backed append-only store. Everything
 Octant does that matters is journaled as versioned events, and every
 projection can be rebuilt from the journal. A confirmed thread purge is the
 one data-lifecycle exception that removes that thread's own journal events
-and derived projections so a rebuild cannot resurrect the transcript. See
+and derived projections so a rebuild cannot resurrect the transcript.
+Usage rows are de-linked rather than kept whole: their aggregates stay for
+spend accounting while the purged thread's identity leaves them, and a
+Project-scoped purge also erases that Project's memory and Canvases and
+reports the scopes it deleted. See
 [Recovery and troubleshooting](/advanced/recovery) for how the journal backs
 recovery.
 
@@ -70,9 +74,10 @@ carry a forbidden key are left out, with a generic entry on the export's
 omissions page; a forbidden key in a thread or emitted page can instead
 refuse the export. A confirmed thread purge
 deletes that thread's journal events, projections, and bulk content, so a
-later host export carries no content trace of it; the purge outcome names
-the retained scopes — the tombstone and usage attribution — where the
-thread id remains by design.
+later host export carries no content trace of it. Its id remains only in
+the purge tombstone, by design. Its usage rows stay for accounting but are
+de-linked, so they carry token counts and no thread id, and Project memory
+is kept.
 
 ## Credentials
 

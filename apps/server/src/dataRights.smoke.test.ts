@@ -5,9 +5,9 @@
 // createLiveHostExportService the host-control route streams and the same
 // ThreadRetentionService purge a confirmed purge calls. Export, purge one
 // thread, export again. The second NDJSON cut carries no content trace of
-// the purged thread; the thread id may still appear only inside the two
-// scopes the purge outcome names as retained — the tombstone and usage
-// attribution.
+// the purged thread; the thread id may still appear only in the purge
+// tombstone. Usage rows stay for accounting but are de-linked, so they carry
+// no thread id, and Project memory survives a thread purge.
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -32,6 +32,7 @@ import {
   assembleHostExportBundle,
   encodeHostExportPage,
   THREAD_PURGE_DELETED_SCOPES,
+  THREAD_PURGE_DELINKED_SCOPES,
   THREAD_PURGE_RETAINED_SCOPES,
 } from "@octant/domain";
 import { afterEach, describe, expect, it } from "vitest";
@@ -42,6 +43,7 @@ import { GeneratedImageStore } from "./image/generatedImageStore";
 import { managedWorktreeRoot } from "./code/managedWorktreeService";
 import { readChatThreadView, writeChatContent } from "./persistence/chatProjection";
 import { Journal } from "./persistence/journal";
+import { readProjectMemory } from "./persistence/projectProjection";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "./persistence/sqlitePort";
@@ -115,6 +117,7 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
     seedCodeThread(connection);
     seedAttachments(store.directory);
     seedUsage(connection);
+    seedProjectMemory(journal);
 
     const workThreads: WorkThread[] = [
       {
@@ -236,12 +239,8 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
       threads: threadExports,
       connection,
       listWorkThreadIds: () => workThreads.map((thread) => String(thread.id)),
-      listProjects: () => [],
-      readProjectMemory: (id) => ({
-        projectId: decodeProjectId(id),
-        active: [],
-        history: [],
-      }),
+      listProjects: () => [{ projectId, name: "Smoke project", type: "chat", lifecycle: "active" }],
+      readProjectMemory: (id) => readProjectMemory(connection, decodeProjectId(id)),
       listCanvases: () => [],
       readSettings: () => ({ chatEnabled: true, workEnabled: true, themeMode: "dark" }),
       listProjectIds: () => [String(projectId)],
@@ -316,6 +315,7 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
     if (!("deleted" in outcome)) throw new Error("purge did not report deleted scopes");
     expect(outcome.deleted).toEqual([...THREAD_PURGE_DELETED_SCOPES]);
     expect(outcome.retained).toEqual([...THREAD_PURGE_RETAINED_SCOPES]);
+    expect(outcome.delinked).toEqual([...THREAD_PURGE_DELINKED_SCOPES]);
     // The purged thread's attachment basin is gone from disk.
     expect(scopeDirectoryExists(join(store.directory, "chat", "threads"), threads.chat.id)).toBe(
       false,
@@ -336,12 +336,20 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
       threads.work.id,
       threads.code.id,
     ]);
-    // The purged thread id appears only inside the two scopes the outcome
-    // names as retained: the purge tombstone and usage attribution.
+    // The purged thread id appears only in the purge tombstone. Its usage rows
+    // stay, with their token counts, but no longer name the thread.
     const pagesNamingThread = second.pages
       .filter((page) => JSON.stringify(page).includes(threads.chat.id))
       .map((page) => page.kind);
-    expect([...new Set(pagesNamingThread)].sort()).toEqual(["retention-tombstones", "usage"]);
+    expect([...new Set(pagesNamingThread)].sort()).toEqual(["retention-tombstones"]);
+    const usageRows = second.pages.flatMap((page) => (page.kind === "usage" ? page.usage : []));
+    expect(usageRows.filter((row) => row.subjectId === null).map((row) => row.subjectType)).toEqual(
+      ["chat-thread"],
+    );
+    expect(usageRows).toHaveLength(Object.keys(threads).length);
+    expect(usageRows.reduce((total, row) => total + row.inputTokens, 0)).toBe(9);
+    // Project memory is Project data: a thread purge leaves it in the cut.
+    expect(second.ndjson).toContain(projectMemoryMarker);
   }, 120_000);
 });
 
@@ -434,6 +442,39 @@ function seedAttachments(directory: string): void {
   const imageFile = join(directory, "generated-images", threads.chat.id, randomUUID());
   mkdirSync(imageFile, { recursive: true, mode: 0o700 });
   writeFileSync(join(imageFile, "finalized.bin"), threads.chat.marker);
+}
+
+const projectMemoryMarker = "marker-project-memory-kept";
+
+function seedProjectMemory(journal: Journal): void {
+  journal.append({
+    aggregate: { aggregateType: "project-memory", aggregateId: String(projectId) },
+    expectedVersion: 0,
+    events: [
+      {
+        eventId: randomUUID(),
+        eventName: "memory.entry-created@1",
+        eventVersion: 1,
+        correlationId: randomUUID(),
+        actor: { kind: "system", actorId },
+        occurredAt: now,
+        payload: {
+          entry: {
+            id: "20000000-0000-4000-8000-0000000000e1",
+            projectId: String(projectId),
+            kind: "decision",
+            content: projectMemoryMarker,
+            provenance: { kind: "user-authored" },
+            author: { kind: "local-user", actorId },
+            status: "active",
+            version: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+      },
+    ],
+  });
 }
 
 function seedUsage(connection: SqliteConnection): void {

@@ -21,6 +21,7 @@ import {
   selectThreadsForPurge,
   THREAD_PURGE_DELETED_SCOPES,
   THREAD_PURGE_RETAINED_SCOPES,
+  THREAD_PURGE_DELINKED_SCOPES,
   type PrincipalKind,
   type ThreadRetentionSubject,
 } from "@octant/domain";
@@ -30,8 +31,11 @@ import { readAggregateVersion } from "./persistence/chatProjection";
 import type { Journal } from "./persistence/journal";
 import type { SqliteConnection } from "./persistence/sqlitePort";
 import {
+  erasePurgedProjectData,
   erasePurgedThread,
+  listProjectCanvasIds,
   listProjectedThreadSubjects,
+  listThreadFileAnchors,
   threadProjectionExists,
 } from "./persistence/threadPurge";
 import {
@@ -60,6 +64,10 @@ export interface ThreadRetentionServiceOptions {
   readonly uuid: () => string;
   readonly listWorkThreads: () => ReadonlyArray<ThreadRetentionWorkThread>;
   readonly forgetWorkThread?: (threadId: string) => void;
+  /** Drops erased Canvases from the live projection so reads stop serving them at once. */
+  readonly forgetCanvases?: (canvasIds: ReadonlyArray<string>) => void;
+  /** Removes the files an erased Project's Canvases mirrored, while their receipts still exist. */
+  readonly purgeCanvasFiles?: (canvasIds: ReadonlyArray<string>) => Promise<void> | void;
   readonly purgeThreadArtifacts?: (input: {
     readonly mode: OctantMode;
     readonly threadId: ThreadRetentionThreadId;
@@ -73,6 +81,8 @@ export class ThreadRetentionService {
   readonly #uuid: () => string;
   readonly #listWorkThreads: () => ReadonlyArray<ThreadRetentionWorkThread>;
   readonly #forgetWorkThread: ((threadId: string) => void) | undefined;
+  readonly #forgetCanvases: ThreadRetentionServiceOptions["forgetCanvases"];
+  readonly #purgeCanvasFiles: ThreadRetentionServiceOptions["purgeCanvasFiles"];
   readonly #purgeThreadArtifacts: ThreadRetentionServiceOptions["purgeThreadArtifacts"];
 
   constructor(options: ThreadRetentionServiceOptions) {
@@ -82,6 +92,8 @@ export class ThreadRetentionService {
     this.#uuid = options.uuid;
     this.#listWorkThreads = options.listWorkThreads;
     this.#forgetWorkThread = options.forgetWorkThread;
+    this.#forgetCanvases = options.forgetCanvases;
+    this.#purgeCanvasFiles = options.purgeCanvasFiles;
     this.#purgeThreadArtifacts = options.purgeThreadArtifacts;
   }
 
@@ -155,13 +167,23 @@ export class ThreadRetentionService {
         ...(subject.projectId === undefined ? {} : { projectId: subject.projectId }),
         purgedAt: occurredAt,
       });
+      const canvasIds = listThreadFileAnchors(
+        this.#connection,
+        subject.mode,
+        String(subject.threadId),
+      ).canvasIds;
       erasePurgedThread({
         connection: this.#connection,
         mode: subject.mode,
         threadId: subject.threadId,
       });
+      if (canvasIds.length > 0) this.#forgetCanvases?.(canvasIds);
       if (subject.mode === "work") this.#forgetWorkThread?.(String(subject.threadId));
     }
+    const projectScopeDeleted =
+      request.scope.kind === "project"
+        ? await this.#eraseProjectData(String(request.scope.projectId))
+        : [];
     return {
       operation: "purge-threads",
       scope: request.scope,
@@ -172,8 +194,11 @@ export class ThreadRetentionService {
       })),
       alreadyPurged,
       retained: [...THREAD_PURGE_RETAINED_SCOPES],
+      delinked: [...THREAD_PURGE_DELINKED_SCOPES],
       deleted:
-        selected.length === 0 && alreadyPurged.length > 0 ? [] : [...THREAD_PURGE_DELETED_SCOPES],
+        selected.length === 0 && alreadyPurged.length > 0
+          ? []
+          : [...THREAD_PURGE_DELETED_SCOPES, ...projectScopeDeleted],
       occurredAt,
     };
   }
@@ -248,5 +273,31 @@ export class ThreadRetentionService {
         },
       ],
     });
+  }
+
+  /**
+   * A Project-scoped erase removes Project-owned data a thread purge cannot
+   * reach: the Project's memory entries and every Canvas it owns, with each
+   * Canvas's comments, share and access history, receipts, and mirrored
+   * files. Files go first, while receipts still name them; the journal and
+   * projection rows follow; the live Canvas projection is evicted last so
+   * inventory and reads stop serving the Canvases at once, not at restart.
+   * Returns the scopes this pass deleted so the report names what went.
+   */
+  async #eraseProjectData(
+    projectId: string,
+  ): Promise<ReadonlyArray<"project-memory" | "project-canvases">> {
+    const canvasIds = listProjectCanvasIds(this.#connection, projectId);
+    if (canvasIds.length > 0) await this.#purgeCanvasFiles?.(canvasIds);
+    const { memoryErased } = erasePurgedProjectData({
+      connection: this.#connection,
+      projectId,
+      canvasIds,
+    });
+    if (canvasIds.length > 0) this.#forgetCanvases?.(canvasIds);
+    return [
+      ...(memoryErased ? (["project-memory"] as const) : []),
+      ...(canvasIds.length > 0 ? (["project-canvases"] as const) : []),
+    ];
   }
 }
