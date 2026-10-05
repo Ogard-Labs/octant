@@ -244,13 +244,194 @@ function grid(y: number, width: number, palette: ArtifactThumbnailPalette): stri
   return cells.join("");
 }
 
+/** The picture area a chart block gets: `width` across, 44 down from `y`. */
+const CHART_HEIGHT = 44;
+
 function bars(
   block: Extract<CanvasBlock, { readonly kind: "chart" }>,
   y: number,
   width: number,
   palette: ArtifactThumbnailPalette,
 ): string {
-  // The real values, so a chart's silhouette is its own rather than a stock one.
+  // Each chart type draws its own shape, so a pie reads as a pie and a
+  // bar-and-line chart keeps both of its marks. The real values, so a chart's
+  // silhouette is its own rather than a stock one.
+  switch (block.chartType) {
+    case "pie":
+    case "donut":
+      return pie(block, y, width, palette, block.chartType === "donut");
+    case "stacked-bar":
+      return stackedColumns(block, y, width, palette);
+    case "grouped-bar":
+      return groupedColumns(block, y, width, palette, block.series.length);
+    case "bar-line":
+      return barAndLine(block, y, width, palette);
+    default:
+      return simpleBars(block, y, width, palette);
+  }
+}
+
+function pie(
+  block: Extract<CanvasBlock, { readonly kind: "chart" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+  ring: boolean,
+): string {
+  const slices = (block.series[0]?.points ?? []).slice(0, 12);
+  if (slices.length === 0) return grid(y, width, palette);
+  const values = slices.map((point) => Math.max(0, point.y));
+  const total = values.reduce((sum, value) => sum + value, 0);
+  const cx = Math.round(PADDING + width / 2);
+  const cy = y + CHART_HEIGHT / 2;
+  const radius = Math.min(19, Math.max(6, Math.round((width - 4) / 2)));
+  if (total <= 0) {
+    return `<circle cx="${String(cx)}" cy="${String(cy)}" r="${String(radius)}" fill="none" stroke="${palette.accent}" stroke-width="1.5" opacity="0.75"/>`;
+  }
+  let angle = -Math.PI / 2;
+  const wedges = values.map((value) => {
+    const sweep = (value / total) * Math.PI * 2;
+    const start = angle;
+    angle += sweep;
+    if (values.length === 1 || sweep >= Math.PI * 2 - 1e-9) {
+      return `<circle cx="${String(cx)}" cy="${String(cy)}" r="${String(radius)}" fill="${palette.accent}" opacity="0.75"/>`;
+    }
+    const x1 = round(cx + radius * Math.cos(start));
+    const y1 = round(cy + radius * Math.sin(start));
+    const x2 = round(cx + radius * Math.cos(angle));
+    const y2 = round(cy + radius * Math.sin(angle));
+    const largeArc = sweep > Math.PI ? 1 : 0;
+    return (
+      `<path d="M ${String(cx)} ${String(cy)} L ${String(x1)} ${String(y1)} ` +
+      `A ${String(radius)} ${String(radius)} 0 ${String(largeArc)} 1 ${String(x2)} ${String(y2)} Z" ` +
+      `fill="${palette.accent}" opacity="${opacityFor(0.4 + 0.5 * (value / Math.max(...values)))}"/>`
+    );
+  });
+  const hole = ring
+    ? `<circle cx="${String(cx)}" cy="${String(cy)}" r="${String(Math.round(radius * 0.55))}" fill="${palette.background}"/>`
+    : "";
+  return wedges.join("") + hole;
+}
+
+function stackedColumns(
+  block: Extract<CanvasBlock, { readonly kind: "chart" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const categories = (block.series[0]?.points ?? []).slice(0, 12);
+  if (categories.length === 0) return grid(y, width, palette);
+  const totals = categories.map((_point, index) =>
+    block.series.reduce((sum, series) => sum + Math.abs(series.points[index]?.y ?? 0), 0),
+  );
+  const peak = Math.max(...totals, 1);
+  const slot = width / categories.length;
+  return categories
+    .map((_point, categoryIndex) => {
+      let top = y + CHART_HEIGHT;
+      const segments: string[] = [];
+      for (const [seriesIndex, series] of block.series.entries()) {
+        const value = Math.abs(series.points[categoryIndex]?.y ?? 0);
+        if (value === 0) continue;
+        const height = Math.max(1.5, Math.round((value / peak) * (CHART_HEIGHT - 4)));
+        top -= height;
+        segments.push(
+          column(
+            PADDING + categoryIndex * slot,
+            slot,
+            top,
+            height,
+            palette,
+            0.9 - seriesIndex * 0.18,
+          ),
+        );
+      }
+      return segments.join("");
+    })
+    .join("");
+}
+
+function groupedColumns(
+  block: Extract<CanvasBlock, { readonly kind: "chart" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+  seriesCount: number,
+): string {
+  const categories = (block.series[0]?.points ?? []).slice(0, 12);
+  if (categories.length === 0 || seriesCount === 0) return grid(y, width, palette);
+  const peak = Math.max(
+    ...block.series.flatMap((series) => series.points.map((point) => Math.abs(point.y))),
+    1,
+  );
+  const slot = width / categories.length;
+  const barWidth = Math.max(2, Math.floor((slot - 3) / seriesCount));
+  return categories
+    .map((_point, categoryIndex) =>
+      block.series
+        .map((series, seriesIndex) => {
+          const value = Math.abs(series.points[categoryIndex]?.y ?? 0);
+          const height = Math.max(2, Math.round((value / peak) * (CHART_HEIGHT - 4)));
+          const x = PADDING + categoryIndex * slot + 1.5 + seriesIndex * barWidth;
+          return column(
+            x,
+            barWidth,
+            y + CHART_HEIGHT - height,
+            height,
+            palette,
+            0.9 - seriesIndex * 0.18,
+          );
+        })
+        .join(""),
+    )
+    .join("");
+}
+
+function barAndLine(
+  block: Extract<CanvasBlock, { readonly kind: "chart" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const barSeries = block.series.filter((series) => series.mark === "bar");
+  const lineSeries = block.series.filter((series) => series.mark === "line");
+  const categories = (block.series[0]?.points ?? []).slice(0, 12);
+  if (categories.length === 0) return grid(y, width, palette);
+  const columns = groupedColumns(
+    { ...block, series: barSeries },
+    y,
+    width,
+    palette,
+    Math.max(barSeries.length, 1),
+  );
+  const peak = Math.max(
+    ...block.series.flatMap((series) => series.points.map((point) => Math.abs(point.y))),
+    1,
+  );
+  const slot = width / categories.length;
+  const lines = lineSeries
+    .map((series, seriesIndex) => {
+      const points = categories
+        .map((_point, index) => {
+          const value = Math.abs(series.points[index]?.y ?? 0);
+          const x = round(PADDING + index * slot + slot / 2);
+          const lineY = round(y + CHART_HEIGHT - (value / peak) * (CHART_HEIGHT - 4) - 2);
+          return `${String(x)},${String(lineY)}`;
+        })
+        .join(" ");
+      if (points.length === 0) return "";
+      return `<polyline points="${points}" fill="none" stroke="${palette.ink}" stroke-width="1.5" opacity="${opacityFor(0.9 - seriesIndex * 0.2)}"/>`;
+    })
+    .join("");
+  return columns + lines;
+}
+
+function simpleBars(
+  block: Extract<CanvasBlock, { readonly kind: "chart" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
   const values = block.series
     .flatMap((series) => series.points.map((point) => point.y))
     .slice(0, 12);
@@ -259,10 +440,37 @@ function bars(
   const slot = width / values.length;
   return values
     .map((value, index) => {
-      const height = Math.max(2, Math.round((Math.abs(value) / peak) * 40));
-      return `<rect x="${String(Math.round(PADDING + index * slot + 1))}" y="${String(y + 44 - height)}" width="${String(Math.max(2, Math.round(slot - 3)))}" height="${String(height)}" rx="1" fill="${palette.accent}" opacity="0.75"/>`;
+      const height = Math.max(2, Math.round((Math.abs(value) / peak) * (CHART_HEIGHT - 4)));
+      return column(
+        PADDING + index * slot + 1,
+        slot - 3,
+        y + CHART_HEIGHT - height,
+        height,
+        palette,
+        0.75,
+      );
     })
     .join("");
+}
+
+function column(
+  x: number,
+  width: number,
+  top: number,
+  height: number,
+  palette: ArtifactThumbnailPalette,
+  opacity: number,
+): string {
+  return `<rect x="${String(Math.round(x))}" y="${String(Math.round(top))}" width="${String(Math.max(2, Math.round(width)))}" height="${String(Math.round(height))}" rx="1" fill="${palette.accent}" opacity="${opacityFor(opacity)}"/>`;
+}
+
+function round(value: number): number {
+  return Math.round(value);
+}
+
+/** Keep a series' opacity readable, however many series share the picture. */
+function opacityFor(value: number): string {
+  return String(Math.min(0.9, Math.max(0.25, Math.round(value * 100) / 100)));
 }
 
 function timeline(y: number, width: number, palette: ArtifactThumbnailPalette): string {
