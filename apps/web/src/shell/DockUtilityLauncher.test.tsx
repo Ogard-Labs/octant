@@ -33,13 +33,13 @@ describe("right sidebar tool launcher", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Add tool" }));
-    expect(await screen.findByRole("button", { name: "Terminal" })).toBeVisible();
+    expect(await screen.findByRole("menuitem", { name: "Terminal" })).toBeVisible();
 
     // Left open over whatever comes next, the reader's following click is spent
     // dismissing the menu rather than doing what they clicked.
     await user.click(screen.getByRole("button", { name: "Elsewhere" }));
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("menuitem", { name: "Terminal" })).not.toBeInTheDocument(),
     );
   });
 
@@ -64,7 +64,7 @@ describe("right sidebar tool launcher", () => {
     await user.click(screen.getByRole("button", { name: "Add tool" }));
     expect(await screen.findByText("Relevant to this thread")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: /#917 Faster issue validation/ }));
+    await user.click(screen.getByRole("menuitem", { name: /#917 Faster issue validation/ }));
     expect(onOpenPullRequest).toHaveBeenCalledOnce();
     // The menu closes on choosing, the same as choosing a tool does.
     await waitFor(() =>
@@ -101,11 +101,11 @@ describe("right sidebar tool launcher", () => {
     const trigger = screen.getByRole("button", { name: "Add tool" });
     expect(trigger).toHaveTextContent("");
     await user.click(trigger);
-    expect(await screen.findByRole("button", { name: "Browser" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Terminal" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "iOS Simulator" })).toBeVisible();
+    expect(await screen.findByRole("menuitem", { name: "Browser" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Terminal" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "iOS Simulator" })).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "iOS Simulator" }));
+    await user.click(screen.getByRole("menuitem", { name: "iOS Simulator" }));
     expect(onOpen).toHaveBeenCalledWith("ios-simulator");
     await waitFor(() => expect(trigger).toHaveFocus());
   });
@@ -123,13 +123,14 @@ describe("right sidebar tool launcher", () => {
     );
 
     const trigger = screen.getByRole("button", { name: "Add tool" });
-    await user.click(trigger);
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
     // Workspace lists Browser before Terminal, so Browser is the first row.
-    await waitFor(() => expect(screen.getByRole("button", { name: "Browser" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Browser" })).toHaveFocus());
 
     await user.keyboard("{Escape}");
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Browser" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("menuitem", { name: "Browser" })).not.toBeInTheDocument(),
     );
     expect(trigger).toHaveFocus();
   });
@@ -143,7 +144,7 @@ describe("right sidebar tool launcher", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Add tool" }));
-    const row = await screen.findByRole("button", { name: "Terminal" });
+    const row = await screen.findByRole("menuitem", { name: "Terminal" });
     // The in-flow menu was clipped at the dock's right edge, and pinning it to
     // the toolbar put it far from the plus. A portal anchored to the plus has
     // neither problem, so the menu must not live inside the toolbar.
@@ -165,17 +166,17 @@ describe("right sidebar tool launcher", () => {
 
     await user.click(screen.getByRole("button", { name: "Add tool" }));
     expect(
-      within(await screen.findByRole("group", { name: "Thread tools" })).getByRole("button", {
+      within(await screen.findByRole("group", { name: "Thread tools" })).getByRole("menuitem", {
         name: "Environment",
       }),
     ).toBeVisible();
     expect(
-      within(screen.getByRole("group", { name: "Workspace" })).getByRole("button", {
+      within(screen.getByRole("group", { name: "Workspace" })).getByRole("menuitem", {
         name: "Browser",
       }),
     ).toBeVisible();
     expect(
-      within(screen.getByRole("group", { name: "Devices" })).getByRole("button", {
+      within(screen.getByRole("group", { name: "Devices" })).getByRole("menuitem", {
         name: "Android emulator",
       }),
     ).toBeVisible();

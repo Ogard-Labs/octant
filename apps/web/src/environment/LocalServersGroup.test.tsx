@@ -156,7 +156,7 @@ describe("LocalServersGroup", () => {
     const onCopyUrl = vi.fn(async () => undefined);
     render(<LocalServersGroup controller={controller()} onCopyUrl={onCopyUrl} />);
     await user.click(screen.getByRole("button", { name: /More actions for/ }));
-    await user.click(await screen.findByRole("button", { name: /Copy http/ }));
+    await user.click(await screen.findByRole("menuitem", { name: /Copy http/ }));
     expect(onCopyUrl).toHaveBeenCalledWith("http://127.0.0.1:5173/");
     expect(await screen.findByText("Copied")).toBeVisible();
   });
@@ -168,7 +168,7 @@ describe("LocalServersGroup", () => {
     });
     render(<LocalServersGroup controller={controller()} onCopyUrl={onCopyUrl} />);
     await user.click(screen.getByRole("button", { name: /More actions for/ }));
-    await user.click(await screen.findByRole("button", { name: /Copy http/ }));
+    await user.click(await screen.findByRole("menuitem", { name: /Copy http/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Octant could not copy the URL.");
   });
 
@@ -199,9 +199,9 @@ describe("LocalServersGroup", () => {
       <LocalServersGroup controller={controller()} onCopyUrl={vi.fn()} onOpenTarget={vi.fn()} />,
     );
     expect(screen.getByRole("button", { name: /Open http/ })).toBeVisible();
-    expect(screen.queryByRole("button", { name: /Copy http/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /Copy http/ })).toBeNull();
     await user.click(screen.getByRole("button", { name: /More actions for/ }));
-    expect(await screen.findByRole("button", { name: /Copy http/ })).toBeVisible();
+    expect(await screen.findByRole("menuitem", { name: /Copy http/ })).toBeVisible();
   });
 
   it("hides Open and Copy entirely when the host supplies no way to perform them", async () => {
@@ -210,7 +210,7 @@ describe("LocalServersGroup", () => {
     expect(screen.getByText("node · vite")).toBeVisible();
     expect(screen.queryByRole("button", { name: /Open http/ })).toBeNull();
     await user.click(screen.getByRole("button", { name: /More actions for/ }));
-    expect(screen.queryByRole("button", { name: /Copy http/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /Copy http/ })).toBeNull();
   });
 
   it("stops an Octant-owned server without a confirmation step", async () => {

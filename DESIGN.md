@@ -468,6 +468,20 @@ shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 menus now use the shared `OctantContextMenu` adapter; do not add a new direct
 primitive import.
 
+Desktop context menus and ordinary dropdown menus (including More, the account
+menu, action menus, plain select fields, Project/thread filters, and checkbox/radio choices) use Electron's native OS menus through that adapter.
+The OS owns their font, material, spacing, highlighting, submenu behavior,
+accessibility, and light/dark appearance; renderer theme tokens do not repaint
+native menus. The account menu opens above its footer control and More beside
+its sidebar row. Activity › Custom range opens a date-range dialog.
+The existing action composition supplies labels, grouping,
+disabled and checked states, and nested actions. Native menus dismiss after
+a selection, including checkbox/radio changes; reopening reads the current state. Ordinary editable text and text selections
+receive the platform editing/copy menu. The Code editor and both diff sides
+use native editing/find actions that run through the existing editor commands. Browser clients retain the accessible
+Base UI menus. Searchable pickers and popovers with embedded controls remain
+renderer surfaces.
+
 ### Turn header
 
 Every assistant reply in Chat, Work, and Code opens with the same line: who
