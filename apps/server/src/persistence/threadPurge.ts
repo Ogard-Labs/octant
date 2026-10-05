@@ -36,34 +36,43 @@ export function erasePurgedThread(input: {
     delinkProjectMemoryProvenance(input.connection, threadId);
     deleteThreadScopedProjectionRows(input.connection, threadId);
     deleteJournalEvents(input.connection, aggregates);
-    input.connection.exec(
-      `DELETE FROM aggregate_heads WHERE NOT EXISTS (
-         SELECT 1 FROM event_journal
-         WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
-           AND event_journal.aggregate_id = aggregate_heads.aggregate_id
-       )`,
-    );
-    input.connection.exec(
-      `UPDATE aggregate_heads
-       SET aggregate_version = (
-             SELECT MAX(event_journal.aggregate_version) FROM event_journal
-             WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
-               AND event_journal.aggregate_id = aggregate_heads.aggregate_id
-           ),
-           last_sequence = (
-             SELECT MAX(event_journal.global_sequence) FROM event_journal
-             WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
-               AND event_journal.aggregate_id = aggregate_heads.aggregate_id
-           )
-       WHERE EXISTS (
-         SELECT 1 FROM event_journal
-         WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
-           AND event_journal.aggregate_id = aggregate_heads.aggregate_id
-       )`,
-    );
+    reconcileAggregateHeads(input.connection);
   } finally {
     input.connection.pragma("foreign_keys = ON");
   }
+}
+
+/**
+ * Aggregate heads whose journal history is gone leave with it, and a head
+ * with surviving events falls back to the surviving version and sequence, so
+ * a later append expects a version that exists.
+ */
+function reconcileAggregateHeads(connection: SqliteConnection): void {
+  connection.exec(
+    `DELETE FROM aggregate_heads WHERE NOT EXISTS (
+       SELECT 1 FROM event_journal
+       WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
+         AND event_journal.aggregate_id = aggregate_heads.aggregate_id
+     )`,
+  );
+  connection.exec(
+    `UPDATE aggregate_heads
+     SET aggregate_version = (
+           SELECT MAX(event_journal.aggregate_version) FROM event_journal
+           WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
+             AND event_journal.aggregate_id = aggregate_heads.aggregate_id
+         ),
+         last_sequence = (
+           SELECT MAX(event_journal.global_sequence) FROM event_journal
+           WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
+             AND event_journal.aggregate_id = aggregate_heads.aggregate_id
+         )
+     WHERE EXISTS (
+       SELECT 1 FROM event_journal
+       WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
+         AND event_journal.aggregate_id = aggregate_heads.aggregate_id
+     )`,
+  );
 }
 
 export function listProjectedThreadSubjects(connection: SqliteConnection): ReadonlyArray<{
@@ -195,11 +204,26 @@ export function listThreadFileAnchors(
 }
 
 /**
- * Every journal aggregate a Canvas owns: its own history, its comments, and
- * its artifact-mirror receipts. A Project-scoped erase uses the same
- * ownership walk the thread purge uses, so a Canvas disappears completely —
- * journal, projection rebuild, and mirrored files — instead of leaving
- * subsidiary state a restart would resurrect.
+ * Aggregate types that belong to a Canvas and nothing else: the Canvas, its
+ * comments, share and access history, refresh and action receipts, and
+ * artifact-mirror receipts.
+ */
+const CANVAS_FAMILY_AGGREGATE_TYPES = new Set<string>([
+  "canvas",
+  "canvas-comments",
+  "canvas-share",
+  "canvas-share-access",
+  "canvas-refresh",
+  "canvas-action",
+  "artifact-mirror",
+]);
+
+/**
+ * Every journal aggregate a Canvas owns, found with the ownership walk the
+ * thread purge uses. A Project-scoped erase deletes exactly these, so a
+ * Canvas disappears completely instead of leaving subsidiary state a restart
+ * or rebuild would resurrect. Only Canvas-owned aggregate types are taken: a
+ * thread whose events merely mention the Canvas is not the Project's to erase.
  */
 export function collectCanvasFamilyAggregates(
   connection: SqliteConnection,
@@ -207,11 +231,13 @@ export function collectCanvasFamilyAggregates(
 ): ReadonlyArray<AggregateKey> {
   const keys = new Map<string, AggregateKey>();
   const add = (aggregateType: string, aggregateId: string) => {
-    if (RETAINED_AGGREGATE_TYPES.has(aggregateType) || aggregateId.length === 0) return;
+    if (!CANVAS_FAMILY_AGGREGATE_TYPES.has(aggregateType) || aggregateId.length === 0) return;
     keys.set(`${aggregateType}:${aggregateId}`, { aggregateType, aggregateId });
   };
   add("canvas", canvasId);
   followLinkedAggregates(connection, keys, add, "canvas", CANVAS_LINK_PATHS);
+  add("canvas-comments", canvasId);
+  add("artifact-mirror", canvasId);
   return [...keys.values()];
 }
 
@@ -230,6 +256,50 @@ export function listProjectCanvasIds(
     )
     .all(projectId) as ReadonlyArray<{ readonly aggregate_id: string }>;
   return rows.map((row) => row.aggregate_id);
+}
+
+/**
+ * Erases what a Project owns beyond its threads: its memory entries and the
+ * complete family of each Canvas it owns. The journal is authoritative, so the
+ * history leaves with the projection rows; aggregate heads and quarantine rows
+ * that point at it are cleaned in the same pass, so a rebuild cannot bring
+ * either back. Returns whether any memory existed, so the report names only
+ * scopes that actually held data.
+ */
+export function erasePurgedProjectData(input: {
+  readonly connection: SqliteConnection;
+  readonly projectId: string;
+  readonly canvasIds: ReadonlyArray<string>;
+}): { readonly memoryErased: boolean } {
+  const { connection, projectId } = input;
+  const memoryAggregate = { aggregateType: "project-memory", aggregateId: projectId };
+  const memoryErased =
+    connection
+      .prepare(`SELECT 1 AS present FROM project_memory_projection WHERE project_id = ? LIMIT 1`)
+      .get(projectId) !== undefined ||
+    connection
+      .prepare(
+        `SELECT 1 AS present FROM event_journal
+         WHERE aggregate_type = ? AND aggregate_id = ? LIMIT 1`,
+      )
+      .get(memoryAggregate.aggregateType, memoryAggregate.aggregateId) !== undefined;
+  const aggregates = new Map<string, AggregateKey>([
+    [`project-memory:${projectId}`, memoryAggregate],
+  ]);
+  for (const canvasId of input.canvasIds) {
+    for (const aggregate of collectCanvasFamilyAggregates(connection, canvasId)) {
+      aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
+    }
+  }
+  connection.pragma("foreign_keys = OFF");
+  try {
+    connection.prepare("DELETE FROM project_memory_projection WHERE project_id = ?").run(projectId);
+    deleteJournalEvents(connection, [...aggregates.values()]);
+    reconcileAggregateHeads(connection);
+  } finally {
+    connection.pragma("foreign_keys = ON");
+  }
+  return { memoryErased };
 }
 
 function collectOwnedAggregates(

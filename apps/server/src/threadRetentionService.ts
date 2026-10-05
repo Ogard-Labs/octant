@@ -31,10 +31,11 @@ import { readAggregateVersion } from "./persistence/chatProjection";
 import type { Journal } from "./persistence/journal";
 import type { SqliteConnection } from "./persistence/sqlitePort";
 import {
-  collectCanvasFamilyAggregates,
+  erasePurgedProjectData,
   erasePurgedThread,
   listProjectCanvasIds,
   listProjectedThreadSubjects,
+  listThreadFileAnchors,
   threadProjectionExists,
 } from "./persistence/threadPurge";
 import {
@@ -63,6 +64,10 @@ export interface ThreadRetentionServiceOptions {
   readonly uuid: () => string;
   readonly listWorkThreads: () => ReadonlyArray<ThreadRetentionWorkThread>;
   readonly forgetWorkThread?: (threadId: string) => void;
+  /** Drops erased Canvases from the live projection so reads stop serving them at once. */
+  readonly forgetCanvases?: (canvasIds: ReadonlyArray<string>) => void;
+  /** Removes the files an erased Project's Canvases mirrored, while their receipts still exist. */
+  readonly purgeCanvasFiles?: (canvasIds: ReadonlyArray<string>) => Promise<void> | void;
   readonly purgeThreadArtifacts?: (input: {
     readonly mode: OctantMode;
     readonly threadId: ThreadRetentionThreadId;
@@ -76,6 +81,8 @@ export class ThreadRetentionService {
   readonly #uuid: () => string;
   readonly #listWorkThreads: () => ReadonlyArray<ThreadRetentionWorkThread>;
   readonly #forgetWorkThread: ((threadId: string) => void) | undefined;
+  readonly #forgetCanvases: ThreadRetentionServiceOptions["forgetCanvases"];
+  readonly #purgeCanvasFiles: ThreadRetentionServiceOptions["purgeCanvasFiles"];
   readonly #purgeThreadArtifacts: ThreadRetentionServiceOptions["purgeThreadArtifacts"];
 
   constructor(options: ThreadRetentionServiceOptions) {
@@ -85,6 +92,8 @@ export class ThreadRetentionService {
     this.#uuid = options.uuid;
     this.#listWorkThreads = options.listWorkThreads;
     this.#forgetWorkThread = options.forgetWorkThread;
+    this.#forgetCanvases = options.forgetCanvases;
+    this.#purgeCanvasFiles = options.purgeCanvasFiles;
     this.#purgeThreadArtifacts = options.purgeThreadArtifacts;
   }
 
@@ -158,16 +167,22 @@ export class ThreadRetentionService {
         ...(subject.projectId === undefined ? {} : { projectId: subject.projectId }),
         purgedAt: occurredAt,
       });
+      const canvasIds = listThreadFileAnchors(
+        this.#connection,
+        subject.mode,
+        String(subject.threadId),
+      ).canvasIds;
       erasePurgedThread({
         connection: this.#connection,
         mode: subject.mode,
         threadId: subject.threadId,
       });
+      if (canvasIds.length > 0) this.#forgetCanvases?.(canvasIds);
       if (subject.mode === "work") this.#forgetWorkThread?.(String(subject.threadId));
     }
     const projectScopeDeleted =
       request.scope.kind === "project"
-        ? eraseProjectData(this.#connection, String(request.scope.projectId))
+        ? await this.#eraseProjectData(String(request.scope.projectId))
         : [];
     return {
       operation: "purge-threads",
@@ -259,80 +274,30 @@ export class ThreadRetentionService {
       ],
     });
   }
-}
 
-/**
- * A Project-scoped erase removes Project-owned data a thread purge cannot
- * reach (OCT-366, decision 2): the Project's memory entries and its Canvas
- * history. Memory is keyed by Project; Canvases are journaled aggregates whose
- * provenance names the Project, so both are deleted by Project identity and
- * the in-memory Canvas projection rebuilds without them on restart. Returns
- * the scopes this pass deleted so the report names what actually went.
- */
-function eraseProjectData(
-  connection: SqliteConnection,
-  projectId: string,
-): ReadonlyArray<"project-memory" | "project-canvases"> {
-  const deleted: Array<"project-memory" | "project-canvases"> = [];
-  const memory = connection
-    .prepare("DELETE FROM project_memory_projection WHERE project_id = ?")
-    .run(projectId);
-  // The journal is authoritative: the Project's memory aggregates must leave
-  // it too, or a rebuild resurrects what the report says was deleted.
-  connection
-    .prepare(
-      `DELETE FROM event_journal WHERE aggregate_type = 'project-memory' AND aggregate_id = ?`,
-    )
-    .run(projectId);
-  if (memory.changes > 0) deleted.push("project-memory");
-  const canvasIds = listProjectCanvasIds(connection, projectId);
-  if (canvasIds.length > 0) {
-    for (const canvasId of canvasIds) {
-      for (const aggregate of collectCanvasFamilyAggregates(connection, canvasId)) {
-        connection
-          .prepare(
-            `DELETE FROM event_journal
-             WHERE aggregate_type = ? AND aggregate_id = ? AND event_name != ?`,
-          )
-          .run(aggregate.aggregateType, aggregate.aggregateId, "context.usage-reconciled@1");
-      }
-    }
-    deleted.push("project-canvases");
+  /**
+   * A Project-scoped erase removes Project-owned data a thread purge cannot
+   * reach: the Project's memory entries and every Canvas it owns, with each
+   * Canvas's comments, share and access history, receipts, and mirrored
+   * files. Files go first, while receipts still name them; the journal and
+   * projection rows follow; the live Canvas projection is evicted last so
+   * inventory and reads stop serving the Canvases at once, not at restart.
+   * Returns the scopes this pass deleted so the report names what went.
+   */
+  async #eraseProjectData(
+    projectId: string,
+  ): Promise<ReadonlyArray<"project-memory" | "project-canvases">> {
+    const canvasIds = listProjectCanvasIds(this.#connection, projectId);
+    if (canvasIds.length > 0) await this.#purgeCanvasFiles?.(canvasIds);
+    const { memoryErased } = erasePurgedProjectData({
+      connection: this.#connection,
+      projectId,
+      canvasIds,
+    });
+    if (canvasIds.length > 0) this.#forgetCanvases?.(canvasIds);
+    return [
+      ...(memoryErased ? (["project-memory"] as const) : []),
+      ...(canvasIds.length > 0 ? (["project-canvases"] as const) : []),
+    ];
   }
-  reconcileAggregateHeads(connection);
-  return deleted;
-}
-
-/**
- * Aggregate heads whose journal history is gone must leave with it, and heads
- * with remaining events fall back to the surviving sequence. This is the
- * same reconciliation the thread-purge path runs; the Project path needs the
- * invariant after deleting memory and Canvas history.
- */
-function reconcileAggregateHeads(connection: SqliteConnection): void {
-  connection.exec(
-    `DELETE FROM aggregate_heads WHERE NOT EXISTS (
-       SELECT 1 FROM event_journal
-       WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
-         AND event_journal.aggregate_id = aggregate_heads.aggregate_id
-     )`,
-  );
-  connection.exec(
-    `UPDATE aggregate_heads
-     SET aggregate_version = (
-           SELECT MAX(event_journal.aggregate_version) FROM event_journal
-           WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
-             AND event_journal.aggregate_id = aggregate_heads.aggregate_id
-         ),
-         last_sequence = (
-           SELECT MAX(event_journal.global_sequence) FROM event_journal
-           WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
-             AND event_journal.aggregate_id = aggregate_heads.aggregate_id
-         )
-     WHERE EXISTS (
-       SELECT 1 FROM event_journal
-       WHERE event_journal.aggregate_type = aggregate_heads.aggregate_type
-         AND event_journal.aggregate_id = aggregate_heads.aggregate_id
-     )`,
-  );
 }
