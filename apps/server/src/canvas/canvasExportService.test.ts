@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import { decodeCanvasId, decodeCanvasVersionId, type CanvasBlock } from "@octant/contracts/canvas";
 import {
@@ -414,6 +414,41 @@ describe("canvas export service", () => {
     expect(second).toMatchObject({ kind: "refused", code: "approval-required" });
     expect(calls).toHaveLength(1);
     expect(eventStore.replay()).toHaveLength(1);
+    connection.close();
+  });
+
+  it("reports a delivered export the journal could not record instead of failing it", async () => {
+    const { calls, service, eventStore, connection } = harness();
+    const prepared = service.prepare(prepareRequest(), true);
+    expect(prepared.kind).toBe("approval");
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+    vi.spyOn(eventStore, "append").mockImplementation(() => {
+      throw new Error("journal unavailable");
+    });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(result).toEqual({
+      kind: "unrecorded",
+      outcome: {
+        kind: "receipt",
+        receipt: { kind: "remote-id", remoteId: "copy-reading-copy" },
+      },
+      message: "The export was delivered, but this host could not record it.",
+    });
+    expect(logged).toHaveBeenCalledTimes(1);
+    logged.mockRestore();
     connection.close();
   });
 

@@ -1484,7 +1484,9 @@ renders the Canvas to Markdown or HTML, shows an approval card with that
 payload and the destination, and calls the target only after approval. The
 call returns a receipt (a link, a path, or a remote id) or a typed refusal.
 Each completed export is a `canvas.export@1` journal event and is rebuilt by
-replay. PDF and PNG are named formats the seam can carry later; this host does
+replay. When the destination was called but the journal could not take the
+record, the answer is `unrecorded` and carries the destination's outcome; it is
+never reported as a failed export. PDF and PNG are named formats the seam can carry later; this host does
 not render them. A target that passed activation is still reported honestly as
 `not-connected`, `ready`, or `refused`.
 

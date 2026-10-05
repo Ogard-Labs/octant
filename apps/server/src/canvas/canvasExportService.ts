@@ -315,7 +315,18 @@ export class CanvasExportService {
       approvalId: pending.card.card.approvalId,
       outcome: delivery,
     });
-    this.#eventStore.append({ record, occurredAt: this.#clock(), actor: input.actor });
+    // The destination has already been called, so a journal failure must not
+    // read as a failed export: say it was delivered and could not be recorded.
+    try {
+      this.#eventStore.append({ record, occurredAt: this.#clock(), actor: input.actor });
+    } catch {
+      console.error("A Canvas export was delivered but could not be journaled.");
+      return decodeCanvasExportDecideResult({
+        kind: "unrecorded",
+        outcome: delivery,
+        message: "The export was delivered, but this host could not record it.",
+      });
+    }
     return decodeCanvasExportDecideResult({ kind: "exported", record });
   }
 

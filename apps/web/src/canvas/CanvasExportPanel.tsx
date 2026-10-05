@@ -86,6 +86,10 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
         setMessage(receiptText(result.record.outcome));
         return;
       }
+      if (result.kind === "unrecorded") {
+        setMessage(`${receiptText(result.outcome)} ${result.message}`);
+        return;
+      }
       setMessage(result.message);
     } catch {
       setMessage("Export could not be completed.");

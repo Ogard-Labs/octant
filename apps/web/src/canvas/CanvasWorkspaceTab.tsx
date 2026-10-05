@@ -820,6 +820,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         props.client?.prepareExport !== undefined &&
         props.client.decideExport !== undefined ? (
           <CanvasExportPanel
+            key={`${String(exportOffers.canvasId)}:${String(exportOffers.versionId)}`}
             offers={exportOffers}
             onDecide={props.client.decideExport}
             onPrepare={props.client.prepareExport}

@@ -4,7 +4,10 @@ import type {
   CanvasExportTargetOffer,
   CanvasExportTargetStatus,
 } from "@octant/contracts/canvas-export";
-import { isCanvasExportImplementedFormat } from "@octant/contracts/canvas-export";
+import {
+  isCanvasExportImplementedFormat,
+  isCanvasExportMessage,
+} from "@octant/contracts/canvas-export";
 import type { ExtensionEffectiveState } from "@octant/contracts/extensions";
 
 /**
@@ -35,6 +38,7 @@ export type CanvasExportAdmission =
   | { readonly kind: "offered"; readonly offer: CanvasExportTargetOffer };
 
 const NOT_CONNECTED = "This destination is not connected.";
+const STANDING_REFUSAL = "This destination is not accepting exports.";
 const LATER_FORMAT = "This destination does not accept a format this host can render.";
 
 function implementedFormats(
@@ -80,7 +84,10 @@ export function admitCanvasExportContribution(
   let message: string | undefined;
   if (standing !== undefined && standing.length > 0) {
     status = "refused";
-    message = standing;
+    // The text is the destination's own. One that is too long or names a path
+    // or a secret would fail decoding of the whole offer list, so it is
+    // replaced rather than allowed to hide every other destination.
+    message = isCanvasExportMessage(standing) ? standing : STANDING_REFUSAL;
   } else if (!facts.connected) {
     status = "not-connected";
     message = NOT_CONNECTED;

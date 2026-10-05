@@ -86,6 +86,12 @@ const safeBounded = (maximum: number) =>
     }),
   );
 
+/** Text a destination or the host shows the person about one export. */
+const CanvasExportMessage = safeBounded(CANVAS_EXPORT_MESSAGE_MAX_CHARS);
+
+/** Whether `value` would decode as an export message: bounded and free of paths and secrets. */
+export const isCanvasExportMessage = Schema.is(CanvasExportMessage);
+
 const uniqueFormats = <T extends string>(formats: ReadonlyArray<T>): boolean =>
   new Set(formats).size === formats.length;
 
@@ -117,7 +123,7 @@ export const CanvasExportTargetOffer = Schema.Struct({
     }),
   ),
   status: CanvasExportTargetStatus,
-  message: Schema.optional(safeBounded(CANVAS_EXPORT_MESSAGE_MAX_CHARS)),
+  message: Schema.optional(CanvasExportMessage),
 })
   .annotations(strict)
   .pipe(
@@ -214,7 +220,7 @@ export type CanvasExportRefusalCode = typeof CanvasExportRefusalCode.Type;
 export const CanvasExportRefusal = Schema.Struct({
   kind: Schema.Literal("refused"),
   code: CanvasExportRefusalCode,
-  message: safeBounded(CANVAS_EXPORT_MESSAGE_MAX_CHARS),
+  message: CanvasExportMessage,
 }).annotations(strict);
 export type CanvasExportRefusal = typeof CanvasExportRefusal.Type;
 
@@ -285,7 +291,7 @@ export type CanvasExportDecideRequest = typeof CanvasExportDecideRequest.Type;
 /** The person declined. This is not a destination refusal and is not journaled. */
 export const CanvasExportDenied = Schema.Struct({
   kind: Schema.Literal("denied"),
-  message: safeBounded(CANVAS_EXPORT_MESSAGE_MAX_CHARS),
+  message: CanvasExportMessage,
 }).annotations(strict);
 export type CanvasExportDenied = typeof CanvasExportDenied.Type;
 
@@ -305,11 +311,24 @@ export const CanvasExportRecorded = Schema.Struct({
 }).annotations(strict);
 export type CanvasExportRecorded = typeof CanvasExportRecorded.Type;
 
+/**
+ * The destination was called but the journal could not take the record, so a
+ * restart would not replay this export. The outcome is returned so the person
+ * still sees what the destination did.
+ */
+export const CanvasExportUnrecorded = Schema.Struct({
+  kind: Schema.Literal("unrecorded"),
+  outcome: CanvasExportDelivery,
+  message: CanvasExportMessage,
+}).annotations(strict);
+export type CanvasExportUnrecorded = typeof CanvasExportUnrecorded.Type;
+
 export const CanvasExportDecideResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("exported"),
     record: CanvasExportRecorded,
   }).annotations(strict),
+  CanvasExportUnrecorded,
   CanvasExportDenied,
   CanvasExportRefusal,
 );

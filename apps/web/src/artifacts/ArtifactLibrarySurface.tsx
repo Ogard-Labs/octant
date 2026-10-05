@@ -1,7 +1,7 @@
 import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
 import type { CanvasExportOfferList } from "@octant/contracts/canvas-export";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { CanvasExportPanel } from "../canvas/CanvasExportPanel";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { Surface } from "../surface/SurfaceHeader";
@@ -43,13 +43,22 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
   const [exportOffers, setExportOffers] = useState<CanvasExportOfferList | undefined>(undefined);
   const [exportMessage, setExportMessage] = useState<string | undefined>(undefined);
 
+  // The newest request, or a closed dialog, supersedes an offers response that
+  // resolves later, so an answer for one artifact never opens the dialog on
+  // another. Same idiom as the Canvas tab's load token.
+  const exportToken = useRef(0);
+
   async function openExport(entry: ArtifactLibraryEntry) {
     if (exportClient?.exportOffers === undefined) return;
+    const current = (exportToken.current += 1);
     setExportMessage(undefined);
     setExportOffers(undefined);
     try {
-      setExportOffers(await exportClient.exportOffers(entry.canvasId));
+      const offers = await exportClient.exportOffers(entry.canvasId);
+      if (exportToken.current !== current) return;
+      setExportOffers(offers);
     } catch {
+      if (exportToken.current !== current) return;
       setExportMessage("Export is unavailable.");
       setExportOffers(undefined);
     }
@@ -84,6 +93,7 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
         label="Export artifact"
         labelledBy="canvas-export-title"
         onClose={() => {
+          exportToken.current += 1;
           setExportOffers(undefined);
           setExportMessage(undefined);
         }}

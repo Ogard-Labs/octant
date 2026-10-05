@@ -72,6 +72,50 @@ describe("CanvasExportPanel", () => {
     expect(screen.getByTestId("canvas-export-payload")).toHaveTextContent("# Launch plan");
   });
 
+  it("says a delivered export could not be recorded instead of reporting a failure", async () => {
+    const user = userEvent.setup();
+    const onPrepare = vi.fn(async () => ({
+      kind: "approval" as const,
+      card: {
+        schemaVersion: 1 as const,
+        kind: "canvas-export-approval" as const,
+        approvalId,
+        canvasId,
+        versionId,
+        sequence: 1,
+        targetId: "reading-copy",
+        destinationLabel: "Reading copy",
+        format: "markdown" as const,
+        title: "Launch plan",
+        payload: "# Launch plan\n",
+        payloadDigest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        byteLength: 15,
+      },
+    }));
+    const onDecide = vi.fn(async () => ({
+      kind: "unrecorded" as const,
+      outcome: {
+        kind: "receipt" as const,
+        receipt: { kind: "remote-id" as const, remoteId: "copy-1" },
+      },
+      message: "The export was delivered, but this host could not record it.",
+    }));
+    render(
+      <CanvasExportPanel
+        offers={offers()}
+        onDecide={onDecide as never}
+        onPrepare={onPrepare as never}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Review export" }));
+    await user.click(await screen.findByRole("button", { name: "Approve export" }));
+
+    expect(await screen.findByText(/Exported\. copy-1/)).toHaveTextContent(
+      "The export was delivered, but this host could not record it.",
+    );
+  });
+
   it("says when no destination is ready", () => {
     render(
       <CanvasExportPanel
