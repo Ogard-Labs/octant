@@ -106,6 +106,7 @@ export function makeAnthropicCompatibleDriver(
                 instanceId,
                 host: options.subscriptionOAuth,
                 now: () => Date.parse(observedAt),
+                baseUrl: options.configuration.baseUrl,
               });
               if (gate.kind === "report") {
                 const refused = decodeProviderObservedState({
@@ -215,6 +216,7 @@ function anthropicCompatibleTransport(
         instanceId: options.instanceId,
         host: options.subscriptionOAuth,
         now: () => Date.parse(observedAt),
+        baseUrl: options.configuration.baseUrl,
       });
       if (gate.kind === "report") throw failure(gate.readiness, gate.message);
       const plainCredential = gate.kind === "plain" ? gate.credential : undefined;
@@ -345,6 +347,7 @@ function anthropicOAuthInput(options: AnthropicCompatibleDriverOptions, clock: (
     instanceId: options.instanceId,
     host: options.subscriptionOAuth,
     now: () => Date.parse(clock()),
+    baseUrl: options.configuration.baseUrl,
   };
 }
 

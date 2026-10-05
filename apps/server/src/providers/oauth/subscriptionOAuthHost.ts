@@ -36,14 +36,14 @@ export function subscriptionOAuthHostFromBroker(
         raw.kind !== "granted" ||
         typeof raw.accessToken !== "string" ||
         raw.accessToken.length === 0 ||
-        typeof raw.expiresAt !== "string"
+        (raw.expiresAt !== undefined && typeof raw.expiresAt !== "string")
       ) {
         return { kind: "unavailable" };
       }
       return {
         kind: "granted",
         accessToken: raw.accessToken,
-        expiresAt: raw.expiresAt,
+        ...(raw.expiresAt === undefined ? {} : { expiresAt: raw.expiresAt }),
       };
     },
   };

@@ -8,8 +8,8 @@ const CALLBACK_PATH = "/oauth/callback";
 const OPENROUTER_DIALECT = "openrouter-pkce";
 // OpenRouter exchanges the code for a long-lived user-controlled API key.
 // There is no refresh token; the stored refresh field repeats the key and a
-// failed refresh sends the user back to sign-in.
-const OPENROUTER_KEY_LIFETIME_MS = 365 * 24 * 60 * 60 * 1_000;
+// failed refresh sends the user back to sign-in. The key never expires, so
+// the grant stores no expiry at all rather than a manufactured one.
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1_000;
 const DEFAULT_DEVICE_INTERVAL_MS = 5_000;
@@ -99,7 +99,8 @@ export type HostOAuthAccessResult =
       readonly kind: "granted";
       readonly accessToken: string;
       readonly tokenType: string;
-      readonly expiresAt: string;
+      /** Absent when the stored credential does not expire. */
+      readonly expiresAt?: string;
     }
   | { readonly kind: "sign-in-again"; readonly reason: HostOAuthSignInAgainReason }
   | { readonly kind: "unavailable" };
@@ -122,7 +123,13 @@ interface StoredGrant {
   readonly accessToken: string;
   readonly refreshToken: string;
   readonly tokenType: string;
-  readonly expiresAt: number;
+  /**
+   * Epoch millis of expiry. Absent means the credential never expires:
+   * OpenRouter's issued API key stays valid until the user revokes it, and a
+   * manufactured far-future expiry would silently break resolution when it
+   * eventually passes.
+   */
+  readonly expiresAt?: number;
   readonly scope: string;
   readonly clientId: string;
   readonly tokenEndpoint: string;
@@ -179,7 +186,6 @@ export async function exchangeAuthorizationCode(input: {
   if (input.dialect === OPENROUTER_DIALECT) {
     return exchangeOpenRouterKey({
       fetch: input.fetch,
-      now: input.now,
       tokenEndpoint: input.tokenEndpoint,
       code: input.code,
       verifier: input.verifier,
@@ -212,27 +218,28 @@ export async function exchangeAuthorizationCode(input: {
 }
 
 /**
- * OpenRouter's /auth page does not echo an OAuth `state` parameter and the
- * code exchange takes a JSON body, not a form. The exchange returns a
- * user-controlled API key; there is no refresh token and no expiry, so the
- * key is stored as the access token with a far-future expiry and the refresh
- * slot repeats the key (a refresh attempt on a revoked key fails and sends
- * the user back to sign-in).
+ * OpenRouter's /auth page accepts the OAuth `state` parameter and echoes it
+ * back on the callback, so the dialect sends one and the callback validates
+ * it like the standard PKCE path. The code exchange takes a JSON body, not a
+ * form. The exchange returns a user-controlled API key; there is no refresh
+ * token and no expiry, so the key is stored without an expiry (a non-expiring
+ * credential) and the refresh slot repeats the key (a refresh attempt on a
+ * revoked key fails and sends the user back to sign-in).
  */
 function openRouterAuthorizationRequest(
   endpoint: string,
-  input: { readonly redirectUri: string; readonly challenge: string },
+  input: { readonly redirectUri: string; readonly challenge: string; readonly state: string },
 ): string {
   const url = new URL(endpoint);
   url.searchParams.set("callback_url", input.redirectUri);
   url.searchParams.set("code_challenge", input.challenge);
   url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("state", input.state);
   return url.toString();
 }
 
 async function exchangeOpenRouterKey(input: {
   readonly fetch: typeof fetch;
-  readonly now: () => number;
   readonly tokenEndpoint: string;
   readonly code: string;
   readonly verifier: string;
@@ -270,7 +277,9 @@ async function exchangeOpenRouterKey(input: {
       accessToken: key,
       refreshToken: key,
       tokenType: "Bearer",
-      expiresAt: input.now() + OPENROUTER_KEY_LIFETIME_MS,
+      // The issued key has no expiry. Store no expiry rather than a
+      // manufactured far-future one: a fake date would eventually pass and
+      // break resolution for a key that is still valid.
       scope: "",
       clientId: "",
       tokenEndpoint: input.tokenEndpoint,
@@ -373,7 +382,11 @@ export function createHostOAuthRuntime(options: {
       redirectUri = `http://127.0.0.1:${address.port}${CALLBACK_PATH}`;
       const authorizationUrl =
         descriptor.dialect === OPENROUTER_DIALECT
-          ? openRouterAuthorizationRequest(authorizationEndpoint, { redirectUri, challenge })
+          ? openRouterAuthorizationRequest(authorizationEndpoint, {
+              redirectUri,
+              challenge,
+              state,
+            })
           : authorizationRequest(authorizationEndpoint, {
               clientId: descriptor.clientId ?? "",
               redirectUri,
@@ -437,12 +450,10 @@ export function createHostOAuthRuntime(options: {
     session.attempt.closed = true;
     const query = url.search.length > 4_096 ? "" : url.search;
     const params = new URLSearchParams(query);
-    // OpenRouter's redirect carries only `code` — no `state` is echoed. The
-    // attempt is single-use, loopback-bound, and PKCE-verifier-bound, so the
-    // cross-site guard the state parameter provides is covered otherwise.
-    const requiresState = session.descriptor.dialect === undefined;
+    // Every flow — the standard PKCE path and the dialects — sends a CSRF
+    // `state` and must see it echoed back before the code is exchanged.
     const presented = params.get("state") ?? "";
-    if (requiresState && !statesEqual(session.state, presented)) {
+    if (!statesEqual(session.state, presented)) {
       publish(
         session.attemptId,
         refused(session.attemptId, session.descriptor.descriptorId, "state-mismatch"),
@@ -723,7 +734,9 @@ export function createHostOAuthRuntime(options: {
           kind: "granted",
           accessToken: grant.accessToken,
           tokenType: grant.tokenType,
-          expiresAt: new Date(grant.expiresAt).toISOString(),
+          ...(grant.expiresAt === undefined
+            ? {}
+            : { expiresAt: new Date(grant.expiresAt).toISOString() }),
         };
       } catch (error) {
         if (error instanceof CredentialStoreFailure && error.category === "missing") {
@@ -818,7 +831,7 @@ async function accessRoute(
       kind: "granted",
       accessToken: granted.accessToken,
       tokenType: granted.tokenType,
-      expiresAt: granted.expiresAt,
+      ...(granted.expiresAt === undefined ? {} : { expiresAt: granted.expiresAt }),
     },
     { headers: { "cache-control": "no-store" } },
   );
@@ -996,7 +1009,7 @@ function decodeGrant(raw: string): StoredGrant {
     typeof accessToken !== "string" ||
     typeof refreshToken !== "string" ||
     typeof tokenType !== "string" ||
-    typeof expiresAt !== "number" ||
+    (expiresAt !== undefined && typeof expiresAt !== "number") ||
     typeof scope !== "string" ||
     typeof clientId !== "string" ||
     typeof tokenEndpoint !== "string" ||
@@ -1011,7 +1024,7 @@ function decodeGrant(raw: string): StoredGrant {
     accessToken,
     refreshToken,
     tokenType,
-    expiresAt,
+    ...(expiresAt === undefined ? {} : { expiresAt }),
     scope,
     clientId,
     tokenEndpoint,
