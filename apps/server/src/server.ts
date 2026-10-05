@@ -427,6 +427,8 @@ import { CanvasService, type CanvasServiceDependencies } from "./canvas/canvasSe
 import { CanvasCommentService } from "./canvas/canvasCommentService";
 import { CanvasShareEventStore } from "./canvas/canvasShareEventStore";
 import { CanvasShareService } from "./canvas/canvasShareService";
+import { CanvasExportEventStore } from "./canvas/canvasExportEventStore";
+import { CanvasExportService } from "./canvas/canvasExportService";
 import { createCanvasRefreshSourceResolver } from "./canvas/canvasRefreshSourceResolver";
 import { readCanvasRefreshFile, resolveCanvasRefreshFile } from "./canvas/canvasRefreshFileRead";
 import { createCanvasSkillContributionResolver } from "./canvas/canvasSkillContributionResolver";
@@ -8342,6 +8344,36 @@ export function startOctantServer(
       },
       { authorize: authorizeCanvas },
     );
+    // Destinations arrive through the export contribution. The registration
+    // path from admitted plugins is held on the maintainer's Export-surface
+    // decision (what this list shows while no destination plugin is admitted),
+    // so the provider stays empty here; rendering, approval, and the journal
+    // are already wired through the same seam a plugin will reach.
+    const canvasExportService = new CanvasExportService({
+      load: (canvasId, versionId) => {
+        const entry = persistence.canvasProjection.getById(canvasId);
+        if (entry === undefined) return undefined;
+        const version =
+          versionId === undefined
+            ? entry.currentVersion
+            : entry.versions.find((candidate) => String(candidate.versionId) === String(versionId));
+        if (version === undefined) return undefined;
+        return {
+          canvasId: version.canvasId,
+          versionId: version.versionId,
+          sequence: version.sequence,
+          title: version.definition.title,
+          blocks: version.definition.blocks,
+        };
+      },
+      targets: () => [],
+      eventStore: new CanvasExportEventStore({
+        journal: persistence.journal,
+        uuid: randomUUID,
+      }),
+      uuid: randomUUID,
+      clock: () => new Date().toISOString() as never,
+    });
     // The library is a host-wide read of the same journal-derived projection
     // the per-Project inventory reads. It is deliberately wider than a window's
     // Project scope (0026); the service, not the route, decides what a given
@@ -8504,6 +8536,7 @@ export function startOctantServer(
       canvasProjection: persistence.canvasProjection,
       canvasService,
       canvasShareService,
+      canvasExportService,
       canvasCommentService,
       windowAuthorityStore,
       projects: projectService,

@@ -3,6 +3,9 @@ import {
   decodeCanvasGetOutcome,
   decodeCanvasHistoryOutcome,
   decodeCanvasCreateResult,
+  decodeCanvasExportDecideResult,
+  decodeCanvasExportOfferList,
+  decodeCanvasExportPrepareResult,
   decodeCanvasCommentCommandResult,
   decodeCanvasCommentsOutcome,
   decodeCanvasDiagramLayoutReviseResult,
@@ -21,6 +24,11 @@ import {
   type CanvasId,
   type CanvasCreateRequest,
   type CanvasCreateResult,
+  type CanvasExportDecideRequest,
+  type CanvasExportDecideResult,
+  type CanvasExportOfferList,
+  type CanvasExportPrepareRequest,
+  type CanvasExportPrepareResult,
   type CanvasCommentCommand,
   type CanvasCommentCommandResult,
   type CanvasCommentsOutcome,
@@ -85,6 +93,13 @@ export interface CanvasClient {
   share?(request: CanvasShareSnapshotRequest): Promise<CanvasShareResult>;
   revokeShare?(request: CanvasShareSnapshotRevokeRequest): Promise<CanvasShareResult>;
   accessShare?(request: CanvasShareAccessRequest): Promise<CanvasShareAccessResult>;
+  /**
+   * Destination export. The host renders and holds an approval card; the client
+   * only echoes that card back. A host without the route omits these methods.
+   */
+  exportOffers?(canvasId: CanvasId): Promise<CanvasExportOfferList>;
+  prepareExport?(request: CanvasExportPrepareRequest): Promise<CanvasExportPrepareResult>;
+  decideExport?(request: CanvasExportDecideRequest): Promise<CanvasExportDecideResult>;
   create(request: CanvasCreateRequest): Promise<CanvasCreateResult>;
   threadReferenceCards(input: {
     readonly mode: OctantMode;
@@ -290,6 +305,40 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           body: JSON.stringify(body),
         },
         decodeCanvasShareAccessResult,
+      );
+    },
+    exportOffers(canvasId) {
+      const url = new URL("/api/canvas/export-targets", options.baseUrl);
+      url.searchParams.set("canvasId", String(canvasId));
+      return request(
+        options.fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeCanvasExportOfferList,
+      );
+    },
+    prepareExport(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/export-prepare", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeCanvasExportPrepareResult,
+      );
+    },
+    decideExport(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/export-decide", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeCanvasExportDecideResult,
       );
     },
     create(body) {
