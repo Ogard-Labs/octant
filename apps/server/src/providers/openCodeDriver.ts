@@ -861,9 +861,10 @@ function makeConnection(
     const sessionsBySource = new Map<string, SessionState>();
     const sourceBySession = new Map<ProviderSessionId, string>();
     const pendingBySource = new Map<string, Event[]>();
-    const subscriptionAbort = new AbortController();
+    let subscriptionAbort = new AbortController();
     let subscriptionReady: Promise<void> | undefined;
     let streamFailure: ProviderFailure | undefined;
+    let runtimeGeneration = 0;
     let sessionSetupInFlight = false;
     let closing = false;
     let client: OpenCodeClientPort | undefined;
@@ -943,6 +944,15 @@ function makeConnection(
     const samePorts = (left: ReadonlyArray<number>, right: ReadonlyArray<number>): boolean =>
       left.length === right.length && left.every((port, index) => port === right[index]);
     const closeRuntime = async (): Promise<void> => {
+      // A deliberate close retires the runtime generation. The cancelled
+      // process monitor and the aborted event stream belong to the closed
+      // runtime; their callbacks must not record an unexpected exit against
+      // the connection, or the next start on this connection is poisoned by
+      // a failure that was never real. The next runtime subscribes fresh.
+      runtimeGeneration += 1;
+      const outgoingSubscription = subscriptionAbort;
+      subscriptionAbort = new AbortController();
+      outgoingSubscription.abort();
       processMonitor?.cancel();
       if (runtimeScope !== undefined) {
         await Effect.runPromise(Scope.close(runtimeScope, Exit.void));
@@ -999,6 +1009,7 @@ function makeConnection(
             const started = startedExit.value;
             const monitor = monitorProcessExit(started.pid);
             const nextClient = clientFactory(started, projectRoot);
+            const generation = runtimeGeneration;
             runtimeScope = scope;
             processMonitor = monitor;
             runtimePolicy = executionPolicy;
@@ -1007,7 +1018,7 @@ function makeConnection(
             runtimeLoopbackPorts = loopbackPorts;
             client = nextClient;
             void monitor.exited.then(() => {
-              if (closing) return;
+              if (closing || generation !== runtimeGeneration) return;
               streamFailure = fail("provider-failed", "Provider runtime exited unexpectedly.");
               subscriptionAbort.abort();
               for (const state of sessionsBySource.values()) {
@@ -1060,8 +1071,8 @@ function makeConnection(
       }),
     );
 
-    const failStream = () => {
-      if (subscriptionAbort.signal.aborted || streamFailure !== undefined) return;
+    const failStream = (generation: number) => {
+      if (closing || generation !== runtimeGeneration || streamFailure !== undefined) return;
       streamFailure = fail("protocol", "Provider event stream ended unexpectedly.");
       for (const state of sessionsBySource.values()) {
         if (state.terminal) continue;
@@ -1082,7 +1093,9 @@ function makeConnection(
       request(async () => {
         if (streamFailure !== undefined) throw streamFailure;
         if (subscriptionReady === undefined) {
-          subscriptionReady = runtimeClient.subscribe(subscriptionAbort.signal).then((events) => {
+          const generation = runtimeGeneration;
+          const subscriptionSignal = subscriptionAbort.signal;
+          subscriptionReady = runtimeClient.subscribe(subscriptionSignal).then((events) => {
             void (async () => {
               try {
                 for await (const event of events) {
@@ -1111,7 +1124,7 @@ function makeConnection(
                   }
                 }
               } finally {
-                failStream();
+                failStream(generation);
               }
             })().catch(() => undefined);
           });

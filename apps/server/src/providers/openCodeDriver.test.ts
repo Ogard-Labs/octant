@@ -1360,6 +1360,35 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
   });
 
+  it("recovers on the same connection when a refused 2.x write start is retried in Plan", async () => {
+    const fixture = betaDriver();
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.exit,
+              Effect.flatMap((refused) =>
+                refused._tag === "Failure" &&
+                String(refused).includes("cannot enforce session permission rules") &&
+                String(refused).includes("unsupported")
+                  ? connection
+                      .start({ sessionId, modelId, executionPolicy: "plan" })
+                      .pipe(Effect.exit)
+                  : Effect.succeed(refused),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    // A deliberate refusal must not poison the connection: the Plan retry on
+    // the same connection starts, without a stale-exit or aborted-stream
+    // failure masquerading as a protocol error.
+    expect(outcome._tag).toBe("Success");
+    expect(fixture.calls).toContain("session.create:ask");
+  });
+
   it("adapts a 2.x event from data when properties is empty", () => {
     expect(
       adaptBetaOpenCodeEvent({
