@@ -65,7 +65,9 @@ projectable thread across Chat, Work, and Code, plus Projects, memory,
 Canvases, settings, usage rows, and retention state including purge
 tombstones, streamed as line-delimited JSON. A remote or paired device
 principal is refused before any store is opened, and the same secret and
-path exclusions apply as in the thread bundle. A confirmed thread purge
+path exclusions apply as in the thread bundle: a record that would carry a
+forbidden key is left out and named on the export's omissions page rather
+than stopping the whole cut. A confirmed thread purge
 deletes that thread's journal events, projections, and bulk content, so a
 later host export carries no content trace of it; the purge outcome names
 the retained scopes — the tombstone and usage attribution — where the

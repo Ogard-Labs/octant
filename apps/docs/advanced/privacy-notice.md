@@ -181,8 +181,11 @@ Canvases, settings, usage rows, and the retention state including purge
 tombstones, streamed as line-delimited JSON. It is local-owner-only: a
 remote or paired device principal is refused before any store is opened.
 The same unrepresentable rules as the thread bundle apply — no credentials,
-no filesystem paths, no raw provider payloads — and anything the walk
-cannot represent is refused rather than partially emitted.
+no filesystem paths, no raw provider payloads. Individual records that would
+carry a forbidden key are left out of the bundle and named on the export's
+omissions page, so the cut can complete while still disclosing every
+omitted record; if the walk itself cannot finish, the export is refused and
+nothing is saved.
 
 **Retain and purge.** Retention windows are per host, Project, or thread.
 The narrower scope wins. The host default is forever. Setting a window
