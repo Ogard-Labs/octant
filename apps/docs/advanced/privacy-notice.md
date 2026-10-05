@@ -194,9 +194,15 @@ never deletes anything, and there is no unattended timer. A confirmed
 purge (`confirm: true`) is required. For each named thread it deletes
 purgeable bulk content, removes derived projection rows, physically
 deletes that thread's own journal events so a rebuild cannot resurrect the
-transcript or title, then appends a tombstone. Usage attribution, canvas
-documents, memory, credentials, Projects, and other threads stay unless a
-later request names them. SQLite free pages may keep bytes until a vacuum
+transcript or title, then appends a tombstone. Usage rows keep their token
+and cost aggregates for accounting but the thread's id leaves them, so a
+purged thread is no longer named anywhere in usage attribution. That
+usage appears as erased threads in Usage and in the host export. Canvas
+documents, credentials, Projects, and other threads stay unless a later
+request names them. Project memory belongs to the Project: it survives a
+thread purge with its provenance de-linked, it is included in the host
+export, and a Project-scoped purge erases the Project's memory and Canvases
+and reports those scopes. SQLite free pages may keep bytes until a vacuum
 or store rebuild; that residual is reported, not hidden. A remote
 principal cannot set a window or purge. A later host export carries no
 content trace of a purged thread; the purge outcome names exactly which

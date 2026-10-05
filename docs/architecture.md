@@ -847,9 +847,20 @@ flowchart LR
   managed worktree directory: a receipt that names any other path, or one
   the sweep cannot read, leaves every owned worktree in place and keeps
   its file so the leftover is visible. It then records a tombstone so a
-  rebuild cannot resurrect the transcript. Usage records stay and are
-  named in the outcome; deciding whether they should be erased is a later
-  choice.
+  rebuild cannot resurrect the transcript. Usage records are de-linked,
+  not erased: their token and cost aggregates stay for host accounting, the
+  thread's identity leaves them (`subject_id` becomes NULL, modelled as a
+  `deLinked` usage subject), and replay never re-links a purged thread.
+  A de-linked row belongs to no Project, so it reads as unfiled usage and
+  as an "Erased threads" line in the dashboard and the host export; no
+  thread or Project spend ceiling counts it. Project memory is Project
+  data: a thread purge keeps the entries and removes the thread from their
+  provenance. A Project-scoped purge also erases that Project's memory
+  entries and every Canvas it owns, each with its comments, shares,
+  receipts, mirrored files, journal history, aggregate heads, and
+  quarantine rows, and evicts those Canvases from the live projection so
+  reads stop serving them at once. The outcome lists what was de-linked and
+  which Project scopes were deleted.
   The tombstone, other threads, Projects, credentials, external
   repositories, and SQLite free pages are named retained scopes rather
   than hidden leftovers. A remote principal cannot purge. See

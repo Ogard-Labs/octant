@@ -9,7 +9,7 @@ import type { UsageRecord } from "@octant/contracts";
 export interface SafeUsageExportRow {
   readonly reconciliationId: string;
   readonly subjectType: string;
-  readonly subjectId: string;
+  readonly subjectId: string | null;
   readonly providerInstanceId: string;
   readonly modelId: string;
   readonly requestShape: string;
@@ -30,7 +30,7 @@ export function toSafeExportRow(record: UsageRecord): SafeUsageExportRow {
   return {
     reconciliationId: record.reconciliationId,
     subjectType: record.subject.aggregateType,
-    subjectId: record.subject.aggregateId,
+    subjectId: "aggregateId" in record.subject ? record.subject.aggregateId : null,
     providerInstanceId: record.providerInstanceId,
     modelId: record.modelId,
     requestShape: record.requestShape,
@@ -76,7 +76,8 @@ const CSV_COLUMNS: ReadonlyArray<keyof SafeUsageExportRow> = [
   "attributionCategories",
 ];
 
-function csvEscape(value: string | number | undefined): string {
+function csvEscape(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return "";
   const text = String(value);
   if (/[",\n\r]/.test(text)) {
     return `"${text.replace(/"/g, '""')}"`;

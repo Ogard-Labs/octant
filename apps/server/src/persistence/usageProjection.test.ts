@@ -303,7 +303,8 @@ describe("UsageProjection", () => {
     expect(record!.varianceTokens).toBe(0);
     expect(record!.quality).toBe("exact");
     expect(record!.subject.aggregateType).toBe("chat-thread");
-    expect(record!.subject.aggregateId).toBe(ids.aggregate);
+    expect("aggregateId" in record!.subject).toBe(true);
+    expect((record!.subject as { readonly aggregateId: string }).aggregateId).toBe(ids.aggregate);
   });
 
   it("projects authoritative advanced dimensions and keeps missing dimensions unknown", () => {
@@ -518,7 +519,7 @@ describe("usage project scope", () => {
     input: {
       readonly reconciliationId: string;
       readonly subjectType: string;
-      readonly subjectId: string;
+      readonly subjectId: string | null;
       readonly sequence: number;
     },
   ): void {
@@ -568,7 +569,7 @@ describe("usage project scope", () => {
 
   function subjectIds(connection: SqliteConnection, scope: UsageProjectScope): Array<string> {
     return queryUsageRecords(connection, {}, 100, 0, scope).records.map((record) =>
-      String(record.subject.aggregateId),
+      "aggregateId" in record.subject ? String(record.subject.aggregateId) : "de-linked",
     );
   }
 
@@ -624,6 +625,33 @@ describe("usage project scope", () => {
 
     expect(unfiled.filter((subject) => filed.includes(subject))).toEqual([]);
     expect([...unfiled, ...filed].sort()).toEqual([scopeIds.workThread, ids.aggregate].sort());
+  });
+
+  it("places a de-linked row with the unfiled usage and in no Project's usage", () => {
+    const { connection, journal } = openDatabase();
+    seedWorkThread(journal, scopeIds.workThread, scopeIds.project);
+    seedUsageRow(connection, {
+      reconciliationId: scopeIds.workUsage,
+      subjectType: "work-thread",
+      subjectId: scopeIds.workThread,
+      sequence: 10,
+    });
+    for (const [index, subjectType] of ["chat-thread", "code-thread", "work-thread"].entries()) {
+      seedUsageRow(connection, {
+        reconciliationId: `63000000-0000-4000-8000-0000000000${20 + index}`,
+        subjectType,
+        subjectId: null,
+        sequence: 20 + index,
+      });
+    }
+
+    // A de-linked row has no Project to place it in, so it is unfiled, and the
+    // two scopes still partition the ledger with no row in both or neither.
+    const unfiled = subjectIds(connection, unfiledScope);
+    const filed = subjectIds(connection, { kind: "projects", projectIds: [scopeIds.project] });
+    expect(unfiled).toEqual(["de-linked", "de-linked", "de-linked"]);
+    expect(filed).toEqual([scopeIds.workThread]);
+    expect(readAllUsageRecords(connection)).toHaveLength(4);
   });
 });
 
