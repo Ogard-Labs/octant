@@ -6,7 +6,8 @@ import {
   type ProviderModelId,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
-import { Effect, Fiber, Stream } from "effect";
+import { encodeSubscriptionOAuthCredential } from "@octant/provider-sdk/subscription-oauth";
+import { Effect, Either, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
@@ -623,6 +624,140 @@ describe("makeOpenAiCompatibleDriver", () => {
     );
 
     expect(bodies[0]?.prompt_cache_key).toBe(String(sessionId));
+  });
+});
+
+describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
+  const planConfiguration: OpenAiCompatibleProviderConfiguration = {
+    kind: "openai-compatible-http",
+    baseUrl: "https://api.openai.com/v1",
+    authentication: "bearer",
+    protocol: "chat-completions",
+    manualModelIds: [modelId],
+    oauthDescriptorId: "chatgpt-plan",
+  };
+
+  function planDriver(options: {
+    readonly fetch: CompatibleFetch;
+    readonly protocol?: OpenAiCompatibleProviderConfiguration["protocol"];
+  }) {
+    return makeOpenAiCompatibleDriver({
+      instanceId,
+      configuration: {
+        ...planConfiguration,
+        ...(options.protocol === undefined ? {} : { protocol: options.protocol }),
+      },
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      credentialResolver: {
+        has: async () => true,
+        resolve: async () =>
+          encodeSubscriptionOAuthCredential({
+            kind: "subscription-oauth",
+            credentialRef: "7c1e1d3f-1e4b-4051-8d2b-7f6e5d4c3b2a",
+            descriptorId: "chatgpt-plan",
+            accountLabel: "ChatGPT plan",
+          }),
+      },
+      subscriptionOAuth: {
+        refresh: async () => ({ kind: "refreshed" as const }),
+        access: async () => ({
+          kind: "granted" as const,
+          accessToken: "plan-access-token",
+          planUsageEnabled: true,
+        }),
+      },
+      fetch: options.fetch,
+      clock: () => "2026-10-06T18:00:00.000Z",
+    });
+  }
+
+  async function lastFailureOf(events: readonly ProviderRuntimeEvent[]): Promise<ProviderFailure> {
+    const failed = events.find((event) => event.kind === "failed");
+    expect(failed).toBeDefined();
+    if (failed === undefined || failed.kind !== "failed") throw new Error("expected a failure");
+    return failed.failure;
+  }
+
+  it("refuses a turn before any request when the plan profile is bound to chat-completions", async () => {
+    const fetch = vi.fn(async () => modelsResponse("x"));
+    const driver = planDriver({ fetch });
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
+          return Array.from(yield* Fiber.join(collected));
+        }),
+      ),
+    );
+    const failed = events.find((event) => event.kind === "failed");
+    expect(failed).toBeDefined();
+    if (failed === undefined || failed.kind !== "failed") throw new Error("expected a failure");
+    expect(failed.failure.category).toBe("unsupported");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to chat-completions from responses under the plan profile", async () => {
+    const calls: string[] = [];
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify({ error: { code: "not_found", message: "no route" } }), {
+        status: 404,
+      });
+    });
+    const driver = planDriver({ fetch, protocol: "auto" });
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
+          return Array.from(yield* Fiber.join(collected));
+        }),
+      ),
+    );
+    const failed = events.find((event) => event.kind === "failed");
+    expect(failed).toBeDefined();
+    if (failed === undefined || failed.kind !== "failed") throw new Error("expected a failure");
+    // The fallback the auto protocol would otherwise permit is refused with
+    // the plan's typed reason, and no chat-completions request left the
+    // process — only the one Responses request was sent.
+    expect(failed.failure.category).toBe("unsupported");
+    expect(failed.failure.message).toContain("Responses API");
+    expect(calls.filter((url) => url.endsWith("/chat/completions"))).toEqual([]);
+    expect(calls.filter((url) => url.endsWith("/responses"))).toHaveLength(1);
+  });
+
+  it("refuses to verify tool support over chat-completions under the plan profile", async () => {
+    const fetch = vi.fn(async () => modelsResponse("x"));
+    const driver = planDriver({ fetch });
+    if (driver.verifyToolCapability === undefined) {
+      throw new Error("expected the driver to verify tool capability");
+    }
+
+    const either = await Effect.runPromise(
+      Effect.either(Effect.scoped(driver.verifyToolCapability({ instanceId, modelId }))),
+    );
+    expect(Either.isLeft(either)).toBe(true);
+    if (Either.isRight(either)) throw new Error("expected a typed provider failure");
+    expect(either.left.category).toBe("unsupported");
+    expect(either.left.message).toContain("Responses API");
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 

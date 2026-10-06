@@ -523,6 +523,10 @@ async function exchangeChatGptPlanCode(
     jwks: input.jwks,
     issuer: input.issuer,
   });
+  // A JWKS that cannot be obtained is the endpoint's problem, not a bad
+  // token: the exchange reports unavailable so a first sign-in can be
+  // retried rather than reading as a refused code.
+  if (identity.kind === "unavailable") return { kind: "refused", reason: "unavailable" };
   if (identity.kind !== "valid") return { kind: "refused", reason: "exchange-refused" };
   const scopes = parseScopeList(grant.scope);
   return {
@@ -606,6 +610,31 @@ async function refreshChatGptPlanGrant(
     jwks: input.jwks,
     issuer: input.issuer,
   });
+  // The issuer already rotated the refresh token, so refusing here would
+  // make the caller delete the grant and the replacement token with it: the
+  // next refresh would fail with refresh_token_reused. An unavailable JWKS
+  // (a brief outage, or keys this process could not fetch) keeps the rotated
+  // tokens and the prior identity — the same shape as a refresh without an
+  // identity token — and validation runs again on a later refresh. The new
+  // identity token is NOT kept: it was never verified, and the prior one is
+  // still the identity this grant proved.
+  if (identity.kind === "unavailable") {
+    const { idToken: _unverifiedIdToken, ...rotated } = grant;
+    return {
+      kind: "tokens",
+      grant: {
+        ...rotated,
+        dialect: CHATGPT_PLAN_DIALECT,
+        extAgentHostId: input.extAgentHostId,
+        ...(input.priorIdToken === undefined ? {} : { idToken: input.priorIdToken }),
+        ...(input.priorSubject === undefined ? {} : { subject: input.priorSubject }),
+        ...(input.priorEmail === undefined ? {} : { email: input.priorEmail }),
+        ...(input.priorPlanUsageEnabled === undefined
+          ? {}
+          : { planUsageEnabled: input.priorPlanUsageEnabled }),
+      },
+    };
+  }
   if (identity.kind !== "valid") {
     return { kind: "refused", reason: "exchange-refused", error: "id_token_invalid" };
   }
@@ -630,7 +659,8 @@ function parseScopeList(scope: string): readonly string[] {
 
 type SiwcIdTokenValidation =
   | { readonly kind: "valid"; readonly subject: string; readonly email?: string }
-  | { readonly kind: "invalid" };
+  | { readonly kind: "invalid" }
+  | { readonly kind: "unavailable" };
 
 /**
  * Validate a ChatGPT plan identity token: RS256 signature against the
@@ -672,8 +702,11 @@ async function validateSiwcIdToken(input: {
   }
   if (!isRecord(header) || !isRecord(payload)) return { kind: "invalid" };
   if (header.alg !== "RS256" || typeof header.kid !== "string") return { kind: "invalid" };
-  const keys = await fetchSiwcJwks(input.fetch, input.issuer, input.jwks, input.now);
-  const key = keys.get(header.kid);
+  const keys = await fetchSiwcJwks(input.fetch, input.issuer, input.jwks, input.now, {
+    kid: header.kid,
+  });
+  if (keys.kind === "unavailable") return { kind: "unavailable" };
+  const key = keys.keys.get(header.kid);
   if (key === undefined) return { kind: "invalid" };
   const signed = Buffer.from(`${encodedHeader}.${encodedPayload}`, "utf8");
   let signatureValid = false;
@@ -710,7 +743,22 @@ async function validateSiwcIdToken(input: {
 interface SiwcJwksCache {
   readonly keys: ReadonlyMap<string, KeyObject>;
   readonly fetchedAt: number;
+  /**
+   * When an unknown kid last forced a refetch of a still-fresh key set.
+   * Absent means no refetch has happened since the last routine fetch.
+   */
+  readonly refetchedAt?: number;
 }
+
+/**
+ * Whether the issuer's JWKS could be obtained. `unavailable` keeps it
+ * distinct from a fetched key set that simply lacks the `kid`: an
+ * unreachable JWKS must not read as an invalid token, or a brief outage
+ * would delete the stored grant.
+ */
+type SiwcJwksResult =
+  | { readonly kind: "fetched"; readonly keys: ReadonlyMap<string, KeyObject> }
+  | { readonly kind: "unavailable" };
 
 const SIWC_DISCOVERY_PATH = "/.well-known/openid-configuration";
 
@@ -757,18 +805,41 @@ async function revokeSiwcRefreshToken(input: {
   }
 }
 
+// An unknown `kid` is how issuer key rotation looks from this side: the
+// cached key set is younger than the cache window yet no longer names the
+// token's key. Each validation may force one refetch of a still-fresh key
+// set, but never more often than this floor, so a burst of validations
+// cannot turn into a request flood against the issuer.
+const SIWC_JWKS_REFETCH_MS = 30_000;
+
 /**
  * Fetch (and memoize per runtime) the issuer's JWKS. The cache lives on the
  * runtime so a refresh does not re-fetch keys the issuer already published.
+ * A still-fresh cached key set that does not name `wanted.kid` is refetched
+ * once (bounded by the refetch floor) — that is what issuer key rotation
+ * looks like — and any failure to obtain the key set is reported as
+ * `unavailable` rather than an empty key set, so a caller can keep the
+ * grant instead of reading it as an invalid token.
  */
 async function fetchSiwcJwks(
   fetchImpl: typeof fetch,
   issuer: string,
   cache: { current: SiwcJwksCache | undefined },
   now: () => number,
-): Promise<ReadonlyMap<string, KeyObject>> {
-  const fresh = cache.current !== undefined && now() - cache.current.fetchedAt < JWKS_CACHE_MS;
-  if (fresh && cache.current !== undefined) return cache.current.keys;
+  wanted: { readonly kid: string } = { kid: "" },
+): Promise<SiwcJwksResult> {
+  const cached = cache.current;
+  const fresh = cached !== undefined && now() - cached.fetchedAt < JWKS_CACHE_MS;
+  if (fresh && cached !== undefined) {
+    // The cached key set is definitive when it names the wanted kid. When
+    // it does not, only a refetch can tell issuer rotation from a key this
+    // issuer never had; the floor keeps a burst of validations from
+    // hammering the issuer after a refetch already happened.
+    const lastForced = cached.refetchedAt ?? 0;
+    if (cached.keys.has(wanted.kid) || now() - lastForced < SIWC_JWKS_REFETCH_MS) {
+      return { kind: "fetched", keys: cached.keys };
+    }
+  }
   let response: Response;
   try {
     response = await fetchImpl(`${issuer}${SIWC_JWKS_PATH}`, {
@@ -777,12 +848,12 @@ async function fetchSiwcJwks(
       headers: { accept: "application/json" },
     });
   } catch {
-    return new Map();
+    return { kind: "unavailable" };
   }
-  if (!response.ok) return new Map();
+  if (!response.ok) return { kind: "unavailable" };
   const body = await readResponseJson(response);
   const keys = body === undefined ? undefined : body.keys;
-  if (!Array.isArray(keys)) return new Map();
+  if (!Array.isArray(keys)) return { kind: "unavailable" };
   const parsed = new Map<string, KeyObject>();
   for (const entry of keys) {
     if (!isRecord(entry)) continue;
@@ -809,8 +880,14 @@ async function fetchSiwcJwks(
       continue;
     }
   }
-  cache.current = { keys: parsed, fetchedAt: now() };
-  return parsed;
+  cache.current = {
+    keys: parsed,
+    fetchedAt: now(),
+    // A fetch the cache age alone did not require is a rotation refetch;
+    // recording it keeps the refetch floor honest for later validations.
+    ...(fresh ? { refetchedAt: now() } : {}),
+  };
+  return { kind: "fetched", keys: parsed };
 }
 
 export function createHostOAuthRuntime(options: {

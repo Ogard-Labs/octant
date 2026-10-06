@@ -256,6 +256,70 @@ describe("host OAuth service", () => {
     });
     expect(forwarded?.credentialRef).toBe("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
   });
+
+  it("reports sign-out unavailable and journals nothing when the broker could not revoke the grant", async () => {
+    const journal: HostOAuthJournalRecord[] = [];
+    const service = createHostOAuthService({
+      journal: { append: (record) => journal.push(record) },
+      broker: {
+        begin: async () => ({}),
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        // The broker answers HTTP 200 with an unavailable result when the
+        // issuer refused the revocation: the refresh token stayed valid.
+        revoke: async () => ({ kind: "unavailable" }),
+      },
+    });
+    const plan = decodeHostOAuthDescriptor({
+      descriptorId: "chatgpt-plan",
+      dialect: "chatgpt-plan-siwc",
+      flow: "authorization-code-pkce",
+      authorizationEndpoint: "https://auth.openai.com/api/accounts/authorize",
+      tokenEndpoint: "https://auth.openai.com/api/accounts/oauth/token",
+      scopes: ["openid"],
+      termsId: "chatgpt-plan-terms-1",
+    });
+    const result = await service.signOut({
+      principalKind: "local-window",
+      descriptor: plan,
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    expect(result).toEqual({ kind: "unavailable" });
+    expect(journal.map((record) => record.name)).not.toContain("host-oauth.signed-out");
+  });
+
+  it("journals the sign-out only after the broker confirms the grant was revoked", async () => {
+    const journal: HostOAuthJournalRecord[] = [];
+    const service = createHostOAuthService({
+      journal: { append: (record) => journal.push(record) },
+      broker: {
+        begin: async () => ({}),
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
+      },
+    });
+    const plan = decodeHostOAuthDescriptor({
+      descriptorId: "chatgpt-plan",
+      dialect: "chatgpt-plan-siwc",
+      flow: "authorization-code-pkce",
+      authorizationEndpoint: "https://auth.openai.com/api/accounts/authorize",
+      tokenEndpoint: "https://auth.openai.com/api/accounts/oauth/token",
+      scopes: ["openid"],
+      termsId: "chatgpt-plan-terms-1",
+    });
+    const result = await service.signOut({
+      principalKind: "local-window",
+      descriptor: plan,
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    expect(result).toEqual({ kind: "signed-out" });
+    expect(journal.map((record) => record.name)).toContain("host-oauth.signed-out");
+  });
 });
 
 describe("host OAuth broker client", () => {

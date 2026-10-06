@@ -1328,14 +1328,8 @@ function failure(category: ProviderFailure["category"], message: string): Provid
   return { category, message };
 }
 
-async function classifyStoreRejection(response: Response): Promise<ProviderFailure | undefined> {
-  if (response.status !== 400 && response.status !== 422) return undefined;
-  let body: string;
-  try {
-    body = await response.text();
-  } catch (error) {
-    throw sanitizeFailure(error);
-  }
+function classifyStoreRejection(status: number, body: string): ProviderFailure | undefined {
+  if (status !== 400 && status !== 422) return undefined;
   let value: unknown;
   try {
     value = JSON.parse(body) as unknown;
@@ -1366,21 +1360,14 @@ async function classifyStoreRejection(response: Response): Promise<ProviderFailu
  * Classify a rejected response under the active profile. The ChatGPT plan
  * profile maps the route's structured `subscription_sharing_*` codes to
  * user-facing states; every other profile keeps the store-rejection
- * classification.
+ * classification. The body is read exactly once here and handed to each
+ * classifier as text: a response body cannot be read twice, so a classifier
+ * that fell through to another reader on the consumed response would throw
+ * and replace the real category with a generic normalization failure.
  */
 async function classifyPlanOrStoreRejection(
   response: Response,
   profile: ResponsesTurnInput["profile"],
-): Promise<ProviderFailure | undefined> {
-  if (profile === "chatgpt-plan") {
-    const mapped = await classifyChatGptPlanRejection(response);
-    if (mapped !== undefined) return mapped;
-  }
-  return classifyStoreRejection(response);
-}
-
-async function classifyChatGptPlanRejection(
-  response: Response,
 ): Promise<ProviderFailure | undefined> {
   let body: string;
   try {
@@ -1388,6 +1375,14 @@ async function classifyChatGptPlanRejection(
   } catch (error) {
     throw sanitizeFailure(error);
   }
+  if (profile === "chatgpt-plan") {
+    const mapped = classifyChatGptPlanRejection(response.status, body);
+    if (mapped !== undefined) return mapped;
+  }
+  return classifyStoreRejection(response.status, body);
+}
+
+function classifyChatGptPlanRejection(status: number, body: string): ProviderFailure | undefined {
   let value: unknown;
   try {
     value = JSON.parse(body) as unknown;
@@ -1403,7 +1398,7 @@ async function classifyChatGptPlanRejection(
   ) {
     return undefined;
   }
-  return chatGptPlanErrorFailure(chatGptPlanErrorState(code, response.status));
+  return chatGptPlanErrorFailure(chatGptPlanErrorState(code, status));
 }
 
 /** Read the plan route's structured error code from a failed response object. */

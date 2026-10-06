@@ -286,7 +286,16 @@ export function createHostOAuthService(options: {
         // revocation endpoint before the local grant is dropped; other
         // dialects have no revocation endpoint and simply forget the grant.
         if (input.descriptor.dialect === "chatgpt-plan-siwc") {
-          await options.broker.revoke(input.credentialRef);
+          const revoked = await options.broker.revoke(input.credentialRef);
+          // The broker answers HTTP 200 with an unavailable result when the
+          // issuer refused the revocation or the grant could not be dropped:
+          // the refresh token stayed valid at the issuer and the grant stayed
+          // in the store. Claiming signed-out anyway would make the caller
+          // delete the instance pointer and journal a sign-out that never
+          // happened, silently leaving the session alive at the issuer.
+          if (!isRecord(revoked) || revoked.kind !== "revoked") {
+            return { kind: "unavailable" };
+          }
         } else {
           await options.broker.forget(input.credentialRef);
         }

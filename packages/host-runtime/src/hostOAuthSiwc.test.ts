@@ -115,6 +115,11 @@ interface FakeSiwcServer {
   readonly lastRefresh: () => Record<string, string> | undefined;
   readonly revokeHits: () => number;
   readonly lastRevocation: () => Record<string, string> | undefined;
+  readonly jwksHits: () => number;
+  /** The public JWK the published key set names `test-key` with. */
+  readonly signingJwk: () => RsaKeyPair["publicKeyJwk"];
+  /** The public JWK the `rotated-key` refresh identity token is signed with. */
+  readonly rotatedJwk: () => RsaKeyPair["publicKeyJwk"] | undefined;
   readonly close: () => Promise<void>;
 }
 
@@ -128,13 +133,25 @@ async function startFakeSiwcServer(options?: {
    * When set, a successful refresh response includes an identity token.
    * `authorize-nonce` reuses the nonce from the authorize request.
    * `wrong-subject` does the same but names a different subject.
+   * `rotated-key` signs with a second key pair whose kid the default JWKS
+   * does not publish, so the validation sees an unknown `kid`.
    */
-  readonly refreshIdToken?: "authorize-nonce" | "wrong-subject";
+  readonly refreshIdToken?: "authorize-nonce" | "wrong-subject" | "rotated-key";
+  /** Serves JWKS responses with this status instead of the key set. */
+  readonly jwksStatus?: number;
+  /** Publishes an additional key set entry alongside the signing key. */
+  readonly jwksKeys?: readonly RsaKeyPair[];
 }): Promise<FakeSiwcServer> {
   const keyPair = options?.keyPair ?? rsaKeyPair();
+  // `rotated-key` signs the refresh identity token with a key pair the
+  // published JWKS does NOT name: the validation sees an unknown `kid`,
+  // exactly what issuer key rotation looks like before the JWKS catches up.
+  const rotatedPair = options?.refreshIdToken === "rotated-key" ? rsaKeyPair() : undefined;
+  const jwksPairs: readonly RsaKeyPair[] = [keyPair, ...(options?.jwksKeys ?? [])];
   let issuer = options?.issuer ?? "";
   let tokenHits = 0;
   let revokeHits = 0;
+  let jwksHits = 0;
   let lastExchange: Record<string, string> | undefined;
   let lastRefresh: Record<string, string> | undefined;
   let lastRevocation: Record<string, string> | undefined;
@@ -167,9 +184,21 @@ async function startFakeSiwcServer(options?: {
       return;
     }
     if (request.method === "GET" && url.pathname === "/.well-known/jwks.json") {
+      jwksHits += 1;
+      if (options?.jwksStatus !== undefined) {
+        response.writeHead(options.jwksStatus);
+        response.end();
+        return;
+      }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
-        JSON.stringify({ keys: [{ ...keyPair.publicKeyJwk, kid: "test-key", alg: "RS256" }] }),
+        JSON.stringify({
+          keys: jwksPairs.map((pair, index) => ({
+            ...pair.publicKeyJwk,
+            kid: index === 0 ? "test-key" : `test-key-${index}`,
+            alg: "RS256",
+          })),
+        }),
       );
       return;
     }
@@ -220,17 +249,23 @@ async function startFakeSiwcServer(options?: {
           return;
         }
         const refreshKind = options?.refreshIdToken;
+        const refreshPair = rotatedPair ?? keyPair;
+        const refreshKid = rotatedPair === undefined ? "test-key" : "test-key-1";
         const token =
           refreshKind === undefined
             ? undefined
-            : idToken(keyPair, {
-                iss: issuer,
-                aud: ISSUED_CLIENT_ID,
-                sub: refreshKind === "wrong-subject" ? "other-subject" : SUBJECT,
-                email: EMAIL,
-                exp: Math.floor(Date.now() / 1000) + 3600,
-                nonce: authorizeNonce ?? "missing-authorize-nonce",
-              });
+            : idToken(
+                refreshPair,
+                {
+                  iss: issuer,
+                  aud: ISSUED_CLIENT_ID,
+                  sub: refreshKind === "wrong-subject" ? "other-subject" : SUBJECT,
+                  email: EMAIL,
+                  exp: Math.floor(Date.now() / 1000) + 3600,
+                  nonce: authorizeNonce ?? "missing-authorize-nonce",
+                },
+                refreshKid,
+              );
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
@@ -292,6 +327,9 @@ async function startFakeSiwcServer(options?: {
     lastRefresh: () => lastRefresh,
     revokeHits: () => revokeHits,
     lastRevocation: () => lastRevocation,
+    jwksHits: () => jwksHits,
+    signingJwk: () => keyPair.publicKeyJwk,
+    rotatedJwk: () => rotatedPair?.publicKeyJwk,
     close: () => closeServer(server),
   };
 }
@@ -927,6 +965,166 @@ describe("ChatGPT plan (SIWC) dialect", () => {
         reason: "revoked",
       });
       expect(store.values.has(status.credentialRef)).toBe(false);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("keeps the grant and the rotated tokens when the JWKS cannot be fetched during a refresh", async () => {
+    // A refresh whose identity token cannot be validated because the JWKS
+    // is unreachable must not delete the grant: the issuer already rotated
+    // the refresh token, so refusing would also lose the replacement and
+    // permanently sign the person out.
+    const fake = await startFakeSiwcServer({ refreshIdToken: "authorize-nonce" });
+    let jwksDown = false;
+    let clock = Date.now();
+    const store = memoryStore();
+    const runtime = createHostOAuthRuntime({
+      store,
+      timeoutMs: 2_000,
+      siwcIssuer: fake.url,
+      now: () => clock,
+      fetch: async (input, init) => {
+        if (jwksDown && String(input).endsWith("/.well-known/jwks.json")) {
+          return new Response(null, { status: 503 });
+        }
+        return fetch(input, init);
+      },
+    });
+    try {
+      const started = await runtime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      await fetch(started.authorizationUrl);
+      const done = await waitForState(() => runtime.status(started.attemptId), "signed-in");
+      if (done.kind !== "signed-in") throw new Error("expected a signed-in state");
+      const status = runtime.status(started.attemptId);
+      if (status.kind !== "signed-in") throw new Error("missing credential ref");
+      const priorIdToken = (
+        JSON.parse(store.values.get(status.credentialRef) ?? "{}") as Record<string, unknown>
+      ).idToken;
+      if (typeof priorIdToken !== "string") throw new Error("expected a stored identity token");
+      // Age the cached JWKS past its window and take the endpoint down, so
+      // the refresh's validation must fetch and cannot.
+      clock += 11 * 60_000;
+      jwksDown = true;
+      const refreshed = await runtime.refresh(status.credentialRef);
+      expect(refreshed).toEqual({ kind: "refreshed" });
+      expect(store.values.has(status.credentialRef)).toBe(true);
+      const stored = JSON.parse(store.values.get(status.credentialRef) ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      // The rotated replacement refresh token is kept, and the identity is
+      // the prior one — the new identity token was never verified.
+      expect(stored.refreshToken).toBe("rotated-refresh-token");
+      expect(stored.accessToken).toBe("rotated-access-token");
+      expect(stored.subject).toBe(SUBJECT);
+      expect(stored.idToken).toBe(priorIdToken);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("refetches the JWKS once when a refresh identity token carries an unknown kid", async () => {
+    // Key rotation seen from this side: the cached JWKS is younger than the
+    // cache window but no longer names the token's key. The unknown kid
+    // forces exactly one refetch, and once the rotated key is published the
+    // refresh validates the identity token instead of deleting the grant.
+    const fake = await startFakeSiwcServer({ refreshIdToken: "rotated-key" });
+    const rotatedJwk = fake.rotatedJwk();
+    if (rotatedJwk === undefined) throw new Error("expected a rotated key pair");
+    let publishRotated = false;
+    let jwksFetches = 0;
+    const store = memoryStore();
+    const runtime = createHostOAuthRuntime({
+      store,
+      timeoutMs: 2_000,
+      siwcIssuer: fake.url,
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (url === `${fake.url}/.well-known/jwks.json`) {
+          jwksFetches += 1;
+          if (!publishRotated) return fetch(input, init);
+          return new Response(
+            JSON.stringify({
+              keys: [
+                { ...rotatedJwk, kid: "test-key-1", alg: "RS256" },
+                { ...fake.signingJwk(), kid: "test-key", alg: "RS256" },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return fetch(input, init);
+      },
+    });
+    try {
+      const started = await runtime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      await fetch(started.authorizationUrl);
+      const done = await waitForState(() => runtime.status(started.attemptId), "signed-in");
+      if (done.kind !== "signed-in") throw new Error("expected a signed-in state");
+      const status = runtime.status(started.attemptId);
+      if (status.kind !== "signed-in") throw new Error("missing credential ref");
+      // The cached key set names only the pre-rotation key; the issuer now
+      // publishes the rotated one as well.
+      publishRotated = true;
+      const fetchesBefore = jwksFetches;
+      const first = await runtime.refresh(status.credentialRef);
+      expect(first).toEqual({ kind: "refreshed" });
+      // The unknown kid forced exactly one refetch of the still-fresh cache.
+      expect(jwksFetches).toBe(fetchesBefore + 1);
+      expect(store.values.has(status.credentialRef)).toBe(true);
+      const stored = JSON.parse(store.values.get(status.credentialRef) ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(stored.refreshToken).toBe("rotated-refresh-token");
+      expect(stored.subject).toBe(SUBJECT);
+      // The next refresh finds the rotated kid in the refetched cache and
+      // does not fetch the JWKS again.
+      const second = await runtime.refresh(status.credentialRef);
+      expect(second).toEqual({ kind: "refreshed" });
+      expect(jwksFetches).toBe(fetchesBefore + 1);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("reports the exchange refused as unavailable when the JWKS cannot be fetched", async () => {
+    // A first sign-in whose identity token cannot be validated because the
+    // JWKS is unreachable is retriable, not a refused code.
+    const fake = await startFakeSiwcServer({ jwksStatus: 503 });
+    const store = memoryStore();
+    const runtime = runtimeFor(store, fake);
+    try {
+      const started = await runtime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      await fetch(started.authorizationUrl);
+      const done = await waitForState(() => runtime.status(started.attemptId), "refused");
+      expect(done).toMatchObject({ kind: "refused", reason: "unavailable" });
+      expect(store.values.size).toBe(0);
     } finally {
       await runtime.close();
       await fake.close();

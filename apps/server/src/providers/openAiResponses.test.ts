@@ -1866,6 +1866,55 @@ describe("sendResponsesTurn under the ChatGPT plan profile", () => {
     expect(failure.category).toBe("unauthenticated");
   });
 
+  it("classifies a 400 store rejection under the plan profile instead of a normalization failure", async () => {
+    // The plan classifier reads the body first and finds no plan code; the
+    // store classifier must still see the same body. Reading the response
+    // twice would throw and replace the honest category with "could not be
+    // normalized".
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message: "store is not supported",
+              type: "invalid_request_error",
+              param: "store",
+              code: "unsupported_parameter",
+            },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        ),
+    );
+
+    const failure = await failureOf(
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+    );
+
+    expect(failure).toEqual({
+      category: "unsupported",
+      message: "The provider does not support requests with storage disabled.",
+    });
+  });
+
+  it("classifies a 400 non-plan body under the plan profile as the HTTP failure, not a normalization failure", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { message: "invalid model", type: "invalid_request_error" } }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        ),
+    );
+
+    const failure = await failureOf(
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+    );
+
+    expect(failure).toEqual({
+      category: "provider-failed",
+      message: "The provider request failed with HTTP 400.",
+    });
+  });
+
   it("preserves the plan error code from a mid-stream response.failed event", async () => {
     const fetch = vi.fn(async () =>
       sse(created(1), {
