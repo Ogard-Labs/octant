@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeCanvasExportApprovalCard,
   decodeCanvasExportContribution,
   decodeCanvasExportReceipt,
   decodeCanvasExportRecorded,
@@ -24,14 +25,50 @@ describe("canvas export contracts", () => {
     expect(contribution.formats).toEqual(["markdown", "html", "pdf", "png"]);
   });
 
-  it("accepts a link, a path, or a remote id as a receipt", () => {
+  it("accepts a link, a file path, or a remote id as a receipt", () => {
     expect(
       decodeCanvasExportReceipt({ kind: "link", href: "https://example.test/copy" }).kind,
     ).toBe("link");
-    expect(decodeCanvasExportReceipt({ kind: "path", path: "approved/copy.md" }).kind).toBe("path");
+    expect(
+      decodeCanvasExportReceipt({ kind: "path", path: "/Users/example/Documents/copy.md" }).kind,
+    ).toBe("path");
     expect(decodeCanvasExportReceipt({ kind: "remote-id", remoteId: "copy-1" }).kind).toBe(
       "remote-id",
     );
+  });
+
+  it("refuses a receipt path that is not an absolute file on this machine", () => {
+    // A local destination reports where it wrote, so a bare name tells the
+    // person nothing and is not the path of anything.
+    expect(() => decodeCanvasExportReceipt({ kind: "path", path: "approved/copy.md" })).toThrow();
+  });
+
+  it("names the file on an approval card and refuses a replacement claim without one", () => {
+    const card = {
+      schemaVersion: 1,
+      kind: "canvas-export-approval",
+      approvalId,
+      canvasId,
+      versionId,
+      sequence: 1,
+      targetId: "folder-on-this-mac",
+      destinationLabel: "A folder on this Mac",
+      format: "markdown",
+      title: "Launch plan",
+      payload: "# Launch plan",
+      payloadDigest: digest,
+      byteLength: 14,
+      expiresAt: "2026-08-01T21:10:00.000Z",
+    } as const;
+
+    const named = decodeCanvasExportApprovalCard({
+      ...card,
+      destinationPath: "/Users/example/Documents/Launch plan.md",
+      replacesExisting: true,
+    });
+    expect(named.destinationPath).toBe("/Users/example/Documents/Launch plan.md");
+
+    expect(() => decodeCanvasExportApprovalCard({ ...card, replacesExisting: true })).toThrow();
   });
 
   it("round-trips a journaled export that names the approval and the receipt", () => {
@@ -54,6 +91,31 @@ describe("canvas export contracts", () => {
     expect(recorded.outcome).toEqual({
       kind: "receipt",
       receipt: { kind: "remote-id", remoteId: "copy-1" },
+    });
+  });
+
+  it("journals the written path a local destination reported", () => {
+    const recorded = decodeCanvasExportRecorded({
+      schemaVersion: 1,
+      kind: "canvas-export",
+      exportId,
+      canvasId,
+      versionId,
+      sequence: 1,
+      targetId: "folder-on-this-mac",
+      destinationLabel: "A folder on this Mac",
+      format: "markdown",
+      payloadDigest: digest,
+      approvalId,
+      outcome: {
+        kind: "receipt",
+        receipt: { kind: "path", path: "/Users/example/Documents/Launch plan.md" },
+      },
+    });
+
+    expect(recorded.outcome).toEqual({
+      kind: "receipt",
+      receipt: { kind: "path", path: "/Users/example/Documents/Launch plan.md" },
     });
   });
 

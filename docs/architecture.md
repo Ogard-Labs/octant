@@ -1781,7 +1781,22 @@ replay. When the destination was called but the journal could not take the
 record, the answer is `unrecorded` and carries the destination's outcome; it is
 never reported as a failed export. PDF and PNG are named formats the seam can carry later; this host does
 not render them. A target that passed activation is still reported honestly as
-`not-connected`, `ready`, or `refused`.
+`not-connected`, `ready`, or `refused`. A local target may describe the exact
+file it would write, and the card then names that path: approving a card that
+names an existing file is the confirmation to replace it, and a call without
+that confirmation writes a numbered copy beside the file instead of over it.
+
+The folder destination ships in-tree on that same port, so it is offered,
+approved, and journaled exactly as a plugin's contribution is. Its folder comes
+from the host folder browser — a renderer sends a candidate the host listed, and
+the host resolves the path — and is remembered per Project, with a host-wide
+folder for a thread filed nowhere, in a `canvas.export-folder-changed@1` journal
+frame rebuilt on restart. A folder must be inside the person's home unless the
+standing access-outside-project approval exists, the same rule the artifact
+mirror's global folder follows. Writes are confined to the chosen folder and are
+atomic: a temporary file is renamed into place, so a reader never sees a
+half-written export. The user guide's exporting page
+(`apps/docs/guide/export.md`) states the same rules for a person.
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured

@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { CanvasId, CanvasVersionId } from "./canvas";
-import { isCanvasShareSafeText } from "./canvasShare";
+import { isCanvasShareSafeText, isExportCredentialFreeText } from "./canvasShare";
 import { UtcTimestamp } from "./events";
 
 // A destination plugin receives a rendered Canvas and returns a receipt or a
@@ -185,11 +185,34 @@ const exportUrl = Schema.String.pipe(
   ),
 );
 
+/**
+ * A file on this machine, named the way the person will open it.
+ *
+ * This is the one exported string allowed to be an absolute path. A local
+ * destination exists to write a readable file and report where it put it, and
+ * the approval card names that file before it is written, so the path is the
+ * payload the person is approving. It is still bounded, free of NUL, and
+ * scanned for credential-shaped text like every other exported string — the
+ * share filter's path rule protects a snapshot leaving the host, and none of
+ * this leaves the host.
+ */
+export const CanvasExportFilePath = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(4_096),
+  Schema.filter((value) => value.startsWith("/") && !value.includes("\0"), {
+    message: () => "An export file path must be an absolute path with no NUL.",
+  }),
+  Schema.filter((value) => isExportCredentialFreeText(value), {
+    message: () => "An export file path must not contain a secret.",
+  }),
+);
+export type CanvasExportFilePath = typeof CanvasExportFilePath.Type;
+
 export const CanvasExportReceipt = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("link"), href: exportUrl }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("path"),
-    path: safeBounded(1_024),
+    /** The file a local destination wrote, named the way the person will open it. */
+    path: CanvasExportFilePath,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("remote-id"),
@@ -244,6 +267,16 @@ export const CanvasExportApprovalCard = Schema.Struct({
   destinationLabel: safeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
   format: CanvasExportImplementedFormat,
   title: safeBounded(256),
+  /**
+   * The exact file this export will write, when the destination can name one.
+   *
+   * Naming the file is what makes approving this card the confirmation that an
+   * existing file at that path may be replaced; a destination that cannot name
+   * one never replaces anything (see the seam's `describeDestination`).
+   */
+  destinationPath: Schema.optional(CanvasExportFilePath),
+  /** Whether a file is already at `destinationPath` and will be replaced. */
+  replacesExisting: Schema.optional(Schema.Boolean),
   /** The rendered document the person is approving. Not a summary of it. */
   payload: exportBody,
   payloadDigest: CanvasExportPayloadDigest,
@@ -253,7 +286,19 @@ export const CanvasExportApprovalCard = Schema.Struct({
   ),
   /** Past this instant the host drops the held approval; answering it expires. */
   expiresAt: UtcTimestamp,
-}).annotations(strict);
+})
+  .annotations(strict)
+  // Only a card that names the file can say what it will do to one. A card
+  // claiming a replacement without naming the file would be asking for a
+  // confirmation nobody can give.
+  .pipe(
+    Schema.filter(
+      (card) => card.replacesExisting === undefined || card.destinationPath !== undefined,
+      {
+        message: () => "Only a card that names a destination path can say it replaces one.",
+      },
+    ),
+  );
 export type CanvasExportApprovalCard = typeof CanvasExportApprovalCard.Type;
 
 export const CanvasExportPrepareRequest = Schema.Struct({
