@@ -22,6 +22,7 @@
     "./work-file-listing-client": "./src/workFileListingClient.ts",
     "./work-promotion-client": "./src/workPromotionClient.ts",
     "./work-request-client": "./src/workRequestClient.ts",
+    "./pending-request-client": "./src/pendingRequestClient.ts",
     "./work-thread-client": "./src/workThreadClient.ts",
     "./work-turn-client": "./src/workTurnClient.ts",
     "./context-client": "./src/contextClient.ts",

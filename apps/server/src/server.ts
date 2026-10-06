@@ -171,6 +171,8 @@ import { WorkRequestProjection } from "./work/workRequestProjection";
 import { attachWorkRequestRuntime, WorkRequestRuntime } from "./work/workRequestRuntime";
 import { WorkRequestService } from "./work/workRequestService";
 import { createWorkRequestRouteHandler } from "./workRequestRoutes";
+import { createPendingRequestRouteHandler } from "./pendingRequestRoutes";
+import { PendingRequestService } from "./pendingRequestService";
 import { createWorkThreadRouteHandler } from "./workThreadRoutes";
 import { createWorkTurnRouteHandler } from "./workTurnRoutes";
 import { createSidebarBackgroundRouteHandler } from "./theme/sidebarBackgroundRoutes";
@@ -4627,6 +4629,7 @@ export function startOctantServer(
       });
       codeOperationRuntime = createCodeOperationRuntime({
         liveTurns,
+        onPendingRequestWithdrawn: () => machineChangeFeed.publish(["code-navigation"]),
         gitMutationPort,
         agentRuns: agentRunPersistence,
         resolveSelectedExtensions,
@@ -9393,6 +9396,15 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const pendingRequestRoutes = createPendingRequestRouteHandler({
+      service: new PendingRequestService({
+        readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+        work: (windowId) => workRequestApplication.listPendingForWindow(windowId),
+        code: async (windowId) => (await codeOperationRuntime?.pendingRequests?.(windowId)) ?? [],
+        chat: () => chatService.listPendingQuestions(),
+      }),
+      windowAuthorityStore,
+    });
     const workThreadRoutes = createWorkThreadRouteHandler({
       service: {
         bootstrap: (windowId) => workThreadServiceWithWorkflows.bootstrap(windowId),
@@ -9571,6 +9583,7 @@ export function startOctantServer(
       (await automationNotificationRoutes(request)) ??
       (await workPromotionRoutes(request)) ??
       (await workRequestRoutes(request)) ??
+      (await pendingRequestRoutes(request)) ??
       (await sidebarBackgroundRoutes(request)) ??
       (await zenBackgroundRoutes(request)) ??
       (await zenRoutes(request)) ??
