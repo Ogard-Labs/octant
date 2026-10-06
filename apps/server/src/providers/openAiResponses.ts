@@ -14,6 +14,12 @@ import {
   encodeResponsesToolResults,
   normalizeToolName,
 } from "./openAiToolEncoding";
+import {
+  chatGptPlanErrorFailure,
+  chatGptPlanErrorState,
+  chatGptPlanRefusalFailure,
+  inspectChatGptPlanRequestBody,
+} from "./chatGptPlanProfile";
 import { readOpenAiRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
 
 export interface ProtocolToolResult {
@@ -95,9 +101,21 @@ export interface ResponsesTurnInput {
    * A stable key for every request of one conversation. The endpoint uses it
    * to route requests that share a reusable prefix to the same prompt cache,
    * so a tool step reads the earlier steps back. Absent leaves routing to the
-   * endpoint.
+   * endpoint. The ChatGPT plan profile never sends it: the plan preview does
+   * not accept `prompt_cache_key`.
    */
   readonly promptCacheKey?: string | undefined;
+  /**
+   * The ChatGPT plan request profile. When set, the turn is checked against
+   * the plan preview's wire contract before send, and a request that cannot
+   * be expressed is refused with a typed reason.
+   */
+  readonly profile?: "chatgpt-plan" | undefined;
+  /**
+   * Whether the resolved credential granted the plan-usage scope. False means
+   * the sign-in is identity-only: the turn is refused before send.
+   */
+  readonly planUsageEnabled?: boolean | undefined;
   readonly sequenceStart?: number;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: ProtocolTurnEvent) => void;
@@ -126,6 +144,8 @@ interface NormalizationState {
   reasoning: string;
   usage?: ProtocolUsage;
   completed: boolean;
+  /** Whether the turn runs under the ChatGPT plan request profile. */
+  planProfile: boolean;
   readonly events: ProtocolTurnEvent[];
   readonly textParts: Map<string, string>;
   readonly reasoningParts: Map<string, string>;
@@ -171,6 +191,11 @@ async function runResponsesTurn(
   input: ResponsesTurnInput,
   attempt: MutableAttemptMetadata,
 ): Promise<ProtocolTurnResult> {
+  // The ChatGPT plan profile refuses an identity-only sign-in before any
+  // request leaves the process.
+  if (input.profile === "chatgpt-plan" && input.planUsageEnabled === false) {
+    throw chatGptPlanRefusalFailure({ kind: "plan-usage-disabled" });
+  }
   const tools = input.tools === undefined ? undefined : encodeResponsesTools(input.tools);
   const toolAnswers =
     input.toolAnswers === undefined ? undefined : encodeResponsesToolResults(input.toolAnswers);
@@ -179,58 +204,69 @@ async function runResponsesTurn(
   // must immediately follow them with no intervening user item. Omit the
   // user prompt when it is empty so the call/output pairing stays valid.
   const includeUserPrompt = !(input.prompt.length === 0 && toolAnswers !== undefined);
-  const response = await requestGeneration(input.endpoint, {
-    path: "responses",
-    body: {
-      model: input.modelId,
-      ...(input.system === undefined ? {} : { instructions: input.system }),
-      input: [
-        ...input.history.flatMap((entry) => {
-          // Entries that contain only tool results (role: "assistant",
-          // empty text) must serialize directly to function_call_output
-          // items. Emitting an empty assistant item before the outputs
-          // would place a gap between the prior function_call and its
-          // matching output, which Responses providers reject.
-          if (entry.toolResults !== undefined && entry.toolCalls === undefined) {
-            return [
-              ...entry.toolResults.map((result) => ({
+  const body = {
+    model: input.modelId,
+    ...(input.system === undefined ? {} : { instructions: input.system }),
+    input: [
+      ...input.history.flatMap((entry) => {
+        // Entries that contain only tool results (role: "assistant",
+        // empty text) must serialize directly to function_call_output
+        // items. Emitting an empty assistant item before the outputs
+        // would place a gap between the prior function_call and its
+        // matching output, which Responses providers reject.
+        if (entry.toolResults !== undefined && entry.toolCalls === undefined) {
+          return [
+            ...entry.toolResults.map((result) => ({
+              type: "function_call_output" as const,
+              call_id: result.toolCallId,
+              output: result.resultJson,
+            })),
+            ...responsesToolImages(entry.toolResults),
+          ];
+        }
+        return [
+          { role: entry.role, content: entry.text },
+          ...(entry.toolCalls === undefined
+            ? []
+            : entry.toolCalls.map((call) => ({
+                type: "function_call" as const,
+                call_id: call.toolCallId,
+                name: call.toolName,
+                arguments: call.argumentsJson,
+              }))),
+          ...(entry.toolResults === undefined
+            ? []
+            : entry.toolResults.map((result) => ({
                 type: "function_call_output" as const,
                 call_id: result.toolCallId,
                 output: result.resultJson,
-              })),
-              ...responsesToolImages(entry.toolResults),
-            ];
-          }
-          return [
-            { role: entry.role, content: entry.text },
-            ...(entry.toolCalls === undefined
-              ? []
-              : entry.toolCalls.map((call) => ({
-                  type: "function_call" as const,
-                  call_id: call.toolCallId,
-                  name: call.toolName,
-                  arguments: call.argumentsJson,
-                }))),
-            ...(entry.toolResults === undefined
-              ? []
-              : entry.toolResults.map((result) => ({
-                  type: "function_call_output" as const,
-                  call_id: result.toolCallId,
-                  output: result.resultJson,
-                }))),
-            ...responsesToolImages(entry.toolResults ?? []),
-          ];
-        }),
-        ...(includeUserPrompt ? [{ role: "user" as const, content: input.prompt }] : []),
-        ...(toolAnswers === undefined ? [] : toolAnswers),
-      ],
-      stream: true,
-      store: false,
-      ...(input.promptCacheKey === undefined ? {} : { prompt_cache_key: input.promptCacheKey }),
-      ...(tools === undefined ? {} : { tools }),
-      ...(input.toolChoice === undefined ? {} : { tool_choice: input.toolChoice }),
-    },
-    classifyRejectedResponse: classifyStoreRejection,
+              }))),
+          ...responsesToolImages(entry.toolResults ?? []),
+        ];
+      }),
+      ...(includeUserPrompt ? [{ role: "user" as const, content: input.prompt }] : []),
+      ...(toolAnswers === undefined ? [] : toolAnswers),
+    ],
+    stream: true,
+    store: false,
+    // The plan preview does not accept prompt_cache_key; the profile omits it.
+    ...(input.profile === "chatgpt-plan" || input.promptCacheKey === undefined
+      ? {}
+      : { prompt_cache_key: input.promptCacheKey }),
+    ...(tools === undefined ? {} : { tools }),
+    ...(input.toolChoice === undefined ? {} : { tool_choice: input.toolChoice }),
+  };
+  // The plan profile checks the exact wire body before send: a request that
+  // cannot be expressed under the preview contract is refused with a typed
+  // reason, never silently reshaped.
+  if (input.profile === "chatgpt-plan") {
+    const refusal = inspectChatGptPlanRequestBody(body);
+    if (refusal !== undefined) throw chatGptPlanRefusalFailure(refusal);
+  }
+  const response = await requestGeneration(input.endpoint, {
+    path: "responses",
+    body,
+    classifyRejectedResponse: (response) => classifyPlanOrStoreRejection(response, input.profile),
     onRejected: ({ httpStatus }) => {
       attempt.httpStatus = httpStatus;
     },
@@ -248,6 +284,7 @@ async function runResponsesTurn(
     text: "",
     reasoning: "",
     completed: false,
+    planProfile: input.profile === "chatgpt-plan",
     events: [],
     textParts: new Map(),
     reasoningParts: new Map(),
@@ -377,10 +414,18 @@ function normalizeEvent(
       state.accepted = true;
       state.outputStarted = true;
       throw failure("provider-failed", "The provider refused the request.");
-    case "response.failed":
+    case "response.failed": {
       state.accepted = true;
       validateResponseState(event.response, "failed", state);
+      // The plan route reports its structured error codes on the failed
+      // response; preserve the code so the caller can map it to a
+      // user-facing state instead of a generic provider failure.
+      const code = readPlanErrorCode(event.response);
+      if (code !== undefined && state.planProfile === true) {
+        throw chatGptPlanErrorFailure(chatGptPlanErrorState(code, undefined));
+      }
       throw failure("provider-failed", "The provider failed to complete the response.");
+    }
     case "response.incomplete":
       state.accepted = true;
       validateResponseState(event.response, "incomplete", state);
@@ -1315,6 +1360,61 @@ async function classifyStoreRejection(response: Response): Promise<ProviderFailu
     return undefined;
   }
   return failure("unsupported", "The provider does not support requests with storage disabled.");
+}
+
+/**
+ * Classify a rejected response under the active profile. The ChatGPT plan
+ * profile maps the route's structured `subscription_sharing_*` codes to
+ * user-facing states; every other profile keeps the store-rejection
+ * classification.
+ */
+async function classifyPlanOrStoreRejection(
+  response: Response,
+  profile: ResponsesTurnInput["profile"],
+): Promise<ProviderFailure | undefined> {
+  if (profile === "chatgpt-plan") {
+    const mapped = await classifyChatGptPlanRejection(response);
+    if (mapped !== undefined) return mapped;
+  }
+  return classifyStoreRejection(response);
+}
+
+async function classifyChatGptPlanRejection(
+  response: Response,
+): Promise<ProviderFailure | undefined> {
+  let body: string;
+  try {
+    body = await response.text();
+  } catch (error) {
+    throw sanitizeFailure(error);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(body) as unknown;
+  } catch {
+    return undefined;
+  }
+  // The plan route reports structured codes either as {"error": {"code": …}}
+  // or as a bare {"detail": …} diagnostic; only the structured shape maps.
+  const code = isRecord(value) && isRecord(value.error) ? value.error.code : undefined;
+  if (
+    typeof code !== "string" ||
+    (!code.startsWith("subscription_sharing_") && !code.startsWith("chatpass_v2_"))
+  ) {
+    return undefined;
+  }
+  return chatGptPlanErrorFailure(chatGptPlanErrorState(code, response.status));
+}
+
+/** Read the plan route's structured error code from a failed response object. */
+function readPlanErrorCode(response: unknown): string | undefined {
+  if (!isRecord(response) || !isRecord(response.error)) return undefined;
+  const code = response.error.code;
+  if (typeof code !== "string") return undefined;
+  if (!code.startsWith("subscription_sharing_") && !code.startsWith("chatpass_v2_")) {
+    return undefined;
+  }
+  return code;
 }
 
 function hasExactKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {

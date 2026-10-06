@@ -39,6 +39,12 @@ export interface SubscriptionOAuthHost {
         readonly accessToken: string;
         /** Absent means the credential does not expire (e.g. an OpenRouter key). */
         readonly expiresAt?: string;
+        /**
+         * ChatGPT plan dialect only: false when the granted scopes do not
+         * include the plan-usage scope. The bearer is still valid for
+         * identity; plan usage is disabled.
+         */
+        readonly planUsageEnabled?: boolean;
       }
     | { readonly kind: "sign-in-again"; readonly reason: SubscriptionOAuthSignInAgainReason }
     | { readonly kind: "unavailable" }
@@ -46,7 +52,16 @@ export interface SubscriptionOAuthHost {
 }
 
 export type SubscriptionOAuthResolution =
-  | { readonly kind: "bearer"; readonly token: string }
+  | {
+      readonly kind: "bearer";
+      readonly token: string;
+      /**
+       * ChatGPT plan dialect only: false when the granted scopes do not
+       * include the plan-usage scope. The bearer is still valid for
+       * identity; plan usage is disabled.
+       */
+      readonly planUsageEnabled?: boolean;
+    }
   | { readonly kind: "unauthenticated"; readonly reason: "missing" | "expired" | "revoked" }
   | { readonly kind: "unavailable" }
   | { readonly kind: "incompatible" };
@@ -175,7 +190,13 @@ async function accessOrRefresh(
     if (refresh.kind !== "refreshed") return { kind: "unavailable" };
     return accessOrRefresh(host, credentialRef, now, true);
   }
-  return { kind: "bearer", token: granted.accessToken };
+  return {
+    kind: "bearer",
+    token: granted.accessToken,
+    ...(granted.planUsageEnabled === undefined
+      ? {}
+      : { planUsageEnabled: granted.planUsageEnabled }),
+  };
 }
 
 function unauthenticated(reason: SubscriptionOAuthSignInAgainReason): SubscriptionOAuthResolution {

@@ -1349,7 +1349,15 @@ modelId }`, and the model picker is provider-first. Discovery can find
   renderer-visible. The raw credential resolve path refuses that material, so
   a refresh token is not handed out as an API key. Refresh runs in the broker.
   A revoked, expired, or reused refresh token becomes a typed sign-in-again
-  state. An API-key path stays available beside every sign-in. The effective
+  state. An API-key path stays available beside every sign-in. The host-driven
+  runner speaks vendor dialects: OpenRouter exchanges the code for an API key;
+  the ChatGPT plan dialect registers the host as a user-defined agent on first
+  sign-in (placeholder client id, agent name hint, stable `ext_agent_host_id`
+  bound by the server), stores the issued `oaiapp_…` client id from the
+  callback, validates the identity token against the issuer's JWKS, and
+  revokes the refresh token at the issuer on sign-out. The plan route's
+  request profile is enforced before send and its `subscription_sharing_*`
+  error codes map to user-facing states. The effective
   authority rule is in [security and authority](#security-and-authority); the
   historical record remains Proposed. Secrets
   Octant holds for an integration use the same host credential path: the host
@@ -2200,6 +2208,35 @@ mechanisms are:
   stored grant. The API-key path remains available beside that sign-in.
   [0111](decisions/0111-host-driven-provider-oauth.md) stays a Proposed
   historical record; this section is the effective rule.
+- **Subscription sign-in dialects.** The host OAuth runner speaks vendor wire
+  dialects beside the standard PKCE path. The OpenRouter dialect exchanges the
+  code for a user-controlled API key (no refresh token, no expiry). The
+  ChatGPT plan dialect ("Sign in with ChatGPT") registers the host as a
+  user-defined agent on first sign-in: the authorize request carries the
+  placeholder client id `dynamic_agent_client`, an `agent_name_hint`, and the
+  host's stable id as `ext_agent_host_id` (derived once from the host's data
+  directory and bound by the server before the first sign-in — never invented
+  by the catalog). The loopback callback returns the issued `oaiapp_…` client
+  id, which is stored and used for the exchange and every refresh — never the
+  placeholder. The exchange and refresh send `resource=https://api.openai.com/v1`
+  and no client secret. The identity token is validated against the issuer's
+  JWKS (RS256 signature, issuer, audience, expiry, and the per-attempt OIDC
+  nonce) before the grant is stored; the verified `sub`/`email`, the issued
+  client id, the retained identity token (for `id_token_hint` on
+  reauthorization), and the stable host id live on the stored grant. A
+  reauthorization reuses the issued client id and omits the agent name hint.
+  When the granted scopes omit `chatgpt.tokens.use.direct`, the sign-in is
+  still valid as identity-only and plan usage is reported disabled. Sign-out
+  revokes the refresh token at the issuer's discovery `revocation_endpoint`
+  before the local grant is dropped. The plan route's request profile is
+  enforced before send: `store:false` and `stream:true` are mandatory, `input`
+  is an array carrying the full history, system text travels as
+  `instructions` (an explicit system-role message item is rejected), a fixed
+  parameter set is omitted entirely, and only function tools are allowed —
+  hosted tools are refused. A request that cannot be expressed is refused
+  with a typed reason, and the route's `subscription_sharing_*` error codes
+  map to user-facing states (usage limit with a manage-usage link, bounded
+  backoff on unavailability, unauthenticated on 401/403).
 
 ## Package map
 

@@ -3,6 +3,13 @@ export interface CredentialStore {
   readonly has: (providerInstanceId: string) => Promise<boolean>;
   readonly resolve: (providerInstanceId: string) => Promise<string>;
   readonly delete: (providerInstanceId: string) => Promise<void>;
+  /**
+   * List the opaque credential references this store holds. Optional: a store
+   * that cannot enumerate (some platform backends) simply omits it, and
+   * flows that need to locate a stored grant by content — the ChatGPT plan
+   * reauthorization — treat the absence as "no stored grant".
+   */
+  readonly list?: () => Promise<readonly string[]>;
 }
 
 export type CredentialStoreFailureCategory = "failed" | "invalid" | "missing" | "unavailable";

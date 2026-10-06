@@ -56,12 +56,25 @@ export interface HostOAuthService {
     readonly descriptor: HostOAuthDescriptor;
     readonly credentialRef: string;
   }) => Promise<{ readonly kind: "signed-out" } | Refused | { readonly kind: "unavailable" }>;
+  /**
+   * Whether a descriptor's dialect revokes the refresh token at the issuer
+   * before the local grant is dropped. The ChatGPT plan dialect does; the
+   * OpenRouter dialect has no revocation endpoint.
+   */
+  readonly revokesOnSignOut: (descriptor: HostOAuthDescriptor) => boolean;
 }
 
 export function createHostOAuthService(options: {
   readonly journal: { readonly append: (record: HostOAuthJournalRecord) => void };
   readonly broker: HostOAuthBrokerPort;
   readonly now?: () => Date;
+  /**
+   * The stable host id the ChatGPT plan dialect sends as
+   * `ext_agent_host_id`. Bound into the descriptor when a flow begins, so
+   * the catalog entry never carries a host id and the id is stable before
+   * the first sign-in.
+   */
+  readonly extAgentHostId?: string;
   readonly authorize?: (input: {
     readonly principalKind: PrincipalKind;
     readonly action: string;
@@ -182,10 +195,16 @@ export function createHostOAuthService(options: {
         termsKey(input.descriptor.descriptorId, input.descriptor.termsId),
       );
       if (acknowledgment === undefined) return refuse(input.descriptor, "terms-required");
+      // The ChatGPT plan dialect needs the stable host id on the descriptor
+      // before the first sign-in; the catalog entry never carries one.
+      const descriptor =
+        input.descriptor.dialect === "chatgpt-plan-siwc" && options.extAgentHostId !== undefined
+          ? { ...input.descriptor, extAgentHostId: options.extAgentHostId }
+          : input.descriptor;
       let raw: unknown;
       try {
         raw = await options.broker.begin({
-          descriptor: wireDescriptor(input.descriptor),
+          descriptor: wireDescriptor(descriptor),
           actorId: input.actorId,
           termsAcknowledgedAt: acknowledgment.acknowledgedAt,
         });
@@ -260,7 +279,14 @@ export function createHostOAuthService(options: {
       });
       if (decision.kind === "deny") return refuse(input.descriptor, "local-host-required");
       try {
-        await options.broker.forget(input.credentialRef);
+        // The ChatGPT plan dialect revokes the refresh token at the issuer's
+        // revocation endpoint before the local grant is dropped; other
+        // dialects have no revocation endpoint and simply forget the grant.
+        if (input.descriptor.dialect === "chatgpt-plan-siwc") {
+          await options.broker.revoke(input.credentialRef);
+        } else {
+          await options.broker.forget(input.credentialRef);
+        }
       } catch {
         return { kind: "unavailable" };
       }
@@ -271,6 +297,7 @@ export function createHostOAuthService(options: {
       });
       return { kind: "signed-out" };
     },
+    revokesOnSignOut: (descriptor) => descriptor.dialect === "chatgpt-plan-siwc",
   };
   return service;
 }
@@ -322,6 +349,10 @@ function wireDescriptor(
     ...(descriptor.deviceAuthorizationEndpoint === undefined
       ? {}
       : { deviceAuthorizationEndpoint: descriptor.deviceAuthorizationEndpoint }),
+    ...(descriptor.extAgentHostId === undefined
+      ? {}
+      : { extAgentHostId: descriptor.extAgentHostId }),
+    ...(descriptor.agentNameHint === undefined ? {} : { agentNameHint: descriptor.agentNameHint }),
   };
 }
 

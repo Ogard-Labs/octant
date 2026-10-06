@@ -230,6 +230,7 @@ function fixture(
       (async () => ({
         kind: "signed-out" as const,
       })),
+    revokesOnSignOut: () => false,
   };
   return createProviderOAuthRouteHandler({
     service,

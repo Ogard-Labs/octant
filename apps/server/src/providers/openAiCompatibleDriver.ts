@@ -40,6 +40,7 @@ import {
   honestDirectEndpointCapabilities,
   inspectDirectEndpointCredential,
 } from "./directEndpointSubscriptionOAuth";
+import { isChatGptPlanDescriptor } from "./chatGptPlanProfile";
 import { sendChatCompletionsTurn, type ChatCompletionsTurnResult } from "./openAiChatCompletions";
 import {
   makeOpenAiCompatibleEndpoint,
@@ -364,6 +365,13 @@ function openAiCompatibleTransport(
             ? { has: async () => true, resolve: async () => plainCredential }
             : undefined;
       let endpoint: OpenAiCompatibleEndpoint | undefined = endpointFor(options, resolver, profile);
+      // The ChatGPT plan request profile applies when the resolved
+      // credential's descriptor is the plan offer; plan usage is disabled
+      // when the granted scopes did not include the plan-usage scope.
+      const planProfile = isChatGptPlanDescriptor(options.configuration.oauthDescriptorId)
+        ? ("chatgpt-plan" as const)
+        : undefined;
+      const planUsageEnabled = gate.kind === "oauth" ? gate.planUsageEnabled : undefined;
       return {
         fits: (request) => endpoint !== undefined && requestFits(options, endpoint, request),
         send: async (request, stream) => {
@@ -374,7 +382,10 @@ function openAiCompatibleTransport(
             onEvent: stream.onEvent,
             options: options.harness?.retry,
             attempt: async (attempt) => {
-              const result = await sendCompatibleRequest(options, active, request, attempt);
+              const result = await sendCompatibleRequest(options, active, request, attempt, {
+                profile: planProfile,
+                planUsageEnabled,
+              });
               recordObservedTurn(options, result, clock);
               return {
                 text: result.text,
@@ -429,6 +440,10 @@ async function sendCompatibleRequest(
     readonly signal: AbortSignal;
     readonly onEvent: (event: NativeHarnessStreamEvent) => void;
   },
+  plan: {
+    readonly profile: "chatgpt-plan" | undefined;
+    readonly planUsageEnabled: boolean | undefined;
+  } = { profile: undefined, planUsageEnabled: undefined },
 ): Promise<CompatibleTurnResult> {
   const { history, prompt, toolAnswers } = protocolInput(request);
   const onEvent = (event: ProtocolTurnEvent) => {
@@ -449,6 +464,8 @@ async function sendCompatibleRequest(
     ...(request.system === undefined ? {} : { system: request.system }),
     ...(request.tools.length === 0 ? {} : { tools: request.tools }),
     ...(toolAnswers === undefined ? {} : { toolAnswers }),
+    ...(plan.profile === undefined ? {} : { profile: plan.profile }),
+    ...(plan.planUsageEnabled === undefined ? {} : { planUsageEnabled: plan.planUsageEnabled }),
     signal: stream.signal,
     onEvent,
   };

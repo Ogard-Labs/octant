@@ -236,6 +236,38 @@ authentication; anonymous access is accepted only for loopback. OAuth and
 subscription modes work where the official runtime supports them and are
 never silently replaced by API-key modes.
 
+### Signing in with a subscription
+
+An **OpenAI-compatible** endpoint can sign in with a subscription instead of
+an API key. Two offers are available, and the one shown is chosen by the
+instance's base URL:
+
+- **OpenRouter** — signs in with an OpenRouter account and stores the issued
+  API key.
+- **ChatGPT plan** — signs in with a ChatGPT account ("Sign in with
+  ChatGPT") and uses the plan's Responses route at `https://api.openai.com/v1`.
+  To use it, add an OpenAI-compatible endpoint whose base URL is
+  `https://api.openai.com/v1` and choose **Sign in with ChatGPT**.
+
+The sign-in opens the provider's authorization page in the system browser and
+completes on a loopback callback; Octant never sees or types your credentials.
+On the first sign-in the host registers itself as a user-defined agent: the
+stable host id is sent before the first sign-in and the issued client id
+returned by the callback is stored and reused for every later refresh. The
+identity token is validated against the issuer's published keys before the
+grant is stored. Signing out revokes the refresh token at the issuer before
+the local grant is dropped.
+
+The ChatGPT plan route is a preview with a fixed request shape: storage is
+disabled, streaming is on, the full history is sent as an array, system text
+travels as instructions, and only function tools are available — no hosted
+tools. A request that cannot be expressed under that shape is refused with a
+typed reason rather than silently reshaped. If the granted scopes do not
+include plan usage, the sign-in still succeeds as identity-only and plan
+turns are refused until you sign in again and allow plan access. When the
+plan's usage limit is reached, the failure links to ChatGPT's usage settings
+(`https://chatgpt.com/settings/usage`).
+
 ## Choosing a model
 
 The **provider-first model picker** groups models by provider instance in the

@@ -86,6 +86,7 @@ describe("host OAuth service", () => {
         refresh: async () => ({}),
         access: async () => ({}),
         forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
       },
     });
     const result = await service.begin({
@@ -110,6 +111,7 @@ describe("host OAuth service", () => {
         refresh: async () => ({}),
         access: async () => ({}),
         forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
       },
     });
     const sample = descriptor("https://idp.example/authorize", "https://idp.example/token");
@@ -204,6 +206,7 @@ describe("host OAuth service", () => {
         refresh: async () => ({}),
         access: async () => ({}),
         forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
       },
       now: () => new Date("2026-10-03T18:04:00.000Z"),
     });
@@ -238,6 +241,9 @@ function throwingBroker() {
       throw new Error("broker must not be called");
     },
     forget: async () => {
+      throw new Error("broker must not be called");
+    },
+    revoke: async () => {
       throw new Error("broker must not be called");
     },
   };

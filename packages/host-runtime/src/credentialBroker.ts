@@ -31,6 +31,7 @@ const ROUTES = new Set([
   "/v1/oauth/status",
   "/v1/oauth/refresh",
   "/v1/oauth/access",
+  "/v1/oauth/revoke",
 ]);
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {

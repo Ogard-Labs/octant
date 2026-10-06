@@ -1760,3 +1760,150 @@ describe("sendResponsesTurn", () => {
     });
   });
 });
+
+describe("sendResponsesTurn under the ChatGPT plan profile", () => {
+  it("refuses the turn before any request when plan usage is disabled", async () => {
+    const fetch = vi.fn(async () => sse(created(1), completed(2)));
+
+    const failure = await failureOf(
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: false })),
+    );
+
+    expect(failure.category).toBe("unauthorized");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("sends the plan wire contract and omits prompt_cache_key", async () => {
+    const fetch = vi.fn(async () => sse(created(1), completed(2)));
+
+    await Effect.runPromise(
+      sendResponsesTurn(
+        input(fetch, {
+          profile: "chatgpt-plan",
+          planUsageEnabled: true,
+          promptCacheKey: "cache-key-must-not-leak",
+          system: "You are helpful.",
+        }),
+      ),
+    );
+
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body.store).toBe(false);
+    expect(body.stream).toBe(true);
+    expect(Array.isArray(body.input)).toBe(true);
+    expect(body.instructions).toBe("You are helpful.");
+    expect(body).not.toHaveProperty("prompt_cache_key");
+    expect(body).not.toHaveProperty("temperature");
+    expect(body).not.toHaveProperty("max_output_tokens");
+    expect(body).not.toHaveProperty("truncation");
+    expect(body).not.toHaveProperty("metadata");
+    expect(body).not.toHaveProperty("user");
+    expect(body).not.toHaveProperty("previous_response_id");
+  });
+
+  it("keeps prompt_cache_key on non-plan profiles", async () => {
+    const fetch = vi.fn(async () => sse(created(1), completed(2)));
+
+    await Effect.runPromise(sendResponsesTurn(input(fetch, { promptCacheKey: "cache-key" })));
+
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toHaveProperty("prompt_cache_key", "cache-key");
+  });
+
+  it("maps a rejected plan response's usage-limit code to a rate-limited failure", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: { code: "subscription_sharing_usage_limit_exceeded", message: "limit" },
+          }),
+          { status: 429, headers: { "content-type": "application/json" } },
+        ),
+    );
+
+    const failure = await failureOf(
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+    );
+
+    expect(failure.category).toBe("rate-limited");
+    expect(failure.message).toContain("https://chatgpt.com/settings/usage");
+  });
+
+  it("maps a rejected plan response's unsupported-capability code to an unsupported failure", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: { code: "subscription_sharing_unsupported_capability", message: "nope" },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        ),
+    );
+
+    const failure = await failureOf(
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+    );
+
+    expect(failure.category).toBe("unsupported");
+  });
+
+  it("maps a rejected plan response's invalid-user code to an unauthenticated failure", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: { code: "subscription_sharing_invalid_user", message: "nope" },
+          }),
+          { status: 401, headers: { "content-type": "application/json" } },
+        ),
+    );
+
+    const failure = await failureOf(
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+    );
+
+    expect(failure.category).toBe("unauthenticated");
+  });
+
+  it("preserves the plan error code from a mid-stream response.failed event", async () => {
+    const fetch = vi.fn(async () =>
+      sse(created(1), {
+        type: "response.failed",
+        sequence_number: 2,
+        response: {
+          ...responseState("failed"),
+          error: { code: "subscription_sharing_usage_unavailable", message: "busy" },
+        },
+      }),
+    );
+
+    const failure = await failureOf(
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+    );
+
+    expect(failure.category).toBe("unavailable");
+  });
+
+  it("keeps the generic provider failure for a mid-stream failure without a plan code", async () => {
+    const fetch = vi.fn(async () =>
+      sse(created(1), {
+        type: "response.failed",
+        sequence_number: 2,
+        response: {
+          ...responseState("failed"),
+          error: { code: "internal_error", message: "boom" },
+        },
+      }),
+    );
+
+    const failure = await failureOf(
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+    );
+
+    expect(failure).toEqual({
+      category: "provider-failed",
+      message: "The provider failed to complete the response.",
+    });
+  });
+});

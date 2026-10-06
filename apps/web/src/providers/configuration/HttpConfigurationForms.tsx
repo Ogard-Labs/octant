@@ -1,7 +1,7 @@
 import { type ProviderInstance } from "@octant/contracts";
 import { subscriptionOAuthOffers } from "@octant/domain";
 import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
@@ -92,6 +92,7 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         credentialManagementAvailable={props.credentialManagementAvailable}
       />
       <DirectEndpointSignIn
+        baseUrl={props.instance.configuration.baseUrl}
         disabled={props.disabled}
         driverKind="openai-compatible"
         instanceId={props.instance.id}
@@ -242,6 +243,7 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         supportsApiKey
       />
       <DirectEndpointSignIn
+        baseUrl={props.instance.configuration.baseUrl}
         disabled={props.disabled}
         driverKind="anthropic-compatible"
         instanceId={props.instance.id}
@@ -462,6 +464,7 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
 function DirectEndpointSignIn(props: {
   readonly instanceId: string;
   readonly driverKind: "openai-compatible" | "anthropic-compatible";
+  readonly baseUrl: string;
   readonly disabled: boolean;
   readonly onUseApiKey: () => void;
   readonly onProviderOAuth?: (
@@ -469,10 +472,44 @@ function DirectEndpointSignIn(props: {
   ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
   readonly onOpenExternalUrl?: (url: string) => void;
 }) {
-  const offer = subscriptionOAuthOffers().find((candidate: SubscriptionOAuthOffer) =>
-    candidate.driverKinds.includes(props.driverKind),
+  // Several offers can share a driver kind (OpenRouter and the ChatGPT plan
+  // both serve openai-compatible endpoints), so the offer is selected by the
+  // instance's configured base URL: the offer whose allowed endpoint matches
+  // the base URL's canonical origin. When more than one offer matches, the
+  // person picks explicitly.
+  const candidates = subscriptionOAuthOffers().filter(
+    (candidate: SubscriptionOAuthOffer) =>
+      candidate.driverKinds.includes(props.driverKind) &&
+      originsMatch(candidate.allowedEndpoint, props.baseUrl),
   );
-  if (offer === undefined) return null;
+  const [selectedId, setSelectedId] = useState<string | undefined>(
+    candidates.length === 1 ? candidates[0]?.descriptor.descriptorId : undefined,
+  );
+  const offer =
+    candidates.find((candidate) => candidate.descriptor.descriptorId === selectedId) ??
+    (candidates.length === 1 ? candidates[0] : undefined);
+  if (offer === undefined) {
+    if (candidates.length <= 1) return null;
+    return (
+      <SettingRow
+        label="Sign-in account"
+        scope="host"
+        settingId={`provider-${props.instanceId}-oauth-offer`}
+      >
+        <OctantSelectField
+          aria-label={`Sign-in account for ${props.instanceId}`}
+          className="settings-view__select"
+          defaultValue=""
+          name="oauthOffer"
+          onValueChange={(value) => setSelectedId(value || undefined)}
+          options={candidates.map((candidate) => ({
+            id: candidate.descriptor.descriptorId,
+            label: candidate.accountLabel,
+          }))}
+        />
+      </SettingRow>
+    );
+  }
   return (
     <ProviderOAuthSignInPanel
       accountLabel={offer.accountLabel}
@@ -485,4 +522,12 @@ function DirectEndpointSignIn(props: {
       termsSummary={offer.termsSummary}
     />
   );
+}
+
+function originsMatch(allowedEndpoint: string, baseUrl: string): boolean {
+  try {
+    return new URL(allowedEndpoint).origin === new URL(baseUrl).origin;
+  } catch {
+    return false;
+  }
 }

@@ -829,6 +829,7 @@ import { resolvePrivateListenerHostIdentity } from "./remote/privateListenerHost
 import { createPrivateListenerAdministrationRouteHandler } from "./remote/privateListenerAdministrationRoutes";
 import {
   boundHostRuntimeDiagnostics,
+  deriveHostRuntimeHostId,
   type HostRuntimeDiagnostics,
   type HostRuntimeServiceMode,
 } from "@octant/host-runtime";
@@ -4149,6 +4150,12 @@ export function startOctantServer(
         : createHostOAuthService({
             journal: oauthJournal,
             broker: oauthBroker,
+            // The ChatGPT plan sign-in registers this host under a stable id
+            // before the first sign-in. The id is derived from the same data
+            // directory the host runtime already owns, so the broker and the
+            // server agree on one host identity instead of provisioning a
+            // second one.
+            extAgentHostId: `urn:uuid:${deriveHostRuntimeHostId(persistence.dataDirectory)}`,
           });
     if (hostOAuth !== undefined && oauthJournal !== undefined) {
       for (const acknowledgment of oauthJournal.acknowledgments()) {

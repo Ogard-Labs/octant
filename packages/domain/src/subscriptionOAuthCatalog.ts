@@ -5,7 +5,7 @@ import type { HostOAuthDescriptor, SubscriptionOAuthOffer } from "@octant/contra
  * The wire schema stays in contracts. This catalog is the product list.
  */
 export function subscriptionOAuthOffers(): readonly SubscriptionOAuthOffer[] {
-  return [openRouterOffer];
+  return [openRouterOffer, chatGptPlanOffer];
 }
 
 /**
@@ -32,3 +32,50 @@ const openRouterOffer: SubscriptionOAuthOffer = {
   driverKinds: ["openai-compatible"],
   allowedEndpoint: "https://openrouter.ai/api/v1",
 };
+
+/**
+ * Sign in with ChatGPT for open-source and local apps. The first sign-in
+ * registers Octant as a user-defined agent: the authorize request carries the
+ * `dynamic_agent_client` placeholder plus the agent name hint and a stable
+ * host id, and the callback returns the issued client id the host keeps for
+ * every later exchange and refresh. The sign-in may only attach to the
+ * OpenAI API endpoint itself, and the request profile the driver applies on
+ * this route enforces the plan preview's limitations.
+ */
+const chatGptPlanOffer: SubscriptionOAuthOffer = {
+  descriptor: {
+    descriptorId: "chatgpt-plan" as HostOAuthDescriptor["descriptorId"],
+    dialect: "chatgpt-plan-siwc",
+    flow: "authorization-code-pkce",
+    authorizationEndpoint: "https://auth.openai.com/api/accounts/authorize",
+    tokenEndpoint: "https://auth.openai.com/api/accounts/oauth/token",
+    scopes: [
+      "openid",
+      "profile",
+      "email",
+      "offline_access",
+      "resource.invoke",
+      "chatgpt.tokens.use.direct",
+    ],
+    termsId: "chatgpt-plan-terms-1" as HostOAuthDescriptor["termsId"],
+    agentNameHint: "Octant",
+  },
+  accountLabel: "ChatGPT plan",
+  termsSummary:
+    "Octant signs you in with your ChatGPT account and stores the tokens in the local credential broker. Requests run against your ChatGPT plan; the Sign in with ChatGPT terms apply.",
+  driverKinds: ["openai-compatible"],
+  allowedEndpoint: "https://api.openai.com/v1",
+};
+
+/**
+ * The ChatGPT plan offer with the host's stable id bound into the descriptor.
+ * The host id must be stable before the first sign-in, so the caller
+ * provisions it (from the host runtime's derived host id) and passes it here;
+ * the catalog never invents one.
+ */
+export function chatGptPlanOfferWithHostId(extAgentHostId: string): SubscriptionOAuthOffer {
+  return {
+    ...chatGptPlanOffer,
+    descriptor: { ...chatGptPlanOffer.descriptor, extAgentHostId },
+  };
+}
