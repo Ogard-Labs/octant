@@ -88,10 +88,10 @@ describe("Canvas contracts", () => {
   });
 
   it("rejects unknown or malformed schema versions", () => {
-    expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: 4 })).toThrow();
+    expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: 5 })).toThrow();
     expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: "1" })).toThrow();
     expect(() =>
-      decodeCanvasDefinition({ ...definition, blocks: [{ ...heading, schemaVersion: 4 }] }),
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...heading, schemaVersion: 5 }] }),
     ).toThrow();
   });
 
@@ -115,6 +115,22 @@ describe("Canvas contracts", () => {
     expect(decodeCanvasDefinition({ ...definition, blocks: [mockup] })).toMatchObject({
       blocks: [mockup],
     });
+    // Version 3 documents written before the presentation hint keep decoding.
+    expect(
+      decodeCanvasDefinition({ ...definition, schemaVersion: 3, blocks: [mockup] }),
+    ).toMatchObject({ blocks: [mockup] });
+  });
+
+  it("admits a thread presentation only under the version that declared it", () => {
+    expect(
+      decodeCanvasDefinition({ ...definition, schemaVersion: 4, presentation: "inline" }),
+    ).toMatchObject({ presentation: "inline" });
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 3, presentation: "inline" }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 4, presentation: "floating" }),
+    ).toThrow();
   });
 
   it("rejects unknown blocks and executable or renderer-owned fields", () => {

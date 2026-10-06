@@ -6,6 +6,8 @@ import { CanvasThreadReferenceCard } from "./CanvasThreadReferenceCard";
 import { CreateCanvasDraft } from "./CreateCanvasDraft";
 import { CanvasCreatePanel } from "./CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "./CanvasThreadReferenceCardList";
+import { InlineThreadCanvas } from "./InlineThreadCanvas";
+import { useThreadCanvasCards } from "./useThreadCanvasCards";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 
 const threadId = "11111111-1111-4111-8111-111111111111";
@@ -91,11 +93,12 @@ function referenceCardFixture(overrides: Record<string, unknown> = {}) {
 }
 
 describe("CanvasThreadReferenceCard", () => {
-  it("renders title, status, and scope", () => {
+  it("names the Canvas and when it changed, without the host's internal scope", () => {
     render(<CanvasThreadReferenceCard card={referenceCardFixture()} />);
     expect(screen.getByTestId("canvas-card-title")).toHaveTextContent("Canvas card");
-    expect(screen.getByTestId("canvas-card-status")).toHaveTextContent("ready");
-    expect(screen.getByTestId("canvas-card-scope")).toHaveTextContent("chat / chat-virtual");
+    expect(screen.getByTestId("canvas-card-meta")).toHaveTextContent(/^Canvas · Updated /);
+    expect(screen.queryByText("chat-virtual", { exact: false })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("shows summary when present", () => {
@@ -108,9 +111,84 @@ describe("CanvasThreadReferenceCard", () => {
     expect(screen.queryByTestId("canvas-card-summary")).not.toBeInTheDocument();
   });
 
-  it("shows action count", () => {
-    render(<CanvasThreadReferenceCard card={referenceCardFixture({ actionCount: 5 })} />);
-    expect(screen.getByTestId("canvas-card-actions")).toHaveTextContent("5");
+  it("says when a Canvas is not ready, and how many actions it offers", () => {
+    render(
+      <CanvasThreadReferenceCard
+        card={referenceCardFixture({ status: "stale", actionCount: 5 })}
+      />,
+    );
+    expect(screen.getByTestId("canvas-card-meta")).toHaveTextContent(
+      /^Out of date · 5 actions · Updated /,
+    );
+  });
+
+  it("previews a plan and says how far it has got and what comes next", async () => {
+    const definition = {
+      schemaVersion: 4,
+      title: "Launch plan",
+      provenance: {
+        mode: "chat",
+        hostId: "local",
+        projectId,
+        threadId,
+        actor: { kind: "agent", actorId: "99999999-9999-4999-8999-999999999999" },
+        providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        modelId: "octant-test-model",
+        createdAt: "2026-08-01T21:00:00.000Z",
+      },
+      sourceManifest: [],
+      blocks: [
+        {
+          blockId: "plan",
+          schemaVersion: 1,
+          kind: "plan",
+          title: "Launch",
+          phases: [{ phaseId: "ship", title: "Ship" }],
+          tasks: [
+            { taskId: "fix", phaseId: "ship", title: "Ship the fix", status: "done" },
+            { taskId: "note", phaseId: "ship", title: "Write the note", status: "todo" },
+          ],
+        },
+      ],
+    };
+    const client = {
+      get: vi.fn().mockResolvedValue({
+        kind: "ready",
+        version: {
+          schemaVersion: 4,
+          canvasId: "20000000-0000-4000-8000-000000000002",
+          versionId: "20000000-0000-4000-8000-000000000003",
+          sequence: 1,
+          definition,
+          createdBy: definition.provenance.actor,
+          createdAt: "2026-08-01T21:00:00.000Z",
+        },
+      }),
+    } as unknown as CanvasClient;
+    const { container } = render(
+      <CanvasThreadReferenceCard card={referenceCardFixture()} client={client} onOpen={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("canvas-card-meta")).toHaveTextContent(
+        /^Plan · 2 tasks · next: Write the note · Updated /,
+      );
+    });
+    expect(container.querySelector(".canvas-ref__progress-label")).toHaveTextContent("1 of 2 done");
+    expect(screen.getByTestId("canvas-card")).toHaveAttribute("data-kind", "plan");
+    // The miniature is decorative: nothing inside it is reachable or announced.
+    const preview = container.querySelector(".canvas-ref__preview");
+    expect(preview).toHaveAttribute("aria-hidden", "true");
+    expect(preview).toHaveAttribute("inert");
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+
+  it("opens the Canvas from the whole row", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    render(<CanvasThreadReferenceCard card={referenceCardFixture()} onOpen={onOpen} />);
+    await user.click(screen.getByRole("button", { name: /Canvas card/ }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Canvas card" }));
   });
 });
 
@@ -274,14 +352,16 @@ describe("Canvas create panel and card list", () => {
         cards: [card],
       }),
     } as unknown as CanvasClient;
-    render(
-      <CanvasThreadReferenceCardList
-        client={client}
-        mode="chat"
-        projectId={null}
-        threadId={threadId as never}
-      />,
-    );
+    function ThreadCards() {
+      const loaded = useThreadCanvasCards({
+        client,
+        mode: "chat",
+        projectId: null,
+        threadId: threadId as never,
+      });
+      return <CanvasThreadReferenceCardList cards={loaded.cards} error={loaded.error} />;
+    }
+    render(<ThreadCards />);
     await waitFor(() => {
       expect(screen.getByTestId("canvas-card-title")).toHaveTextContent("Canvas card");
     });
@@ -289,6 +369,145 @@ describe("Canvas create panel and card list", () => {
       mode: "chat",
       threadId,
       projectId: null,
+    });
+  });
+
+  it("drops the previous thread's Canvases as soon as another thread opens", async () => {
+    const otherThread = "33333333-3333-4333-8333-333333333333";
+    const threadReferenceCards = vi
+      .fn()
+      .mockResolvedValueOnce({
+        mode: "chat",
+        threadId,
+        projectId: null,
+        cards: [referenceCardFixture()],
+      })
+      // The other thread's read never settles, so only the reset can clear the list.
+      .mockReturnValueOnce(new Promise(() => undefined));
+    const client = { threadReferenceCards } as unknown as CanvasClient;
+    function ThreadCards(props: { readonly threadId: string }) {
+      const loaded = useThreadCanvasCards({
+        client,
+        mode: "chat",
+        projectId: null,
+        threadId: props.threadId as never,
+      });
+      return <CanvasThreadReferenceCardList cards={loaded.cards} error={loaded.error} />;
+    }
+    const view = render(<ThreadCards threadId={threadId} />);
+    await screen.findByTestId("canvas-card-title");
+
+    view.rerender(<ThreadCards threadId={otherThread} />);
+    expect(screen.queryByTestId("canvas-card-title")).not.toBeInTheDocument();
+  });
+
+  it("keeps the thread's Canvases on screen while its project resolves", async () => {
+    const threadReferenceCards = vi
+      .fn()
+      .mockResolvedValueOnce({
+        mode: "work",
+        threadId,
+        projectId: null,
+        cards: [referenceCardFixture()],
+      })
+      // The re-read for the resolved project never settles, so only a reset could clear the row.
+      .mockReturnValueOnce(new Promise(() => undefined));
+    const client = { threadReferenceCards } as unknown as CanvasClient;
+    function ThreadCards(props: { readonly projectId: string | null }) {
+      const loaded = useThreadCanvasCards({
+        client,
+        mode: "work",
+        projectId: props.projectId as never,
+        threadId: threadId as never,
+      });
+      return <CanvasThreadReferenceCardList cards={loaded.cards} error={loaded.error} />;
+    }
+    const view = render(<ThreadCards projectId={null} />);
+    await screen.findByTestId("canvas-card-title");
+
+    view.rerender(<ThreadCards projectId="44444444-4444-4444-8444-444444444444" />);
+    expect(screen.getByTestId("canvas-card-title")).toBeInTheDocument();
+  });
+  describe("a Canvas drawn inside its thread", () => {
+    const definition = {
+      schemaVersion: 4,
+      title: "Weekly signups",
+      provenance: {
+        mode: "chat",
+        hostId: "local",
+        projectId,
+        threadId,
+        actor: { kind: "agent", actorId: "99999999-9999-4999-8999-999999999999" },
+        providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        modelId: "octant-test-model",
+        createdAt: "2026-08-01T21:00:00.000Z",
+      },
+      sourceManifest: [],
+      presentation: "inline",
+      blocks: [
+        {
+          blockId: "signups",
+          schemaVersion: 1,
+          kind: "metric",
+          label: "Signups this week",
+          value: 1284,
+        },
+      ],
+    };
+    const inlineCard = () =>
+      referenceCardFixture({
+        title: "Weekly signups",
+        presentation: "inline",
+        canvasCreatedAt: "2026-08-01T21:00:00.000Z",
+      }) as never;
+    const clientWith = () =>
+      ({
+        get: vi.fn().mockResolvedValue({
+          kind: "ready",
+          version: {
+            schemaVersion: 4,
+            canvasId: "20000000-0000-4000-8000-000000000002",
+            versionId: "20000000-0000-4000-8000-000000000003",
+            sequence: 1,
+            definition,
+            createdBy: definition.provenance.actor,
+            createdAt: "2026-08-01T21:00:00.000Z",
+          },
+        }),
+      }) as unknown as CanvasClient;
+
+    it("draws the Canvas's blocks in the conversation and opens the same Canvas in the sidebar", async () => {
+      const user = userEvent.setup();
+      const onOpen = vi.fn();
+      const client = clientWith();
+      render(<InlineThreadCanvas card={inlineCard()} client={client} onOpen={onOpen} />);
+
+      expect(await screen.findByText("Signups this week")).toBeInTheDocument();
+      expect(client.get).toHaveBeenCalledWith("20000000-0000-4000-8000-000000000002");
+      // The frame names the Canvas once; the document inside does not repeat it as a page title.
+      expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: "Open in sidebar" }));
+      expect(onOpen).toHaveBeenCalledWith(
+        expect.objectContaining({ canvasId: "20000000-0000-4000-8000-000000000002" }),
+      );
+    });
+
+    it("folds to a card on request and stays folded when the thread is opened again", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      const first = render(<InlineThreadCanvas card={inlineCard()} client={clientWith()} />);
+      await screen.findByText("Signups this week");
+
+      await user.click(screen.getByRole("button", { name: "Show as card" }));
+      expect(screen.queryByText("Signups this week")).toBeNull();
+      first.unmount();
+
+      const client = clientWith();
+      render(<InlineThreadCanvas card={inlineCard()} client={client} />);
+      expect(screen.getByRole("button", { name: "Show in thread" })).toBeInTheDocument();
+      expect(client.get).not.toHaveBeenCalled();
+      localStorage.clear();
     });
   });
 });

@@ -172,6 +172,32 @@ describe("chart marks", () => {
         .map((cell) => cell.textContent),
     ).toEqual(["20", "7"]);
   });
+  it("leads a lone trend with its last reading and its change since the first", () => {
+    const trend = chartBlock({
+      blockId: "signups",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "chart",
+      chartType: "line",
+      series: [
+        {
+          seriesId: "signups",
+          label: "Signups",
+          points: [
+            { x: "W1", y: 120 },
+            { x: "W2", y: 180 },
+            { x: "W5", y: 310 },
+          ],
+        },
+      ],
+    });
+    const { container } = render(
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [trend] }} />,
+    );
+    const headline = container.querySelector(".canvas-chart__headline");
+    expect(headline?.textContent).toBe("310W5+158% since W1");
+    // Only the last reading carries a point until the pointer asks for another.
+    expect(container.querySelectorAll(".canvas-chart__dot")).toHaveLength(1);
+  });
 });
 
 describe("chart tooltip", () => {
@@ -241,6 +267,38 @@ describe("chart tooltip", () => {
     // The reading is the shared compact reading, never the raw integer.
     expect(screen.getByRole("tooltip").textContent).toContain("M");
     expect(screen.getByRole("tooltip").textContent).not.toContain("1360000");
+  });
+
+  it("serves a non-cartesian chart through the same tooltip and follows keyboard focus", () => {
+    const pie = chartBlock({
+      blockId: "shares",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "chart",
+      chartType: "pie",
+      series: [
+        {
+          seriesId: "share",
+          label: "Share",
+          points: [
+            { x: "Direct", y: 60 },
+            { x: "Referral", y: 40 },
+          ],
+        },
+      ],
+    });
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [pie] }} />);
+    const figure = document.querySelector(".canvas-block__chart--pie");
+    if (figure === null) throw new Error("Pie chart was not drawn.");
+    const mark = figure.querySelector("svg path.canvas-block__chart-mark");
+    if (mark === null) throw new Error("Pie mark was not drawn.");
+    expect(mark.getAttribute("tabindex")).toBe("0");
+
+    fireEvent.focus(mark);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Direct");
+    expect(screen.getByRole("tooltip").textContent).toContain("60");
+
+    fireEvent.blur(mark);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 });
 

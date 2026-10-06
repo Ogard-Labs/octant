@@ -128,7 +128,9 @@ greys and the same hairline carry the hierarchy on a white or graphite ground.
 Settings › Appearance › Style chooses how much of that palette the chrome
 uses. **Default** is the monochrome described above. **Vivid** lets the
 places that name something carry colour: the welcome greeting, the sidebar's
-count tiles, board column marks, and a Project's accent. Vivid draws every
+count tiles, board column marks, a Project's accent, and a thread's Canvases,
+which take the hue of what they hold (a plan purple, a chart or figures
+amber, a diagram teal, a mockup pink, a table or document blue). Vivid draws every
 hue from the preset's palette roles (`--octant-palette-*`, read through the
 `--oct-vivid-*` aliases in `styles/vivid.css`), so it follows the light or
 dark theme and any tinted preset, and it never recolours a warning, a
@@ -1018,8 +1020,10 @@ occupy the main workspace in turn, following the
 [workspace navigation rule](docs/design/workspace.md#navigation-and-projects).
 The directory provides search and All, Chat, Work, and Code filters. Project
 detail is thread-first, with memory, provider access, and canvases in compact
-expandable rows below the primary work. The thread list is named Chats for threads filed in no
-Project; Work and Code call it Recents. Rows are hairline rails, never cards;
+expandable rows below the primary work. Threads without a listed Project appear once in **No project**, a collapsible
+folder row in the Project tree with the same nested-thread layout as Projects.
+It has no horizontal divider or separate section heading and is absent when empty.
+It is a navigation group, not a persisted Project. Rows are hairline rails, never cards;
 provider marks are fixed-size inline and can be hidden without changing row
 height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the

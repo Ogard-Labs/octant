@@ -27,6 +27,7 @@
     "./mobile-hardening-policy": "./src/mobileHardeningPolicy.ts",
     "./canvas-policy": "./src/canvasPolicy.ts",
     "./canvas-number-format": "./src/canvasNumberFormat.ts",
+    "./canvas-presentation-policy": "./src/canvasPresentationPolicy.ts",
     "./canvas-action-policy": "./src/canvasActionPolicy.ts",
     "./canvas-action-availability-policy": "./src/canvasActionAvailabilityPolicy.ts",
     "./canvas-refresh-policy": "./src/canvasRefreshPolicy.ts",
@@ -77,7 +78,8 @@
     "./canvas-share-snapshot-policy": "./src/canvasShareSnapshotPolicy.ts",
     "./canvas-share-access-log-policy": "./src/canvasShareAccessLogPolicy.ts",
     "./audit-policy": "./src/auditPolicy.ts",
-    "./replica-entry-policy": "./src/replicaEntryPolicy.ts"
+    "./replica-entry-policy": "./src/replicaEntryPolicy.ts",
+    "./turn-metrics-policy": "./src/turnMetricsPolicy.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

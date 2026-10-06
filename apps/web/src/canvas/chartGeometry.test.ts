@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   categoryCenter,
+  formatTick,
+  niceAxis,
+  smoothPath,
   computeYDomain,
   pieWedges,
   ringPath,
@@ -54,5 +57,105 @@ describe("chartGeometry", () => {
   it("centers category slots across the plot", () => {
     expect(categoryCenter(0, 2, 100, 0)).toBe(25);
     expect(categoryCenter(1, 2, 100, 0)).toBe(75);
+  });
+});
+
+describe("value axis gridlines", () => {
+  it("lands gridlines on round numbers that enclose every reading", () => {
+    const axis = niceAxis({ min: 120, max: 310 }, false);
+    expect(axis.ticks).toEqual([100, 150, 200, 250, 300, 350]);
+    expect(axis.domain).toEqual({ min: 100, max: 350 });
+  });
+
+  it("keeps the zero baseline for bars and areas", () => {
+    expect(niceAxis({ min: 120, max: 310 }, true).ticks[0]).toBe(0);
+  });
+
+  it("labels small steps without floating-point noise and large values compactly", () => {
+    expect(niceAxis({ min: 0.1, max: 0.3 }, false).ticks).toEqual([0.1, 0.15, 0.2, 0.25, 0.3]);
+    expect(formatTick(1_250_000)).toBe("1.25M");
+    expect(formatTick(42_000)).toBe("42k");
+    expect(formatTick(2500)).toBe("2500");
+  });
+});
+
+describe("smooth line through readings", () => {
+  it("draws a straight segment for two readings and a curve through every reading for more", () => {
+    expect(
+      smoothPath([
+        { x: 0, y: 10 },
+        { x: 10, y: 0 },
+      ]),
+    ).toBe("M 0.00 10.00 L 10.00 0.00");
+    const path = smoothPath([
+      { x: 0, y: 50 },
+      { x: 10, y: 20 },
+      { x: 20, y: 40 },
+    ]);
+    expect(path.startsWith("M 0.00 50.00 C")).toBe(true);
+    expect(path).toContain(" 10.00 20.00 C");
+    expect(path.endsWith(" 20.00 40.00")).toBe(true);
+  });
+
+  it("keeps a peak's control points level so the curve never draws past the reading", () => {
+    const path = smoothPath([
+      { x: 0, y: 50 },
+      { x: 10, y: 20 },
+      { x: 20, y: 50 },
+    ]);
+    // Both handles beside the peak sit at its height: a flat tangent at the turn.
+    expect(path).toContain("6.67 20.00 10.00 20.00 C 13.33 20.00");
+  });
+});
+
+describe("smooth line tangents", () => {
+  it("passes straight through evenly rising readings instead of flattening between them", () => {
+    // Three evenly spaced readings on one straight rise: the smooth line is that straight line.
+    const path = smoothPath([
+      { x: 0, y: 30 },
+      { x: 30, y: 20 },
+      { x: 60, y: 10 },
+    ]);
+    expect(path).toBe(
+      "M 0.00 30.00 C 10.00 26.67 20.00 23.33 30.00 20.00 C 40.00 16.67 50.00 13.33 60.00 10.00",
+    );
+  });
+});
+
+describe("value axis edge cases", () => {
+  it("finishes on readings only a float step apart instead of looping forever", () => {
+    const axis = niceAxis({ min: 3.3, max: 1.1 + 2.2 }, false);
+    expect(axis.ticks.length).toBeGreaterThan(1);
+    expect(axis.ticks.length).toBeLessThan(10);
+    expect(axis.ticks[0]).toBeLessThanOrEqual(3.3);
+  });
+
+  it("finishes on a domain only a few float steps wide", () => {
+    const axis = niceAxis({ min: 1, max: 1 + Number.EPSILON * 4 }, false);
+    expect(axis.ticks.length).toBeGreaterThan(1);
+    expect(axis.ticks.length).toBeLessThan(10);
+    expect(axis.domain.min).toBeLessThanOrEqual(1);
+    expect(axis.domain.max).toBeGreaterThanOrEqual(1 + Number.EPSILON * 4);
+  });
+
+  it("falls back to a unit axis when the span overflows a float", () => {
+    const axis = niceAxis({ min: -Number.MAX_VALUE, max: Number.MAX_VALUE }, false);
+    expect(axis.ticks).toEqual([0, 1]);
+    expect(axis.domain).toEqual({ min: 0, max: 1 });
+  });
+
+  it("gives every gridline a distinct label for tiny and for large readings", () => {
+    const small = niceAxis({ min: 0.001, max: 0.004 }, false);
+    const smallLabels = small.ticks.map((tick) => formatTick(tick, small.step));
+    expect(new Set(smallLabels).size).toBe(smallLabels.length);
+    expect(smallLabels).toContain("0.002");
+
+    const large = niceAxis({ min: 10_000, max: 10_004 }, false);
+    const largeLabels = large.ticks.map((tick) => formatTick(tick, large.step));
+    expect(new Set(largeLabels).size).toBe(largeLabels.length);
+    expect(largeLabels).toContain("10002");
+
+    const thousands = niceAxis({ min: 10_000, max: 90_000 }, false);
+    expect(thousands.ticks.map((tick) => formatTick(tick, thousands.step))).toContain("40k");
   });
 });

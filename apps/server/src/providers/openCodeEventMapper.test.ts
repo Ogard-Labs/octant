@@ -148,7 +148,8 @@ describe("mapOpenCodeEvent", () => {
       }),
       expected: {
         kind: "usage",
-        inputTokens: 12,
+        // 12 uncached plus 2 read from the cache and 1 written to it.
+        inputTokens: 15,
         outputTokens: 7,
         reasoningTokens: 3,
         cacheReadInputTokens: 2,

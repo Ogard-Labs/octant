@@ -3,6 +3,7 @@ import type {
   ProviderCredentialStatus,
   ProviderFailure,
 } from "@octant/contracts";
+import { subscriptionOAuthOffers } from "@octant/domain";
 import {
   readSubscriptionOAuthCredential,
   resolveSubscriptionOAuthBearer,
@@ -62,6 +63,8 @@ export async function inspectDirectEndpointCredential(input: {
   readonly instanceId: string;
   readonly host: SubscriptionOAuthHost | undefined;
   readonly now: () => number;
+  /** The instance's current base URL, revalidated against the offer at resolve. */
+  readonly baseUrl?: string | undefined;
 }): Promise<DirectEndpointCredentialGate> {
   if (input.authentication === "none") return { kind: "plain", credential: undefined };
   let raw = "";
@@ -91,6 +94,7 @@ export async function inspectDirectEndpointCredential(input: {
     expectedDescriptorId: input.expectedDescriptorId,
     host: input.host,
     now: input.now,
+    endpoint: endpointBinding(input.baseUrl, pointer),
   });
   if (resolution.kind !== "bearer") return report(resolution);
   return {
@@ -107,6 +111,7 @@ export function directEndpointRequestResolver(input: {
   readonly instanceId: string;
   readonly host: SubscriptionOAuthHost | undefined;
   readonly now: () => number;
+  readonly baseUrl?: string | undefined;
 }): ProviderCredentialResolver | undefined {
   if (input.authentication === "none") return undefined;
   let plain: string | undefined;
@@ -130,6 +135,7 @@ async function resolveBearerForRequest(
     readonly expectedDescriptorId: string | undefined;
     readonly host: SubscriptionOAuthHost | undefined;
     readonly now: () => number;
+    readonly baseUrl?: string | undefined;
   },
   pointer: SubscriptionOAuthCredential,
 ): Promise<string> {
@@ -138,9 +144,31 @@ async function resolveBearerForRequest(
     expectedDescriptorId: input.expectedDescriptorId,
     host: input.host,
     now: input.now,
+    endpoint: endpointBinding(input.baseUrl, pointer),
   });
   if (resolution.kind === "bearer") return resolution.token;
   throw failure(report(resolution).readiness, report(resolution).message);
+}
+
+/**
+ * The sign-in's endpoint binding re-checked at token-resolve time. begin and
+ * poll validated the offer binding, but the user can change the instance's
+ * base URL afterwards; before any bearer leaves this process, the CURRENT
+ * base URL must still match the offer's allowed endpoint on canonical
+ * origin. A pointer whose descriptor no offer names has no binding to
+ * revalidate — only a catalog offer can store a pointer, and its allowed
+ * endpoint is what this check enforces.
+ */
+function endpointBinding(
+  baseUrl: string | undefined,
+  pointer: SubscriptionOAuthCredential,
+): { readonly baseUrl: string; readonly allowedEndpoint: string } | undefined {
+  if (baseUrl === undefined) return undefined;
+  const offer = subscriptionOAuthOffers().find(
+    (candidate) => candidate.descriptor.descriptorId === pointer.descriptorId,
+  );
+  if (offer === undefined) return undefined;
+  return { baseUrl, allowedEndpoint: offer.allowedEndpoint };
 }
 
 function missingOrUnavailable(

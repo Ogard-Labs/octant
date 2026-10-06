@@ -93,23 +93,60 @@
   margin-top: var(--oct-space-1);
 }
 
+/* Consecutive metrics sit side by side as tiles: the face of the sidebar's
+   count tiles (a faint fill inside a faint ring), so a number in a Canvas
+   reads like a number anywhere else in the app. */
+.canvas-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--oct-space-2);
+  margin: 0 0 var(--oct-space-4);
+}
+
+.canvas-metrics > .canvas-block {
+  margin: 0;
+}
+
 .canvas-block__metric {
-  display: flex;
+  height: 100%;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 7%, transparent);
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 4%, transparent);
+}
+
+.canvas-block__metric .cmetric-label {
+  flex-basis: auto;
+  color: var(--oct-muted);
+  font-family: inherit;
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1.2;
+}
+
+.canvas-block__metric .cmetric-value {
+  display: inline-flex;
   align-items: baseline;
-  gap: var(--oct-space-3);
+  gap: var(--oct-space-1);
+  font-family: inherit;
+  font-size: var(--oct-text-2xl);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
 }
 
-.canvas-block__metric-value {
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xl);
-  font-variant-numeric: tabular-nums;
+.canvas-block__metric .cmetric-unit {
+  font-family: inherit;
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: 0;
 }
 
-.canvas-block__metric-delta {
-  color: var(--oct-success-fg);
-  font-family: var(--oct-font-mono);
+.canvas-block__metric .cmetric-delta {
   font-size: var(--oct-text-xs);
-  font-variant-numeric: tabular-nums;
 }
 
 .canvas-block__progress progress {
@@ -189,6 +226,129 @@
 
 [data-octant-reduced-motion="true"] .canvas-block__chart-mark {
   transition: none;
+}
+
+/* The shared tooltip's listed readings keep each series key beside its name,
+   the same key the legend and the marks carry. */
+.canvas-block__chart-tip dt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.canvas-block__chart-tip .chart-key.is-block {
+  width: 8px;
+  height: 8px;
+}
+/* Line, area, scatter, bar and distribution charts draw at the figure's
+   measured width, so gridline and axis labels stay at the interface size.
+   The marks follow the system chart recipe in octant.css: 1.5px lines with
+   round joins, 8px points ringed in the surface, bars with a 2px top. */
+.canvas-chart {
+  position: relative;
+  min-width: 0;
+}
+
+/* The tooltip is placed from the plot's own box, so the headline above the
+   chart never shifts where the tip lands. */
+.canvas-chart__plot {
+  position: relative;
+}
+
+.canvas-chart__svg {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+  touch-action: pan-y;
+}
+
+.canvas-chart__grid {
+  /* The shared grid token is tuned for the usage chart's flat ground; on the
+     reply card it vanishes, so the rule is drawn from the ink instead. */
+  stroke: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+  stroke-width: 1;
+}
+
+.canvas-chart__baseline {
+  stroke: var(--oct-chart-axis);
+  stroke-width: 1;
+}
+
+.canvas-chart__tick,
+.canvas-chart .canvas-block__chart-label {
+  fill: var(--oct-meta);
+  font-family: inherit;
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-chart__guide {
+  stroke: var(--oct-chart-axis);
+  stroke-width: 1;
+}
+
+.canvas-chart .canvas-block__chart-mark.is-line {
+  stroke-width: 2;
+}
+
+/* A lone line or an area fades a wash of its own colour to the floor. */
+.canvas-chart__wash-top {
+  stop-color: var(--oct-ser, var(--oct-series-1));
+  stop-opacity: 0.22;
+}
+
+.canvas-chart__wash-top[data-kind="area"] {
+  stop-opacity: 0.32;
+}
+
+.canvas-chart__wash-floor {
+  stop-color: var(--oct-ser, var(--oct-series-1));
+  stop-opacity: 0;
+}
+
+.canvas-chart__dot {
+  fill: var(--oct-ser, var(--oct-series-1));
+  stroke: var(--octant-card, var(--oct-surface));
+  stroke-width: 2;
+}
+
+/* Where a lone trend ended, and how far it moved since it began. */
+.canvas-chart__headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  margin: 0 0 var(--oct-space-2);
+}
+
+.canvas-chart__headline-value {
+  font-size: var(--oct-text-2xl);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1.1;
+}
+
+.canvas-chart__headline-at {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.canvas-chart__headline-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 2px var(--oct-space-2);
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-chart__bar[data-active="true"] {
+  filter: brightness(1.12);
 }
 
 .canvas-block__chart-mark {
@@ -1738,4 +1898,312 @@
 
 .octant-dialog__popup:has(> .canvas-export) {
   padding: var(--oct-space-4);
+}
+
+/* A Canvas drawn in the conversation that wrote it. It is the work the turn
+   produced, so it wears the reply's one card: the changed-files card's fill,
+   hairline and radius, with a code block's 32px header strip naming it and
+   ghost icon controls at its end. The body is capped instead of scrolled, so
+   the wheel always belongs to the thread; what runs past the cap fades into
+   an offer to open the whole Canvas. */
+.thread-canvas-list {
+  display: grid;
+  gap: var(--oct-space-3);
+  margin-top: var(--oct-space-3);
+}
+
+.thread-canvas {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card, var(--octant-workspace));
+}
+
+.thread-canvas__header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: 32px;
+  padding: 0 var(--oct-space-1) 0 var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.thread-canvas[data-shown-as="card"] .thread-canvas__header {
+  border-bottom: 0;
+}
+
+.thread-canvas__icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.thread-canvas__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-canvas__actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+/* Sized to the strip, like a code block's copy control; the ghost recipe paints it. */
+.thread-canvas__action {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+}
+
+.thread-canvas__viewport {
+  position: relative;
+}
+
+.thread-canvas__body {
+  max-height: 560px;
+  overflow: hidden;
+}
+
+.thread-canvas__body[data-clipped="true"] {
+  /* A mask reads only alpha, so any opaque ink draws the visible part. */
+  mask-image: linear-gradient(
+    to bottom,
+    var(--oct-fg) calc(100% - var(--oct-space-12) - var(--oct-space-6)),
+    transparent
+  );
+}
+
+.thread-canvas .canvas-view--thread {
+  padding: var(--oct-space-4);
+}
+
+/* Inside the card the document drops its outer rhythm: the first block
+   starts at the padding and the last one ends there. */
+.thread-canvas .canvas-view--thread .canvas-view__body > :first-child,
+.thread-canvas .canvas-view--thread .canvas-view__body > :first-child .canvas-block__heading {
+  margin-top: 0;
+}
+
+.thread-canvas .canvas-view--thread .canvas-view__body > :last-child {
+  margin-bottom: 0;
+}
+
+.thread-canvas__more {
+  position: absolute;
+  inset: auto 0 var(--oct-space-3);
+  display: flex;
+  justify-content: center;
+}
+
+.thread-canvas__status {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+/* A Canvas the thread wrote and does not draw inline: one row on the reply's
+   card face, the document's mark in an inset tile, its title, and one line
+   of facts. The row is the open control, so its face is drawn here over the
+   button recipe's bare variant. */
+.canvas-ref-list {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.canvas-ref-list__error {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.canvas-ref {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-2) var(--oct-space-2);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card, var(--octant-workspace));
+  color: var(--oct-fg);
+  text-align: start;
+}
+
+/* The open control lies over the whole row; the row's content sits beneath
+   it and the hover wash is drawn on the row. */
+.canvas-ref {
+  position: relative;
+}
+
+.canvas-ref__hit {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border-radius: inherit;
+}
+
+.canvas-ref:has(.canvas-ref__hit:hover) {
+  background: color-mix(in oklab, var(--oct-fg) 3%, var(--octant-card, var(--octant-workspace)));
+}
+
+/* A live miniature of the document: the real renderer laid out at a narrow
+   page width and scaled down into a 104 × 72 tile, faded at its foot. */
+.canvas-ref__preview {
+  position: relative;
+  flex: none;
+  width: 104px;
+  height: 72px;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 8%, transparent);
+  border-radius: var(--oct-radius-inset);
+  background: var(--octant-workspace, var(--oct-surface));
+  mask-image: linear-gradient(to bottom, var(--oct-fg) 70%, transparent);
+  pointer-events: none;
+}
+
+.canvas-ref__preview-page {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 320px;
+  transform: scale(0.325);
+  transform-origin: top left;
+}
+
+.canvas-ref__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-1);
+}
+
+.canvas-ref__progress-track {
+  flex: 1 1 auto;
+  max-width: 12rem;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--oct-fg) 10%, transparent);
+}
+
+.canvas-ref__progress-fill {
+  display: block;
+  min-width: 4px;
+  height: 100%;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+}
+
+.canvas-ref__progress-label {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-ref__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 7%, transparent);
+  border-radius: var(--oct-radius-inset);
+  background: color-mix(in oklab, var(--oct-fg) 4%, transparent);
+  color: var(--oct-muted);
+}
+
+.canvas-ref__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.canvas-ref__title,
+.canvas-ref__summary,
+.canvas-ref__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-ref__title {
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1.35;
+}
+
+.canvas-ref__summary {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+
+.canvas-ref__meta {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-ref__chevron {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+/* Forced colours: the measured chart keeps its rules, labels and points in
+   system ink, and the faint tile and row fills give way to plain borders. */
+@media (forced-colors: active) {
+  .canvas-chart__grid,
+  .canvas-chart__baseline,
+  .canvas-chart__guide {
+    stroke: GrayText;
+  }
+
+  .canvas-chart__tick,
+  .canvas-chart .canvas-block__chart-label {
+    fill: CanvasText;
+  }
+
+  .canvas-chart__dot {
+    fill: CanvasText;
+    stroke: Canvas;
+  }
+
+  .canvas-block__metric,
+  .canvas-ref,
+  .canvas-ref__icon,
+  .thread-canvas {
+    border-color: CanvasText;
+    background: Canvas;
+  }
+}
+
+@media (forced-colors: active) {
+  .canvas-ref__progress-fill {
+    background: CanvasText;
+  }
+
+  .canvas-ref__progress-track,
+  .canvas-chart__headline-change {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
 }

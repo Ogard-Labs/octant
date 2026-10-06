@@ -25,7 +25,7 @@ const encoder = new TextEncoder();
 // Versions this runtime decodes: every historical version plus the current
 // one. A document declaring anything else is refused as a future version,
 // before its blocks are read, so a newer contract never reaches a renderer.
-const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [1, 2, CANVAS_SCHEMA_VERSION];
+const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, CANVAS_SCHEMA_VERSION];
 
 export type CanvasPolicyRejectionCode =
   | "invalid-schema"
@@ -246,8 +246,9 @@ function calculateBudgetUsage(
 
 /**
  * A document a newer runtime declared with a version this runtime has never
- * seen — either a future schema version or a version-gated block (mockup)
- * inside a document that declares an older version — must fail closed as an
+ * seen — either a future schema version or a version-gated field (a mockup
+ * block from version 3, a thread presentation from version 4) inside a
+ * document that declares an older version — must fail closed as an
  * unsupported schema version, before any content is read, rather than
  * collapsing into a generic "corrupt" decode failure. Works on both a
  * definition (`blocks` at the top level) and a version envelope (blocks under
@@ -258,12 +259,16 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
   const envelope = input as {
     schemaVersion?: unknown;
     blocks?: unknown;
-    definition?: { blocks?: unknown };
+    presentation?: unknown;
+    definition?: { blocks?: unknown; presentation?: unknown };
   };
   const declared = envelope.schemaVersion;
   if (typeof declared !== "number") return undefined;
   if (!SUPPORTED_CANVAS_SCHEMA_VERSIONS.includes(declared)) return "unsupported-schema-version";
   if (declared === CANVAS_SCHEMA_VERSION) return undefined;
+  const presentation = envelope.presentation ?? envelope.definition?.presentation;
+  if (declared < 4 && presentation !== undefined) return "unsupported-schema-version";
+  if (declared >= 3) return undefined;
   const blocks = Array.isArray(envelope.blocks)
     ? envelope.blocks
     : Array.isArray(envelope.definition?.blocks)
