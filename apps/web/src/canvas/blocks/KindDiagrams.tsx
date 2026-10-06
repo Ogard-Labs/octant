@@ -406,6 +406,7 @@ export function ErDiagram({ block }: { readonly block: CanvasErBlock }) {
 
 export function SwimlaneDiagram({ block }: { readonly block: CanvasSwimlaneBlock }) {
   const layout = layoutCanvasSwimlane(block);
+  const stepLabels = new Map(block.steps.map((step) => [String(step.stepId), step.label]));
   return (
     <figure
       aria-label={swimlaneLabel(block)}
@@ -505,9 +506,9 @@ export function SwimlaneDiagram({ block }: { readonly block: CanvasSwimlaneBlock
         <ul>
           {block.connections.map((connection) => (
             <li key={connection.connectionId}>
-              {`${connection.source} → ${connection.target}${
-                connection.label === undefined ? "" : `: ${connection.label}`
-              }`}
+              {`${stepLabels.get(String(connection.source)) ?? connection.source} → ${
+                stepLabels.get(String(connection.target)) ?? connection.target
+              }${connection.label === undefined ? "" : `: ${connection.label}`}`}
             </li>
           ))}
         </ul>

@@ -102,6 +102,12 @@ describe("entity-relationship, swimlane, and mind map diagrams", () => {
     // Numbered steps per lane are the fallback for the swimlane.
     const swimlaneFigure = screen.getByRole("figure", { name: /Swimlane with 3 lanes/ });
     expect(swimlaneFigure.querySelectorAll("figcaption ol").length).toBe(3);
+    // Swimlane connections name their steps by label, so a screen reader
+    // never hears internal identifiers or misses a connection's own label.
+    const swimlaneConnections = swimlaneFigure.querySelectorAll("figcaption > ul li");
+    expect(swimlaneConnections.length).toBe(5);
+    expect(swimlaneConnections[0]?.textContent).toBe("Report a problem → Is it a defect?");
+    expect(swimlaneConnections[2]?.textContent).toBe("Is it a defect? → Fix the defect: yes");
     // A nested list is the fallback for the mind map.
     const mindmapFigure = screen.getByRole("figure", { name: /Mind map with 6 topics/ });
     expect(mindmapFigure.querySelectorAll("figcaption ul ul").length).toBeGreaterThan(0);
