@@ -427,12 +427,9 @@ import type {
   SidebarNavigationDescriptorId,
   ThreadProviderIdentity,
 } from "./shell/navigationModel";
-import {
-  reviewWaitingCount,
-  runningCardsFromBoard,
-  runningCardsFromNavigation,
-  runningThreadCount,
-} from "./shell/runningNow";
+import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
+import { createWorkingNowCard } from "./home/WorkingNowCard";
+import { boardFactsByThread, remoteHostLabel, type WorkingNowThread } from "./home/workingNow";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
@@ -3645,6 +3642,55 @@ function LaunchedShell(
     [activeMode, chatController.status, minuteNow, navigationModel],
   );
 
+  // The start-screen cards read these, so they are held here with the other
+  // memoized models, above the status early returns that follow: a hook below
+  // them would change the hook order once the shell finishes loading.
+  const workingNowThreads = useMemo<ReadonlyArray<WorkingNowThread>>(
+    () =>
+      activeMode === "code"
+        ? navigationModel.codeProjectThreads.map((thread) => ({
+            mode: "code" as const,
+            thread: navigationModel.withProviderMark(thread),
+          }))
+        : [
+            ...(chatController.status === "ready"
+              ? navigationModel.markedChatNavigation.map((thread) => ({
+                  mode: "chat" as const,
+                  thread,
+                }))
+              : []),
+            ...navigationModel.workProjectThreads.map((thread) => ({
+              mode: "work" as const,
+              thread: navigationModel.withProviderMark(thread),
+            })),
+          ],
+    [activeMode, chatController.status, navigationModel],
+  );
+  const workingNowModes = useMemo(
+    () => (activeMode === "code" ? (["code"] as const) : (["chat", "work"] as const)),
+    [activeMode],
+  );
+  const workingNowProjectNames = useMemo(
+    () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
+    [projectController.projects],
+  );
+  const workingNowProviders = useMemo(
+    () =>
+      new Map(
+        providerController.instances.map((instance) => [
+          String(instance.id),
+          { displayName: instance.displayName, driverKind: instance.driverKind },
+        ]),
+      ),
+    [providerController.instances],
+  );
+  const workingNowBoardFacts = useMemo(
+    () =>
+      continueCards.kind === "ready" && activeMode === "code"
+        ? boardFactsByThread(continueCards.running)
+        : new Map(),
+    [activeMode, continueCards],
+  );
   const workKindChoice: WorkKindChoice | undefined =
     activeMode === "code" || controller.settings === undefined
       ? undefined
@@ -3916,53 +3962,77 @@ function LaunchedShell(
     workProjectThreads,
   } = navigationModel;
 
-  // Work and Code start screens share one shape: tiles and the threads running
-  // now. Code reads its running cards off the board, which carries the branch
-  // and the host's activity line; Work has no board card to read, so its cards
-  // come from the navigation rows that already say a turn is executing.
-  const homeStart: DraftThreadWorkspaceProps["homeStart"] =
-    activeMode === "code" || activeMode === "work"
-      ? {
-          reviewCount: reviewWaitingCount(
-            activeMode === "code" ? codeProjectThreads : workProjectThreads,
-          ),
-          runningCount:
-            activeMode === "code"
-              ? continueCards.kind === "ready"
-                ? continueCards.runningTotal
-                : 0
-              : runningThreadCount(workProjectThreads),
-          onReview: openInbox,
-          running:
-            activeMode === "code"
-              ? continueCards.kind === "ready"
-                ? runningCardsFromBoard(continueCards.running, {
-                    projectNames: new Map(
-                      codeBoardProjects.map((project) => [String(project.id), project.name]),
-                    ),
-                    providers: new Map(
-                      providerController.instances.map((instance) => [
-                        String(instance.id),
-                        { displayName: instance.displayName, driverKind: instance.driverKind },
-                      ]),
-                    ),
-                  })
-                : []
-              : runningCardsFromNavigation(
-                  workProjectThreads.map(withProviderMark),
-                  new Map(workBoardProjects.map((project) => [String(project.id), project.name])),
-                ),
-          onOpenRunning: (card) =>
-            activeMode === "code"
-              ? selectCodeThread(card.threadId)
-              : selectWorkThread(card.threadId),
-          onOpenBoard: () => {
-            pluginSidebarDestinationActionContext.closeOverlays();
-            pluginSidebarDestinationActionContext.openThreadBoard();
-          },
-          ...(activeMode === "code" ? { onOpenTerminal: openHomeTerminal } : {}),
-        }
+  // Work and Code start screens share one shape: tiles, then the card area.
+  // Code reads the host's activity line off the board; Work has no board card to
+  // read, so its rows come from the navigation rows that already say a turn is
+  // executing. Work counts its Chat and Work threads together, as its list does.
+  const workingNowHost =
+    props.hostBridge === undefined
+      ? remoteHostLabel(props.launch.serverUrl, localHost?.displayName)
       : undefined;
+  // The card list is rebuilt each render and is cheap: each card's own rows are
+  // memoized from the inputs above, which keep their identity between renders.
+  const homeCards = [
+    createWorkingNowCard({
+      agentRunClient,
+      boardFacts: workingNowBoardFacts,
+      ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
+      modes: workingNowModes,
+      now: minuteNow.getTime(),
+      onOpenRow: (row) => {
+        pluginSidebarDestinationActionContext.closeOverlays();
+        if (row.mode === "chat") selectChatThread(row.threadId);
+        else if (row.mode === "work") selectWorkThread(row.threadId);
+        else selectCodeThread(row.threadId);
+      },
+      // The same place the sidebar's Running tile goes: Chat has no board, so
+      // its running threads lead the Activity feed instead.
+      onOpenRunning: () => {
+        if (activeMode === "chat") {
+          openSidebarList("activity");
+          return;
+        }
+        pluginSidebarDestinationActionContext.closeOverlays();
+        pluginSidebarDestinationActionContext.openThreadBoard();
+      },
+      projectNames: workingNowProjectNames,
+      providers: workingNowProviders,
+      runRevision:
+        machineChanges.chatNavigation +
+        machineChanges.workNavigation +
+        machineChanges.codeNavigation,
+      threads: workingNowThreads,
+    }),
+  ];
+  const homeStart: DraftThreadWorkspaceProps["homeStart"] =
+    activeMode === "chat"
+      ? {
+          reviewCount: 0,
+          runningCount: 0,
+          cards: homeCards,
+          cardCustomization: controller.settings.homeCards,
+          onCardCustomizationChange: (homeCardChoice) =>
+            void controller.updateSettings({ homeCards: homeCardChoice }),
+        }
+      : activeMode === "code" || activeMode === "work"
+        ? {
+            reviewCount: reviewWaitingCount(
+              activeMode === "code" ? codeProjectThreads : workProjectThreads,
+            ),
+            runningCount:
+              activeMode === "code"
+                ? continueCards.kind === "ready"
+                  ? continueCards.runningTotal
+                  : 0
+                : runningThreadCount(workProjectThreads),
+            onReview: openInbox,
+            cards: homeCards,
+            cardCustomization: controller.settings.homeCards,
+            onCardCustomizationChange: (homeCardChoice) =>
+              void controller.updateSettings({ homeCards: homeCardChoice }),
+            ...(activeMode === "code" ? { onOpenTerminal: openHomeTerminal } : {}),
+          }
+        : undefined;
 
   // What a Code thread row offers on right-click. Each one carries the row's
   // navigation id, which for a Project-backed thread is its Code thread id;
