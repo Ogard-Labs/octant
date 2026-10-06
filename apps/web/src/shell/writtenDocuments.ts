@@ -53,6 +53,20 @@ export function noteWrittenDocument(
 }
 
 /**
+ * Shows a document the person asked to see, such as a Canvas drawn in the
+ * thread they chose to open beside it. A person's request is not a turn's
+ * offer, so it opens even a document that was offered or closed before.
+ */
+export function showWrittenDocument(
+  offers: WrittenDocumentOffers,
+  document: WrittenDocument,
+): WrittenDocumentOffers {
+  const offered = new Set(offers.offered);
+  offered.add(writtenDocumentId(document));
+  return { offered, current: document };
+}
+
+/**
  * Notes the documents a thread already had when it was opened. They stay
  * reachable from the dock's tool list but are not offered: the person has
  * seen them, and reopening an old thread must not raise the dock.

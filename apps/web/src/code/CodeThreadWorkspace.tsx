@@ -57,6 +57,9 @@ import type { ThreadTaskChangedFiles } from "../plan/ThreadTaskViewer";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
+import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import type { HostId } from "@octant/contracts/host";
 import type { CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -144,6 +147,8 @@ export interface CodeThreadWorkspaceProps {
   readonly onCreatePullRequest?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /** Opens the dock's Canvas tool on this Canvas; a Canvas drawn in the thread offers it. */
+  readonly onOpenCanvasInSidebar?: (card: CanvasThreadReferenceCard) => void;
   /** The Canvas cards the host lists for this thread, each time they are read. */
   readonly onCanvasReferencesObserved?: (
     threadId: string,
@@ -515,6 +520,31 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     };
   }, [markDraftStagedDropped, peekAbandoned, props.threadId]);
 
+  const settledReplyCount = props.controller.conversation.filter(
+    (message) =>
+      message.role === "assistant" &&
+      (message.status === "completed" ||
+        message.status === "interrupted" ||
+        message.status === "failed"),
+  ).length;
+  // Read before the early returns below, which would otherwise change the hook
+  // order. The transcript draws the inline Canvases and the card list the rest.
+  const threadCanvases = useThreadCanvasCards({
+    client: view === undefined ? undefined : props.canvasClient,
+    mode: "code",
+    threadId: props.threadId,
+    projectId: view?.thread.projectId ?? null,
+    // A settled reply may have authored a Canvas; re-read the cards so the
+    // document appears without reopening the thread.
+    refreshKey: settledReplyCount,
+    ...(props.onCanvasReferencesObserved === undefined
+      ? {}
+      : {
+          onCardsObserved: (cards: ReadonlyArray<CanvasThreadReferenceCard>) =>
+            props.onCanvasReferencesObserved?.(String(props.threadId), cards),
+        }),
+  });
+
   function syncMentions(value: string, caret: number | null) {
     computer.sync(value, caret);
     browser.sync(value, caret);
@@ -635,13 +665,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         modelId: thread.modelId,
       })
     : providerGroups;
-  const settledReplyCount = messages.filter(
-    (message) =>
-      message.role === "assistant" &&
-      (message.status === "completed" ||
-        message.status === "interrupted" ||
-        message.status === "failed"),
-  ).length;
+  const canvasClient = props.canvasClient;
+  const openInSidebar = props.onOpenCanvasInSidebar;
+  const canvasPlacement = placeThreadCanvases(
+    threadTurnSpans(
+      messages,
+      (message) => message.id,
+      (message) => (message.role === "user" ? message.at : undefined),
+    ),
+    threadCanvases.cards,
+  );
   const liveTasks = liveTaskProgress(
     messages.flatMap((message) => {
       if (message.role !== "assistant" || message.operationId === undefined) return [];
@@ -1200,6 +1233,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           key={String(props.threadId)}
           listClassName="code-thread-workspace__transcript thread-column"
           {...(confirmingRestore === undefined ? {} : { pinnedKeys: [confirmingRestore] })}
+          {...(canvasClient === undefined
+            ? {}
+            : {
+                afterItem: (message: (typeof messages)[number]) => (
+                  <ThreadCanvases
+                    cards={canvasPlacement.byRow.get(message.id)}
+                    client={canvasClient}
+                    {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                  />
+                ),
+              })}
           renderItem={(message, index) => {
             const previousAssistant = previousAssistantMessage(messages, index);
             const handoff =
@@ -1464,20 +1508,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       {props.canvasClient === undefined || view === undefined ? null : (
         <div className="thread-column">
           <CanvasThreadReferenceCardList
-            client={props.canvasClient}
-            mode="code"
+            cards={threadCanvases.cards.filter(
+              (card) => !canvasPlacement.placed.has(String(card.canvasId)),
+            )}
+            error={threadCanvases.error}
             {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
-            {...(props.onCanvasReferencesObserved === undefined
-              ? {}
-              : {
-                  onCardsObserved: (cards: ReadonlyArray<CanvasThreadReferenceCard>) =>
-                    props.onCanvasReferencesObserved?.(String(props.threadId), cards),
-                })}
-            projectId={view.thread.projectId}
-            // A settled reply may have authored a Canvas; re-read the cards so
-            // the document appears without reopening the thread.
-            refreshKey={settledReplyCount}
-            threadId={props.threadId}
           />
         </div>
       )}
