@@ -307,3 +307,51 @@
   justify-self: start;
   margin: var(--oct-space-1) var(--oct-space-1) 0;
 }
+
+/* ── CI failures ──────────────────────────────────────────────────────── */
+
+.ci-failures-card__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ci-failures-card__list > li {
+  display: grid;
+  min-width: 0;
+}
+
+.ci-failures-card__row {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: var(--oct-space-2) var(--oct-space-1);
+}
+
+.ci-failures-card__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-failures-card__facts {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--oct-space-2);
+}
+
+.ci-failures-card__place,
+.ci-failures-card__age {
+  min-width: 0;
+}
+
+.ci-failures-card__fix.ci-failures-card__fix {
+  justify-self: start;
+  height: auto;
+  min-height: 0;
+  padding-inline: 0;
+}

@@ -430,6 +430,8 @@ import type {
 import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
 import { createWorkingNowCard } from "./home/WorkingNowCard";
 import { createPullRequestsCard } from "./home/PullRequestsCard";
+import { createCiFailuresCard } from "./home/CiFailuresCard";
+import { currentCodeProjectBranches } from "./home/ciFailures";
 import {
   pullRequestCardAvailable,
   pullRequestCardCapability,
@@ -877,6 +879,7 @@ function LaunchedShell(
     if (mode === "code") {
       setDraftExecutionPolicy(undefined);
       setDraftPermissionPersistence(undefined);
+      setPendingDraftBranch(undefined);
     }
     setDraftResetRevision((revision) => revision + 1);
   }
@@ -911,6 +914,7 @@ function LaunchedShell(
   // A Canvas plan task handed to a new thread: the draft opens with it written
   // in, and the person sends it like any new thread.
   const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
+  const [pendingDraftBranch, setPendingDraftBranch] = useState<string>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [githubPullRequestCapability, setGithubPullRequestCapability] =
     useState<PullRequestCardCapability>({ readable: false });
@@ -4052,6 +4056,31 @@ function LaunchedShell(
         setCodePullRequestsOpen(true);
       },
     }),
+    createCiFailuresCard({
+      available: pullRequestCardAvailable({
+        mode: activeMode,
+        pluginEffective: FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true,
+        capability: githubPullRequestCapability,
+      }),
+      viewerLogin: githubPullRequestCapability.login ?? "",
+      currentBranches: currentCodeProjectBranches({
+        threads: codeController.bootstrap?.threads ?? [],
+        checkouts: codeController.bootstrap?.checkouts ?? [],
+      }),
+      load: loadHomePullRequests,
+      now: minuteNow.getTime(),
+      onStartFix: (fix) => {
+        // A draft only. The person sends it; this never starts a turn.
+        closeWorkspaceReaders();
+        setDraftError(undefined);
+        setDraftPendingMessage(undefined);
+        resetNewTaskDraft("code");
+        setPendingDraftPrompt(fix.prompt);
+        setPendingDraftBranch(fix.branch);
+        setDraftProjectSelection((current) => ({ ...current, code: fix.projectId }));
+        void controller.openDraftThread("code", fix.projectId);
+      },
+    }),
   ];
   const homeStart: DraftThreadWorkspaceProps["homeStart"] =
     activeMode === "chat"
@@ -7033,6 +7062,9 @@ function LaunchedShell(
                       {...(projectController.activeProject === undefined
                         ? {}
                         : { draftProjectName: projectController.activeProject.name })}
+                      {...(pendingDraftBranch === undefined
+                        ? {}
+                        : { draftBranchName: pendingDraftBranch })}
                       {...(effectiveDraftProviderInstanceId === undefined
                         ? {}
                         : { draftSelectedProviderInstanceId: effectiveDraftProviderInstanceId })}

@@ -63,6 +63,10 @@ export const MAX_CODE_PROJECT_PULL_REQUEST_DETAIL_DIFF_BYTES = 1024 * 1024;
 export const MAX_CODE_PROJECT_PULL_REQUEST_PROJECTS = 1_000;
 export const MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS = 32;
 export const MAX_CODE_PROJECT_PULL_REQUEST_REVIEW_REQUESTS = 32;
+/** Failing checks kept from one pull request's already-fetched rollup. */
+export const MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS = 8;
+/** Failure text kept from that same rollup. A longer text is cut, not fetched again. */
+export const MAX_CODE_PROJECT_PULL_REQUEST_FAILURE_EXCERPT_BYTES = 1_024;
 
 /**
  * Cached read of the host-local Project-scoped active pull-request projection.
@@ -232,6 +236,18 @@ export const CodeProjectPullRequestLinkedThread = Schema.Struct({
 }).annotations(strict);
 export type CodeProjectPullRequestLinkedThread = typeof CodeProjectPullRequestLinkedThread.Type;
 
+/**
+ * One failing check from the rollup the pull-request list already fetched.
+ * Absent text means that read carried none; it is not a prompt to fetch logs.
+ */
+export const CodeProjectPullRequestFailingCheck = Schema.Struct({
+  name: boundedNonEmptyText(512),
+  completedAt: Schema.optional(githubUpdatedAt),
+  excerpt: Schema.optional(boundedText(MAX_CODE_PROJECT_PULL_REQUEST_FAILURE_EXCERPT_BYTES)),
+  excerptTruncated: Schema.optional(Schema.Literal(true)),
+}).annotations(strict);
+export type CodeProjectPullRequestFailingCheck = typeof CodeProjectPullRequestFailingCheck.Type;
+
 export const CodeProjectPullRequestRow = Schema.Struct({
   projectId: ProjectId,
   projectName: boundedNonEmptyText(512),
@@ -259,6 +275,15 @@ export const CodeProjectPullRequestRow = Schema.Struct({
       Schema.filter(
         (values) => new Set(values.map((value) => value.toLowerCase())).size === values.length,
       ),
+    ),
+  ),
+  /**
+   * Failing checks from the same list read as the summary. Absent on a
+   * snapshot taken before that fact was recorded; that is not a failure.
+   */
+  failingChecks: Schema.optional(
+    Schema.Array(CodeProjectPullRequestFailingCheck).pipe(
+      Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS),
     ),
   ),
   linkedThreads: Schema.Array(CodeProjectPullRequestLinkedThread).pipe(

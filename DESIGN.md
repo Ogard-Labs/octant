@@ -397,7 +397,11 @@ says "Running 12m"; a fact the host does not report is left out rather than
 invented. **Pull requests** lists up to six rows on a Code start screen, in
 Waiting on your review and Yours. Each row is the title, a short repository
 and number, and the words for checks and review — never colour alone. It is
-absent when that read is not allowed. Under the Vivid style the tiles'
+absent when that read is not allowed. **CI failures** lists up to five failing
+checks from that same read, the check name, the repository or branch, and how
+long ago it failed. It is absent when nothing is failing, and absent when that
+read is not allowed. **Start a fix** opens a draft; it does not send. Under the
+Vivid style the tiles'
 icon squares take the blue, orange, and purple palette hues. Code's five prompt
 suggestions are one compact row of label-only chips under the cards, and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline

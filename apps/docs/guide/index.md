@@ -64,6 +64,15 @@ card is not shown at all without a connection, or when credential storage is
 insecure. It reads the list the Pull requests page already keeps, so it does
 not ask again on its own.
 
+**CI failures**, on a new Code task, lists checks that failed on pull requests
+you opened and on the branch a Code Project is on now. A row shows the check,
+the repository or the branch, and how long ago it failed. Up to five rows
+show. When nothing is failing, the card is not shown. **Start a fix** opens a
+new Code task in that Project and branch with the failure already written in;
+you send it. The card is not shown without a connection, or when credential
+storage is insecure. It reads the same list Pull requests keeps, so it does
+not ask again on its own.
+
 **Customize**, on the right under the composer, turns each card on or off and
 reorders them: drag a card by its handle, or use the up and down buttons from the
 keyboard. **Reset to default** puts them back. Your choices are kept on this

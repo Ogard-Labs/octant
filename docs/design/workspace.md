@@ -179,6 +179,25 @@ more**, which opens Pull requests. A row opens that pull request's existing
 review for its Project. The read is one query of the window's authorized
 snapshot, so a remote window sees only the Projects it was granted.
 
+**CI failures** is the next card, on by default, and only on a Code start
+screen. It uses the same gate as Pull requests: no connection, insecure token
+storage, or a missing pull-request capability hides it and leaves it out of
+Customize. It lists failing checks the pull-request refresh already recorded,
+on the signed-in person's open pull requests and on the current branches of
+Code Projects. A current branch is the branch of an active thread's available
+checkout; the card does not observe checkouts itself. A failing check that is
+neither is left out. A row shows the check name, the repository and number
+when the pull request is the person's (`repo#12`) or the branch when it is
+only a current checkout, and how long ago the check finished failing. The
+refresh's rollup carries the name and the finish time; it does not carry a
+log, so a row never invents one. At most five rows show, most recently failed
+first. The card hides when it has nothing to show — there is no empty line —
+which is its default. **Start a fix** opens a new Code task draft in that
+Project and branch, with the failing check and a bounded excerpt of whatever
+failure text the refresh recorded already written in. It does not start a
+turn; the person sends it. Opening the card reads the same cached snapshot
+Pull requests reads and adds no poll.
+
 ## Tool lifecycles
 
 Thread utilities live in the Right Utility Dock outside the split tree.
