@@ -1638,7 +1638,11 @@ native harness in `apps/server/src/harness`:
   observed state, which the journal persists with the catalog and a
   configuration change clears; a model that answers in text leaves it out, and
   a transport failure (authentication, timeout) is reported rather than
-  recorded as "unsupported". Admission, the AgentRun transport check, and the
+  recorded as "unsupported". A real turn in which a model calls a tool records
+  that model the same way. The provider-level `appManagedTools` flag stays
+  `unsupported` on every direct-endpoint profile, so no verification or tool
+  turn on one model offers tools to another model of the same endpoint.
+  Admission, the AgentRun transport check, and the
   Chat preflight read that set per model, so verifying one model never offers
   tools to its siblings. The command accepts only the models the endpoint
   lists or the profile configures, and only a Foundry profile's configured
