@@ -99,7 +99,7 @@ describe("buildSidebarActivityView", () => {
       label: "Yesterday",
       threads: [
         expect.objectContaining({
-          projectName: "Unfiled",
+          projectName: "No project",
           threadId: "yesterday",
         }),
       ],
@@ -164,7 +164,7 @@ describe("buildSidebarActivityView", () => {
       label: "Earlier",
       threads: [
         expect.objectContaining({
-          projectName: "Unfiled",
+          projectName: "No project",
           threadId: "undated",
         }),
       ],
@@ -216,7 +216,7 @@ describe("filterSidebarActivityView", () => {
 
   it("matches the Project, Recents, or Unfiled folder word on the row", () => {
     expect(
-      filterSidebarActivityView(view, "unfiled").groups.map((group) =>
+      filterSidebarActivityView(view, "no project").groups.map((group) =>
         group.threads.map((item) => item.threadId),
       ),
     ).toEqual([["yesterday"]]);

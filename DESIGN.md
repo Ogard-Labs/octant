@@ -940,8 +940,10 @@ occupy the main workspace in turn, following the
 [workspace navigation rule](docs/design/workspace.md#navigation-and-projects).
 The directory provides search and All, Chat, Work, and Code filters. Project
 detail is thread-first, with memory, provider access, and canvases in compact
-expandable rows below the primary work. The thread list is named Chats for threads filed in no
-Project; Work and Code call it Recents. Rows are hairline rails, never cards;
+expandable rows below the primary work. Threads without a listed Project appear once in **No project**, a collapsible
+folder row in the Project tree with the same nested-thread layout as Projects.
+It has no horizontal divider or separate section heading and is absent when empty.
+It is a navigation group, not a persisted Project. Rows are hairline rails, never cards;
 provider marks are fixed-size inline and can be hidden without changing row
 height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the
