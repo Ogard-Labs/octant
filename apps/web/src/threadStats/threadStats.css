@@ -22,6 +22,7 @@
   justify-content: flex-start;
   gap: 0 var(--oct-space-2);
   min-width: 0;
+  height: auto;
   min-height: 28px;
   color: inherit;
   font: inherit;
