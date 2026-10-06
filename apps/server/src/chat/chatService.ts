@@ -228,7 +228,7 @@ const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
  * models with room for far more. A window this size admits an ordinary thread
  * whole and leaves a model with a smaller window to say so itself.
  */
-const FALLBACK_CHAT_CONTEXT_WINDOW = 128_000;
+const FALLBACK_CHAT_CONTEXT_WINDOW = 256_000;
 const FALLBACK_CHAT_MAX_OUTPUT = 1_024;
 
 type ConfiguredChatSettings = ChatSettings & {

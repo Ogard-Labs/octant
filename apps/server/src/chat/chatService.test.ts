@@ -6626,6 +6626,7 @@ describe("ChatService", () => {
       decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: created.thread.id }),
     );
     expect(snapshot.modelLimits.source).toBe("conservative-fallback");
+    expect(snapshot.modelLimits.contextWindow).toBe(256_000);
     expect(snapshot.next.plan.entries.filter((entry) => entry.reason === "omitted-to-fit")).toEqual(
       [],
     );

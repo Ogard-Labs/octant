@@ -92,7 +92,7 @@ When no provider, catalog, or setting has named the model's context window,
 the meter shows what the window holds and nothing to divide it by: the figure
 has no maximum and no percentage, the ring stays empty rather than full, and the
 popover says no window was reported. Octant plans such a turn against a
-128,000-token estimate so that an ordinary thread is sent whole; the context
+256,000-token estimate so that an ordinary thread is sent whole; the context
 inspector lists that limit as an estimate and the number is never shown as the
 model's window. The first window a provider reports replaces it.
 Opening the popover does not make a further provider or network call.
