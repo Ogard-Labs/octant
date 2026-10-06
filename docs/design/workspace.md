@@ -168,6 +168,25 @@ start and step ride on the same navigation rows as the executing flag (see
 reads), so a remote window sees them for exactly the threads it can already
 list.
 
+**Pull requests** is the next card, on by default, and only on a Code start
+screen. It is hidden — and left out of Customize — unless the Pull requests
+destination is offered and its read is allowed: no connection, insecure token
+storage, or a missing pull-request capability hides it, the same gate that
+refuses that destination's read. It lists open pull requests across every Code
+Project the window can access, from the cached Project pull-request snapshot.
+Opening the card reads that cached snapshot and does not poll; the existing
+per-Project refresh cadence, and an explicit refresh on the Pull requests
+workspace, are what move the list. Two groups: **Waiting on your review**
+(a review was requested from the signed-in person) and **Yours** (authored by
+that person). A pull request that is both is listed once, under waiting.
+Anything that is neither is left out. A row shows the title, a short
+repository and number (`repo#12`), and the words for checks (passed, failed,
+running, none) and review (approved, changes requested, in review, draft). A
+draft says draft rather than a decision. At most six rows show, then **+N
+more**, which opens Pull requests. A row opens that pull request's existing
+review for its Project. The read is one query of the window's authorized
+snapshot, so a remote window sees only the Projects it was granted.
+
 ## Tool lifecycles
 
 Thread utilities live in the Right Utility Dock outside the split tree.

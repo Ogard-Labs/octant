@@ -396,7 +396,11 @@ running right now." when empty. A running tool is shown in mono
 (`Command: bun run test`); a turn waiting on the person is plain prose. A turn's
 time says "Running 12m" from the start time the host reports, and "Active 4m
 ago" only for a host that reports none; a fact the host does not report is left
-out rather than invented. Under the Vivid style the tiles'
+out rather than invented. **Pull requests** lists up to six rows on a Code
+start screen, in Waiting on your review and Yours. Each row is the title, a
+short repository and number, and the words for checks and review — never
+colour alone. It is absent when that read is not allowed. Under the Vivid
+style the tiles'
 icon squares take the blue, orange, and purple palette hues. Code's five prompt
 suggestions are one compact row of label-only chips under the cards, and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
