@@ -687,6 +687,7 @@ describe("a lead whose model keeps failing", () => {
 
 describe("fitting a request to the endpoint", () => {
   const base: NativeHarnessRequest = {
+    sessionId,
     modelId,
     system: undefined,
     tools: [],
