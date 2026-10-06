@@ -29,6 +29,7 @@ import {
 } from "./codeTurnRunner";
 import { liveCodeTestSourcePort } from "./codeDirectoryPort";
 import { createCodeAcpClientTools } from "./codeAcpClientTools";
+import type { TurnEndSummary } from "../metrics/turnEnd";
 
 const now = "2026-07-21T00:00:00.000Z";
 const providerInstanceId = decodeProviderInstanceId("87000000-0000-4000-8000-000000000001");
@@ -1272,6 +1273,145 @@ describe("CodeTurnRunner", () => {
     expect(exit._tag).toBe("Failure");
     expect(outcomes).toEqual(["waiting"]);
     expect(connection.stop).toHaveBeenCalledWith(sessionId);
+  });
+
+  describe("what a turn leaves behind for its observers", () => {
+    const at = (ms: number) => new Date(Date.parse(now) + ms).toISOString();
+    /** Reads the clock at each moment the runner asks, in order. */
+    const scriptedClock = (moments: ReadonlyArray<number>) => {
+      let next = 0;
+      return () => at(moments[Math.min(next++, moments.length - 1)] ?? 0);
+    };
+    const usage = (ms: number) =>
+      event({
+        kind: "usage",
+        occurredAt: at(ms),
+        inputTokens: 1_000,
+        outputTokens: 120,
+        cacheReadInputTokens: 800,
+        reasoningTokens: 10,
+      });
+
+    it("hands a completed turn's full usage, real start and speed to the observer", async () => {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.make(
+            event({ kind: "text-delta", text: "Working", occurredAt: at(2_000) }),
+            usage(8_000),
+            event({ kind: "completed", occurredAt: at(8_000) }),
+          ),
+        ),
+      });
+      const completed: Array<{ readonly turn: TurnEndSummary }> = [];
+      const ended: TurnEndSummary[] = [];
+
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              // Turn start, prompt sent, the completed event, the turn's end.
+              clock: scriptedClock([0, 500, 8_000, 8_000]),
+              onTurnCompleted: async (turn) => {
+                completed.push(turn);
+              },
+              onTurnEnded: (turn) => ended.push(turn),
+            }),
+          ),
+        ),
+      );
+
+      expect(completed).toHaveLength(1);
+      expect(completed[0]?.turn).toEqual({
+        stopReason: "end-of-turn",
+        startedAt: at(0),
+        endedAt: at(8_000),
+        usage: {
+          inputTokens: 1_000,
+          outputTokens: 120,
+          cacheReadInputTokens: 800,
+          reasoningTokens: 10,
+        },
+        metrics: {
+          precision: "exact",
+          wallMs: 7_500,
+          timeToFirstTokenMs: 1_500,
+          decodeOutputTokens: 120,
+          decodeMs: 6_000,
+          toolMs: 0,
+          modelCalls: 1,
+        },
+      });
+      expect(ended).toEqual([completed[0]?.turn]);
+    });
+
+    it("says a cancelled turn was cancelled and keeps what it had cost", async () => {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.make(
+            event({ kind: "text-delta", text: "Working", occurredAt: at(1_000) }),
+            usage(3_000),
+            event({ kind: "interrupted", message: "Stopped.", occurredAt: at(3_000) }),
+          ),
+        ),
+      });
+      const ended: TurnEndSummary[] = [];
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              clock: scriptedClock([0, 0, 3_000]),
+              onTurnEnded: (turn) => ended.push(turn),
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(ended).toHaveLength(1);
+      expect(ended[0]).toMatchObject({
+        stopReason: "cancelled",
+        usage: { inputTokens: 1_000, outputTokens: 120 },
+        metrics: { precision: "exact", decodeMs: 2_000 },
+      });
+    });
+
+    it("says a failed turn failed, and reports no speed when the provider streamed nothing", async () => {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.make(
+            event({
+              kind: "failed",
+              failure: { category: "provider-failed", message: "Provider stopped." },
+            }),
+          ),
+        ),
+      });
+      const ended: TurnEndSummary[] = [];
+
+      await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              clock: scriptedClock([0, 0, 1_000]),
+              onTurnEnded: (turn) => ended.push(turn),
+            }),
+          ),
+        ),
+      );
+
+      expect(ended).toEqual([
+        {
+          stopReason: "failed",
+          startedAt: at(0),
+          endedAt: at(1_000),
+          metrics: { precision: "unavailable", wallMs: 1_000 },
+        },
+      ]);
+    });
   });
 });
 

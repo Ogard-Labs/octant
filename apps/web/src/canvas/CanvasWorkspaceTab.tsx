@@ -44,6 +44,7 @@ import { OctantPopover } from "../ui/base/OctantPopover";
 import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
 import type { CanvasExportOfferList } from "@octant/contracts/canvas-export";
 import { CanvasExportPanel } from "./CanvasExportPanel";
+import { useCanvasExportFolder } from "./useCanvasExportFolder";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 import {
   CanvasRefreshPanel,
@@ -92,6 +93,12 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const [refreshSkills, setRefreshSkills] = useState<ReadonlyArray<CanvasRefreshSkillOption>>([]);
   const [shares, setShares] = useState<CanvasShareOverview | undefined>(undefined);
   const [exportOffers, setExportOffers] = useState<CanvasExportOfferList | undefined>(undefined);
+  // Where this Canvas exports to. The host owns the folder; the panel shows it
+  // and sends back a candidate the host listed.
+  const exportFolder = useCanvasExportFolder({
+    client: props.client,
+    canvasId: props.tab.canvasId,
+  });
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [focusedBlockId, setFocusedBlockId] = useState<string | undefined>(undefined);
   const [commentThreads, setCommentThreads] = useState<ReadonlyArray<CanvasCommentThread>>([]);
@@ -821,8 +828,10 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         props.client.decideExport !== undefined ? (
           <CanvasExportPanel
             key={`${String(exportOffers.canvasId)}:${String(exportOffers.versionId)}`}
+            folder={exportFolder}
             offers={exportOffers}
             onDecide={props.client.decideExport}
+            onExportFolderChosen={() => void loadExportOffers()}
             onPrepare={props.client.prepareExport}
           />
         ) : null}

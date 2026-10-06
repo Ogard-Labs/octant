@@ -249,10 +249,22 @@ export function mapOpenCodeEvent(
           }),
         ];
       }
+      // OpenCode reports input apart from cache reads and writes. `inputTokens`
+      // is all input, cached or not, so context math and the cache hit rate
+      // never depend on whether a model caches.
+      const allInputTokens = inputTokens + cacheReadInputTokens + cacheWriteInputTokens;
+      if (!Number.isSafeInteger(allInputTokens)) {
+        return [
+          mappedEvent(context, {
+            kind: "failed",
+            failure: { category: "protocol", message: "OpenCode returned invalid usage data." },
+          }),
+        ];
+      }
       return [
         mappedEvent(context, {
           kind: "usage",
-          inputTokens,
+          inputTokens: allInputTokens,
           outputTokens,
           reasoningTokens,
           cacheReadInputTokens,

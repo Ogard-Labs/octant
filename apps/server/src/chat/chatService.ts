@@ -206,6 +206,7 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
+import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 import { SearxngEndpointRejected, validateSearxngEndpoint } from "./research/searxngEndpoint";
 import {
@@ -571,13 +572,13 @@ export interface ChatServiceOptions {
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
-    /** Every turn's end, whatever its outcome. */
-    readonly turnEnded?: (scope: NativeHarnessTurnScope) => void;
+    /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
+    readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
         readonly toolCalls: number;
-        readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
+        readonly turn?: TurnEndSummary;
         readonly contextSubject?: ContextSubjectRef;
       },
     ) => Promise<void>;
@@ -4975,6 +4976,7 @@ export class ChatService {
         ...(input.thread.projectId === undefined ? {} : { projectId: input.thread.projectId }),
       };
       this.#nativeHarness?.turnStarted(harnessScope);
+      let endedTurn: TurnEndSummary | undefined;
       try {
         await Effect.runPromise(
           Effect.scoped(
@@ -4986,6 +4988,9 @@ export class ChatService {
                 ...(this.#nativeHarness?.contextFor(harnessScope) ?? []),
                 ...input.prepared.context.providerContext,
               ],
+              onTurnEnded: (ended) => {
+                endedTurn = ended;
+              },
               ...(this.#nativeHarness === undefined
                 ? {}
                 : {
@@ -5103,7 +5108,7 @@ export class ChatService {
           ),
         );
       } finally {
-        this.#nativeHarness?.turnEnded?.(harnessScope);
+        this.#nativeHarness?.turnEnded?.(harnessScope, endedTurn);
       }
     } catch (error) {
       // A deliberate refusal throws a ChatServiceError with the category the

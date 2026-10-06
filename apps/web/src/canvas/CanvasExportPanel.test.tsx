@@ -1,4 +1,6 @@
 import type { CanvasExportOfferList } from "@octant/contracts/canvas-export";
+import { decodeCanvasExportFolderView } from "@octant/contracts/canvas-export-folder";
+import { decodeFolderBrowseResult } from "@octant/contracts/folder-browse";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -128,5 +130,92 @@ describe("CanvasExportPanel", () => {
     expect(screen.getByTestId("canvas-export-empty")).toHaveTextContent(
       "No export destination is installed yet.",
     );
+  });
+
+  it("names the file the export will write, and says when it replaces one", async () => {
+    const user = userEvent.setup();
+    const onPrepare = vi.fn(async () => ({
+      kind: "approval" as const,
+      card: {
+        schemaVersion: 1 as const,
+        kind: "canvas-export-approval" as const,
+        approvalId,
+        canvasId,
+        versionId,
+        sequence: 1,
+        targetId: "folder-on-this-mac",
+        destinationLabel: "A folder on this Mac",
+        format: "markdown" as const,
+        title: "Launch plan",
+        destinationPath: "/Users/henrik/Documents/Exports/Launch plan.md",
+        replacesExisting: true,
+        payload: "# Launch plan\n",
+        payloadDigest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        byteLength: 15,
+      },
+    }));
+    render(
+      <CanvasExportPanel offers={offers()} onDecide={vi.fn()} onPrepare={onPrepare as never} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Review export" }));
+
+    expect(await screen.findByTestId("canvas-export-destination")).toHaveTextContent(
+      "Replaces /Users/henrik/Documents/Exports/Launch plan.md",
+    );
+  });
+
+  it("shows the chosen folder and sends back the candidate the host listed", async () => {
+    const user = userEvent.setup();
+    const candidateId = "88888888-8888-4888-8888-888888888888";
+    const choose = vi.fn(async () => true);
+    const onExportFolderChosen = vi.fn();
+    render(
+      <CanvasExportPanel
+        folder={{
+          view: decodeCanvasExportFolderView({
+            kind: "canvas-export-folder-view",
+            settings: {
+              kind: "canvas-export-folder-settings",
+              overrides: [],
+              version: 0,
+              updatedAt: "2026-08-01T21:00:00.000Z",
+            },
+            scope: "project",
+            hostId: "local",
+            mode: "work",
+          }),
+          busy: false,
+          message: undefined,
+          browse: async () =>
+            decodeFolderBrowseResult({
+              candidates: [
+                {
+                  candidateId,
+                  displayName: "Exports",
+                  isGitRepository: false,
+                  isSelectable: true,
+                },
+              ],
+              breadcrumbs: [{ label: "henrik" }],
+              hasMore: false,
+              browsedAt: "2026-08-01T21:00:00.000Z",
+            }),
+          choose,
+        }}
+        offers={offers()}
+        onDecide={vi.fn()}
+        onExportFolderChosen={onExportFolderChosen}
+        onPrepare={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("canvas-export-folder")).toHaveTextContent("No folder chosen yet");
+
+    await user.click(screen.getByRole("button", { name: "Choose folder…" }));
+    await user.click(await screen.findByRole("button", { name: "Select" }));
+
+    expect(choose).toHaveBeenCalledWith(candidateId);
+    expect(onExportFolderChosen).toHaveBeenCalled();
   });
 });

@@ -437,6 +437,8 @@ describe("makeOpenAiCompatibleDriver", () => {
       input: [{ role: "user", content: "" }],
       stream: true,
       store: false,
+      // The Responses body carries the session's prompt cache key.
+      prompt_cache_key: String(sessionId),
     }).length;
     const prompt = "x".repeat(1_048_576 - emptyResponseLength);
     const fetch = vi.fn(async (_url: string | URL | Request) => responsesTextStream("accepted"));
@@ -591,6 +593,36 @@ describe("makeOpenAiCompatibleDriver", () => {
       cacheReadInputTokens: 64,
       reasoningTokens: 5,
     });
+  });
+
+  it("sends the harness session id as the Responses prompt cache key", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith("/models")) return new Response(null, { status: 404 });
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return responsesTextStream("answer");
+    });
+    const driver = makeDriver({
+      configuration: { ...configuration, protocol: "responses" },
+      fetch,
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const events = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({ sessionId, prompt: "hi", attachments: [], tools: [] });
+          expect(Array.from(yield* Fiber.join(events)).at(-1)?.kind).toBe("completed");
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    expect(bodies[0]?.prompt_cache_key).toBe(String(sessionId));
   });
 });
 

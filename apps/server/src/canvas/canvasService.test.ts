@@ -29,6 +29,7 @@ import {
   CanvasEventStore,
 } from "./canvasEventStore";
 import { CanvasProjection } from "./canvasProjection";
+import { CANVAS_TOOL_NAME, createCanvasAgentTools } from "./canvasAgentTools";
 import { CanvasService } from "./canvasService";
 import { createCanvasRefreshSourceResolver } from "./canvasRefreshSourceResolver";
 
@@ -548,6 +549,97 @@ describe("CanvasService", () => {
         .byThread({ mode: "chat", projectId: ids.project as never, threadId: ids.thread })
         .some((entry) => String(entry.canvasId) === String(result.card.canvasId)),
     ).toBe(true);
+  });
+
+  it("draws a small agent-written Canvas inside its thread and shows a card once it outgrows the thread", async () => {
+    const { service } = createService();
+    const tools = createCanvasAgentTools({
+      windowId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
+      thread: {
+        id: ids.thread,
+        projectId: ids.project,
+        providerInstanceId: ids.provider,
+        modelId: "octant-test-model",
+      } as never,
+      port: {
+        activeContext: () => ({ mode: "chat", projectId: ids.project }),
+        project: async () => ({ id: ids.project, type: "chat", lifecycle: "active" }),
+        canvas: service,
+        uuid: () => crypto.randomUUID(),
+        hostId: "local" as never,
+      },
+    });
+    const heading = {
+      blockId: "signups",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "heading",
+      level: 2,
+      text: "Weekly signups",
+    };
+    const board = {
+      blockId: "board",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "diagram",
+      nodes: [{ nodeId: "a", label: "A" }],
+      edges: [],
+    };
+    const card = (canvasId: unknown) =>
+      service
+        .threadReferenceCards({ mode: "chat", threadId: ids.thread, projectId: ids.project })
+        .find((entry) => String(entry.canvasId) === String(canvasId));
+
+    const created = await tools.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Signups",
+        presentation: "inline",
+        blocks: [heading],
+      }),
+    });
+    expect(created.isError).toBeUndefined();
+    const inline = created.result as { canvasId: string; presentation: string };
+    expect(inline.presentation).toBe("inline");
+    expect(card(inline.canvasId)).toMatchObject({ presentation: "inline", canvasCreatedAt: later });
+
+    // A revision that says nothing keeps inline, until its blocks no longer fit the thread.
+    const revised = await tools.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId: inline.canvasId,
+        expectedSequence: 1,
+        blocks: [heading, board],
+      }),
+    });
+    expect(revised.result).toMatchObject({
+      presentation: "sidebar",
+      presentationNote: expect.stringContaining("diagram"),
+    });
+    expect(card(inline.canvasId)).toMatchObject({
+      presentation: "sidebar",
+      canvasCreatedAt: later,
+    });
+
+    // Asking for inline with a board records the sidebar and says why.
+    const refused = await tools.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Architecture",
+        presentation: "inline",
+        blocks: [board],
+      }),
+    });
+    const sidebar = refused.result as { canvasId: string };
+    expect(refused.result).toMatchObject({
+      presentation: "sidebar",
+      presentationNote: expect.stringContaining("diagram"),
+    });
+    expect(service.get(sidebar.canvasId as never, boardContext, boardProject)).toMatchObject({
+      kind: "ready",
+      version: { definition: { presentation: "sidebar" } },
+    });
   });
 
   it("records a managed child as the author when the host stamps that run", () => {

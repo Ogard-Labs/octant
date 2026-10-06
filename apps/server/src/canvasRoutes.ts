@@ -30,6 +30,13 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import {
+  decodeCanvasExportFolderCommand,
+  decodeCanvasExportFolderResult,
+  decodeCanvasExportFolderView,
+  type CanvasExportFolderRefusalReason,
+  type CanvasExportFolderScope,
+} from "@octant/contracts/canvas-export-folder";
+import {
   authorizeCanvasInventoryAccess,
   filterCanvasInventoryEntries,
   projectInventoryEntryFromProjection,
@@ -38,6 +45,7 @@ import type { CanvasService } from "./canvas/canvasService";
 import type { CanvasCommentService } from "./canvas/canvasCommentService";
 import type { CanvasShareService } from "./canvas/canvasShareService";
 import type { CanvasExportService } from "./canvas/canvasExportService";
+import type { CanvasExportFolderService } from "./canvas/canvasExportFolderService";
 import { canvasExportEventActor } from "./canvas/canvasExportActor";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvas/canvasProjection";
@@ -61,6 +69,18 @@ export interface CanvasRouteDependencies {
   readonly canvasShareService?: CanvasShareService;
   /** Destination export. Absent when the host cannot journal an export. */
   readonly canvasExportService?: CanvasExportService;
+  /**
+   * Which folder a Project's exports are written to. Absent when the host
+   * cannot journal the choice, which also leaves the folder destination
+   * `not-connected`.
+   */
+  readonly canvasExportFolderService?: CanvasExportFolderService;
+  /**
+   * The canonical path behind a folder-browser candidate. The renderer sends a
+   * candidate id and this resolves it host-side, so a renderer never names a
+   * path itself. Throws when the candidate is expired, foreign, or off-mode.
+   */
+  readonly resolveFolderCandidate?: (windowId: WindowId, input: unknown) => string;
   /** Comment journal; a host without it serves boards without a conversation. */
   readonly canvasCommentService?: CanvasCommentService;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -137,6 +157,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "export-targets" &&
       route !== "export-prepare" &&
       route !== "export-decide" &&
+      route !== "export-folder" &&
       route !== "thread-reference-cards"
     ) {
       return undefined;
@@ -995,6 +1016,144 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
             }),
           ),
+          200,
+          origin,
+        );
+      }
+
+      if (route === "export-folder" && (request.method === "GET" || request.method === "POST")) {
+        const folders = dependencies.canvasExportFolderService;
+        // Reading where a Canvas exports to and choosing it are the same
+        // surface: a host without it has no folder destination at all, so it
+        // says so rather than offering a chooser that cannot store anything.
+        if (folders === undefined) {
+          return request.method === "GET"
+            ? failureResponse("Canvas export folders are unavailable on this host.", 404, origin)
+            : jsonResponse(
+                decodeCanvasExportFolderResult({
+                  kind: "canvas-export-folder-refused",
+                  reason: "canvas-unavailable",
+                  message: "Canvas export folders are unavailable on this host.",
+                }),
+                200,
+                origin,
+              );
+        }
+
+        if (request.method === "GET") {
+          if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
+            return failureResponse("Canvas export folder request is invalid.", 400, origin);
+          }
+          let canvasId;
+          try {
+            canvasId = decodeCanvasId(url.searchParams.get("canvasId") ?? "");
+          } catch {
+            return failureResponse("Canvas ID is invalid.", 400, origin);
+          }
+          const context = await resolveAuthorizedContext(
+            dependencies,
+            authenticatedWindowId,
+            canvasId,
+          );
+          if (context.kind !== "ok") {
+            return failureResponse(
+              "Canvas export is not available for this canvas.",
+              context.kind === "unauthorized" ? 403 : 404,
+              origin,
+            );
+          }
+          const entry = dependencies.canvasProjection.getById(canvasId);
+          if (entry === undefined) {
+            return failureResponse("Canvas export is not available for this canvas.", 404, origin);
+          }
+          // A Canvas carries its Project, so a choice made here is remembered
+          // for that Project. The host folder is the same choice made for a
+          // thread filed nowhere, and travels through the same command.
+          const scope: CanvasExportFolderScope = "project";
+          const provenance = entry.currentVersion.definition.provenance;
+          const folder = folders.folderFor(String(provenance.projectId));
+          const view = {
+            kind: "canvas-export-folder-view",
+            settings: folders.settings(),
+            ...(folder === undefined ? {} : { folder }),
+            scope,
+            hostId: String(provenance.hostId),
+            // Chat and Work browse the same folders; only Code is offered a
+            // mode of its own, and the browser records the mode a candidate
+            // was listed under.
+            mode: provenance.mode === "code" ? "code" : "work",
+          };
+          return jsonResponse(decodeCanvasExportFolderView(view), 200, origin);
+        }
+
+        const refusedFolder = (reason: CanvasExportFolderRefusalReason, message: string) =>
+          jsonResponse(
+            decodeCanvasExportFolderResult({
+              kind: "canvas-export-folder-refused",
+              reason,
+              message,
+            }),
+            200,
+            origin,
+          );
+        const body = await readJson(request);
+        if (body.kind !== "ok") {
+          return refusedFolder("malformed", "Canvas export folder request is malformed.");
+        }
+        let command;
+        try {
+          command = decodeCanvasExportFolderCommand(body.value);
+        } catch {
+          return refusedFolder("malformed", "Canvas export folder request is malformed.");
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          command.canvasId,
+        );
+        if (context.kind !== "ok") {
+          return refusedFolder(
+            "canvas-unavailable",
+            "That Canvas is not available in this workspace.",
+          );
+        }
+        const entry = dependencies.canvasProjection.getById(command.canvasId);
+        if (entry === undefined) {
+          return refusedFolder(
+            "canvas-unavailable",
+            "That Canvas is not available in this workspace.",
+          );
+        }
+        if (dependencies.resolveFolderCandidate === undefined) {
+          return refusedFolder(
+            "candidate-unavailable",
+            "This host cannot resolve a chosen folder.",
+          );
+        }
+        let folder: string;
+        try {
+          // The renderer sent a candidate id; the path is resolved here, from
+          // the record the host made when it listed the folder.
+          folder = dependencies.resolveFolderCandidate(authenticatedWindowId, {
+            hostId: String(entry.currentVersion.definition.provenance.hostId),
+            mode: command.mode,
+            candidateId: command.candidateId,
+          });
+        } catch {
+          return refusedFolder(
+            "candidate-unavailable",
+            "That folder is no longer available to choose.",
+          );
+        }
+        return jsonResponse(
+          folders.choose({
+            scope: command.scope,
+            ...(command.scope === "host"
+              ? {}
+              : { projectId: String(entry.currentVersion.definition.provenance.projectId) }),
+            folder,
+            expectedVersion: command.expectedVersion,
+          }),
           200,
           origin,
         );

@@ -128,7 +128,9 @@ greys and the same hairline carry the hierarchy on a white or graphite ground.
 Settings › Appearance › Style chooses how much of that palette the chrome
 uses. **Default** is the monochrome described above. **Vivid** lets the
 places that name something carry colour: the welcome greeting, the sidebar's
-count tiles, board column marks, and a Project's accent. Vivid draws every
+count tiles, board column marks, a Project's accent, and a thread's Canvases,
+which take the hue of what they hold (a plan purple, a chart or figures
+amber, a diagram teal, a mockup pink, a table or document blue). Vivid draws every
 hue from the preset's palette roles (`--octant-palette-*`, read through the
 `--oct-vivid-*` aliases in `styles/vivid.css`), so it follows the light or
 dark theme and any tinted preset, and it never recolours a warning, a
@@ -321,6 +323,15 @@ Side-task offers stack above the chips as hairline cards: a target icon
 (branch for a worktree, new-message otherwise), the title, a dismiss control,
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
+
+A thread's stats line sits under the follow-up composer, below the context strip
+and inside the same tray: one row of figures at the 12px meta step in the meta ink,
+separated by middle dots, with no hue on any number and no fill on the row. It wraps at
+narrow widths rather than scrolling, and a trailing quiet icon button hides it. A figure
+that is approximate carries a leading tilde and a dotted underline that explains it on
+hover; a figure the provider did not report is absent, never zero. The whole line is one
+button that opens the per-turn detail dialog, a plain definition list of tokens, timing,
+and cost with Previous and Next turn controls.
 
 Work follow-up composers use the same attached context strip as Code, showing
 the project and working folder instead of Git controls. Full paths require a
@@ -940,8 +951,10 @@ occupy the main workspace in turn, following the
 [workspace navigation rule](docs/design/workspace.md#navigation-and-projects).
 The directory provides search and All, Chat, Work, and Code filters. Project
 detail is thread-first, with memory, provider access, and canvases in compact
-expandable rows below the primary work. The thread list is named Chats for threads filed in no
-Project; Work and Code call it Recents. Rows are hairline rails, never cards;
+expandable rows below the primary work. Threads without a listed Project appear once in **No project**, a collapsible
+folder row in the Project tree with the same nested-thread layout as Projects.
+It has no horizontal divider or separate section heading and is absent when empty.
+It is a navigation group, not a persisted Project. Rows are hairline rails, never cards;
 provider marks are fixed-size inline and can be hidden without changing row
 height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the

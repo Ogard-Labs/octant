@@ -271,7 +271,126 @@ describe("official OpenCode client routing", () => {
     expect(reads).toBeGreaterThan(1);
   });
 
-  it("refuses beta session creation when the API cannot carry Octant permission rules", async () => {
+  it("creates, reads, prompts, and interrupts a 2.x session without sending permission rules", async () => {
+    const requests: Request[] = [];
+    const encoder = new TextEncoder();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (request: Request) => {
+        requests.push(request.clone());
+        const url = new URL(request.url);
+        if (request.method === "GET" && url.pathname === "/api/event") {
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      id: "e1",
+                      type: "session.next.text.delta",
+                      data: {
+                        sessionID: "ses_1",
+                        delta: "hello",
+                        assistantMessageID: "m",
+                        textID: "t",
+                      },
+                    })}\n\n`,
+                  ),
+                );
+              },
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          );
+        }
+        if (request.method === "POST" && url.pathname === "/api/session/ses_1/interrupt") {
+          return new Response(null, { status: 204 });
+        }
+        const sessionBody = {
+          data: {
+            id: "ses_1",
+            projectID: "project",
+            title: "turn",
+            location: { directory: "/tmp/project" },
+            model: { id: "gpt-5", providerID: "openai" },
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 1, updated: 1 },
+          },
+        };
+        const body = url.pathname.startsWith("/api/session")
+          ? sessionBody
+          : { data: { id: "ses_1" } };
+        return new Response(JSON.stringify(body), {
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode v2.0.22",
+        url: new URL("http://127.0.0.1:41727/"),
+      },
+      "/tmp/project",
+    );
+    const permission = [
+      { permission: "*", pattern: "*", action: "ask" },
+      { permission: "edit", pattern: "*", action: "deny" },
+      { permission: "external_directory", pattern: "*", action: "deny" },
+    ] as const;
+
+    await expect(
+      client.createSession({
+        permission: [...permission],
+        model: { providerId: "openai", modelId: "gpt-5" },
+      }),
+    ).resolves.toEqual({
+      id: "ses_1",
+      directory: "/tmp/project",
+      model: { id: "gpt-5", providerID: "openai" },
+    });
+    await expect(client.getSession("ses_1")).resolves.toMatchObject({ id: "ses_1" });
+    await client.prompt({
+      sessionId: "ses_1",
+      providerId: "openai",
+      modelId: "gpt-5",
+      prompt: "hello",
+      permission: [...permission],
+    });
+    const controller = new AbortController();
+    const events = await client.subscribe(controller.signal);
+    const first = await events[Symbol.asyncIterator]().next();
+    controller.abort();
+    await client.abort("ses_1");
+
+    expect(first.value).toMatchObject({
+      type: "session.next.text.delta",
+      properties: { delta: "hello", sessionID: "ses_1" },
+    });
+    expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
+      ["POST", "/api/session"],
+      ["GET", "/api/session/ses_1"],
+      ["POST", "/api/session/ses_1/model"],
+      ["POST", "/api/session/ses_1/prompt"],
+      ["GET", "/api/event"],
+      ["POST", "/api/session/ses_1/interrupt"],
+    ]);
+    expect(JSON.stringify(await requests[0]?.json())).not.toContain("permission");
+    expect(await requests[2]?.json()).toEqual({
+      model: { providerID: "openai", id: "gpt-5" },
+    });
+    expect(await requests[3]?.json()).toEqual({
+      prompt: { text: "hello" },
+      resume: true,
+    });
+    expect(
+      requests.every((request) => request.headers.get("authorization") === "Basic redacted"),
+    ).toBe(true);
+  });
+
+  it("refuses a 2.x session whose rules would allow an unasked write", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const client = makeOfficialOpenCodeClient(
@@ -279,7 +398,7 @@ describe("official OpenCode client routing", () => {
         authorization: "Basic redacted",
         pid: 1,
         runtime: "beta",
-        version: "opencode2 v0.0.0-beta-18721",
+        version: "opencode v2.0.22",
         url: new URL("http://127.0.0.1:41724/"),
       },
       "/tmp/project",
@@ -288,11 +407,20 @@ describe("official OpenCode client routing", () => {
     await expect(
       client.createSession({
         permission: [
-          { permission: "*", pattern: "*", action: "ask" },
+          { permission: "*", pattern: "*", action: "allow" },
           { permission: "external_directory", pattern: "*", action: "deny" },
         ],
       }),
-    ).rejects.toMatchObject({ category: "incompatible" });
+    ).rejects.toMatchObject({ category: "unsupported" });
+    await expect(client.replyPermission("request", "once")).rejects.toMatchObject({
+      category: "unsupported",
+    });
+    await expect(client.replyQuestion("request", ["yes"])).rejects.toMatchObject({
+      category: "unsupported",
+    });
+    await expect(
+      client.addMcpServer({ name: "octant", url: "http://127.0.0.1:9/" }),
+    ).rejects.toMatchObject({ category: "unsupported" });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

@@ -4,9 +4,15 @@ import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
-import { nativeHarnessSessionHeld, nativeHarnessStatusLabel } from "@octant/domain";
+import {
+  nativeHarnessSessionHeld,
+  nativeHarnessStatusLabel,
+  sessionStatsInputOf,
+  threadStats,
+} from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import "./native-harness.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -163,6 +169,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
     return error === undefined ? null : <OctantAlert tone="warning">{error}</OctantAlert>;
   }
   if (view === null) return null;
+  const stats = threadStats(sessionStatsInputOf(view));
   const paused = nativeHarnessSessionHeld(view.session.status);
 
   return (
@@ -324,6 +331,22 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
         <dd>{view.session.turnsRun}</dd>
         <dt>Context cuts</dt>
         <dd>{view.session.cutovers}</dd>
+        {stats.length === 0 ? null : (
+          <>
+            <dt>Usage</dt>
+            <dd className="native-harness-card__stats" data-testid="native-harness-stats">
+              {stats.map((stat) =>
+                stat.hint === undefined ? (
+                  <span key={stat.key}>{stat.text}</span>
+                ) : (
+                  <OctantTooltip key={stat.key} label={stat.hint} side="top">
+                    <span data-hinted="true">{stat.text}</span>
+                  </OctantTooltip>
+                ),
+              )}
+            </dd>
+          </>
+        )}
       </dl>
       {view.routes.length === 0 ? null : (
         <>

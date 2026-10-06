@@ -58,6 +58,7 @@
     "./canvas-skill": "./src/canvasSkill.ts",
     "./canvas-share": "./src/canvasShare.ts",
     "./canvas-export": "./src/canvasExport.ts",
+    "./canvas-export-folder": "./src/canvasExportFolder.ts",
     "./computer-use": "./src/computerUse.ts",
     "./diagnostics": "./src/diagnostics.ts",
     "./validation-composition": "./src/validationComposition.ts",

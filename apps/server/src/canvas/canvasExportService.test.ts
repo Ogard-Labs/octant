@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import { decodeCanvasId, decodeCanvasVersionId, type CanvasBlock } from "@octant/contracts/canvas";
@@ -19,6 +20,8 @@ import {
   type EventEnvelope,
 } from "@octant/contracts";
 import type { CanvasExportTarget } from "@octant/plugin-api/canvas-export";
+import type { CanvasExportActivationFacts } from "@octant/plugin-host/canvas-export-contributions";
+import type { ExtensionEffectiveState } from "@octant/contracts/extensions";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -26,7 +29,17 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { CanvasExportEventStore, registerCanvasExportEvents } from "./canvasExportEventStore";
-import { CanvasExportService, type CanvasExportDocument } from "./canvasExportService";
+import {
+  CanvasExportService,
+  type CanvasExportDocument,
+  type CanvasExportTargetBinding,
+} from "./canvasExportService";
+import { createCanvasExportFilePort } from "./canvasExportFilePort";
+import {
+  canvasExportTargetBindings,
+  type CanvasExportTargetRegistration,
+} from "./canvasExportTargets";
+import { FOLDER_EXPORT_TARGET_ID } from "./folderExportTarget";
 
 const directories: string[] = [];
 const start = Date.parse("2026-08-01T21:00:00.000Z");
@@ -62,6 +75,31 @@ afterEach(() => {
   }
 });
 
+/**
+ * A real folder on this machine for the folder destination to write into, and
+ * the registration that offers it. Nobody else can read it, and it is never a
+ * real person's folder.
+ */
+function exportFolder(options?: { readonly chosen?: boolean }): {
+  readonly folder: string;
+  readonly registration: CanvasExportTargetRegistration;
+} {
+  const folder = join(tmpdir(), `octant-export-${randomUUID()}`);
+  mkdirSync(folder, { mode: 0o700 });
+  directories.push(folder);
+  const chosen = options?.chosen !== false;
+  return {
+    folder,
+    registration: {
+      folderFor: () => (chosen ? folder : undefined),
+      files: createCanvasExportFilePort(),
+      home: tmpdir(),
+      standingOutsideApproval: false,
+      newTempId: randomUUID,
+    },
+  };
+}
+
 function document(text = "Scope"): CanvasExportDocument {
   return {
     canvasId,
@@ -84,11 +122,15 @@ interface FactOverrides {
   readonly installed?: boolean;
   readonly trusted?: boolean;
   readonly desiredEnabled?: boolean;
-  readonly effectiveState?: { kind: "effective" } | { kind: "blocked"; reason: string };
+  readonly effectiveState?: ExtensionEffectiveState;
   readonly connected?: boolean;
 }
 
-function binding(targetId: string, calls: CanvasExportRenderedOutput[], facts?: FactOverrides) {
+function binding(
+  targetId: string,
+  calls: CanvasExportRenderedOutput[],
+  facts?: FactOverrides,
+): CanvasExportTargetBinding {
   const target: CanvasExportTarget = {
     contribution: decodeCanvasExportContribution({
       schemaVersion: 1,
@@ -102,25 +144,23 @@ function binding(targetId: string, calls: CanvasExportRenderedOutput[], facts?: 
       return { kind: "receipt", receipt: { kind: "remote-id", remoteId: `copy-${targetId}` } };
     },
   };
-  return {
-    facts: {
-      installed: true,
-      trusted: true,
-      desiredEnabled: true,
-      effectiveState: { kind: "effective" as const },
-      connected: true,
-      ...facts,
-    },
-    target,
+  const activation: CanvasExportActivationFacts = {
+    installed: true,
+    trusted: true,
+    desiredEnabled: true,
+    effectiveState: { kind: "effective" },
+    connected: true,
+    ...facts,
   };
+  return { facts: activation, target };
 }
 
 function harness(
-  bindings?: ReadonlyArray<ReturnType<typeof binding>>,
+  bindings?: () => ReadonlyArray<CanvasExportTargetBinding>,
   options?: { readonly doc?: CanvasExportDocument },
 ) {
   const calls: CanvasExportRenderedOutput[] = [];
-  const held = bindings ?? [binding("reading-copy", calls)];
+  const held = bindings ?? (() => [binding("reading-copy", calls)]);
   let n = 0;
   const nextId = () => {
     n += 1;
@@ -138,7 +178,7 @@ function harness(
   const eventStore = new CanvasExportEventStore({ journal, uuid: nextId });
   const service = new CanvasExportService({
     load: () => options?.doc ?? document(),
-    targets: () => held as never,
+    targets: held,
     eventStore,
     uuid: nextId,
     clock: () => decodeUtcTimestamp(new Date(clockMs).toISOString()),
@@ -275,7 +315,7 @@ describe("canvas export service", () => {
   it("never offers or delivers an id declared by two bindings, whichever is admitted", async () => {
     const disabledCalls: CanvasExportRenderedOutput[] = [];
     const admittedCalls: CanvasExportRenderedOutput[] = [];
-    const { service, connection } = harness([
+    const { service, connection } = harness(() => [
       binding("shared-target", disabledCalls, { trusted: false }),
       binding("shared-target", admittedCalls),
     ]);
@@ -289,7 +329,7 @@ describe("canvas export service", () => {
     expect(prepared).toMatchObject({ kind: "refused", code: "not-offered" });
 
     // A unique id beside the ambiguity is still offered and delivered.
-    const both = harness([
+    const both = harness(() => [
       binding("shared-target", disabledCalls, { trusted: false }),
       binding("shared-target", admittedCalls),
       binding("unique-target", admittedCalls),
@@ -483,6 +523,129 @@ describe("canvas export service", () => {
     });
     expect(refused).toMatchObject({ kind: "refused", code: "unauthorized" });
     expect(calls).toHaveLength(0);
+    connection.close();
+  });
+
+  it("writes the exported file where the card named it, and journals the written path", async () => {
+    const { folder, registration } = exportFolder();
+    const { service, eventStore, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+
+    const prepared = service.prepare(prepareRequest(FOLDER_EXPORT_TARGET_ID), true);
+    expect(prepared.kind).toBe("approval");
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+    expect(prepared.card.destinationLabel).toBe("A folder on this Mac");
+    expect(prepared.card.destinationPath).toBe(join(folder, "Launch plan.md"));
+    expect(prepared.card.replacesExisting).toBe(false);
+    // Preparing shows the person the payload and the place; it writes neither.
+    expect(readdirSync(folder)).toEqual([]);
+
+    const exported = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(exported.kind).toBe("exported");
+    expect(readFileSync(join(folder, "Launch plan.md"), "utf8")).toBe(prepared.card.payload);
+    expect(eventStore.replay()[0]?.outcome).toEqual({
+      kind: "receipt",
+      receipt: { kind: "path", path: join(folder, "Launch plan.md") },
+    });
+    connection.close();
+  });
+
+  it("asks before replacing a file that is already there, and then replaces it", async () => {
+    const { folder, registration } = exportFolder();
+    writeFileSync(join(folder, "Launch plan.md"), "what the person kept", "utf8");
+    const { service, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+
+    const prepared = service.prepare(prepareRequest(FOLDER_EXPORT_TARGET_ID), true);
+    expect(prepared.kind).toBe("approval");
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+    // The card names the file it is about to replace, so approving it is the
+    // person's confirmation rather than a surprise.
+    expect(prepared.card.destinationPath).toBe(join(folder, "Launch plan.md"));
+    expect(prepared.card.replacesExisting).toBe(true);
+    expect(readFileSync(join(folder, "Launch plan.md"), "utf8")).toBe("what the person kept");
+
+    await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(readFileSync(join(folder, "Launch plan.md"), "utf8")).toBe(prepared.card.payload);
+    expect(readdirSync(folder)).toEqual(["Launch plan.md"]);
+    connection.close();
+  });
+
+  it("writes nothing at all when the person declines", async () => {
+    const { folder, registration } = exportFolder();
+    const { service, eventStore, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+    const prepared = service.prepare(prepareRequest(FOLDER_EXPORT_TARGET_ID), true);
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+
+    const denied = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "denied",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(denied.kind).toBe("denied");
+    expect(readdirSync(folder)).toEqual([]);
+    expect(eventStore.replay()).toEqual([]);
+    connection.close();
+  });
+
+  it("offers the folder destination as not connected until a folder is chosen", () => {
+    const { registration } = exportFolder({ chosen: false });
+    const { service, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+
+    const offer = service
+      .offers(canvasId)
+      ?.targets.find((candidate) => String(candidate.targetId) === FOLDER_EXPORT_TARGET_ID);
+
+    expect(offer?.status).toBe("not-connected");
+    expect(offer?.formats).toEqual(["markdown", "html"]);
+    connection.close();
+  });
+
+  it("reports the folder destination refused once the folder has gone", () => {
+    const { folder, registration } = exportFolder();
+    const { service, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+    rmSync(folder, { recursive: true, force: true });
+
+    const offer = service
+      .offers(canvasId)
+      ?.targets.find((candidate) => String(candidate.targetId) === FOLDER_EXPORT_TARGET_ID);
+
+    expect(offer?.status).toBe("refused");
+    expect(offer?.message).toContain("could not be read");
     connection.close();
   });
 });

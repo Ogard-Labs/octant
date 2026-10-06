@@ -14,6 +14,21 @@ import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const enabled = process.env.OCTANT_OPENCODE_SMOKE === "1";
 
+/**
+ * The driver probes from the process working directory. Run from a plain
+ * directory so a refusal reflects the runtime and jail, not a checkout this
+ * suite happens to live in.
+ */
+function inPlainDirectory<A>(run: () => Promise<A>): Promise<A> {
+  const previous = process.cwd();
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-smoke-")));
+  process.chdir(scratch);
+  return run().finally(() => {
+    process.chdir(previous);
+    rmSync(scratch, { recursive: true, force: true });
+  });
+}
+
 describe("real OpenCode integration", () => {
   it.skipIf(!enabled)(
     "runs only with OCTANT_OPENCODE_SMOKE=1 because it starts the installed authenticated CLI",
@@ -32,7 +47,16 @@ describe("real OpenCode integration", () => {
         permissionPersistence: () => "current-session",
       });
       const projectRoot = process.cwd();
-      const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+      const probe = await inPlainDirectory(() =>
+        Effect.runPromise(Effect.scoped(driver.probe({ instanceId }))),
+      );
+      if (probe.readiness === "incompatible") {
+        // A runtime the confined jail cannot serve is listed, never offered for turns.
+        expect(probe.reason).toBe("runtime-incompatible");
+        expect(probe.capabilities.streaming).toBe("unsupported");
+        await registry.closeAll();
+        return;
+      }
       expect(probe.readiness).toBe("ready");
       expect(probe.detectedVersion).toMatch(/^\d+\.\d+\.\d+/);
       expect(probe.models.length).toBeGreaterThan(0);
@@ -56,6 +80,83 @@ describe("real OpenCode integration", () => {
       expect(registry.hasRuntime(instanceId)).toBe(false);
     },
     60_000,
+  );
+
+  it.skipIf(!enabled)(
+    "completes one Chat turn against the installed runtime when credentials exist",
+    async () => {
+      const binaryPath = findExecutable("opencode");
+      expect(binaryPath, "enabled smoke requires an installed OpenCode CLI").not.toBeNull();
+      const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000305");
+      const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000306");
+      const registry = new ProviderRuntimeRegistry();
+      const driver = makeOpenCodeDriver({
+        instanceId,
+        binaryPath: binaryPath!,
+        process: makeOpenCodeProcessLive({ startupTimeoutMs: 20_000 }),
+        runtimeRegistry: registry,
+        idleLeaseMs: 0,
+        permissionPersistence: () => "current-session",
+      });
+      const projectRoot = process.cwd();
+      const kinds: string[] = [];
+      const failures: string[] = [];
+      try {
+        const probe = await inPlainDirectory(() =>
+          Effect.runPromise(Effect.scoped(driver.probe({ instanceId }))),
+        );
+        if (probe.readiness === "incompatible") {
+          expect(probe.reason).toBe("runtime-incompatible");
+          return;
+        }
+        if (probe.readiness !== "ready" || probe.models.length === 0) {
+          throw new Error(
+            `Installed OpenCode did not offer a usable model (${probe.readiness}). Credentials were not available for a live Chat turn.`,
+          );
+        }
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "chat" });
+              const events = yield* connection.subscribe;
+              const consume = yield* Effect.forkScoped(
+                Stream.runForEach(
+                  events.pipe(
+                    Stream.filter((event) => event.sessionId === sessionId),
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                  (event) =>
+                    Effect.sync(() => {
+                      if (kinds.length < 40) kinds.push(event.kind);
+                      if (event.kind === "failed") failures.push(event.failure.category);
+                    }),
+                ),
+              );
+              yield* connection.start({
+                sessionId,
+                modelId: probe.models[0]!.id,
+                executionPolicy: "approval-gated",
+              });
+              yield* connection.send({
+                sessionId,
+                prompt: "Reply with the single word ready. Do not use tools.",
+                attachments: [],
+                tools: [],
+              });
+              yield* Fiber.join(consume).pipe(Effect.timeout("90 seconds"));
+            }),
+          ),
+        );
+        expect(failures, kinds.join(",")).toEqual([]);
+        expect(kinds, kinds.join(",")).toContain("text-delta");
+        expect(kinds.at(-1), kinds.join(",")).toBe("completed");
+      } finally {
+        await registry.closeAll();
+      }
+    },
+    120_000,
   );
   it.skipIf(process.env.OCTANT_OPENCODE_TOOL_SMOKE !== "1")(
     "round-trips a read-only app tool through the installed runtime when explicitly enabled",

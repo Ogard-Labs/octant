@@ -103,6 +103,98 @@ describe("direct endpoint subscription-oauth credentials", () => {
     expect(JSON.stringify(probe)).not.toContain(REFRESH);
   });
 
+  it("refuses to resolve a bearer when the instance endpoint no longer matches the offer", async () => {
+    // The instance was signed in while its base URL matched the offer. The
+    // user then changed the base URL: resolution must fail closed against
+    // the CURRENT endpoint without contacting the host or minting a bearer.
+    let called = false;
+    const driver = makeOpenAiCompatibleDriver({
+      instanceId,
+      configuration: {
+        kind: "openai-compatible-http",
+        baseUrl: "https://attacker.example/v1",
+        authentication: "bearer",
+        protocol: "chat-completions",
+        manualModelIds: [modelId],
+        oauthDescriptorId: "openrouter",
+      },
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      credentialResolver: {
+        has: async () => true,
+        resolve: async () =>
+          encodeSubscriptionOAuthCredential({
+            kind: "subscription-oauth",
+            credentialRef,
+            descriptorId: "openrouter",
+            accountLabel: "OpenRouter account",
+          }),
+      },
+      subscriptionOAuth: {
+        refresh: async () => {
+          called = true;
+          return { kind: "unavailable" as const };
+        },
+        access: async () => {
+          called = true;
+          return { kind: "granted" as const, accessToken: ACCESS };
+        },
+      },
+      fetch: async () => {
+        called = true;
+        return Response.json({});
+      },
+      clock: () => "2026-10-04T14:00:00.000Z",
+    });
+    const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(probe).toMatchObject({
+      readiness: "incompatible",
+      capabilities: { appManagedTools: "unsupported" },
+    });
+    expect(called).toBe(false);
+    expect(JSON.stringify(probe)).not.toContain(ACCESS);
+  });
+
+  it("resolves the bearer when the endpoint still matches the offer origin", async () => {
+    // Canonical-origin match: path differences do not refuse the real offer.
+    const seen: string[] = [];
+    const fetch = async (url: string | URL | Request, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers).get("authorization") ?? "");
+      return Response.json({ object: "list", data: [{ id: modelId }] });
+    };
+    const driver = makeOpenAiCompatibleDriver({
+      instanceId,
+      configuration: {
+        kind: "openai-compatible-http",
+        baseUrl: "https://openrouter.ai/api/v1",
+        authentication: "bearer",
+        protocol: "chat-completions",
+        manualModelIds: [modelId],
+        oauthDescriptorId: "openrouter",
+      },
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      credentialResolver: {
+        has: async () => true,
+        resolve: async () =>
+          encodeSubscriptionOAuthCredential({
+            kind: "subscription-oauth",
+            credentialRef,
+            descriptorId: "openrouter",
+            accountLabel: "OpenRouter account",
+          }),
+      },
+      // A non-expiring dialect grant: no expiresAt on the wire.
+      subscriptionOAuth: {
+        refresh: async () => ({ kind: "unavailable" as const }),
+        access: async () => ({ kind: "granted" as const, accessToken: ACCESS }),
+      },
+      fetch,
+      clock: () => "2026-10-04T14:00:00.000Z",
+    });
+    const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("ready");
+    expect(seen.some((header) => header === `Bearer ${ACCESS}`)).toBe(true);
+  });
+
   it("reports incompatible when the stored binding does not match the instance", async () => {
     let called = false;
     const driver = makeOpenAiCompatibleDriver({

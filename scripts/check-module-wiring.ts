@@ -116,6 +116,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/client-runtime/src/replicaMembershipClient.ts",
     "Loopback client for the host-only replica membership commands. The Settings sync surface is the product caller; until it lands, the loopback client tests are the caller. Remove once a Settings sync view imports the client.",
   ],
+  [
+    "apps/server/src/replica/s3ReplicaStore.ts",
+    "S3-compatible replica store. Nothing publishes or pulls yet, so no product caller imports it. Remove once the replica service opens the store.",
+  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */

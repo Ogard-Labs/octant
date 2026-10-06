@@ -117,6 +117,8 @@ function upcastPersistedShellSettings(value: unknown): unknown {
       "showThreadProviderIcons" in withSidebarBackground
         ? withSidebarBackground.showThreadProviderIcons
         : true,
+    showThreadStats:
+      "showThreadStats" in withSidebarBackground ? withSidebarBackground.showThreadStats : true,
     // Open or closed is renderer state. Stored floating, pinned, or hidden
     // presentation is dropped before decode rather than restored as a panel.
     environmentPresentationByMode: DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
