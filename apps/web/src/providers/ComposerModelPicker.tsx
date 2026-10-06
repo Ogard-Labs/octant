@@ -23,6 +23,7 @@ import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { rememberModelChoice } from "./modelChoiceMemory";
 import { readRecentModels, rememberModel } from "./modelRecents";
 import { ProviderGlyph } from "./ProviderGlyph";
+import { useModelToolVerifier } from "./ModelToolVerificationContext";
 
 /**
  * One selectable option the selected model declares (effort, reasoning, speed
@@ -111,6 +112,10 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   const [favorites, setFavorites] = useState<ReadonlySet<string>>(() => readModelFavorites());
   const [recentModels, setRecentModels] = useState<ReadonlyArray<string>>(() => readRecentModels());
   const ariaLabel = props.ariaLabel ?? "Provider and model";
+  const verifyTools = useModelToolVerifier();
+  // The key of the model being verified, and what the last request found.
+  const [verifyingTools, setVerifyingTools] = useState<string>();
+  const [toolVerifyNotes, setToolVerifyNotes] = useState<Readonly<Record<string, string>>>({});
 
   const selectedGroup = useMemo(
     () =>
@@ -342,6 +347,15 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     ]
       .filter((part): part is string => part !== undefined)
       .join(" · ");
+    // A Chat-only model on an endpoint Octant drives can be proven otherwise.
+    // Work and Code list it disabled, so the action is always there; Chat lists
+    // every model, so only the one in use carries it.
+    const verifyKey = `${String(group.instance.id)}:${String(modelId)}`;
+    const verifyNote = toolVerifyNotes[verifyKey];
+    const offersToolVerification =
+      verifyTools !== undefined &&
+      picker.toolsVerifiable === true &&
+      (unavailable || selected || verifyNote !== undefined);
     return (
       <div
         className={`composer-model-picker__row${selected ? " composer-model-picker__row--selected" : ""}`}
@@ -392,6 +406,37 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             <Check aria-hidden="true" className="composer-model-picker__model-check" size={16} />
           ) : null}
         </OctantButton>
+        {offersToolVerification ? (
+          <div className="composer-model-picker__verify">
+            <span>{verifyNote ?? "Chat only: tools not verified."}</span>
+            <OctantButton
+              aria-label={`Verify tools for ${picker.model.displayName} (${group.instance.displayName})`}
+              disabled={verifyingTools !== undefined}
+              onClick={() => {
+                setVerifyingTools(verifyKey);
+                void verifyTools(group.instance.id, modelId)
+                  .then((outcome) =>
+                    setToolVerifyNotes((notes) => ({
+                      ...notes,
+                      [verifyKey]:
+                        outcome === "supported"
+                          ? "Tools verified."
+                          : outcome === "unsupported"
+                            ? "Did not call the test tool; stays Chat only."
+                            : "Could not verify tools.",
+                    })),
+                  )
+                  .finally(() => setVerifyingTools(undefined));
+              }}
+              size="sm"
+              title="Sends one request to the endpoint, which it may bill."
+              type="button"
+              variant="ghost"
+            >
+              {verifyingTools === verifyKey ? "Verifying…" : "Verify tools"}
+            </OctantButton>
+          </div>
+        ) : null}
         <OctantButton
           aria-label={`${favorited ? "Remove" : "Add"} ${picker.model.displayName} (${group.instance.displayName}) ${favorited ? "from" : "to"} favorites`}
           aria-pressed={favorited}
