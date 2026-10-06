@@ -9,15 +9,26 @@ import type {
   CanvasExportTargetOffer,
   CanvasExportTargetStatus,
 } from "@octant/contracts/canvas-export";
+import type {
+  FolderCandidateId,
+  FolderBrowseRequest,
+  FolderBrowseResult,
+} from "@octant/contracts/folder-browse";
 import { useState } from "react";
+import { FolderPicker } from "../projects/FolderPicker";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import type { CanvasExportFolderState } from "./useCanvasExportFolder";
 
 export interface CanvasExportPanelProps {
   readonly offers: CanvasExportOfferList;
   readonly onPrepare: (request: CanvasExportPrepareRequest) => Promise<CanvasExportPrepareResult>;
   readonly onDecide: (request: CanvasExportDecideRequest) => Promise<CanvasExportDecideResult>;
+  /** The folder this Canvas exports to. Absent on a host without that surface. */
+  readonly folder?: CanvasExportFolderState;
+  /** Called after a folder was chosen, so the offers are read again. */
+  readonly onExportFolderChosen?: () => void;
 }
 
 const STATUS_LABEL: Record<CanvasExportTargetStatus, string> = {
@@ -30,6 +41,10 @@ const STATUS_LABEL: Record<CanvasExportTargetStatus, string> = {
  * Asks the host to render a Canvas, then shows the payload and destination
  * before anything is sent. The host re-checks approval; this panel does not
  * call a destination itself.
+ *
+ * A destination that names the file it will write shows that path here, because
+ * the person is approving a place: an existing file is only replaced once the
+ * card naming it is approved.
  */
 export function CanvasExportPanel(props: CanvasExportPanelProps) {
   const ready = props.offers.targets.filter((target) => target.status === "ready");
@@ -40,8 +55,14 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
   const [card, setCard] = useState<CanvasExportApprovalCard | undefined>(undefined);
   const [message, setMessage] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [pickingFolder, setPickingFolder] = useState(false);
 
   const chosenFormat = formats.includes(format) ? format : formats[0];
+  const folder = props.folder;
+  // Narrowed once here: an optional property of an optional object loses its
+  // narrowing inside a callback, which is where the picker is built.
+  const folderView = folder?.view;
+  const folderBrowse = folder?.browse;
 
   async function prepare() {
     if (selected === undefined || selected.status !== "ready" || chosenFormat === undefined) return;
@@ -67,6 +88,12 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function chooseFolder(candidateId: FolderCandidateId) {
+    if (folder === undefined) return;
+    setPickingFolder(false);
+    if (await folder.choose(candidateId)) props.onExportFolderChosen?.();
   }
 
   async function decide(decision: CanvasExportDecideRequest["decision"]) {
@@ -107,6 +134,23 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
         Send a rendered copy to a destination. Nothing leaves until you approve the payload and the
         destination.
       </p>
+      {folder === undefined || folderView === undefined ? null : (
+        <div className="canvas-export__folder">
+          <span className="canvas-export__folder-label">Folder</span>
+          <span className="canvas-export__folder-path" data-testid="canvas-export-folder">
+            {folderView.folder ?? "No folder chosen yet"}
+          </span>
+          <OctantButton
+            disabled={folder.busy || folderBrowse === undefined}
+            onClick={() => setPickingFolder(true)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Choose folder…
+          </OctantButton>
+        </div>
+      )}
       {props.offers.targets.length === 0 ? (
         <p className="canvas-export__note" data-testid="canvas-export-empty">
           No export destination is installed yet.
@@ -189,6 +233,13 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
           label="Approve export"
           summary={`Export to ${card.destinationLabel}`}
         >
+          {card.destinationPath === undefined ? null : (
+            <p className="canvas-export__destination" data-testid="canvas-export-destination">
+              {card.replacesExisting === true
+                ? `Replaces ${card.destinationPath}`
+                : `Writes ${card.destinationPath}`}
+            </p>
+          )}
           <pre className="canvas-export__payload" data-testid="canvas-export-payload">
             {card.payload}
           </pre>
@@ -199,8 +250,42 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
           {message}
         </p>
       )}
+      {folder?.message === undefined ? null : (
+        <p className="canvas-export__note" role="status">
+          {folder.message}
+        </p>
+      )}
+      {pickingFolder && folderView !== undefined && folderBrowse !== undefined ? (
+        <FolderPicker
+          client={{ browse: (request) => browseRequest(folderBrowse, request) }}
+          hint="Pick the folder Octant writes exported files into."
+          hostId={folderView.hostId}
+          mode={folderView.mode}
+          onCancel={() => setPickingFolder(false)}
+          onSelectCandidate={(candidate) => void chooseFolder(candidate.candidateId)}
+          showGitInit={false}
+          title="Export folder"
+        />
+      ) : null}
     </div>
   );
+}
+
+/**
+ * The picker names the host and mode it browses with; this client already
+ * knows both from the host, so it takes only the part of the request that
+ * describes where in the tree the person is.
+ */
+function browseRequest(
+  browse: NonNullable<CanvasExportFolderState["browse"]>,
+  request: FolderBrowseRequest,
+): Promise<FolderBrowseResult> {
+  return browse({
+    ...(request.parentCandidateId === undefined
+      ? {}
+      : { parentCandidateId: request.parentCandidateId }),
+    ...(request.search === undefined ? {} : { search: request.search }),
+  });
 }
 
 function destinationLabel(target: CanvasExportTargetOffer): string {
