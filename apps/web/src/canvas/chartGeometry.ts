@@ -119,6 +119,8 @@ export function ringPath(
 export interface NiceAxis {
   readonly domain: YDomain;
   readonly ticks: ReadonlyArray<number>;
+  /** The distance between gridlines, which sets the precision their labels need. */
+  readonly step: number;
 }
 
 /**
@@ -129,10 +131,15 @@ export interface NiceAxis {
 export function niceAxis(domain: YDomain, includeZero: boolean, target = 4): NiceAxis {
   let min = includeZero ? Math.min(0, domain.min) : domain.min;
   let max = includeZero ? Math.max(0, domain.max) : domain.max;
-  if (!Number.isFinite(min) || !Number.isFinite(max))
-    return { domain: { min: 0, max: 1 }, ticks: [0, 1] };
-  if (max - min <= Number.EPSILON) {
-    const pad = Math.abs(max) <= Number.EPSILON ? 1 : Math.abs(max) * 0.1;
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return { domain: { min: 0, max: 1 }, ticks: [0, 1], step: 1 };
+  }
+  // Readings a few float steps apart (3.3 and 1.1 + 2.2) are one value: the
+  // tolerance scales with their size, or the step falls below what a float
+  // can add and the gridlines never end.
+  const scale = Math.max(Math.abs(min), Math.abs(max));
+  if (max - min <= Math.max(Number.EPSILON, scale * 1e-9)) {
+    const pad = scale <= Number.EPSILON ? 1 : scale * 0.1;
     min -= pad;
     max += pad;
   }
@@ -144,26 +151,52 @@ export function niceAxis(domain: YDomain, includeZero: boolean, target = 4): Nic
       .find((candidate) => candidate >= rough) ?? 10 * magnitude;
   const start = Math.floor(min / step) * step;
   const end = Math.ceil(max / step) * step;
-  const ticks: number[] = [];
-  // Rounded through the step's own precision so 0.1 + 0.2 never labels a line 0.30000000000000004.
+  // Rounded through the step's own precision so 0.1 + 0.2 never labels a line
+  // 0.30000000000000004, and counted by index so nothing accumulates.
   const decimals = Math.max(0, -Math.floor(Math.log10(step)) + 1);
-  for (let value = start; value <= end + step / 2; value += step) {
-    ticks.push(Number(value.toFixed(decimals)));
+  const count = Math.round((end - start) / step);
+  const ticks: number[] = [];
+  for (let index = 0; index <= count; index += 1) {
+    ticks.push(Number((start + index * step).toFixed(decimals)));
   }
-  return { domain: { min: start, max: end }, ticks };
+  return { domain: { min: start, max: end }, ticks, step };
 }
 
-/** A tick label short enough for a gutter: 1.2k, 3.4M, 0.25. */
-export function formatTick(value: number): string {
+const COMPACT_UNITS: ReadonlyArray<{
+  readonly size: number;
+  readonly from: number;
+  readonly suffix: string;
+}> = [
+  { size: 1_000_000_000, from: 1_000_000_000, suffix: "B" },
+  { size: 1_000_000, from: 1_000_000, suffix: "M" },
+  { size: 1_000, from: 10_000, suffix: "k" },
+];
+
+/**
+ * A tick label short enough for a gutter: 1.2k, 3.4M, 0.25. Given the axis
+ * step, it keeps exactly the precision that tells neighbouring gridlines
+ * apart: 0.001 steps stay 0.001, 0.002, and 10001, 10002 are not all "10k".
+ */
+export function formatTick(value: number, step?: number): string {
   const size = Math.abs(value);
-  if (size >= 1_000_000_000) return `${trimNumber(value / 1_000_000_000)}B`;
-  if (size >= 1_000_000) return `${trimNumber(value / 1_000_000)}M`;
-  if (size >= 10_000) return `${trimNumber(value / 1_000)}k`;
-  return trimNumber(value);
+  for (const unit of COMPACT_UNITS) {
+    if (size < unit.from) continue;
+    const decimals = step === undefined ? 2 : decimalsFor(step / unit.size);
+    // On an axis, a compact label that needs more than one decimal to stay
+    // distinct reads worse than the plain number.
+    if (step !== undefined && decimals > 1) break;
+    return `${trimNumber(value / unit.size, decimals)}${unit.suffix}`;
+  }
+  return trimNumber(value, step === undefined ? 2 : decimalsFor(step));
 }
 
-function trimNumber(value: number): string {
-  return String(Number(value.toFixed(2)));
+function decimalsFor(step: number): number {
+  if (!(step > 0)) return 2;
+  return Math.min(8, Math.max(0, Math.ceil(-Math.log10(step) - 1e-9)));
+}
+
+function trimNumber(value: number, decimals: number): string {
+  return String(Number(value.toFixed(decimals)));
 }
 
 export interface PlotPoint {

@@ -371,6 +371,35 @@ describe("Canvas create panel and card list", () => {
       projectId: null,
     });
   });
+
+  it("drops the previous thread's Canvases as soon as another thread opens", async () => {
+    const otherThread = "33333333-3333-4333-8333-333333333333";
+    const threadReferenceCards = vi
+      .fn()
+      .mockResolvedValueOnce({
+        mode: "chat",
+        threadId,
+        projectId: null,
+        cards: [referenceCardFixture()],
+      })
+      // The other thread's read never settles, so only the reset can clear the list.
+      .mockReturnValueOnce(new Promise(() => undefined));
+    const client = { threadReferenceCards } as unknown as CanvasClient;
+    function ThreadCards(props: { readonly threadId: string }) {
+      const loaded = useThreadCanvasCards({
+        client,
+        mode: "chat",
+        projectId: null,
+        threadId: props.threadId as never,
+      });
+      return <CanvasThreadReferenceCardList cards={loaded.cards} error={loaded.error} />;
+    }
+    const view = render(<ThreadCards threadId={threadId} />);
+    await screen.findByTestId("canvas-card-title");
+
+    view.rerender(<ThreadCards threadId={otherThread} />);
+    expect(screen.queryByTestId("canvas-card-title")).not.toBeInTheDocument();
+  });
   describe("a Canvas drawn inside its thread", () => {
     const definition = {
       schemaVersion: 4,

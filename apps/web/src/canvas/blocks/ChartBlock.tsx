@@ -151,7 +151,7 @@ function CartesianChart({
     ),
     barLike || block.chartType === "area",
   );
-  const tickLabels = axis.ticks.map(formatTick);
+  const tickLabels = axis.ticks.map((tick) => formatTick(tick, axis.step));
   const gutter = Math.min(
     64,
     Math.max(28, Math.max(...tickLabels.map((label) => label.length)) * 7 + 12),

@@ -105,7 +105,7 @@ beside the conversation.
 ### Small Canvases inside the thread
 
 When you ask for something small, such as a chart, a few numbers, a short table,
-or a sequence diagram, the agent can ask for it to be shown in the thread
+or a sequence or state diagram, the agent can ask for it to be shown in the thread
 (`"presentation": "inline"`). The Canvas then appears at the end of the turn
 that made it, drawn with the same blocks it has in the sidebar. It is still one
 Canvas: it keeps its versions, it appears in your library, and you can share or
@@ -120,11 +120,13 @@ export it.
 - Hover a line or bar chart to read the value under the pointer. **View chart
   data** lists every reading.
 - A tall Canvas is cut off at a fixed height and fades out. Its button opens
-  the whole Canvas in the sidebar. Scrolling always moves the thread, never the
-  Canvas.
+  the whole Canvas in the sidebar, or in its own tab in Chat. Scrolling always
+  moves the thread, never the Canvas.
 
-Inside the thread a Canvas holds at most 12 blocks. A board, plan, or mockup
-always opens in the sidebar, because you work on those there. If a Canvas grows
+Inside the thread a Canvas holds at most 12 blocks. A Canvas with a diagram
+board (the generic diagram you can drag), a plan, or a mockup always appears as
+a row that opens it in the sidebar, or in its own tab in Chat, because you work
+on those there. Sequence and state diagrams can be shown inline. If a Canvas grows
 past that, later or through your own edits, it turns back into a card. The
 agent is told when that happens.
 

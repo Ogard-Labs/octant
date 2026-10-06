@@ -121,3 +121,27 @@ describe("smooth line tangents", () => {
     );
   });
 });
+
+describe("value axis edge cases", () => {
+  it("finishes on readings only a float step apart instead of looping forever", () => {
+    const axis = niceAxis({ min: 3.3, max: 1.1 + 2.2 }, false);
+    expect(axis.ticks.length).toBeGreaterThan(1);
+    expect(axis.ticks.length).toBeLessThan(10);
+    expect(axis.ticks[0]).toBeLessThanOrEqual(3.3);
+  });
+
+  it("gives every gridline a distinct label for tiny and for large readings", () => {
+    const small = niceAxis({ min: 0.001, max: 0.004 }, false);
+    const smallLabels = small.ticks.map((tick) => formatTick(tick, small.step));
+    expect(new Set(smallLabels).size).toBe(smallLabels.length);
+    expect(smallLabels).toContain("0.002");
+
+    const large = niceAxis({ min: 10_000, max: 10_004 }, false);
+    const largeLabels = large.ticks.map((tick) => formatTick(tick, large.step));
+    expect(new Set(largeLabels).size).toBe(largeLabels.length);
+    expect(largeLabels).toContain("10002");
+
+    const thousands = niceAxis({ min: 10_000, max: 90_000 }, false);
+    expect(thousands.ticks.map((tick) => formatTick(tick, thousands.step))).toContain("40k");
+  });
+});
