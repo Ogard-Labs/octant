@@ -24,19 +24,24 @@
   overflow: visible;
 }
 
-/* The context ring is the one composer mark that carries colour in every
-   style: a reader checks how full the window is at a glance, and a grey arc
-   beside grey controls had to be read rather than seen. The arc takes the
-   palette's amber and a near-full window turns it red. The track is a faint step
-   of the text ink rather than of the arc's hue: at a low share a tinted track
-   nearly vanished on both grounds and the short arc read as a spinner on a
-   finished thread, where a neutral groove reads as a gauge in light and dark. */
+/* The ring is a gauge drawn in theme roles, never in a palette hue: the
+   Default theme is monochrome, so the arc wears the primary ink and a theme
+   that wants colour gets it by setting a role. Near the limit the arc takes
+   the warning text role and a heavier stroke. Default's warning role carries
+   no hue, so there the weight tells "nearly full" apart from "filling" and the
+   trigger's name carries the figure; a theme with an amber warning role gets
+   its amber arc with no change here. The track is a faint step of the text ink
+   rather than of the arc's colour: at a low share a tinted track nearly
+   vanished on both grounds and the short arc read as a spinner on a finished
+   thread, where a neutral groove reads as a gauge in light and dark. */
 .composer-context-meter {
-  --composer-context-meter-ink: var(--octant-palette-orange, var(--octant-text-primary));
+  --composer-context-meter-ink: var(--octant-text-primary);
+  --composer-context-meter-weight: 2;
 }
 
 .composer-context-meter[data-fill="high"] {
-  --composer-context-meter-ink: var(--octant-palette-red, var(--oct-warn-fg));
+  --composer-context-meter-ink: var(--octant-warning-text);
+  --composer-context-meter-weight: 3;
 }
 
 .composer-context-meter__track {
@@ -48,9 +53,11 @@
    snaps between renders reads as a redraw rather than as consumption. */
 .composer-context-meter__used {
   stroke: var(--composer-context-meter-ink);
-  stroke-width: 2;
+  stroke-width: var(--composer-context-meter-weight);
   stroke-linecap: round;
-  transition: stroke-dasharray var(--oct-motion-base) var(--oct-ease-motion);
+  transition:
+    stroke-dasharray var(--oct-motion-base) var(--oct-ease-motion),
+    stroke-width var(--oct-motion-base) var(--oct-ease-motion);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -60,8 +67,8 @@
 }
 
 /* Past four fifths of the window the next long turn may not fit; the ring
-   turns red (above), and the trigger's name carries the figure for anyone
-   who cannot see the change. */
+   takes the warning ink and a heavier arc (above), and the trigger's name
+   carries the figure for anyone who cannot see the change. */
 
 /* A provider usage limit is at warning or exhausted. The dot is the only
    at-a-glance alert left in the composer row now that the status line lives

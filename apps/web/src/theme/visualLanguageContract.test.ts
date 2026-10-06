@@ -1,5 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
+import { resolveEffectiveTokens } from "@octant/theme/fallback";
 import { describe, expect, it } from "vitest";
 
 const webRoot = join(process.cwd(), "src");
@@ -527,5 +529,46 @@ describe("the public-block visual language", () => {
     expect(dashboard).toContain("<SurfaceEmpty");
     expect(limits).not.toContain("OctantCard");
     expect(limits).toContain('className="surface-row provider-limits__row"');
+  });
+
+  describe("the composer's context ring", () => {
+    // The ring's own rules, without the popover that shares the stylesheet.
+    function ringRules(): ReadonlyArray<{ readonly selector: string; readonly body: string }> {
+      const css = readFileSync(join(webRoot, "context/context.css"), "utf8").replace(
+        /\/\*[\s\S]*?\*\//g,
+        "",
+      );
+      return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+        .map((match) => ({ selector: (match[1] ?? "").trim(), body: match[2] ?? "" }))
+        .filter((rule) => rule.selector.startsWith(".composer-context-meter"));
+    }
+
+    it("draws in theme roles rather than a palette hue", () => {
+      // The palette hues are for categorical marks. The ring drew its arc in
+      // the palette's orange and red, which put a colour on the monochrome
+      // Default theme's one gauge; a theme that wants one sets a role.
+      const hues = ringRules().filter((rule) => /palette/.test(rule.body));
+      expect(hues).toEqual([]);
+    });
+
+    it("gives the Default theme a neutral arc at every fill, in light and dark", () => {
+      const inks = ringRules()
+        .flatMap((rule) =>
+          [...rule.body.matchAll(/--composer-context-meter-ink:\s*var\(--octant-([a-z-]+)\)/g)].map(
+            (match) => match[1] ?? "",
+          ),
+        )
+        .sort();
+      expect(inks).toEqual(["text-primary", "warning-text"]);
+
+      for (const mode of ["light", "dark"] as const) {
+        const { tokens } = resolveEffectiveTokens({ ...DEFAULT_THEME_SETTINGS, mode }, false);
+        for (const role of inks) {
+          const hex = (tokens as Record<string, string | undefined>)[role] ?? "";
+          const channels = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i)?.slice(1);
+          expect(new Set(channels), `${role} in ${mode} is ${hex}`).toHaveProperty("size", 1);
+        }
+      }
+    });
   });
 });

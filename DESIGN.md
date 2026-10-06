@@ -1216,12 +1216,13 @@ groups results and shows a shortcut badge when a row maps to a user-bindable
 chord. Shared dialogs keep the 14px overlay radius and overlay shadow.
 
 The context meter is a circular composer control, not a dock tab: a 16px
-gauge with a full track and a 2px round-capped arc filled clockwise from
-twelve o'clock by the used share. It is the one composer mark that carries
-colour in every style: the arc is the palette's amber with its track a faint
-step of the same hue, and from 80% the ring turns red, so how full the window
-is reads at a glance. It
-opens an opaque 320px popover: a header with the used and
+gauge with a full faint track and a 2px round-capped arc filled clockwise from
+twelve o'clock by the used share. It is drawn in theme roles, never palette
+hues, so the Default theme stays monochrome: the arc wears the primary ink over
+a neutral track. From 80% the arc takes the warning text role and thickens to
+3px; Default's warning role carries no hue, so there the weight alone says
+"nearly full", and a theme that sets an amber warning role gets an amber arc.
+It opens an opaque 320px popover: a header with the used and
 maximum figures and share, one 4px segmented bar whose empty track is the free
 space, a breakdown folded behind a chevron each time the popover opens, the
 provider's limits as a name, a reset countdown or weekday, a share, and a thin
