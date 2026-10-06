@@ -361,8 +361,8 @@ asked up front; it is derived from the chips and shown on the thread once it
 exists.
 
 Under the composer, Work and Code start screens offer a row of action tiles and
-then a Running now strip, both on the composer's measure and ahead of Code's
-prompt suggestions, so a running thread is never under the fold. The tiles are
+then the card area, both on the composer's measure and ahead of Code's prompt
+suggestions, so a running thread is never under the fold. The tiles are
 always a three-column grid, one column under 560px, so one or two tiles keep a
 tile's width instead of stretching across the row; a detail line wraps to a
 second line before it is cut. A tile is a card
@@ -373,17 +373,30 @@ and **Review N changes** (Finished threads that wait for you) when N is above
 zero, where N counts unread threads that are not running or rested, the
 sidebar's To review rule. Open terminal starts a Project terminal and pins it in
 Zen, the only place one lives. Work offers the same tiles without a terminal,
-because Work has no shell. Review opens the Inbox. Running now is a section
-label with an Open board link and up to four cards, one per executing thread:
-provider mark, title, a small spinner, how long ago the thread last moved, a
-Project chip, in Code a mono branch chip, and the host's latest activity line
-in a mono well. The host keeps no turn start time on the board or in
-navigation, so a card says "Active 4m ago" rather than an elapsed time, and a
-fact the host does not report is left out rather than invented. Running
-threads show here instead of in Continue, so one thread is not listed twice.
-Each part leaves when it has nothing to show. Under the Vivid style the tiles'
+because Work has no shell. Review opens the Inbox. The tiles leave when they
+have nothing to show.
+
+The card area is a ghost **Customize** button right-aligned under the tiles
+(icon at the 14px step and the label), then a grid of cards, two columns and one
+under 560px. A card uses the card recipe (`OctantCard`: hairline ring, no
+shadow, the card fill) at a compact 12px rhythm. Its header is an icon at the
+16px step in secondary ink, the title as a section label, and a count as
+tabular meta text; its body is rows or one quiet line in the detail step. No
+card has a hue of its own: the default theme stays monochrome, and a state is
+carried by wording and weight. A row is a bare card-shaped button whose face
+fills at 5% ink on hover and focus, the provider mark and a row label on its
+first line, and a mono meta line for what is happening. The Customize panel is a
+popover at most 340px wide: one row per card with a drag grip, the icon, the
+title, up and down icon buttons, and a switch, then **Reset to default**; a
+dragged row marks its drop target with a hairline above it. **Working now**
+lists up to five rows of threads and agent runs in progress, each with the
+provider mark, the title, a time, and a one-line mono step; it says "Nothing is
+running right now." when empty. The host keeps no turn start time on the board
+or in navigation, so a thread's time says "Active 4m ago" and only an agent run
+says "Running 12m"; a fact the host does not report is left out rather than
+invented. Under the Vivid style the tiles'
 icon squares take the blue, orange, and purple palette hues. Code's five prompt
-suggestions are one compact row of label-only chips under Running now, and
+suggestions are one compact row of label-only chips under the cards, and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
 button: hairline, resting fill, hover and focus fill); the prompt rides as the
 chip's tooltip and description and fills the composer when chosen, nothing more.
