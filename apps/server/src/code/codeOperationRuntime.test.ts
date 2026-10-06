@@ -1819,7 +1819,7 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("preserves provider context occupancy and compaction point in live events and replayed conversation usage", async () => {
+  it("preserves provider context occupancy and compaction point and window make-up in live events and replayed conversation usage", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const fixture = runtimeFixture({ provider: providerDriver(connection) });
@@ -1841,6 +1841,11 @@ describe("CodeOperationRuntime", () => {
         contextTokens: 27_600,
         contextWindow: 258_400,
         autoCompactThreshold: 167_000,
+        contextBreakdown: {
+          parts: [
+            { kind: "messages" as const, tokens: 900, accuracy: "provider-reported" as const },
+          ],
+        },
       };
       await Effect.runPromise(Queue.offer(queue, providerEvent(usage)));
       await vi.waitFor(async () => {
@@ -1854,6 +1859,7 @@ describe("CodeOperationRuntime", () => {
         contextTokens: 27_600,
         contextWindow: 258_400,
         autoCompactThreshold: 167_000,
+        contextBreakdown: usage.contextBreakdown,
       });
     } finally {
       fixture.close();

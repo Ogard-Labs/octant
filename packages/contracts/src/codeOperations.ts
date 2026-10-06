@@ -39,6 +39,7 @@ import {
   ProviderInstanceId,
   ProviderModelId,
   ProviderSessionId,
+  ProviderContextBreakdown,
   ProviderResumeCursor,
 } from "./providers";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
@@ -1265,6 +1266,11 @@ const UsageEvent = Schema.Struct({
    * no reader may infer a figure from the model's window.
    */
   autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  /**
+   * What the window held after this report: the runtime's own categories, or
+   * the parts Octant counted when it reported none. Absent means neither.
+   */
+  contextBreakdown: Schema.optional(ProviderContextBreakdown),
 }).annotations(strict);
 /**
  * How much of a provider usage window this account has spent, as the provider
@@ -1394,6 +1400,11 @@ export const CodeConversationTurnUsage = Schema.Struct({
    * no reader may infer a figure from the model's window.
    */
   autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  /**
+   * What the window held after this report: the runtime's own categories, or
+   * the parts Octant counted when it reported none. Absent means neither.
+   */
+  contextBreakdown: Schema.optional(ProviderContextBreakdown),
 }).annotations(strict);
 export type CodeConversationTurnUsage = typeof CodeConversationTurnUsage.Type;
 

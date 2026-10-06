@@ -696,6 +696,34 @@ describe("Code operation contracts", () => {
     ).toMatchObject({ admission: "refused" });
   });
 
+  it("records what fills the window on a usage frame, so a reopened thread shows the same parts", () => {
+    const frame = {
+      threadId: ids.thread,
+      operationId: ids.operation,
+      cursor: 5,
+      occurredAt: "2026-07-21T12:00:00.000Z",
+      event: {
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 4,
+        contextTokens: 36_000,
+        contextBreakdown: {
+          parts: [
+            { kind: "messages", tokens: 10, accuracy: "provider-reported" },
+            { kind: "octant-tools", tokens: 410, accuracy: "conservative-heuristic", count: 5 },
+          ],
+        },
+      },
+    } as const;
+    expect(decodeCodeOperationEventFrame(frame)).toEqual(frame);
+    expect(() =>
+      decodeCodeOperationEventFrame({
+        ...frame,
+        event: { ...frame.event, contextBreakdown: { parts: [{ kind: "messages", tokens: 10 }] } },
+      }),
+    ).toThrow();
+  });
+
   it("records where the runtime compacts by itself on a usage frame, only as a whole token count", () => {
     const frame = {
       threadId: ids.thread,

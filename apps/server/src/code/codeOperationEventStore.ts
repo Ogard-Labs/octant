@@ -604,6 +604,9 @@ export class CodeOperationEventStore {
             ...(frame.event.autoCompactThreshold === undefined
               ? {}
               : { autoCompactThreshold: frame.event.autoCompactThreshold }),
+            ...(frame.event.contextBreakdown === undefined
+              ? {}
+              : { contextBreakdown: frame.event.contextBreakdown }),
           };
         } else if (frame.event.kind === "provider-limit") {
           // Window names are the provider's own, so two providers routinely

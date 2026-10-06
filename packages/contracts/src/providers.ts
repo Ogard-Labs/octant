@@ -1736,6 +1736,68 @@ export const ProviderFailure = Schema.Struct({
 }).annotations(strict);
 export type ProviderFailure = typeof ProviderFailure.Type;
 
+/**
+ * What fills a provider-run window, by kind. A kind is the provider's own
+ * category where it reports one, or something Octant itself puts in the
+ * window and can count (`octant-tools`). The set is closed so a surface can
+ * give each kind one name and one colour.
+ */
+export const ProviderContextPartKind = Schema.Literal(
+  "system-prompt",
+  "system-tools",
+  "octant-tools",
+  "mcp-tools",
+  "memory-files",
+  "skills",
+  "agents",
+  "messages",
+  "reserved",
+);
+export type ProviderContextPartKind = typeof ProviderContextPartKind.Type;
+
+/**
+ * One part of the window with the honesty of its number. `provider-reported`
+ * is the runtime's own count; the other accuracies are Octant's estimate and
+ * must be shown as one. `count` is how many things the part holds (tools,
+ * files, agents), where that is known.
+ */
+export const ProviderContextPart = Schema.Struct({
+  kind: ProviderContextPartKind,
+  tokens: Schema.Int.pipe(Schema.nonNegative()),
+  accuracy: Schema.Literal(
+    "provider-reported",
+    "exact-tokenizer",
+    "model-family-estimate",
+    "conservative-heuristic",
+  ),
+  count: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+}).annotations(strict);
+export type ProviderContextPart = typeof ProviderContextPart.Type;
+
+/**
+ * Tools the runtime knows about but has not loaded into the window. They hold
+ * no share of it, so only how many there are, where known, is carried.
+ */
+export const ProviderDeferredContextPart = Schema.Struct({
+  kind: Schema.Literal("system-tools", "mcp-tools"),
+  /** Absent when the runtime named the group but not how many it holds. */
+  count: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+}).annotations(strict);
+export type ProviderDeferredContextPart = typeof ProviderDeferredContextPart.Type;
+
+/**
+ * The parts of a provider-run window, as of the report that carries it. A
+ * runtime that reports categories supplies them as `provider-reported`; for
+ * one that does not, Octant supplies only what it can count itself. The parts
+ * never claim the whole window: whatever the occupancy holds beyond them is
+ * the reader's remainder, not a part.
+ */
+export const ProviderContextBreakdown = Schema.Struct({
+  parts: Schema.Array(ProviderContextPart).pipe(Schema.maxItems(16)),
+  deferred: Schema.optional(Schema.Array(ProviderDeferredContextPart).pipe(Schema.maxItems(4))),
+}).annotations(strict);
+export type ProviderContextBreakdown = typeof ProviderContextBreakdown.Type;
+
 const ProviderRuntimeEventFields = {
   instanceId: ProviderInstanceId,
   sessionId: ProviderSessionId,
@@ -1815,6 +1877,15 @@ export const ProviderRuntimeEvent = Schema.Union(
     kind: Schema.Literal("tool-start"),
     toolCallId: Schema.NonEmptyTrimmedString,
     toolName: Schema.NonEmptyTrimmedString,
+    /**
+     * What the tool was asked to do: the first line of the command a shell
+     * tool runs, the checkout-relative path a file tool edits. The adapter
+     * reduces it to one redacted, bounded line before it crosses, so a raw
+     * command or path never rides on a normalized event, and a consumer still
+     * redacts before showing it. Optional because many providers report none;
+     * never file contents.
+     */
+    argument: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -1874,6 +1945,11 @@ export const ProviderRuntimeEvent = Schema.Union(
      * no reader may infer a figure from the model's window.
      */
     autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+    /**
+     * What the window held after this report, when the runtime reported its
+     * make-up or Octant could count what it adds. Absent means neither.
+     */
+    contextBreakdown: Schema.optional(ProviderContextBreakdown),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

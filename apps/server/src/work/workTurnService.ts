@@ -62,6 +62,7 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
   decideWorkTurnAuthority,
   assertProviderAllowedByProjectPolicy,
@@ -306,6 +307,8 @@ export interface WorkTurnServiceDependencies {
    * waiting on the turn (the goal loop) reads its figures from here.
    */
   readonly usageStore?: WorkTurnUsageStore;
+  /** Where a running turn's start time and latest step are kept for the navigation read. */
+  readonly liveTurns?: LiveTurnRegistry;
   /**
    * Read access to journaled subagent runs. A turn that claims to carry a
    * finished run's result is verified here — parent thread, terminal
@@ -363,6 +366,7 @@ export class WorkTurnService {
   readonly #safeInputBudgetTokens: number;
   readonly #liveUpdates: WorkTurnLiveStore;
   readonly #usageStore: WorkTurnUsageStore | undefined;
+  readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #agentRuns: WorkTurnServiceDependencies["agentRuns"];
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
@@ -408,6 +412,7 @@ export class WorkTurnService {
     this.#safeInputBudgetTokens = dependencies.safeInputBudgetTokens ?? WORK_TURN_SAFE_INPUT_TOKENS;
     this.#liveUpdates = dependencies.liveUpdates ?? new WorkTurnLiveStore();
     this.#usageStore = dependencies.usageStore;
+    this.#liveTurns = dependencies.liveTurns;
     this.#agentRuns = dependencies.agentRuns;
   }
 
@@ -1198,6 +1203,11 @@ export class WorkTurnService {
         onTurnEnded: (ended) => {
           endedTurn = ended;
         },
+        ...(this.#liveTurns === undefined
+          ? {}
+          : {
+              liveTurn: this.#liveTurns.tracker(String(input.command.threadId), "work-navigation"),
+            }),
         onUsage: (usage) => {
           const projected = this.#projection.lookup(input.command.requestId);
           if (

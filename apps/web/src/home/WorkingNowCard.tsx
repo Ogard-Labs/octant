@@ -114,7 +114,16 @@ function WorkingNowRows(props: {
                     {row.step === undefined ? (
                       <span className="oct-meta working-now__step">{row.projectName}</span>
                     ) : (
-                      <span className="oct-meta oct-meta--mono working-now__step">{row.step}</span>
+                      <span
+                        className={
+                          row.stepKind === "status"
+                            ? "oct-meta working-now__step"
+                            : "oct-meta oct-meta--mono working-now__step"
+                        }
+                        title={row.step}
+                      >
+                        {row.step}
+                      </span>
                     )}
                     {row.host === undefined ? null : (
                       <span className="oct-meta working-now__host">{row.host}</span>
@@ -141,7 +150,7 @@ function WorkingNowRows(props: {
   );
 }
 
-/** A run says how long it has run; a thread, whose turn start the host keeps no record of, says when it last moved. */
+/** Work with a known start says how long it has run; a thread whose host reports none says when it last moved. */
 function WorkingNowTime(props: { readonly row: WorkingNowRow; readonly now: number }) {
   const { row } = props;
   if (row.startedAt !== undefined) {
