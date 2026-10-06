@@ -112,7 +112,7 @@ try {
   page.setDefaultTimeout(15_000);
   await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(
-    "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap",
+    "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list",
   );
   await Bun.$`mkdir -p ${evidenceDir}`.quiet();
 

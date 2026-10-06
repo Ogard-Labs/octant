@@ -737,6 +737,32 @@ their total and the cells can be walked with the arrow keys; these are view
 state and revise nothing. The disclosed table is the accessible reading, and it
 shows a missing coordinate as an empty cell rather than a zero.
 
+**Bar list.** A ranking of magnitudes — the "hottest files" or "slowest tests"
+panel (`packages/domain/src/canvasBarListLayout.ts`). Each row is a label, a
+value, an optional second value, and an optional manifest source. Rows sort
+largest first by default; a tie keeps the author's order. The list shows a top N
+with Show all up to the row budget, and both the order and the number shown are
+view state. A bar's length is its share of the largest value — the reading is
+the length, so bars use the neutral ink, or the sequential scale when the
+magnitude is the subject; a value is never negative. A label that reads as a
+path uses the shared path style: the directory is dimmed and the file name keeps
+full ink in the code font. A row that names a manifest source offers Open file
+through the allowlisted open-source action, which the host reauthorizes. The
+screen renderer and the static SVG export draw the same list. The disclosed
+table is the accessible reading of every row, including the rows Show all holds
+back.
+
+**Metric tiles.** Consecutive metric blocks are gathered into one responsive
+row of two to four tiles, and a metric's value is set large in tabular numerals
+so a row of numbers aligns. A metric may name how its value reads (`format`), a
+unit, a `delta`, and a `goodDirection` of `up`, `down`, or `neutral` so a
+delta's tone is never guessed: a direction that agrees with the change reads in
+`--oct-success`, one that disagrees in `--oct-danger`, and an absent or
+`neutral` direction keeps the neutral ink so the arrow and the signed value
+carry the reading. It may also carry a `sparkline` of at most 256 recent
+readings, drawn as a glance with no axis, and a short `caption`. The value, the
+delta, and the caption are the accessible numbers; the sparkline is decorative.
+
 **Motion.** A chart transitions only on a state change — a legend toggle, a zoom
 — never on entrance. A transition lasts at most 200ms and is off under
 `prefers-reduced-motion: reduce` and when the workspace sets

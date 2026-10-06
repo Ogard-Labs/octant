@@ -115,10 +115,12 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           .filter((part) => part.length > 0)
           .join(": "),
       );
-    case "metric":
+    case "metric": {
+      const value = `${reading(block.label)}: ${scalar(block.value, block.format)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`;
       return paragraph(
-        `${reading(block.label)}: ${scalar(block.value, block.format)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`,
+        block.caption === undefined ? value : `${value} — ${reading(block.caption)}`,
       );
+    }
     case "progress":
       return paragraph(
         `${reading(block.label)}: ${String(Math.round(block.value * 100))}%${block.detail === undefined ? "" : ` — ${reading(block.detail)}`}`,
@@ -348,6 +350,33 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
             day.date,
             scalar(day.value, block.format),
             day.note === undefined ? "" : reading(day.note),
+          ]),
+        },
+      ];
+    }
+    case "bar-list": {
+      // The ranking as a table: one row per entry, largest first would be a
+      // view choice, so the exported document keeps the author's order and
+      // carries every row the block declares.
+      const hasSecondary = block.rows.some((row) => row.secondaryValue !== undefined);
+      return [
+        {
+          kind: "table",
+          headers: [
+            "Item",
+            reading(block.valueLabel ?? "Value"),
+            ...(hasSecondary ? [reading(block.secondaryLabel ?? "Second")] : []),
+          ],
+          rows: block.rows.map((row) => [
+            reading(row.label),
+            scalar(row.value, block.format),
+            ...(hasSecondary
+              ? [
+                  row.secondaryValue === undefined
+                    ? ""
+                    : scalar(row.secondaryValue, block.secondaryFormat ?? block.format),
+                ]
+              : []),
           ]),
         },
       ];

@@ -362,4 +362,46 @@ describe("drawing a preview of an artifact", () => {
     // Eight days are laid out between the first and last reading.
     expect((markup.match(/<rect/g) ?? []).length).toBeGreaterThanOrEqual(8);
   });
+
+  it("draws a bar list as a bar and a value per row, with no script", () => {
+    const barList = {
+      blockId: "hottest-files",
+      schemaVersion: 6,
+      kind: "bar-list",
+      valueLabel: "Edits",
+      rows: [
+        { label: "apps/web", value: 41 },
+        { label: "packages/domain", value: 10 },
+      ],
+    } as unknown as CanvasBlock;
+
+    const markup = renderArtifactThumbnail(definition([barList], "Hot files"));
+
+    expect(markup.startsWith("<svg")).toBe(true);
+    expect(markup).not.toMatch(/<\s*script/i);
+    // The background plus one bar per row, and the labels beside them.
+    expect(markup).toContain("apps/web");
+    expect((markup.match(/<rect/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("draws a metric sparkline as a polyline when the block carries one", () => {
+    const withSpark = {
+      blockId: "metric-1",
+      schemaVersion: 6,
+      kind: "metric",
+      label: "Lines of code",
+      value: 1_360_000,
+      format: "compact",
+      sparkline: [1.2, 1.24, 1.27, 1.36],
+      caption: "since last release",
+    } as unknown as CanvasBlock;
+    const plain = { ...(withSpark as unknown as Record<string, unknown>) };
+    delete plain["sparkline"];
+
+    const withMarkup = renderArtifactThumbnail(definition([withSpark]));
+    const plainMarkup = renderArtifactThumbnail(definition([plain as unknown as CanvasBlock]));
+
+    expect(withMarkup).toContain("<polyline");
+    expect(plainMarkup).not.toContain("<polyline");
+  });
 });

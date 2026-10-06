@@ -1,11 +1,16 @@
 import type { CanvasBlock, CanvasDefinition } from "@octant/contracts/canvas";
 import { MAX_ARTIFACT_PREVIEW_CHARACTERS } from "@octant/contracts/artifact-library";
 import { CHART_BAR_RADIUS, CHART_LINE_WIDTH } from "@octant/theme";
+import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { layoutCanvasTreemap } from "@octant/domain/canvas-treemap-layout";
 import {
   layoutCanvasHeatmapCalendar,
   layoutCanvasHeatmapMatrix,
 } from "@octant/domain/canvas-heatmap-layout";
+import {
+  BAR_LIST_DEFAULT_VISIBLE_ROWS,
+  layoutCanvasBarList,
+} from "@octant/domain/canvas-bar-list-layout";
 
 /**
  * Drawing an artifact, once.
@@ -42,6 +47,7 @@ const DRAWN_KINDS = new Set<CanvasBlock["kind"]>([
   "mockup",
   "treemap",
   "heatmap",
+  "bar-list",
   "code-excerpt",
   "pseudocode",
   "diff",
@@ -175,6 +181,7 @@ function drawBlock(
         height: 20,
       };
     case "metric":
+      return { markup: metric(block, y, width, palette), height: 30 };
     case "status":
       return {
         markup:
@@ -208,6 +215,8 @@ function drawBlock(
       return { markup: treemap(block, y, width, palette), height: CHART_HEIGHT };
     case "heatmap":
       return { markup: heatmap(block, y, width, palette), height: CHART_HEIGHT };
+    case "bar-list":
+      return { markup: barList(block, y, width, palette), height: barListHeight(block) };
     case "code-excerpt":
     case "pseudocode":
     case "diff":
@@ -729,6 +738,107 @@ function heatCell(
   const span = max - min;
   const ratio = span > 0 ? (value - min) / span : 0.5;
   return `<rect x="${left}" y="${top}" width="${boxWidth}" height="${boxHeight}" fill="${palette.accent}" opacity="${opacityFor(0.2 + 0.65 * clampUnit(ratio))}"/>`;
+}
+
+/**
+ * A metric thumbnail: its label and value, an optional caption, and the same
+ * sparkline the screen draws, scaled into a strip on the right. The numbers
+ * read through the shared formatter so the preview matches the document.
+ */
+function metric(
+  block: Extract<CanvasBlock, { readonly kind: "metric" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const parts = [
+    text(PADDING, y + 8, clamp(block.label, 20), 8, palette.muted),
+    text(PADDING, y + 20, clamp(String(block.value), 14), 13, palette.ink, 600),
+  ];
+  if (block.caption !== undefined) {
+    parts.push(text(PADDING, y + 28, clamp(block.caption, titleLength(width)), 7, palette.muted));
+  }
+  const spark = block.sparkline;
+  if (spark !== undefined && spark.length >= 2) {
+    const sparkWidth = Math.min(80, Math.max(24, Math.round(width / 3)));
+    parts.push(sparkline(spark, PADDING + width - sparkWidth, y + 9, sparkWidth, 11, palette));
+  }
+  return parts.join("");
+}
+
+function sparkline(
+  values: ReadonlyArray<number>,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  const span = max - min;
+  const points = values
+    .map((value, index) => {
+      const px = values.length <= 1 ? x + width / 2 : x + (index / (values.length - 1)) * width;
+      const share = span > 0 ? (value - min) / span : 0.5;
+      return `${String(round(px))},${String(round(y + height - share * height))}`;
+    })
+    .join(" ");
+  return `<polyline points="${points}" fill="none" stroke="${palette.accent}" stroke-width="${String(CHART_LINE_WIDTH)}" opacity="0.85"/>`;
+}
+
+/** One row of a bar list in a thumbnail, and the band each row gets. */
+const BAR_LIST_ROW_HEIGHT = 9;
+const BAR_LIST_BAR_HEIGHT = 4;
+
+function barListHeight(block: Extract<CanvasBlock, { readonly kind: "bar-list" }>): number {
+  const visible = Math.min(block.rows.length, BAR_LIST_DEFAULT_VISIBLE_ROWS);
+  return Math.max(BAR_LIST_ROW_HEIGHT, visible * BAR_LIST_ROW_HEIGHT) + 2;
+}
+
+/**
+ * A bar list drawn from the shared layout: a label, a bar whose length is the
+ * row's share of the largest value, and its formatted value. The top rows are
+ * drawn, matching what the screen shows before Show all.
+ */
+function barList(
+  block: Extract<CanvasBlock, { readonly kind: "bar-list" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const layout = layoutCanvasBarList(block, { limit: BAR_LIST_DEFAULT_VISIBLE_ROWS });
+  const labelWidth = Math.round(width * 0.46);
+  const valueWidth = Math.round(width * 0.18);
+  const barX = PADDING + labelWidth + 4;
+  const barWidth = Math.max(8, width - labelWidth - valueWidth - 12);
+  return layout.rows
+    .map((row, index) => {
+      const top = y + index * BAR_LIST_ROW_HEIGHT;
+      const filled = Math.max(1, Math.round(barWidth * row.fraction));
+      const bar = `<rect x="${String(round(barX))}" y="${String(round(top + (BAR_LIST_ROW_HEIGHT - BAR_LIST_BAR_HEIGHT) / 2))}" width="${String(filled)}" height="${String(BAR_LIST_BAR_HEIGHT)}" rx="${String(CHART_BAR_RADIUS)}" fill="${palette.accent}" opacity="${opacityFor(0.3 + 0.6 * row.fraction)}"/>`;
+      const label = text(
+        PADDING,
+        top + 7,
+        clamp(row.label, Math.max(6, Math.floor(labelWidth / 5))),
+        7,
+        palette.ink,
+      );
+      const value = text(
+        round(PADDING + width - valueWidth),
+        top + 7,
+        clamp(formatCanvasNumber(row.value, block.format), 12),
+        7,
+        palette.muted,
+      );
+      return label + bar + value;
+    })
+    .join("");
 }
 
 function text(
