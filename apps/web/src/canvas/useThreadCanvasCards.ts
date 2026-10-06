@@ -39,9 +39,9 @@ export function useThreadCanvasCards(input: ThreadCanvasCardsInput): ThreadCanva
   onCardsObserved.current = input.onCardsObserved;
   const { client, mode, projectId, refreshKey, threadId } = input;
   // Another thread's Canvases must never show in this one's transcript while
-  // its own are read, or stay there if that read fails. A refresh of the same
-  // thread keeps what it has, so a settled turn does not blink the list, and
-  // neither does the project resolving once the thread has loaded.
+  // its own are read, or stay there if that read fails. The same thread keeps
+  // what it has, whether a settled turn refreshes it or its Project resolves
+  // after the first read, so its rows do not blink or move under a click.
   useEffect(() => {
     setCards(NO_CARDS);
   }, [mode, threadId]);
