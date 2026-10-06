@@ -1640,7 +1640,10 @@ native harness in `apps/server/src/harness`:
   a transport failure (authentication, timeout) is reported rather than
   recorded as "unsupported". Admission, the AgentRun transport check, and the
   Chat preflight read that set per model, so verifying one model never offers
-  tools to its siblings. The command accepts only the models the endpoint
+  tools to its siblings. A tool call in a real turn widens nothing either: the
+  provider-level `appManagedTools` flag of an OpenAI-compatible or Foundry
+  profile stays "unsupported", because a tool call proves only the model that
+  made it. The command accepts only the models the endpoint
   lists or the profile configures, and only a Foundry profile's configured
   deployments, because its catalogue lists base models that are not
   deployments. Ollama has no verify action until its driver runs the tool
