@@ -32,6 +32,7 @@ import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Cause, Deferred, Effect, Fiber, Option, Schema, Scope, Stream } from "effect";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
@@ -237,6 +238,8 @@ export interface ChatTurnRunnerInput {
   }) => Promise<void>;
   /** Told once when the attempt is over, whatever its outcome, with what it cost and how it ran. */
   readonly onTurnEnded?: (turn: TurnEndSummary) => void;
+  /** Tells the navigation read what the running turn is doing, from its start to its end. */
+  readonly liveTurn?: LiveTurnTracker;
 }
 
 export type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -307,6 +310,8 @@ export class ChatTurnRunner {
       // Re-based when the prompt is sent, so the wait for a first token never
       // includes starting the provider's session.
       let timing = startTurnMetrics(turnStartedAt);
+      input.liveTurn?.begin(turnStartedAt);
+      yield* Effect.addFinalizer(() => Effect.sync(() => input.liveTurn?.end()));
       const endOfTurn = (stopReason: TurnStopReason) =>
         summarizeTurnEnd({
           metrics: timing,
@@ -804,6 +809,7 @@ export class ChatTurnRunner {
               Effect.gen(function* () {
                 yield* idle.touch;
                 timing = observeTurnMetrics(timing, event);
+                input.liveTurn?.observe(event);
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > maxEvents) {
                   yield* persistOutcome("interrupted", {

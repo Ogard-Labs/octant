@@ -104,6 +104,7 @@ import { makeOpenAiCompatibleDriver } from "../providers/openAiCompatibleDriver"
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { ResearchRouter } from "./research/researchRouter";
 import { ThreadWorkService } from "./threadWorkService";
+import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { ChatService, ChatServiceError } from "./chatService";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
 
@@ -213,6 +214,7 @@ function openFixture(options?: {
   }>;
   readonly chatEnabled?: { current: boolean };
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
+  readonly liveTurns?: import("../liveTurn/liveTurnRegistry").LiveTurnRegistry;
   readonly resolveSideChatSourceContext?: (input: {
     readonly sidecarThreadId: ChatThreadId;
     readonly windowId?: WindowId;
@@ -417,6 +419,7 @@ function openFixture(options?: {
         .all() as Array<{ readonly thread_json: string }>;
       return rows.map((row) => JSON.parse(row.thread_json));
     },
+    readChatNavigation: () => readChatNavigation(connection),
     readChatThreadView: (threadId: ChatThreadId) => readChatThreadView(connection, threadId),
     readChatContent: (contentId: string) => readChatContent(connection, contentId),
     searchChatThreads: (query: string) => searchChatThreads(connection, query),
@@ -591,6 +594,7 @@ function openFixture(options?: {
 
   const attachmentStore = new ChatAttachmentStore(dataDirectory);
   const service = new ChatService({
+    ...(options?.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
     ...(options?.beforeAttachmentPurge === undefined
       ? {}
       : { beforeAttachmentPurge: options.beforeAttachmentPurge }),
@@ -4968,6 +4972,73 @@ describe("ChatService", () => {
     expect(
       fakeDriver.sentTurns[1]?.context?.some((block) => block.text === "Second question"),
     ).toBe(false);
+  });
+
+  it("shows a running answer's start time and latest tool step on navigation, and clears them when it ends", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const driver = {
+      acquire: () =>
+        Effect.sync(() => {
+          const queue = Effect.runSync(Queue.unbounded<never>());
+          return {
+            subscribe: Effect.succeed(Stream.fromQueue(queue)),
+            start: (input: { readonly sessionId: string }) =>
+              Effect.succeed({ sessionId: input.sessionId }),
+            send: (input: { readonly sessionId: string }) =>
+              Effect.gen(function* () {
+                const emit = (event: Record<string, unknown>) =>
+                  Queue.offer(queue, { sessionId: input.sessionId, ...event } as never);
+                yield* emit({
+                  kind: "tool-start",
+                  toolCallId: "call-1",
+                  toolName: "Command",
+                  argument: "bun run test",
+                });
+                yield* Effect.promise(() => gate);
+                yield* emit({ kind: "text-delta", text: "Done." });
+                yield* emit({ kind: "usage", inputTokens: 10, outputTokens: 5 });
+                yield* emit({ kind: "completed" });
+              }),
+            interrupt: () => Effect.void,
+            stop: () => Effect.void,
+            answerApproval: () => Effect.void,
+            answerUserInput: () => Effect.void,
+            answerTool: () => Effect.void,
+          };
+        }),
+    } as unknown as ProviderDriver;
+    const liveTurns = new LiveTurnRegistry();
+    const { service } = openFixture({ driver, liveTurns });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Running answer",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sending = service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Run the tests",
+    });
+
+    await until(() => service.navigation().threads[0]?.liveStep !== undefined);
+    expect(service.navigation().threads[0]).toMatchObject({
+      executing: true,
+      turnStartedAt: now,
+      liveStep: { kind: "tool", tool: "Command", argument: "bun run test" },
+    });
+
+    release();
+    await sending;
+    await until(() => service.navigation().threads[0]?.executing === false);
+    await until(() => liveTurns.read(String(created.thread.id)) === undefined);
+    const finished = service.navigation().threads[0];
+    expect(finished).not.toHaveProperty("turnStartedAt");
+    expect(finished).not.toHaveProperty("liveStep");
   });
 
   it("keeps an abandoned reply's prompt but not its text in the next turn's context", async () => {

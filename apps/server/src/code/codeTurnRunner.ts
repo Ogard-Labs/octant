@@ -3,6 +3,7 @@ import {
   decodeCodeRelativePath,
   type CodeThread,
   type PermissionPersistence,
+  type ProviderContextBreakdown,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
@@ -18,6 +19,8 @@ import type {
   ProviderSessionHandle,
 } from "@octant/provider-sdk/driver";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
+import { estimateOctantToolsPart } from "./codeTurnContext";
+import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { countsTowardTurnEventBudget, makeIdleTimeout } from "../providers/turnBudget";
@@ -114,6 +117,7 @@ export interface CodeTurnEvent {
   readonly contextWindow?: number;
   readonly contextTokens?: number;
   readonly autoCompactThreshold?: number;
+  readonly contextBreakdown?: ProviderContextBreakdown;
   readonly utilization?: number;
   readonly resetsAt?: string;
   readonly providerClaimIsMutationProof?: false;
@@ -167,6 +171,8 @@ export interface CodeTurnRunnerInput {
   }) => Promise<void>;
   /** Told once when the turn is over, whatever its outcome, with what it cost and how it ran. */
   readonly onTurnEnded?: (turn: TurnEndSummary) => void;
+  /** Tells the navigation read what the running turn is doing, from its start to its end. */
+  readonly liveTurn?: LiveTurnTracker;
   /** The wall clock the turn is timed against. */
   readonly clock?: () => string;
 }
@@ -204,6 +210,7 @@ export class CodeTurnRunner {
       // Re-based when the prompt is sent, so the wait for a first token never
       // includes starting the provider's session.
       let timing = startTurnMetrics(turnStartedAt);
+      input.liveTurn?.begin(turnStartedAt);
       const endOfTurn = (stopReason: TurnStopReason) =>
         summarizeTurnEnd({
           metrics: timing,
@@ -213,6 +220,7 @@ export class CodeTurnRunner {
         });
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
+          input.liveTurn?.end();
           try {
             input.onTurnEnded?.(
               endOfTurn(
@@ -359,6 +367,10 @@ export class CodeTurnRunner {
                 if (!isSanitizedEventValid(boundedEvent, sanitizedEvent, input.checkoutRoot)) {
                   return yield* fail("failed", "Provider event sanitization failed closed.");
                 }
+                // The sanitized copy: the checkout root and the turn's secrets
+                // are already out of it, so the step line starts from what the
+                // journal would be allowed to keep.
+                input.liveTurn?.observe(sanitizedEvent);
                 const normalized = withToolName(
                   toolNames,
                   yield* normalizeProviderEvent(input, sanitizedEvent),
@@ -726,7 +738,11 @@ function normalizeProviderEvent(
         text: text(event.inputJson),
         status: "app-managed-request",
       });
-    case "usage":
+    case "usage": {
+      // The runtime's own categories win. Octant counts what it adds only for
+      // a runtime that reported none, so a part is never counted twice.
+      const contextBreakdown =
+        event.contextBreakdown ?? estimateOctantToolsPart(input.appManagedTools?.definitions ?? []);
       return Effect.succeed({
         ...base,
         category: "usage",
@@ -745,7 +761,9 @@ function normalizeProviderEvent(
         ...(event.autoCompactThreshold === undefined
           ? {}
           : { autoCompactThreshold: event.autoCompactThreshold }),
+        ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
       });
+    }
     case "rate-limit-window":
       return Effect.succeed({
         ...base,

@@ -6,6 +6,7 @@ import {
   buildSidebarNavigation,
   layoutSidebarDestinations,
   moveSidebarDestination,
+  sameLiveTurn,
   type NavigationAvailability,
   setSidebarDestinationVisibility,
   sidebarDestinationOrder,
@@ -446,6 +447,40 @@ describe("buildSidebarNavigation", () => {
         unread: true,
       },
     ]);
+  });
+
+  it("carries a running turn's start time and latest step onto the row, and nothing when idle", () => {
+    const [running, idle] = buildChatThreadNavigation([
+      {
+        executing: true,
+        liveStep: { kind: "tool", tool: "Command", argument: "bun run test" },
+        readSequence: 0,
+        threadId: "00000000-0000-4000-8000-000000000101",
+        title: "Planning",
+        turnStartedAt: "2026-10-06T12:00:00.000Z",
+      },
+      {
+        readSequence: 0,
+        threadId: "00000000-0000-4000-8000-000000000102",
+        title: "Research",
+      },
+    ]);
+    expect(running).toMatchObject({
+      turnStartedAt: "2026-10-06T12:00:00.000Z",
+      liveStep: { kind: "tool", tool: "Command", argument: "bun run test" },
+    });
+    expect(idle).not.toHaveProperty("turnStartedAt");
+    expect(idle).not.toHaveProperty("liveStep");
+  });
+
+  it("reads two polls of the same live turn as one, so a repeat does not re-render", () => {
+    const step = { kind: "tool", tool: "Command", argument: "ls" } as const;
+    const first = { turnStartedAt: "2026-10-06T12:00:00.000Z", liveStep: step };
+    expect(sameLiveTurn(first, { ...first, liveStep: { ...step } })).toBe(true);
+    expect(sameLiveTurn(first, { ...first, liveStep: { ...step, argument: "pwd" } })).toBe(false);
+    expect(sameLiveTurn(first, { turnStartedAt: first.turnStartedAt })).toBe(false);
+    expect(sameLiveTurn(undefined, undefined)).toBe(true);
+    expect(sameLiveTurn(first, undefined)).toBe(false);
   });
 
   it("marks a row working while the host projects the thread as executing", () => {
