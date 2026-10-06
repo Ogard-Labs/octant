@@ -168,7 +168,7 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
                 type="button"
                 variant="secondary"
               >
-                Show the whole Canvas
+                Read the whole Canvas
               </OctantButton>
             </div>
           ) : null}

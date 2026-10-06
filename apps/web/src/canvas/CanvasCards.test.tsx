@@ -400,6 +400,34 @@ describe("Canvas create panel and card list", () => {
     view.rerender(<ThreadCards threadId={otherThread} />);
     expect(screen.queryByTestId("canvas-card-title")).not.toBeInTheDocument();
   });
+
+  it("keeps the thread's Canvases on screen while its project resolves", async () => {
+    const threadReferenceCards = vi
+      .fn()
+      .mockResolvedValueOnce({
+        mode: "work",
+        threadId,
+        projectId: null,
+        cards: [referenceCardFixture()],
+      })
+      // The re-read for the resolved project never settles, so only a reset could clear the row.
+      .mockReturnValueOnce(new Promise(() => undefined));
+    const client = { threadReferenceCards } as unknown as CanvasClient;
+    function ThreadCards(props: { readonly projectId: string | null }) {
+      const loaded = useThreadCanvasCards({
+        client,
+        mode: "work",
+        projectId: props.projectId as never,
+        threadId: threadId as never,
+      });
+      return <CanvasThreadReferenceCardList cards={loaded.cards} error={loaded.error} />;
+    }
+    const view = render(<ThreadCards projectId={null} />);
+    await screen.findByTestId("canvas-card-title");
+
+    view.rerender(<ThreadCards projectId="44444444-4444-4444-8444-444444444444" />);
+    expect(screen.getByTestId("canvas-card-title")).toBeInTheDocument();
+  });
   describe("a Canvas drawn inside its thread", () => {
     const definition = {
       schemaVersion: 4,

@@ -130,6 +130,20 @@ describe("value axis edge cases", () => {
     expect(axis.ticks[0]).toBeLessThanOrEqual(3.3);
   });
 
+  it("finishes on a domain only a few float steps wide", () => {
+    const axis = niceAxis({ min: 1, max: 1 + Number.EPSILON * 4 }, false);
+    expect(axis.ticks.length).toBeGreaterThan(1);
+    expect(axis.ticks.length).toBeLessThan(10);
+    expect(axis.domain.min).toBeLessThanOrEqual(1);
+    expect(axis.domain.max).toBeGreaterThanOrEqual(1 + Number.EPSILON * 4);
+  });
+
+  it("falls back to a unit axis when the span overflows a float", () => {
+    const axis = niceAxis({ min: -Number.MAX_VALUE, max: Number.MAX_VALUE }, false);
+    expect(axis.ticks).toEqual([0, 1]);
+    expect(axis.domain).toEqual({ min: 0, max: 1 });
+  });
+
   it("gives every gridline a distinct label for tiny and for large readings", () => {
     const small = niceAxis({ min: 0.001, max: 0.004 }, false);
     const smallLabels = small.ticks.map((tick) => formatTick(tick, small.step));

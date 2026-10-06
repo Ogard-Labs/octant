@@ -123,6 +123,8 @@ export interface NiceAxis {
   readonly step: number;
 }
 
+const UNIT_AXIS: NiceAxis = { domain: { min: 0, max: 1 }, ticks: [0, 1], step: 1 };
+
 /**
  * A value axis a reader can scan: about `target` gridlines on round numbers
  * (1, 2, 2.5 or 5 times a power of ten) that enclose every reading. Bars and
@@ -131,9 +133,7 @@ export interface NiceAxis {
 export function niceAxis(domain: YDomain, includeZero: boolean, target = 4): NiceAxis {
   let min = includeZero ? Math.min(0, domain.min) : domain.min;
   let max = includeZero ? Math.max(0, domain.max) : domain.max;
-  if (!Number.isFinite(min) || !Number.isFinite(max)) {
-    return { domain: { min: 0, max: 1 }, ticks: [0, 1], step: 1 };
-  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return UNIT_AXIS;
   // Readings a few float steps apart (3.3 and 1.1 + 2.2) are one value: the
   // tolerance scales with their size, or the step falls below what a float
   // can add and the gridlines never end.
@@ -149,6 +149,8 @@ export function niceAxis(domain: YDomain, includeZero: boolean, target = 4): Nic
     [1, 2, 2.5, 5, 10]
       .map((factor) => factor * magnitude)
       .find((candidate) => candidate >= rough) ?? 10 * magnitude;
+  // A span that overflows a float has no step a gridline can be counted by.
+  if (!Number.isFinite(step) || step <= 0) return UNIT_AXIS;
   const start = Math.floor(min / step) * step;
   const end = Math.ceil(max / step) * step;
   // Rounded through the step's own precision so 0.1 + 0.2 never labels a line
