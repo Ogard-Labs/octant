@@ -74,6 +74,7 @@ import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
+import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
@@ -1391,6 +1392,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                               })}
                           {...(message.at === undefined ? {} : { at: message.at })}
                         />
+                        {activity?.retrying === undefined ? null : (
+                          <HarnessRetryStatus
+                            events={[
+                              {
+                                kind: "retrying",
+                                attempt: activity.retrying.attempt,
+                                maxAttempts: activity.retrying.maxAttempts,
+                                delayMs: activity.retrying.delayMs,
+                                reason: activity.retrying.reason,
+                                announcedAt: activity.retrying.announcedAt,
+                              },
+                            ]}
+                          />
+                        )}
                         {gallery}
                         {activity === undefined ? null : (
                           <CodeTranscriptRow

@@ -1593,7 +1593,11 @@ native harness in `apps/server/src/harness`:
   jitter; `Retry-After` replaces the wait, capped at a minute. A request is
   retried only while nothing of it has streamed (text or reasoning); tool calls
   reach the loop only with the settled response, so they never count as output.
-  Each retry is a `retrying` runtime event emitted before its wait, and what a
+  Each retry is a `retrying` runtime event emitted before its wait. The thread's
+  working indicator, the terminal footer, and the phone session panel show
+  "Provider busy, retrying 2/5 in 4 s" and count the wait down, in ordinary
+  text rather than a warning, until the next content arrives. The turn's
+  detail counts those same events. What a
   failed attempt billed is added to the usage of the attempts after it. A
   cancel ends a wait at once and stays `interrupted`. The stream idle limit is
   120 s and restarts on any byte, so keep-alive comments and reasoning deltas

@@ -67,6 +67,7 @@ export * from "./localServers";
 export * from "./modes";
 export * from "./multiModelPool";
 export * from "./nativeHarnessRouting";
+export * from "./harnessRetry";
 export * from "./nativeHarness";
 export * from "./nativeHarnessTranscript";
 export * from "./followUpSuggestions";

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { CodeOperationEvent } from "@octant/contracts";
+import {
+  decodeCodeOperationEvent,
+  decodeUtcTimestamp,
+  type CodeOperationEvent,
+} from "@octant/contracts";
 import {
   EMPTY_TURN_ACTIVITY,
   activeRowCount,
@@ -21,6 +25,30 @@ function tool(state: "started" | "running" | "completed" | "failed"): CodeOperat
 }
 
 describe("transcript activity", () => {
+  it("shows an endpoint retry and clears it when content arrives", () => {
+    const announcedAt = decodeUtcTimestamp("2026-10-06T12:00:00.000Z");
+    const retrying = decodeCodeOperationEvent({
+      kind: "provider-retry",
+      attempt: 2,
+      maxAttempts: 5,
+      delayMs: 4_000,
+      reason: "unavailable",
+      announcedAt,
+    });
+    const waiting = applyActivityEvent(EMPTY_TURN_ACTIVITY, retrying);
+    expect(waiting.retrying).toMatchObject({ attempt: 2, maxAttempts: 5, delayMs: 4_000 });
+    const content = decodeCodeOperationEvent({
+      kind: "provider-content",
+      channel: "message",
+      content: {
+        contentId: "89000000-0000-4000-8000-000000000030",
+        digest: "d".repeat(64),
+        byteLength: 4,
+      },
+    });
+    expect(applyActivityEvent(waiting, content).retrying).toBeUndefined();
+  });
+
   it("remembers the files a turn created or rewrote and forgets one it deleted", () => {
     const change = (path: string, kind: "created" | "modified" | "deleted"): CodeOperationEvent =>
       ({ kind: "file-change", path, change: kind, reconciled: true }) as CodeOperationEvent;

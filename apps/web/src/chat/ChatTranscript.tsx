@@ -15,6 +15,7 @@ import { activeChatTurns } from "@octant/domain/chat-policy";
 import type { PickerGroup } from "@octant/domain";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
+import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import {
   memo,
   useEffect,
@@ -676,6 +677,22 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             );
             return workedFor === undefined ? {} : { workedFor };
           })()}
+        />
+        <HarnessRetryStatus
+          events={
+            props.attempt.harnessRetry === undefined
+              ? []
+              : [
+                  {
+                    kind: "retrying",
+                    attempt: props.attempt.harnessRetry.attempt,
+                    maxAttempts: props.attempt.harnessRetry.maxAttempts,
+                    delayMs: props.attempt.harnessRetry.delayMs,
+                    reason: props.attempt.harnessRetry.reason,
+                    announcedAt: props.attempt.harnessRetry.announcedAt,
+                  },
+                ]
+          }
         />
         {props.attempt.tasks === undefined || props.attempt.tasks.length === 0 ? null : (
           <ThreadTasksPanel

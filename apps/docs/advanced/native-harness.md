@@ -140,8 +140,12 @@ give or take a tenth). When the endpoint sends `Retry-After`, that wait is used
 instead, up to a minute. A rejected key, an unsupported endpoint, or a spent
 allowance is not retried.
 
-Each retry is announced before its wait, so the thread can say "retrying 2/5 in
-4 s". A request is only sent again while nothing of it has appeared: once the
+Each retry is announced before its wait. While the turn is quiet, the thread's
+working indicator, the terminal footer, and the phone's session panel say
+"Provider busy, retrying 2/5 in 4 s" and count the wait down. The line is
+ordinary text, not a warning; it disappears when the next content arrives. A
+retry that runs out still fails with the endpoint's own alert. The turn's
+detail counts those same announcements. A request is only sent again while nothing of it has appeared: once the
 reply has started to stream, a failure ends the turn rather than showing the
 start of the answer twice. Pressing stop during a wait ends it at once. The
 tokens a failed attempt used still count toward the turn.

@@ -4,6 +4,7 @@ import {
   decodeChatAttemptQuestion,
   decodeChatFailure,
   decodeDiagnosticFailureCode,
+  decodeHarnessRetryNotice,
   UtcTimestamp,
   type ChatAttempt,
   type ChatAttemptFailure,
@@ -12,6 +13,7 @@ import {
   type ChatCitationId,
   type ChatContentReference,
   type ChatFailure,
+  type HarnessRetryNotice,
   type ChatThread,
   type ProviderAttachmentInput,
   type CapacityReservationId,
@@ -237,6 +239,9 @@ export interface ChatTurnRunnerInput {
   }) => Promise<void>;
   /** Told once when the attempt is over, whatever its outcome, with what it cost and how it ran. */
   readonly onTurnEnded?: (turn: TurnEndSummary) => void;
+  /** The endpoint is sending the request again. The same event the stats line counts. */
+  readonly onHarnessRetry?: (notice: HarnessRetryNotice) => void;
+  readonly onHarnessRetryCleared?: () => void;
 }
 
 export type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -801,6 +806,30 @@ export class ChatTurnRunner {
               Effect.gen(function* () {
                 yield* idle.touch;
                 timing = observeTurnMetrics(timing, event);
+                if (event.kind === "retrying") {
+                  const notice = decodeHarnessRetryNotice({
+                    attempt: event.attempt,
+                    maxAttempts: event.maxAttempts,
+                    delayMs: event.delayMs,
+                    reason: event.reason,
+                    announcedAt: event.occurredAt,
+                  });
+                  currentAttempt = {
+                    ...currentAttempt,
+                    harnessRetry: notice,
+                    updatedAt: updatedAt(),
+                  };
+                  yield* input.persistAttempt(currentAttempt);
+                  input.onHarnessRetry?.(notice);
+                } else if (
+                  (event.kind === "text-delta" || event.kind === "reasoning-delta") &&
+                  currentAttempt.harnessRetry !== undefined
+                ) {
+                  const { harnessRetry: _cleared, ...withoutRetry } = currentAttempt;
+                  currentAttempt = { ...withoutRetry, updatedAt: updatedAt() };
+                  yield* input.persistAttempt(currentAttempt);
+                  input.onHarnessRetryCleared?.();
+                }
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > maxEvents) {
                   yield* persistOutcome("interrupted", {

@@ -5,6 +5,7 @@ import {
   decodeNativeHarnessTurnRecord,
   decodeProviderSessionId,
   decodeUtcTimestamp,
+  type HarnessRetryNotice,
   type ContextSubjectRef,
   type NativeHarnessSlotCandidate,
   type NativeHarnessTurnStopReason,
@@ -151,6 +152,7 @@ export class NativeHarnessTurnObserver {
       });
     }
     this.#options.sessions.settleTurn(scope.threadId);
+    this.#options.sessions.clearRetry(scope.threadId);
   }
 
   turnStarted(scope: NativeHarnessTurnScope): void {
@@ -163,6 +165,17 @@ export class NativeHarnessTurnObserver {
       lead: this.#lead(scope),
     });
     this.#options.sessions.markRunning(scope.threadId);
+    this.#options.sessions.clearRetry(scope.threadId);
+  }
+
+  noteRetry(scope: NativeHarnessTurnScope, notice: HarnessRetryNotice): void {
+    if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return;
+    this.#options.sessions.noteRetry(scope.threadId, notice);
+  }
+
+  clearRetry(scope: NativeHarnessTurnScope): void {
+    if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return;
+    this.#options.sessions.clearRetry(scope.threadId);
   }
 
   async turnCompleted(
