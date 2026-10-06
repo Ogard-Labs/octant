@@ -191,7 +191,7 @@ export function heatmapRowTotals(block: CanvasHeatmapMatrixBlock): ReadonlyMap<s
 }
 
 /** The sum of a column's present cells. */
-export function heatmapColumnTotals(block: CanvasHeatmapMatrixBlock): ReadonlyMap<string, number> {
+function heatmapColumnTotals(block: CanvasHeatmapMatrixBlock): ReadonlyMap<string, number> {
   const totals = new Map<string, number>(
     block.columns.map((column) => [String(column.columnId), 0]),
   );
@@ -200,18 +200,6 @@ export function heatmapColumnTotals(block: CanvasHeatmapMatrixBlock): ReadonlyMa
     totals.set(columnId, (totals.get(columnId) ?? 0) + cell.value);
   }
   return totals;
-}
-
-/** The reading at one coordinate, or undefined when the block lists none. */
-export function heatmapMatrixCell(
-  block: CanvasHeatmapMatrixBlock,
-  rowId: string,
-  columnId: string,
-): { readonly value: number; readonly note: string | undefined } | undefined {
-  const cell = block.cells.find(
-    (entry) => String(entry.rowId) === rowId && String(entry.columnId) === columnId,
-  );
-  return cell === undefined ? undefined : { value: cell.value, note: cell.note };
 }
 
 /** The order rows are drawn in: the caller's order, else the declared one. */
@@ -298,7 +286,7 @@ export function layoutCanvasHeatmapMatrix(
 }
 
 /** The weekday names in the week's own order, starting at `weekStartsOn`. */
-export function heatmapWeekdayOrder(weekStartsOn: number): ReadonlyArray<string> {
+function heatmapWeekdayOrder(weekStartsOn: number): ReadonlyArray<string> {
   const start = Number.isFinite(weekStartsOn) ? Math.floor(weekStartsOn) : 0;
   return Array.from({ length: 7 }, (_value, index) => WEEKDAYS_SHORT[(start + index) % 7] ?? "");
 }
@@ -368,13 +356,4 @@ export function layoutCanvasHeatmapCalendar(
     startDate,
     endDate,
   };
-}
-
-/** The number of calendar days a span covers, inclusive of both ends. */
-export function heatmapCalendarSpanDays(block: CanvasHeatmapCalendarBlock): number {
-  const dates = block.days.map((day) => day.date).sort();
-  const first = dates[0];
-  const last = dates[dates.length - 1];
-  if (first === undefined || last === undefined) return 0;
-  return dayNumber(last) - dayNumber(first) + 1;
 }
