@@ -2130,15 +2130,8 @@ export function startOctantServer(
                               return undefined;
                             }
                           },
-                          readCodeCheckout: (checkoutId) => {
-                            try {
-                              return persistence.readCodeCheckout(decodeCodeCheckoutId(checkoutId));
-                            } catch {
-                              return undefined;
-                            }
-                          },
-                          loadManagedReceipt: (receiptId) =>
-                            managedWorktreeReceipts.load(receiptId),
+                          findManagedWorktreeReceipt: (lookup) =>
+                            managedWorktreeReceipts.findActive(lookup),
                         },
                         query.runId,
                       ),
@@ -2221,6 +2214,9 @@ export function startOctantServer(
           scheduler: capacityScheduler,
           now: () => new Date().toISOString() as UtcTimestamp,
         }),
+        // `agentRunOrchestration` is declared below; this closure runs only
+        // once a child's session has started.
+        onSessionRunning: ({ runId }) => void agentRunOrchestration.onSessionRunning(runId),
         onSessionStarted: ({ runId, resumed }) =>
           agentRunLiveConversations.begin(runId, { resume: resumed }),
         onUserMessage: ({ runId, kind, text, occurredAt }) =>
@@ -2413,7 +2409,9 @@ export function startOctantServer(
                     conversation: (input) => codeBoardEventStore.conversation(input),
                     readEvidence: (reference) => codeEvidence.read(reference),
                   });
-            return selection.status === "available" ? selection.blocks : undefined;
+            return selection.status === "available"
+              ? selection.blocks
+              : { unavailable: selection.reason };
           } catch {
             return undefined;
           }

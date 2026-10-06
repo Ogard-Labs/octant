@@ -1,8 +1,28 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Schema } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { CodeEvidenceStore } from "../code/codeEvidenceStore";
 import {
+  CODE_OPERATION_EVENT_RECORDED,
+  CodeOperationEventStore,
+} from "../code/codeOperationEventStore";
+import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
+import { CodeProjection, readCodeThreadActivity } from "../persistence/codeProjection";
+import { EventRegistry } from "../persistence/eventRegistry";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { ProjectionRegistry } from "../persistence/projection";
+import { openSqlite } from "../persistence/sqlitePort";
+import {
+  ActorId,
+  CodeOperationEventFrame,
   decodeAgentRunAdmittedContext,
   decodeCodeConversationTurn,
   decodeCodeEvidenceReference,
+  decodeCodeOperationEvent,
+  decodeCodeOperationId,
   decodeCodeThreadId,
   decodeProjectId,
   decodeWorkThreadId,
@@ -349,5 +369,104 @@ describe("admitted parent context", () => {
       status: "unavailable",
       reason: "source-point-unavailable",
     });
+  });
+});
+
+const journalDirectories: string[] = [];
+afterEach(() => {
+  for (const directory of journalDirectories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
+});
+
+describe("a Code parent's context during its own turn", () => {
+  it("resolves the conversation the parent has journaled while its turn is still running", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-parent-context-"));
+    journalDirectories.push(directory);
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    const occurredAt = "2026-10-05T17:35:00.000Z";
+    applyMigrations(connection, MIGRATIONS, () => occurredAt);
+    const journal = new Journal({
+      connection,
+      registry: new EventRegistry().register(
+        CODE_OPERATION_EVENT_RECORDED,
+        1,
+        CodeOperationEventFrame,
+      ),
+      projections: new ProjectionRegistry()
+        .register(new AggregateHeadsProjection())
+        .register(new CodeProjection()),
+      clock: () => occurredAt,
+    });
+    let counter = 0;
+    const store = new CodeOperationEventStore({
+      journal,
+      actor: {
+        kind: "system",
+        actorId: Schema.decodeUnknownSync(ActorId)(id(900)),
+      },
+      clock: () => occurredAt,
+      uuid: () => id(1_000 + counter++),
+    });
+    const evidence = new CodeEvidenceStore({ connection });
+    const operationId = decodeCodeOperationId(id(10));
+    let cursor = 0;
+    const append = (event: Record<string, unknown>) =>
+      store.append({
+        threadId: codeThreadId,
+        operationId,
+        expectedCursor: cursor++,
+        event: decodeCodeOperationEvent(event),
+      });
+    append({
+      kind: "conversation-turn-started",
+      providerInstanceId: id(40),
+      modelId: "gpt-6-astra",
+      sessionId: id(50),
+      prompt: evidence.put("Delegate a short plan to a helper."),
+    });
+    append({
+      kind: "provider-content",
+      channel: "message",
+      content: evidence.put("I will ask a helper."),
+    });
+    // The delegation itself is a tool call the parent has started and not yet
+    // finished, so its own turn is exactly what the child must read.
+    append({
+      kind: "tool-activity",
+      toolCallId: id(60),
+      toolName: "octant_agents",
+      state: "started",
+    });
+    append({
+      kind: "tool-activity",
+      toolCallId: id(60),
+      toolName: "octant_agents",
+      state: "running",
+      summary: "delegate",
+    });
+
+    const selection = admittedParentCodeContext({
+      threadId: codeThreadId,
+      externalContentIngested: false,
+      readThread: () => codeThread,
+      readActivity: (threadId) =>
+        readCodeThreadActivity(connection).find(
+          (activity) => String(activity.threadId) === String(threadId),
+        ),
+      conversation: (input) => store.conversation(input),
+      readEvidence: (reference) => evidence.read(reference),
+    });
+
+    expect(selection.status).toBe("available");
+    if (selection.status !== "available") return;
+    expect(selection.blocks.map((block) => block.kind)).toEqual([
+      "conversation-summary",
+      "user-message",
+    ]);
+    expect(selection.blocks[1]?.text).toContain("Delegate a short plan to a helper.");
+    // The unfinished reply is disclosed as omitted, never handed over as if the
+    // parent had accepted it.
+    expect(selection.omissions.unfinishedReplies).toBe(1);
+    connection.close();
   });
 });

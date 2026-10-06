@@ -624,6 +624,13 @@ frame, and a parent purge removes all generations' text and evidence. Nested
 observations retain the authorized root thread and identify their managed parent
 separately. Result reads do not consume or acknowledge delivery.
 
+A managed child's lifecycle moves from Starting to Running once its workspace
+is verified and its provider session starts, not at completion. One turn,
+from provider acquisition to its terminal event, may run for at most 30
+minutes (`MANAGED_AGENT_RUN_TURN_DEADLINE_MS`); a turn that reaches that bound
+is recorded as Interrupted and releases its capacity. The bound covers time a
+child spends waiting for an approval or answer.
+
 Managed children retain a private provider-session cursor and a bounded,
 purgeable conversation alongside their journaled lifecycle. A cursor is bound
 to the run, provider, model, workspace, context, and authority. Resume uses that
@@ -661,7 +668,12 @@ admitted conversation; Work and Code expose bounded accepted prompts and
 completed replies with source attribution, provider/model identity, taint, and
 omission metadata. Work/Code selections contain at most 24 blocks of 4,000
 characters, including metadata. Reasoning and tool bodies are excluded. A
-foreign, changing, or incompletely read selection fails closed.
+foreign, changing, or incompletely read selection fails closed. A Code or Work
+parent's own running turn is readable: its accepted prompts are selected and its
+unfinished reply is disclosed as omitted. The selection is read before a child
+workspace is allocated, so a refusal names the reason (for example, no readable
+messages yet or a conversation that changed during the read) and leaves no
+worktree behind.
 
 Finished siblings currently owing a result to the same parent can be delivered
 in one ordinary parent turn, capped at 16 members and 32,768 prompt characters.
@@ -1958,7 +1970,11 @@ mechanisms are:
   receives `octant_canvas` bound to the workspace and Project the host resolved
   for that run. The model cannot name a path. Create and revise succeed only
   inside that scope; another Project or an unresolved checkout is refused, and
-  the child run is the author. A provider transport that cannot carry
+  the child run is the author. A Code child's scope is the managed worktree the
+  host allocated for that delegation, found through the same receipt lookup that
+  allocated it and valid only while that receipt is ready and still names the
+  worktree the run was admitted with; a child's worktree is never a journaled
+  thread checkout, so none is required. A provider transport that cannot carry
   app-managed tools fails the start with a typed reason rather than dropping
   the tool. Each adapter turns its provider's own subagent feature off, because a child
   the provider starts itself runs outside the journal and the approval path.

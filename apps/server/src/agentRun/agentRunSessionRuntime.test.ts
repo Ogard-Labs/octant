@@ -36,6 +36,7 @@ import {
   clampAgentRunSessionAuthority,
   createAgentRunSessionRuntime,
   createRecordedAgentRunContextSnapshotPort,
+  MANAGED_AGENT_RUN_TURN_DEADLINE_MS,
   type AgentRunSessionRuntimeOptions,
 } from "./agentRunSessionRuntime";
 
@@ -530,6 +531,93 @@ describe("createRecordedAgentRunContextSnapshotPort", () => {
 });
 
 describe("createAgentRunSessionRuntime", () => {
+  it("reports a child as running once its session starts, before the turn ends", async () => {
+    const provider = fakeProvider();
+    const running: string[] = [];
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, { onSessionRunning: ({ runId: id }) => running.push(String(id)) }),
+    );
+    const outcome = settled(runtime.start(agentRun()));
+    await vi.waitFor(() => expect(provider.turns.length).toBe(1));
+    expect(running).toEqual([runId]);
+    await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
+    await provider.emit({ kind: "completed", sessionId });
+    await expect(outcome).resolves.toMatchObject({ kind: "completed" });
+  });
+
+  it("does not report running for a child whose workspace cannot be verified", async () => {
+    const running: string[] = [];
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(fakeProvider(), {
+        onSessionRunning: ({ runId: id }) => running.push(String(id)),
+        verifyCodeWorkspace: async () => ({ status: "refused", reason: "Workspace changed." }),
+      }),
+    );
+    const outcome = await settled(
+      runtime.start(
+        agentRun({
+          workspaceReceipt: {
+            kind: "code-worktree",
+            mode: "code",
+            projectId: "88888888-8888-4888-8888-888888888888" as never,
+            checkoutRoot: "/repo",
+            worktreeRoot: "/child",
+            verified: true,
+          },
+        }),
+      ),
+    );
+    expect(outcome.kind).toBe("interrupted");
+    expect(running).toEqual([]);
+  });
+
+  it("lets a turn work past two minutes before the default runtime deadline ends it", async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = fakeProvider();
+      const { timeoutMs: _bounded, ...withoutDeadline } = runtimeOptions(provider);
+      const runtime = createAgentRunSessionRuntime(withoutDeadline);
+      let outcome: AgentRunSessionOutcome | undefined;
+      runtime.start(agentRun()).onSettled((value) => {
+        outcome = value;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(provider.turns.length).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(outcome).toBeUndefined();
+
+      await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
+      await provider.emit({ kind: "completed", sessionId });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome?.kind).toBe("completed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still ends a turn that never finishes once the default deadline passes", async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = fakeProvider();
+      const { timeoutMs: _bounded, ...withoutDeadline } = runtimeOptions(provider);
+      const runtime = createAgentRunSessionRuntime(withoutDeadline);
+      let outcome: AgentRunSessionOutcome | undefined;
+      runtime.start(agentRun()).onSettled((value) => {
+        outcome = value;
+      });
+      await vi.advanceTimersByTimeAsync(MANAGED_AGENT_RUN_TURN_DEADLINE_MS - 1_000);
+      expect(outcome).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(outcome).toMatchObject({
+        kind: "interrupted",
+        reason: "Managed AgentRun turn exceeded its runtime deadline.",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("publishes managed response deltas without changing the terminal outcome", async () => {
     const provider = fakeProvider();
     const started: string[] = [];
