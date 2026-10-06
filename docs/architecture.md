@@ -1370,6 +1370,67 @@ those recorded when the turn started, including after a later handoff. These
 turns have no Octant planning estimate or variance: APIs omit those fields and
 the request-detail table labels them unavailable.
 
+**Turn speed and full usage, for every provider.** Every runner that watches a
+provider's events (Chat, Work, Code) feeds each normalized runtime event to one
+pure policy in `@octant/domain` (`turnMetricsPolicy`); no driver measures
+anything. A turn is timed from the moment its prompt is sent, not from starting
+the provider's session. The wait for a first token ends at the first text or
+reasoning delta, and decode speed is the output tokens over the time from that
+delta to completion with tool time taken out. Precision is a typed field on
+every figure and is never inferred by a surface:
+
+- `exact`: a usage report that names the one model request it covers
+  (`requestStartedAt` on the runtime `usage` event) times that request on its
+  own, and the time between requests is tool time by construction. Octant
+  Harness reports this way. A turn with one report for the whole turn is also
+  exact when it ran no tool and made no wait, because it was a single request.
+- `approximate`: one report for the whole turn, with tool calls or waits inside
+  it (Codex, Claude, Pi, OpenCode). The spans the provider streamed
+  (`tool-start` to `tool-success` or `tool-failure`, merged where calls
+  overlap; an unanswered `tool-request`, approval or question until the next
+  event) are taken out of the window. A span it did not stream stays in, which
+  is why the figure is labelled approximate.
+- `unavailable`: no output tokens, no streamed text or reasoning to time them
+  against, or a window that tool time leaves empty. Every timing figure is then
+  absent and a surface hides it. Octant never shows a zero it did not measure.
+
+A turn that made several requests reports its tokens once: the request-scoped
+reports are summed and the restated turn total is ignored; a provider that
+restates one turn's usage replaces the earlier report. Tool-call-only requests
+stream no deltas, so they add to a turn's tokens but not to its decode window.
+A retried request's wait counts toward first-token time, never decode time.
+Session figures are weighted: total decode tokens over total decode time, so a
+long turn weighs more than a short one, and a session is exact only while every
+measured turn was. The cache hit rate is `cacheReadInputTokens` over
+`inputTokens`, which already counts cache reads and writes; it is hidden when no
+cache figure was reported, when nothing was sent, or when the read exceeds the
+input (a provider that counts input another way), and a partial hit is never
+rounded to a full one.
+
+One `turn-metrics-recorded` frame is journaled on the thread's own aggregate
+when each turn ends, whether it completed, failed, was cancelled, or was left
+waiting: its full usage (input, output, reasoning, cache read and write, the
+provider's own cost), its real start and end, how it stopped, and its timing.
+`TurnMetricsStore` folds the frames back after a restart, so session totals are
+identical to the live ones, and a thread purge erases them with the thread. The
+usage query (`POST /api/usage/query`) returns them as `turnMetrics`: totals
+over every matching turn plus the most recent fifty, within the same Project
+scope as the ledger rows. It is left out when the query filters on a dimension
+only the ledger carries (request shape, category, host, quality). A harness
+turn record carries the same usage, timing, start and stop reason, and the
+session's `usage` and `metrics` totals fold them, so a Code turn on a direct
+endpoint no longer records zero tokens. Chat, Work and Code on every provider
+journal the frame; the harness additionally keeps its own record.
+
+The ACP and RPC mappers (Devin, Kimi, Grok, Copilot, Mistral Vibe, Oh My Pi)
+report no usage today: the prompt result is read only for its stop reason, and
+the capability is declared `unavailable`, so their turns are `unavailable` and
+no cache figure is invented. Pi accumulates usage, including cache reads and
+writes, from completed assistant messages. OpenCode reports input apart from
+cache reads and writes, so its mapper adds them into `inputTokens` like the
+Claude and Pi mappers do; that follows OpenCode's own token accounting and has
+not been checked against a live OpenCode run.
+
 Native Chat, Work, and Code resume acknowledgements may omit an unchanged resume
 cursor. The host retains the already-admitted cursor in that case and persists a
 replacement when one is returned. A changed session identity or an initial native

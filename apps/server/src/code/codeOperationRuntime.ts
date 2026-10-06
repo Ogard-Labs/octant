@@ -103,6 +103,7 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
+import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { ProviderContextBlock } from "@octant/contracts";
 import {
   CodeServiceError,
@@ -353,10 +354,14 @@ export interface CodeOperationRuntimeOptions {
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
-    /** Every turn's end, whatever its outcome. */
-    readonly turnEnded?: (scope: NativeHarnessTurnScope) => void;
+    /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
+    readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
     readonly turnCompleted: (
-      input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
+      input: NativeHarnessTurnScope & {
+        readonly text: string;
+        readonly toolCalls: number;
+        readonly turn?: TurnEndSummary;
+      },
     ) => Promise<void>;
     /** Settles a harness question the person answered through the Code question surface. */
     readonly answerQuestion?: (threadId: string, questionId: string, answer: string) => void;
@@ -2208,6 +2213,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     };
     const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
     this.#options.nativeHarness?.turnStarted(harnessScope);
+    let endedTurn: TurnEndSummary | undefined;
     const browserSelected = active.extensionSelections?.some(isBrowserUseSelection) === true;
     const fullContext = [
       ...harnessContext,
@@ -2251,6 +2257,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           checkoutRoot: active.checkoutRoot,
           prompt,
           ...(fullContext.length === 0 ? {} : { context: fullContext }),
+          onTurnEnded: (ended) => {
+            endedTurn = ended;
+          },
           ...(this.#options.nativeHarness === undefined
             ? {}
             : {
@@ -2384,7 +2393,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }
       })
       .finally(() => {
-        this.#options.nativeHarness?.turnEnded?.(harnessScope);
+        this.#options.nativeHarness?.turnEnded?.(harnessScope, endedTurn);
         if (this.#active.get(String(active.thread.id)) === active)
           this.#active.delete(String(active.thread.id));
       });
