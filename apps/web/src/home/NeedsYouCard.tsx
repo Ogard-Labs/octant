@@ -111,7 +111,10 @@ function useNeedsYouContent(source: NeedsYouCardSource): HomeCardContent {
     [answerClients, refresh],
   );
 
-  if (read.status === "loading") return { status: "loading" };
+  // Before the first read the card says nothing rather than "Looking…": it
+  // leaves the grid when nothing waits, so a loading line would flash on
+  // every start screen and then disappear.
+  if (read.status === "loading") return { status: "ready", count: 0, body: null };
   const liveKeys = new Set(listed.map(pendingRequestKey));
   const rows = [
     ...listed.map((request) => ({ request, unlisted: false })),

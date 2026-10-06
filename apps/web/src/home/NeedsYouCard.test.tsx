@@ -427,6 +427,8 @@ describe("the Needs you card", () => {
   it("leaves the grid while nothing is waiting", async () => {
     renderCard(createNeedsYouCard(source({ pendingRequestClient: reader([]) })));
     await screen.findByRole("region", { name: "Home cards" });
+    // Not even a loading line first: it would flash on every start screen.
+    expect(screen.queryByText("Looking…")).toBeNull();
     await waitFor(() => expect(screen.queryByRole("region", { name: "Needs you" })).toBeNull());
     expect(screen.queryByText("Nothing is waiting for you.")).toBeNull();
   });
