@@ -126,6 +126,18 @@
   margin: 0;
 }
 
+.native-harness-card__facts dd.native-harness-card__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.native-harness-card__stats [data-hinted="true"] {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
 .native-harness-card__list {
   margin: 0;
   padding-left: 1rem;

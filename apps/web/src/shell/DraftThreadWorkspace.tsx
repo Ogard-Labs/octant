@@ -25,6 +25,7 @@ import type {
   ProviderModelOptionValues,
 } from "@octant/contracts/providers";
 import { LOCAL_HOST_ID, type HostId, type HostIdentity } from "@octant/contracts/host";
+import type { HomeCardCustomization } from "@octant/contracts/shell";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type {
@@ -82,7 +83,8 @@ import { appendTranscript } from "../voice/appendTranscript";
 import { HostSelector } from "./HostSelector";
 import { HomeStart, type HomeAction } from "./HomeStart";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
-import type { RunningNowCard } from "./runningNow";
+import { HomeDashboard } from "../home/HomeDashboard";
+import type { HomeCardDefinition } from "../home/homeCards";
 import type { OctantHostBridge } from "./hostBridge";
 import { WorkKindSwitch } from "./WorkKindSwitch";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -203,21 +205,19 @@ export interface DraftThreadWorkspaceProps {
   readonly onCancelFirstTurn?: () => void;
   /**
    * What a Work or Code start screen offers under the composer besides its
-   * own sections: tiles for the next likely actions and the threads running
-   * now. Each action appears only when its owner supplies a way to do it.
+   * own sections: tiles for the next likely actions and the card area. Each
+   * action appears only when its owner supplies a way to do it.
    */
   readonly homeStart?: {
     /** Finished threads waiting to be opened; the Review tile needs more than none. */
     readonly reviewCount: number;
-    /**
-     * Every thread executing now. The cards below are capped, so the heading
-     * counts from here rather than from how many cards happen to show.
-     */
+    /** Every thread executing now, which the composer's quiet line counts. */
     readonly runningCount: number;
     readonly onReview?: () => void;
-    readonly running: ReadonlyArray<RunningNowCard>;
-    readonly onOpenRunning?: (card: RunningNowCard) => void;
-    readonly onOpenBoard?: () => void;
+    /** The card registry for this screen; absent leaves the card area out. */
+    readonly cards?: ReadonlyArray<HomeCardDefinition>;
+    readonly cardCustomization: HomeCardCustomization;
+    readonly onCardCustomizationChange: (next: HomeCardCustomization) => void;
     /** Code only: a shell at the selected Project's root. Work has no shell. */
     readonly onOpenTerminal?: (projectId: ProjectId) => void;
   };
@@ -587,9 +587,17 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     return (
       <HomeStart
         actions={actions}
-        running={home.running}
-        {...(home.onOpenRunning === undefined ? {} : { onOpenRunning: home.onOpenRunning })}
-        {...(home.onOpenBoard === undefined ? {} : { onOpenBoard: home.onOpenBoard })}
+        {...(home.cards === undefined
+          ? {}
+          : {
+              dashboard: (
+                <HomeDashboard
+                  cards={home.cards}
+                  customization={home.cardCustomization}
+                  onCustomizationChange={home.onCardCustomizationChange}
+                />
+              ),
+            })}
       />
     );
   })();

@@ -195,6 +195,8 @@ describe("Journal", () => {
         transcriptTextSize: "medium",
         transcriptWidth: "narrow",
         showThreadProviderIcons: true,
+        showThreadStats: true,
+        homeCards: { order: [], visibility: [] },
         sidebarRowProperties: {
           projects: {
             project: false,

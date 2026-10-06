@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -338,6 +338,81 @@ describe("FolderBrowseService", () => {
       await expectRefusal(
         service.select(WINDOW_ID, { ...HOST, candidateId: issued.candidateId }),
         "unauthorized",
+      );
+    });
+  });
+
+  describe("resolveCandidate", () => {
+    it("resolves a candidate the host listed to the path behind it", async () => {
+      const { home } = await makeTree();
+      const service = makeService({ homeDir: home });
+      const listed = await service.browse(WINDOW_ID, HOST);
+      const beta = listed.candidates.find((candidate) => candidate.displayName === "beta");
+      expect(beta).toBeDefined();
+      if (beta === undefined) return;
+
+      const path = service.resolveCandidate(WINDOW_ID, {
+        ...HOST,
+        candidateId: beta.candidateId,
+      });
+
+      // The host reports where the folder really is, not the path it was
+      // listed by: on macOS a temporary directory is reached through a link.
+      expect(path).toBe(await realpath(join(home, "beta")));
+    });
+
+    it("refuses a candidate that was shown to another window", async () => {
+      const { home } = await makeTree();
+      const service = makeService({ homeDir: home });
+      const listed = await service.browse(WINDOW_ID, HOST);
+      const beta = listed.candidates.find((candidate) => candidate.displayName === "beta");
+      expect(beta).toBeDefined();
+      if (beta === undefined) return;
+
+      await expectRefusal(
+        Promise.resolve().then(() =>
+          service.resolveCandidate(OTHER_WINDOW, { ...HOST, candidateId: beta.candidateId }),
+        ),
+        "unauthorized",
+      );
+    });
+
+    it("refuses a candidate that has expired", async () => {
+      const { home } = await makeTree();
+      let now = 1_000;
+      const service = makeService({ homeDir: home, now: () => now });
+      const listed = await service.browse(WINDOW_ID, HOST);
+      const beta = listed.candidates.find((candidate) => candidate.displayName === "beta");
+      expect(beta).toBeDefined();
+      if (beta === undefined) return;
+
+      now = 1_000 + 120_000;
+
+      await expectRefusal(
+        Promise.resolve().then(() =>
+          service.resolveCandidate(WINDOW_ID, { ...HOST, candidateId: beta.candidateId }),
+        ),
+        "not-found",
+      );
+    });
+
+    it("refuses a candidate listed for another mode", async () => {
+      const { home } = await makeTree();
+      const service = makeService({ homeDir: home });
+      const listed = await service.browse(WINDOW_ID, HOST);
+      const beta = listed.candidates.find((candidate) => candidate.displayName === "beta");
+      expect(beta).toBeDefined();
+      if (beta === undefined) return;
+
+      await expectRefusal(
+        Promise.resolve().then(() =>
+          service.resolveCandidate(WINDOW_ID, {
+            hostId: "local",
+            mode: "code",
+            candidateId: beta.candidateId,
+          }),
+        ),
+        "invalid",
       );
     });
   });

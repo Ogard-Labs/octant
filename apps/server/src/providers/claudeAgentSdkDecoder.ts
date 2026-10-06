@@ -1,4 +1,10 @@
-import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
+import type {
+  ProviderContextBreakdown,
+  ProviderContextPart,
+  ProviderDeferredContextPart,
+  ProviderExecutionPolicy,
+  ProviderFailure,
+} from "@octant/contracts";
 
 import type {
   ClaudeAccountState,
@@ -625,6 +631,128 @@ export function decodeInitialization(value: unknown): ClaudeInitialization {
     models: decodeModels(initialized.models),
     account: decodeAccount(initialized.account),
   };
+}
+
+/**
+ * The compaction point in a runtime's context-usage answer. Claude Code 2.1.287
+ * answers with `autoCompactThreshold` beside `maxTokens`, both in tokens (the
+ * observed pairs are 167000 of 200000 and 967000 of 1000000), and with
+ * `isAutoCompactEnabled`. The same release documents its other report of this
+ * figure as "the token count where threshold-triggered compaction fires". The
+ * threshold counts only while compaction is on and sits inside the window it
+ * is measured against; anything else promises nothing.
+ */
+export function decodeAutoCompactThreshold(value: unknown): number | undefined {
+  const usage = object(value);
+  if (usage === undefined || usage.isAutoCompactEnabled !== true) return undefined;
+  const { autoCompactThreshold, maxTokens } = usage;
+  if (!Number.isSafeInteger(autoCompactThreshold) || !Number.isSafeInteger(maxTokens)) {
+    return undefined;
+  }
+  const threshold = autoCompactThreshold as number;
+  return threshold > 0 && threshold <= (maxTokens as number) ? threshold : undefined;
+}
+
+// The runtime's own category names. Claude Code 2.1.287 answers every
+// context-usage request with the ones it has content for. A name outside this
+// table (for example "MCP server instructions" or "Free space") is not a part
+// Octant names, so its tokens stay in the occupancy the reader shows as
+// "Other (provider)" rather than being folded into a part it is not.
+const CONTEXT_PART_BY_CATEGORY: Readonly<Record<string, ProviderContextPart["kind"]>> = {
+  "System prompt": "system-prompt",
+  "System tools": "system-tools",
+  "MCP tools": "mcp-tools",
+  "Custom agents": "agents",
+  "Memory files": "memory-files",
+  Skills: "skills",
+  Messages: "messages",
+  "Autocompact buffer": "reserved",
+};
+const DEFERRED_CONTEXT_CATEGORY: Readonly<Record<string, ProviderDeferredContextPart["kind"]>> = {
+  "System tools (deferred)": "system-tools",
+  "MCP tools (deferred)": "mcp-tools",
+};
+
+function arrayLength(value: unknown): number | undefined {
+  return Array.isArray(value) ? value.length : undefined;
+}
+
+function countWhere(
+  value: unknown,
+  wanted: (entry: Record<string, unknown>) => boolean,
+): number | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((entry) => {
+    const item = object(entry);
+    return item !== undefined && wanted(item);
+  }).length;
+}
+
+function safeCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * What a runtime's context-usage answer says fills its window. Claude Code
+ * 2.1.287 answers with `categories` (name, tokens, and `isDeferred` for tools it
+ * knows of but has not loaded), `totalTokens` and `maxTokens`, plus lists that
+ * give counts: `memoryFiles`, `mcpTools` (each with `isLoaded`), `agents`, and
+ * `skills.includedSkills`. Every figure is the runtime's own, so it is
+ * `provider-reported`. Only counts leave the lists: memory file paths and skill
+ * names are never carried. An answer whose categories are malformed gives
+ * nothing, so a half-read breakdown is never shown, and a category the runtime
+ * left empty is not a part.
+ */
+export function decodeContextBreakdown(value: unknown): ProviderContextBreakdown | undefined {
+  const usage = object(value);
+  if (usage === undefined || !Array.isArray(usage.categories)) return undefined;
+  const tokensByKind = new Map<ProviderContextPart["kind"], number>();
+  const deferredKinds = new Set<ProviderDeferredContextPart["kind"]>();
+  for (const raw of usage.categories) {
+    const category = object(raw);
+    if (category === undefined || typeof category.name !== "string") return undefined;
+    const tokens = safeCount(category.tokens);
+    if (tokens === undefined) return undefined;
+    const deferred = DEFERRED_CONTEXT_CATEGORY[category.name];
+    if (deferred !== undefined) {
+      deferredKinds.add(deferred);
+      continue;
+    }
+    const kind = category.kind === "buffer" ? "reserved" : CONTEXT_PART_BY_CATEGORY[category.name];
+    if (kind === undefined || tokens === 0) continue;
+    tokensByKind.set(kind, (tokensByKind.get(kind) ?? 0) + tokens);
+  }
+  const counts: Partial<Record<ProviderContextPart["kind"], number | undefined>> = {
+    "system-tools": arrayLength(usage.systemTools),
+    "mcp-tools": countWhere(usage.mcpTools, (tool) => tool.isLoaded !== false),
+    "memory-files": arrayLength(usage.memoryFiles),
+    agents: arrayLength(usage.agents),
+    skills: safeCount(object(usage.skills)?.includedSkills),
+  };
+  const deferredCounts: Partial<Record<ProviderDeferredContextPart["kind"], number | undefined>> = {
+    "system-tools": countWhere(usage.deferredBuiltinTools, (tool) => tool.isLoaded === false),
+    "mcp-tools": countWhere(usage.mcpTools, (tool) => tool.isLoaded === false),
+  };
+  // The lists name tools the runtime left unloaded even when no category
+  // carries tokens for them.
+  for (const kind of ["system-tools", "mcp-tools"] as const) {
+    if ((deferredCounts[kind] ?? 0) > 0) deferredKinds.add(kind);
+  }
+  const parts: ProviderContextPart[] = [...tokensByKind].map(([kind, tokens]) => {
+    const count = counts[kind];
+    return {
+      kind,
+      tokens,
+      accuracy: "provider-reported" as const,
+      ...(count === undefined ? {} : { count }),
+    };
+  });
+  const deferred: ProviderDeferredContextPart[] = [...deferredKinds].map((kind) => {
+    const count = deferredCounts[kind];
+    return { kind, ...(count === undefined ? {} : { count }) };
+  });
+  if (parts.length === 0 && deferred.length === 0) return undefined;
+  return { parts, ...(deferred.length === 0 ? {} : { deferred }) };
 }
 
 export function permissionMode(

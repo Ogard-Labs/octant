@@ -1652,6 +1652,21 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
             </OctantToggleGroup>
           </SettingRow>
         ) : null}
+        {isAvailable("thread-stats") ? (
+          <SettingRow
+            description="Tokens, cache hit, speed, first-token time, and cost under every thread's composer, for every provider. Turn details stay one click away from the context meter."
+            focused={focusedSetting === settingId("thread-stats")}
+            label="Stats line under the composer"
+            scope="app"
+            settingId="thread-stats"
+          >
+            <OctantSwitch
+              checked={props.settings.showThreadStats}
+              label="Stats line under the composer"
+              onCheckedChange={(showThreadStats) => props.onSettingsChange({ showThreadStats })}
+            />
+          </SettingRow>
+        ) : null}
       </div>
     </SettingsSection>
   );

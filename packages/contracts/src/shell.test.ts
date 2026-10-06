@@ -59,6 +59,8 @@ const settings = {
   transcriptTextSize: "medium",
   transcriptWidth: "narrow",
   showThreadProviderIcons: true,
+  showThreadStats: true,
+  homeCards: { order: [], visibility: [] },
   sidebarRowProperties: {
     projects: { project: false, branch: true, pullRequest: true, lastUpdated: true, status: true },
     activity: {
@@ -159,6 +161,46 @@ describe("shell bootstrap contracts", () => {
   it("defaults transcript text to the compact reading size", () => {
     const { transcriptTextSize: _omitted, ...withoutTranscriptTextSize } = settings;
     expect(decodeShellSettings(withoutTranscriptTextSize).transcriptTextSize).toBe("small");
+  });
+
+  it("shows the thread stats line unless someone turned it off", () => {
+    const { showThreadStats: _omitted, ...withoutThreadStats } = settings;
+    expect(decodeShellSettings(withoutThreadStats).showThreadStats).toBe(true);
+    expect(decodeShellSettings({ ...settings, showThreadStats: false }).showThreadStats).toBe(
+      false,
+    );
+    expect(() => decodeShellSettings({ ...settings, showThreadStats: "off" })).toThrow();
+  });
+
+  it("decodes a store from before the start-screen cards to the registry defaults", () => {
+    const { homeCards: _predatesTheCards, ...predatesTheCards } = settings;
+    expect(decodeShellSettings(predatesTheCards).homeCards).toEqual({ order: [], visibility: [] });
+  });
+
+  it("keeps a start-screen card order and choice, and refuses a card named twice", () => {
+    const homeCards = {
+      order: ["pull-requests", "working-now"],
+      visibility: [{ id: "ci-failures", visible: false }],
+    };
+    expect(decodeShellSettings({ ...settings, homeCards }).homeCards).toEqual(homeCards);
+    expect(() =>
+      decodeShellSettings({ ...settings, homeCards: { order: ["a", "a"], visibility: [] } }),
+    ).toThrow();
+    expect(() =>
+      decodeShellSettings({
+        ...settings,
+        homeCards: {
+          order: [],
+          visibility: [
+            { id: "a", visible: true },
+            { id: "a", visible: false },
+          ],
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeShellSettings({ ...settings, homeCards: { order: ["Not An Id"], visibility: [] } }),
+    ).toThrow();
   });
 
   it("preserves an explicit choice to wait for finished replies", () => {

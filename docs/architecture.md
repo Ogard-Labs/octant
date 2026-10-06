@@ -1078,7 +1078,24 @@ flowchart LR
   their durable evidence references. Work uses a bounded delta feed over its
   durable transcript. One post-commit Machine change feed invalidates mode
   navigation and Project/extension projections instead of independent polling
-  timers. Every process-local feed sends `snapshot-required` after gaps,
+  timers. A running turn's start time and latest step (a tool name and one
+  redacted, truncated argument, or a wait on approval or an answer) ride on the
+  same Chat, Work, and Code navigation rows as `executing`, optional and absent
+  together outside a live turn. They are held in memory by one process-local
+  live-turn registry the three turn runners feed from the normalized runtime
+  events, are never journaled (a restart interrupts every turn, so there is
+  nothing to rebuild), and are cleared when the turn ends. A provider reports
+  an argument only where it can (Codex shell commands and file paths today);
+  the others show the tool name alone. Redaction happens at the adapter and
+  again when the event is observed: a login-shell wrapper is unwrapped, the first line only, no
+  heredoc body, secret-shaped values and environment assignments replaced, every
+  absolute path reduced to its last segment, then a length cap; a file change
+  names its Project-relative path and never its contents. A step change is not a
+  journal event, so the registry publishes a coalesced notice to the Machine
+  change feed for the mode's navigation topic; the reads still follow the feed
+  and add no timer. Rows are already filtered by the caller's Project and
+  thread authority, so a remote client sees a step only for a thread it can list.
+  Every process-local feed sends `snapshot-required` after gaps,
   overflow, or host restart. The client transport bounds and prioritizes reads,
   coalesces identical work, cancels obsolete thread switches, renews local
   client context without replaying mutations, and windows long transcripts.
@@ -1224,8 +1241,22 @@ flowchart LR
   file the sync client has not downloaded, and a conflict copy the sync client
   left behind, are reported instead of being treated as entries. A folder
   outside the user's home is refused unless the standing access-outside-project
-  approval exists — the same rule as the artifact mirror's global folder.
-  Publish and pull are not this store; they call it.
+  approval exists — the same rule as the artifact mirror's global folder. The
+  in-tree S3-compatible store sends every request to the configured endpoint and
+  only while sync is on. Its settings are the endpoint URL, region, bucket,
+  optional key prefix, and path-style or virtual-host addressing. The access key
+  and secret live in the host credential store — macOS Keychain or freedesktop
+  Secret Service — and are never journaled. A plaintext endpoint is refused and
+  no credential is sent on it. A publish uses a conditional create
+  (`If-None-Match: *`); a provider that does not enforce it is configured to
+  fall back to HEAD-then-PUT, where a key is already unique to one host's
+  instance and sequence so a lost race cannot overwrite another host's entry. A
+  failure is a typed outcome — unauthorized, not-found, throttled, unreachable;
+  a throttled or unreachable answer is retried a bounded number of times with
+  backoff, while a rejected credential or a missing object is not. A Test
+  connection action writes one probe object in a reserved key namespace and
+  deletes nothing; `list` skips that namespace. Publish and pull are not this
+  store; they call it.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -1444,7 +1475,59 @@ and request shape is retained across restart and participates in subsequent
 planning; it replaces emergency estimates while conflicting model facts retain
 the more conservative bound.
 Provider-managed Code turns also contribute their journaled token reports to the
-usage ledger. One operation contributes one request; a later report replaces its
+usage ledger. A runtime that compacts its own session may report where, as
+`autoCompactThreshold` on the usage report (tokens of the window the last request
+filled); the meter derives its automatic-compaction line from that and from the
+report's `contextTokens`, and shows nothing when either is absent. Claude Code is
+the only runtime that reports one: the host asks its runtime for the point once,
+when the session opens (Claude Code 2.1.287 answers `getContextUsage` with
+`autoCompactThreshold` and `isAutoCompactEnabled`, in tokens, for example 167000
+of a 200000 window), and the Claude mapper stamps it on every usage report of the
+session together with the input the latest request read as `contextTokens`. The
+runtime's separate `autocompact_state` message is only sent to remote workers, so
+the host does not depend on it. Codex CLI and every other runtime report no
+point and stay `unknown`.
+
+**What fills a provider-run window.** A usage report may carry
+`contextBreakdown` (`ProviderContextBreakdown` in `@octant/contracts`): a closed
+set of part kinds (`system-prompt`, `system-tools`, `octant-tools`, `mcp-tools`,
+`memory-files`, `skills`, `agents`, `messages`, `reserved`), each with tokens, an
+accuracy (`provider-reported`, `exact-tokenizer`, `model-family-estimate`,
+`conservative-heuristic`) and an optional count, plus counts of tools the runtime
+knows but has not loaded (`deferred`, no tokens, no share). Per runtime:
+
+- Claude Code answers `query.getContextUsage()` with `categories` (name, tokens,
+  `isDeferred`), `totalTokens`, `maxTokens`, and lists that give counts
+  (`memoryFiles`, `mcpTools` with `isLoaded`, `agents`, `skills.includedSkills`).
+  The port asks once per settled turn, attaches the decoded parts to the turn's
+  result usage, and stops asking for the session after one unanswered request
+  (1.5 s), so a slow runtime delays one turn at most. Category names outside the
+  table (for example MCP server instructions) are not parts; their tokens stay
+  in the occupancy. Paths and skill names are dropped at the port; only counts
+  leave it.
+- Codex app-server (`thread/tokenUsage/updated`: `last`/`total` input, cached,
+  output and reasoning tokens, plus `modelContextWindow`), OpenCode (per-step
+  tokens and the model's `limit.context`), Pi (`get_session_stats.contextUsage`
+  as one figure) and ACP (`usage_update` with `used` and `size`) report no
+  categories. Lists of tools, MCP servers, skills or instruction files exist in
+  some of them but carry no token weight, so they are not parts.
+- For a runtime that reported none, the turn runner counts what Octant itself
+  registered with the session: the app-managed tool definitions, which travel
+  with every request. They are `octant-tools`, `conservative-heuristic` (the
+  serialized definition at four characters to a token, floor 16 per tool), and
+  are never added when the runtime reported its own categories, so a part is
+  never counted twice.
+
+The renderer shows the parts and one remainder, `Other (provider)`, which is the
+reported occupancy less the parts and is itself marked estimated when any part
+is. When the parts outrun the occupancy (the breakdown follows the reply, the
+occupancy precedes it) the window holds what the parts add up to, so the parts
+and the remainder always sum to the figure shown. The latest breakdown that was
+reported stands while a later turn is still running. Each category has one tone
+in the popover's bar and key and on the inspector's entries; Free space and
+Reserved have none ([DESIGN.md](../DESIGN.md), the context meter under "Shell and layout").
+
+One operation contributes one request; a later report replaces its
 previous totals. Code conversation usage also preserves optional cache-read and cache-write
 counters. Codex native-thread totals are normalized to turn usage before recording;
 missing cache reports remain unknown. Direct-endpoint (native harness) usage is
@@ -1860,7 +1943,22 @@ not render them. A target that passed activation is still reported honestly as
 artifact preview SVG read numbers through the shared Canvas formatter and draw
 marks to the shared chart specifications and the shared squarified treemap
 layout, so an exported reading matches the screen rather than growing a second
-reading.
+reading. A local target may describe the exact file it would write, and the
+card then names that path: approving a card that names an existing file is the
+confirmation to replace it, and a call without that confirmation writes a
+numbered copy beside the file instead of over it.
+
+The folder destination ships in-tree on that same port, so it is offered,
+approved, and journaled exactly as a plugin's contribution is. Its folder comes
+from the host folder browser — a renderer sends a candidate the host listed, and
+the host resolves the path — and is remembered per Project, with a host-wide
+folder for a thread filed nowhere, in a `canvas.export-folder-changed@1` journal
+frame rebuilt on restart. A folder must be inside the person's home unless the
+standing access-outside-project approval exists, the same rule the artifact
+mirror's global folder follows. Writes are confined to the chosen folder and are
+atomic: a temporary file is renamed into place, so a reader never sees a
+half-written export. The user guide's exporting page
+(`apps/docs/guide/export.md`) states the same rules for a person.
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured

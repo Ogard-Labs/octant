@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
+import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
@@ -1058,6 +1059,8 @@ export const CodeNavigationRuntime = Schema.Struct({
     }).annotations(strict),
   ),
   pullRequestSummaries: Schema.optional(ThreadBoardPullRequestSummaries),
+  /** The latest turn's start and latest step while it runs; absent otherwise. */
+  ...ThreadLiveTurnFields,
 }).annotations(strict);
 export type CodeNavigationRuntime = typeof CodeNavigationRuntime.Type;
 
