@@ -32,6 +32,7 @@ import type {
   NativeHarnessResponse,
   NativeHarnessTransport,
   NativeHarnessTransportSession,
+  NativeHarnessUsage,
 } from "./nativeHarnessTransport";
 
 /**
@@ -107,8 +108,8 @@ interface SessionState {
   abortController: AbortController | undefined;
   stopped: boolean;
   steps: number;
-  inputTokens: number;
-  outputTokens: number;
+  /** Everything this turn's requests have cost so far; a figure no request reported stays absent. */
+  usage: NativeHarnessUsage;
 }
 
 /**
@@ -217,8 +218,7 @@ export function createNativeHarnessConnection(
       abortController: undefined,
       stopped: false,
       steps: 0,
-      inputTokens: 0,
-      outputTokens: 0,
+      usage: { inputTokens: 0, outputTokens: 0 },
     });
 
     // A note is acknowledged only after it is durable and its next request
@@ -299,10 +299,7 @@ export function createNativeHarnessConnection(
       // Header buckets describe the account after this response; they go
       // first so a consumer that stops at the terminal still sees them.
       for (const bucket of response.rateLimitBuckets ?? []) emitBucket(state, bucket);
-      if (response.usage !== undefined) {
-        state.inputTokens += response.usage.inputTokens;
-        state.outputTokens += response.usage.outputTokens;
-      }
+      if (response.usage !== undefined) state.usage = addUsage(state.usage, response.usage);
       if (response.toolCalls.length > 0) {
         const refused = refuseToolCalls(state.tools, response.toolCalls);
         if (refused !== undefined) {
@@ -337,12 +334,8 @@ export function createNativeHarnessConnection(
       }
       // A turn that took several requests reports its whole cost once more
       // before it ends; consumers keep the latest usage they saw.
-      if (state.steps > 1 && (state.inputTokens > 0 || state.outputTokens > 0)) {
-        emit(state, {
-          kind: "usage",
-          inputTokens: state.inputTokens,
-          outputTokens: state.outputTokens,
-        });
+      if (state.steps > 1 && (state.usage.inputTokens > 0 || state.usage.outputTokens > 0)) {
+        emit(state, { kind: "usage", ...state.usage });
       }
       state.acceptingSteering = false;
       emit(state, { kind: "completed", resumeCursor: cursorFor(state) });
@@ -474,8 +467,7 @@ export function createNativeHarnessConnection(
             state.pending = undefined;
             state.answered.clear();
             state.steps = 0;
-            state.inputTokens = 0;
-            state.outputTokens = 0;
+            state.usage = { inputTokens: 0, outputTokens: 0 };
             state.acceptingSteering = true;
             void runStep(state, request);
           },
@@ -603,6 +595,22 @@ export function createNativeHarnessConnection(
         }).pipe(Effect.asVoid),
     };
   });
+}
+
+/** A figure only appears in the total once some request has reported it. */
+function addUsage(total: NativeHarnessUsage, step: NativeHarnessUsage): NativeHarnessUsage {
+  const sum = (a: number | undefined, b: number | undefined) =>
+    a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
+  const cacheRead = sum(total.cacheReadInputTokens, step.cacheReadInputTokens);
+  const cacheWrite = sum(total.cacheWriteInputTokens, step.cacheWriteInputTokens);
+  const reasoning = sum(total.reasoningTokens, step.reasoningTokens);
+  return {
+    inputTokens: total.inputTokens + step.inputTokens,
+    outputTokens: total.outputTokens + step.outputTokens,
+    ...(cacheRead === undefined ? {} : { cacheReadInputTokens: cacheRead }),
+    ...(cacheWrite === undefined ? {} : { cacheWriteInputTokens: cacheWrite }),
+    ...(reasoning === undefined ? {} : { reasoningTokens: reasoning }),
+  };
 }
 
 /**

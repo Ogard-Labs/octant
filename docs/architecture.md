@@ -1347,7 +1347,19 @@ Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. One operation contributes one request; a later report replaces its
 previous totals. Code conversation usage also preserves optional cache-read and cache-write
 counters. Codex native-thread totals are normalized to turn usage before recording;
-missing cache reports remain unknown. ACP and Pi resume cursors carry a durable
+missing cache reports remain unknown. Direct-endpoint (native harness) usage is
+normalized from every wire protocol into the same buckets: `inputTokens` is all input,
+cached or not, so context math never depends on whether an endpoint caches;
+`cacheReadInputTokens` and `cacheWriteInputTokens` are the parts of it read from or
+written to the prompt cache; `reasoningTokens` is the part of `outputTokens` spent
+thinking. Protocols that already count cached tokens inside their input figure (Chat
+Completions `prompt_tokens`, Responses `input_tokens`) are read as they come, and the
+protocol that reports uncached input, cache reads, and cache writes as disjoint figures
+(Messages) has them summed into `inputTokens`. A figure the endpoint did not report is
+absent rather than zero, a turn of several requests reports the sum of the figures its
+requests reported, and a report whose cache or reasoning figure exceeds its total is
+refused as invalid usage. Unknown fields in a response are ignored; a known field of
+the wrong type still fails the turn. ACP and Pi resume cursors carry a durable
 task binding, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
 follow-ups; Chat retries retain that identity and native scratch files. Native

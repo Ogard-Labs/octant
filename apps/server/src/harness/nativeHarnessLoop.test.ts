@@ -13,7 +13,9 @@ import type { ProviderConnection } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Stream, type Scope } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
+import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { buildUsageDashboard } from "../usageDashboardModel";
 import { createNativeHarnessConnection, fitRequest } from "./nativeHarnessLoop";
 import {
   JournalNativeHarnessTranscriptStore,
@@ -544,5 +546,108 @@ describe("fitting a request to the endpoint", () => {
 
   it("refuses rather than cut the latest message", () => {
     expect(fitRequest(fitsUnder(10), base)).toBeUndefined();
+  });
+
+  describe("usage across the requests of one turn", () => {
+    /** Runs a turn of two requests, the first calling a tool, and returns every event it produced. */
+    const twoRequestTurn = (
+      first: NativeHarnessResponse["usage"],
+      second: NativeHarnessResponse["usage"],
+    ) => {
+      const { transport } = scriptedTransport([
+        {
+          text: "",
+          toolCalls: [{ toolCallId: "call", toolName: "read", argumentsJson: "{}" }],
+          ...(first === undefined ? {} : { usage: first }),
+        },
+        { text: "done", toolCalls: [], ...(second === undefined ? {} : { usage: second }) },
+      ]);
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            yield* sendAndCollect(connection, "look", (event) => event.kind === "tool-request");
+            const finished = yield* Effect.fork(
+              Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+            );
+            yield* connection.answerTool({
+              sessionId,
+              requestId: "call",
+              resultJson: "{}",
+              isError: false,
+            });
+            return Array.from(yield* Fiber.join(finished));
+          }),
+        ),
+      );
+    };
+
+    it("reports the turn's cache and reasoning tokens once, summed over its requests", async () => {
+      const events = await twoRequestTurn(
+        { inputTokens: 100, outputTokens: 10, cacheWriteInputTokens: 60, cacheReadInputTokens: 0 },
+        { inputTokens: 160, outputTokens: 5, cacheReadInputTokens: 60, reasoningTokens: 3 },
+      );
+
+      const usage = events.filter((event) => event.kind === "usage");
+      expect(usage).toHaveLength(1);
+      expect(usage[0]).toMatchObject({
+        inputTokens: 260,
+        outputTokens: 15,
+        cacheReadInputTokens: 60,
+        cacheWriteInputTokens: 60,
+        reasoningTokens: 3,
+      });
+
+      // The same event is what the usage dashboard reads for cache coverage.
+      const observation = usageFromRuntimeEvent(usage[0] as ProviderRuntimeEvent);
+      const dashboard = buildUsageDashboard(
+        [
+          {
+            reconciliationId: "harness-turn",
+            hostId: "local",
+            providerInstanceId: String(instanceId),
+            modelId: String(modelId),
+            requestShape: "code-turn",
+            subjectType: "code-thread",
+            subjectId: "thread",
+            quality: "exact",
+            inputTokens: observation?.inputTokens ?? 0,
+            outputTokens: observation?.outputTokens ?? 0,
+            ...(observation?.cacheReadInputTokens === undefined
+              ? {}
+              : { cacheReadInputTokens: observation.cacheReadInputTokens }),
+            ...(observation?.cacheWriteInputTokens === undefined
+              ? {}
+              : { cacheWriteInputTokens: observation.cacheWriteInputTokens }),
+            attribution: [],
+            observedAt: now,
+          },
+        ],
+        { queryAt: now, timeZone: "UTC", detailLimit: 10, breakdownLimit: 10 },
+      );
+      expect(dashboard.cacheStats.providerTokenCaches).toEqual([
+        {
+          providerInstanceId: String(instanceId),
+          requestCount: 1,
+          cacheReadInputTokens: 60,
+          cacheWriteInputTokens: 60,
+          hitRatio: 0.5,
+        },
+      ]);
+    });
+
+    it("leaves a figure out of the turn's usage when no request reported it", async () => {
+      const events = await twoRequestTurn(
+        { inputTokens: 100, outputTokens: 10 },
+        { inputTokens: 160, outputTokens: 5 },
+      );
+
+      const usage = events.find((event) => event.kind === "usage");
+      expect(usage).toMatchObject({ inputTokens: 260, outputTokens: 15 });
+      expect(usage).not.toHaveProperty("cacheReadInputTokens");
+      expect(usage).not.toHaveProperty("cacheWriteInputTokens");
+      expect(usage).not.toHaveProperty("reasoningTokens");
+    });
   });
 });
