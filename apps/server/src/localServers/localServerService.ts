@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import {
   decodeLocalServerCommandResult,
   decodeLocalServerSnapshot,
+  decodeRunningServiceCommandResult,
+  decodeRunningServicesSnapshot,
   type CodeThreadId,
   type LocalServerCommand,
   type LocalServerCommandResult,
@@ -9,17 +11,25 @@ import {
   type LocalServerHealth,
   type LocalServerListener,
   type LocalServerListenerId,
+  type LocalServerOpenTarget,
   type LocalServerSnapshot,
+  type LocalServerStartSource,
   type ProjectId,
+  type RunningService,
+  type RunningServiceCommand,
+  type RunningServiceCommandResult,
+  type RunningServicesSnapshot,
   type WindowId,
   MAX_LOCAL_SERVER_LISTENERS,
 } from "@octant/contracts";
 import {
+  attributeLocalListener,
   authorizeLocalServerAction,
   classifyLocalListener,
   describeLocalServerStopDenial,
   LOCAL_SERVER_SYSTEM_DENYLIST,
   type LocalListenerClassification,
+  type LocalListenerClassificationContext,
   type LocalServerActor,
   type LocalServerPosture,
 } from "@octant/domain";
@@ -42,6 +52,13 @@ import type {
  *   may since have been taken by a different process.
  * - The observation is ephemeral. Nothing here is journaled, so a restart shows
  *   the host as it is now and never silently restarts a server.
+ *
+ * The start screen's Running services is the same surface read host-wide
+ * rather than per thread. It reuses this classifier, scan, and health phase and
+ * adds one more filter before anything is probed: a listener is published only
+ * when its working directory sits inside a Project (or a thread's own worktree)
+ * the window can access. The classifier decides what *may* be listed and the
+ * attribution decides what the window *may see*; neither is a second inventory.
  *
  * Every scan is also bounded in time, because the panel skips a refresh while
  * one is outstanding. The health phase probes listeners with bounded
@@ -126,6 +143,41 @@ export interface LocalServerScopeResolver {
   ): Promise<LocalServerScopeBinding | undefined>;
 }
 
+/**
+ * One place a listener can be attributed to: a Project's bound folder, or the
+ * worktree of a single thread inside it.
+ */
+export interface RunningServiceOrigin {
+  /** Canonical folder the listener's working directory must sit inside. */
+  readonly root: string;
+  readonly projectId: ProjectId;
+  readonly projectName: string;
+  /** Set only for a root that belongs to exactly one thread (its own worktree). */
+  readonly thread?: { readonly threadId: CodeThreadId; readonly title: string };
+  readonly branch?: string;
+  /**
+   * Posture Stop is judged under. A thread's own worktree carries that thread's
+   * posture, so a Plan thread's server is never stoppable from the start screen
+   * either; a Project folder is the person's own and carries no thread posture.
+   */
+  readonly posture: LocalServerPosture;
+}
+
+/** Everything the host decides before it observes for the whole window. */
+export interface LocalServerHostBinding {
+  readonly origins: ReadonlyArray<RunningServiceOrigin>;
+  /** PIDs of processes Octant itself started and still owns. */
+  readonly ownedPids: ReadonlySet<number>;
+}
+
+export interface LocalServerHostScopeResolver {
+  /** `undefined` is the fail-closed answer: the window's Projects could not be resolved. */
+  resolve(
+    authenticatedWindowId: WindowId,
+    signal?: AbortSignal,
+  ): Promise<LocalServerHostBinding | undefined>;
+}
+
 export interface LocalServerHealthProbe {
   probe(input: {
     readonly port: number;
@@ -148,11 +200,39 @@ export interface LocalServerStopPort {
 export interface LocalServerServiceOptions {
   readonly listeners: LocalListenerPort;
   readonly scopes: LocalServerScopeResolver;
+  readonly hostScopes: LocalServerHostScopeResolver;
   readonly health: LocalServerHealthProbe;
   readonly stopPort: LocalServerStopPort;
   readonly clock?: () => string;
   readonly maxListeners?: number;
 }
+
+/**
+ * What one scan needs to classify, admit, and decide Stop for its listeners. A
+ * thread's scope and the window-wide scope both reduce to this, so the scan
+ * itself has one implementation.
+ */
+interface ObservationScope {
+  /** Mixed into every listener id so ids from different surfaces never collide. */
+  readonly idSalt: string;
+  readonly classification: LocalListenerClassificationContext;
+  readonly ownedPids: ReadonlySet<number>;
+  readonly actor: LocalServerActor;
+  readonly postureFor: (observation: ObservedLocalListener) => LocalServerPosture;
+  /** Runs before health is probed, so a listener it refuses costs nothing further. */
+  readonly admit: (
+    observation: ObservedLocalListener,
+    facts: {
+      readonly owned: boolean;
+      readonly startSource: LocalServerStartSource;
+    },
+  ) => boolean;
+}
+
+/** A refusal, or the one fact the caller needs next. */
+type Outcome<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly failure: LocalServerFailure };
 
 interface ResolvedListener {
   readonly listener: LocalServerListener;
@@ -182,6 +262,7 @@ type ClassifiedScan =
 export class LocalServerService {
   readonly #listeners: LocalListenerPort;
   readonly #scopes: LocalServerScopeResolver;
+  readonly #hostScopes: LocalServerHostScopeResolver;
   readonly #health: LocalServerHealthProbe;
   readonly #stopPort: LocalServerStopPort;
   readonly #clock: () => string;
@@ -190,6 +271,7 @@ export class LocalServerService {
   constructor(options: LocalServerServiceOptions) {
     this.#listeners = options.listeners;
     this.#scopes = options.scopes;
+    this.#hostScopes = options.hostScopes;
     this.#health = options.health;
     this.#stopPort = options.stopPort;
     this.#clock = options.clock ?? (() => new Date().toISOString());
@@ -219,16 +301,13 @@ export class LocalServerService {
       });
     }
     const scope: LocalServerScope = { ...binding, actor: options.actor };
+    const observing = threadObservationScope(scope);
 
-    const scan = await this.#observe(scope, options.signal);
+    const scan = await this.#observe(observing, options.signal);
     if (scan.status === "unavailable") {
       // The host never established what is running here, so it answers with a
       // refusal rather than a snapshot the user would read as a quiet computer.
-      return this.#rejected(command, {
-        category: "unavailable",
-        message:
-          "Octant could not check this computer for local servers, so it cannot say whether any are running.",
-      });
+      return this.#rejected(command, { category: "unavailable", message: SCAN_UNAVAILABLE });
     }
     const resolved = scan.listeners;
     if (command.kind === "list-local-servers") {
@@ -240,33 +319,113 @@ export class LocalServerService {
     }
 
     const target = resolved.find((entry) => entry.listener.listenerId === command.listenerId);
-    if (target === undefined) {
-      // A listener the current observation does not classify is not merely
-      // missing — it is one Octant refuses to act on, and both answer alike.
-      return this.#rejected(command, {
-        category: "not-found",
-        message: "That local server is no longer classified as a user or dev server.",
-      });
-    }
+    if (target === undefined) return this.#rejected(command, NOT_CLASSIFIED);
 
-    return command.kind === "open-local-server"
-      ? this.#open(command, scope, target)
-      : await this.#stop(command, scope, target, options.signal);
+    if (command.kind === "open-local-server") {
+      const opened = this.#prepareOpen(observing, target);
+      return opened.ok
+        ? decodeLocalServerCommandResult({
+            kind: "local-server-open-prepared",
+            requestId: command.requestId,
+            listenerId: target.listener.listenerId,
+            target: opened.value,
+          })
+        : this.#rejected(command, opened.failure);
+    }
+    const stopped = await this.#stop(
+      observing,
+      { listenerId: command.listenerId, confirmation: command.confirmation },
+      target,
+      options.signal,
+    );
+    return stopped.ok
+      ? decodeLocalServerCommandResult({
+          kind: "local-server-stopped",
+          requestId: command.requestId,
+          listenerId: command.listenerId,
+          snapshot: this.#snapshot(scope, stopped.value),
+        })
+      : this.#rejected(command, stopped.failure);
   }
 
-  #open(
-    command: Extract<LocalServerCommand, { readonly kind: "open-local-server" }>,
-    scope: LocalServerScope,
-    target: ResolvedListener,
-  ): LocalServerCommandResult {
+  /**
+   * The same surface read for the whole window, for the start screen's Running
+   * services. Open and Stop take the very paths a thread's Local servers take,
+   * judged for the listener's own origin: a Plan thread's server is not
+   * stoppable here either, and a leftover still needs its confirmation.
+   */
+  async executeRunning(
+    authenticatedWindowId: WindowId,
+    command: RunningServiceCommand,
+    options: { readonly actor: LocalServerActor; readonly signal?: AbortSignal },
+  ): Promise<RunningServiceCommandResult> {
+    const binding = await this.#hostScopes.resolve(authenticatedWindowId, options.signal);
+    if (binding === undefined) {
+      return this.#runningRejected(command, {
+        category: "not-found",
+        message: "Running services need an active Code Project in this window.",
+      });
+    }
+    // A window with no Code Project has nothing a listener could be attributed
+    // to, so there is nothing to scan for and nothing to say about the host.
+    if (binding.origins.length === 0) {
+      if (command.kind === "list-running-services") {
+        return this.#runningListed(command, []);
+      }
+      return this.#runningRejected(command, NOT_CLASSIFIED);
+    }
+
+    const observing = hostObservationScope(binding, options.actor);
+    const scan = await this.#observe(observing, options.signal);
+    if (scan.status === "unavailable") {
+      return this.#runningRejected(command, {
+        category: "unavailable",
+        message: SCAN_UNAVAILABLE,
+      });
+    }
+    if (command.kind === "list-running-services") {
+      return this.#runningListed(command, runningServices(binding, scan.listeners));
+    }
+
+    const target = scan.listeners.find((entry) => entry.listener.listenerId === command.listenerId);
+    if (target === undefined) return this.#runningRejected(command, NOT_CLASSIFIED);
+
+    if (command.kind === "open-running-service") {
+      const opened = this.#prepareOpen(observing, target);
+      return opened.ok
+        ? decodeRunningServiceCommandResult({
+            kind: "running-service-open-prepared",
+            requestId: command.requestId,
+            listenerId: target.listener.listenerId,
+            target: opened.value,
+          })
+        : this.#runningRejected(command, opened.failure);
+    }
+    const stopped = await this.#stop(
+      observing,
+      { listenerId: command.listenerId, confirmation: command.confirmation },
+      target,
+      options.signal,
+    );
+    return stopped.ok
+      ? decodeRunningServiceCommandResult({
+          kind: "running-service-stopped",
+          requestId: command.requestId,
+          listenerId: command.listenerId,
+          snapshot: this.#runningSnapshot(runningServices(binding, stopped.value)),
+        })
+      : this.#runningRejected(command, stopped.failure);
+  }
+
+  #prepareOpen(scope: ObservationScope, target: ResolvedListener): Outcome<LocalServerOpenTarget> {
     const decision = authorizeLocalServerAction({
       action: "open",
       actor: scope.actor,
-      posture: scope.posture,
+      posture: scope.postureFor(target.observation),
       classified: true,
     });
     if (decision.kind === "deny") {
-      return this.#rejected(command, {
+      return refused({
         category: "unauthorized",
         message: describeLocalServerStopDenial(decision),
       });
@@ -275,7 +434,7 @@ export class LocalServerService {
       // Both refusals withhold Open, but only one of them is a fact about the
       // listener: a row the host never finished asking about is not "not
       // answering", it is unchecked.
-      return this.#rejected(command, {
+      return refused({
         category: "unavailable",
         message:
           target.listener.health === "unknown"
@@ -284,49 +443,54 @@ export class LocalServerService {
       });
     }
     const url = new URL(String(target.listener.url));
-    return decodeLocalServerCommandResult({
-      kind: "local-server-open-prepared",
-      requestId: command.requestId,
-      listenerId: target.listener.listenerId,
-      target: {
+    return {
+      ok: true,
+      value: {
         url: target.listener.url,
         // Exactly this origin: a second leftover creates another tab rather
         // than widening `localhost` to every port on the host.
         allowedOrigin: url.origin,
         acceptsLocalCertificate: url.protocol === "https:",
       },
-    });
+    };
   }
 
+  /** Authorize, confirm, re-observe, signal, then re-scan; the listing after the stop. */
   async #stop(
-    command: Extract<LocalServerCommand, { readonly kind: "stop-local-server" }>,
-    scope: LocalServerScope,
+    scope: ObservationScope,
+    request: {
+      readonly listenerId: LocalServerListenerId;
+      readonly confirmation: Extract<
+        LocalServerCommand,
+        { readonly kind: "stop-local-server" }
+      >["confirmation"];
+    },
     target: ResolvedListener,
     signal?: AbortSignal,
-  ): Promise<LocalServerCommandResult> {
+  ): Promise<Outcome<ReadonlyArray<ResolvedListener>>> {
     const decision = authorizeLocalServerAction({
       action: "stop",
       actor: scope.actor,
-      posture: scope.posture,
+      posture: scope.postureFor(target.observation),
       ownership: target.ownership,
       classified: true,
     });
     if (decision.kind === "deny") {
-      return this.#rejected(command, {
+      return refused({
         category:
           decision.reason === "local-host-required" ? "local-host-required" : "unauthorized",
         message: describeLocalServerStopDenial(decision),
       });
     }
     if (decision.kind === "prompt") {
-      return this.#rejected(command, {
+      return refused({
         category: "confirmation-required",
         message:
           "Stopping a leftover server needs a fresh user approval; a remembered Full access grant does not cover it.",
       });
     }
-    if (decision.kind === "confirm" && !confirms(command.confirmation, target)) {
-      return this.#rejected(command, {
+    if (decision.kind === "confirm" && !confirms(request.confirmation, target)) {
+      return refused({
         category: "confirmation-required",
         message: `Confirm stopping ${target.listener.processName} on port ${target.listener.port} before Octant signals it.`,
       });
@@ -336,14 +500,14 @@ export class LocalServerService {
     // port may since have been taken by a process this classifier would hide.
     const reobserved = await this.#observe(scope, signal);
     if (reobserved.status === "unavailable") {
-      return this.#rejected(command, {
+      return refused({
         category: "unavailable",
         message:
           "Octant could not re-check this computer's local servers, so it signalled nothing.",
       });
     }
     const current = reobserved.listeners.find(
-      (entry) => entry.listener.listenerId === command.listenerId,
+      (entry) => entry.listener.listenerId === request.listenerId,
     );
     if (
       current === undefined ||
@@ -351,7 +515,7 @@ export class LocalServerService {
       current.ownership !== target.ownership ||
       current.listener.stop.status !== "available"
     ) {
-      return this.#rejected(command, {
+      return refused({
         category: "not-found",
         message: "That local server changed before Octant could stop it; nothing was signalled.",
       });
@@ -359,7 +523,7 @@ export class LocalServerService {
 
     const outcome = await this.#stopPort.stop({ pid: current.observation.pid });
     if (outcome === "failed") {
-      return this.#rejected(command, {
+      return refused({
         category: "unavailable",
         message: "Octant could not stop that local server.",
       });
@@ -369,21 +533,16 @@ export class LocalServerService {
     if (after.status === "unavailable") {
       // The signal landed; only the follow-up scan failed. Saying so beats
       // publishing an empty snapshot as this host's post-stop state.
-      return this.#rejected(command, {
+      return refused({
         category: "unavailable",
         message:
           "Octant stopped that local server but could not re-check this computer afterwards.",
       });
     }
-    return decodeLocalServerCommandResult({
-      kind: "local-server-stopped",
-      requestId: command.requestId,
-      listenerId: command.listenerId,
-      snapshot: this.#snapshot(scope, after.listeners),
-    });
+    return { ok: true, value: after.listeners };
   }
 
-  async #observe(scope: LocalServerScope, signal?: AbortSignal): Promise<ClassifiedScan> {
+  async #observe(scope: ObservationScope, signal?: AbortSignal): Promise<ClassifiedScan> {
     let scan: LocalListenerObservation;
     try {
       scan = await this.#listeners.observe(signal);
@@ -400,11 +559,16 @@ export class LocalServerService {
     const classified: ClassifiedListener[] = [];
     if (signal?.aborted !== true) {
       for (const observation of scan.listeners.slice(0, this.#maxListeners)) {
-        const classification = classifyLocalListener(observation, {
-          currentCheckoutRoot: scope.currentCheckoutRoot,
-          userProjectRoots: scope.userProjectRoots,
-        });
-        if (classification.status !== "omitted") classified.push({ observation, classification });
+        const classification = classifyLocalListener(observation, scope.classification);
+        if (
+          classification.status !== "omitted" &&
+          scope.admit(observation, {
+            owned: isOctantOwned(scope, observation),
+            startSource: classification.startSource,
+          })
+        ) {
+          classified.push({ observation, classification });
+        }
       }
     }
 
@@ -419,14 +583,11 @@ export class LocalServerService {
       const probed = probes[index];
       if (probed === undefined && abandoned) continue;
       const probe = probed ?? unanswered(observation);
-      const ownership =
-        scope.ownedPids.has(observation.pid) || observation.ownedByOctant === true
-          ? "octant-owned"
-          : "leftover";
+      const ownership = isOctantOwned(scope, observation) ? "octant-owned" : "leftover";
       const stopDecision = authorizeLocalServerAction({
         action: "stop",
         actor: scope.actor,
-        posture: scope.posture,
+        posture: scope.postureFor(observation),
         ownership,
         classified: classification.stoppable && !isDenylisted(observation),
       });
@@ -439,7 +600,7 @@ export class LocalServerService {
       let listener: LocalServerListener;
       try {
         listener = {
-          listenerId: deriveListenerId(scope.threadId, observation),
+          listenerId: deriveListenerId(scope.idSalt, observation),
           port: observation.port as LocalServerListener["port"],
           url: url as LocalServerListener["url"],
           processName: observation.processName,
@@ -557,6 +718,32 @@ export class LocalServerService {
     });
   }
 
+  #runningListed(
+    command: Extract<RunningServiceCommand, { readonly kind: "list-running-services" }>,
+    services: ReadonlyArray<RunningService>,
+  ): RunningServiceCommandResult {
+    return decodeRunningServiceCommandResult({
+      kind: "running-services-listed",
+      requestId: command.requestId,
+      snapshot: this.#runningSnapshot(services),
+    });
+  }
+
+  #runningSnapshot(services: ReadonlyArray<RunningService>): RunningServicesSnapshot {
+    return decodeRunningServicesSnapshot({ services, observedAt: this.#clock() });
+  }
+
+  #runningRejected(
+    command: RunningServiceCommand,
+    failure: LocalServerFailure,
+  ): RunningServiceCommandResult {
+    return decodeRunningServiceCommandResult({
+      kind: "running-service-rejected",
+      requestId: command.requestId,
+      failure,
+    });
+  }
+
   #rejected(command: LocalServerCommand, failure: LocalServerFailure): LocalServerCommandResult {
     return decodeLocalServerCommandResult({
       kind: "local-server-rejected",
@@ -567,17 +754,18 @@ export class LocalServerService {
 }
 
 /**
- * Opaque per-thread listener id. Derived from thread, pid, port, and process
- * name so the same listener keeps its id across refreshes while the token still
- * carries no host handle a client could act on directly.
+ * Opaque listener id. Derived from the surface that asked (a thread, or the
+ * window-wide listing), pid, port, and process name so the same listener keeps
+ * its id across refreshes while the token still carries no host handle a client
+ * could act on directly.
  */
 export function deriveListenerId(
-  threadId: CodeThreadId,
+  scopeKey: string,
   observation: Pick<ObservedLocalListener, "pid" | "port" | "processName">,
 ): LocalServerListenerId {
   const digest = createHash("sha256")
     .update("octant.local-server.v1\0")
-    .update(String(threadId))
+    .update(scopeKey)
     .update("\0")
     .update(String(observation.pid))
     .update("\0")
@@ -587,6 +775,118 @@ export function deriveListenerId(
     .digest("hex")
     .slice(0, 32);
   return `lsn_${digest}` as LocalServerListenerId;
+}
+
+const SCAN_UNAVAILABLE =
+  "Octant could not check this computer for local servers, so it cannot say whether any are running.";
+
+/**
+ * A listener the current observation does not classify is not merely missing —
+ * it is one Octant refuses to act on, and both answer alike.
+ */
+const NOT_CLASSIFIED: LocalServerFailure = {
+  category: "not-found",
+  message: "That local server is no longer classified as a user or dev server.",
+};
+
+function refused(failure: LocalServerFailure): {
+  readonly ok: false;
+  readonly failure: LocalServerFailure;
+} {
+  return { ok: false, failure };
+}
+
+function threadObservationScope(scope: LocalServerScope): ObservationScope {
+  return {
+    idSalt: String(scope.threadId),
+    classification: {
+      currentCheckoutRoot: scope.currentCheckoutRoot,
+      userProjectRoots: scope.userProjectRoots,
+    },
+    ownedPids: scope.ownedPids,
+    actor: scope.actor,
+    postureFor: () => scope.posture,
+    admit: () => true,
+  };
+}
+
+/** Host-wide ids carry their own salt: a thread's id for the same listener is a different token. */
+const RUNNING_SERVICES_ID_SALT = "octant.running-services";
+
+function hostObservationScope(
+  binding: LocalServerHostBinding,
+  actor: LocalServerActor,
+): ObservationScope {
+  return {
+    idSalt: RUNNING_SERVICES_ID_SALT,
+    // Attribution to a thread's checkout is not what this listing asks, so no
+    // listener is classified as "the current checkout"; every Project folder is
+    // simply a root a user server may live in.
+    classification: {
+      currentCheckoutRoot: "",
+      userProjectRoots: binding.origins.map((origin) => origin.root),
+    },
+    ownedPids: binding.ownedPids,
+    actor,
+    postureFor: (observation) =>
+      attributeLocalListener(observation.workingDirectory, binding.origins)?.posture ??
+      "approval-gated",
+    // The rules that keep this from being a process inventory: no Project to
+    // attribute the listener to, no row, and no health probe either. A listener
+    // Octant does not own is shown as left over only while nothing says another
+    // editor started it; Octant cannot prove it started a leftover, so a
+    // positive sign that it was someone else's is enough to leave it out.
+    admit: (observation, facts) =>
+      attributeLocalListener(observation.workingDirectory, binding.origins) !== undefined &&
+      (facts.owned || !startedByAnotherEditor(facts.startSource)),
+  };
+}
+
+function startedByAnotherEditor(source: LocalServerStartSource): boolean {
+  return source === "vscode" || source === "other-editor";
+}
+
+function isOctantOwned(scope: ObservationScope, observation: ObservedLocalListener): boolean {
+  return scope.ownedPids.has(observation.pid) || observation.ownedByOctant === true;
+}
+
+/** Octant-started servers first, then leftovers, each by port. */
+function runningServices(
+  binding: LocalServerHostBinding,
+  resolved: ReadonlyArray<ResolvedListener>,
+): ReadonlyArray<RunningService> {
+  const rows: Array<{ readonly rank: number; readonly service: RunningService }> = [];
+  for (const entry of resolved) {
+    const origin = attributeLocalListener(entry.observation.workingDirectory, binding.origins);
+    if (origin === undefined) continue;
+    const { listener } = entry;
+    rows.push({
+      rank: entry.ownership === "octant-owned" ? 0 : 1,
+      service: {
+        listenerId: listener.listenerId,
+        port: listener.port,
+        url: listener.url,
+        processName: listener.processName,
+        ...(listener.framework === undefined ? {} : { framework: listener.framework }),
+        ...(listener.workingDirectory === undefined
+          ? {}
+          : { workingDirectory: listener.workingDirectory }),
+        ownership: entry.ownership === "octant-owned" ? "octant-owned" : "left-over",
+        health: listener.health,
+        openAvailable: listener.openAvailable,
+        stop: listener.stop,
+        projectId: origin.projectId,
+        projectName: origin.projectName,
+        ...(origin.thread === undefined
+          ? {}
+          : { thread: { threadId: origin.thread.threadId, title: origin.thread.title } }),
+        ...(origin.branch === undefined ? {} : { branch: origin.branch }),
+      },
+    });
+  }
+  return rows
+    .sort((a, b) => a.rank - b.rank || Number(a.service.port) - Number(b.service.port))
+    .map((row) => row.service);
 }
 
 function confirms(

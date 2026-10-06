@@ -6,6 +6,7 @@ import {
   type LocalServerListenerId,
   type LocalServerRequestId,
   type ProjectId,
+  type RunningServiceCommand,
   type WindowId,
 } from "@octant/contracts";
 import type { ObservedLocalListener } from "./localListenerPort";
@@ -17,6 +18,7 @@ import {
   LISTENER_HEALTH_PROBE_CONCURRENCY,
   LocalServerService,
   type LocalServerHealthProbe,
+  type LocalServerHostBinding,
   type LocalServerScopeBinding,
 } from "./localServerService";
 
@@ -88,6 +90,9 @@ function manyListeners(count: number): ReadonlyArray<ObservedLocalListener> {
 
 const listening = { scheme: "http", host: "127.0.0.1", health: "listening" } as const;
 
+/** The per-thread surface never reads the window-wide scope. */
+const noHostScopes = { resolve: async () => undefined };
+
 function scope(overrides: Partial<LocalServerScopeBinding> = {}): LocalServerScopeBinding {
   return {
     threadId,
@@ -128,6 +133,7 @@ function build(input: {
         return { status: "observed", listeners: input.observed };
       },
     },
+    hostScopes: noHostScopes,
     scopes: { resolve: async () => input.scope ?? scope() },
     health: input.probe ?? {
       probe: async () => ({
@@ -372,6 +378,7 @@ describe("LocalServerService list", () => {
   it("refuses to list anything when the host could not observe at all", async () => {
     const service = new LocalServerService({
       listeners: { observe: async () => ({ status: "unavailable" }) },
+      hostScopes: noHostScopes,
       scopes: { resolve: async () => scope() },
       health: { probe: async () => ({ scheme: "http", host: "127.0.0.1", health: "listening" }) },
       stopPort: { stop: async () => "stopped" },
@@ -390,6 +397,7 @@ describe("LocalServerService list", () => {
           throw new Error("lsof: command not found");
         },
       },
+      hostScopes: noHostScopes,
       scopes: { resolve: async () => scope() },
       health: { probe: async () => ({ scheme: "http", host: "127.0.0.1", health: "listening" }) },
       stopPort: { stop: async () => "stopped" },
@@ -615,6 +623,7 @@ describe("LocalServerService stop", () => {
           return { status: "observed", listeners: call === 1 ? [viteListener] : [] };
         },
       },
+      hostScopes: noHostScopes,
       scopes: { resolve: async () => scope({ ownedPids: new Set([viteListener.pid]) }) },
       health: { probe: async () => ({ scheme: "http", host: "127.0.0.1", health: "listening" }) },
       stopPort: { stop },
@@ -644,6 +653,7 @@ describe("LocalServerService stop", () => {
           };
         },
       },
+      hostScopes: noHostScopes,
       scopes: { resolve: async () => scope() },
       health: { probe: async () => ({ scheme: "http", host: "127.0.0.1", health: "listening" }) },
       stopPort: { stop },
@@ -672,6 +682,7 @@ describe("LocalServerService stop", () => {
             : { status: "unavailable" as const };
         },
       },
+      hostScopes: noHostScopes,
       scopes: { resolve: async () => scope({ ownedPids: new Set([viteListener.pid]) }) },
       health: { probe: async () => ({ scheme: "http", host: "127.0.0.1", health: "listening" }) },
       stopPort: { stop },
@@ -708,6 +719,7 @@ describe("LocalServerService stop", () => {
   it("rejects every command when the thread is not a bound Code thread", async () => {
     const service = new LocalServerService({
       listeners: { observe: async () => ({ status: "observed", listeners: [] }) },
+      hostScopes: noHostScopes,
       scopes: { resolve: async () => undefined },
       health: { probe: async () => ({ scheme: "http", host: "127.0.0.1", health: "listening" }) },
       stopPort: { stop: async () => "stopped" },
@@ -717,5 +729,386 @@ describe("LocalServerService stop", () => {
       kind: "local-server-rejected",
       failure: { category: "not-found" },
     });
+  });
+});
+
+const worktreeRoot = "/Users/example/code/octant/.worktrees/fix-login";
+const worktreeThreadId = "55555555-5555-4555-8555-555555555555" as CodeThreadId;
+const otherProjectId = "66666666-6666-4666-8666-666666666666" as ProjectId;
+
+function hostBinding(overrides: Partial<LocalServerHostBinding> = {}): LocalServerHostBinding {
+  return {
+    origins: [
+      {
+        root: checkoutRoot,
+        projectId,
+        projectName: "Octant",
+        posture: "approval-gated",
+      },
+      {
+        root: worktreeRoot,
+        projectId,
+        projectName: "Octant",
+        thread: { threadId: worktreeThreadId, title: "Fix login" },
+        branch: "fix/login",
+        posture: "approval-gated",
+      },
+      {
+        root: "/Users/example/code/other-app",
+        projectId: otherProjectId,
+        projectName: "Other app",
+        posture: "approval-gated",
+      },
+    ],
+    ownedPids: new Set<number>(),
+    ...overrides,
+  };
+}
+
+const worktreeListener: ObservedLocalListener = {
+  pid: 4300,
+  port: 5180,
+  processName: "node",
+  commandName: "vite",
+  ownership: "current-user",
+  workingDirectory: `${worktreeRoot}/apps/web`,
+  bindAddress: "127.0.0.1",
+  ownedByOctant: true,
+};
+
+/** A dev server in a folder none of the window's Projects holds. */
+const strayViteListener: ObservedLocalListener = {
+  pid: 6100,
+  port: 5190,
+  processName: "node",
+  commandName: "vite",
+  ownership: "current-user",
+  workingDirectory: "/Users/example/elsewhere/site",
+  bindAddress: "127.0.0.1",
+};
+
+/** A leftover with no editor lineage left: all the host can say is that Octant does not own it. */
+const orphanListener: ObservedLocalListener = {
+  pid: 9001,
+  port: 3000,
+  processName: "node",
+  ownership: "current-user",
+  workingDirectory: "/Users/example/code/other-app",
+  bindAddress: "0.0.0.0",
+};
+
+function buildRunning(input: {
+  readonly observed: ReadonlyArray<ObservedLocalListener>;
+  readonly binding?: LocalServerHostBinding | undefined;
+  readonly probe?: LocalServerHealthProbe;
+  readonly observeSpy?: () => void;
+  readonly stop?: () => Promise<"stopped" | "failed">;
+}) {
+  const stop = vi.fn(input.stop ?? (async () => "stopped" as const));
+  const service = new LocalServerService({
+    listeners: {
+      observe: async () => {
+        input.observeSpy?.();
+        return { status: "observed", listeners: input.observed };
+      },
+    },
+    scopes: { resolve: async () => undefined },
+    hostScopes: { resolve: async () => input.binding ?? hostBinding() },
+    health: input.probe ?? { probe: async () => listening },
+    stopPort: { stop },
+    clock: () => "2026-08-14T08:00:00.000Z",
+  });
+  return { service, stop };
+}
+
+function executeRunning(
+  service: LocalServerService,
+  value: RunningServiceCommand,
+  options: { readonly actor?: LocalServerActor; readonly signal?: AbortSignal } = {},
+) {
+  return service.executeRunning(windowId, value, {
+    actor: options.actor ?? "local-user",
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+}
+
+const listRunning = { kind: "list-running-services", requestId } as const;
+
+async function listedServices(service: LocalServerService) {
+  const result = await executeRunning(service, listRunning);
+  if (result.kind !== "running-services-listed") throw new Error(result.kind);
+  return result.snapshot.services;
+}
+
+describe("LocalServerService running services", () => {
+  it("lists only what Octant started, leftovers labelled as such, owned first", async () => {
+    const { service } = buildRunning({
+      observed: [orphanListener, viteListener, worktreeListener],
+    });
+    const services = await listedServices(service);
+
+    expect(services.map((row) => [row.port, row.ownership])).toEqual([
+      [5180, "octant-owned"],
+      [3000, "left-over"],
+      [5173, "left-over"],
+    ]);
+    expect(services[0]).toMatchObject({
+      projectName: "Octant",
+      branch: "fix/login",
+      thread: { threadId: worktreeThreadId, title: "Fix login" },
+      framework: "vite",
+    });
+    // A Project folder names the Project and no thread: several threads share it.
+    expect(services[2]?.thread).toBeUndefined();
+    expect(services[1]?.projectName).toBe("Other app");
+  });
+
+  it("leaves out a leftover another editor started, since Octant cannot say it started that one", async () => {
+    const { service } = buildRunning({ observed: [leftoverListener, orphanListener] });
+    // Both sit in a Project; only the one with a VS Code lineage is withheld.
+    expect((await listedServices(service)).map((row) => row.port)).toEqual([3000]);
+  });
+
+  it("never lists a process that is not a user or dev server in one of the window's Projects", async () => {
+    const probe = vi.fn(async () => listening);
+    const { service } = buildRunning({
+      observed: [systemListener, postgresListener, strayViteListener, viteListener],
+      probe: { probe },
+    });
+    const services = await listedServices(service);
+
+    expect(services.map((row) => row.port)).toEqual([5173]);
+    // The unattributed dev server was refused before anything was asked of its
+    // port, so the card cannot be used to probe the rest of the machine.
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  it("encodes no process id or command line", async () => {
+    const { service } = buildRunning({ observed: [viteListener] });
+    const [row] = await listedServices(service);
+    expect(Object.keys(row ?? {}).sort()).toEqual(
+      [
+        "framework",
+        "health",
+        "listenerId",
+        "openAvailable",
+        "ownership",
+        "port",
+        "processName",
+        "projectId",
+        "projectName",
+        "stop",
+        "url",
+        "workingDirectory",
+      ].sort(),
+    );
+  });
+
+  it("answers a window with no Code Project without scanning the computer", async () => {
+    const observeSpy = vi.fn();
+    const { service } = buildRunning({
+      observed: [viteListener],
+      binding: hostBinding({ origins: [] }),
+      observeSpy,
+    });
+    expect(await listedServices(service)).toEqual([]);
+    expect(observeSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses rather than reporting a quiet computer when it cannot scan", async () => {
+    const service = new LocalServerService({
+      listeners: { observe: async () => ({ status: "unavailable" }) },
+      scopes: { resolve: async () => undefined },
+      hostScopes: { resolve: async () => hostBinding() },
+      health: { probe: async () => listening },
+      stopPort: { stop: async () => "stopped" },
+    });
+    expect(await executeRunning(service, listRunning)).toMatchObject({
+      kind: "running-service-rejected",
+      failure: { category: "unavailable" },
+    });
+  });
+
+  it("refuses when the window's Projects cannot be resolved", async () => {
+    const service = new LocalServerService({
+      listeners: { observe: async () => ({ status: "observed", listeners: [viteListener] }) },
+      scopes: { resolve: async () => undefined },
+      hostScopes: { resolve: async () => undefined },
+      health: { probe: async () => listening },
+      stopPort: { stop: async () => "stopped" },
+    });
+    expect(await executeRunning(service, listRunning)).toMatchObject({
+      kind: "running-service-rejected",
+      failure: { category: "not-found" },
+    });
+  });
+
+  it("keeps the health deadline: a silent listener is listed as unchecked, not waited for", async () => {
+    vi.useFakeTimers();
+    try {
+      const probe: LocalServerHealthProbe = {
+        probe: async ({ port }) =>
+          port === 5173 ? new Promise<never>(() => {}) : Promise.resolve(listening),
+      };
+      const { service } = buildRunning({ observed: [viteListener, orphanListener], probe });
+
+      const pending = listedServices(service);
+      await vi.advanceTimersByTimeAsync(LISTENER_HEALTH_PHASE_DEADLINE_MS);
+      const services = await pending;
+
+      expect(services.find((row) => row.port === 5173)).toMatchObject({
+        health: "unknown",
+        openAvailable: false,
+      });
+      expect(services.find((row) => row.port === 3000)?.health).toBe("listening");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prepares Open for a healthy service and refuses one that is not answering", async () => {
+    const healthy = buildRunning({ observed: [viteListener] });
+    const [row] = await listedServices(healthy.service);
+    const opened = await executeRunning(healthy.service, {
+      kind: "open-running-service",
+      requestId,
+      listenerId: row?.listenerId as LocalServerListenerId,
+    });
+    expect(opened).toMatchObject({
+      kind: "running-service-open-prepared",
+      target: { url: "http://127.0.0.1:5173/", allowedOrigin: "http://127.0.0.1:5173" },
+    });
+
+    const silent = buildRunning({
+      observed: [viteListener],
+      probe: { probe: async () => ({ ...listening, health: "unresponsive" as const }) },
+    });
+    const [silentRow] = await listedServices(silent.service);
+    expect(
+      await executeRunning(silent.service, {
+        kind: "open-running-service",
+        requestId,
+        listenerId: silentRow?.listenerId as LocalServerListenerId,
+      }),
+    ).toMatchObject({ kind: "running-service-rejected", failure: { category: "unavailable" } });
+  });
+
+  it("refuses Open or Stop for an id the current scan does not classify", async () => {
+    const { service, stop } = buildRunning({ observed: [strayViteListener] });
+    const listenerId = deriveListenerId("octant.running-services", strayViteListener);
+    for (const kind of ["open-running-service", "stop-running-service"] as const) {
+      expect(await executeRunning(service, { kind, requestId, listenerId })).toMatchObject({
+        kind: "running-service-rejected",
+        failure: { category: "not-found" },
+      });
+    }
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("stops a server Octant started and returns the listing after it", async () => {
+    let signalled = false;
+    const service = new LocalServerService({
+      listeners: {
+        observe: async () => ({
+          status: "observed",
+          listeners: signalled ? [viteListener] : [worktreeListener, viteListener],
+        }),
+      },
+      scopes: { resolve: async () => undefined },
+      hostScopes: { resolve: async () => hostBinding() },
+      health: { probe: async () => listening },
+      stopPort: {
+        stop: async () => {
+          signalled = true;
+          return "stopped";
+        },
+      },
+      clock: () => "2026-08-14T08:00:00.000Z",
+    });
+    const result = await executeRunning(service, {
+      kind: "stop-running-service",
+      requestId,
+      listenerId: deriveListenerId("octant.running-services", worktreeListener),
+    });
+    expect(result.kind).toBe("running-service-stopped");
+    if (result.kind !== "running-service-stopped") return;
+    expect(result.snapshot.services.map((row) => row.port)).toEqual([5173]);
+  });
+
+  it("asks for confirmation naming the process before it stops a leftover", async () => {
+    const { service, stop } = buildRunning({ observed: [orphanListener] });
+    const listenerId = deriveListenerId("octant.running-services", orphanListener);
+
+    expect(
+      await executeRunning(service, { kind: "stop-running-service", requestId, listenerId }),
+    ).toMatchObject({ failure: { category: "confirmation-required" } });
+    expect(stop).not.toHaveBeenCalled();
+
+    const confirmed = await executeRunning(service, {
+      kind: "stop-running-service",
+      requestId,
+      listenerId,
+      confirmation: {
+        acknowledgedProcessName: "node",
+        acknowledgedPort: 3000 as never,
+        acknowledgedWorkingDirectory: "/Users/example/code/other-app",
+      },
+    });
+    expect(confirmed.kind).toBe("running-service-stopped");
+    expect(stop).toHaveBeenCalledWith({ pid: 9001 });
+  });
+
+  it("keeps a leftover stop on the host and a paired device to servers Octant owns", async () => {
+    const { service, stop } = buildRunning({ observed: [orphanListener, worktreeListener] });
+    const leftover = await executeRunning(
+      service,
+      {
+        kind: "stop-running-service",
+        requestId,
+        listenerId: deriveListenerId("octant.running-services", orphanListener),
+      },
+      { actor: "remote-client" },
+    );
+    expect(leftover).toMatchObject({ failure: { category: "local-host-required" } });
+    expect(stop).not.toHaveBeenCalled();
+
+    const owned = await executeRunning(
+      service,
+      {
+        kind: "stop-running-service",
+        requestId,
+        listenerId: deriveListenerId("octant.running-services", worktreeListener),
+      },
+      { actor: "remote-client" },
+    );
+    expect(owned.kind).toBe("running-service-stopped");
+  });
+
+  it("denies Stop for a server in a Plan thread's worktree, as that thread's own panel does", async () => {
+    const binding = hostBinding();
+    const planned = {
+      ...binding,
+      origins: binding.origins.map((origin) =>
+        origin.thread === undefined ? origin : { ...origin, posture: "plan" as const },
+      ),
+    };
+    const { service, stop } = buildRunning({ observed: [worktreeListener], binding: planned });
+    const [row] = await listedServices(service);
+    expect(row?.stop.status).toBe("unavailable");
+    expect(
+      await executeRunning(service, {
+        kind: "stop-running-service",
+        requestId,
+        listenerId: row?.listenerId as LocalServerListenerId,
+      }),
+    ).toMatchObject({ failure: { category: "unauthorized" } });
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("gives a listener a different id here than in a thread's own listing", () => {
+    expect(deriveListenerId("octant.running-services", viteListener)).not.toBe(
+      deriveListenerId(threadId, viteListener),
+    );
   });
 });

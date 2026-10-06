@@ -56,6 +56,19 @@ is showing another computer's work, the row names that computer. Up to five rows
 show, then **+N more** opens Running. Choose a row to open its thread. When
 nothing is running, the card says so in one line.
 
+**Running services** lists the dev servers Octant started, across your Code
+Projects: the port, the Project and the branch or thread, what is running
+(`vite`, `node`, `bun`), and whether it is answering. A server left running from
+an earlier session is marked **Left over from Octant**. **Open** shows the page
+in a Browser tab for that thread, or in your own browser; **Stop** stops it. A
+server Octant started can stop at once; a leftover asks you to confirm first,
+and from a paired device it can only be stopped at the computer itself.
+A server an editor such as VS Code started is not listed, and neither is
+anything outside your Code Projects. Up to five show, then **+N more
+listening**. The card refreshes about every five seconds while the window is
+showing, and not at all when it is hidden or turned off. When the window shows
+another computer's work, the row names that computer.
+
 **Customize**, on the right under the composer, turns each card on or off and
 reorders them: drag a card by its handle, or use the up and down buttons from the
 keyboard. **Reset to default** puts them back. Your choices are kept on this

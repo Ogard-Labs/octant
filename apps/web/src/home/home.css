@@ -233,3 +233,87 @@
   justify-self: start;
   margin: var(--oct-space-1) var(--oct-space-1) 0;
 }
+
+/* ── Running services ─────────────────────────────────────────────────── */
+
+.running-services__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.running-services__list > li {
+  display: grid;
+  min-width: 0;
+}
+
+.running-services__row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-1);
+}
+
+.running-services__main {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 2px;
+}
+
+.running-services__head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+}
+
+.running-services__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.running-services__origin {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Health, runtime, and ownership wrap instead of truncating: "Left over from
+   Octant" is the word that says why the row is there. */
+.running-services__detail {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: var(--oct-space-1);
+}
+
+.running-services__detail > svg {
+  flex: 0 0 auto;
+  margin-top: 0.2em;
+}
+
+.running-services__detail-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.running-services__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.running-services__more {
+  margin: var(--oct-space-1) var(--oct-space-1) 0;
+}
+
+.running-services__alert {
+  margin: 0 var(--oct-space-1) var(--oct-space-1);
+}

@@ -27,6 +27,7 @@ import type { BrowserAutomationClient } from "@octant/client-runtime/browser-aut
 import type { HostClient } from "@octant/client-runtime/host-client";
 import type { NavigatorAssistantClient } from "@octant/client-runtime/navigator-assistant-client";
 import {
+  createLocalServerClient,
   isRemotePairingOrigin,
   localHostDisplayName,
   readPairingFragment,
@@ -97,6 +98,8 @@ import type {
   CodeProjectPullRequestMergeMethod,
   CodeProjectPullRequestMergeOutcome,
   CodeProjectPullRequestRow,
+  LocalServerOpenTarget,
+  RunningService,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import { type PaneId, type WindowId } from "@octant/contracts/shell";
@@ -428,6 +431,7 @@ import type {
   ThreadProviderIdentity,
 } from "./shell/navigationModel";
 import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
+import { createRunningServicesCard } from "./home/RunningServicesCard";
 import { createWorkingNowCard } from "./home/WorkingNowCard";
 import { boardFactsByThread, remoteHostLabel, type WorkingNowThread } from "./home/workingNow";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
@@ -1458,6 +1462,19 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
+  // The host-wide Running services read. A base URL the client refuses (a
+  // plain-HTTP remote host) leaves the card unoffered rather than broken.
+  const runningServicesClient = useMemo(() => {
+    try {
+      return createLocalServerClient({
+        baseUrl: props.launch.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: props.projectWindowCapability,
+      });
+    } catch {
+      return undefined;
+    }
+  }, [props.launch.serverUrl, props.projectWindowCapability]);
   const threadHandOffClient = useMemo(
     () =>
       resolveThreadHandOffClient({
@@ -3268,6 +3285,38 @@ function LaunchedShell(
     }
   }
   /**
+   * Shows a running service's page. A service attributed to a thread's own
+   * worktree opens as a Browser tab of that thread, confined to the one origin
+   * the host prepared; the rest open in this computer's own browser, which is
+   * only right when the window is reading this computer. Either failure is
+   * thrown to the row, never answered by opening a loopback address that
+   * belongs to some other computer.
+   */
+  async function openRunningService(
+    service: RunningService,
+    target: LocalServerOpenTarget,
+  ): Promise<void> {
+    const client = browserAutomationClient;
+    const paneId = activePaneId;
+    if (service.thread !== undefined && client !== undefined && paneId !== undefined) {
+      const threadId = decodeBrowserThreadId(service.thread.threadId);
+      const contextId = await openDedicatedBrowserContext(client, threadId, "code", {
+        allowedOrigin: target.allowedOrigin,
+        url: String(target.url),
+        ...(target.acceptsLocalCertificate ? { acceptsLocalCertificate: true } : {}),
+      });
+      const adopted = await controller.openSurfaceInSplit("browser", paneId, contextId);
+      if (adopted) return;
+      await releaseBrowserContext(client, threadId, contextId);
+      throw new Error("No Browser tab adopted the context opened for this server.");
+    }
+    if (workingNowHost === undefined) {
+      openExternalUrl(props.hostBridge, String(target.url));
+      return;
+    }
+    throw new Error("This server runs on another computer.");
+  }
+  /**
    * Takes the reader to the degraded Project. Context usage lives on that
    * Project's thread composer, so activating the Project is the honest
    * destination — a dock panel about someone else's context is not.
@@ -3975,6 +4024,18 @@ function LaunchedShell(
   // The card list is rebuilt each render and is cheap: each card's own rows are
   // memoized from the inputs above, which keep their identity between renders.
   const homeCards = [
+    createRunningServicesCard({
+      client: runningServicesClient,
+      ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
+      // A service on another computer opens only as that thread's Browser tab,
+      // which the host itself shows; this window's own browser cannot reach it.
+      canOpen: (service) =>
+        workingNowHost === undefined ||
+        (service.thread !== undefined &&
+          browserAutomationClient !== undefined &&
+          activePaneId !== undefined),
+      onOpenTarget: openRunningService,
+    }),
     createWorkingNowCard({
       agentRunClient,
       boardFacts: workingNowBoardFacts,

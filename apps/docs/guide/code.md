@@ -146,7 +146,8 @@ Local servers are compact rows grouped by process and port, with this checkout
 separated from other classified leftovers. **Open** stays on a usable listener.
 Copy URL and details live in that row's menu. **Stop** appears only for an
 Octant-owned safe stop, or for a classified leftover after confirmation.
-Unmanaged processes say so and have no fake Stop control. Files, Plan,
+Unmanaged processes say so and have no fake Stop control. The same servers,
+across every Project, are on the start screen's **Running services** card. Files, Plan,
 Delivery, Agents, Browser, Review, iOS Simulator, and Android emulator stay in
 the dock.
 

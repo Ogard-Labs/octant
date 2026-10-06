@@ -2246,6 +2246,29 @@ mechanisms are:
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
   into authority on another.
+- **Local servers and Running services.** Listener observation is ephemeral,
+  scoped to listening sockets of the current user, and never journaled. One
+  classifier decides what may be listed at all: a system daemon, another user's
+  process, or an interpreter with no project and no editor lineage is omitted
+  rather than shown disabled, so no surface can be read as a host process
+  inventory. The Code Environment reads it per thread. The start screen's
+  Running services reads the same service host-wide (`list-running-services`
+  on the same authenticated route; no thread or Project in the command) and
+  adds one filter before anything is probed: a listener is published only when
+  its working directory sits inside an active Code Project the window can
+  reach, or inside the worktree of one thread of such a Project, which a host-
+  written ownership receipt vouches for. A listener outside those roots gets no
+  row and no health probe. Rows are Octant-owned (a live terminal descendant)
+  or left over; nothing else exists. Octant cannot prove it started a leftover,
+  so one is listed only while nothing names another editor as its starter. The same bounded scan, health phase and
+  deadline apply, and a scan that cannot finish is a refusal, never an empty
+  list. Open and Stop re-observe and re-classify by an opaque id that is not a
+  process id and differs from the per-thread id for the same listener. Stop is
+  judged under the origin's posture (a Plan thread's server is never
+  stoppable), a leftover needs the confirmation naming process, folder and
+  port, and a paired device may stop only a server Octant owns; the actor comes
+  from the request's authenticated principal. A window reads the host it is
+  connected to; All Hosts federation does not carry these rows.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and
