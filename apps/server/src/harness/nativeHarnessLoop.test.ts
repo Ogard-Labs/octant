@@ -1119,6 +1119,63 @@ describe("recovering from a malformed tool call", () => {
       failure: { category: "protocol" },
     });
   });
+
+  it("resolves a queued steering note when malformed calls exhaust the correction cap", async () => {
+    let releaseFourth: ((response: NativeHarnessResponse) => void) | undefined;
+    let sent = 0;
+    const malformed: NativeHarnessResponse = {
+      text: "",
+      toolCalls: [{ toolCallId: "bad", toolName: "read", argumentsJson: "{not json" }],
+    };
+    const transport: NativeHarnessTransport = {
+      open: async () => ({
+        fits: () => true,
+        send: async () => {
+          sent += 1;
+          if (sent < 4) return malformed;
+          return await new Promise<NativeHarnessResponse>((resolve) => {
+            releaseFourth = resolve;
+          });
+        },
+        release: () => undefined,
+      }),
+    };
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({ sessionId, prompt: "look", attachments: [], tools });
+          for (let spin = 0; releaseFourth === undefined && spin < 50; spin += 1) {
+            yield* Effect.yieldNow();
+          }
+          const finish = releaseFourth;
+          expect(finish).toBeTypeOf("function");
+          const note = yield* Effect.fork(
+            connection.steer?.({ sessionId, message: "try a different tool" }) ??
+              Effect.succeed("unsupported" as const),
+          );
+          yield* Effect.yieldNow();
+          finish?.(malformed);
+          const steered = yield* Effect.race(
+            Fiber.join(note),
+            Effect.sleep("2 seconds").pipe(Effect.as("pending" as const)),
+          );
+          const events = Array.from(yield* Fiber.join(terminal));
+          expect(events.at(-1)).toMatchObject({
+            kind: "failed",
+            failure: { category: "protocol" },
+          });
+          return steered;
+        }),
+      ),
+    );
+
+    expect(outcome).toBe("unsupported");
+  });
 });
 
 describe("cancelling a turn without rebuilding the session", () => {
@@ -1166,5 +1223,55 @@ describe("cancelling a turn without rebuilding the session", () => {
 
     expect(events.at(-1)?.kind).toBe("completed");
     expect(requests[1]?.history.map((message) => message.text)).toEqual(["first", "second"]);
+  });
+
+  it("releases the session when an interrupted tool step cannot be journaled, so resume can retry the open step", async () => {
+    const inner = new MemoryNativeHarnessTranscriptStore();
+    let rejectSettle = true;
+    const transcripts: NativeHarnessTranscriptStore = {
+      open: (id, binding, forkedFrom) => inner.open(id, binding, forkedFrom),
+      load: (id) => inner.load(id),
+      append: (id, message) => inner.append(id, message),
+      settle: (id, result) => {
+        if (rejectSettle) throw new Error("journal append failed");
+        inner.settle(id, result);
+      },
+    };
+    const scripted = scriptedTransport([
+      {
+        text: "",
+        toolCalls: [{ toolCallId: "call-read", toolName: "read", argumentsJson: "{}" }],
+      },
+      { text: "continued", toolCalls: [] },
+    ]);
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(scripted.transport, transcripts);
+          const handle = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          yield* sendAndCollect(connection, "look", (event) => event.kind === "tool-request");
+          const interrupted = yield* Effect.exit(connection.interrupt(sessionId));
+          expect(interrupted._tag).toBe("Failure");
+          rejectSettle = false;
+          const cursor = handle.resumeCursor;
+          if (cursor === undefined) throw new Error("The session did not return a resume cursor.");
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: cursor,
+            executionPolicy: "approval-gated",
+          });
+          return yield* sendAndCollect(connection, "carry on", isTerminal);
+        }),
+      ),
+    );
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    const results = scripted.requests[1]?.history.flatMap((message) => message.toolResults ?? []);
+    expect(results?.map((result) => result.toolCallId)).toEqual(["call-read"]);
+    expect(JSON.parse(results?.[0]?.resultJson ?? "{}")).toMatchObject({ interrupted: true });
   });
 });

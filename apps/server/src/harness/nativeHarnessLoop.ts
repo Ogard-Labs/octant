@@ -582,6 +582,10 @@ export function createNativeHarnessConnection(
           state.selfCorrections += 1;
           if (state.selfCorrections > MAX_SELF_CORRECTION_ROUNDS) {
             state.pending = undefined;
+            // This branch returns normally, so the step's catch does not run.
+            // A note queued during the step would otherwise stay pending.
+            state.acceptingSteering = false;
+            for (const note of state.steering.splice(0)) note.resolve("unsupported");
             emit(state, {
               kind: "failed",
               failure: failure(
@@ -792,7 +796,16 @@ export function createNativeHarnessConnection(
             // else reports the cancellation; the calls the runner never
             // answered are closed here so the conversation stays valid.
             if (state.pending !== undefined) {
-              closePendingStep(state);
+              // A journal write that fails here must drop the live session.
+              // Clearing the turn in memory would discard the open step without
+              // a durable results message, and leaving it in flight rejects
+              // every later send. Resume rebuilds that step from the journal.
+              try {
+                closePendingStep(state);
+              } catch (error) {
+                release(state);
+                throw error;
+              }
               emit(state, { kind: "interrupted", message: "The provider request was cancelled." });
             }
             // The session and its conversation stay live, so the next send
