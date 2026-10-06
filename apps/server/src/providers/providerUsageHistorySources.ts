@@ -1,5 +1,5 @@
 import type { LocalUsageHistoryCheckpointStore } from "./localUsageHistoryReader";
-import { LOCAL_PRICING_REVISION } from "./localUsagePricing";
+import { LOCAL_PRICING_REVISION } from "@octant/domain/local-usage-pricing";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import type { ProviderDriverKind } from "@octant/contracts";
 import { join } from "node:path";
