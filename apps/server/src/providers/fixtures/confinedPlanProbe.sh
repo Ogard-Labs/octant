@@ -19,7 +19,8 @@ else
 fi
 # Last, because a posture that denies process-fork ends the shell here rather
 # than letting it report: bash prints "fork: Operation not permitted" and exits
-# 128 without running another line. Either way `exec=allowed` is never printed.
+# 128 without running another line. A subscription launch may fork, so the exec
+# itself is refused and reported. Either way `exec=allowed` is never printed.
 if /bin/date > /dev/null 2>&1; then
   printf 'exec=allowed\n'
 else

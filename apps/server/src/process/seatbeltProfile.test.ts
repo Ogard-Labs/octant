@@ -264,13 +264,15 @@ describe("shared Seatbelt profile builder", () => {
     );
   });
 
-  it("opens a provider's credential lookup without opening the keychain files", () => {
+  it("opens a provider's credential lookup and its login keychain, and no other keychain", () => {
     const root = temporaryRoot();
     const input = {
       boundRoot: root,
       temporaryDirectory: root,
       networkEgress: "allow",
       allowFileReadStar: true,
+      allowProcessExec: false,
+      allowProcessFork: false,
       privateHomeAllowPaths: [],
     } as const;
 
@@ -280,11 +282,82 @@ describe("shared Seatbelt profile builder", () => {
     });
 
     expect(withLookup).toContain('(allow mach-lookup (global-name "com.apple.SecurityServer"))');
-    // The daemon opens the store; this process may never read it off disk.
+    expect(withLookup).toContain(seatbeltExecRule("/usr/bin/security"));
+    expect(withLookup).toContain("(allow process-fork)");
+    expect(withLookup).not.toContain("(allow process-exec)");
+    // The system keychains stay denied as files.
     expect(withLookup).toContain(seatbeltDenyRule("file-read*", "/Library/Keychains"));
     expect(withLookup).not.toContain(seatbeltAllowRule("file-read*", "/Library/Keychains"));
-    expect(buildDenyDefaultSeatbeltProfile(input)).not.toContain("com.apple.SecurityServer");
+    const withoutLookup = buildDenyDefaultSeatbeltProfile(input);
+    expect(withoutLookup).not.toContain("com.apple.SecurityServer");
+    expect(withoutLookup).not.toContain("/usr/bin/security");
+    expect(withoutLookup).not.toContain("login");
+    expect(withoutLookup).not.toContain("(allow process-fork)");
   });
+
+  it.skipIf(process.platform !== "darwin" || !existsSync("/usr/bin/security"))(
+    "lets a signed-out-by-default runtime reach its login keychain through the security tool and nothing else",
+    () => {
+      // A Plan launch that could only look up the security server still
+      // reported itself signed out: the runtime runs `/usr/bin/security`, which
+      // opens the login keychain file itself.
+      const root = temporaryRoot();
+      const home = join(root, "home");
+      const keychains = join(home, "Library", "Keychains");
+      const checkout = join(root, "checkout");
+      const temporaryDirectory = join(root, "tmp");
+      mkdirSync(keychains, { recursive: true });
+      mkdirSync(checkout);
+      mkdirSync(temporaryDirectory);
+      writeFileSync(join(keychains, "login.keychain-db"), "kych\n");
+      writeFileSync(join(keychains, "other.keychain-db"), "kych\n");
+      const script = join(checkout, "runtime.sh");
+      writeFileSync(
+        script,
+        [
+          "#!/bin/bash",
+          `keychains='${keychains}'`,
+          'IFS= read -r login < "$keychains/login.keychain-db" && echo login=read',
+          'IFS= read -r other < "$keychains/other.keychain-db" && echo other=read',
+          'echo refreshed > "$keychains/login.keychain-db.sb-0001" && echo rewrite=ok',
+          "/usr/bin/security help >/dev/null 2>&1; [ $? -ne 126 ] && echo security=ran",
+          "/bin/echo other-program-ran",
+          "",
+        ].join("\n"),
+        { mode: 0o700 },
+      );
+      const profile = (allowProviderCredentialLookup: boolean) =>
+        buildDenyDefaultSeatbeltProfile({
+          boundRoot: checkout,
+          temporaryDirectory,
+          networkEgress: "none",
+          writeBoundRoot: false,
+          allowFileReadStar: true,
+          allowProcessExec: false,
+          allowProcessFork: false,
+          execAllowPaths: ["/bin/bash", script],
+          allowProviderCredentialLookup,
+          homeDirectory: home,
+          usersDirectory: root,
+        });
+      const run = (allowLookup: boolean) =>
+        spawnSync("/usr/bin/sandbox-exec", ["-p", profile(allowLookup), script], {
+          cwd: checkout,
+          encoding: "utf8",
+        }).stdout;
+
+      const withLookup = run(true);
+      expect(withLookup).toContain("login=read");
+      expect(withLookup).toContain("rewrite=ok");
+      expect(withLookup).toContain("security=ran");
+      expect(withLookup).not.toContain("other=read");
+      expect(withLookup).not.toContain("other-program-ran");
+
+      const withoutLookup = run(false);
+      expect(withoutLookup).not.toContain("login=read");
+      expect(withoutLookup).not.toContain("security=ran");
+    },
+  );
 
   it("grants the resolved form of a launch root reached through a symlink", () => {
     const root = temporaryRoot();

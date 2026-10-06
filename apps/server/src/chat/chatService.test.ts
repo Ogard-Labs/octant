@@ -105,6 +105,7 @@ import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { ResearchRouter } from "./research/researchRouter";
 import { ThreadWorkService } from "./threadWorkService";
 import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
+import { createChatAgentResultDeliveryPort } from "./chatAgentResultDeliveryPort";
 import { ChatService, ChatServiceError } from "./chatService";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
 
@@ -8982,6 +8983,44 @@ describe("agent result delivery", () => {
     if (replayed.kind !== "turn-created") throw new Error("Expected turn-created result.");
     expect(replayed.turn.id).toEqual(delivered.turn.id);
     expect(withRuns.service.read(thread.id).turns).toHaveLength(1);
+  });
+
+  it("delivers a child's result to a Chat parent that has already answered a turn", async () => {
+    const runs = new Map<string, AgentRun>();
+    const fixture = openFixture({
+      agentRuns: {
+        getById: (runId) => runs.get(String(runId)),
+        resultText: () => "the subagent's reply",
+      },
+    });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Parent",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await fixture.service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Delegate a check",
+    });
+    await until(
+      () =>
+        fixture.service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+    );
+    const run = deliveryRunFor(created.thread.id);
+    runs.set(String(run.id), run);
+    const port = createChatAgentResultDeliveryPort({
+      readThread: (threadId) => fixture.persistence.readChatThread(threadId),
+      chat: fixture.service,
+    });
+
+    await expect(port.dispatch([run])).resolves.toMatchObject({
+      kind: "dispatched",
+      runIds: [run.id],
+    });
+    expect(fixture.service.read(created.thread.id).turns).toHaveLength(2);
   });
 
   it("refuses a delivery that names a run the thread never owned or an unfinished run", async () => {

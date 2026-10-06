@@ -36,6 +36,9 @@ from recorded lifecycle blockers, provider-reported file changes, and tools the
 host actually executed. File reports are unverified; a tool return is not proof
 that tests passed. Missing and truncated evidence is shown explicitly. A completed
 child does not establish review, merge, deployment, or completion of its parent.
+A child that fails, is interrupted, or is cancelled tells its parent why, for
+example that its provider is signed out. The reason is short, and Octant
+removes private paths and secrets from it before the parent's agent sees it.
 
 For writable Code children, **Review changes** opens the host's saved comparison
 for that generation in **Review**. It includes committed changes and non-ignored

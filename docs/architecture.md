@@ -698,6 +698,13 @@ Delivery does not wait for every sibling to finish. Each member's identity and
 result generation are validated and journaled on the receiving turn; replay
 settles only those members. Actual fallback provider/model attribution is kept.
 The delivery service serializes work per parent and defers while it is busy.
+A Chat delivery names the parent at its thread aggregate's head version, the
+version Chat admission checks, and a refusal that only says the parent is
+mid-turn or moved on is deferred and retried, never journaled as a failed
+delivery. A child that ends without a reply (failed, interrupted, or cancelled)
+reports why on the managed `wait` and `status` answers and in the delivered
+outcome line: its journaled reason, redacted with the diagnostics rules and cut
+to 512 characters.
 
 A completed managed child accepts an explicit follow-up through either
 delegation tool or the Agents views. The caller supplies its current version
@@ -2067,7 +2074,15 @@ mechanisms are:
   by
   [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md)
   and narrowed by 0145, and the tools those threads reach stay confined either
-  way. A bound root a launch may not write is denied in the profile, so a
+  way. A Claude Plan launch on subscription sign-in may also reach its own
+  credential: it may fork, exec `/usr/bin/security` and no other program, look
+  up the security server, and read and rewrite the user's login keychain file
+  and its atomic-write siblings; every other keychain file stays denied. The
+  runtime reads and refreshes its sign-in through that tool, which opens the
+  keychain file itself, so the lookup alone that 0145 recorded left every
+  confined Claude launch signed out, Chat children included. This reach stays
+  inside what an approval-gated Claude launch, which Octant does not confine,
+  already has. A bound root a launch may not write is denied in the profile, so a
   checkout under that launch's own temporary directory is not writable through
   it. The `--version` read every family and the discovery scan perform before a
   runtime starts is wrapped too, with no root, no home, no network and one
