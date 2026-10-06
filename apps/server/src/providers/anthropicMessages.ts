@@ -10,6 +10,7 @@ import {
   type AnthropicCompatibleEndpoint,
   requestAnthropicGeneration,
 } from "./anthropicCompatibleEndpoint";
+import { contextOverflowFromBody } from "./endpointRetry";
 import { decodeSse } from "./openAiCompatibleSse";
 import { readAnthropicRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
 
@@ -225,6 +226,17 @@ async function runMessagesTurn(input: AnthropicMessagesTurnInput): Promise<Anthr
   const response = await requestAnthropicGeneration(input.endpoint, {
     path: "messages",
     body: buildAnthropicMessagesBody(input),
+    // Anthropic reports a filled window as a 400 whose error message says the
+    // prompt is too long. Reading the body once lets the harness shrink and
+    // retry instead of failing the turn.
+    classifyRejectedResponse: async (response) => {
+      try {
+        return contextOverflowFromBody(await response.text());
+      } catch (error) {
+        if (isProviderFailure(error)) throw error;
+        return undefined;
+      }
+    },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   if (response.body === null) {
@@ -309,7 +321,10 @@ function normalizeEvent(
       throw failure("provider-failed", "The provider failed to complete the response.");
     }
     default:
-      throw protocol("The provider stream contained an unsupported event.");
+      // A provider may add event types of its own; one the harness does not
+      // know is ignored and logged, not a reason to fail an otherwise good turn.
+      console.warn(`[provider] ignoring unknown stream event type: ${String(event.type)}`);
+      return;
   }
 }
 
@@ -463,12 +478,11 @@ function validateContentBlockStop(event: Record<string, unknown>, state: StreamS
   }
   tracked.status = "completed";
   if (tracked.type === "tool_use") {
+    // A tool_use that streamed no input is a call with no arguments; the
+    // harness reads an empty object for it. Input that did stream and is not
+    // JSON is surfaced with its raw bytes so the model is told and can correct
+    // itself, never replaced by an empty object.
     const argumentsJson = tracked.inputJson.trim().length === 0 ? "{}" : tracked.inputJson;
-    try {
-      JSON.parse(argumentsJson);
-    } catch {
-      throw protocol("The provider stream ended a tool call with invalid JSON input.");
-    }
     state.toolCalls.push({
       toolCallId: tracked.toolCallId!,
       toolName: tracked.toolName!,
@@ -636,6 +650,10 @@ function sanitizeFailure(error: unknown): ProviderFailure {
 
 function protocol(message: string): ProviderFailure {
   return failure("protocol", message);
+}
+
+function isProviderFailure(error: unknown): error is ProviderFailure {
+  return typeof error === "object" && error !== null && "category" in error && "message" in error;
 }
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {

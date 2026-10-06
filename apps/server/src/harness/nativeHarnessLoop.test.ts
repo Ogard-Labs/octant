@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
+  type ProviderFailure,
   type ProviderModelId,
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
@@ -933,5 +934,236 @@ describe("fitting a request to the endpoint", () => {
         cacheReadInputTokens: 200,
       });
     });
+  });
+});
+
+/** An endpoint whose `fits` always passes, so only the endpoint itself can refuse a size. */
+function endpointThatAcceptsEverySize(
+  send: (request: NativeHarnessRequest) => Promise<NativeHarnessResponse>,
+): { readonly transport: NativeHarnessTransport; readonly requests: NativeHarnessRequest[] } {
+  const requests: NativeHarnessRequest[] = [];
+  return {
+    requests,
+    transport: {
+      open: async () => ({
+        fits: () => true,
+        send: async (request) => {
+          requests.push(request);
+          return await send(request);
+        },
+        release: () => undefined,
+      }),
+    },
+  };
+}
+
+/** Waits until the loop has emitted the tool request, so an answer lands on a live step. */
+async function whenRequested(
+  events: ReadonlyArray<ProviderRuntimeEvent>,
+  requestId: string,
+): Promise<void> {
+  while (!events.some((event) => event.kind === "tool-request" && event.requestId === requestId)) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+}
+
+describe("recovering from a request the endpoint refuses as too large", () => {
+  it("forces one more reduction and completes after a single overflow retry", async () => {
+    const overflow: ProviderFailure = {
+      category: "provider-failed",
+      message:
+        "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (context_length_exceeded).",
+    };
+    const calls: string[] = [];
+    const scripted = endpointThatAcceptsEverySize(async () => {
+      calls.push("call");
+      if (calls.length === 1) {
+        return {
+          text: "",
+          toolCalls: [{ toolCallId: "a", toolName: "read", argumentsJson: "{}" }],
+        };
+      }
+      if (calls.length === 2) {
+        return {
+          text: "",
+          toolCalls: [{ toolCallId: "b", toolName: "grep", argumentsJson: "{}" }],
+        };
+      }
+      if (calls.length === 3) throw overflow;
+      return { text: "recovered", toolCalls: [] };
+    });
+
+    const events: ProviderRuntimeEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            scripted.transport,
+            new MemoryNativeHarnessTranscriptStore(),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            Stream.runForEach(
+              (yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal)),
+              (event) => Effect.sync(() => events.push(event)),
+            ),
+          );
+          yield* connection.send({ sessionId, prompt: "look", attachments: [], tools });
+          for (const requestId of ["a", "b"]) {
+            yield* Effect.promise(() => whenRequested(events, requestId));
+            yield* connection.answerTool({
+              sessionId,
+              requestId,
+              resultJson: "{}",
+              isError: false,
+            });
+          }
+          yield* Fiber.join(collected);
+        }),
+      ),
+    );
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(scripted.requests).toHaveLength(4);
+    const retried = scripted.requests[3]?.history ?? [];
+    expect(
+      retried.some((message) =>
+        message.toolResults?.some((result) => result.resultJson.includes('"omitted":true')),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("recovering from a malformed tool call", () => {
+  const runWithBadArguments = async () => {
+    const scripted = scriptedTransport([
+      {
+        text: "mis-firing",
+        toolCalls: [{ toolCallId: "bad", toolName: "read", argumentsJson: "{not json" }],
+      },
+      {
+        text: "",
+        toolCalls: [{ toolCallId: "good", toolName: "read", argumentsJson: '{"path":"a.ts"}' }],
+      },
+      { text: "recovered", toolCalls: [] },
+    ]);
+    const events: ProviderRuntimeEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            scripted.transport,
+            new MemoryNativeHarnessTranscriptStore(),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            Stream.runForEach(
+              (yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal)),
+              (event) => Effect.sync(() => events.push(event)),
+            ),
+          );
+          yield* connection.send({ sessionId, prompt: "look", attachments: [], tools });
+          yield* Effect.promise(() => whenRequested(events, "good"));
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "good",
+            resultJson: "{}",
+            isError: false,
+          });
+          yield* Fiber.join(collected);
+        }),
+      ),
+    );
+    return { events, requests: scripted.requests };
+  };
+
+  it("answers a bad-arguments call with an error result and completes the model's next call", async () => {
+    const { events, requests } = await runWithBadArguments();
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(
+      events.flatMap((event) => (event.kind === "tool-request" ? [event.requestId] : [])),
+    ).toEqual(["good"]);
+    const errorResult = requests[1]?.history
+      .flatMap((message) => message.toolResults ?? [])
+      .find((result) => result.toolCallId === "bad");
+    expect(errorResult?.isError).toBe(true);
+    expect(JSON.parse(errorResult?.resultJson ?? "{}")).toMatchObject({
+      error: "arguments were not valid JSON",
+    });
+  });
+
+  it("fails the turn once a model will not stop returning malformed calls", async () => {
+    const scripted = scriptedTransport(
+      Array.from({ length: 6 }, () => ({
+        text: "",
+        toolCalls: [{ toolCallId: "bad", toolName: "read", argumentsJson: "{not json" }],
+      })),
+    );
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            scripted.transport,
+            new MemoryNativeHarnessTranscriptStore(),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          return yield* sendAndCollect(connection, "look", isTerminal);
+        }),
+      ),
+    );
+
+    expect(events.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: { category: "protocol" },
+    });
+  });
+});
+
+describe("cancelling a turn without rebuilding the session", () => {
+  it("accepts the next send on the same session after a cancel", async () => {
+    const requests: NativeHarnessRequest[] = [];
+    const transport: NativeHarnessTransport = {
+      open: async () => ({
+        fits: () => true,
+        send: (request, stream) =>
+          new Promise<NativeHarnessResponse>((resolve, reject) => {
+            requests.push(request);
+            if (requests.length > 1) {
+              resolve({ text: "second", toolCalls: [] });
+              return;
+            }
+            stream.signal.addEventListener(
+              "abort",
+              () =>
+                reject({ category: "interrupted", message: "The provider request was cancelled." }),
+              { once: true },
+            );
+          }),
+        release: () => undefined,
+      }),
+    };
+    const events: ProviderRuntimeEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const first = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({ sessionId, prompt: "first", attachments: [], tools });
+          yield* connection.interrupt(sessionId);
+          expect(Array.from(yield* Fiber.join(first)).at(-1)?.kind).toBe("interrupted");
+
+          // No resume: the same live session takes the next prompt straight away.
+          const second = yield* sendAndCollect(connection, "second", isTerminal);
+          for (const event of second) events.push(event);
+        }),
+      ),
+    );
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(requests[1]?.history.map((message) => message.text)).toEqual(["first", "second"]);
   });
 });

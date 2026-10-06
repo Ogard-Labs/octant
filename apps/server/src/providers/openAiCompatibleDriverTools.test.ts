@@ -414,7 +414,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     expect(callCount).toBe(2);
   });
 
-  it("rejects unoffered tool calls with a failed terminal", async () => {
+  it("keeps answering an unoffered tool call and fails once the model will not correct itself", async () => {
     const fetch = routeFetch(() => responsesToolCallStream("call_abc", "unknown_tool", '{"x":1}'));
     const { driver } = makeDriver(fetch as CompatibleFetch);
 
@@ -442,16 +442,15 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     const failed = collected.find((e) => e.kind === "failed");
     expect(failed).toBeDefined();
     expect((failed as { kind: string; failure: { message: string } }).failure.message).toContain(
-      "unsupported tool",
+      "could not run",
     );
-    // No tool-request should be emitted for an unoffered tool
-    const toolRequest = collected.find((e) => e.kind === "tool-request");
-    expect(toolRequest).toBeUndefined();
+    // An unoffered tool is never run: no tool-request is emitted for it.
+    expect(collected.find((e) => e.kind === "tool-request")).toBeUndefined();
   });
 
-  it("rejects duplicate tool call identifiers with a failed terminal", async () => {
-    const fetch = routeFetch(() => {
-      // Two tool calls with the same call_id in a single response
+  it("answers a step that reuses a tool call id and continues the turn", async () => {
+    // Two tool calls with the same call_id in a single response.
+    const duplicateStream = () => {
       const events = [
         {
           type: "response.created",
@@ -556,6 +555,11 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
       return new Response(events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(""), {
         headers: { "content-type": "text/event-stream" },
       });
+    };
+    let callCount = 0;
+    const fetch = routeFetch(() => {
+      callCount += 1;
+      return callCount === 1 ? duplicateStream() : responsesTextStream("done");
     });
     const { driver } = makeDriver(fetch as CompatibleFetch);
 
@@ -580,11 +584,10 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         }),
       ),
     );
-    const failed = collected.find((e) => e.kind === "failed");
-    expect(failed).toBeDefined();
-    expect((failed as { kind: string; failure: { message: string } }).failure.message).toContain(
-      "duplicate tool call",
-    );
+    // The whole step is answered with error results and the model is asked
+    // again: a second model request follows, and none of the calls was run.
+    expect(callCount).toBe(2);
+    expect(collected.find((e) => e.kind === "tool-request")).toBeUndefined();
   });
 
   it("persists tool results in history after a tool loop completes", async () => {

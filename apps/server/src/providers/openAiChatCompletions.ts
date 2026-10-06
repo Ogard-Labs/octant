@@ -8,6 +8,7 @@ import {
 import { Effect } from "effect";
 import { type OpenAiCompatibleEndpoint, requestGeneration } from "./openAiCompatibleEndpoint";
 import { decodeSse } from "./openAiCompatibleSse";
+import { contextOverflowFromBody } from "./endpointRetry";
 import {
   encodeChatCompletionsTools,
   encodeChatCompletionsToolResults,
@@ -92,7 +93,10 @@ async function runChatTurn(input: ChatCompletionsTurnInput): Promise<ChatComplet
       path: "chat/completions",
       body: requestBody(input, true),
       classifyRejectedResponse: async (response) => {
-        if (await isStrictStreamUnsupported(response)) {
+        const body = await readRejectionText(response);
+        const overflow = contextOverflowFromBody(body);
+        if (overflow !== undefined) return overflow;
+        if (isStrictStreamUnsupported(body)) {
           streamUnsupported = true;
           return failure("unsupported", "The provider does not support streaming responses.");
         }
@@ -188,7 +192,10 @@ async function normalizeStream(
   })) {
     if (state.done) throw protocol("The provider stream continued after its terminal marker.");
     if (frame.event !== undefined && frame.event !== "message") {
-      throw protocol("The provider stream contained an unsupported event type.");
+      // A vendor may add SSE event names of its own; one that is not a chat
+      // completion is ignored and logged rather than failing a good turn.
+      console.warn(`[provider] ignoring unknown stream event: ${frame.event}`);
+      continue;
     }
     if (frame.data === "[DONE]") {
       if (!state.terminal) throw protocol("The provider stream ended without a finish reason.");
@@ -561,13 +568,11 @@ function result(
   };
 }
 
-async function isStrictStreamUnsupported(response: Response): Promise<boolean> {
-  if (response.status !== 400 && response.status !== 422) return false;
+function isStrictStreamUnsupported(body: string): boolean {
   let value: unknown;
   try {
-    value = JSON.parse(await response.text()) as unknown;
-  } catch (error) {
-    if (isProviderFailure(error)) throw error;
+    value = JSON.parse(body) as unknown;
+  } catch {
     return false;
   }
   return (
@@ -578,6 +583,20 @@ async function isStrictStreamUnsupported(response: Response): Promise<boolean> {
     value.error.param === "stream" &&
     value.error.code === "unsupported_parameter"
   );
+}
+
+/**
+ * Reads a rejected response's body once. The chat path asks two questions of
+ * the same bytes — whether the endpoint left the stream unsupported and whether
+ * it rejected a filled context window — and a second read would see nothing.
+ */
+async function readRejectionText(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch (error) {
+    if (isProviderFailure(error)) throw error;
+    return "";
+  }
 }
 
 function readUsage(value: unknown): ProtocolUsage {
@@ -674,17 +693,18 @@ const MAX_TOOL_CALL_ARGUMENT_KEY_LENGTH = 128;
 const MAX_TOOL_CALL_ARGUMENT_STRING_LENGTH = 4_096;
 
 function assertBoundedToolCallArguments(argumentsJson: string): void {
-  if (argumentsJson.length === 0) {
-    throw protocol("The provider function call arguments were empty.");
-  }
   if (argumentsJson.length > MAX_TOOL_CALL_ARGUMENT_BYTES) {
     throw protocol("The provider function call arguments exceeded the size limit.");
   }
+  // Arguments the harness cannot parse are not a broken stream: the call is
+  // surfaced with its raw bytes so the model is told what was wrong and can
+  // correct itself. Only a payload that does parse is held to the structural
+  // bounds below, and its raw bytes are never replaced by an empty object.
   let parsed: unknown;
   try {
     parsed = JSON.parse(argumentsJson);
   } catch {
-    throw protocol("The provider function call arguments were not valid JSON.");
+    return;
   }
   if (!isBoundedToolCallArguments(parsed)) {
     throw protocol("The provider function call arguments exceeded the bounded JSON limits.");

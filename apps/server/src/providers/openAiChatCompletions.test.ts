@@ -175,14 +175,19 @@ describe("sendChatCompletionsTurn", () => {
     expect(JSON.stringify(failure)).not.toContain("secret");
   });
 
-  it("rejects nonstandard SSE event names", async () => {
+  it("ignores a nonstandard SSE event name and still completes the turn", async () => {
     const fetch = vi.fn(
-      async () => new Response(`event: provider.reasoning\ndata: ${JSON.stringify(chunk({}))}\n\n`),
+      async () =>
+        new Response(
+          `event: provider.reasoning\ndata: ${JSON.stringify(chunk({}))}\n\n` +
+            `data: ${JSON.stringify(chunk({ content: "fine" }))}\n\n` +
+            `data: ${JSON.stringify(chunk({}, "stop"))}\n\n` +
+            "data: [DONE]\n\n",
+        ),
     );
 
-    expect(await failureOf(sendChatCompletionsTurn(input(fetch)))).toMatchObject({
-      category: "protocol",
-    });
+    const result = await Effect.runPromise(sendChatCompletionsTurn(input(fetch)));
+    expect(result.text).toBe("fine");
   });
 
   it("rejects a completion identity change within one stream", async () => {

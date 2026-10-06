@@ -1367,7 +1367,10 @@ protocol that reports uncached input, cache reads, and cache writes as disjoint 
 absent rather than zero, a turn of several requests reports the sum of the figures its
 requests reported, and a report whose cache or reasoning figure exceeds its total is
 refused as invalid usage. Unknown fields in a response are ignored; a known field of
-the wrong type still fails the turn. ACP and Pi resume cursors carry a durable
+the wrong type still fails the turn. The input tokens a request reports also
+calibrate the native harness's next size estimate: a model's real bytes-per-token,
+measured from the last call, is preferred over a flat four-bytes-per-token guess, so
+a filled window is caught before the endpoint has to refuse the request. ACP and Pi resume cursors carry a durable
 task binding, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
 follow-ups; Chat retries retain that identity and native scratch files. Native
@@ -1487,7 +1490,19 @@ native harness in `apps/server/src/harness`:
   results return in one message in call order. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
-  alone does not fit.
+  alone does not fit. When the endpoint still rejects a request as too large,
+  the loop recognises the refusal as a filled context window (OpenAI's
+  `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
+  413 shape from an OpenAI-compatible host), shrinks it one further ladder
+  step, and sends it once more; a second refusal stands. The size estimate
+  prefers the input tokens the last call reported over a flat
+  four-bytes-per-token guess. A tool call that names no offered tool, reuses a
+  call id, or carries arguments that are not JSON is answered with an error
+  result instead of failing the turn, so the model can correct itself; the
+  arguments the model sent are never replaced by an empty object. A handful of
+  such correction steps is the most a turn takes, so a model that will not
+  correct itself fails rather than loop. An unknown stream event type is
+  ignored and logged, never fatal.
 - **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
   each step as it happens (`native-harness-transcript`, one aggregate per
   session): the user message once the request is known to fit, each reply,
@@ -1498,7 +1513,12 @@ native harness in `apps/server/src/harness`:
   stopped in the middle of with a journaled interrupted result that says
   whether the tool only reads (`replay: "safe"`, call it again) or may have
   taken effect (`replay: "unsafe"`, check before repeating); nothing is
-  silently re-run. Chat and Work still rebuild their history on the host and
+  silently re-run. A cancel (`interrupt`) ends only the turn in flight: the
+  session and its conversation stay live, so the next `send` continues it
+  without a resume or a journal rebuild, and a cancel during a tool step first
+  closes the calls its runner never answered with the same interrupted results
+  a resume would write. Only `stop` releases the session. Chat and Work still
+  rebuild their history on the host and
   start a fresh session each turn.
 - **Forks.** A Code fork on a harness model starts its first session from a
   copy of the source's transcript through the fork point
@@ -1567,7 +1587,11 @@ native harness in `apps/server/src/harness`:
   cancel ends a wait at once and stays `interrupted`. The stream idle limit is
   120 s and restarts on any byte, so keep-alive comments and reasoning deltas
   count. A spent allowance (`usageLimit` other than `temporary`), a rejected
-  credential, and a malformed event are never retried. Transports reject with
+  credential, and a malformed event are never retried. A refusal that names a
+  filled context window (OpenAI's `context_length_exceeded`, Anthropic's
+  "prompt is too long", or a 400 or 413 shape) is classified as context
+  overflow, which the retry policy never sends again as-is: the loop shrinks
+  the request and retries it once (above). Transports reject with
   the typed `ProviderFailure` (`runProviderEffect`), not the Effect runtime's
   wrapper, because the category is what these rules decide on.
 - **Lead fallback.** When a request's retries are spent, the loop asks its

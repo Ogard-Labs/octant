@@ -339,7 +339,8 @@ describe("makeOpenAiCompatibleDriver", () => {
           expect(String(duplicate)).toContain("protocol");
           yield* connection.interrupt(sessionId);
           expect(requestSignal?.aborted).toBe(true);
-          expect(runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
+          // A cancel ends the turn but keeps the session live for the next send.
+          expect(runtimeRegistry.activeSessionCount(instanceId)).toBe(1);
           return Array.from(yield* Fiber.join(collected));
         }),
       ),
@@ -414,6 +415,8 @@ describe("makeOpenAiCompatibleDriver", () => {
           });
           yield* connection.interrupt(sessionId);
           expect(Array.from(yield* Fiber.join(interrupted)).at(-1)?.kind).toBe("interrupted");
+          // The cancel kept the session live; release it before starting over.
+          yield* connection.stop(sessionId);
 
           hanging = false;
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
