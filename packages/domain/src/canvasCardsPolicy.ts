@@ -20,10 +20,12 @@ import {
   type CanvasActor,
   type CanvasBlock,
   type CanvasId,
+  type CanvasPresentation,
   type CanvasVersion,
   type CanvasVersionId,
 } from "@octant/contracts/canvas";
 import type { AgentRunAuthority } from "@octant/contracts/agent-run";
+import { effectiveCanvasPresentation } from "./canvasPresentationPolicy";
 import type { UtcTimestamp } from "@octant/contracts/events";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
@@ -312,6 +314,8 @@ export interface BuildCreateVersionInput {
    * never echoed back into the page as though it were.
    */
   readonly blocks?: ReadonlyArray<CanvasBlock>;
+  /** Where the author asked the thread to show it; the host's inline bound already applied. */
+  readonly presentation?: CanvasPresentation;
 }
 
 export function buildCreateVersion(input: BuildCreateVersionInput): CanvasVersion {
@@ -345,6 +349,7 @@ export function buildCreateVersion(input: BuildCreateVersionInput): CanvasVersio
       createdAt: input.createdAt,
     },
     sourceManifest: input.request.sourceManifest,
+    ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
     blocks,
   };
   const version = decodeCanvasVersion({
@@ -370,6 +375,8 @@ export function projectThreadReferenceCardFromVersion(input: {
   readonly cardId: unknown;
   readonly authority: AgentRunAuthority;
   readonly request?: CanvasCreateRequest;
+  /** When the Canvas's first version was written, when the caller holds its history. */
+  readonly canvasCreatedAt?: UtcTimestamp;
 }): CanvasThreadReferenceCard {
   const version = decodeCanvasVersion(input.version);
   const provenance = version.definition.provenance;
@@ -414,6 +421,8 @@ export function projectThreadReferenceCardFromVersion(input: {
       ? { summary: version.definition.blocks[1].text }
       : {}),
     actionCount: 0,
+    presentation: effectiveCanvasPresentation(version.definition),
+    ...(input.canvasCreatedAt === undefined ? {} : { canvasCreatedAt: input.canvasCreatedAt }),
   };
   return validateCanvasThreadReferenceCard(card);
 }

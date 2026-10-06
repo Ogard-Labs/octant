@@ -362,6 +362,7 @@ import {
   isDocumentPath,
   noteExistingDocuments,
   noteWrittenDocument,
+  showWrittenDocument,
   type WrittenDocumentOffers,
 } from "./shell/writtenDocuments";
 import {
@@ -2244,7 +2245,8 @@ function LaunchedShell(
   /**
    * A Canvas the thread authored opens in the dock's Canvas tool once. The
    * cards the thread already had when it was opened are seen documents, not
-   * new writing, so reopening an old thread never raises the dock.
+   * new writing, so reopening an old thread never raises the dock. A Canvas
+   * drawn inline is already in front of the person, so it raises nothing.
    */
   function noteCanvasReferences(
     mode: OctantMode,
@@ -2261,7 +2263,7 @@ function LaunchedShell(
       current.get(key) === revision ? current : new Map(current).set(key, revision),
     );
     const documents = cards
-      .filter(isAuthorizedCanvasDocument)
+      .filter((card) => isAuthorizedCanvasDocument(card) && card.presentation !== "inline")
       .map((card) => ({ kind: "canvas" as const, canvasId: String(card.canvasId) }));
     const offers = writtenDocumentsRef.current.get(key);
     if (offers === undefined) {
@@ -2288,6 +2290,19 @@ function LaunchedShell(
    * document a turn wrote. The dock rises only when that thread is the one in
    * front, because 0079 opens the document without moving focus.
    */
+  /** The person asked to see a Canvas drawn in the thread beside that thread. */
+  function openCanvasInSidebar(card: CanvasThreadReferenceCard): void {
+    const key = threadUtilityDockKey(card.scope.mode, String(card.originThreadId));
+    const document = { kind: "canvas" as const, canvasId: String(card.canvasId) };
+    setWrittenDocumentsByThread((current) =>
+      new Map(current).set(
+        key,
+        showWrittenDocument(current.get(key) ?? NO_WRITTEN_DOCUMENTS, document),
+      ),
+    );
+    setDockStatesByThread((current) => openThreadUtilityTab(current, key, "canvas"));
+    setDockVisible(true);
+  }
   function noteHandedOffDocument(mode: OctantMode, threadId: string, canvasId: string): void {
     const key = threadUtilityDockKey(mode, threadId);
     const offers = writtenDocumentsRef.current.get(key) ?? NO_WRITTEN_DOCUMENTS;
@@ -6206,11 +6221,11 @@ function LaunchedShell(
                       ? {
                           addProjectLabel: "chat-project" as const,
                           onAddProject: () => openProjectCreate(),
-                          unfiledLabel: "Recents" as const,
+                          unfiledLabel: "No project" as const,
                         }
                       : {
                           onAddProject: () => openProjectCreate(),
-                          unfiledLabel: "Recents" as const,
+                          unfiledLabel: "No project" as const,
                         })}
                     onArchive={(projectId) => void projectController.setArchived(projectId, true)}
                     onColorChange={(projectId, color) => {
@@ -6832,6 +6847,7 @@ function LaunchedShell(
                     previewClient={previewClient}
                     canvasClient={canvasClient}
                     imageGenerationClient={imageGenerationClient}
+                    onOpenCanvasInSidebar={openCanvasInSidebar}
                     onOpenCanvasReference={(card) => {
                       const projectId = card.scope.workspace.projectId;
                       if (projectId === null) return;

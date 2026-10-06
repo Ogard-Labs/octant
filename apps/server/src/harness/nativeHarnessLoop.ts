@@ -132,6 +132,8 @@ interface SessionState {
   steps: number;
   /** Everything this turn's requests have cost so far; a figure no request reported stays absent. */
   usage: NativeHarnessUsage;
+  /** When the request now in flight was sent, which dates the usage it reports. */
+  requestStartedAt: string | undefined;
 }
 
 /**
@@ -247,6 +249,7 @@ export function createNativeHarnessConnection(
       stopped: false,
       steps: 0,
       usage: { inputTokens: 0, outputTokens: 0 },
+      requestStartedAt: undefined,
     });
 
     // A note is acknowledged only after it is durable and its next request
@@ -335,7 +338,15 @@ export function createNativeHarnessConnection(
     ): Promise<NativeHarnessResponse> => {
       const stream = {
         signal,
-        onEvent: (event: NativeHarnessStreamEvent) => emit(state, { ...event }),
+        // A request's own usage says when that request was sent, which is what
+        // lets its timing leave out the tool time between requests.
+        onEvent: (event: NativeHarnessStreamEvent) =>
+          emit(
+            state,
+            event.kind === "usage" && state.requestStartedAt !== undefined
+              ? { ...event, requestStartedAt: state.requestStartedAt }
+              : { ...event },
+          ),
       };
       let current = request;
       if (state.fallback !== undefined) {
@@ -353,6 +364,7 @@ export function createNativeHarnessConnection(
       }
       for (;;) {
         try {
+          state.requestStartedAt = options.clock();
           return await (state.fallback?.endpoint ?? state.endpoint).send(current, stream);
         } catch (error) {
           if (

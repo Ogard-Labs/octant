@@ -7,8 +7,10 @@ import {
   buildCreateVersion,
   canvasCreateDenialReason,
   clampCanvasAuthority,
+  projectThreadReferenceCardFromVersion,
   validateCanvasThreadReferenceCard,
 } from "./canvasCardsPolicy";
+import { CANVAS_INLINE_MAX_BLOCKS } from "./canvasPresentationPolicy";
 
 const requestId = "20000000-0000-4000-8000-000000000000";
 const threadId = "11111111-1111-4111-8111-111111111111";
@@ -331,6 +333,68 @@ describe("Canvas create version projection", () => {
     });
 
     expect(version.definition.blocks.map((block) => block.kind)).toEqual(["heading", "diagram"]);
+  });
+
+  it("shows a Canvas inline in its thread only while it fits the inline bound", () => {
+    const request = authorizeCanvasCreateRequest({
+      request: chatRequest({ workspace: { kind: "chat-virtual", projectId } }),
+      activeContext: { mode: "chat", projectId },
+    });
+    const admitted = admitCanvasCreate({
+      request,
+      receiptId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      canvasId,
+      versionId,
+      now: "2026-08-01T21:00:00.000Z" as never,
+    });
+    const heading = {
+      blockId: "inline-heading" as never,
+      schemaVersion: 1 as never,
+      kind: "heading" as const,
+      level: 2 as const,
+      text: "Weekly signups",
+    };
+    const board = {
+      blockId: "inline-board" as never,
+      schemaVersion: 1 as never,
+      kind: "diagram" as const,
+      nodes: [{ nodeId: "a" as never, label: "A" }],
+      edges: [],
+    };
+    const cardFor = (blocks: ReadonlyArray<unknown>) =>
+      projectThreadReferenceCardFromVersion({
+        version: buildCreateVersion({
+          request,
+          admitted,
+          canvasId: canvasId as never,
+          versionId: versionId as never,
+          projectId: projectId as never,
+          actor: { kind: "agent", actorId: actorId as never },
+          providerInstanceId: providerInstanceId as never,
+          modelId: "octant-test-model" as never,
+          createdAt: "2026-08-01T21:00:00.000Z" as never,
+          blocks: blocks as never,
+          presentation: "inline",
+        }),
+        cardId: versionId,
+        canvasCreatedAt: "2026-08-01T21:00:00.000Z" as never,
+        authority: safeAuthority,
+      });
+
+    expect(cardFor([heading])).toMatchObject({
+      presentation: "inline",
+      canvasCreatedAt: "2026-08-01T21:00:00.000Z",
+    });
+    // A board is worked on in the sidebar, so asking for inline does not put it in the thread.
+    expect(cardFor([heading, board]).presentation).toBe("sidebar");
+    expect(
+      cardFor(
+        Array.from({ length: CANVAS_INLINE_MAX_BLOCKS + 1 }, (_, index) => ({
+          ...heading,
+          blockId: `heading-${String(index)}`,
+        })),
+      ).presentation,
+    ).toBe("sidebar");
   });
 
   it("rejects a create request bound to another active Project", () => {

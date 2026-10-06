@@ -11,6 +11,7 @@ import {
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
   CANVAS_MAX_TREEMAP_DEPTH,
+  CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
   decodeCanvasDefinition,
   type CanvasDefinition,
@@ -199,7 +200,8 @@ describe("Canvas validation policy", () => {
 
   it("fails closed for unknown schema versions", () => {
     expectPolicyCode(
-      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 5 }),
+      () =>
+        validateCanvasDefinition({ ...baseDefinition, schemaVersion: CANVAS_SCHEMA_VERSION + 1 }),
       "unsupported-schema-version",
     );
     expectPolicyCode(
@@ -236,6 +238,16 @@ describe("Canvas validation policy", () => {
           createdBy: { kind: "local-user", actorId: ids.actor },
           createdAt: "2026-08-01T21:00:01.000Z",
         }),
+      "unsupported-schema-version",
+    );
+  });
+
+  it("refuses a thread presentation inside a document declaring an older schema version", () => {
+    // A rolled-back runtime that reads a newer document must refuse it as a
+    // future version, not report the Canvas corrupt.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({ ...baseDefinition, schemaVersion: 3, presentation: "inline" }),
       "unsupported-schema-version",
     );
   });
@@ -687,6 +699,20 @@ function treemap(overrides: Record<string, unknown> = {}) {
 describe("treemap validation", () => {
   it("accepts a hierarchy whose leaves carry every measure", () => {
     expect(() => validateCanvasDefinition(withBlocks([treemap()]))).not.toThrow();
+  });
+
+  it("refuses a treemap inside a document declaring an older schema version", () => {
+    // A treemap arrived at version 5: a v4 document that carries one is a
+    // rolled-back runtime's future-version failure, not a corrupt document.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_PRESENTATION_SCHEMA_VERSION,
+          blocks: [treemap()],
+        }),
+      "unsupported-schema-version",
+    );
   });
 
   it("rejects a hierarchy with more than one root", () => {

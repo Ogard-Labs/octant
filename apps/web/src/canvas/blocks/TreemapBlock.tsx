@@ -344,8 +344,7 @@ function anchorFor(
     })
     .join(" · ");
   return {
-    seriesLabel: path.join(" / "),
-    valueLabel: readings,
+    readings: [{ seriesIndex: 0, seriesLabel: path.join(" / "), valueLabel: readings }],
     x: Math.min(1, Math.max(0, (rect.x + rect.width / 2) / PLOT_WIDTH)),
     y: Math.min(1, Math.max(0, rect.y / PLOT_HEIGHT)),
   };

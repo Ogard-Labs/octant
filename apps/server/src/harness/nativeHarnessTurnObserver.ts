@@ -7,6 +7,7 @@ import {
   decodeUtcTimestamp,
   type ContextSubjectRef,
   type NativeHarnessSlotCandidate,
+  type NativeHarnessTurnStopReason,
   type OctantMode,
   type ProjectId,
   type ProviderContextBlock,
@@ -18,6 +19,7 @@ import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import { nativeHarnessGoalContext } from "./nativeHarnessGoal";
 import { nativeHarnessInstructions } from "./nativeHarnessInstructions";
+import { harnessStopReason, type TurnEndSummary } from "../metrics/turnEnd";
 import type { NativeHarnessRouter } from "./nativeHarnessRouter";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 import { completeOnce } from "./nativeHarnessSingleShot";
@@ -134,12 +136,20 @@ export class NativeHarnessTurnObserver {
 
   /**
    * Every turn ends here, whatever its outcome. A completed turn is already
-   * closed by its record; this closes one that failed or was stopped, so a
-   * pause waiting for it knows it is done and a restart does not mistake it
-   * for one it cut off.
+   * closed by its record. One that failed or was stopped is recorded here with
+   * how it really stopped and what it had cost by then, so the session's
+   * totals count it, a pause waiting for it knows it is done, and a restart
+   * does not mistake it for one it cut off.
    */
-  turnEnded(scope: NativeHarnessTurnScope): void {
+  turnEnded(scope: NativeHarnessTurnScope, turn?: TurnEndSummary): void {
     if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return;
+    if (turn !== undefined && turn.stopReason !== "end-of-turn") {
+      this.#recordTurn(scope, {
+        turnId: decodeNativeHarnessTurnId(this.#options.uuid()),
+        stopReason: harnessStopReason(turn.stopReason),
+        turn,
+      });
+    }
     this.#options.sessions.settleTurn(scope.threadId);
   }
 
@@ -159,31 +169,53 @@ export class NativeHarnessTurnObserver {
     input: NativeHarnessTurnScope & {
       readonly text: string;
       readonly toolCalls: number;
-      readonly usage?: { readonly inputTokens: number; readonly outputTokens: number } | undefined;
+      /** What the turn cost and how it ran, as the runner that watched it measured. */
+      readonly turn?: TurnEndSummary | undefined;
       readonly contextSubject?: ContextSubjectRef | undefined;
-      readonly startedAt?: string | undefined;
     },
   ): Promise<void> {
     if (!this.#options.isHarnessProvider(input.providerInstanceId)) return;
-    const session = this.#options.sessions.ensure({
-      threadId: input.threadId,
-      mode: input.mode,
-      projectId: input.projectId,
-      leadSlotId: "default" as never,
-      lead: this.#lead(input),
-    });
-    const now = this.#options.clock();
     const turnId = decodeNativeHarnessTurnId(this.#options.uuid());
-    const lead = this.#lead(input);
-    const tools = this.#options.sessions.takeToolCalls(input.threadId);
     // A note the lead already read is done; one still queued waits for the next prompt.
     this.#options.sessions.clearSteering(input.threadId, "delivered");
+    this.#recordTurn(input, {
+      turnId,
+      stopReason: "end-of-turn",
+      toolCalls: input.toolCalls,
+      ...(input.turn === undefined ? {} : { turn: input.turn }),
+    });
+    if (input.contextSubject !== undefined)
+      this.#recordReductions(input.threadId, turnId, input.contextSubject);
+    // The advisor answers in its own time; the thread is free the moment the
+    // turn is recorded, and its verdict lands on the session when it arrives.
+    void this.#review(input, turnId).catch(() => undefined);
+  }
+
+  /** The one place a turn becomes a journaled record, whether it finished or stopped early. */
+  #recordTurn(
+    scope: NativeHarnessTurnScope,
+    outcome: {
+      readonly turnId: string;
+      readonly stopReason: NativeHarnessTurnStopReason;
+      readonly toolCalls?: number;
+      readonly turn?: TurnEndSummary;
+    },
+  ): void {
+    const session = this.#options.sessions.ensure({
+      threadId: scope.threadId,
+      mode: scope.mode,
+      projectId: scope.projectId,
+      leadSlotId: "default" as never,
+      lead: this.#lead(scope),
+    });
+    const now = this.#options.clock();
+    const tools = this.#options.sessions.takeToolCalls(scope.threadId);
     try {
       this.#options.sessions.recordTurn(
-        input.threadId,
+        scope.threadId,
         decodeNativeHarnessTurnRecord({
           ...(tools.length === 0 ? {} : { tools }),
-          turnId,
+          turnId: outcome.turnId,
           sessionId: session.id,
           sequence: session.turnsRun + 1,
           job: "lead",
@@ -191,29 +223,22 @@ export class NativeHarnessTurnObserver {
             kind: "primary",
             job: "lead",
             slotId: session.leadSlotId,
-            candidate: lead,
+            candidate: this.#lead(scope),
             decidedAt: now,
             rejected: [],
           },
-          toolCalls: input.toolCalls,
-          stopReason: "end-of-turn",
-          usage: {
-            inputTokens: input.usage?.inputTokens ?? 0,
-            outputTokens: input.usage?.outputTokens ?? 0,
-          },
-          startedAt: input.startedAt ?? now,
-          endedAt: now,
+          toolCalls: outcome.toolCalls ?? tools.length,
+          stopReason: outcome.stopReason,
+          usage: outcome.turn?.usage ?? { inputTokens: 0, outputTokens: 0 },
+          ...(outcome.turn === undefined ? {} : { metrics: outcome.turn.metrics }),
+          startedAt: outcome.turn?.startedAt ?? now,
+          endedAt: outcome.turn?.endedAt ?? now,
         }),
       );
     } catch {
-      // A turn the journal refused still completed for the user; nothing else
+      // A turn the journal refused still ended for the user; nothing else
       // here depends on the record existing.
     }
-    if (input.contextSubject !== undefined)
-      this.#recordReductions(input.threadId, turnId, input.contextSubject);
-    // The advisor answers in its own time; the thread is free the moment the
-    // turn is recorded, and its verdict lands on the session when it arrives.
-    void this.#review(input, turnId).catch(() => undefined);
   }
 
   #recordReductions(threadId: string, turnId: string, subject: ContextSubjectRef): void {

@@ -33,8 +33,7 @@ into.
 
 Sidebar **Search** opens a current-mode thread overlay. It filters titles
 among the threads the host has already listed for this window — live and
-archived — and never mixes Chat, Work, and Code. Project names, Recents,
-and Unfiled print as folder words on a hit, not as filters. Up, Down,
+archived — and never mixes Chat, Work, and Code. Project names and No project print as folder words on a hit, not as filters. Up, Down,
 Home, and End move, Enter opens, and Escape dismisses.
 
 The palette command **Search Chat threads**, **Search Work threads**, or

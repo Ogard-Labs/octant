@@ -44,7 +44,7 @@ function tools(overrides: Record<string, unknown> = {}) {
   const port = {
     activeContext: vi.fn(() => ({ mode: "chat", projectId })),
     project: vi.fn(async () => ({ id: projectId, type: "chat", lifecycle: "active" })),
-    canvas: { create, revise },
+    canvas: { create, revise, get: vi.fn(() => ({ kind: "unavailable" })) },
     uuid: vi.fn(() => "55555555-5555-4555-8555-555555555555"),
     hostId: "66666666-6666-4666-8666-666666666666",
     ...overrides,
@@ -627,7 +627,7 @@ describe("createCanvasAgentTools", () => {
           throw new Error("A Work or Code Canvas must not follow the window's active mode.");
         }),
         project: vi.fn(async () => ({ id: projectId, type: mode, lifecycle: "active" })),
-        canvas: { create, revise },
+        canvas: { create, revise, get: vi.fn(() => ({ kind: "unavailable" })) },
         uuid: vi.fn(() => "55555555-5555-4555-8555-555555555555"),
         hostId: "66666666-6666-4666-8666-666666666666",
         resolveWorkspace,
@@ -849,7 +849,12 @@ describe("a managed child's Canvas tool", () => {
       project: vi.fn(async () => {
         throw new Error("A child Canvas must not ask the window for a Project.");
       }),
-      canvas: { create, revise, threadReferenceCards: vi.fn(() => []), get: vi.fn() },
+      canvas: {
+        create,
+        revise,
+        threadReferenceCards: vi.fn(() => []),
+        get: vi.fn(() => ({ kind: "unavailable" })),
+      },
       uuid: vi.fn(() => "55555555-5555-4555-8555-555555555555"),
       hostId: "66666666-6666-4666-8666-666666666666",
       resolveChildWorkspace,

@@ -29,6 +29,12 @@ export interface TranscriptWindowProps<T> {
   readonly items: ReadonlyArray<T>;
   readonly itemKey: (item: T, index: number) => string;
   readonly renderItem: (item: T, index: number) => ReactNode;
+  /**
+   * What the thread places after a row inside the same measured row, such as
+   * a Canvas the turn ending there wrote. Kept apart from `renderItem` so each
+   * transcript's own row rendering stays as it is.
+   */
+  readonly afterItem?: (item: T, index: number) => ReactNode;
   /** Identifies the thread so leaving and returning restores this scroll offset. */
   readonly restoreKey: string;
   readonly estimateSize?: number;
@@ -429,6 +435,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
             }}
           >
             {props.renderItem(item, virtualItem.index)}
+            {props.afterItem?.(item, virtualItem.index)}
           </ItemTag>
         );
       })}

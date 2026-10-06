@@ -462,6 +462,10 @@ function seedFollowUp(harness: Harness, thread: SeededThread): void {
     kind: "follow-up-updated",
     followUp: { threadId: thread.id, reason: thread.marker },
   });
+  insertEvent(harness.connection, "thread-turn-metrics", thread.id, {
+    threadId: thread.id,
+    modelId: thread.marker,
+  });
 }
 
 function seedHarnessSession(harness: Harness, thread: SeededThread): void {

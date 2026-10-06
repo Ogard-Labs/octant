@@ -6,6 +6,7 @@ import {
   type CanvasActor,
   type CanvasDefinition,
   type CanvasId,
+  type CanvasPresentation,
   type CanvasVersion,
   type CanvasVersionId,
 } from "@octant/contracts/canvas";
@@ -162,6 +163,11 @@ export interface BuildRevisionVersionInput {
    * the prompt is recorded as a note rather than answered.
    */
   readonly blocks?: ReadonlyArray<CanvasDefinition["blocks"][number]>;
+  /**
+   * A new thread presentation, when the author chose one. Without it the
+   * revision keeps whatever the current version asked for.
+   */
+  readonly presentation?: CanvasPresentation;
   readonly actor: CanvasActor;
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
@@ -176,10 +182,20 @@ export function buildRevisionVersion(input: BuildRevisionVersionInput): CanvasVe
     modelId: input.modelId,
     createdAt: input.createdAt,
   });
-  const refinedDefinition =
+  const revisedDefinition =
     input.blocks === undefined
       ? applyPromptRefinement(reprovenanced, input.prompt)
       : applyAuthoredRevision(reprovenanced, input.blocks);
+  // The hint is a version-4 field, so a document first written under an older
+  // version is re-declared at the current one when it gains it.
+  const refinedDefinition =
+    input.presentation === undefined
+      ? revisedDefinition
+      : validateCanvasDefinition({
+          ...revisedDefinition,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          presentation: input.presentation,
+        });
   const nextEnvelope = {
     schemaVersion: CANVAS_SCHEMA_VERSION,
     canvasId: input.canvasId,
@@ -242,6 +258,8 @@ export interface AdmitCanvasReviseInput {
   readonly now: UtcTimestamp;
   /** The document an author wrote for this revision, when one did. */
   readonly blocks?: ReadonlyArray<CanvasDefinition["blocks"][number]>;
+  /** A new thread presentation, when the author chose one. */
+  readonly presentation?: CanvasPresentation;
 }
 
 export function admitCanvasRevise(input: AdmitCanvasReviseInput): {
@@ -308,6 +326,7 @@ export function admitCanvasRevise(input: AdmitCanvasReviseInput): {
     modelId: request.modelId,
     createdAt: input.now,
     ...(input.blocks === undefined ? {} : { blocks: input.blocks }),
+    ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
   });
   const receipt = {
     schemaVersion: 1 as const,
