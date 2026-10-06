@@ -79,6 +79,41 @@ describe("replica device key service", () => {
     );
   });
 
+  it("does not replace a stored key when resolve fails for a transient reason", async () => {
+    const store = memoryStore();
+    const first = await ensureReplicaDeviceKey(store, instanceId);
+    // A locked Keychain or a helper timeout surfaces as a rejected resolve,
+    // not as absence; regenerating would strand every signature already bound
+    // to the published public key.
+    const flaky: CredentialStore = {
+      ...store,
+      async resolve() {
+        throw new Error("keychain locked");
+      },
+    };
+    const failure = await ensureReplicaDeviceKey(flaky, instanceId).catch(
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(ReplicaDeviceKeyFailure);
+    expect((failure as ReplicaDeviceKeyFailure).category).toBe("unavailable");
+    const unchanged = await ensureReplicaDeviceKey(store, instanceId);
+    expect(unchanged.publicKey).toBe(first.publicKey);
+    expect(store.values.size).toBe(1);
+  });
+
+  it("creates a key when resolve fails and none is stored", async () => {
+    const store = memoryStore();
+    const flaky: CredentialStore = {
+      ...store,
+      async resolve() {
+        throw new Error("not found");
+      },
+    };
+    const key = await ensureReplicaDeviceKey(flaky, instanceId);
+    expect(key.publicKey).toMatch(/^[A-Za-z0-9+/]{59}=$/);
+    expect(store.values.size).toBe(1);
+  });
+
   it("refuses a signature from a different key", async () => {
     const store = memoryStore();
     await ensureReplicaDeviceKey(store, instanceId);

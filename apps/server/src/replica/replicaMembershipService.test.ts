@@ -8,6 +8,7 @@ import {
   type ReplicaInstanceId,
   type ReplicaMembershipEntry,
 } from "@octant/contracts/replica-entry";
+import { REPLICA_JOIN_REQUEST_TTL_MS } from "@octant/domain/replica-membership-policy";
 import type { ReplicaStore } from "@octant/plugin-api/replica-store";
 import {
   deriveReplicaJoinMatchingCode,
@@ -102,6 +103,7 @@ function harness(
     members: [],
     revocations: [],
   },
+  now: () => number = () => 0,
 ): Harness {
   const store = memoryStore();
   const credentials = memoryCredentialStore();
@@ -126,7 +128,7 @@ function harness(
       revocations,
     }),
     nextSequence: () => members.length + revocations.length + 1,
-    clock: () => 0,
+    clock: now,
   });
   return {
     service,
@@ -142,6 +144,7 @@ function joinRequest(options: {
   readonly displayName: string;
   readonly sequence?: number;
   readonly publicKey: string;
+  readonly requestedAt?: number;
 }): ReplicaMembershipEntry {
   return decodeReplicaMembershipEntry({
     format: REPLICA_ENTRY_FORMAT,
@@ -154,7 +157,37 @@ function joinRequest(options: {
     subject: options.instanceId,
     subjectDisplayName: options.displayName,
     subjectDeviceKey: options.publicKey,
+    requestedAt: options.requestedAt ?? 0,
   });
+}
+
+/** A join request the joiner signed and wrote into the store itself. */
+async function writtenJoinRequest(
+  h: Harness,
+  options: {
+    readonly instanceId: ReplicaInstanceId;
+    readonly displayName: string;
+    readonly sequence?: number;
+    readonly requestedAt?: number;
+  },
+): Promise<ReplicaMembershipEntry> {
+  const key = await ensureReplicaDeviceKey(h.credentials, options.instanceId);
+  const request = joinRequest({
+    instanceId: options.instanceId,
+    displayName: options.displayName,
+    sequence: options.sequence ?? 1,
+    publicKey: key.publicKey,
+    requestedAt: options.requestedAt ?? 0,
+  });
+  const sequence = options.sequence ?? 1;
+  const entryPath = `${String(options.instanceId)}/${sequence}.json`;
+  const signaturePath = `${String(options.instanceId)}/${sequence}.sig`;
+  const encoded = new TextEncoder().encode(encodeReplicaEntry(request));
+  h.store.files.set(entryPath, encoded);
+  const signer = makeReplicaDeviceSigner(h.credentials, options.instanceId);
+  const { signature } = await signer.sign(encoded);
+  h.store.files.set(signaturePath, new TextEncoder().encode(signature));
+  return request;
 }
 
 describe("replica membership service", () => {
@@ -185,11 +218,9 @@ describe("replica membership service", () => {
 
   it("refuses an approval when the matching codes do not agree", async () => {
     const h = harness();
-    const joinerKey = await ensureReplicaDeviceKey(h.credentials, ids.joiner);
-    const request = joinRequest({
+    const request = await writtenJoinRequest(h, {
       instanceId: ids.joiner,
       displayName: "Mac mini",
-      publicKey: joinerKey.publicKey,
     });
     const outcome = await h.service.execute({
       kind: "approve-join",
@@ -197,12 +228,11 @@ describe("replica membership service", () => {
       confirmationCode: "000000",
     });
     expect(outcome).toMatchObject({ kind: "refused", reason: "code-mismatch" });
-    expect(h.store.files.size).toBe(0);
+    expect(h.store.files.size).toBe(2);
   });
 
-  it("approves a join request after the codes agree and journals the member", async () => {
+  it("refuses an approval for a join request that is not in the store", async () => {
     const h = harness();
-    await ensureReplicaDeviceKey(h.credentials, ids.local);
     const joinerKey = await ensureReplicaDeviceKey(h.credentials, ids.joiner);
     const request = joinRequest({
       instanceId: ids.joiner,
@@ -218,18 +248,115 @@ describe("replica membership service", () => {
       joinRequest: request,
       confirmationCode: code,
     });
+    expect(outcome).toMatchObject({ kind: "refused", reason: "unknown-instance" });
+    expect(h.journal.some((e) => e.eventName === "replica.join-approval-refused@1")).toBe(true);
+    expect(h.store.files.size).toBe(0);
+  });
+
+  it("refuses an approval whose stored join request was not signed by the joiner", async () => {
+    const h = harness();
+    const joinerKey = await ensureReplicaDeviceKey(h.credentials, ids.joiner);
+    const request = joinRequest({
+      instanceId: ids.joiner,
+      displayName: "Mac mini",
+      publicKey: joinerKey.publicKey,
+    });
+    // The caller's copy names the joiner's key, but the store holds bytes
+    // someone else signed with a different key.
+    const entryPath = `${String(ids.joiner)}/1.json`;
+    const signaturePath = `${String(ids.joiner)}/1.sig`;
+    const encoded = new TextEncoder().encode(encodeReplicaEntry(request));
+    h.store.files.set(entryPath, encoded);
+    await ensureReplicaDeviceKey(h.credentials, ids.local);
+    const { signature } = await makeReplicaDeviceSigner(h.credentials, ids.local).sign(encoded);
+    h.store.files.set(signaturePath, new TextEncoder().encode(signature));
+    const code = deriveReplicaJoinMatchingCode({
+      joinRequest: request,
+      approverInstanceId: ids.local,
+    });
+    const outcome = await h.service.execute({
+      kind: "approve-join",
+      joinRequest: request,
+      confirmationCode: code,
+    });
+    expect(outcome).toMatchObject({ kind: "refused", reason: "code-mismatch" });
+    expect(h.store.files.size).toBe(2);
+  });
+
+  it("refuses an approval whose join request is no longer fresh", async () => {
+    let now = 1_000_000;
+    const h = harness(undefined, () => now);
+    const request = await writtenJoinRequest(h, {
+      instanceId: ids.joiner,
+      displayName: "Mac mini",
+      requestedAt: now,
+    });
+    now += REPLICA_JOIN_REQUEST_TTL_MS + 1;
+    const code = deriveReplicaJoinMatchingCode({
+      joinRequest: request,
+      approverInstanceId: ids.local,
+    });
+    const outcome = await h.service.execute({
+      kind: "approve-join",
+      joinRequest: request,
+      confirmationCode: code,
+    });
+    expect(outcome).toMatchObject({ kind: "refused", reason: "expired-join-request" });
+    expect(h.journal.some((e) => e.eventName === "replica.join-approval-refused@1")).toBe(true);
+    expect(h.store.files.size).toBe(2);
+  });
+
+  it("approves a join request after the codes agree and journals the member", async () => {
+    const now = 1_000_000;
+    const h = harness(undefined, () => now);
+    await ensureReplicaDeviceKey(h.credentials, ids.local);
+    const request = await writtenJoinRequest(h, {
+      instanceId: ids.joiner,
+      displayName: "Mac mini",
+      requestedAt: now,
+    });
+    const code = deriveReplicaJoinMatchingCode({
+      joinRequest: request,
+      approverInstanceId: ids.local,
+    });
+    const outcome = await h.service.execute({
+      kind: "approve-join",
+      joinRequest: request,
+      confirmationCode: code,
+    });
     expect(outcome.kind).toBe("join-approved");
     expect(h.journal.some((e) => e.eventName === "replica.join-approved@1")).toBe(true);
   });
 
   it("writes a join request the approver can read back from the store", async () => {
-    const h = harness();
+    const now = 1_800_000_000_000;
+    const h = harness(undefined, () => now);
     const outcome = await h.service.execute({
       kind: "write-join-request",
       displayName: "Mac mini",
     });
     expect(outcome.kind).toBe("join-requested");
+    if (outcome.kind !== "join-requested") throw new Error("expected join-requested");
+    expect(outcome.entry.requestedAt).toBe(now);
     expect(h.store.files.size).toBe(2);
+  });
+
+  it("leaves no entry behind when the signature publish fails", async () => {
+    const h = harness();
+    const files = h.store.files;
+    // One entry already holds the next sequence, so the write-once store
+    // refuses the new entry's publish.
+    files.set("11111111-1111-4111-8111-111111111111/1.sig", new TextEncoder().encode("taken"));
+    const outcome = await h.service.execute({
+      kind: "write-join-request",
+      displayName: "Mac mini",
+    });
+    expect(outcome.kind).toBe("store-failed");
+    expect(files.has("11111111-1111-4111-8111-111111111111/1.json")).toBe(false);
+    const failure = h.journal.find(
+      (event) => event.eventName === "replica.membership-store-failure@1",
+    );
+    expect(failure?.payload).toMatchObject({ kind: "store-failure", phase: "signature" });
   });
 
   it("refuses to revoke a computer that is not a member", async () => {

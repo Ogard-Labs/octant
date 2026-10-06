@@ -21,11 +21,15 @@ import {
   buildReplicaJoinMatchingPreimage,
   decideReplicaJoinApproval,
   decideReplicaRevocation,
+  replicaJoinRequestIsFresh,
   type ReplicaMembershipFacts,
 } from "@octant/domain/replica-membership-policy";
 import { createHash, randomUUID } from "node:crypto";
 import type { ReplicaStore } from "@octant/plugin-api/replica-store";
-import { type ReplicaDeviceSigningKey } from "./replicaDeviceKeyService";
+import {
+  verifyReplicaEntrySignature,
+  type ReplicaDeviceSigningKey,
+} from "./replicaDeviceKeyService";
 
 export const REPLICA_MEMBERSHIP_AGGREGATE_TYPE = "replica-membership";
 export const REPLICA_MEMBERSHIP_EVENT_NAMES = {
@@ -212,6 +216,7 @@ export class ReplicaMembershipService {
       subject: instanceId,
       subjectDisplayName: displayName,
       subjectDeviceKey: key.publicKey,
+      requestedAt: this.#ports.clock(),
     });
     const published = await this.#publish(instanceId, sequence, entry);
     if (published !== undefined) return published;
@@ -233,8 +238,64 @@ export class ReplicaMembershipService {
     }
     const facts = this.#ports.facts();
     const deviceKey = joinRequest.subjectDeviceKey;
-    if (deviceKey === undefined) {
+    const requestedAt = joinRequest.requestedAt;
+    if (deviceKey === undefined || requestedAt === undefined) {
       return this.#refuse("not-a-member", "The join request carries no device key.");
+    }
+    // The caller's copy proves nothing: the matching code is derived from
+    // these same fields, so a request that was never written to the store -
+    // or was rewritten since - would still match its own code. Approval is
+    // published only for the entry the store holds and the joiner signed.
+    const paths = replicaEntryRelativePaths(
+      joinRequest.origin.instanceId,
+      joinRequest.origin.sequence,
+    );
+    const stored = await this.#ports.store.get(paths.entry);
+    const storedSignature = await this.#ports.store.get(paths.signature);
+    for (const read of [stored, storedSignature]) {
+      if (read.status === "not-connected" || read.status === "refused") {
+        this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.storeFailure, joinRequest.subject, {
+          kind: "store-failure",
+          phase: "join-request-read",
+          reason: read.status,
+        });
+        return this.#refuse("store-unavailable", "The replica store cannot be read.");
+      }
+    }
+    if (stored.status !== "ready" || storedSignature.status !== "ready") {
+      this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.joinApprovalRefused, joinRequest.subject, {
+        kind: "join-approval-refused",
+        reason: "unknown-instance",
+        subject: joinRequest.subject,
+      });
+      return this.#refuse(
+        "unknown-instance",
+        "No join request from that computer is in the store.",
+      );
+    }
+    const payload = stored.bytes;
+    if (
+      new TextDecoder().decode(payload) !== encodeReplicaEntry(joinRequest) ||
+      !verifyReplicaEntrySignature({
+        publicKeyBase64: deviceKey,
+        payload,
+        signatureBase64: new TextDecoder().decode(storedSignature.bytes),
+      })
+    ) {
+      this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.joinApprovalRefused, joinRequest.subject, {
+        kind: "join-approval-refused",
+        reason: "code-mismatch",
+        subject: joinRequest.subject,
+      });
+      return this.#refuse("code-mismatch", "The stored join request does not verify.");
+    }
+    if (!replicaJoinRequestIsFresh(requestedAt, this.#ports.clock())) {
+      this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.joinApprovalRefused, joinRequest.subject, {
+        kind: "join-approval-refused",
+        reason: "expired-join-request",
+        subject: joinRequest.subject,
+      });
+      return this.#refuse("expired-join-request", "That join request is no longer fresh.");
     }
     const decision = decideReplicaJoinApproval({
       facts,
@@ -327,8 +388,10 @@ export class ReplicaMembershipService {
   }
 
   /**
-   * Publish one entry and its detached signature. Returns a refusal outcome
-   * when the store cannot take it; never unwinds the local decision.
+   * Publish one entry and its detached signature. The signature goes in
+   * first: a reader that finds an entry always finds its signature beside
+   * it, and write-once storage can never add one later. Returns a refusal
+   * outcome when the store cannot take it; never unwinds the local decision.
    */
   async #publish(
     instanceId: ReplicaInstanceId,
@@ -347,29 +410,29 @@ export class ReplicaMembershipService {
     } catch {
       return this.#refuse("key-unavailable", "The entry could not be signed.");
     }
-    const entryResult = await this.#ports.store.putIfAbsent(
-      paths.entry,
-      new TextEncoder().encode(encoded),
-    );
-    if (entryResult.status === "refused" || entryResult.status === "not-connected") {
-      this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.storeFailure, instanceId, {
-        kind: "store-failure",
-        phase: "entry",
-        reason: entryResult.status,
-      });
-      return { kind: "store-failed", message: "The replica store did not take the entry." };
-    }
     const signatureResult = await this.#ports.store.putIfAbsent(
       paths.signature,
       new TextEncoder().encode(signature),
     );
-    if (signatureResult.status === "refused" || signatureResult.status === "not-connected") {
+    if (signatureResult.status !== "stored") {
       this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.storeFailure, instanceId, {
         kind: "store-failure",
         phase: "signature",
         reason: signatureResult.status,
       });
       return { kind: "store-failed", message: "The replica store did not take the signature." };
+    }
+    const entryResult = await this.#ports.store.putIfAbsent(
+      paths.entry,
+      new TextEncoder().encode(encoded),
+    );
+    if (entryResult.status !== "stored") {
+      this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.storeFailure, instanceId, {
+        kind: "store-failure",
+        phase: "entry",
+        reason: entryResult.status,
+      });
+      return { kind: "store-failed", message: "The replica store did not take the entry." };
     }
     return undefined;
   }

@@ -2153,21 +2153,24 @@ mechanisms are:
   signature from the writing host's own identity key — the host-owned identity,
   not a paired client's device key. There is no replica key. An entry from an
   unknown or revoked host, or one that fails verification, is refused and
-  journaled. A new computer joins by writing a join request into the store. A
-  computer that is already a member approves it by name. A short matching code,
-  shown on both screens, guards against a stranger's request. Revoke writes a
-  signed revocation. Store setup, joining, and revoking happen on the host,
-  never from a paired phone. Store credentials live in the host credential
-  store — macOS Keychain or freedesktop Secret Service — and are not written
-  into the replica. An S3-compatible store is contacted only over authenticated
-  TLS. A plaintext endpoint is refused, and store credentials are not sent on
-  it. The storage provider can read the synced content: the artifact versions
-  and tombstones are plain files. Settings and the user guide
-  (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
-  Opt-in encryption of replicas is not this rule. A replica import appends
-  versions to this journal and adopts nothing else. Membership accepts an entry
-  signed by a known, non-revoked host identity key as authentic. It does not
-  delegate host authority between hosts.
+  journaled. A new computer joins by writing a join request into the store,
+  signed over the time it was written; a request older than a day is not
+  offered for approval. A computer that is already a member approves it by
+  name, and only the store's own copy of the request — verified against the
+  joiner's device key — can be approved, not a copy a caller hands over. A
+  short matching code, shown on both screens, guards against a stranger's
+  request. Revoke writes a signed revocation. Store setup, joining, and
+  revoking happen on the host, never from a paired phone. Store credentials
+  live in the host credential store — macOS Keychain or freedesktop Secret
+  Service — and are not written into the replica. An S3-compatible store is
+  contacted only over authenticated TLS. A plaintext endpoint is refused, and
+  store credentials are not sent on it. The storage provider can read the
+  synced content: the artifact versions and tombstones are plain files.
+  Settings and the user guide (`apps/docs/guide/sync-artifacts.md`) say so
+  before sync is turned on. Opt-in encryption of replicas is not this rule. A
+  replica import appends versions to this journal and adopts nothing else.
+  Membership accepts an entry signed by a known, non-revoked host identity key
+  as authentic. It does not delegate host authority between hosts.
 - **Hosts never trust each other.** Multi-host views merge read models
   client-side; credentials and mutable authority never cross hosts. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client

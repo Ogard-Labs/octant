@@ -109,10 +109,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Synced-folder replica store. Nothing publishes or pulls yet, so no product caller imports it. Remove once the replica service opens the store.",
   ],
   [
-    "apps/server/src/replica/replicaDeviceKeyService.ts",
-    "Ed25519 device signing keys for replica membership. The membership service receives key access through ports, so no product caller imports the helpers directly yet. Remove once the launch path constructs the credential-backed ports or the pull path verifies signatures inline.",
-  ],
-  [
     "packages/client-runtime/src/replicaMembershipClient.ts",
     "Loopback client for the host-only replica membership commands. The Settings sync surface is the product caller; until it lands, the loopback client tests are the caller. Remove once a Settings sync view imports the client.",
   ],

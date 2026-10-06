@@ -221,6 +221,7 @@ function membershipEntry(
     readonly subject?: ReplicaInstanceId;
     readonly subjectDisplayName?: string;
     readonly subjectDeviceKey?: string;
+    readonly requestedAt?: number;
   } = {},
 ): ReplicaMembershipEntry {
   const origin = {
@@ -228,17 +229,19 @@ function membershipEntry(
     displayName: options.displayName ?? "North",
     sequence: options.sequence ?? 1,
   };
+  const kind = options.kind ?? "join-request";
   return decodeReplicaMembershipEntry({
     format: REPLICA_ENTRY_FORMAT,
-    kind: options.kind ?? "join-request",
+    kind,
     origin,
     subject: options.subject ?? origin.instanceId,
     subjectDisplayName: options.subjectDisplayName ?? origin.displayName,
-    ...(options.subjectDeviceKey === undefined && (options.kind ?? "join-request") !== "revocation"
+    ...(options.subjectDeviceKey === undefined && kind !== "revocation"
       ? {
           subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
         }
       : {}),
+    ...(kind === "join-request" ? { requestedAt: options.requestedAt ?? 0 } : {}),
   });
 }
 
@@ -560,7 +563,25 @@ describe("reconciling replica membership", () => {
     });
   });
 
-  it("accepts a store creator's founding self-approval so joiners can learn the first member", () => {
+  it("refuses a founding self-approval from a writer it has never heard of", () => {
+    const founding = membershipEntry({
+      kind: "join-approved",
+      instanceId: ids.stranger,
+      sequence: 1,
+      subject: ids.stranger,
+      subjectDisplayName: "Stranger",
+    });
+    const joinerState = state({
+      localInstanceId: ids.south,
+      instances: [{ instanceId: ids.south, status: "member" }],
+    });
+    expect(reconcileReplicaEntry(joinerState, founding)).toEqual({
+      outcome: "refused",
+      reason: "unknown-instance",
+    });
+  });
+
+  it("accepts the founding self-approval of the creator the joiner confirmed by matching code", () => {
     const founding = membershipEntry({
       kind: "join-approved",
       instanceId: ids.north,
@@ -570,8 +591,11 @@ describe("reconciling replica membership", () => {
     });
     const joinerState = state({
       localInstanceId: ids.south,
-      instances: [{ instanceId: ids.south, status: "member" }],
+      instances: [
+        { instanceId: ids.south, status: "member" },
+        { instanceId: ids.north, status: "member" },
+      ],
     });
-    expect(reconcileReplicaEntry(joinerState, founding)).toEqual({ outcome: "member-added" });
+    expect(reconcileReplicaEntry(joinerState, founding)).toEqual({ outcome: "already-present" });
   });
 });

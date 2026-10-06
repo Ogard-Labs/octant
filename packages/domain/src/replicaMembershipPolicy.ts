@@ -82,9 +82,14 @@ export function buildReplicaJoinMatchingPreimage(input: {
 /**
  * Whether a join request may still be offered for approval. The joining
  * computer already wrote its request; a stale one is not offered again.
+ *
+ * The window runs one way: a request whose signed time is later than now has
+ * not happened yet, and without the lower bound a far-future time would never
+ * leave the window.
  */
 export function replicaJoinRequestIsFresh(requestedAt: number, now: number): boolean {
-  return now - requestedAt <= REPLICA_JOIN_REQUEST_TTL_MS;
+  const age = now - requestedAt;
+  return age >= 0 && age <= REPLICA_JOIN_REQUEST_TTL_MS;
 }
 
 /**

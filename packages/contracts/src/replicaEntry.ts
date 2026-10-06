@@ -121,10 +121,11 @@ export type ReplicaArtifactEntry = typeof ReplicaArtifactEntry.Type;
  * a member can be discovered and approved by name instead of being invisible.
  *
  * `join-request` is written by the joining computer as its own next sequence
- * and names itself. `join-approved` and `revocation` are written by a member
- * as that member's next sequence and name the instance they act on. None of
- * the three carries an artifact, a parent chain, or a content hash: their
- * body is the record, and the signature covers it whole.
+ * and names itself, and it says when it was written so an approver can hold
+ * it to a freshness window. `join-approved` and `revocation` are written by a
+ * member as that member's next sequence and name the instance they act on.
+ * None of the three carries an artifact, a parent chain, or a content hash:
+ * their body is the record, and the signature covers it whole.
  */
 export const ReplicaMembershipEntryKind = Schema.Literal(
   "join-request",
@@ -150,6 +151,13 @@ const ReplicaMembershipEntryFields = {
   subjectDisplayName: ReplicaDisplayName,
   /** The device key that instance signs entries with. A revocation has none. */
   subjectDeviceKey: Schema.optional(ReplicaDevicePublicKey),
+  /**
+   * When the joining computer wrote its request, in epoch milliseconds. The
+   * signature covers it like every other field, so the approver can hold the
+   * request to a freshness window measured against its own clock. Only a
+   * join request carries it.
+   */
+  requestedAt: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
 } as const;
 
 export const ReplicaMembershipEntry = Schema.Struct(ReplicaMembershipEntryFields)
@@ -160,17 +168,18 @@ export const ReplicaMembershipEntry = Schema.Struct(ReplicaMembershipEntryFields
         if (entry.kind === "join-request") {
           return (
             String(entry.subject) === String(entry.origin.instanceId) &&
-            entry.subjectDeviceKey !== undefined
+            entry.subjectDeviceKey !== undefined &&
+            entry.requestedAt !== undefined
           );
         }
         if (entry.kind === "join-approved") {
-          return entry.subjectDeviceKey !== undefined;
+          return entry.subjectDeviceKey !== undefined && entry.requestedAt === undefined;
         }
-        return entry.subjectDeviceKey === undefined;
+        return entry.subjectDeviceKey === undefined && entry.requestedAt === undefined;
       },
       {
         message: () =>
-          "A join request names the instance that wrote it and carries its device key; an approval carries the approved device key; a revocation carries none.",
+          "A join request names the instance that wrote it, carries its device key, and says when it was written; an approval carries the approved device key; a revocation carries neither key nor time.",
       },
     ),
   );
@@ -267,6 +276,7 @@ export function encodeReplicaEntry(entry: ReplicaEntry): string {
         ...(entry.subjectDeviceKey === undefined
           ? {}
           : { subjectDeviceKey: entry.subjectDeviceKey }),
+        ...(entry.requestedAt === undefined ? {} : { requestedAt: entry.requestedAt }),
       }
     : {
         format: entry.format,

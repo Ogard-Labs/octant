@@ -122,4 +122,11 @@ describe("replica membership policy", () => {
       replicaJoinRequestIsFresh(requestedAt, requestedAt + REPLICA_JOIN_REQUEST_TTL_MS + 1),
     ).toBe(false);
   });
+
+  it("refuses a join request whose time has not happened yet", () => {
+    const now = 1_000_000;
+    expect(replicaJoinRequestIsFresh(now + 1, now)).toBe(false);
+    expect(replicaJoinRequestIsFresh(now + REPLICA_JOIN_REQUEST_TTL_MS, now)).toBe(false);
+    expect(replicaJoinRequestIsFresh(now - REPLICA_JOIN_REQUEST_TTL_MS, now)).toBe(true);
+  });
 });

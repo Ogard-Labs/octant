@@ -123,6 +123,20 @@ describe("artifact bundle contract", () => {
         origin: { instanceId: ids.instance, displayName: "North", sequence: 1 },
         subject: ids.instance,
         subjectDisplayName: "North",
+        requestedAt: 1,
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a join request that does not say when it was written", () => {
+    expect(() =>
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-request",
+        origin: { instanceId: ids.instance, displayName: "North", sequence: 1 },
+        subject: ids.instance,
+        subjectDisplayName: "North",
+        subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
       }),
     ).toThrow();
   });
@@ -137,6 +151,23 @@ describe("artifact bundle contract", () => {
         subjectDisplayName: "South",
       }),
     ).toThrow();
+  });
+
+  it("refuses an approval or revocation that claims a request time", () => {
+    const subjectDeviceKey = "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=";
+    for (const kind of ["join-approved", "revocation"] as const) {
+      expect(() =>
+        decodeReplicaMembershipEntry({
+          format: REPLICA_ENTRY_FORMAT,
+          kind,
+          origin: { instanceId: ids.instance, displayName: "North", sequence: 3 },
+          subject: ids.otherVersion,
+          subjectDisplayName: "South",
+          ...(kind === "join-approved" ? { subjectDeviceKey } : {}),
+          requestedAt: 1,
+        }),
+      ).toThrow();
+    }
   });
 
   it("refuses a revocation that carries a device key", () => {
@@ -243,6 +274,7 @@ describe("replica entry contract", () => {
       subject: ids.instance,
       subjectDisplayName: "North",
       subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
+      requestedAt: 1_800_000_000_000,
     });
     const encoded = encodeReplicaEntry(request);
     expect(Object.keys(JSON.parse(encoded) as Record<string, unknown>)).toEqual([
@@ -252,6 +284,7 @@ describe("replica entry contract", () => {
       "subject",
       "subjectDisplayName",
       "subjectDeviceKey",
+      "requestedAt",
     ]);
     expect(decodeReplicaEntryText(encoded)).toEqual(request);
     expect(() =>

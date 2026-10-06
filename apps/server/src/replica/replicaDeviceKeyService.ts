@@ -69,6 +69,17 @@ export async function ensureReplicaDeviceKey(
   try {
     stored = await store.resolve(id);
   } catch {
+    // A resolve that throws is not "no key": the public half of an existing
+    // key is already bound in published membership entries, and regenerating
+    // the private half would strand every signature made before. Only a
+    // resolve that reports absence may create one, so ask the store directly.
+    let present: boolean;
+    try {
+      present = await store.has(id);
+    } catch {
+      throw new ReplicaDeviceKeyFailure("unavailable");
+    }
+    if (present) throw new ReplicaDeviceKeyFailure("unavailable");
     stored = undefined;
   }
   let privateKeyPem: string;
