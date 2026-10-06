@@ -78,7 +78,9 @@
     "./canvas-share-access-log-policy": "./src/canvasShareAccessLogPolicy.ts",
     "./audit-policy": "./src/auditPolicy.ts",
     "./replica-entry-policy": "./src/replicaEntryPolicy.ts",
-    "./turn-metrics-policy": "./src/turnMetricsPolicy.ts"
+    "./turn-metrics-policy": "./src/turnMetricsPolicy.ts",
+    "./turn-metrics-display": "./src/turnMetricsDisplay.ts",
+    "./local-usage-pricing": "./src/localUsagePricing.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

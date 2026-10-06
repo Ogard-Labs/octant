@@ -304,6 +304,23 @@ the composer and Environment explain an admission refusal and its recovery.
 [Context and usage accounting](../architecture.md#context-and-usage-accounting)
 owns budget enforcement, provenance, native-session identity, and journal rules.
 
+Under the composer of every thread, in Chat, Work, and Code and for every provider, a
+quiet stats line states what the thread used: input and output tokens, the cache
+hit, output speed, time to first token, and cost. It reads the host's recorded
+turns and is worded by one shared module in `packages/domain`
+(`turnMetricsDisplay.ts`), which the composer, the Octant Harness session card, the
+terminal footer, and the phone's session panel all call, so the rules cannot
+drift. A figure the provider did not report, or whose denominator is zero, is
+absent; a provider that reported no usage shows no line. A cache hit is never
+rounded up to a whole; an approximate speed carries a tilde and a tooltip that it
+is per turn and includes some tool time; a cost says "est." unless the provider
+reported it and is absent when the model has no price. Clicking the line, or
+**Turn details** in the context meter's popover, opens one turn at a time (tokens,
+timing, retries, cost). The line is on by default; `showThreadStats` in the shell
+settings is the one shared preference, set from the eye button on the line, the
+switch in the context meter's popover, and Settings › Appearance › Reading. Off hides
+only the line; the details stay reachable.
+
 Project overviews retain loaded content during same-Project refreshes
 on the same client connection. Changing Project or client clears retained
 content; disconnect and authorization failures remain explicit unavailable

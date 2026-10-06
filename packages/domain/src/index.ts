@@ -141,3 +141,4 @@ export * from "./nativeHarnessSessionPolicy";
 export * from "./projectProviderPolicy";
 export * from "./subscriptionOAuthCatalog";
 export * from "./turnMetricsPolicy";
+export * from "./turnMetricsDisplay";
