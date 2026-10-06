@@ -604,6 +604,10 @@ describe("sendChatCompletionsTurn", () => {
       { completion_tokens_details: { reasoning_tokens: 3 } },
     ],
     ["a string cache hit count", { prompt_cache_hit_tokens: "8" }],
+    [
+      "a malformed cache hit count beside a valid cached count",
+      { prompt_tokens_details: { cached_tokens: 4 }, prompt_cache_hit_tokens: "8" },
+    ],
   ])("still rejects %s in usage", async (_name, extra) => {
     const fetch = vi.fn(async () =>
       stream(chunk({ role: "assistant", content: "Hi" }), chunk({}, "stop"), {

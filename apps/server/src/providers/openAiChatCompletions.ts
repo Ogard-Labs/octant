@@ -594,9 +594,11 @@ function readUsage(value: unknown): ProtocolUsage {
   const completionDetails = readDetails(value.completion_tokens_details);
   // Some endpoints report cache hits as top-level hit and miss counters
   // instead of a details object; the details object wins when both appear.
-  const cacheRead =
-    readOptionalCount(promptDetails, "cached_tokens") ??
-    readOptionalCount(value, "prompt_cache_hit_tokens");
+  // Both are validated before precedence so a malformed counter never hides
+  // behind a valid one.
+  const detailCacheRead = readOptionalCount(promptDetails, "cached_tokens");
+  const topLevelCacheRead = readOptionalCount(value, "prompt_cache_hit_tokens");
+  const cacheRead = detailCacheRead ?? topLevelCacheRead;
   const cacheWrite = readOptionalCount(promptDetails, "cache_write_tokens");
   const reasoning = readOptionalCount(completionDetails, "reasoning_tokens");
   readOptionalCount(value, "prompt_cache_miss_tokens");
