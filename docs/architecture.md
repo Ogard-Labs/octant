@@ -1904,6 +1904,9 @@ not render them. A target that passed activation is still reported honestly as
 file it would write, and the card then names that path: approving a card that
 names an existing file is the confirmation to replace it, and a call without
 that confirmation writes a numbered copy beside the file instead of over it.
+The rendered Markdown, HTML, and the artifact preview SVG read numbers through
+the shared Canvas formatter and draw marks to the shared chart specifications,
+so an exported reading matches the screen rather than growing a second reading.
 
 The folder destination ships in-tree on that same port, so it is offered,
 approved, and journaled exactly as a plugin's contribution is. Its folder comes

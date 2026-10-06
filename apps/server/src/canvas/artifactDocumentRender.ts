@@ -1,10 +1,11 @@
-import type { CanvasBlock, CanvasDefinition } from "@octant/contracts/canvas";
+import type { CanvasBlock, CanvasDefinition, CanvasNumberFormat } from "@octant/contracts/canvas";
 import {
   CANVAS_EXPORT_BODY_MAX_BYTES,
   canvasExportBodyByteLength,
   type CanvasExportImplementedFormat,
 } from "@octant/contracts/canvas-export";
 import { isCanvasShareSafeText } from "@octant/contracts/canvas-share";
+import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
 
 /**
@@ -64,9 +65,12 @@ function reading(value: string): string {
   return isCanvasShareSafeText(trimmed) ? trimmed : "[redacted]";
 }
 
-function scalar(value: string | number | boolean | null): string {
+function scalar(value: string | number | boolean | null, format?: CanvasNumberFormat): string {
   if (value === null) return "";
   if (typeof value === "string") return reading(value);
+  // A number reads through the shared formatter so the document matches the
+  // screen; a boolean has no number reading.
+  if (typeof value === "number") return formatCanvasNumber(value, format);
   return String(value);
 }
 
@@ -107,7 +111,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       );
     case "metric":
       return paragraph(
-        `${reading(block.label)}: ${scalar(block.value)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`,
+        `${reading(block.label)}: ${scalar(block.value, block.format)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`,
       );
     case "progress":
       return paragraph(
@@ -129,7 +133,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           kind: "table",
           headers: block.columns.map((column) => reading(column.label)),
           rows: block.rows.map((row) =>
-            block.columns.map((_, index) => scalar(row[index] ?? null)),
+            block.columns.map((column, index) => scalar(row[index] ?? null, column.format)),
           ),
         },
       ];
@@ -139,7 +143,8 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           kind: "list",
           items: block.series.flatMap((series) =>
             series.points.map(
-              (point) => `${reading(series.label)}: ${scalar(point.x)} = ${String(point.y)}`,
+              (point) =>
+                `${reading(series.label)}: ${scalar(point.x, block.format)} = ${scalar(point.y, block.format)}`,
             ),
           ),
         },
