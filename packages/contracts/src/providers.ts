@@ -398,12 +398,15 @@ export type ProviderCredentialStatus = typeof ProviderCredentialStatus.Type;
 const UniqueManualModelIds = Schema.Array(ProviderModelId).pipe(
   Schema.filter((modelIds) => new Set(modelIds).size === modelIds.length),
 );
+const OAuthDescriptorId = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
 export const OpenAiCompatibleProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("openai-compatible-http"),
   baseUrl: Schema.NonEmptyTrimmedString,
   authentication: Schema.Literal("bearer", "none"),
   protocol: OpenAiCompatibleProtocol,
   manualModelIds: UniqueManualModelIds,
+  /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
+  oauthDescriptorId: Schema.optional(OAuthDescriptorId),
 }).annotations(strict);
 export type OpenAiCompatibleProviderConfiguration =
   typeof OpenAiCompatibleProviderConfiguration.Type;
@@ -418,6 +421,8 @@ export const AnthropicCompatibleProviderConfiguration = Schema.Struct({
   protocol: AnthropicCompatibleProtocol,
   protocolVersion: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
   manualModelIds: UniqueManualModelIds,
+  /** Expected host-driven sign-in binding. Absent means no subscription sign-in. */
+  oauthDescriptorId: Schema.optional(OAuthDescriptorId),
 }).annotations(strict);
 export type AnthropicCompatibleProviderConfiguration =
   typeof AnthropicCompatibleProviderConfiguration.Type;
@@ -990,6 +995,20 @@ export const ProviderModelOptionValues = Schema.Record({
   );
 export type ProviderModelOptionValues = typeof ProviderModelOptionValues.Type;
 
+/** Display choices identify advertised variants; selecting one still binds its real model id. */
+const ProviderModelConfiguration = Schema.Struct({
+  family: Schema.NonEmptyTrimmedString,
+  choices: Schema.NonEmptyArray(
+    Schema.Struct({
+      id: Schema.NonEmptyTrimmedString,
+      displayName: Schema.NonEmptyTrimmedString,
+      value: Schema.NonEmptyTrimmedString,
+    }).annotations(strict),
+  ).pipe(
+    Schema.filter((choices) => new Set(choices.map((choice) => choice.id)).size === choices.length),
+  ),
+}).annotations(strict);
+
 const ProviderModelFields = {
   id: ProviderModelId,
   displayName: Schema.NonEmptyTrimmedString,
@@ -1004,6 +1023,7 @@ const ProviderModelFields = {
   inputModalities: UniqueInputModalities,
   imageInput: Schema.optional(ImageInputCapability),
   options: Schema.Array(ProviderModelOption),
+  configuration: Schema.optional(ProviderModelConfiguration),
   capabilityEvidence: Schema.optional(Schema.Array(CapabilityEvidence)),
   /** User-maintained residency/privacy labels; absent means untagged. */
   dataTags: Schema.optional(ProviderDataTags),
@@ -1724,6 +1744,61 @@ const ProviderRuntimeEventFields = {
   occurredAt: UtcTimestamp,
 } as const;
 
+/** A provider report is observation only; it carries no execution authority. */
+export const ProviderChildActivityEvent = Schema.Struct({
+  ...ProviderRuntimeEventFields,
+  kind: Schema.Literal("child-agent-activity"),
+  childAgentId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  parentChildAgentId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
+  modelId: Schema.optional(ProviderModelId),
+  task: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  status: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
+  summary: Schema.NonEmptyTrimmedString,
+}).annotations(strict);
+export type ProviderChildActivityEvent = typeof ProviderChildActivityEvent.Type;
+
+export const MAX_PROVIDER_CHILD_OBSERVATIONS = 16;
+export const MAX_PROVIDER_CHILD_HISTORY = 8;
+export const ProviderChildObservation = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  sessionId: ProviderSessionId,
+  childAgentId: ProviderChildActivityEvent.fields.childAgentId,
+  parentChildAgentId: ProviderChildActivityEvent.fields.parentChildAgentId,
+  modelId: Schema.optional(ProviderModelId),
+  task: ProviderChildActivityEvent.fields.task,
+  lifecycleStatus: Schema.Literal(
+    "starting",
+    "running",
+    "waiting",
+    "completed",
+    "failed",
+    "unknown",
+  ),
+  latestSummary: Schema.String.pipe(Schema.maxLength(512)),
+  firstObservedAt: UtcTimestamp,
+  updatedAt: UtcTimestamp,
+  historyStatus: Schema.Literal("partial", "truncated", "conflicted"),
+  history: Schema.Array(
+    Schema.Struct({
+      sequence: Schema.Int.pipe(Schema.positive()),
+      occurredAt: UtcTimestamp,
+      status: ProviderChildActivityEvent.fields.status,
+      summary: Schema.String.pipe(Schema.maxLength(512)),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(MAX_PROVIDER_CHILD_HISTORY)),
+}).annotations(strict);
+export type ProviderChildObservation = typeof ProviderChildObservation.Type;
+export const ProviderChildObservationState = Schema.Struct({
+  children: Schema.Array(ProviderChildObservation).pipe(
+    Schema.maxItems(MAX_PROVIDER_CHILD_OBSERVATIONS),
+  ),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type ProviderChildObservationState = typeof ProviderChildObservationState.Type;
+export const decodeProviderChildObservationState = Schema.decodeUnknownSync(
+  ProviderChildObservationState,
+);
+
 export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -1832,6 +1907,22 @@ export const ProviderRuntimeEvent = Schema.Union(
   })
     .annotations(strict)
     .pipe(Schema.filter((event) => event.remaining <= event.limit)),
+  /**
+   * A direct endpoint failed in a way that usually passes and the request is
+   * going out again once `delayMs` has elapsed. It is sent before the wait, so
+   * a surface can say "retrying 2/5 in 4 s" while the turn is quiet. `attempt`
+   * is the attempt about to start, counted from 1; the turn is still running.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("retrying"),
+    attempt: Schema.Int.pipe(Schema.between(2, 16)),
+    maxAttempts: Schema.Int.pipe(Schema.between(2, 16)),
+    delayMs: Schema.Int.pipe(Schema.between(0, 3_600_000)),
+    reason: Schema.Literal("rate-limited", "unavailable", "stream-interrupted", "empty-completion"),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter((event) => event.attempt <= event.maxAttempts)),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("task-progress"),
@@ -1839,13 +1930,7 @@ export const ProviderRuntimeEvent = Schema.Union(
     status: Schema.Literal("pending", "in-progress", "completed", "failed"),
     summary: Schema.NonEmptyTrimmedString,
   }).annotations(strict),
-  Schema.Struct({
-    ...ProviderRuntimeEventFields,
-    kind: Schema.Literal("child-agent-activity"),
-    childAgentId: Schema.NonEmptyTrimmedString,
-    status: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
-    summary: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+  ProviderChildActivityEvent,
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("approval-request"),

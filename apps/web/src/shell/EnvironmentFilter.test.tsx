@@ -40,10 +40,10 @@ describe("choosing which environments a list gathers from", () => {
   it("names this machine Local and puts it first", async () => {
     await openFilter();
 
-    const rows = screen.getAllByRole("checkbox");
+    const rows = await screen.findAllByRole("menuitemcheckbox");
     expect(rows).toHaveLength(3);
     expect(screen.getByText("Local")).toBeVisible();
-    expect(screen.getByText("Devbox")).toBeVisible();
+    expect(await screen.findByText("Devbox")).toBeVisible();
   });
 
   it("summarises the selection by name rather than by count while there are few", async () => {
@@ -55,7 +55,7 @@ describe("choosing which environments a list gathers from", () => {
   it("unticking one environment while All is on means everything except it", async () => {
     const { user, onSelectionChange } = await openFilter();
 
-    await user.click(screen.getByRole("checkbox", { name: /Devbox/ }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: /Devbox/ }));
 
     expect(onSelectionChange).toHaveBeenCalledWith({
       kind: "some",
@@ -66,7 +66,7 @@ describe("choosing which environments a list gathers from", () => {
   it("unticking the master selects none rather than silently meaning everything", async () => {
     const { user, onSelectionChange } = await openFilter();
 
-    await user.click(screen.getByRole("checkbox", { name: "All environments" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "All environments" }));
 
     expect(onSelectionChange).toHaveBeenCalledWith({ kind: "some", hostIds: new Set() });
   });
@@ -80,7 +80,7 @@ describe("choosing which environments a list gathers from", () => {
     });
 
     // A host that dropped out is a thing to see, not a thing to hide.
-    expect(screen.getByText("Devbox")).toBeVisible();
+    expect(await screen.findByText("Devbox")).toBeVisible();
     expect(screen.getByText("unreachable")).toBeVisible();
     expect(screen.getByText("4")).toBeVisible();
   });

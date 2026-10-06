@@ -276,19 +276,42 @@ names the state and claims no elapsed time. See
 
 ### Welcome and composer
 
-A thread's working subagents sit in their own card tucked behind the composer's
-top edge — narrower than the composer by one inset on each side, its lower edge
-hidden under the composer, rising from behind it on arrival — so they read as
-work beside the message rather than part of it. Only running subagents show
-there; finished ones, reviewed or not, are listed in Environment and Agents, so
-a thread that delegates a lot never grows a tall card. The head ("Subagents ·
-N working") folds the card to a one-line tab and the fold is remembered per
-viewer; open, the rows are 24px and scroll past three. A row (status icon, the
-task on one line, "Working · 12s") opens that subagent in the Agents tool, and
-Stop appears on hover or focus. Stopping one named subagent acts at once; Stop
-all asks first and names how many it reaches. There is no strip above the
-transcript. A cross-context notice takes the same place behind the composer and wins while
-it shows.
+A thread's subagents sit in an inset card attached above the composer's message
+surface. The card participates in normal layout so expansion cannot cover the
+preceding task list or transcript. Cross-context notices share the same flow;
+they never hide failed children or results needing review. The card starts
+collapsed and remembers the viewer's fold choice. Its head names the total,
+prioritizing failed, waiting, review-needed and unknown states over redundant
+activity counts. A truncated list identifies its count as listed children.
+Task-plan completion is never counted as child completion. View all opens the
+full Agents list even when every child has finished. Expansion previews at most
+three active or unresolved children; longer history stays in Environment and
+Agents. Compact rows show task, semantic status, recorded model and available
+activity. Age is explicitly time since the last update or first observation,
+never inferred execution duration. Raw identifiers and workspace paths belong
+in details. Rows open the child in Agents. Only managed active children offer
+Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
+narrow widths, disclosures work with the keyboard and retain visible focus,
+and expanded lists have bounded height.
+
+Provider-observed children remain separate from managed runs. Their detail shows
+reported activity, observation timing, available lineage and explicit partial,
+truncated or conflicting history. An unknown model stays unknown. Observations
+have no managed conversation, execution controls, workspace authority or result
+acknowledgement.
+
+Managed result previews identify their execution generation and recorded model.
+The result detail leads with the reported summary, files, checks and blockers;
+exact run, parent, provider and workspace attribution is available in a separate
+disclosure. Earlier generations keep their own attribution and evidence. Missing
+or truncated results stay explicit. Provider-reported files remain unverified;
+recorded tool output is inspectable without claiming that tool completion means
+a check passed. A recorded Code generation offers Review changes and links its
+captured paths into the existing Review surface. The saved comparison identifies
+the child, generation, workspace and capture time; its partial and binary content
+states stay explicit. It offers no staging, discard or parent-checkout editor
+controls. Unavailable capture stays unavailable. Evidence references are disclosed
+on request rather than presented as unsupported navigation links.
 
 A reply's suggested follow-ups sit as outline chips at the top of the
 thread composer, inside its surface, with a quiet "Next" label and a dismiss
@@ -378,8 +401,16 @@ High") and reset above, and Faster and Smarter at the track's two ends. The fill
 is a dot grain that grows denser, brighter, and more purple, with a soft glow,
 the higher the level; a chosen level shows at once and never snaps back while
 it saves. Explicit model and reasoning choices are remembered
-locally for new threads; reasoning is keyed by provider/model and restored only while
-supported. Existing thread selections remain authoritative.
+locally for new threads; model settings are keyed by provider/model and restored only
+while supported. Existing thread selections remain authoritative. The same picker
+shows every declared model setting in Chat, Work, and Code. Paired model families
+show Lead and Sidekick selectors drawn from available catalog entries; choosing
+one preserves the other choice and carries still-supported explicit effort and
+speed settings. Devin's Speed selector offers Standard and Fast where the CLI
+supports Fast Mode, plus Default to use the provider's choice. The settings area
+scrolls within the bounded popup at narrow or short viewport sizes.
+Model choices and settings wait for an asynchronous model change to finish before
+accepting another edit, so the next configuration choice uses the confirmed pairing.
 
 The screen sits on the application ground (0091, 0129), set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, or the
@@ -467,6 +498,20 @@ shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 `ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
 menus now use the shared `OctantContextMenu` adapter; do not add a new direct
 primitive import.
+
+Desktop context menus and ordinary dropdown menus (including More, the account
+menu, action menus, plain select fields, Project/thread filters, and checkbox/radio choices) use Electron's native OS menus through that adapter.
+The OS owns their font, material, spacing, highlighting, submenu behavior,
+accessibility, and light/dark appearance; renderer theme tokens do not repaint
+native menus. The account menu opens above its footer control and More beside
+its sidebar row. Activity › Custom range opens a date-range dialog.
+The existing action composition supplies labels, grouping,
+disabled and checked states, and nested actions. Native menus dismiss after
+a selection, including checkbox/radio changes; reopening reads the current state. Ordinary editable text and text selections
+receive the platform editing/copy menu. The Code editor and both diff sides
+use native editing/find actions that run through the existing editor commands. Browser clients retain the accessible
+Base UI menus. Searchable pickers and popovers with embedded controls remain
+renderer surfaces.
 
 ### Turn header
 
@@ -669,7 +714,12 @@ fresh install reads Small and Narrow, so a question, its reply, and the
 composer under them all read at 13px, never under the chrome around them. The column uses
 `width: min(100% - 40px, measure)` with automatic horizontal margins. Welcome composers share a 768px maximum so
 Chat, Work, and Code start from the same prompt geometry independently of the
-reading-width preference. Canvas documents use a 62ch measure.
+reading-width preference. Canvas documents use a 62ch measure. A mockup is a
+wireframe of one screen, in a desktop, tablet, or phone frame. It draws only
+the closed catalog — window, header, sidebar, list, list row, form field,
+button, toggle, tabs, card, image placeholder, and text — and those controls
+are inert. In the Default style the wireframe uses neutral ink, hairline, and
+surface, never a hue.
 
 ## Spacing, shapes, and depth
 
@@ -1186,6 +1236,13 @@ journaled plan. It appears only when a real plan exists, shows proposed review
 or `Step n / total`, and opens a popover with title, step states, evidence, and
 start/finish/reopen/drop actions when approved. It must not invent progress from
 assistant prose or display an empty plan form.
+
+The provider's recorded task list is a separate, initially collapsed group. Its
+header keeps completed/total progress and failed or waiting counts visible while
+folded. An unfinished list after a settled turn says Incomplete; it does not
+claim that the agent is still running. Expansion shows the recorded ordered
+steps in a bounded, scrollable list. Neither this list nor the journaled plan
+borrows progress, completion, or authority from the subagent group.
 
 Responsive breakpoints are 560px, 720px, and 920px. Below 920px the right dock
 is removed rather than squeezing the transcript unreadably. Below 720px split

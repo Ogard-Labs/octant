@@ -81,7 +81,8 @@ export type HostExportSettingsSummary = typeof HostExportSettingsSummary.Type;
 export const HostExportUsageRow = Schema.Struct({
   reconciliationId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
   subjectType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  subjectId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  /** Null for usage whose thread was purged: the row keeps its counts, not its identity. */
+  subjectId: Schema.NullOr(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
   providerInstanceId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
   modelId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
   requestShape: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),

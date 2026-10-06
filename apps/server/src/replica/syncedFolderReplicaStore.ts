@@ -13,17 +13,8 @@
 
 import { execFile as execFileCallback } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  lstat,
-  mkdir,
-  readFile,
-  readdir,
-  realpath,
-  link,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
-import type { Dirent } from "node:fs";
+import { lstat, mkdir, open, readdir, realpath, link, unlink, writeFile } from "node:fs/promises";
+import { constants, type Dirent } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -171,19 +162,7 @@ export function createSyncedFolderReplicaStore(
         return { status: "refused", reason: "key-refused" };
       }
       try {
-        const metadata = await lstat(destination);
-        if (metadata.isSymbolicLink()) return { status: "refused", reason: "key-refused" };
-        if (!metadata.isFile()) return { status: "missing" };
-      } catch (error) {
-        if (isEnoent(error)) return { status: "missing" };
-        return { status: "refused", reason: "key-refused" };
-      }
-      if (isDataless(await flagsOf(destination, readFileFlags))) {
-        return { status: "refused", reason: "not-downloaded" };
-      }
-      try {
-        const bytes = await readFile(destination);
-        return { status: "ready", bytes: new Uint8Array(bytes) };
+        return await readConfinedFile(destination, readFileFlags);
       } catch (error) {
         if (isEnoent(error)) return { status: "missing" };
         return { status: "refused", reason: "key-refused" };
@@ -199,10 +178,11 @@ export function createSyncedFolderReplicaStore(
       if (destination === undefined || skipReason(key, 0) !== undefined) {
         return { status: "refused", reason: "key-refused" };
       }
-      if (await pathExists(destination)) return { status: "already-exists" };
       const confined = await ensureConfinedDirectory(root.folder, root.syncRoot, destination);
       if (!confined) return { status: "refused", reason: "key-refused" };
-      if (await pathExists(destination)) return { status: "already-exists" };
+      const gate = await publishGate(root.syncRoot, destination);
+      if (gate === "escaped") return { status: "refused", reason: "key-refused" };
+      if (gate === "occupied") return { status: "already-exists" };
       return publishIfAbsent(destination, snapshot);
     },
   };
@@ -305,6 +285,33 @@ async function flagsOf(
   }
 }
 
+/**
+ * Read the key through a descriptor that cannot be moved by a symlink swap.
+ *
+ * A path-based read re-resolves the name: a sync client that replaces the
+ * file with a symlink while this call awaits would point the bytes outside
+ * the sync folder. `O_NOFOLLOW` refuses the final symlink (ELOOP), and the
+ * regular-file assertion plus the read run against the opened descriptor, so
+ * the checked inode is the read inode.
+ */
+async function readConfinedFile(
+  destination: string,
+  readFileFlags: (absolutePath: string) => Promise<number>,
+): Promise<ReplicaStoreGetResult> {
+  const handle = await open(destination, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) return { status: "missing" };
+    if (isDataless(await flagsOf(destination, readFileFlags))) {
+      return { status: "refused", reason: "not-downloaded" };
+    }
+    const bytes = await handle.readFile();
+    return { status: "ready", bytes: new Uint8Array(bytes) };
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
 async function listSyncRoot(
   syncRoot: string,
   afterCursor: string | undefined,
@@ -399,7 +406,10 @@ async function walkFiles(syncRoot: string): Promise<readonly string[]> {
  *
  * Recursive mkdir follows an intermediate symlink and can create directories
  * outside the folder before the containment check runs. Each missing name is
- * created only after its parent still sits inside the folder.
+ * created only after its parent still sits inside the folder, and every
+ * component on the way must be a real directory: a symlink that stays inside
+ * the folder still rewrites where the key's bytes truly land, so a write
+ * refuses it as well as one that escapes.
  */
 async function ensureConfinedDirectory(
   folder: string,
@@ -423,10 +433,7 @@ async function mkdirEachContained(root: string, target: string): Promise<boolean
   for (let depth = 0; depth < 64; depth += 1) {
     try {
       const metadata = await lstat(cursor);
-      if (metadata.isSymbolicLink()) {
-        const resolved = await realpath(cursor);
-        if (!isContained(root, resolved)) return false;
-      }
+      if (metadata.isSymbolicLink()) return false;
       break;
     } catch (error) {
       if (!isEnoent(error)) return false;
@@ -460,14 +467,40 @@ async function mkdirEachContained(root: string, target: string): Promise<boolean
   return true;
 }
 
-async function pathExists(path: string): Promise<boolean> {
+/**
+ * The last look before a publish lands bytes on the key.
+ *
+ * A sync client can replace a verified directory with a symlink while the
+ * publish awaits, and `link` then follows it: the exists check would
+ * misreport the situation as already-exists and the bytes would land in the
+ * symlink target. A symlink at the key name is always a refusal, never an
+ * occupied key. The gate re-canonicalizes the real parent against the sync
+ * root right before the exclusive link, so a parent swapped for a symlink
+ * after the confined-directory walk still refuses.
+ */
+async function publishGate(
+  syncRoot: string,
+  destination: string,
+): Promise<"open" | "occupied" | "escaped"> {
+  let metadata;
   try {
-    await lstat(path);
-    return true;
+    metadata = await lstat(destination);
   } catch (error) {
-    if (isEnoent(error)) return false;
-    return true;
+    if (!isEnoent(error)) return "escaped";
   }
+  if (metadata !== undefined) {
+    if (metadata.isSymbolicLink()) return "escaped";
+    if (!metadata.isFile() && !metadata.isDirectory()) return "escaped";
+    return "occupied";
+  }
+  let canonicalParent: string;
+  try {
+    canonicalParent = await realpath(dirname(destination));
+  } catch {
+    return "escaped";
+  }
+  if (!isContained(syncRoot, canonicalParent)) return "escaped";
+  return "open";
 }
 
 /**

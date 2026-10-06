@@ -1913,6 +1913,38 @@ describe("provider registry contracts", () => {
     expect(() => decodeProviderModel({ ...model, inputModalities: [] })).toThrow();
   });
 
+  it("carries normalized model configuration choices without provider payloads or duplicate axes", () => {
+    const model = {
+      id: "paired-model",
+      displayName: "Paired model",
+      source: "discovered",
+      verification: "verified",
+      reasoning: "supported",
+      inputModalities: ["text"],
+      options: [],
+      configuration: {
+        family: "Fusion",
+        choices: [
+          { id: "lead", displayName: "Lead", value: "Frontier" },
+          { id: "sidekick", displayName: "Sidekick", value: "Executor" },
+        ],
+      },
+    };
+    expect(decodeProviderModel(model)).toEqual(model);
+    expect(() =>
+      decodeProviderModel({ ...model, configuration: { ...model.configuration, raw: {} } }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderModel({
+        ...model,
+        configuration: {
+          family: "Fusion",
+          choices: [model.configuration.choices[0], model.configuration.choices[0]],
+        },
+      }),
+    ).toThrow();
+  });
+
   it("keeps image input a driver-reported tri-state that defaults to absent", () => {
     const model = {
       id: "image-capable-model",
@@ -2229,6 +2261,7 @@ describe("provider runtime contracts", () => {
       remaining: 999,
       resetsAt: "2026-07-15T10:01:00.000Z",
     },
+    { kind: "retrying", attempt: 2, maxAttempts: 5, delayMs: 4000, reason: "unavailable" },
     { kind: "file-change", path: "src/index.ts", change: "modified" },
     { kind: "diff", diff: "@@ -1 +1 @@" },
     { kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "Working" },
@@ -2305,6 +2338,19 @@ describe("provider runtime contracts", () => {
         bucket: "tokens",
         limit: 10,
         remaining: 11,
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a retry notice for an attempt past the last one", () => {
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...common,
+        kind: "retrying",
+        attempt: 6,
+        maxAttempts: 5,
+        delayMs: 500,
+        reason: "unavailable",
       }),
     ).toThrow();
   });

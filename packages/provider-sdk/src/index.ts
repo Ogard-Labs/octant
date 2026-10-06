@@ -6,3 +6,5 @@ export * from "./discovery";
 export * from "./driver";
 export * from "./driverPlugins";
 export * from "./acpClientCapabilities";
+export * from "./subscriptionOAuth";
+export * from "./childObservations";

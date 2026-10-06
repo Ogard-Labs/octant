@@ -1676,4 +1676,87 @@ describe("sendResponsesTurn", () => {
 
     expect(result).toMatchObject({ text: "hello", reasoning: "Think", terminal: "completed" });
   });
+
+  it("reads cached, cache-write, and reasoning tokens from the completed response", async () => {
+    const observed = vi.fn();
+    const fetch = vi.fn(async () =>
+      sse(
+        created(1),
+        completed(2, {
+          input_tokens: 200,
+          output_tokens: 30,
+          total_tokens: 230,
+          input_tokens_details: { cached_tokens: 128, cache_write_tokens: 40 },
+          output_tokens_details: { reasoning_tokens: 12 },
+        }),
+      ),
+    );
+
+    const result = await Effect.runPromise(sendResponsesTurn(input(fetch, { onEvent: observed })));
+
+    const expected = {
+      inputTokens: 200,
+      outputTokens: 30,
+      cacheReadInputTokens: 128,
+      cacheWriteInputTokens: 40,
+      reasoningTokens: 12,
+    };
+    expect(result.usage).toEqual(expected);
+    expect(result.events.at(-1)).toEqual({ kind: "usage", sequence: 1, ...expected });
+    expect(observed.mock.calls.map(([event]) => event)).toEqual(result.events);
+  });
+
+  it("reports zero cache reads for an uncached response and nothing when the endpoint reports none", async () => {
+    const uncached = vi.fn(async () =>
+      sse(
+        created(1),
+        completed(2, {
+          input_tokens: 9,
+          output_tokens: 1,
+          total_tokens: 10,
+          input_tokens_details: { cached_tokens: 0 },
+          output_tokens_details: { reasoning_tokens: 0 },
+        }),
+      ),
+    );
+    const silent = vi.fn(async () =>
+      sse(created(1), completed(2, { input_tokens: 9, output_tokens: 1, total_tokens: 10 })),
+    );
+
+    const withDetails = await Effect.runPromise(sendResponsesTurn(input(uncached)));
+    const without = await Effect.runPromise(sendResponsesTurn(input(silent)));
+
+    expect(withDetails.usage).toEqual({
+      inputTokens: 9,
+      outputTokens: 1,
+      cacheReadInputTokens: 0,
+      reasoningTokens: 0,
+    });
+    expect(without.usage).toEqual({ inputTokens: 9, outputTokens: 1 });
+  });
+
+  it.each([
+    ["a string cached count", { input_tokens_details: { cached_tokens: "8" } }],
+    ["a non-object input detail", { input_tokens_details: 8 }],
+    ["a negative reasoning count", { output_tokens_details: { reasoning_tokens: -1 } }],
+    ["more cached tokens than input tokens", { input_tokens_details: { cached_tokens: 4 } }],
+    [
+      "more reasoning tokens than output tokens",
+      { output_tokens_details: { reasoning_tokens: 3 } },
+    ],
+  ])("still rejects %s in usage", async (_name, extra) => {
+    const fetch = vi.fn(async () =>
+      sse(
+        created(1),
+        completed(2, { input_tokens: 3, output_tokens: 2, total_tokens: 5, ...extra }),
+      ),
+    );
+
+    const failure = await failureOf(sendResponsesTurn(input(fetch)));
+
+    expect(failure).toEqual({
+      category: "protocol",
+      message: "The provider stream contained invalid usage.",
+    });
+  });
 });

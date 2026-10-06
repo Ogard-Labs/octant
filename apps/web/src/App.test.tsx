@@ -1,5 +1,7 @@
 import {
   decodeWorkThread,
+  decodeCodeThreadId,
+  decodeWorkspaceOperation,
   decodeThreadBoardPullRequestSummary,
   decodeCodeProjectPullRequestDetailView,
   decodeCodeProjectPullRequestView,
@@ -15,6 +17,9 @@ import type { NavigatorAssistantClient } from "@octant/client-runtime/navigator-
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
+import { resultPacketFixture } from "./agents/agentActivityFixtures";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import { applyWorkspaceOperation } from "@octant/domain/shell-policy";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -2861,6 +2866,276 @@ describe("App", () => {
     expect(within(dock).getByRole("button", { name: "Agents" })).toBeVisible();
   });
 
+  it.each(["composer tray", "Agents list"])(
+    "returns an already-open child from the %s to the full list on every View all request",
+    async (openedFrom) => {
+      const user = userEvent.setup();
+      const runId = decodeAgentRunId("30000000-0000-4000-8000-000000000003");
+      const finishedRunId = decodeAgentRunId("30000000-0000-4000-8000-000000000004");
+      const agentRunClient: AgentRunClient = {
+        parentSummary: vi.fn(async (parentThreadId) => ({
+          parentThreadId,
+          entries: [
+            { runId, task: "Inspect parser", lifecycleStatus: "running" },
+            { runId: finishedRunId, task: "Earlier review", lifecycleStatus: "completed" },
+          ].map((entry) => ({
+            ...entry,
+            parentThreadId,
+            requestId: String(entry.runId),
+            role: "review",
+            executionKind: "octant-managed",
+            usageQuality: "unavailable",
+            resultAcknowledgement: { required: false, acknowledged: false },
+            version: 1,
+            updatedAt: "2026-09-26T19:00:35.599Z",
+          })),
+        })),
+        conversation: vi.fn(async () => {
+          throw new Error("No live transcript in this fixture");
+        }),
+        center: vi.fn(),
+        snapshotCanvas: vi.fn(),
+        acknowledge: vi.fn(),
+        cancel: vi.fn(),
+        steer: vi.fn(),
+        retry: vi.fn(),
+        resume: vi.fn(),
+        usageResume: vi.fn(),
+      };
+      render(
+        <App
+          agentRunClient={agentRunClient}
+          codeClient={codes()}
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projects()}
+          projectWindowCapability={projectWindowCapability}
+          shellClient={client(codeShellBootstrap())}
+        />,
+      );
+
+      const tray = await screen.findByRole("group", { name: "Subagents" });
+      if (openedFrom === "composer tray") {
+        await user.click(within(tray).getByRole("button", { name: /Subagents,.*Show them/ }));
+        await user.click(within(tray).getByRole("button", { name: /Inspect parser.*Opens it/ }));
+      } else {
+        await showRightUtilityDock(user);
+        const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
+        await user.click(within(dock).getByRole("button", { name: "Agents" }));
+        await user.click(await within(dock).findByRole("button", { name: /Inspect parser/ }));
+      }
+
+      const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
+      expect(await within(dock).findByRole("region", { name: "Subagent" })).toBeVisible();
+      for (let request = 0; request < 2; request += 1) {
+        await user.click(
+          within(tray).getByRole("button", { name: "View all 2 subagents in Agents" }),
+        );
+        expect(await within(dock).findByRole("region", { name: "Subagents" })).toBeVisible();
+        expect(within(dock).queryByRole("region", { name: "Subagent" })).not.toBeInTheDocument();
+        expect(within(dock).getByRole("button", { name: /Earlier review/ })).toBeVisible();
+        await user.click(within(dock).getByRole("button", { name: /Inspect parser/ }));
+        expect(await within(dock).findByRole("region", { name: "Subagent" })).toBeVisible();
+      }
+      expect(agentRunClient.conversation).toHaveBeenCalledWith(runId);
+      expect(agentRunClient.cancel).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["ordinary Review", "a thread switch"])(
+    "opens captured generations without reading the parent checkout and forgets them after %s",
+    async (returnThrough) => {
+      const user = userEvent.setup();
+      const packet = resultPacketFixture({
+        parentThreadId: decodeAgentRunParentThreadId(String(codeThreadId)),
+      });
+      const reviewMetadata = {
+        capturedAt: packet.occurredAt,
+        baseTree: "a".repeat(40),
+        resultTree: "b".repeat(40),
+        changedPaths: ["src/parser.ts"],
+        truncated: false,
+      };
+      const packets = [1, 2].map((generation) => ({
+        ...packet,
+        generation,
+        review: reviewMetadata,
+        files: {
+          ...packet.files,
+          reviewStatus: "available" as const,
+          items:
+            generation === 2
+              ? []
+              : [
+                  ...packet.files.items,
+                  {
+                    path: "reported-only.ts",
+                    change: "modified" as const,
+                    reference: "report",
+                    source: "provider-reported" as const,
+                    verified: false as const,
+                  },
+                ],
+        },
+      }));
+      const review = vi.fn<NonNullable<AgentRunClient["review"]>>(async (runId, generation) => ({
+        runId,
+        parentThreadId: packet.parentThreadId,
+        generation,
+        status: "available",
+        snapshot: {
+          ...reviewMetadata,
+          diff: `diff --git a/src/parser.ts b/src/parser.ts\n--- a/src/parser.ts\n+++ b/src/parser.ts\n@@ -1 +1 @@\n-before\n+captured generation ${generation}\n`,
+        },
+      }));
+      const agentRunClient: AgentRunClient = {
+        review,
+        parentSummary: vi.fn(async (parentThreadId) => ({
+          parentThreadId,
+          entries: [
+            {
+              runId: packet.runId,
+              parentThreadId,
+              requestId: "captured-review",
+              task: "Review parser",
+              role: "review",
+              lifecycleStatus: "completed",
+              executionKind: "octant-managed",
+              usageQuality: "unavailable",
+              resultAcknowledgement: { required: true, acknowledged: false },
+              version: 1,
+              updatedAt: packet.occurredAt,
+              resultPackets: packets,
+            },
+          ],
+        })),
+        conversation: vi.fn(async () => {
+          throw new Error("No live transcript in this fixture");
+        }),
+        center: vi.fn(),
+        snapshotCanvas: vi.fn(),
+        acknowledge: vi.fn(),
+        cancel: vi.fn(),
+        steer: vi.fn(),
+        retry: vi.fn(),
+        resume: vi.fn(),
+        usageResume: vi.fn(),
+      };
+      const codeApi = codes();
+      const bootstrap = await codeApi.bootstrap();
+      const original = await codeApi.thread(codeThreadId);
+      const otherId = decodeCodeThreadId("00000000-0000-4000-8000-000000000807");
+      const otherThread = { ...original.thread, id: otherId, title: "Another Code thread" };
+      vi.mocked(codeApi.bootstrap).mockResolvedValue({
+        ...bootstrap,
+        threads: [...bootstrap.threads, otherThread],
+      });
+      vi.mocked(codeApi.navigation).mockResolvedValue({
+        threads: [...bootstrap.threads, otherThread],
+        activity: [],
+        runtime: [],
+      });
+      vi.mocked(codeApi.thread).mockImplementation(async (id) => ({
+        ...original,
+        thread: String(id) === String(otherId) ? otherThread : original.thread,
+      }));
+      const shell = codeShellBootstrap();
+      const layout = shell.workspace.layouts.code;
+      if (layout.kind !== "pane") throw new Error("Expected Code pane");
+      const split = applyWorkspaceOperation(
+        shell.workspace,
+        decodeWorkspaceOperation({
+          kind: "split-pane",
+          mode: "code",
+          targetPaneId: layout.paneId,
+          surface: {
+            kind: "code-overview",
+            mode: "code",
+            id: "00000000-0000-4000-8000-000000000808",
+            threadId: otherId,
+            title: otherThread.title,
+          },
+          splitNodeId: "00000000-0000-4000-8000-000000000809",
+          newPaneNodeId: "00000000-0000-4000-8000-000000000810",
+          newPaneId: "00000000-0000-4000-8000-000000000811",
+          orientation: "horizontal",
+          placement: "after",
+          ratio: 0.5,
+        }),
+      );
+      const workspace = split;
+      const executeOperation = vi.spyOn(codeApi, "executeOperation");
+      render(
+        <App
+          agentRunClient={agentRunClient}
+          codeClient={codeApi}
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projects()}
+          projectWindowCapability={projectWindowCapability}
+          shellClient={client({ ...shell, workspace, workspaceVersion: workspace.version })}
+        />,
+      );
+      const originalPane = await screen.findByRole("region", {
+        name: "Workspace pane: Controller foundation",
+      });
+      await user.click(originalPane);
+      const tray = await within(originalPane).findByRole("group", { name: "Subagents" });
+      await user.click(within(tray).getByRole("button", { name: /View all/ }));
+      const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
+      await user.click(await within(dock).findByRole("button", { name: /Review parser/ }));
+      await user.click(within(dock).getByRole("button", { name: /Generation 1/ }));
+      const earlier = within(dock).getByRole("region", { name: "Generation 1 result" });
+      expect(
+        within(earlier).queryByRole("button", { name: /reported-only.ts/ }),
+      ).not.toBeInTheDocument();
+      await user.click(within(earlier).getByRole("button", { name: "Review src/parser.ts" }));
+      expect(
+        await within(dock).findByRole("heading", { name: "Generation 1 changes" }),
+      ).toBeVisible();
+      expect(
+        await within(dock).findByRole("table", { name: "Diff for src/parser.ts" }),
+      ).toHaveTextContent("captured generation 1");
+      expect(within(dock).getByRole("tab", { name: "Review" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      await user.click(within(dock).getByRole("button", { name: "Back to subagent" }));
+      const latest = await within(dock).findByRole("region", { name: "Generation 2 result" });
+      await user.click(within(latest).getByRole("button", { name: "Review changes" }));
+      expect(
+        await within(dock).findByRole("table", { name: "Diff for src/parser.ts" }),
+      ).toHaveTextContent("captured generation 2");
+      expect(review).toHaveBeenNthCalledWith(1, packet.runId, 1);
+      expect(review).toHaveBeenLastCalledWith(packet.runId, 2);
+      expect(
+        within(dock).queryByRole("button", { name: /^(Open|Discard|Stage|Commit|Working tree)/ }),
+      ).not.toBeInTheDocument();
+      expect(executeOperation).not.toHaveBeenCalled();
+      expect(agentRunClient.acknowledge).not.toHaveBeenCalled();
+      if (returnThrough === "a thread switch") {
+        await user.click(
+          screen.getByRole("region", { name: "Workspace pane: Another Code thread" }),
+        );
+        expect(
+          screen.queryByRole("region", { name: "Saved child review" }),
+        ).not.toBeInTheDocument();
+        await user.click(originalPane);
+      } else {
+        await user.click(within(dock).getByRole("button", { name: "Hide Review" }));
+        await user.click(within(dock).getByRole("button", { name: "Add tool" }));
+        await user.click(
+          within(await screen.findByRole("menu", { name: "Add tool" })).getByRole("menuitem", {
+            name: "Review",
+          }),
+        );
+      }
+      expect(await screen.findByRole("button", { name: "Working tree" })).toBeVisible();
+      expect(screen.queryByRole("region", { name: "Saved child review" })).not.toBeInTheDocument();
+      expect(review).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it("offers Plan only when the thread has a current plan artifact", async () => {
     const user = userEvent.setup();
     const projectApi = projects({
@@ -4863,8 +5138,8 @@ describe("App", () => {
     await user.click(within(dock).getByRole("button", { name: "Browser" }));
     await user.click(within(dock).getByRole("button", { name: "Add tool" }));
     // The menu hangs from the plus in a portal, outside the dock's own region.
-    const addTool = await screen.findByRole("dialog", { name: "Add tool" });
-    await user.click(within(addTool).getByRole("button", { name: "Browser" }));
+    const addTool = await screen.findByRole("menu", { name: "Add tool" });
+    await user.click(within(addTool).getByRole("menuitem", { name: "Browser" }));
 
     expect(within(dock).getByRole("tab", { name: "Browser 1" })).toBeVisible();
     expect(within(dock).getByRole("tab", { name: "Browser 2" })).toHaveAttribute(
@@ -4906,7 +5181,7 @@ describe("App", () => {
 
     await user.click(within(panel).getByRole("button", { name: "Add tool" }));
     await user.click(
-      within(await screen.findByRole("dialog", { name: "Add tool" })).getByRole("button", {
+      within(await screen.findByRole("menu", { name: "Add tool" })).getByRole("menuitem", {
         name: "Review",
       }),
     );
@@ -4945,7 +5220,7 @@ describe("App", () => {
     expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
     await user.click(within(panel).getByRole("button", { name: "Add tool" }));
     await user.click(
-      within(await screen.findByRole("dialog", { name: "Add tool" })).getByRole("button", {
+      within(await screen.findByRole("menu", { name: "Add tool" })).getByRole("menuitem", {
         name: "Review",
       }),
     );

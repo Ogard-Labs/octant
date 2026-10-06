@@ -8,6 +8,7 @@
     "./provider-drivers": "./src/bundledProviderDrivers.ts",
     "./agent-plugins": "./src/agentPlugins/index.ts",
     "./canvas-skill-contributions": "./src/canvasSkillContributions.ts",
+    "./canvas-export-contributions": "./src/canvasExportContributions.ts",
     "./addressing": "./src/addressing.ts",
     "./collisions": "./src/collisions.ts",
     "./composer": "./src/composer.ts",

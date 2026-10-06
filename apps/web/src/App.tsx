@@ -308,6 +308,8 @@ import { RightUtilityDock } from "./shell/RightUtilityDock";
 import { ProjectReviewModule as DockProjectPullRequestReviewTool } from "./dockModules/ProjectReviewModule";
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
+import type { AgentRunViewRequest } from "./agents/AgentRunHierarchy";
+import type { AgentResultReviewRequest } from "./gitHistory/SavedAgentReview";
 import {
   MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
@@ -1017,11 +1019,14 @@ function LaunchedShell(
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);
   const [addAgentInvokedByThread, setAddAgentInvokedByThread] = useState(() => new Set<string>());
-  // The subagent a composer tray row asked the Agents tool to open, for the
-  // thread it was asked on. The tool clears it once it has opened there.
-  const [requestedSubagent, setRequestedSubagent] = useState<{
+  // Retain the destination across dock remounts until Back or another request.
+  const [requestedAgentView, setRequestedAgentView] = useState<{
     readonly threadKey: string;
-    readonly runId: string;
+    readonly view: AgentRunViewRequest;
+  }>();
+  const [requestedAgentReview, setRequestedAgentReview] = useState<{
+    readonly threadKey: string;
+    readonly request: AgentResultReviewRequest;
   }>();
   // Documents a turn wrote, per thread, and which the dock already offered.
   // Session-local presentation: nothing here is authority, and a reopened
@@ -1233,6 +1238,13 @@ function LaunchedShell(
   const projectPullRequestReviewOpen = selectedProjectPullRequest !== undefined;
   const dockThreadKey =
     dockThreadId === undefined ? undefined : threadUtilityDockKey(activeMode, String(dockThreadId));
+  // A saved comparison is a navigation request, not a remembered tool for a
+  // thread. Leaving its scope must not restore that request on a later visit.
+  useEffect(() => {
+    setRequestedAgentReview((current) =>
+      current?.threadKey === dockThreadKey ? current : undefined,
+    );
+  }, [dockThreadKey]);
   // A hand-off can take minutes, and the person is free to move threads while
   // it runs, so its completion reads the dock's thread as it is then rather
   // than as it was when the request was made.
@@ -2943,10 +2955,25 @@ function LaunchedShell(
         key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
-        {...(requestedSubagent?.threadKey === dockThreadKey
+        onReviewAgentChanges={(request) => {
+          if (String(request.packet.parentThreadId) !== dockThread.threadId) return;
+          setSelectedProjectPullRequest(undefined);
+          openDockTab("review");
+          setRequestedAgentReview({ threadKey: dockThreadKey, request });
+        }}
+        {...(requestedAgentReview?.threadKey === dockThreadKey
           ? {
-              requestedAgentRunId: requestedSubagent.runId,
-              onAgentRunRequestHandled: () => setRequestedSubagent(undefined),
+              requestedAgentReview: requestedAgentReview.request,
+              onAgentReviewBack: () => {
+                openSubagent(String(requestedAgentReview.request.packet.runId));
+                setRequestedAgentReview(undefined);
+              },
+            }
+          : {})}
+        {...(requestedAgentView?.threadKey === dockThreadKey
+          ? {
+              requestedAgentView: requestedAgentView.view,
+              onAgentViewRequestHandled: () => setRequestedAgentView(undefined),
             }
           : {})}
         nativeHarnessClient={nativeHarnessClient}
@@ -3062,12 +3089,16 @@ function LaunchedShell(
       next.add(dockThreadKey);
       return next;
     });
-    setRequestedSubagent(runId === undefined ? undefined : { threadKey: dockThreadKey, runId });
+    setRequestedAgentView({
+      threadKey: dockThreadKey,
+      view: runId === undefined ? { kind: "list" } : { kind: "child", runId },
+    });
     openDockTab("agents");
   }
   function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
+    if (surface === "review") setRequestedAgentReview(undefined);
     markInteraction("renderer", "dock-open-requested");
     markInteractionAfterPaint("dock-open");
     if (bottomPanelPresentation.open) {
@@ -3084,6 +3115,7 @@ function LaunchedShell(
   function addDockTab(surface: RightUtilityDockSurfaceId) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
+    if (surface === "review") setRequestedAgentReview(undefined);
     if (bottomPanelPresentation.open) {
       persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
     }
@@ -3098,6 +3130,7 @@ function LaunchedShell(
     }
   }
   function openReviewForThread(threadId: string) {
+    setRequestedAgentReview(undefined);
     const key = threadUtilityDockKey("code", threadId);
     setDockVisible(true);
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "review"));
@@ -3308,6 +3341,7 @@ function LaunchedShell(
 
   function openBottomTool(surface: RightUtilityDockSurfaceId) {
     if (!bottomPanelSurfaces.some((candidate) => candidate.id === surface)) return;
+    if (surface === "review") setRequestedAgentReview(undefined);
     const nextBottomState = openUtilityTabState(renderedBottomPanelState, surface);
     if (dockThreadKey === undefined) {
       setFallbackBottomPanelState(nextBottomState);
@@ -5680,6 +5714,10 @@ function LaunchedShell(
       themeController={themeController}
       diagnosticsExportClient={diagnosticsExportClient}
       hostControlClient={hostControlClient}
+      workThreads={(workNavigation.bootstrap?.threads ?? []).map((thread) => ({
+        id: String(thread.id),
+        title: thread.title,
+      }))}
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
       githubClient={githubClient}
@@ -6568,6 +6606,7 @@ function LaunchedShell(
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
+                    nativeHarnessClient={nativeHarnessClient}
                     onOpenSubagent={openSubagent}
                     onOpenAgents={openSubagent}
                     chatClient={chatClient}

@@ -13,17 +13,22 @@ import type { ProviderConnection } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Stream, type Scope } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
+import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { buildUsageDashboard } from "../usageDashboardModel";
 import { createNativeHarnessConnection, fitRequest } from "./nativeHarnessLoop";
 import {
   JournalNativeHarnessTranscriptStore,
   MemoryNativeHarnessTranscriptStore,
   type NativeHarnessTranscriptStore,
 } from "./nativeHarnessTranscriptStore";
+import { sendWithEndpointRetry } from "../providers/endpointRetry";
 import type {
+  NativeHarnessLeadFallback,
   NativeHarnessRequest,
   NativeHarnessResponse,
   NativeHarnessTransport,
+  NativeHarnessTransportSession,
 } from "./nativeHarnessTransport";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000901");
@@ -44,7 +49,10 @@ afterEach(() => {
 });
 
 /** An endpoint that answers from a script and remembers every request it was sent. */
-function scriptedTransport(script: NativeHarnessResponse[]): {
+function scriptedTransport(
+  script: NativeHarnessResponse[],
+  fits: (request: NativeHarnessRequest) => boolean = () => true,
+): {
   readonly transport: NativeHarnessTransport;
   readonly requests: NativeHarnessRequest[];
 } {
@@ -53,7 +61,7 @@ function scriptedTransport(script: NativeHarnessResponse[]): {
     requests,
     transport: {
       open: async () => ({
-        fits: () => true,
+        fits,
         send: async (request) => {
           requests.push(request);
           const next = script.shift();
@@ -69,6 +77,7 @@ function scriptedTransport(script: NativeHarnessResponse[]): {
 function connect(
   transport: NativeHarnessTransport,
   transcripts: NativeHarnessTranscriptStore,
+  leadFallback?: NativeHarnessLeadFallback,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return createNativeHarnessConnection({
     instanceId,
@@ -77,6 +86,7 @@ function connect(
     mode: "code",
     transport,
     transcripts,
+    ...(leadFallback === undefined ? {} : { leadFallback }),
     admitTurn: () => undefined,
     clock: () => now,
     correlationId: () => "80000000-0000-4000-8000-000000000903",
@@ -103,6 +113,198 @@ const isTerminal = (event: ProviderRuntimeEvent) =>
   event.kind === "completed" || event.kind === "failed" || event.kind === "interrupted";
 
 describe("native harness loop", () => {
+  it("does not acknowledge a steering note that cancellation prevents from reaching the model", async () => {
+    const scripted = scriptedTransport([
+      {
+        text: "Reading",
+        toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+      },
+    ]);
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(scripted.transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          yield* sendAndCollect(connection, "Review", (event) => event.kind === "tool-request");
+          const note = yield* Effect.fork(
+            connection.steer?.({ sessionId, message: "Check the parser" }) ??
+              Effect.succeed("unsupported"),
+          );
+          yield* Effect.yieldNow();
+          yield* connection.stop(sessionId);
+          expect(yield* Fiber.join(note)).toBe("unsupported");
+          expect(
+            transcripts
+              .load(sessionId)
+              ?.messages.some((message) => message.text === "Check the parser"),
+          ).toBe(false);
+          expect(scripted.requests).toHaveLength(1);
+        }),
+      ),
+    );
+  });
+
+  it("continues with a note received during the final response before completing the turn", async () => {
+    let finish: ((response: NativeHarnessResponse) => void) | undefined;
+    const requests: NativeHarnessRequest[] = [];
+    const transport: NativeHarnessTransport = {
+      open: async () => ({
+        fits: () => true,
+        send: async (request) => {
+          requests.push(request);
+          if (requests.length === 1)
+            return await new Promise<NativeHarnessResponse>((resolve) => {
+              finish = resolve;
+            });
+          return { text: "Rechecked", toolCalls: [] };
+        },
+        release: () => undefined,
+      }),
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({ sessionId, prompt: "Review", attachments: [], tools });
+          const note = yield* Effect.fork(
+            connection.steer?.({ sessionId, message: "Recheck the parser" }) ??
+              Effect.succeed("unsupported"),
+          );
+          yield* Effect.yieldNow();
+          expect(finish).toBeDefined();
+          finish?.({ text: "Initial review", toolCalls: [] });
+          expect(yield* Fiber.join(note)).toBe("steered");
+          expect(Array.from(yield* Fiber.join(terminal)).at(-1)?.kind).toBe("completed");
+          expect(requests).toHaveLength(2);
+          expect(requests[1]?.history.slice(-2)).toEqual([
+            { role: "assistant", text: "Initial review" },
+            { role: "user", text: "Recheck the parser" },
+          ]);
+        }),
+      ),
+    );
+  });
+
+  it("delivers steering after pending tool results and records it before acknowledging the note", async () => {
+    const scripted = scriptedTransport([
+      {
+        text: "Reading",
+        toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+      },
+      { text: "Used SQLite", toolCalls: [] },
+    ]);
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(scripted.transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          yield* sendAndCollect(
+            connection,
+            "Choose a database",
+            (event) => event.kind === "tool-request",
+          );
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          const note = yield* Effect.fork(
+            connection.steer?.({ sessionId, message: "Use SQLite" }) ??
+              Effect.succeed("unsupported"),
+          );
+          yield* Effect.yieldNow();
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: "{}",
+            isError: false,
+          });
+          expect(yield* Fiber.join(note)).toBe("steered");
+          expect(Array.from(yield* Fiber.join(terminal)).at(-1)?.kind).toBe("completed");
+          const history = scripted.requests[1]?.history;
+          expect(history?.at(-1)).toMatchObject({ role: "user", text: "Use SQLite" });
+          expect(history?.at(-2)?.toolResults?.[0]?.toolCallId).toBe("read-1");
+          expect(
+            transcripts
+              .load(sessionId)
+              ?.messages.some(
+                (message) => message.role === "user" && message.text === "Use SQLite",
+              ),
+          ).toBe(true);
+        }),
+      ),
+    );
+  });
+
+  it("acknowledges and journals only queued steering notes retained in the fitted provider request", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-harness-steering-limit-"));
+    directories.push(directory);
+    const messages = ["Earlier note: " + "a".repeat(400), "Later note: " + "b".repeat(400)];
+    const scripted = scriptedTransport(
+      [
+        {
+          text: "Reading",
+          toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+        },
+        { text: "Applied the delivered note", toolCalls: [] },
+      ],
+      (request) => JSON.stringify(request.history).length <= 800,
+    );
+    let identity = 0;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const persistence = yield* Persistence;
+          const transcripts = new JournalNativeHarnessTranscriptStore({
+            journal: persistence.journal,
+            uuid: () => `80000000-0000-4000-8000-${String(++identity).padStart(12, "0")}`,
+            clock: () => now,
+            actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+          });
+          const connection = yield* connect(scripted.transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          yield* sendAndCollect(connection, "Review", (event) => event.kind === "tool-request");
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          const notes = [];
+          for (const message of messages) {
+            notes.push(
+              yield* Effect.fork(
+                connection.steer?.({ sessionId, message }) ?? Effect.succeed("unsupported"),
+              ),
+            );
+            yield* Effect.yieldNow();
+          }
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: "{}",
+            isError: false,
+          });
+          const outcomes = [];
+          for (const note of notes) outcomes.push(yield* Fiber.join(note));
+          yield* Fiber.join(terminal);
+          const received = scripted.requests[1]?.history.filter((message) =>
+            messages.includes(message.text),
+          );
+          const recorded = transcripts
+            .load(sessionId)
+            ?.messages.filter((message) => messages.includes(message.text));
+          expect(received).toEqual([{ role: "user", text: messages[1] }]);
+          expect(outcomes).toEqual(["unsupported", "steered"]);
+          expect(recorded).toEqual(received);
+        }).pipe(
+          Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
+        ),
+      ),
+    );
+  });
+
   it("resumes after a restart mid-step and tells the model which interrupted calls only read", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-harness-loop-"));
     directories.push(directory);
@@ -305,6 +507,184 @@ describe("native harness loop", () => {
   });
 });
 
+/** An endpoint that is down: its retries run out on every request. */
+function downEndpoint(category: "unavailable" | "unauthenticated" = "unavailable"): {
+  readonly session: NativeHarnessTransportSession;
+  readonly requests: NativeHarnessRequest[];
+} {
+  const requests: NativeHarnessRequest[] = [];
+  return {
+    requests,
+    session: {
+      fits: () => true,
+      release: () => undefined,
+      send: (request, stream) => {
+        requests.push(request);
+        return sendWithEndpointRetry({
+          signal: stream.signal,
+          onEvent: stream.onEvent,
+          options: { sleep: async () => undefined, random: () => 0.5 },
+          attempt: async () => {
+            throw { category, message: "The provider request failed with HTTP 503." };
+          },
+        });
+      },
+    },
+  };
+}
+
+function answeringEndpoint(text: string): {
+  readonly session: NativeHarnessTransportSession;
+  readonly requests: NativeHarnessRequest[];
+  readonly released: () => boolean;
+} {
+  const requests: NativeHarnessRequest[] = [];
+  let released = false;
+  return {
+    requests,
+    released: () => released,
+    session: {
+      fits: () => true,
+      release: () => {
+        released = true;
+      },
+      send: async (request) => {
+        requests.push(request);
+        return { text, toolCalls: [] };
+      },
+    },
+  };
+}
+
+const backupTarget = {
+  providerInstanceId: decodeProviderInstanceId("80000000-0000-4000-8000-000000000904"),
+  modelId: "backup-model" as ProviderModelId,
+};
+
+describe("a lead whose model keeps failing", () => {
+  const run = (
+    primary: NativeHarnessTransportSession,
+    leadFallback: NativeHarnessLeadFallback | undefined,
+    turns = 1,
+  ) =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            { open: async () => primary },
+            new MemoryNativeHarnessTranscriptStore(),
+            leadFallback,
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const turnEvents: ProviderRuntimeEvent[][] = [];
+          for (let turn = 0; turn < turns; turn += 1) {
+            turnEvents.push(yield* sendAndCollect(connection, `turn ${turn}`, isTerminal));
+          }
+          return turnEvents;
+        }),
+      ),
+    );
+
+  it("continues the turn on the next model once the endpoint's retries have run out", async () => {
+    const down = downEndpoint();
+    const backup = answeringEndpoint("from the backup");
+    const asked: Array<Parameters<NativeHarnessLeadFallback["next"]>[0]> = [];
+
+    const [first, second] = await run(
+      down.session,
+      {
+        next: async (input) => {
+          asked.push(input);
+          return { status: "switched", target: backupTarget, endpoint: backup.session };
+        },
+      },
+      2,
+    );
+
+    expect(first?.map((event) => event.kind)).toEqual([
+      "retrying",
+      "retrying",
+      "retrying",
+      "retrying",
+      "completed",
+    ]);
+    expect(backup.requests[0]?.modelId).toBe("backup-model");
+    expect(backup.requests[0]?.history).toEqual([{ role: "user", text: "turn 0" }]);
+    expect(asked[0]).toMatchObject({
+      failed: { providerInstanceId: instanceId, modelId },
+      attempted: [{ providerInstanceId: instanceId, modelId }],
+      failure: { category: "unavailable" },
+    });
+    // The next turn starts on the lead's own model again, and the backup is released.
+    expect(second?.at(-1)?.kind).toBe("completed");
+    expect(down.requests.map((request) => request.modelId)).toEqual([modelId, modelId]);
+    expect(backup.released()).toBe(true);
+  });
+
+  it("fails with the endpoint's own failure and says why when no other model is configured", async () => {
+    const down = downEndpoint();
+    const [events] = await run(down.session, {
+      next: async () => ({ status: "none", reason: "slot-empty" }),
+    });
+
+    expect(events?.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: {
+        category: "unavailable",
+        message: "The provider request failed with HTTP 503. No fallback model is configured.",
+      },
+    });
+  });
+
+  it("fails the way it always did when nothing is configured to fall back with", async () => {
+    const [events] = await run(downEndpoint().session, undefined);
+
+    expect(events?.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: { category: "unavailable", message: "The provider request failed with HTTP 503." },
+    });
+  });
+
+  it("does not look for another model after a failure that was never retried", async () => {
+    let asked = 0;
+    const [events] = await run(downEndpoint("unauthenticated").session, {
+      next: async () => {
+        asked += 1;
+        return { status: "none", reason: "slot-empty" };
+      },
+    });
+
+    expect(asked).toBe(0);
+    expect(events?.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: { category: "unauthenticated" },
+    });
+  });
+
+  it("asks again when the fallback model is down too, naming every model it already tried", async () => {
+    const down = downEndpoint();
+    const alsoDown = downEndpoint();
+    const asked: Array<Parameters<NativeHarnessLeadFallback["next"]>[0]> = [];
+    const [events] = await run(down.session, {
+      next: async (input) => {
+        asked.push(input);
+        return asked.length === 1
+          ? { status: "switched", target: backupTarget, endpoint: alsoDown.session }
+          : { status: "none", reason: "no-other-model" };
+      },
+    });
+
+    expect(asked[1]?.attempted).toEqual([
+      { providerInstanceId: instanceId, modelId },
+      backupTarget,
+    ]);
+    expect(events?.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: { message: expect.stringContaining("No other model is configured to continue on.") },
+    });
+  });
+});
+
 describe("fitting a request to the endpoint", () => {
   const base: NativeHarnessRequest = {
     modelId,
@@ -349,5 +729,108 @@ describe("fitting a request to the endpoint", () => {
 
   it("refuses rather than cut the latest message", () => {
     expect(fitRequest(fitsUnder(10), base)).toBeUndefined();
+  });
+
+  describe("usage across the requests of one turn", () => {
+    /** Runs a turn of two requests, the first calling a tool, and returns every event it produced. */
+    const twoRequestTurn = (
+      first: NativeHarnessResponse["usage"],
+      second: NativeHarnessResponse["usage"],
+    ) => {
+      const { transport } = scriptedTransport([
+        {
+          text: "",
+          toolCalls: [{ toolCallId: "call", toolName: "read", argumentsJson: "{}" }],
+          ...(first === undefined ? {} : { usage: first }),
+        },
+        { text: "done", toolCalls: [], ...(second === undefined ? {} : { usage: second }) },
+      ]);
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            yield* sendAndCollect(connection, "look", (event) => event.kind === "tool-request");
+            const finished = yield* Effect.fork(
+              Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+            );
+            yield* connection.answerTool({
+              sessionId,
+              requestId: "call",
+              resultJson: "{}",
+              isError: false,
+            });
+            return Array.from(yield* Fiber.join(finished));
+          }),
+        ),
+      );
+    };
+
+    it("reports the turn's cache and reasoning tokens once, summed over its requests", async () => {
+      const events = await twoRequestTurn(
+        { inputTokens: 100, outputTokens: 10, cacheWriteInputTokens: 60, cacheReadInputTokens: 0 },
+        { inputTokens: 160, outputTokens: 5, cacheReadInputTokens: 60, reasoningTokens: 3 },
+      );
+
+      const usage = events.filter((event) => event.kind === "usage");
+      expect(usage).toHaveLength(1);
+      expect(usage[0]).toMatchObject({
+        inputTokens: 260,
+        outputTokens: 15,
+        cacheReadInputTokens: 60,
+        cacheWriteInputTokens: 60,
+        reasoningTokens: 3,
+      });
+
+      // The same event is what the usage dashboard reads for cache coverage.
+      const observation = usageFromRuntimeEvent(usage[0] as ProviderRuntimeEvent);
+      const dashboard = buildUsageDashboard(
+        [
+          {
+            reconciliationId: "harness-turn",
+            hostId: "local",
+            providerInstanceId: String(instanceId),
+            modelId: String(modelId),
+            requestShape: "code-turn",
+            subjectType: "code-thread",
+            subjectId: "thread",
+            quality: "exact",
+            inputTokens: observation?.inputTokens ?? 0,
+            outputTokens: observation?.outputTokens ?? 0,
+            ...(observation?.cacheReadInputTokens === undefined
+              ? {}
+              : { cacheReadInputTokens: observation.cacheReadInputTokens }),
+            ...(observation?.cacheWriteInputTokens === undefined
+              ? {}
+              : { cacheWriteInputTokens: observation.cacheWriteInputTokens }),
+            attribution: [],
+            observedAt: now,
+          },
+        ],
+        { queryAt: now, timeZone: "UTC", detailLimit: 10, breakdownLimit: 10 },
+      );
+      expect(dashboard.cacheStats.providerTokenCaches).toEqual([
+        {
+          providerInstanceId: String(instanceId),
+          requestCount: 1,
+          cacheReadInputTokens: 60,
+          cacheWriteInputTokens: 60,
+          hitRatio: 0.5,
+        },
+      ]);
+    });
+
+    it("leaves a figure out of the turn's usage when no request reported it", async () => {
+      const events = await twoRequestTurn(
+        { inputTokens: 100, outputTokens: 10 },
+        { inputTokens: 160, outputTokens: 5 },
+      );
+
+      const usage = events.find((event) => event.kind === "usage");
+      expect(usage).toMatchObject({ inputTokens: 260, outputTokens: 15 });
+      expect(usage).not.toHaveProperty("cacheReadInputTokens");
+      expect(usage).not.toHaveProperty("cacheWriteInputTokens");
+      expect(usage).not.toHaveProperty("reasoningTokens");
+    });
   });
 });

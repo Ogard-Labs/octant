@@ -9,6 +9,7 @@ import {
   selectThreadsForPurge,
   THREAD_PURGE_DELETED_SCOPES,
   THREAD_PURGE_RETAINED_SCOPES,
+  THREAD_PURGE_DELINKED_SCOPES,
 } from "./threadRetentionPolicy";
 
 const threadId = "b1000000-0000-4000-8000-000000000001" as ThreadRetentionThreadId;
@@ -266,9 +267,9 @@ describe("purge scope report", () => {
       "managed-worktrees",
     ]);
     expect(THREAD_PURGE_RETAINED_SCOPES).toContain("other-threads");
-    expect(THREAD_PURGE_RETAINED_SCOPES).toContain("usage-records");
     expect(THREAD_PURGE_RETAINED_SCOPES).toContain("purge-tombstone");
     expect(THREAD_PURGE_RETAINED_SCOPES).toContain("sqlite-free-pages");
+    expect(THREAD_PURGE_DELINKED_SCOPES).toContain("usage-records");
     expect(THREAD_PURGE_RETAINED_SCOPES).not.toContain("thread-journal");
   });
 });

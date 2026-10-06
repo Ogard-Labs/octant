@@ -82,12 +82,14 @@ export type CodeTurnEventCategory =
   | "citation"
   | "research"
   | "completion"
+  | "retry"
   | "waiting"
   | "interruption"
   | "failure";
 
 export interface CodeTurnEvent {
   readonly category: CodeTurnEventCategory;
+  readonly childObservation?: Extract<ProviderRuntimeEvent, { kind: "child-agent-activity" }>;
   readonly providerKind: ProviderRuntimeEvent["kind"];
   readonly instanceId: ProviderInstanceId;
   readonly sessionId: ProviderRuntimeEvent["sessionId"];
@@ -288,7 +290,11 @@ export class CodeTurnRunner {
         connection,
         consume: (runtimeEvents) =>
           runtimeEvents.pipe(
-            Stream.filter((event) => event.sessionId === input.sessionId),
+            Stream.filter(
+              (event) =>
+                event.sessionId === input.sessionId &&
+                event.instanceId === input.thread.providerInstanceId,
+            ),
             Stream.takeUntil(isTerminalProviderEvent),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
@@ -630,6 +636,7 @@ function normalizeProviderEvent(
       return Effect.succeed({
         ...base,
         category: "child-activity",
+        childObservation: { ...event, summary: text(event.summary) },
         requestId: text(event.childAgentId),
         status: event.status,
         text: text(event.summary),
@@ -726,6 +733,15 @@ function normalizeProviderEvent(
         requestId: text(event.researchId),
         status: "completed",
         text: String(event.sourceCount),
+      });
+    case "retrying":
+      return Effect.succeed({
+        ...base,
+        category: "retry",
+        status: event.reason,
+        text: text(
+          `Retrying ${event.attempt}/${event.maxAttempts} in ${Math.max(1, Math.round(event.delayMs / 1000))} s.`,
+        ),
       });
     case "waiting":
       return Effect.succeed({ ...base, category: "waiting", text: text(event.message) });

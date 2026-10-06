@@ -32,6 +32,7 @@ import {
   type MultiModelCandidateRuntimeFacts,
 } from "@octant/domain/multi-model-pool-policy";
 import { Schema } from "effect";
+import type { AgentRunParentContextUnavailableReason } from "./agentRunParentContext";
 
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
@@ -98,14 +99,38 @@ export interface AgentRunWorktreeReceiptPort {
  * so this reads exactly what that principal could read and nothing else:
  * authority is never re-derived here, and the client contributes no content.
  * `undefined` means this host cannot resolve the parent's conversation, which
- * fails the creation closed rather than admitting a child with nothing.
+ * fails the creation closed rather than admitting a child with nothing. An
+ * `unavailable` answer says why, so the refusal can tell the caller what to do.
  */
 export interface AgentRunParentContextPort {
   readonly resolve: (input: {
     readonly parentThreadId: AgentRunParentThreadId;
     readonly mode: OctantMode;
-  }) => ReadonlyArray<ProviderContextBlock> | undefined;
+  }) =>
+    | ReadonlyArray<ProviderContextBlock>
+    | { readonly unavailable: AgentRunParentContextUnavailableReason }
+    | undefined;
 }
+
+const PARENT_CONTEXT_REFUSALS: Record<AgentRunParentContextUnavailableReason, string> = {
+  "thread-unavailable":
+    "The parent thread is no longer available, so its conversation cannot be shared.",
+  "foreign-thread":
+    "The parent conversation does not belong to this thread, so it cannot be shared.",
+  "foreign-project":
+    "The parent conversation does not belong to this Project, so it cannot be shared.",
+  "source-point-unavailable":
+    "The parent thread has no recorded conversation yet. Delegate without parent context, or put what the child needs in the task.",
+  "source-empty":
+    "The parent thread has no readable messages to share yet. Delegate without parent context, or put what the child needs in the task.",
+  "source-changed": "The parent conversation changed while it was being read. Delegate again.",
+  "source-unavailable":
+    "The parent conversation could not be read right now. Delegate again, or put what the child needs in the task.",
+  "invalid-page":
+    "The parent conversation could not be read consistently. Delegate again, or put what the child needs in the task.",
+  "history-window-exceeded":
+    "The parent history is too long to select a recent window from. Put what the child needs in the task.",
+};
 
 /**
  * Server-resolved facts required to derive one immutable pool route for a
@@ -316,10 +341,31 @@ function resolveAdmittedContext(
   input: BuildAgentRunRequestCommandInput,
 ): ReadonlyArray<ProviderContextBlock> | undefined {
   if (input.request.includeParentContext !== true) return undefined;
-  const resolved = input.parentContext?.resolve({
+  return resolveParentContextSelection(input.parentContext, {
     parentThreadId: input.request.parentThreadId,
     mode: input.request.mode,
   });
+}
+
+/**
+ * Resolve the parent selection for a request that asked for it, throwing the
+ * refusal that names why it is unavailable.
+ *
+ * Admission calls this before it allocates a child workspace: reading the
+ * parent's conversation has no side effect, and a refusal found after the
+ * worktree exists leaves that worktree behind for a child that never started.
+ */
+export function resolveParentContextSelection(
+  port: AgentRunParentContextPort | undefined,
+  input: { readonly parentThreadId: AgentRunParentThreadId; readonly mode: OctantMode },
+): ReadonlyArray<ProviderContextBlock> {
+  const resolved = port?.resolve(input);
+  if (resolved !== undefined && "unavailable" in resolved) {
+    throw new AgentRunCreationRejected(
+      "parent-context-unavailable",
+      PARENT_CONTEXT_REFUSALS[resolved.unavailable],
+    );
+  }
   if (resolved === undefined || resolved.length === 0) {
     throw new AgentRunCreationRejected(
       "parent-context-unavailable",

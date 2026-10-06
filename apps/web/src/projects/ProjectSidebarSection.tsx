@@ -1638,6 +1638,9 @@ function ProjectViewFilterMenu(props: {
   readonly rowPropertyView: SidebarRowPropertyView;
 }) {
   const activityRangeErrorId = useId();
+  const rangeTitleId = useId();
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const options = useMemo(() => {
     const local = { id: "local", name: "Local" };
     return [local, ...props.environmentOptions.filter((option) => option.id !== local.id)].filter(
@@ -1673,200 +1676,218 @@ function ProjectViewFilterMenu(props: {
   }
 
   return (
-    <OctantMenuRoot>
-      <OctantMenuTrigger
-        aria-label={triggerLabel}
-        className="code-project-views__filter window-no-drag"
-        title={triggerLabel}
-      >
-        <ListFilter aria-hidden="true" size={14} strokeWidth={1.8} />
-      </OctantMenuTrigger>
-      <OctantMenuPortal>
-        <OctantMenuPositioner
-          align="end"
-          className="z-50 outline-none window-no-drag"
-          side="bottom"
+    <>
+      <OctantMenuRoot>
+        <OctantMenuTrigger
+          ref={triggerRef}
+          aria-label={triggerLabel}
+          className="code-project-views__filter window-no-drag"
+          title={triggerLabel}
         >
-          <OctantMenuPopup
-            aria-label="Project view filters"
-            className="min-w-56 max-w-[calc(100vw-24px)]"
+          <ListFilter aria-hidden="true" size={14} strokeWidth={1.8} />
+        </OctantMenuTrigger>
+        <OctantMenuPortal>
+          <OctantMenuPositioner
+            align="end"
+            className="z-50 outline-none window-no-drag"
+            side="bottom"
           >
-            <OctantMenuGroup>
-              <OctantMenuGroupLabel>Filters</OctantMenuGroupLabel>
-              <FilterRadioSubmenu
-                label="Lifecycle"
-                onValueChange={(value) => {
-                  const option = PROJECT_VIEW_LIFECYCLE_OPTIONS.find(
-                    (candidate) => candidate.id === value,
-                  );
-                  if (option !== undefined) update({ lifecycle: option.id });
-                }}
-                options={PROJECT_VIEW_LIFECYCLE_OPTIONS}
-                value={props.filters.lifecycle}
+            <OctantMenuPopup
+              aria-label="Project view filters"
+              className="min-w-56 max-w-[calc(100vw-24px)]"
+            >
+              <OctantMenuGroup>
+                <OctantMenuGroupLabel>Filters</OctantMenuGroupLabel>
+                <FilterRadioSubmenu
+                  label="Lifecycle"
+                  onValueChange={(value) => {
+                    const option = PROJECT_VIEW_LIFECYCLE_OPTIONS.find(
+                      (candidate) => candidate.id === value,
+                    );
+                    if (option !== undefined) update({ lifecycle: option.id });
+                  }}
+                  options={PROJECT_VIEW_LIFECYCLE_OPTIONS}
+                  value={props.filters.lifecycle}
+                />
+                <OctantMenuSub>
+                  <OctantMenuSubTrigger>Environment</OctantMenuSubTrigger>
+                  <OctantMenuSubPopup>
+                    <OctantMenuCheckboxItem
+                      checked={environmentSelection.length === 0}
+                      onCheckedChange={(checked) => {
+                        if (checked) update({ environmentIds: [] });
+                      }}
+                    >
+                      All environments
+                    </OctantMenuCheckboxItem>
+                    {options.map((option) => (
+                      <OctantMenuCheckboxItem
+                        checked={environmentSelection.includes(option.id)}
+                        key={option.id}
+                        onCheckedChange={() => toggleEnvironment(option.id)}
+                      >
+                        {option.name}
+                      </OctantMenuCheckboxItem>
+                    ))}
+                  </OctantMenuSubPopup>
+                </OctantMenuSub>
+                <OctantMenuCheckboxItem
+                  checked={props.filters.showEmptyProjects}
+                  onCheckedChange={(checked) => update({ showEmptyProjects: checked })}
+                >
+                  Show empty Projects
+                </OctantMenuCheckboxItem>
+              </OctantMenuGroup>
+              <OctantMenuSeparator />
+              <OctantMenuGroup>
+                <FilterRadioSubmenu
+                  label="Group by"
+                  onValueChange={(value) => {
+                    const option = PROJECT_VIEW_GROUPING_OPTIONS.find(
+                      (candidate) => candidate.id === value,
+                    );
+                    if (option !== undefined) update({ grouping: option.id });
+                  }}
+                  options={PROJECT_VIEW_GROUPING_OPTIONS}
+                  value={props.filters.grouping}
+                />
+                <FilterRadioSubmenu
+                  label="Sort by"
+                  onValueChange={(value) => {
+                    const option = PROJECT_VIEW_SORTING_OPTIONS.find(
+                      (candidate) => candidate.id === value,
+                    );
+                    if (option !== undefined) update({ sorting: option.id });
+                  }}
+                  options={PROJECT_VIEW_SORTING_OPTIONS}
+                  value={props.filters.sorting}
+                />
+                {props.onPresentationChange === undefined ? null : (
+                  <FilterRadioSubmenu
+                    label="Show views as"
+                    onValueChange={(value) => {
+                      const option = PROJECT_VIEW_PRESENTATION_OPTIONS.find(
+                        (candidate) => candidate.id === value,
+                      );
+                      if (option !== undefined) props.onPresentationChange?.(option.id);
+                    }}
+                    options={PROJECT_VIEW_PRESENTATION_OPTIONS}
+                    value={props.presentation}
+                  />
+                )}
+              </OctantMenuGroup>
+              <OctantMenuSeparator />
+              <SidebarRowPropertyMenu
+                onChange={props.onRowPropertiesChange}
+                view={props.rowPropertyView}
+                visibility={props.rowProperties}
+              />
+              <OctantMenuSeparator />
+              <ProjectViewStatusMenu
+                onChange={(statuses) => update({ statuses })}
+                statuses={props.filters.statuses}
               />
               <OctantMenuSub>
-                <OctantMenuSubTrigger>Environment</OctantMenuSubTrigger>
+                <OctantMenuSubTrigger>Activity</OctantMenuSubTrigger>
                 <OctantMenuSubPopup>
-                  <OctantMenuCheckboxItem
-                    checked={environmentSelection.length === 0}
-                    onCheckedChange={(checked) => {
-                      if (checked) update({ environmentIds: [] });
+                  <OctantMenuRadioGroup
+                    onValueChange={(value) => {
+                      const option = PROJECT_VIEW_ACTIVITY_OPTIONS.find(
+                        (candidate) => candidate.id === value,
+                      );
+                      if (option !== undefined) update({ activity: option.id });
                     }}
+                    value={props.filters.activity}
                   >
-                    All environments
-                  </OctantMenuCheckboxItem>
-                  {options.map((option) => (
-                    <OctantMenuCheckboxItem
-                      checked={environmentSelection.includes(option.id)}
-                      key={option.id}
-                      onCheckedChange={() => toggleEnvironment(option.id)}
-                    >
-                      {option.name}
-                    </OctantMenuCheckboxItem>
-                  ))}
+                    {PROJECT_VIEW_ACTIVITY_OPTIONS.map((option) => (
+                      <OctantMenuRadioItem
+                        closeOnClick
+                        key={option.id}
+                        value={option.id}
+                        onClick={() => {
+                          if (option.id === "custom") setRangeOpen(true);
+                        }}
+                      >
+                        {option.label}
+                      </OctantMenuRadioItem>
+                    ))}
+                  </OctantMenuRadioGroup>
                 </OctantMenuSubPopup>
               </OctantMenuSub>
-              <OctantMenuCheckboxItem
-                checked={props.filters.showEmptyProjects}
-                onCheckedChange={(checked) => update({ showEmptyProjects: checked })}
-              >
-                Show empty Projects
-              </OctantMenuCheckboxItem>
-            </OctantMenuGroup>
-            <OctantMenuSeparator />
-            <OctantMenuGroup>
-              <FilterRadioSubmenu
-                label="Group by"
-                onValueChange={(value) => {
-                  const option = PROJECT_VIEW_GROUPING_OPTIONS.find(
-                    (candidate) => candidate.id === value,
-                  );
-                  if (option !== undefined) update({ grouping: option.id });
-                }}
-                options={PROJECT_VIEW_GROUPING_OPTIONS}
-                value={props.filters.grouping}
-              />
-              <FilterRadioSubmenu
-                label="Sort by"
-                onValueChange={(value) => {
-                  const option = PROJECT_VIEW_SORTING_OPTIONS.find(
-                    (candidate) => candidate.id === value,
-                  );
-                  if (option !== undefined) update({ sorting: option.id });
-                }}
-                options={PROJECT_VIEW_SORTING_OPTIONS}
-                value={props.filters.sorting}
-              />
-              {props.onPresentationChange === undefined ? null : (
-                <FilterRadioSubmenu
-                  label="Show views as"
-                  onValueChange={(value) => {
-                    const option = PROJECT_VIEW_PRESENTATION_OPTIONS.find(
-                      (candidate) => candidate.id === value,
-                    );
-                    if (option !== undefined) props.onPresentationChange?.(option.id);
-                  }}
-                  options={PROJECT_VIEW_PRESENTATION_OPTIONS}
-                  value={props.presentation}
-                />
-              )}
-            </OctantMenuGroup>
-            <OctantMenuSeparator />
-            <SidebarRowPropertyMenu
-              onChange={props.onRowPropertiesChange}
-              view={props.rowPropertyView}
-              visibility={props.rowProperties}
-            />
-            <OctantMenuSeparator />
-            <ProjectViewStatusMenu
-              onChange={(statuses) => update({ statuses })}
-              statuses={props.filters.statuses}
-            />
-            <OctantMenuSub>
-              <OctantMenuSubTrigger>Activity</OctantMenuSubTrigger>
-              <OctantMenuSubPopup>
-                <OctantMenuRadioGroup
-                  onValueChange={(value) => {
-                    const option = PROJECT_VIEW_ACTIVITY_OPTIONS.find(
-                      (candidate) => candidate.id === value,
-                    );
-                    if (option !== undefined) update({ activity: option.id });
-                  }}
-                  value={props.filters.activity}
-                >
-                  {PROJECT_VIEW_ACTIVITY_OPTIONS.map((option) => (
-                    <OctantMenuRadioItem closeOnClick={false} key={option.id} value={option.id}>
-                      {option.label}
-                    </OctantMenuRadioItem>
-                  ))}
-                </OctantMenuRadioGroup>
-                {props.filters.activity === "custom" ? (
-                  <>
-                    <OctantMenuSeparator />
-                    <OctantField className="gap-1 px-2 py-1.5">
-                      <OctantFieldLabel>From</OctantFieldLabel>
-                      <OctantInput
-                        aria-describedby={
-                          activityRangeError === undefined ? undefined : activityRangeErrorId
-                        }
-                        aria-invalid={activityRangeError === undefined ? undefined : true}
-                        aria-label="Activity from"
-                        onChange={(event) =>
-                          update({
-                            activityRange: {
-                              ...(props.filters.activityRange?.to === undefined
-                                ? {}
-                                : { to: props.filters.activityRange.to }),
-                              from: event.currentTarget.value,
-                            },
-                          })
-                        }
-                        onKeyDown={(event) => event.stopPropagation()}
-                        type="date"
-                        value={props.filters.activityRange?.from ?? ""}
-                      />
-                    </OctantField>
-                    <OctantField className="gap-1 px-2 py-1.5">
-                      <OctantFieldLabel>To</OctantFieldLabel>
-                      <OctantInput
-                        aria-describedby={
-                          activityRangeError === undefined ? undefined : activityRangeErrorId
-                        }
-                        aria-invalid={activityRangeError === undefined ? undefined : true}
-                        aria-label="Activity to"
-                        onChange={(event) =>
-                          update({
-                            activityRange: {
-                              ...(props.filters.activityRange?.from === undefined
-                                ? {}
-                                : { from: props.filters.activityRange.from }),
-                              to: event.currentTarget.value,
-                            },
-                          })
-                        }
-                        onKeyDown={(event) => event.stopPropagation()}
-                        type="date"
-                        value={props.filters.activityRange?.to ?? ""}
-                      />
-                    </OctantField>
-                    {activityRangeError === undefined ? null : (
-                      /* ui-boundary-exception: inline-field-error */
-                      <p
-                        className="px-2 pb-1.5 text-sm text-destructive"
-                        id={activityRangeErrorId}
-                        role="alert"
-                      >
-                        {activityRangeError}
-                      </p>
-                    )}
-                  </>
-                ) : null}
-              </OctantMenuSubPopup>
-            </OctantMenuSub>
-          </OctantMenuPopup>
-        </OctantMenuPositioner>
-      </OctantMenuPortal>
-    </OctantMenuRoot>
+            </OctantMenuPopup>
+          </OctantMenuPositioner>
+        </OctantMenuPortal>
+      </OctantMenuRoot>
+      <OctantDialog
+        label="Custom activity range"
+        labelledBy={rangeTitleId}
+        className="project-dialog"
+        open={rangeOpen}
+        onClose={() => setRangeOpen(false)}
+        restoreFocus={triggerRef}
+      >
+        <h1 id={rangeTitleId}>Custom activity range</h1>
+
+        <OctantField className="gap-1 px-2 py-1.5">
+          <OctantFieldLabel>From</OctantFieldLabel>
+          <OctantInput
+            aria-describedby={activityRangeError === undefined ? undefined : activityRangeErrorId}
+            aria-invalid={activityRangeError === undefined ? undefined : true}
+            aria-label="Activity from"
+            onChange={(event) =>
+              update({
+                activityRange: {
+                  ...(props.filters.activityRange?.to === undefined
+                    ? {}
+                    : { to: props.filters.activityRange.to }),
+                  from: event.currentTarget.value,
+                },
+              })
+            }
+            onKeyDown={(event) => event.stopPropagation()}
+            type="date"
+            value={props.filters.activityRange?.from ?? ""}
+          />
+        </OctantField>
+        <OctantField className="gap-1 px-2 py-1.5">
+          <OctantFieldLabel>To</OctantFieldLabel>
+          <OctantInput
+            aria-describedby={activityRangeError === undefined ? undefined : activityRangeErrorId}
+            aria-invalid={activityRangeError === undefined ? undefined : true}
+            aria-label="Activity to"
+            onChange={(event) =>
+              update({
+                activityRange: {
+                  ...(props.filters.activityRange?.from === undefined
+                    ? {}
+                    : { from: props.filters.activityRange.from }),
+                  to: event.currentTarget.value,
+                },
+              })
+            }
+            onKeyDown={(event) => event.stopPropagation()}
+            type="date"
+            value={props.filters.activityRange?.to ?? ""}
+          />
+        </OctantField>
+        {activityRangeError === undefined ? null : (
+          /* ui-boundary-exception: inline-field-error */
+          <p
+            className="px-2 pb-1.5 text-sm text-destructive"
+            id={activityRangeErrorId}
+            role="alert"
+          >
+            {activityRangeError}
+          </p>
+        )}
+
+        <div className="project-dialog__actions">
+          <OctantButton type="button" onClick={() => setRangeOpen(false)}>
+            Done
+          </OctantButton>
+        </div>
+      </OctantDialog>
+    </>
   );
 }
 

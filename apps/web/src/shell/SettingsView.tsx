@@ -71,7 +71,11 @@ import type { HostControlClient } from "@octant/client-runtime/host-control-clie
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
-import { HostDataSettingsSection, HostSettingsSection } from "../host/HostSettingsSection";
+import {
+  HostDataSettingsSection,
+  HostSettingsSection,
+  type PrivacyTarget,
+} from "../host/HostSettingsSection";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
@@ -169,6 +173,7 @@ export interface SettingsViewProps {
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
+  readonly workThreads?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
   readonly githubClient?: GithubClient;
   readonly integrationClient?: IntegrationClient;
@@ -1049,6 +1054,7 @@ function ActiveSectionContent({
           {props.hostControlClient !== undefined ? (
             <HostDataSettingsSection
               client={props.hostControlClient}
+              threads={privacyThreadsFromSettings(props)}
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           ) : (
@@ -1229,6 +1235,9 @@ function ProvidersSection(props: {
         }
         onChangeAzureFoundryConfiguration={props.providerController.changeAzureFoundryConfiguration}
         onClearProviderCredential={props.providerController.clearProviderCredential}
+        {...(props.providerController.providerOAuth === undefined
+          ? {}
+          : { onProviderOAuth: props.providerController.providerOAuth })}
         onBeginProviderAuthentication={props.providerController.beginProviderAuthentication}
         onCompleteProviderAuthentication={props.providerController.completeProviderAuthentication}
         onUpdateProviderCli={props.providerController.updateProviderCli}
@@ -2212,4 +2221,24 @@ function nativeHarnessProviderOptions(
       })),
     }))
     .filter((option) => option.models.length > 0);
+}
+
+function privacyThreadsFromSettings(props: SettingsViewProps): ReadonlyArray<PrivacyTarget> {
+  return [
+    ...(props.chatController?.bootstrap?.threads ?? []).map((thread) => ({
+      id: String(thread.id),
+      title: thread.title,
+      mode: "chat" as const,
+    })),
+    ...(props.workThreads ?? []).map((thread) => ({
+      id: String(thread.id),
+      title: thread.title,
+      mode: "work" as const,
+    })),
+    ...(props.codeController?.bootstrap?.threads ?? []).map((thread) => ({
+      id: String(thread.id),
+      title: thread.title,
+      mode: "code" as const,
+    })),
+  ];
 }

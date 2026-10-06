@@ -1,17 +1,21 @@
 import {
   AGENT_RUN_TERMINAL_STATUSES,
-  decodeAgentRunControlRequest,
-  type AgentRunControlRequest,
   type AgentRunParentThreadId,
   type NativeHarnessSlotCandidate,
+  type NativeHarnessRouteDecision,
+  NATIVE_HARNESS_BUILT_IN_SLOTS,
   type OctantMode,
   type ProjectId,
 } from "@octant/contracts";
-import { nativeHarnessJobForRole } from "@octant/domain";
+import { type AgentRunControlAdmissionDependencies } from "../agentRun/agentRunControlAdmission";
 import {
-  admitAgentRunControlRequest,
-  type AgentRunControlAdmissionDependencies,
-} from "../agentRun/agentRunControlAdmission";
+  agentRunDelegationCapabilities,
+  followUpAgentRunDelegation,
+  collectAgentRunResult,
+  startAgentRunDelegation,
+  type AgentsToolTarget,
+} from "../agentRun/agentRunDelegation";
+import type { AgentRunControlParentFacts } from "../agentRun/agentRunControlService";
 import type { AgentRunOrchestrationService } from "../agentRun/agentRunOrchestrationService";
 import type { AgentRunPersistenceService } from "../agentRun/agentRunPersistenceService";
 import type { NativeHarnessRouter } from "./nativeHarnessRouter";
@@ -25,14 +29,18 @@ import type {
 
 export interface NativeHarnessDelegatePortOptions {
   readonly admission: AgentRunControlAdmissionDependencies;
-  readonly orchestration: Pick<AgentRunOrchestrationService, "start">;
+  readonly orchestration: Pick<AgentRunOrchestrationService, "start"> &
+    Partial<Pick<AgentRunOrchestrationService, "resume">>;
   readonly persistence: Pick<
     AgentRunPersistenceService,
     "parentSummary" | "resultText" | "getById"
-  >;
+  > &
+    Partial<Pick<AgentRunPersistenceService, "applyCommand">>;
   readonly router: Pick<NativeHarnessRouter, "resolve">;
   readonly sessions: Pick<NativeHarnessSessionStore, "ensure" | "recordRouteDecision" | "read">;
   readonly uuid: () => string;
+  readonly listTargets?: () => ReadonlyArray<AgentsToolTarget>;
+  readonly isTainted?: () => boolean;
   /** Injectable so tests drive `wait` without real time passing. */
   readonly now?: () => number;
   readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -83,107 +91,49 @@ export function createNativeHarnessDelegatePort(
         task: entry.task,
         lifecycleStatus: entry.lifecycleStatus,
         resultAvailable: entry.result !== undefined,
+        ...(run === undefined ? {} : { version: run.version, generation: run.generation ?? 1 }),
+        route: entry.route,
+        ...(run?.routingReceipt?.rawReasoning === undefined
+          ? {}
+          : { reasoning: run.routingReceipt.rawReasoning }),
         ...(run?.dependsOn === undefined ? {} : { after: run.dependsOn.map(String) }),
         ...(run?.recoveryReason === undefined ? {} : { reason: run.recoveryReason }),
       };
     });
-  return {
-    start: async (input): Promise<NativeHarnessDelegateStart> => {
-      // The settings store never reports Ask (it reads a stored Ask as Off),
-      // so anything but Automatic is a person having turned subagents off.
-      if (options.admission.settings.current().creationPosture !== "automatic") {
-        return {
-          status: "refused",
-          reason: "creation-posture-off",
-          message: "Subagents are turned off in Settings → Octant Harness → Helper agents.",
-        };
-      }
-      // A paused run finishes what it started and starts nothing new — a
-      // helper included — until a person resumes it.
+  const delegation = {
+    ...options,
+    ...scope,
+    listTargets: options.listTargets ?? (() => []),
+    isPaused: () => {
       const status = options.sessions.read(scope.parentThreadId)?.session.status;
-      if (
+      return (
         status === "paused-by-user" ||
         status === "paused-by-advisor" ||
         status === "recovery-required"
-      ) {
-        return {
-          status: "refused",
-          reason: "session-paused",
-          message: "This run is paused, so no new helper starts until it is resumed.",
-        };
-      }
-      let controlRequest: AgentRunControlRequest;
-      try {
-        controlRequest = decodeAgentRunControlRequest({
-          requestId: options.uuid(),
-          parentThreadId: scope.parentThreadId,
-          role: input.role,
-          task: input.task,
-          ...(input.includeParentContext ? { includeParentContext: true } : {}),
-          ...(input.after === undefined || input.after.length === 0
-            ? {}
-            : { dependsOn: input.after }),
-        });
-      } catch {
-        return { status: "refused", reason: "invalid-delegation" };
-      }
-      options.sessions.ensure({
-        threadId: scope.parentThreadId,
-        mode: scope.mode,
-        projectId: scope.projectId,
-        leadSlotId: "default" as never,
-        lead: scope.lead,
-      });
-      const admission = await admitAgentRunControlRequest(options.admission, {
-        controlRequest,
-        windowId: scope.windowId,
-        confirmed: false,
-        routeOverride: (parent) => {
-          const decision = options.router.resolve({
-            job: nativeHarnessJobForRole(input.role),
-            projectId: scope.projectId,
-          });
-          options.sessions.recordRouteDecision(scope.parentThreadId, decision);
-          if (decision.kind === "unroutable") return undefined;
-          return {
-            providerInstanceId: decision.candidate.providerInstanceId,
-            modelId: decision.candidate.modelId,
-            ...(decision.candidate.reasoning === undefined
-              ? {}
-              : { reasoning: decision.candidate.reasoning }),
-            ...(parent.parentRoute.projectId === undefined
-              ? {}
-              : { projectId: parent.parentRoute.projectId }),
-          };
-        },
-      });
-      if (admission.kind === "refused") {
-        return { status: "refused", reason: admission.reason };
-      }
-      if (admission.kind === "invalid") {
-        return { status: "refused", reason: "invalid-delegation", message: admission.message };
-      }
-      const accepted =
-        "kind" in admission.result
-          ? admission.result
-          : ({ kind: "run-accepted", run: admission.result } as const);
-      if (accepted.kind === "run-command-failed") {
-        return { status: "refused", reason: accepted.reason, message: accepted.message };
-      }
-      const run = accepted.run;
-      if (run.lifecycleStatus === "queued" && run.recoveryReason === undefined) {
-        const started = options.orchestration.start(run.id, run.version, admission.liveAuthority);
-        if (started.kind === "run-command-failed") {
-          return { status: "refused", reason: started.reason, message: started.message };
-        }
-        return {
-          status: "accepted",
-          runId: String(run.id),
-          lifecycleStatus: started.run.lifecycleStatus,
-        };
-      }
-      return { status: "accepted", runId: String(run.id), lifecycleStatus: run.lifecycleStatus };
+      );
     },
+    routing: {
+      router: options.router,
+      recordDecision: (
+        _parent: AgentRunControlParentFacts,
+        decision: NativeHarnessRouteDecision,
+      ) => {
+        options.sessions.ensure({
+          threadId: scope.parentThreadId,
+          mode: scope.mode,
+          projectId: scope.projectId,
+          leadSlotId: NATIVE_HARNESS_BUILT_IN_SLOTS.default,
+          lead: scope.lead,
+        });
+        options.sessions.recordRouteDecision(scope.parentThreadId, decision);
+      },
+    },
+  };
+  return {
+    capabilities: async () => agentRunDelegationCapabilities(delegation),
+    start: async (input): Promise<NativeHarnessDelegateStart> =>
+      startAgentRunDelegation(delegation, input),
+    followUp: async (input) => followUpAgentRunDelegation(delegation, input),
     status: async (): Promise<ReadonlyArray<NativeHarnessDelegateChild>> => children(),
     wait: async ({ runIds, timeoutMs, signal }) => {
       const wanted = runIds === undefined ? undefined : new Set(runIds);
@@ -207,11 +157,16 @@ export function createNativeHarnessDelegatePort(
         return { status: "refused", reason: "run-not-found" };
       }
       if (run.lifecycleStatus !== "completed" || run.result === undefined) {
-        return { status: "not-ready", lifecycleStatus: run.lifecycleStatus };
+        return {
+          status: "not-ready",
+          lifecycleStatus: run.lifecycleStatus,
+          version: run.version,
+          generation: run.generation ?? 1,
+        };
       }
       const text = options.persistence.resultText(run.id);
       if (text === undefined) return { status: "refused", reason: "result-unavailable" };
-      return { status: "completed", text, truncated: run.result.truncated };
+      return collectAgentRunResult(options.persistence, run, text);
     },
   };
 }

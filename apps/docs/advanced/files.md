@@ -117,6 +117,12 @@ transitions, and an initial and a final state. Both use the same node and
 edge budgets as a board. Comments can sit on a participant, a message, a
 state, or a transition.
 
+A screen is a mockup block: a desktop, tablet, or phone frame and a tree of
+window, header, sidebar, list, list row, form field, button, toggle, tabs,
+card, image placeholder, and text. Nodes name a parent rather than nesting.
+The drawing is a wireframe. Its controls are not live: they cannot be focused
+and they do not submit. Ask `describe` for `mockup` to get a settings screen.
+
 The document fills the Canvas tab and the dock. Its header holds the version
 picker (choose an earlier version, or **Compare with** the previous one to see
 which blocks were added, changed, or removed), **Comments** with the number of

@@ -2,7 +2,9 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -198,6 +200,102 @@ describe("synced folder replica store", () => {
     writeFileSync(join(outside, "1.json"), "secret");
     const store = await offeredStore(folder);
     expect(await store.get("id/1.json")).toEqual({ status: "refused", reason: "key-refused" });
+  });
+
+  it("refuses a get whose key is a symlink, even to bytes inside the folder", async () => {
+    const folder = temporaryDirectory(homedir());
+    const store = await offeredStore(folder);
+    const instance = "11111111-1111-4111-8111-111111111111";
+    const sync = join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY, instance);
+    mkdirSync(sync, { recursive: true });
+    writeFileSync(join(sync, "real.json"), "real");
+    symlinkSync(join(sync, "real.json"), join(sync, "1.json"));
+    expect(await store.get(`${instance}/1.json`)).toEqual({
+      status: "refused",
+      reason: "key-refused",
+    });
+    expect(await store.get(`${instance}/real.json`)).toEqual({
+      status: "ready",
+      bytes: new TextEncoder().encode("real"),
+    });
+  });
+
+  it("refuses a get when a sync client swaps the file for a symlink outside the folder", async () => {
+    const folder = temporaryDirectory(homedir());
+    const outside = temporaryDirectory(homedir());
+    writeFileSync(join(outside, "stolen.json"), "outside-bytes");
+    const store = await offeredStore(folder);
+    const key = "11111111-1111-4111-8111-111111111111/1.json";
+    expect(await store.putIfAbsent(key, new TextEncoder().encode("kept"))).toEqual({
+      status: "stored",
+    });
+    const destination = join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY, key);
+    rmSync(destination);
+    symlinkSync(join(outside, "stolen.json"), destination);
+    expect(await store.get(key)).toEqual({ status: "refused", reason: "key-refused" });
+  });
+
+  it("refuses a publish whose parent directory was swapped for a symlink out of the folder", async () => {
+    const folder = temporaryDirectory(homedir());
+    const outside = temporaryDirectory(homedir());
+    const store = await offeredStore(folder);
+    const key = "11111111-1111-4111-8111-111111111111/1.json";
+    expect(await store.putIfAbsent(key, new TextEncoder().encode("kept"))).toEqual({
+      status: "stored",
+    });
+    const instance = "11111111-1111-4111-8111-111111111111";
+    const sync = join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY);
+    rmSync(join(sync, instance), { recursive: true });
+    mkdirSync(join(outside, instance));
+    writeFileSync(join(outside, instance, "1.json"), "old");
+    symlinkSync(join(outside, instance), join(sync, instance));
+    expect(await store.putIfAbsent(key, new TextEncoder().encode("no"))).toEqual({
+      status: "refused",
+      reason: "key-refused",
+    });
+    expect(readFileSync(join(outside, instance, "1.json"), "utf8")).toBe("old");
+    expect(readdirSync(join(outside, instance))).toEqual(["1.json"]);
+    expect(readlinkSync(join(sync, instance))).toBe(join(outside, instance));
+  });
+
+  it("refuses a publish whose key name is a symlink instead of reporting it as taken", async () => {
+    const folder = temporaryDirectory(homedir());
+    const outside = temporaryDirectory(homedir());
+    writeFileSync(join(outside, "victim.json"), "victim");
+    const store = await offeredStore(folder);
+    const key = "11111111-1111-4111-8111-111111111111/1.json";
+    const sync = join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY);
+    mkdirSync(join(sync, "11111111-1111-4111-8111-111111111111"), { recursive: true });
+    symlinkSync(join(outside, "victim.json"), join(sync, key));
+    expect(await store.putIfAbsent(key, new TextEncoder().encode("no"))).toEqual({
+      status: "refused",
+      reason: "key-refused",
+    });
+    expect(readFileSync(join(outside, "victim.json"), "utf8")).toBe("victim");
+    expect(readlinkSync(join(sync, key))).toBe(join(outside, "victim.json"));
+  });
+
+  it("refuses a write through a key-directory symlink that stays inside the folder", async () => {
+    const folder = temporaryDirectory(homedir());
+    const store = await offeredStore(folder);
+    const instance = "11111111-1111-4111-8111-111111111111";
+    expect(await store.putIfAbsent(`${instance}/1.json`, new TextEncoder().encode("kept"))).toEqual(
+      { status: "stored" },
+    );
+    symlinkSync(
+      join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY, instance),
+      join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY, "alias"),
+    );
+    expect(await store.putIfAbsent("alias/2.json", new TextEncoder().encode("no"))).toEqual({
+      status: "refused",
+      reason: "key-refused",
+    });
+    expect(existsSync(join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY, instance, "2.json"))).toBe(
+      false,
+    );
+    expect(await store.putIfAbsent(`${instance}/2.json`, new TextEncoder().encode("kept"))).toEqual(
+      { status: "stored" },
+    );
   });
 
   it("does not create directories through an intermediate symlink out of the folder", async () => {

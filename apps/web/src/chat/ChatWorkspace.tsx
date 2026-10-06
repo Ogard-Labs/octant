@@ -1,3 +1,4 @@
+import type { ProviderModelOptionValues } from "@octant/contracts";
 import {
   decodeChatAttachmentId,
   type ChatAttachmentId,
@@ -557,14 +558,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   function selectProviderModel(selection: {
     readonly providerInstanceId: ChatThread["providerInstanceId"];
     readonly modelId: ChatThread["modelId"];
+    readonly modelOptionValues?: ProviderModelOptionValues;
   }) {
-    void enqueueThreadCommand(async (previous) => {
+    return enqueueThreadCommand(async (previous) => {
       const result = await props.controller.execute({
         kind: "change-chat-provider",
         threadId: thread.id,
         expectedVersion: queuedVersion(previous),
         providerInstanceId: selection.providerInstanceId,
         modelId: selection.modelId,
+        ...(selection.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: selection.modelOptionValues }),
       });
       return { value: undefined, base: baseFromResult(result) };
     }).catch(() => undefined);
@@ -1218,6 +1223,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               onSelectModel: (selection: {
                 readonly providerInstanceId: (typeof view.thread)["providerInstanceId"];
                 readonly modelId: (typeof view.thread)["modelId"];
+                readonly modelOptionValues?: ProviderModelOptionValues;
               }) => selectProviderModel(selection),
             })}
         onProviderChange={(providerId) => {

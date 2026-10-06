@@ -21,6 +21,7 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { Cause, Effect, Exit, Option } from "effect";
+import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
 import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
 import type {
   NativeHarnessRequest,
@@ -32,6 +33,13 @@ import {
   type NativeHarnessTranscriptStore,
 } from "../harness/nativeHarnessTranscriptStore";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import { sendWithEndpointRetry } from "./endpointRetry";
+import { runProviderEffect } from "./runProviderEffect";
+import {
+  directEndpointRequestResolver,
+  honestDirectEndpointCapabilities,
+  inspectDirectEndpointCredential,
+} from "./directEndpointSubscriptionOAuth";
 import { sendChatCompletionsTurn, type ChatCompletionsTurnResult } from "./openAiChatCompletions";
 import {
   makeOpenAiCompatibleEndpoint,
@@ -55,6 +63,7 @@ import {
 } from "./openAiResponses";
 import { capabilityEchoToolDefinition, isCapabilityEchoToolCall } from "./openAiToolEncoding";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
 
 const initialCapabilities: ProviderCapabilities = {
   streaming: "unavailable",
@@ -99,6 +108,13 @@ export interface OpenAiCompatibleDriverOptions {
    * one started; the server passes the journal-backed store.
    */
   readonly transcripts?: NativeHarnessTranscriptStore;
+  /** How the harness retries this endpoint and where its lead goes when it stays down. */
+  readonly harness?: NativeHarnessEndpointHooks;
+  /**
+   * Host refresh and access for a subscription-oauth credential. Absent means
+   * a stored pointer cannot be used; it is never sent as an API key.
+   */
+  readonly subscriptionOAuth?: SubscriptionOAuthHost;
 }
 
 type CompatibleTurnResult = ProtocolTurnResult | ChatCompletionsTurnResult;
@@ -111,6 +127,11 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
     authStrategy: options.configuration.authentication,
   };
   const transcripts = options.transcripts ?? new MemoryNativeHarnessTranscriptStore();
+  const transport = openAiCompatibleTransport(options, profile, clock);
+  options.harness?.endpoints?.register(options.instanceId, {
+    open: transport.open,
+    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
+  });
   return {
     kind: profile.driverKind,
     probe: ({ instanceId }) =>
@@ -118,9 +139,40 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.tryPromise({
             try: async () => {
-              const endpoint = endpointFor(options, options.credentialResolver, profile);
-              const result = await probeModels(endpoint);
               const observedAt = clock() as UtcTimestamp;
+              const gate = await inspectDirectEndpointCredential({
+                authentication: profile.authStrategy,
+                expectedDescriptorId: options.configuration.oauthDescriptorId,
+                credentialResolver: options.credentialResolver,
+                instanceId,
+                host: options.subscriptionOAuth,
+                now: () => Date.parse(observedAt),
+              });
+              if (gate.kind === "report") {
+                const refused = decodeProviderObservedState({
+                  instanceId,
+                  readiness: gate.readiness,
+                  processState: "stopped",
+                  credentialStatus: gate.credentialStatus,
+                  models: [],
+                  capabilities: honestDirectEndpointCapabilities,
+                  message: gate.message,
+                  observedAt,
+                });
+                options.runtimeRegistry.setObservedState(refused);
+                return refused;
+              }
+              const plainCredential = gate.kind === "plain" ? gate.credential : undefined;
+              const endpoint = endpointFor(
+                options,
+                gate.kind === "oauth"
+                  ? directEndpointRequestResolver(oauthResolverInput(options, profile, clock))
+                  : plainCredential !== undefined && plainCredential.length > 0
+                    ? { has: async () => true, resolve: async () => plainCredential }
+                    : options.credentialResolver,
+                profile,
+              );
+              const result = await probeModels(endpoint);
               // Do NOT run a generating tool-echo turn during routine probes:
               // ChatService.#prepareTurnExecution calls driver.probe() before
               // every Chat turn, so a probe-time tool echo would add an
@@ -167,7 +219,11 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.tryPromise({
             try: async () => {
-              const endpoint = endpointFor(options, options.credentialResolver, profile);
+              const endpoint = endpointFor(
+                options,
+                directEndpointRequestResolver(oauthResolverInput(options, profile, clock)),
+                profile,
+              );
               // Propagate transport failures (auth, timeout, provider error)
               // so the user sees the actual error instead of a false
               // "unsupported" result.
@@ -195,7 +251,7 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
                 "Provider Project root must be an absolute normalized path.",
               ),
             )
-          : makeConnection(options, profile, clock, makeCorrelation, transcripts, {
+          : makeConnection(options, profile, transport, clock, makeCorrelation, transcripts, {
               projectRoot,
               mode: mode ?? "chat",
             }),
@@ -205,6 +261,7 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
 function makeConnection(
   options: OpenAiCompatibleDriverOptions,
   profile: OpenAiCompatibleDriverProfile,
+  transport: NativeHarnessTransport,
   clock: () => string,
   makeCorrelation: () => string,
   transcripts: NativeHarnessTranscriptStore,
@@ -215,8 +272,11 @@ function makeConnection(
     driverKind: profile.driverKind,
     projectRoot: input.projectRoot,
     mode: input.mode,
-    transport: openAiCompatibleTransport(options, profile, clock),
+    transport,
     transcripts,
+    ...(options.harness?.leadFallback === undefined
+      ? {}
+      : { leadFallback: options.harness.leadFallback }),
     admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
     onSessionCountChange: (delta) =>
       options.runtimeRegistry.setActiveSessionCount(
@@ -277,29 +337,53 @@ function openAiCompatibleTransport(
 ): NativeHarnessTransport {
   return {
     open: async () => {
-      const credential = await resolveSessionCredential(options, profile);
-      let endpoint: OpenAiCompatibleEndpoint | undefined = endpointFor(
-        options,
-        credential === undefined
-          ? undefined
-          : { has: async () => true, resolve: async () => credential },
-        profile,
-      );
+      const observedAt = clock();
+      const gate = await inspectDirectEndpointCredential({
+        authentication: profile.authStrategy,
+        expectedDescriptorId: options.configuration.oauthDescriptorId,
+        credentialResolver: options.credentialResolver,
+        instanceId: options.instanceId,
+        host: options.subscriptionOAuth,
+        now: () => Date.parse(observedAt),
+      });
+      if (gate.kind === "report") throw failure(gate.readiness, gate.message);
+      const plainCredential = gate.kind === "plain" ? gate.credential : undefined;
+      if (
+        profile.authStrategy !== "none" &&
+        (plainCredential === undefined || plainCredential.length === 0) &&
+        gate.kind !== "oauth"
+      ) {
+        throw failure("unauthenticated", "The provider credential is missing or unavailable.");
+      }
+      const resolver =
+        gate.kind === "oauth"
+          ? directEndpointRequestResolver(oauthResolverInput(options, profile, clock))
+          : plainCredential !== undefined && plainCredential.length > 0
+            ? { has: async () => true, resolve: async () => plainCredential }
+            : undefined;
+      let endpoint: OpenAiCompatibleEndpoint | undefined = endpointFor(options, resolver, profile);
       return {
         fits: (request) => endpoint !== undefined && requestFits(options, endpoint, request),
         send: async (request, stream) => {
           const active = endpoint;
           if (active === undefined) throw failure("protocol", "Provider session is not active.");
-          const result = await sendCompatibleRequest(options, active, request, stream);
-          recordObservedTurn(options, result, clock);
-          return {
-            text: result.text,
-            toolCalls: result.toolCalls,
-            ...(result.usage === undefined ? {} : { usage: result.usage }),
-            ...(result.rateLimitBuckets === undefined
-              ? {}
-              : { rateLimitBuckets: result.rateLimitBuckets }),
-          };
+          return sendWithEndpointRetry({
+            signal: stream.signal,
+            onEvent: stream.onEvent,
+            options: options.harness?.retry,
+            attempt: async (attempt) => {
+              const result = await sendCompatibleRequest(options, active, request, attempt);
+              recordObservedTurn(options, result, clock);
+              return {
+                text: result.text,
+                toolCalls: result.toolCalls,
+                ...(result.usage === undefined ? {} : { usage: result.usage }),
+                ...(result.rateLimitBuckets === undefined
+                  ? {}
+                  : { rateLimitBuckets: result.rateLimitBuckets }),
+              };
+            },
+          });
         },
         release: () => {
           endpoint = undefined;
@@ -348,11 +432,12 @@ async function sendCompatibleRequest(
   const onEvent = (event: ProtocolTurnEvent) => {
     // Tool calls arrive on the result; the loop asks for them as a step.
     if (event.kind === "tool-call") return;
-    stream.onEvent(
-      event.kind === "usage"
-        ? { kind: "usage", inputTokens: event.inputTokens, outputTokens: event.outputTokens }
-        : { kind: event.kind, text: event.text },
-    );
+    if (event.kind === "usage") {
+      const { sequence: _sequence, ...usage } = event;
+      stream.onEvent(usage);
+      return;
+    }
+    stream.onEvent({ kind: event.kind, text: event.text });
   };
   const shared = {
     endpoint,
@@ -373,7 +458,7 @@ async function sendCompatibleRequest(
     attempt: async (protocol): Promise<CompatibleProtocolAttemptResult<CompatibleTurnResult>> => {
       if (protocol === "chat-completions") {
         try {
-          return { ok: true, value: await Effect.runPromise(sendChatCompletionsTurn(shared)) };
+          return { ok: true, value: await runProviderEffect(sendChatCompletionsTurn(shared)) };
         } catch (error) {
           return {
             ok: false,
@@ -389,7 +474,7 @@ async function sendCompatibleRequest(
       try {
         return {
           ok: true,
-          value: await Effect.runPromise(
+          value: await runProviderEffect(
             sendResponsesTurn({
               ...shared,
               onAttemptFailure: (value) => {
@@ -472,6 +557,21 @@ function recordObservedTurn(
       : { lastSuccessfulProbeAt: current.lastSuccessfulProbeAt }),
     observedAt: clock(),
   });
+}
+
+function oauthResolverInput(
+  options: OpenAiCompatibleDriverOptions,
+  profile: OpenAiCompatibleDriverProfile,
+  clock: () => string,
+) {
+  return {
+    authentication: profile.authStrategy,
+    expectedDescriptorId: options.configuration.oauthDescriptorId,
+    credentialResolver: options.credentialResolver,
+    instanceId: options.instanceId,
+    host: options.subscriptionOAuth,
+    now: () => Date.parse(clock()),
+  };
 }
 
 function authStrategyOf(options: OpenAiCompatibleDriverOptions): OpenAiCompatibleAuthStrategy {
@@ -592,20 +692,6 @@ function protocolFailure(
     outputStarted: metadata?.outputStarted ?? false,
     ...(metadata?.httpStatus === undefined ? {} : { httpStatus: metadata.httpStatus }),
   };
-}
-
-async function resolveSessionCredential(
-  options: OpenAiCompatibleDriverOptions,
-  profile: OpenAiCompatibleDriverProfile,
-): Promise<string | undefined> {
-  if (profile.authStrategy === "none") return undefined;
-  try {
-    const credential = (await options.credentialResolver?.resolve(options.instanceId)) ?? "";
-    if (credential.length === 0) throw new Error("missing");
-    return credential;
-  } catch {
-    throw failure("unauthenticated", "The provider credential is missing or unavailable.");
-  }
 }
 
 function manualModels(modelIds: readonly ProviderModelId[]) {

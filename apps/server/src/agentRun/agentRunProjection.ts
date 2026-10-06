@@ -1,4 +1,5 @@
 import {
+  MAX_AGENT_RESULT_PACKETS,
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
   USAGE_RESUME_SETTLED,
@@ -98,6 +99,7 @@ export interface ListAgentRunCenterCandidatesInput {
 }
 
 export interface AgentRunStatusApplyInput {
+  readonly generation?: number;
   readonly runId: AgentRunId;
   readonly fromStatus: AgentRunLifecycleStatus;
   readonly toStatus: AgentRunLifecycleStatus;
@@ -153,6 +155,8 @@ export class AgentRunProjection implements Projection {
   // Runs live only in these maps, so every host start must replay them all:
   // resuming from the stored checkpoint showed a restarted host no children.
   readonly holdsStateInMemory = true as const;
+  readonly #resultHistory = new Map<AgentRunId, ReadonlyArray<AgentRun>>();
+  readonly #truncatedResults = new Set<AgentRunId>();
   readonly #byId = new Map<AgentRunId, AgentRun>();
   readonly #byRequestId = new Map<AgentRunRequestId, AgentRunId>();
   readonly #byParent = new Map<AgentRunParentThreadId, Set<AgentRunId>>();
@@ -182,6 +186,7 @@ export class AgentRunProjection implements Projection {
         runId: payload.runId,
         fromStatus: payload.fromStatus,
         toStatus: payload.toStatus,
+        ...(payload.generation === undefined ? {} : { generation: payload.generation }),
         version: payload.version,
         updatedAt: event.occurredAt as UtcTimestamp,
         ...(payload.recoveryReason === undefined ? {} : { recoveryReason: payload.recoveryReason }),
@@ -236,7 +241,12 @@ export class AgentRunProjection implements Projection {
     if (existing.lifecycleStatus !== input.fromStatus && existing.version + 1 === input.version) {
       // Allow only if versions still advance; otherwise ignore inconsistent out-of-order.
     }
+    const generation = input.generation ?? existing.generation ?? 1;
+    const newGeneration = generation > (existing.generation ?? 1);
     const {
+      result: previousResult,
+      resultDelivery: previousDelivery,
+      usageResume: previousUsageResume,
       recoveryReason: _previousRecoveryReason,
       usage: _previousUsage,
       usageLimit: _previousUsageLimit,
@@ -244,6 +254,14 @@ export class AgentRunProjection implements Projection {
     } = existing;
     const next = decodeAgentRun({
       ...runWithoutRecoveryReason,
+      generation,
+      ...(!newGeneration && previousResult !== undefined ? { result: previousResult } : {}),
+      ...(!newGeneration && previousDelivery !== undefined
+        ? { resultDelivery: previousDelivery }
+        : {}),
+      ...(!newGeneration && previousUsageResume !== undefined
+        ? { usageResume: previousUsageResume }
+        : {}),
       lifecycleStatus: input.toStatus,
       version: input.version,
       updatedAt: input.updatedAt,
@@ -253,9 +271,27 @@ export class AgentRunProjection implements Projection {
       ...(input.result === undefined ? {} : { result: input.result }),
       ...(input.usage === undefined ? {} : { usage: input.usage }),
       ...(input.usageLimit === undefined ? {} : { usageLimit: input.usageLimit }),
-      resultAcknowledgement: input.resultAcknowledgement ?? existing.resultAcknowledgement,
+      resultAcknowledgement: newGeneration
+        ? { required: false, acknowledged: false }
+        : (input.resultAcknowledgement ?? existing.resultAcknowledgement),
     });
     this.#index(next);
+    if (next.result !== undefined || next.recoveryReason !== undefined) {
+      const previous = this.#resultHistory.get(runId) ?? [];
+      const snapshots = [...previous.filter((item) => (item.generation ?? 1) !== generation), next];
+      if (snapshots.length > MAX_AGENT_RESULT_PACKETS) this.#truncatedResults.add(runId);
+      this.#resultHistory.set(runId, snapshots.slice(-MAX_AGENT_RESULT_PACKETS));
+    }
+  }
+
+  resultHistory(runId: AgentRunId): {
+    readonly runs: ReadonlyArray<AgentRun>;
+    readonly truncated: boolean;
+  } {
+    return {
+      runs: this.#resultHistory.get(runId) ?? [],
+      truncated: this.#truncatedResults.has(runId),
+    };
   }
 
   /**
@@ -460,6 +496,8 @@ export class AgentRunProjection implements Projection {
   }
 
   clear(): void {
+    this.#resultHistory.clear();
+    this.#truncatedResults.clear();
     this.#byId.clear();
     this.#byRequestId.clear();
     this.#byParent.clear();

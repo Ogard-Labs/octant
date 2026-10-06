@@ -2702,6 +2702,7 @@ function normalizedOperationEvent(
   if (event.category === "child-activity")
     return {
       kind: "child-activity",
+      ...(event.childObservation === undefined ? {} : { observation: event.childObservation }),
       childId: event.requestId ?? "provider-child",
       state: (event.status ?? "waiting") as never,
       summary:

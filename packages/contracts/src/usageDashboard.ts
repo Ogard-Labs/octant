@@ -41,6 +41,13 @@ export const UsageAttributionDimension = Schema.Literal(
 );
 export type UsageAttributionDimension = typeof UsageAttributionDimension.Type;
 
+/**
+ * The "thread" breakdown key for usage whose thread was purged. The rows keep
+ * their token aggregates but carry no thread identity, so they group under one
+ * anonymous line instead of under a subject reference.
+ */
+export const USAGE_ERASED_THREADS_KEY = "erased-threads";
+
 export const UsageDimensionSourceStatus = Schema.Literal("recorded", "partial", "unavailable");
 export type UsageDimensionSourceStatus = typeof UsageDimensionSourceStatus.Type;
 
@@ -144,7 +151,7 @@ export const UsageDetailRow = Schema.Struct({
   modelId: ProviderModelId,
   requestShape: StableRequestShape,
   subjectType: Schema.NonEmptyTrimmedString,
-  subjectId: Schema.String,
+  subjectId: Schema.NullOr(Schema.String),
   mode: Schema.optional(OctantMode),
   projectId: Schema.optional(ProjectId),
   quality: UsageQuality,

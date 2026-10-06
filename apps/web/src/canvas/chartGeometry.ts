@@ -41,3 +41,77 @@ export function scaleY(value: number, domain: YDomain, height: number, inset: nu
   const p = (value - domain.min) / span;
   return inset + (1 - p) * (height - inset * 2);
 }
+
+/** Center of a category slot along a shared x axis. */
+export function categoryCenter(index: number, count: number, width: number, inset: number): number {
+  if (count <= 0) return width / 2;
+  const slot = (width - inset * 2) / count;
+  return inset + slot * index + slot / 2;
+}
+
+export interface PieWedge {
+  readonly start: number;
+  readonly end: number;
+  readonly fraction: number;
+}
+
+/** Clockwise wedges from 12 o'clock. A zero total yields no arc. */
+export function pieWedges(values: ReadonlyArray<number>): ReadonlyArray<PieWedge> {
+  const total = values.reduce((sum, value) => sum + Math.max(0, value), 0);
+  if (total <= 0) return values.map(() => ({ start: 0, end: 0, fraction: 0 }));
+  let cursor = -Math.PI / 2;
+  return values.map((value) => {
+    const fraction = Math.max(0, value) / total;
+    const start = cursor;
+    const end = cursor + fraction * Math.PI * 2;
+    cursor = end;
+    return { start, end, fraction };
+  });
+}
+
+function roundCoord(value: number): string {
+  return value.toFixed(2);
+}
+
+/**
+ * A pie wedge, or a donut ring when inner is greater than zero.
+ * Angles are radians, zero at 3 o'clock, increasing clockwise on screen.
+ */
+export function ringPath(
+  cx: number,
+  cy: number,
+  outer: number,
+  inner: number,
+  start: number,
+  end: number,
+): string {
+  const span = end - start;
+  if (span <= 1e-6) return "";
+  if (span >= Math.PI * 2 - 1e-4) {
+    if (inner <= 0) {
+      return `M ${roundCoord(cx - outer)} ${roundCoord(cy)} A ${roundCoord(outer)} ${roundCoord(outer)} 0 1 1 ${roundCoord(cx + outer)} ${roundCoord(cy)} A ${roundCoord(outer)} ${roundCoord(outer)} 0 1 1 ${roundCoord(cx - outer)} ${roundCoord(cy)} Z`;
+    }
+    return [
+      `M ${roundCoord(cx - outer)} ${roundCoord(cy)}`,
+      `A ${roundCoord(outer)} ${roundCoord(outer)} 0 1 1 ${roundCoord(cx + outer)} ${roundCoord(cy)}`,
+      `A ${roundCoord(outer)} ${roundCoord(outer)} 0 1 1 ${roundCoord(cx - outer)} ${roundCoord(cy)}`,
+      `M ${roundCoord(cx - inner)} ${roundCoord(cy)}`,
+      `A ${roundCoord(inner)} ${roundCoord(inner)} 0 1 0 ${roundCoord(cx + inner)} ${roundCoord(cy)}`,
+      `A ${roundCoord(inner)} ${roundCoord(inner)} 0 1 0 ${roundCoord(cx - inner)} ${roundCoord(cy)}`,
+      "Z",
+    ].join(" ");
+  }
+  const large = span > Math.PI ? 1 : 0;
+  const outerStartX = cx + outer * Math.cos(start);
+  const outerStartY = cy + outer * Math.sin(start);
+  const outerEndX = cx + outer * Math.cos(end);
+  const outerEndY = cy + outer * Math.sin(end);
+  if (inner <= 0) {
+    return `M ${roundCoord(cx)} ${roundCoord(cy)} L ${roundCoord(outerStartX)} ${roundCoord(outerStartY)} A ${roundCoord(outer)} ${roundCoord(outer)} 0 ${String(large)} 1 ${roundCoord(outerEndX)} ${roundCoord(outerEndY)} Z`;
+  }
+  const innerEndX = cx + inner * Math.cos(end);
+  const innerEndY = cy + inner * Math.sin(end);
+  const innerStartX = cx + inner * Math.cos(start);
+  const innerStartY = cy + inner * Math.sin(start);
+  return `M ${roundCoord(outerStartX)} ${roundCoord(outerStartY)} A ${roundCoord(outer)} ${roundCoord(outer)} 0 ${String(large)} 1 ${roundCoord(outerEndX)} ${roundCoord(outerEndY)} L ${roundCoord(innerEndX)} ${roundCoord(innerEndY)} A ${roundCoord(inner)} ${roundCoord(inner)} 0 ${String(large)} 0 ${roundCoord(innerStartX)} ${roundCoord(innerStartY)} Z`;
+}

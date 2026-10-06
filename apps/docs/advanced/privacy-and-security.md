@@ -35,7 +35,11 @@ The durable event journal is an SQLite-backed append-only store. Everything
 Octant does that matters is journaled as versioned events, and every
 projection can be rebuilt from the journal. A confirmed thread purge is the
 one data-lifecycle exception that removes that thread's own journal events
-and derived projections so a rebuild cannot resurrect the transcript. See
+and derived projections so a rebuild cannot resurrect the transcript.
+Usage rows are de-linked rather than kept whole: their aggregates stay for
+spend accounting while the purged thread's identity leaves them, and a
+Project-scoped purge also erases that Project's memory and Canvases and
+reports the scopes it deleted. See
 [Recovery and troubleshooting](/advanced/recovery) for how the journal backs
 recovery.
 
@@ -43,8 +47,9 @@ Settings → Data & privacy includes a read-only data map of what this host stor
 where — journal, projections, artifacts, named Keychain or secret-service
 entries (never values), caches, and the categories that leave the machine
 (provider calls, update checks, marketplace fetches). A category the host
-cannot verify is shown as unknown. The map does not purge or export; those
-actions stay on thread retention and the thread export menu.
+cannot verify is shown as unknown. The map itself performs no destructive
+action; export and purge are separate confirmed operations on the same
+Data & privacy surface.
 
 An unsent composer draft is ordinary local client storage on the machine
 where it was typed. It never enters the journal, diagnostics, or a provider
@@ -57,7 +62,22 @@ names the instant it was cut. Credentials, OAuth tokens, raw provider
 payloads, resume cursors, and host filesystem paths never enter the file.
 Attachment bytes and other bulk content that live outside the journal are
 named as omissions rather than inlined. A paired device may export only a
-thread it can already read. This is not a host-wide dump.
+thread it can already read.
+
+**Export my data** is the host-wide cut: a local-owner-only read of every
+projectable thread across Chat, Work, and Code, plus Projects, memory,
+Canvases, settings, usage rows, and retention state including purge
+tombstones, streamed as line-delimited JSON. A remote or paired device
+principal is refused before any export data is read, and the same secret and
+path exclusions apply as in the thread bundle: some non-thread records that
+carry a forbidden key are left out, with a generic entry on the export's
+omissions page; a forbidden key in a thread or emitted page can instead
+refuse the export. A confirmed thread purge
+deletes that thread's journal events, projections, and bulk content, so a
+later host export carries no content trace of it. Its id remains only in
+the purge tombstone, by design. Its usage rows stay for accounting but are
+de-linked, so they carry token counts and no thread id, and Project memory
+is kept.
 
 ## Credentials
 

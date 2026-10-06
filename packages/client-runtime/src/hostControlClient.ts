@@ -56,7 +56,7 @@ export class HostControlClientError extends Error {
 }
 
 export type HostExportClientResult =
-  | { readonly kind: "exported"; readonly bundle: HostExportBundle }
+  | { readonly kind: "exported"; readonly bundle: HostExportBundle; readonly payload: string }
   | {
       readonly kind: "refused";
       readonly reason: "local-owner-only" | "unrepresentable" | "incomplete";
@@ -221,7 +221,7 @@ export function createHostControlClient(options: HostControlClientOptions): Host
       if (threadExportContainsForbiddenKey(assembled.bundle)) {
         return { kind: "refused", reason: "unrepresentable" };
       }
-      return assembled;
+      return { ...assembled, payload: text };
     },
   };
 }

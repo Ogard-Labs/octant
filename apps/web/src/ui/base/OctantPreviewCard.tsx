@@ -1,4 +1,5 @@
-import type { ReactElement, ReactNode } from "react";
+import { useContext, useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { Native } from "./NativeContextMenu";
 import {
   PreviewCard,
   PreviewCardPopup,
@@ -27,8 +28,14 @@ export interface OctantPreviewCardProps {
  * lets it hold actions. Content that only describes belongs in a tooltip.
  */
 export function OctantPreviewCard(props: OctantPreviewCardProps) {
+  const nativeMenu = useContext(Native);
+  const [open, setOpen] = useState(false);
+  const menuOpen = nativeMenu?.open === true;
+  useEffect(() => {
+    if (menuOpen) setOpen(false);
+  }, [menuOpen]);
   return (
-    <PreviewCard>
+    <PreviewCard open={open && !menuOpen} onOpenChange={(next) => setOpen(next && !menuOpen)}>
       <PreviewCardTrigger closeDelay={150} delay={350} render={props.children} />
       <PreviewCardPortal>
         <PreviewCardPositioner

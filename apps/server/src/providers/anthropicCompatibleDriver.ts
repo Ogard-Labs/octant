@@ -9,6 +9,7 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
+  type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
@@ -18,6 +19,7 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { Effect } from "effect";
+import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
 import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
 import type {
   NativeHarnessRequest,
@@ -28,6 +30,13 @@ import {
   type NativeHarnessTranscriptStore,
 } from "../harness/nativeHarnessTranscriptStore";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import { sendWithEndpointRetry } from "./endpointRetry";
+import { runProviderEffect } from "./runProviderEffect";
+import {
+  directEndpointRequestResolver,
+  honestDirectEndpointCapabilities,
+  inspectDirectEndpointCredential,
+} from "./directEndpointSubscriptionOAuth";
 import {
   makeAnthropicCompatibleEndpoint,
   markAnthropicModelVerified,
@@ -42,6 +51,7 @@ import {
   type AnthropicTurnResult,
 } from "./anthropicMessages";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
 
 const initialCapabilities: ProviderCapabilities = {
   streaming: "unavailable",
@@ -75,6 +85,10 @@ export interface AnthropicCompatibleDriverOptions {
   readonly onConnectionReleased?: () => void;
   /** Where harness sessions keep their conversation; see the OpenAI-compatible driver. */
   readonly transcripts?: NativeHarnessTranscriptStore;
+  /** How the harness retries this endpoint and where its lead goes when it stays down. */
+  readonly harness?: NativeHarnessEndpointHooks;
+  /** Host refresh and access for a subscription-oauth credential. */
+  readonly subscriptionOAuth?: SubscriptionOAuthHost;
 }
 
 export function makeAnthropicCompatibleDriver(
@@ -83,6 +97,11 @@ export function makeAnthropicCompatibleDriver(
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? randomUUID;
   const transcripts = options.transcripts ?? new MemoryNativeHarnessTranscriptStore();
+  const transport = anthropicCompatibleTransport(options, clock);
+  options.harness?.endpoints?.register(options.instanceId, {
+    open: transport.open,
+    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
+  });
   return {
     kind: "anthropic-compatible",
     probe: ({ instanceId }) =>
@@ -90,9 +109,37 @@ export function makeAnthropicCompatibleDriver(
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.tryPromise({
             try: async () => {
-              const endpoint = endpointFor(options, options.credentialResolver);
-              const result = await probeAnthropicModels(endpoint);
               const observedAt = clock() as UtcTimestamp;
+              const gate = await inspectDirectEndpointCredential({
+                authentication: options.configuration.authentication,
+                expectedDescriptorId: options.configuration.oauthDescriptorId,
+                credentialResolver: options.credentialResolver,
+                instanceId,
+                host: options.subscriptionOAuth,
+                now: () => Date.parse(observedAt),
+              });
+              if (gate.kind === "report") {
+                const refused = decodeProviderObservedState({
+                  instanceId,
+                  readiness: gate.readiness,
+                  processState: "stopped",
+                  credentialStatus: gate.credentialStatus,
+                  models: [],
+                  capabilities: honestDirectEndpointCapabilities,
+                  message: gate.message,
+                  observedAt,
+                });
+                options.runtimeRegistry.setObservedState(refused);
+                return refused;
+              }
+              const endpoint = endpointFor(
+                options,
+                gate.kind === "oauth"
+                  ? directEndpointRequestResolver(anthropicOAuthInput(options, clock))
+                  : options.credentialResolver,
+                gate.kind === "oauth",
+              );
+              const result = await probeAnthropicModels(endpoint);
               const probe = decodeProviderObservedState({
                 instanceId,
                 readiness: result.readiness,
@@ -121,7 +168,7 @@ export function makeAnthropicCompatibleDriver(
                 "Provider Project root must be an absolute normalized path.",
               ),
             )
-          : makeConnection(options, clock, makeCorrelation, transcripts, {
+          : makeConnection(options, transport, clock, makeCorrelation, transcripts, {
               projectRoot,
               mode: mode ?? "chat",
             }),
@@ -130,6 +177,7 @@ export function makeAnthropicCompatibleDriver(
 
 function makeConnection(
   options: AnthropicCompatibleDriverOptions,
+  transport: NativeHarnessTransport,
   clock: () => string,
   makeCorrelation: () => string,
   transcripts: NativeHarnessTranscriptStore,
@@ -140,13 +188,12 @@ function makeConnection(
     driverKind: "anthropic-compatible",
     projectRoot: input.projectRoot,
     mode: input.mode,
-    transport: anthropicCompatibleTransport(options, clock),
+    transport,
     transcripts,
-    admitTurn: (turn, modelId) => {
-      const observed = options.runtimeRegistry.observedState(options.instanceId);
-      const model = observed?.models.find((candidate) => candidate.id === modelId);
-      return validateChatTurnInput(turn, observed?.capabilities ?? initialCapabilities, model);
-    },
+    ...(options.harness?.leadFallback === undefined
+      ? {}
+      : { leadFallback: options.harness.leadFallback }),
+    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
     onSessionCountChange: (delta) =>
       options.runtimeRegistry.setActiveSessionCount(
         options.instanceId,
@@ -160,6 +207,17 @@ function makeConnection(
   });
 }
 
+/** Whether the endpoint accepts this turn's input for the session's model. */
+function admitTurn(
+  options: AnthropicCompatibleDriverOptions,
+  turn: ProviderTurnInput,
+  modelId: ProviderModelId,
+): ProviderFailure | undefined {
+  const observed = options.runtimeRegistry.observedState(options.instanceId);
+  const model = observed?.models.find((candidate) => candidate.id === modelId);
+  return validateChatTurnInput(turn, observed?.capabilities ?? initialCapabilities, model);
+}
+
 /**
  * The endpoint as the harness loop sees it. The Messages API takes the whole
  * conversation, results included, so the request is the loop's history as is;
@@ -171,57 +229,84 @@ function anthropicCompatibleTransport(
 ): NativeHarnessTransport {
   return {
     open: async () => {
-      const credential = await resolveSessionCredential(options);
+      const observedAt = clock();
+      const gate = await inspectDirectEndpointCredential({
+        authentication: options.configuration.authentication,
+        expectedDescriptorId: options.configuration.oauthDescriptorId,
+        credentialResolver: options.credentialResolver,
+        instanceId: options.instanceId,
+        host: options.subscriptionOAuth,
+        now: () => Date.parse(observedAt),
+      });
+      if (gate.kind === "report") throw failure(gate.readiness, gate.message);
+      const plainCredential = gate.kind === "plain" ? gate.credential : undefined;
+      if (
+        options.configuration.authentication !== "none" &&
+        gate.kind !== "oauth" &&
+        (plainCredential === undefined || plainCredential.length === 0)
+      ) {
+        throw failure("unauthenticated", "The provider credential is missing or unavailable.");
+      }
+      const resolver =
+        gate.kind === "oauth"
+          ? directEndpointRequestResolver(anthropicOAuthInput(options, clock))
+          : plainCredential !== undefined && plainCredential.length > 0
+            ? { has: async () => true, resolve: async () => plainCredential }
+            : undefined;
       let endpoint: AnthropicCompatibleEndpoint | undefined = endpointFor(
         options,
-        credential === undefined
-          ? undefined
-          : { has: async () => true, resolve: async () => credential },
+        resolver,
+        gate.kind === "oauth",
       );
       return {
         fits: (request) => endpoint !== undefined && requestFits(options, endpoint, request),
         send: async (request, stream) => {
           const active = endpoint;
           if (active === undefined) throw failure("protocol", "Provider session is not active.");
-          let result: AnthropicTurnResult;
-          try {
-            result = await Effect.runPromise(
-              sendAnthropicMessagesTurn({
-                endpoint: active,
-                modelId: request.modelId,
-                history: request.history,
-                prompt: "",
-                ...(request.system === undefined ? {} : { system: request.system }),
-                tools: request.tools,
-                toolAnswers: [],
-                signal: stream.signal,
-                onEvent: (event: AnthropicTurnEvent) =>
-                  stream.onEvent(
-                    event.kind === "usage"
-                      ? {
-                          kind: "usage",
-                          inputTokens: event.inputTokens,
-                          outputTokens: event.outputTokens,
-                        }
-                      : { kind: event.kind, text: event.text },
-                  ),
-              }),
-            );
-          } catch (error) {
-            if (stream.signal.aborted) {
-              throw failure("interrupted", "The provider request was cancelled.");
-            }
-            throw error;
-          }
-          recordObservedTurn(options, result, clock);
-          return {
-            text: result.text,
-            toolCalls: result.toolCalls,
-            ...(result.usage === undefined ? {} : { usage: result.usage }),
-            ...(result.rateLimitBuckets === undefined
-              ? {}
-              : { rateLimitBuckets: result.rateLimitBuckets }),
-          };
+          return sendWithEndpointRetry({
+            signal: stream.signal,
+            onEvent: stream.onEvent,
+            options: options.harness?.retry,
+            attempt: async (attempt) => {
+              let result: AnthropicTurnResult;
+              try {
+                result = await runProviderEffect(
+                  sendAnthropicMessagesTurn({
+                    endpoint: active,
+                    modelId: request.modelId,
+                    history: request.history,
+                    prompt: "",
+                    ...(request.system === undefined ? {} : { system: request.system }),
+                    tools: request.tools,
+                    toolAnswers: [],
+                    signal: attempt.signal,
+                    onEvent: (event: AnthropicTurnEvent) => {
+                      if (event.kind === "usage") {
+                        const { sequence: _sequence, ...usage } = event;
+                        attempt.onEvent(usage);
+                        return;
+                      }
+                      attempt.onEvent({ kind: event.kind, text: event.text });
+                    },
+                  }),
+                );
+              } catch (error) {
+                if (attempt.signal.aborted) {
+                  throw failure("interrupted", "The provider request was cancelled.");
+                }
+                throw error;
+              }
+              recordObservedTurn(options, result, clock);
+              return {
+                text: result.text,
+                toolCalls: result.toolCalls,
+                ...(result.usage === undefined ? {} : { usage: result.usage }),
+                ...(result.rateLimitBuckets === undefined
+                  ? {}
+                  : { rateLimitBuckets: result.rateLimitBuckets }),
+              };
+            },
+          });
         },
         release: () => {
           endpoint = undefined;
@@ -265,26 +350,29 @@ function recordObservedTurn(
 function endpointFor(
   options: AnthropicCompatibleDriverOptions,
   credentialResolver: ProviderCredentialResolver | undefined,
+  bearerOverride = false,
 ): AnthropicCompatibleEndpoint {
+  const configuration =
+    bearerOverride && options.configuration.authentication === "api-key"
+      ? { ...options.configuration, authentication: "bearer" as const }
+      : options.configuration;
   return makeAnthropicCompatibleEndpoint({
     instanceId: options.instanceId,
-    configuration: options.configuration,
+    configuration,
     ...(credentialResolver === undefined ? {} : { credentialResolver }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
 }
 
-async function resolveSessionCredential(
-  options: AnthropicCompatibleDriverOptions,
-): Promise<string | undefined> {
-  if (options.configuration.authentication === "none") return undefined;
-  try {
-    const credential = (await options.credentialResolver?.resolve(options.instanceId)) ?? "";
-    if (credential.length === 0) throw new Error("missing");
-    return credential;
-  } catch {
-    throw failure("unauthenticated", "The provider credential is missing or unavailable.");
-  }
+function anthropicOAuthInput(options: AnthropicCompatibleDriverOptions, clock: () => string) {
+  return {
+    authentication: options.configuration.authentication,
+    expectedDescriptorId: options.configuration.oauthDescriptorId,
+    credentialResolver: options.credentialResolver,
+    instanceId: options.instanceId,
+    host: options.subscriptionOAuth,
+    now: () => Date.parse(clock()),
+  };
 }
 
 function manualModels(modelIds: readonly ProviderModelId[]) {

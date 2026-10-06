@@ -1,3 +1,4 @@
+import { ProviderChildActivityEvent } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
@@ -1045,6 +1046,8 @@ const ProviderTurnResult = Schema.Struct({
   operationId: CodeOperationId,
   state: Schema.Literal("running", "waiting", "completed", "interrupted", "failed"),
   evidence: Schema.optional(CodeEvidenceReference),
+  /** The journaled delivery actually covered, including a prior turn found on replay. */
+  delivery: Schema.optional(AgentRunResultDeliveryMark),
   /**
    * Why a turn was refused or failed, when the host can name it. A start that
    * is refused before the provider is reached carries the host's own sentence
@@ -1268,6 +1271,7 @@ const ProviderLimitEvent = Schema.Struct({
   resetsAt: Schema.optional(UtcTimestamp),
 }).annotations(strict);
 const ChildActivityEvent = Schema.Struct({
+  observation: Schema.optional(ProviderChildActivityEvent),
   kind: Schema.Literal("child-activity"),
   childId: boundedNonEmptyText(255),
   state: Schema.Literal("starting", "running", "waiting", "completed", "failed"),

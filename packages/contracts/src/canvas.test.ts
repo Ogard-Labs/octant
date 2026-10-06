@@ -88,11 +88,33 @@ describe("Canvas contracts", () => {
   });
 
   it("rejects unknown or malformed schema versions", () => {
-    expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: 3 })).toThrow();
+    expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: 4 })).toThrow();
     expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: "1" })).toThrow();
     expect(() =>
-      decodeCanvasDefinition({ ...definition, blocks: [{ ...heading, schemaVersion: 3 }] }),
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...heading, schemaVersion: 4 }] }),
     ).toThrow();
+  });
+
+  it("admits mockup blocks only under the version that declared them", () => {
+    const mockup = {
+      blockId: "mockup-1",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "mockup",
+      device: "phone",
+      title: "Settings",
+      nodes: [{ nodeId: "screen", component: "window", label: "Settings" }],
+    } as const;
+    // A mockup carried by a document that declares an older version is a
+    // rolled-back runtime's failure mode: the decode refuses it outright.
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 2, blocks: [mockup] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 1, blocks: [mockup] }),
+    ).toThrow();
+    expect(decodeCanvasDefinition({ ...definition, blocks: [mockup] })).toMatchObject({
+      blocks: [mockup],
+    });
   });
 
   it("rejects unknown blocks and executable or renderer-owned fields", () => {
@@ -342,6 +364,17 @@ describe("Canvas contracts", () => {
         sourceId: ids.source,
         alt: "A bounded image",
       },
+      {
+        blockId: "mockup-1",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "mockup",
+        device: "phone",
+        title: "Settings",
+        nodes: [
+          { nodeId: "screen", component: "window", label: "Settings" },
+          { nodeId: "save", component: "button", label: "Save", parentId: "screen" },
+        ],
+      },
     ] as const;
     expect(decodeCanvasDefinition({ ...definition, blocks })).toMatchObject({ blocks });
   });
@@ -519,5 +552,173 @@ describe("Canvas lifecycle event contracts", () => {
     expect(CANVAS_EVENT_NAMES).toEqual([CANVAS_CREATED, CANVAS_VERSION_APPENDED]);
     expect(CanvasCreated).toBeDefined();
     expect(CanvasVersionAppended).toBeDefined();
+  });
+});
+
+function chartBlock(
+  chartType: string,
+  series: ReadonlyArray<Record<string, unknown>>,
+): Record<string, unknown> {
+  return {
+    blockId: "chart-shape",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "chart",
+    chartType,
+    series,
+  };
+}
+
+const quarters = (id: string, values: ReadonlyArray<number>, mark?: "bar" | "line") => ({
+  seriesId: id,
+  label: id,
+  points: [
+    { x: "Q1", y: values[0] ?? 0 },
+    { x: "Q2", y: values[1] ?? 0 },
+    { x: "Q3", y: values[2] ?? 0 },
+  ],
+  ...(mark === undefined ? {} : { mark }),
+});
+
+describe("chart series shape", () => {
+  it("accepts a pie, a donut, stacked and grouped bars, and a bar and line chart", () => {
+    expect(
+      decodeCanvasBlock(
+        chartBlock("pie", [
+          {
+            seriesId: "share",
+            label: "Share",
+            points: [
+              { x: "Product", y: 42 },
+              { x: "Services", y: 28 },
+            ],
+          },
+        ]),
+      ).kind,
+    ).toBe("chart");
+    expect(
+      decodeCanvasBlock(
+        chartBlock("donut", [
+          {
+            seriesId: "cost",
+            label: "Cost",
+            points: [
+              { x: "Compute", y: 12 },
+              { x: "Storage", y: 4 },
+            ],
+          },
+        ]),
+      ),
+    ).toMatchObject({ chartType: "donut" });
+    expect(
+      decodeCanvasBlock(
+        chartBlock("stacked-bar", [
+          quarters("product", [10, 14, 12]),
+          quarters("services", [6, 8, 9]),
+        ]),
+      ),
+    ).toMatchObject({ chartType: "stacked-bar" });
+    expect(
+      decodeCanvasBlock(
+        chartBlock("grouped-bar", [
+          quarters("product", [10, 14, 12]),
+          quarters("services", [6, 8, 9]),
+        ]),
+      ),
+    ).toMatchObject({ chartType: "grouped-bar" });
+    expect(
+      decodeCanvasBlock(
+        chartBlock("bar-line", [
+          quarters("revenue", [40, 52, 48], "bar"),
+          quarters("margin", [12, 15, 11], "line"),
+        ]),
+      ),
+    ).toMatchObject({
+      chartType: "bar-line",
+      series: [expect.objectContaining({ mark: "bar" }), expect.objectContaining({ mark: "line" })],
+    });
+  });
+
+  it("rejects a pie or donut whose series are not one list of labeled non-negative slices", () => {
+    expect(() =>
+      decodeCanvasBlock(
+        chartBlock("pie", [
+          { seriesId: "a", label: "A", points: [{ x: "Product", y: 1 }] },
+          { seriesId: "b", label: "B", points: [{ x: "Services", y: 1 }] },
+        ]),
+      ),
+    ).toThrow(/Chart series do not match/);
+    expect(() =>
+      decodeCanvasBlock(
+        chartBlock("donut", [{ seriesId: "a", label: "A", points: [{ x: 1, y: 4 }] }]),
+      ),
+    ).toThrow(/Chart series do not match/);
+    expect(() =>
+      decodeCanvasBlock(
+        chartBlock("pie", [{ seriesId: "a", label: "A", points: [{ x: "Product", y: -1 }] }]),
+      ),
+    ).toThrow(/Chart series do not match/);
+    expect(() =>
+      decodeCanvasBlock(
+        chartBlock("pie", [
+          {
+            seriesId: "a",
+            label: "A",
+            points: [
+              { x: "Product", y: 1 },
+              { x: "Product", y: 2 },
+            ],
+          },
+        ]),
+      ),
+    ).toThrow(/Chart series do not match/);
+  });
+
+  it("rejects stacked or grouped bars whose series do not share categories", () => {
+    expect(() =>
+      decodeCanvasBlock(chartBlock("stacked-bar", [quarters("only", [1, 2, 3])])),
+    ).toThrow(/Chart series do not match/);
+    expect(() =>
+      decodeCanvasBlock(
+        chartBlock("grouped-bar", [
+          quarters("product", [1, 2, 3]),
+          {
+            seriesId: "services",
+            label: "services",
+            points: [
+              { x: "Q2", y: 1 },
+              { x: "Q1", y: 2 },
+              { x: "Q3", y: 3 },
+            ],
+          },
+        ]),
+      ),
+    ).toThrow(/Chart series do not match/);
+    expect(() =>
+      decodeCanvasBlock(
+        chartBlock("stacked-bar", [
+          quarters("product", [1, 2, 3]),
+          quarters("services", [1, -2, 3]),
+        ]),
+      ),
+    ).toThrow(/Chart series do not match/);
+  });
+
+  it("rejects a bar and line chart that does not name both marks on shared categories", () => {
+    expect(() =>
+      decodeCanvasBlock(
+        chartBlock("bar-line", [quarters("revenue", [1, 2, 3]), quarters("margin", [1, 2, 3])]),
+      ),
+    ).toThrow(/Chart series do not match/);
+    expect(() =>
+      decodeCanvasBlock(
+        chartBlock("bar-line", [
+          quarters("revenue", [1, 2, 3], "bar"),
+          quarters("orders", [1, 2, 3], "bar"),
+        ]),
+      ),
+    ).toThrow(/Chart series do not match/);
+    expect(() =>
+      decodeCanvasBlock(chartBlock("line", [quarters("requests", [1, 2, 3], "line")])),
+    ).toThrow(/Chart series do not match/);
   });
 });

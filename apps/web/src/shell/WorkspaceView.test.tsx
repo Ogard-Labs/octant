@@ -655,7 +655,7 @@ describe("WorkspaceView Local servers wiring", () => {
       fireEvent.click(
         await screen.findByRole("button", { name: /More actions for/ }, { timeout: 5_000 }),
       );
-      fireEvent.click(await screen.findByRole("button", { name: "Copy http://127.0.0.1:5173/" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Copy http://127.0.0.1:5173/" }));
 
       expect(await screen.findByText("Copied")).toBeVisible();
       expect(writeText).toHaveBeenCalledWith("http://127.0.0.1:5173/");
@@ -1023,7 +1023,7 @@ describe("WorkspaceView subagent tray", () => {
             role: "research",
             task: "collect evidence",
             lifecycleStatus: "running",
-            executionKind: "managed",
+            executionKind: "octant-managed",
             usageQuality: "measured",
             resultAcknowledgement: { required: false, acknowledged: false },
             version: 1,
@@ -1116,6 +1116,9 @@ describe("WorkspaceView subagent tray", () => {
 
     const tray = await screen.findByRole("group", { name: "Subagents" });
     expectTrayInComposer(tray);
+    const toggle = within(tray).getByRole("button", { name: /Subagents,/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
     await user.click(within(tray).getByRole("button", { name: /^collect evidence\. Working/ }));
     expect(onOpenSubagent).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000001");
     // Chat keeps observability only; the tray never grows a way to start one.
@@ -1165,6 +1168,7 @@ describe("WorkspaceView subagent tray", () => {
     );
     const tray = await screen.findByRole("group", { name: "Subagents" }, { timeout: 5_000 });
     expectTrayInComposer(tray);
+    await userEvent.click(within(tray).getByRole("button", { name: /Subagents,/ }));
     expect(tray).toHaveTextContent("collect evidence");
   });
 });

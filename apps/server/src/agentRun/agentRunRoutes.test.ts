@@ -1,3 +1,4 @@
+import { decodeProviderRuntimeEvent } from "@octant/contracts";
 import { AGENT_RUN_MAX_ACTIVE_GLOBAL } from "@octant/domain";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,6 +10,7 @@ import {
   AgentRunPolicySettings,
   AgentRunRequested,
   AgentRunResultAcknowledged,
+  AgentRunResultDeliverySettled,
   AgentRunStatusChanged,
   decodeAgentRunControlRequest,
   decodeAgentRunId,
@@ -37,16 +39,20 @@ import { WindowAuthorityStore } from "../windowAuthorityStore";
 import {
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
+  AGENT_RUN_RESULT_DELIVERY_SETTLED,
   AGENT_RUN_STATUS_CHANGED,
   AgentRunEventStore,
 } from "./agentRunEventStore";
 import {
   AgentRunOrchestrationService,
+  type AgentRunProcessSupervisorPort,
   createInMemoryCapacityPort,
 } from "./agentRunOrchestrationService";
 import { AgentRunPersistenceService } from "./agentRunPersistenceService";
 import { AgentRunProjection } from "./agentRunProjection";
+import { AgentRunSessionStore } from "./agentRunSessionStore";
 import { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
+import { AgentRunSessionError } from "./agentRunSessionPort";
 import { createAgentRunRouteHandler, type AgentRunRouteDependencies } from "./agentRunRoutes";
 import {
   admitAgentRunControlRequest,
@@ -152,6 +158,11 @@ const routing: AgentRunRoutingReceipt = {
 
 function createHandler(
   options: {
+    readonly onExecutionAccepted?: AgentRunControlAdmissionDependencies["onExecutionAccepted"];
+    readonly resume?: (run: AgentRun) => unknown;
+    readonly listTargets?: AgentRunRouteDependencies["listTargets"];
+    readonly reasoning?: string;
+    readonly processes?: AgentRunProcessSupervisorPort;
     readonly authorizeCancellation?: (input: { readonly run: AgentRun }) => boolean;
     readonly authorizeCreation?: () => boolean;
     readonly authorizeParentThread?: (input: {
@@ -169,11 +180,15 @@ function createHandler(
       readonly resolve: (input: {
         readonly parentThreadId: unknown;
         readonly mode: string;
-      }) => ReadonlyArray<{ readonly kind: string; readonly text: string }> | undefined;
+      }) =>
+        | ReadonlyArray<{ readonly kind: string; readonly text: string }>
+        | { readonly unavailable: string }
+        | undefined;
     };
     readonly parentMode?: "chat" | "work" | "code";
     readonly workspace?: AgentRunControlAdmissionDependencies["workspace"];
     readonly snapshotCanvas?: AgentRunRouteDependencies["snapshotCanvas"];
+    readonly resolveCenterContext?: AgentRunRouteDependencies["resolveCenterContext"];
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-routes-"));
@@ -184,6 +199,7 @@ function createHandler(
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
+    .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
     .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings);
   const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
   const journal = new Journal({ connection, registry, projections, clock: () => now });
@@ -220,7 +236,11 @@ function createHandler(
     capacity: options.capacity ?? createInMemoryCapacityPort(),
     worktree: { isVerifiedIsolation: () => false, isParentCheckout: () => true },
     approvals: { isCurrent: () => true },
-    processes: { start: () => undefined, stop: async () => undefined },
+    processes: options.processes ?? {
+      start: () => undefined,
+      stop: async () => undefined,
+      ...(options.resume === undefined ? {} : { resume: options.resume }),
+    },
   });
   const liveConversations = new AgentRunLiveConversationStore();
   let readyProviderId = ids.provider;
@@ -290,6 +310,7 @@ function createHandler(
             }),
       },
       parentRoute: {
+        ...(options.reasoning === undefined ? {} : { reasoning: options.reasoning }),
         providerInstanceId: ids.provider as never,
         modelId: "gpt-4o" as never,
         ...(parentMode === "chat" ? {} : { projectId: "77777777-7777-4777-8777-777777777777" }),
@@ -311,6 +332,9 @@ function createHandler(
       };
     })(),
     authorizeCreation,
+    ...(options.onExecutionAccepted === undefined
+      ? {}
+      : { onExecutionAccepted: options.onExecutionAccepted }),
     nativeEvidence: () => ({
       claimedNativeSupport: "unsupported",
       workspace: false,
@@ -327,16 +351,31 @@ function createHandler(
     ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
   };
   const handler = createAgentRunRouteHandler({
+    listTargets:
+      options.listTargets ??
+      (() => [
+        {
+          providerInstanceId: ids.provider,
+          modelIds: ["gpt-4o"],
+          displayName: "Fixture",
+          driverKind: "openai",
+        },
+      ]),
     windowAuthorityStore,
     persistence,
     liveConversations,
     orchestration,
     authorizeCreation,
+    ...(options.onExecutionAccepted === undefined
+      ? {}
+      : { onExecutionAccepted: options.onExecutionAccepted }),
     authorizeCancellation: ({ run }) => options.authorizeCancellation?.({ run }) ?? true,
     authorizeParentThread: (input) => options.authorizeParentThread?.(input) ?? true,
-    resolveCenterContext: ({ parentThreadId }) => ({
-      parentThreadTitle: `Thread ${String(parentThreadId).slice(0, 8)}`,
-    }),
+    resolveCenterContext:
+      options.resolveCenterContext ??
+      (({ parentThreadId }) => ({
+        parentThreadTitle: `Thread ${String(parentThreadId).slice(0, 8)}`,
+      })),
     ...(options.snapshotCanvas === undefined ? {} : { snapshotCanvas: options.snapshotCanvas }),
     now: () => 0,
   });
@@ -371,7 +410,15 @@ function createHandler(
         orchestration,
         persistence,
         router: {
-          resolve: () => ({ kind: "unroutable", job: "research", reason: "none" }) as never,
+          resolve: () =>
+            ({
+              kind: "primary",
+              job: "researcher",
+              slotId: "default",
+              decidedAt: "2026-10-03T10:00:00.000Z",
+              rejected: [],
+              candidate: { hostId: "local", providerInstanceId: ids.provider, modelId: "gpt-4o" },
+            }) as never,
         },
         sessions: {
           ensure: () => ({}) as never,
@@ -379,6 +426,14 @@ function createHandler(
           read: () => undefined,
         },
         uuid: () => String(ids.request),
+        listTargets: () => [
+          {
+            providerInstanceId: String(ids.provider),
+            modelIds: ["gpt-4o"],
+            displayName: "Fixture",
+            driverKind: "openai",
+          },
+        ],
       },
       {
         parentThreadId: String(ids.thread),
@@ -393,6 +448,7 @@ function createHandler(
     );
   return {
     handler,
+    windowAuthorityStore,
     persistence,
     liveConversations,
     orchestration,
@@ -404,6 +460,7 @@ function createHandler(
     create,
     delegate,
     settings,
+    admission,
   };
 }
 
@@ -453,6 +510,86 @@ describe("agentRunRoutes", () => {
     liveConversations.complete(accepted.run.id);
     await expect(readFrame()).resolves.toMatchObject({ kind: "delta", status: "complete" });
     await expect(reader.read()).resolves.toMatchObject({ done: true });
+  });
+
+  it("re-reads durable terminal history for the final stream snapshot after reload", async () => {
+    const { handler, persistence, liveConversations, token, connection } = createHandler();
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Remember the conversation",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    if (accepted.kind !== "run-accepted") throw new Error("admission failed");
+    let current = accepted.run;
+    for (const kind of [
+      "start-agent-run",
+      "mark-agent-run-running",
+      "complete-agent-run",
+    ] as const) {
+      const identity = { runId: current.id, expectedVersion: current.version };
+      const result = persistence.applyCommand(
+        kind === "complete-agent-run"
+          ? {
+              ...identity,
+              kind,
+              result: { reference: `octant://agent-run/${current.id}/result`, truncated: false },
+              resultText: "Final answer",
+            }
+          : { ...identity, kind },
+      );
+      if (result.kind !== "run-updated") throw new Error("transition failed");
+      current = result.run;
+    }
+    const store = new AgentRunSessionStore({
+      connection,
+      getById: (id) => persistence.getById(id),
+    });
+    const writing = new AgentRunLiveConversationStore({ persistence: store.conversations });
+    writing.begin(current.id);
+    for (let i = 0; i < 160; i++) writing.appendText(current.id, `History ${i}`, now as never);
+    writing.complete(current.id);
+    const reloaded = new AgentRunLiveConversationStore({ persistence: store.conversations });
+    const read = vi
+      .spyOn(liveConversations, "read")
+      .mockImplementation((input) => reloaded.read(input));
+    vi.spyOn(liveConversations, "subscribe").mockImplementation((input) =>
+      reloaded.subscribe(input),
+    );
+    const headers = { "x-octant-window-capability": token };
+    const snapshot = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation?runId=${current.id}`, { headers }),
+    );
+    const expected = await snapshot?.json();
+    expect(expected).toMatchObject({ status: "complete", truncated: true });
+    // The retained view becomes available between the initial live probe and final disclosure.
+    read.mockReturnValueOnce(undefined);
+    const stream = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation/stream?runId=${current.id}`, {
+        headers,
+      }),
+    );
+    const frame = JSON.parse((await stream?.text()) ?? "null");
+    expect(frame).toMatchObject({ ...expected, kind: "snapshot" });
+    expect(frame.entries.length).toBeGreaterThan(1);
+    const ordinary = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation/stream?runId=${current.id}`, {
+        headers,
+      }),
+    );
+    expect(JSON.parse((await ordinary?.text()) ?? "null")).toMatchObject({
+      ...expected,
+      kind: "snapshot",
+    });
   });
 
   it("authorizes conversation streams from the run parent before opening a listener", async () => {
@@ -857,8 +994,175 @@ describe("agentRunRoutes", () => {
     expect(body.entries[0]?.task).toBe("Summarize");
   });
 
+  it.each(["parent", "child"])("refuses child data when %s scope is denied", async (scope) => {
+    const { handler, persistence, token, liveConversations } = createHandler({
+      authorizeCancellation: () => scope !== "child",
+      authorizeParentThread: () => scope !== "parent",
+    });
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Summarize",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
+    const readResults = vi.spyOn(persistence, "resultPackets");
+    const readConversation = vi.spyOn(liveConversations, "read");
+    const readReview = vi.spyOn(persistence, "reviewSnapshot");
+    for (const route of ["review", "results", "conversation", "conversation/stream"]) {
+      const response = await handler(
+        new Request(
+          `http://127.0.0.1/api/agent-runs/${route}?runId=${accepted.run.id}${route === "review" ? "&generation=1" : ""}`,
+          {
+            headers: { "x-octant-window-capability": token },
+          },
+        ),
+      );
+      expect(response?.status).toBe(403);
+    }
+    const summary = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/parent-summary?parentThreadId=${ids.thread}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    if (scope === "parent") expect(summary?.status).toBe(403);
+    else expect(await summary?.json()).toMatchObject({ entries: [], observations: [] });
+    expect(readReview).not.toHaveBeenCalled();
+    expect(readResults).not.toHaveBeenCalled();
+    expect(readConversation).not.toHaveBeenCalled();
+  });
+
+  it("attributes observed descendants to the authorized root and managed parent without run controls", async () => {
+    const { handler, persistence, token, liveConversations } = createHandler();
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Summarize",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
+    const report = decodeProviderRuntimeEvent({
+      kind: "child-agent-activity",
+      instanceId: ids.provider,
+      sessionId: "11111111-1111-4111-8111-111111111111",
+      sequence: 1,
+      correlationId: ids.request,
+      occurredAt: "2026-10-03T20:00:00.000Z",
+      childAgentId: "provider-child",
+      status: "running",
+      summary: "Reviewing",
+    });
+    if (report.kind !== "child-agent-activity") throw new Error("Invalid fixture");
+    liveConversations.begin(accepted.run.id);
+    liveConversations.appendChildActivity(accepted.run.id, report, 1);
+    liveConversations.appendChildActivity(accepted.run.id, report, 1);
+    const response = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/parent-summary?parentThreadId=${ids.thread}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(await response?.json()).toMatchObject({
+      observations: [
+        {
+          kind: "observed",
+          parentThreadId: ids.thread,
+          parentRunId: accepted.run.id,
+          childAgentId: "provider-child",
+          control: "unavailable",
+          historyStatus: "partial",
+        },
+      ],
+      entries: [{ resultPackets: [{ generation: 1, reportedSummary: { status: "unavailable" } }] }],
+    });
+    const results = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/results?runId=${accepted.run.id}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    const review = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/review?runId=${accepted.run.id}&generation=1`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(review?.status).toBe(200);
+    expect(await review?.json()).toMatchObject({
+      runId: accepted.run.id,
+      generation: 1,
+      status: "unavailable",
+    });
+    const invalid = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/review?runId=${accepted.run.id}&generation=-1`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(invalid?.status).toBe(400);
+    const snapshot = {
+      capturedAt: "2026-10-03T20:00:00.000Z",
+      baseTree: "a".repeat(40),
+      resultTree: "b".repeat(40),
+      diff: "private captured diff",
+      changedPaths: ["file.txt"],
+      truncated: false,
+    };
+    persistence.applyCommand({
+      kind: "start-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: accepted.run.version,
+    });
+    persistence.applyCommand({
+      kind: "mark-agent-run-running",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 1) as never,
+    });
+    const completion = persistence.applyCommand({
+      kind: "complete-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 2) as never,
+      result: { reference: `octant://agent-run/${accepted.run.id}/result`, truncated: false },
+      resultText: "Completed",
+      resultEvidence: {
+        files: { status: "unavailable", items: [] },
+        checks: { status: "unavailable", items: [] },
+        review: snapshot as never,
+      },
+    });
+    expect(completion.kind).toBe("run-updated");
+    const captured = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/review?runId=${accepted.run.id}&generation=1`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(await captured?.json()).toMatchObject({ status: "available", snapshot });
+    expect(results?.status).toBe(200);
+    expect(await results?.json()).toMatchObject({
+      runId: accepted.run.id,
+      packets: [{ parentThreadId: ids.thread, generation: 1 }],
+    });
+  });
+
   it("returns authorized center rows with enriched parent titles", async () => {
-    const { handler, persistence, token } = createHandler();
+    const resolveCenterContext = vi.fn(() => ({ parentThreadTitle: "Thread context" }));
+    const { handler, persistence, token } = createHandler({ resolveCenterContext });
     persistence.requestRun({
       command: {
         kind: "request-agent-run",
@@ -887,6 +1191,12 @@ describe("agentRunRoutes", () => {
     expect(body.items[0]?.task).toBe("Summarize");
     expect(body.items[0]?.parentThreadTitle).toContain("Thread");
     expect(body.items[0]?.mode).toBe("chat");
+    expect(resolveCenterContext).toHaveBeenCalledWith({
+      parentThreadId: ids.thread,
+      mode: "chat",
+      requestId: ids.request,
+      workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+    });
   });
 
   it("omits center rows the window is not authorized to read", async () => {
@@ -1230,10 +1540,12 @@ describe("agentRunRoutes", () => {
       includeParentContext: false,
     });
 
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       status: "accepted",
       runId: String(ids.run),
       lifecycleStatus: "starting",
+      target: { providerInstanceId: ids.provider, modelId: "gpt-4o" },
+      route: { kind: "primary" },
     });
     expect(persistence.getById(ids.run)?.parentThreadId).toBe(ids.thread);
   });
@@ -1309,6 +1621,94 @@ describe("agentRunRoutes", () => {
     });
   });
 
+  it("binds only a newly admitted child and never rebinds an idempotent or refused delegation", async () => {
+    const onExecutionAccepted = vi.fn();
+    const { create, admission, setReadyProvider } = createHandler({ onExecutionAccepted });
+    const run = await startedRun(create);
+    expect(onExecutionAccepted).toHaveBeenCalledExactlyOnceWith({
+      run: expect.objectContaining({ requestId: run.requestId }),
+      windowId: String(windowId),
+      operation: "admission",
+    });
+    const otherWindow = "00000000-0000-4000-8000-00000000a002";
+    await admitAgentRunControlRequest(admission, {
+      controlRequest: decodeAgentRunControlRequest(creationBody()),
+      windowId: otherWindow,
+      confirmed: false,
+    });
+    expect(onExecutionAccepted).toHaveBeenCalledOnce();
+    setReadyProvider("99999999-9999-4999-8999-999999999999");
+    await create({ ...creationBody(), requestId: "00000000-0000-4000-8000-00000000a003" });
+    expect(onExecutionAccepted).toHaveBeenCalledOnce();
+  });
+
+  it.each(["resume", "retry"] as const)(
+    "rebinds only an accepted %s and leaves stale controls unable to steal the window",
+    async (action) => {
+      const onExecutionAccepted = vi.fn();
+      const { handler, windowAuthorityStore, persistence, create } = createHandler({
+        onExecutionAccepted,
+        resume: () => undefined,
+      });
+      const run = await startedRun(create);
+      const otherWindow = decodeWindowId("00000000-0000-4000-8000-00000000a002");
+      const token = capability();
+      windowAuthorityStore.register({ windowId: otherWindow, capability: token, now: 0 });
+      persistence.applyCommand({
+        kind: action === "retry" ? "fail-agent-run" : "wait-agent-run",
+        runId: run.id,
+        expectedVersion: run.version,
+        recoveryReason: "provider-unavailable",
+      });
+      const current = persistence.getById(run.id);
+      const control = (version: number | undefined) =>
+        handler(
+          new Request(`http://127.0.0.1/api/agent-runs/${action}`, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-octant-window-capability": token },
+            body: JSON.stringify({ runId: run.id, expectedVersion: version }),
+          }),
+        );
+      onExecutionAccepted.mockClear();
+      expect((await control(run.version))?.status).toBe(409);
+      expect(onExecutionAccepted).not.toHaveBeenCalled();
+      expect((await control(current?.version))?.status).toBe(200);
+      expect(onExecutionAccepted).toHaveBeenCalledExactlyOnceWith({
+        run: expect.objectContaining({ id: run.id, lifecycleStatus: "starting" }),
+        windowId: String(otherWindow),
+        operation: action,
+      });
+    },
+  );
+
+  it("does not rebind a resume that cannot open the saved provider session", async () => {
+    const onExecutionAccepted = vi.fn();
+    const { handler, token, persistence, create } = createHandler({
+      onExecutionAccepted,
+      resume: () => {
+        throw new AgentRunSessionError("resume-unavailable", "Saved cursor unavailable");
+      },
+    });
+    const run = await startedRun(create);
+    const waiting = persistence.applyCommand({
+      kind: "wait-agent-run",
+      runId: run.id,
+      expectedVersion: run.version,
+      recoveryReason: "provider-unavailable",
+    });
+    if (waiting.kind !== "run-updated") throw new Error("Expected waiting child");
+    onExecutionAccepted.mockClear();
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/resume", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({ runId: run.id, expectedVersion: waiting.run.version }),
+      }),
+    );
+    expect(await response?.json()).toMatchObject({ run: { lifecycleStatus: "waiting" } });
+    expect(onExecutionAccepted).not.toHaveBeenCalled();
+  });
+
   it("rejects a request ID reused for a different parent or authority", async () => {
     const { create } = createHandler();
     await startedRun(create);
@@ -1358,6 +1758,25 @@ describe("agentRunRoutes", () => {
         status: 400,
       });
     }
+  });
+
+  it("names why parent context is unavailable and allocates no workspace for the refused child", async () => {
+    const prepare = vi.fn();
+    const { create } = createHandler({
+      parentContext: { resolve: () => ({ unavailable: "source-changed" }) },
+      workspace: { prepare, confirm: vi.fn(), admit: vi.fn() } as never,
+    });
+
+    const refused = await create({ ...creationBody(), includeParentContext: true });
+
+    expect(refused).toMatchObject({
+      kind: "invalid",
+      status: 400,
+      message: expect.stringMatching(/conversation changed while it was being read/),
+    });
+    // A worktree allocated before this refusal would be left behind for a
+    // child that never started.
+    expect(prepare).not.toHaveBeenCalled();
   });
 
   it("rejects a request ID reused with a different parent-context ask", async () => {
@@ -1723,6 +2142,134 @@ describe("agentRunRoutes", () => {
     expect(body.run.lifecycleStatus).toBe("starting");
   });
 
+  it("requires an authorized explicit message to resume a completed child at a new generation", async () => {
+    let authorized = true;
+    const resume = vi.fn();
+    const { handler, token, persistence, orchestration, create } = createHandler({
+      authorizeParentThread: () => authorized,
+      processes: {
+        start: vi.fn(),
+        resume,
+        checkResume: () => ({ status: "ready" }),
+        stop: async () => undefined,
+      },
+    });
+    const run = await startedRun(create);
+    orchestration.onSessionSettled({
+      runId: run.id,
+      outcome: { kind: "completed", responseText: "First answer" },
+    });
+    const finished = persistence.getById(run.id);
+    if (finished === undefined) throw new Error("missing completion");
+    const delivered = persistence.applyCommand({
+      kind: "settle-agent-run-result-delivery",
+      runId: finished.id,
+      expectedVersion: finished.version,
+      generation: finished.generation ?? 1,
+      outcome: "delivered",
+    });
+    if (delivered.kind !== "run-updated") throw new Error("delivery failed");
+    const completed = delivered.run;
+    const post = (body: Record<string, unknown>) =>
+      handler(
+        new Request("http://127.0.0.1/api/agent-runs/resume", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": token },
+          body: JSON.stringify(body),
+        }),
+      );
+    const base = { runId: run.id, expectedVersion: completed.version };
+    expect((await post(base))?.status).toBe(400);
+    expect((await post({ ...base, message: " " }))?.status).toBe(400);
+    expect((await post({ ...base, message: "x".repeat(4097) }))?.status).toBe(400);
+    authorized = false;
+    expect((await post({ ...base, message: "Continue" }))?.status).toBe(403);
+    authorized = true;
+    expect((await post({ ...base, expectedVersion: 1, message: "Continue" }))?.status).toBe(409);
+    expect(persistence.getById(run.id)).toEqual(completed);
+    const response = await post({ ...base, message: "Explain this answer" });
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      kind: "run-updated",
+      run: { id: run.id, generation: 2, lifecycleStatus: "starting" },
+    });
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({ generation: 2 }), {
+      message: "Explain this answer",
+    });
+    expect((await post({ ...base, message: "duplicate" }))?.status).toBe(409);
+    expect(resume).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["provider", false],
+    ["model", false],
+    ["reasoning", false],
+    ["provider", true],
+    ["model", true],
+    ["reasoning", true],
+  ] as const)(
+    "refuses a removed %s on UI follow-up, including preflight drift: %s",
+    async (removed, duringPreflight) => {
+      let revoked = !duringPreflight;
+      const resume = vi.fn();
+      const { handler, token, persistence, orchestration, create } = createHandler({
+        reasoning: "high",
+        listTargets: () => [
+          {
+            providerInstanceId: revoked && removed === "provider" ? "unavailable" : ids.provider,
+            modelIds: revoked && removed === "model" ? [] : ["gpt-4o"],
+            reasoningByModel: { "gpt-4o": revoked && removed === "reasoning" ? [] : ["high"] },
+            displayName: "Fixture",
+            driverKind: "openai",
+          },
+        ],
+        processes: {
+          start: vi.fn(),
+          resume,
+          checkResume: async () => {
+            revoked = true;
+            return { status: "ready" };
+          },
+          stop: async () => undefined,
+        },
+      });
+      const run = await startedRun(create);
+      expect(run.routingReceipt.rawReasoning).toBe("high");
+      orchestration.onSessionSettled({
+        runId: run.id,
+        outcome: { kind: "completed", responseText: "First answer" },
+      });
+      const finished = persistence.getById(run.id);
+      if (finished === undefined) throw new Error("Missing completion");
+      const delivered = persistence.applyCommand({
+        kind: "settle-agent-run-result-delivery",
+        runId: finished.id,
+        expectedVersion: finished.version,
+        generation: finished.generation ?? 1,
+        outcome: "delivered",
+      });
+      if (delivered.kind !== "run-updated") throw new Error("Delivery failed");
+      const response = await handler(
+        new Request("http://127.0.0.1/api/agent-runs/resume", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": token },
+          body: JSON.stringify({
+            runId: run.id,
+            expectedVersion: delivered.run.version,
+            message: "Continue",
+          }),
+        }),
+      );
+      expect(response?.status).toBe(409);
+      expect(await response?.json()).toMatchObject({
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+      });
+      expect(resume).not.toHaveBeenCalled();
+      expect(persistence.getById(run.id)).toEqual(delivered.run);
+    },
+  );
+
   it("resumes a waiting child and refuses a restart interruption without resume evidence", async () => {
     const { handler, token, persistence, create } = createHandler();
     const run = await startedRun(create);
@@ -1740,7 +2287,7 @@ describe("agentRunRoutes", () => {
         body: JSON.stringify({ runId: run.id, expectedVersion: interrupted?.version }),
       }),
     );
-    expect(response?.status).toBe(400);
+    expect(response?.status).toBe(409);
     expect(await response!.json()).toMatchObject({ kind: "run-command-failed" });
   });
 });

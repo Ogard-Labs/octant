@@ -2274,6 +2274,17 @@ describe("ChatTurnRunner", () => {
             status: "pending",
             summary: "Commit the captured evidence",
           } as never);
+          yield* Queue.offer(queue, {
+            kind: "child-agent-activity",
+            sessionId,
+            instanceId: providerInstanceId,
+            sequence: 10,
+            correlationId: "82000000-0000-4000-8000-000000000071",
+            occurredAt: "2026-10-03T20:00:00.000Z",
+            childAgentId: "observed-child",
+            status: "running",
+            summary: "Reading",
+          } as never);
           yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
         }),
       interrupt: () => Effect.void,
@@ -2329,6 +2340,10 @@ describe("ChatTurnRunner", () => {
       ),
     );
 
+    expect(updates.at(-1)?.childObservations?.children).toMatchObject([
+      { childAgentId: "observed-child", providerInstanceId, sessionId, historyStatus: "partial" },
+    ]);
+    expect(updates.at(-1)?.childObservations?.children[0]).not.toHaveProperty("runId");
     expect(updates.at(-1)?.tasks).toEqual([
       { taskId: "task-1", state: "completed", summary: "Watch CI on the branch head" },
       { taskId: "task-2", state: "pending", summary: "Commit the captured evidence" },
