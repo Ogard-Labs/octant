@@ -2178,8 +2178,10 @@ mechanisms are:
   inside its verified budget to export it, and release the exact runtime after
   an explicit export. A dedicated Linux CI job proves two real capsules
   cannot see or signal one another. Ordinary Code threads do not use this
-  service yet, so Linux remains an incompatible destination until the AgentRun
-  and Station launch paths are wired and revalidated.
+  service yet: on a Linux host they run under Bubblewrap like every other
+  confined process (see Sandbox above), and only the protected capsule remains
+  an unavailable destination until the AgentRun and Station launch paths are
+  wired and revalidated.
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,
