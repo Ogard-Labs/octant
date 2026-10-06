@@ -1,0 +1,21 @@
+{
+  "hits": 3,
+  "events": [
+    {
+      "kind": "retrying",
+      "attempt": 2,
+      "maxAttempts": 5,
+      "delayMs": 500,
+      "reason": "unavailable",
+      "announcedAt": "2026-10-06T14:07:38.084Z"
+    },
+    {
+      "kind": "retrying",
+      "attempt": 3,
+      "maxAttempts": 5,
+      "delayMs": 1000,
+      "reason": "unavailable",
+      "announcedAt": "2026-10-06T14:07:38.084Z"
+    }
+  ]
+}
