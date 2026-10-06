@@ -620,8 +620,8 @@ async function validateSiwcIdToken(input: {
   let payload: unknown;
   let signature: Buffer;
   try {
-    header = JSON.parse(Buffer.from(encodedHeader, "base64url").toString("utf8")) as unknown;
-    payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as unknown;
+    header = JSON.parse(Buffer.from(encodedHeader, "base64url").toString("utf8"));
+    payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
     signature = Buffer.from(encodedSignature, "base64url");
   } catch {
     return { kind: "invalid" };
