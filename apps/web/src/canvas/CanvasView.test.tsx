@@ -80,9 +80,11 @@ describe("Canvas accessibility basics", () => {
     render(<CanvasDocument definition={canvasFixture} />);
     const chart = screen.getByRole("img", { name: /line chart/i });
     expect(chart.tagName).toBe("svg");
-    expect(screen.getByRole("button", { name: "Requests" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+    // One series is named by the Canvas, so no legend offers to hide the whole chart;
+    // its readings stay in the disclosed data table.
+    expect(screen.queryByRole("button", { name: "Requests" })).not.toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Chart readings", hidden: true })).toHaveTextContent(
+      "Requests",
     );
   });
 

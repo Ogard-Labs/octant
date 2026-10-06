@@ -14,6 +14,7 @@ export interface CanvasViewProps {
   /** Host-owned journaling for a plan task's status; omitted when the host has none. */
   readonly planRuntime?: PlanTaskRuntime;
   readonly comments?: CanvasDocumentComments;
+  readonly placement?: "document" | "thread";
 }
 
 export function CanvasView({
@@ -22,6 +23,7 @@ export function CanvasView({
   layoutRuntime,
   planRuntime,
   comments,
+  placement,
 }: CanvasViewProps) {
   const gate = decodeCanvasForRender(input);
   if (!gate.ok) {
@@ -39,6 +41,7 @@ export function CanvasView({
       {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
       {...(planRuntime === undefined ? {} : { planRuntime })}
       {...(comments === undefined ? {} : { comments })}
+      {...(placement === undefined ? {} : { placement })}
     />
   );
 }

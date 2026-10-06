@@ -113,6 +113,7 @@ export * from "./threadRest";
 export * from "./threadExport";
 export * from "./threadHandOff";
 export * from "./usage";
+export * from "./turnMetrics";
 export * from "./usageResume";
 export * from "./usageRpc";
 export * from "./usageDashboard";

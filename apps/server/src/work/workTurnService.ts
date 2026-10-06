@@ -61,6 +61,7 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
+import type { TurnEndSummary } from "../metrics/turnEnd";
 import {
   decideWorkTurnAuthority,
   assertProviderAllowedByProjectPolicy,
@@ -244,10 +245,14 @@ export interface WorkTurnServiceDependencies {
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
-    /** Every turn's end, whatever its outcome. */
-    readonly turnEnded?: (scope: NativeHarnessTurnScope) => void;
+    /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
+    readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
     readonly turnCompleted: (
-      input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
+      input: NativeHarnessTurnScope & {
+        readonly text: string;
+        readonly toolCalls: number;
+        readonly turn?: TurnEndSummary;
+      },
     ) => Promise<void>;
   };
   /**
@@ -1131,6 +1136,7 @@ export class WorkTurnService {
             projectId: input.thread.projectId,
           };
     if (harnessScope !== undefined) this.#nativeHarness?.turnStarted(harnessScope);
+    let endedTurn: TurnEndSummary | undefined;
     try {
       let usageReported = false;
       if (input.access !== undefined) {
@@ -1189,6 +1195,9 @@ export class WorkTurnService {
         ...(this.#onRequestSettled === undefined
           ? {}
           : { onRequestSettled: this.#onRequestSettled }),
+        onTurnEnded: (ended) => {
+          endedTurn = ended;
+        },
         onUsage: (usage) => {
           const projected = this.#projection.lookup(input.command.requestId);
           if (
@@ -1284,7 +1293,12 @@ export class WorkTurnService {
         this.#nativeHarness !== undefined
       ) {
         await this.#nativeHarness
-          .turnCompleted({ ...harnessScope, text: outcome.response, toolCalls: 0 })
+          .turnCompleted({
+            ...harnessScope,
+            text: outcome.response,
+            toolCalls: 0,
+            ...(endedTurn === undefined ? {} : { turn: endedTurn }),
+          })
           .catch(() => undefined);
       }
       const live = this.#liveResponses.get(String(input.command.requestId));
@@ -1323,7 +1337,7 @@ export class WorkTurnService {
       if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
     } finally {
       // A completed turn closed itself above; this closes one that did not.
-      if (harnessScope !== undefined) this.#nativeHarness?.turnEnded?.(harnessScope);
+      if (harnessScope !== undefined) this.#nativeHarness?.turnEnded?.(harnessScope, endedTurn);
     }
   }
 

@@ -1,4 +1,5 @@
 import type { CanvasBlock, CanvasTableCell } from "@octant/contracts/canvas";
+import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { Fragment } from "react";
 import { formatScalar } from "../canvasRuntime";
 
@@ -21,17 +22,13 @@ export function DataBlocks({ block }: { readonly block: Block }) {
   switch (block.kind) {
     case "metric":
       return (
-        <div className="canvas-block__metric">
-          <span className="canvas-block__metric-label">{block.label}</span>
-          <strong className="canvas-block__metric-value">
+        <div className="cmetric canvas-block__metric">
+          <span className="cmetric-label">{block.label}</span>
+          <span className="cmetric-value">
             {formatScalar(block.value)}
-            {block.unit !== undefined ? (
-              <span className="canvas-block__metric-unit"> {block.unit}</span>
-            ) : null}
-          </strong>
-          {block.delta !== undefined ? (
-            <span className="canvas-block__metric-delta">{formatDelta(block.delta)}</span>
-          ) : null}
+            {block.unit !== undefined ? <span className="cmetric-unit">{block.unit}</span> : null}
+          </span>
+          {block.delta !== undefined ? <MetricDelta delta={block.delta} /> : null}
         </div>
       );
     case "progress":
@@ -66,6 +63,20 @@ export function DataBlocks({ block }: { readonly block: Block }) {
         </dl>
       );
   }
+}
+
+/**
+ * How a number moved. The block does not say whether up is good, so the
+ * change keeps the neutral ink and the arrow alone gives its direction.
+ */
+function MetricDelta({ delta }: { readonly delta: number }) {
+  const Icon = delta > 0 ? ArrowUpRight : delta < 0 ? ArrowDownRight : Minus;
+  return (
+    <span className="cmetric-delta flat">
+      <Icon aria-hidden="true" size={12} strokeWidth={2} />
+      {formatDelta(delta)}
+    </span>
+  );
 }
 
 function formatDelta(delta: number): string {

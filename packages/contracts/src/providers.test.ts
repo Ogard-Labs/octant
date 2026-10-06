@@ -2255,6 +2255,12 @@ describe("provider runtime contracts", () => {
     { kind: "tool-failure", toolCallId: "tool-1", message: "Denied" },
     { kind: "usage", inputTokens: 10, outputTokens: 4 },
     {
+      kind: "usage",
+      inputTokens: 10,
+      outputTokens: 4,
+      requestStartedAt: "2026-07-23T10:00:00.000Z",
+    },
+    {
       kind: "rate-limit-bucket",
       bucket: "requests",
       limit: 1000,

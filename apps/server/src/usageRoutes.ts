@@ -23,6 +23,7 @@ import {
   type UsageQueryFilter,
 } from "./persistence/usageProjection";
 import { aggregateUsage } from "./persistence/usageAggregation";
+import type { TurnMetricsStore } from "./metrics/turnMetricsStore";
 import { recordsToCsv, recordsToJson, SENSITIVE_EXPORT_FIELDS } from "./persistence/usageExport";
 import type { SqliteConnection } from "./persistence/sqlitePort";
 
@@ -68,6 +69,11 @@ export interface UsageRouteDependencies {
   readonly clock?: () => string;
   /** Host-process latency observations reported with usage reads. */
   readonly latencyStats?: () => UsageLatencyStats;
+  /**
+   * The turns behind the same read: full usage and speed per turn, narrowed by
+   * the same Project scope and filter. Absent leaves turns out of the answer.
+   */
+  readonly turnMetrics?: Pick<TurnMetricsStore, "summarize">;
 }
 
 export function createUsageRouteHandler(dependencies: UsageRouteDependencies) {
@@ -190,10 +196,18 @@ async function handleQuery(
       timeZone,
       dependencies.latencyStats?.(),
     );
-    return new Response(JSON.stringify(response), {
-      status: 200,
-      headers: { "content-type": "application/json", ...corsHeaders(origin) },
-    });
+    // A filter on a ledger-only dimension names rows turns do not carry, and an
+    // unfiltered figure would answer a different question, so turns are left out.
+    const turnMetrics = turnsCarry(filter)
+      ? dependencies.turnMetrics?.summarize(filter, projectScope)
+      : undefined;
+    return new Response(
+      JSON.stringify(turnMetrics === undefined ? response : { ...response, turnMetrics }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json", ...corsHeaders(origin) },
+      },
+    );
   } catch {
     return failureResponse("Usage query is invalid.", 400, origin);
   }
@@ -335,6 +349,15 @@ async function handleRetain(
   } catch {
     return failureResponse("Usage retention is invalid.", 400, origin);
   }
+}
+
+function turnsCarry(filter: UsageQueryFilter): boolean {
+  return (
+    filter.requestShape === undefined &&
+    filter.category === undefined &&
+    filter.hostId === undefined &&
+    filter.quality === undefined
+  );
 }
 
 function mapFilter(filter: unknown): UsageQueryFilter {

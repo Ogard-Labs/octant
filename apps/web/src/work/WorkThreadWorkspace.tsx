@@ -79,6 +79,9 @@ import { GeneratedImageList } from "../image/GeneratedImageList";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
+import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
   ThreadMentionChips,
@@ -272,6 +275,8 @@ export interface WorkThreadWorkspaceProps {
   readonly extensionClient?: ExtensionClient;
   readonly browserAvailable?: boolean;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /** Opens the dock's Canvas tool on this Canvas; a Canvas drawn in the thread offers it. */
+  readonly onOpenCanvasInSidebar?: (card: CanvasThreadReferenceCard) => void;
   /** The Canvas cards the host lists for this thread, each time they are read. */
   readonly onCanvasReferencesObserved?: (
     threadId: string,
@@ -1346,6 +1351,32 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       : folder === undefined || folder === "."
         ? root
         : `${root.replace(/[/\\]+$/, "")}/${folder}`;
+  // The transcript draws the inline Canvases and the card list the rest.
+  const threadCanvases = useThreadCanvasCards({
+    client: props.canvasClient,
+    mode: "work",
+    threadId: props.threadId,
+    projectId: projectId ?? null,
+    // A settled turn may have authored a Canvas; re-read the cards so the
+    // document appears without reopening the thread.
+    refreshKey: settledTurnCount,
+    ...(props.onCanvasReferencesObserved === undefined
+      ? {}
+      : {
+          onCardsObserved: (cards: ReadonlyArray<CanvasThreadReferenceCard>) =>
+            props.onCanvasReferencesObserved?.(String(props.threadId), cards),
+        }),
+  });
+  const canvasClient = props.canvasClient;
+  const openInSidebar = props.onOpenCanvasInSidebar;
+  const canvasPlacement = placeThreadCanvases(
+    threadTurnSpans(
+      transcriptRows,
+      (row) => row.key,
+      (row) => (row.kind === "message" && row.entry.role === "user" ? row.at : undefined),
+    ),
+    threadCanvases.cards,
+  );
 
   return (
     <section aria-label="Task workspace" className="work-thread-workspace">
@@ -1386,6 +1417,17 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         itemKey={(row) => row.key}
         items={transcriptRows}
         listClassName="thread-column"
+        {...(canvasClient === undefined
+          ? {}
+          : {
+              afterItem: (row: WorkTranscriptRow) => (
+                <ThreadCanvases
+                  cards={canvasPlacement.byRow.get(row.key)}
+                  client={canvasClient}
+                  {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                />
+              ),
+            })}
         renderItem={(row) => {
           if (row.kind === "empty") {
             return (
@@ -1590,20 +1632,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       {props.canvasClient === undefined ? null : (
         <div className="thread-column">
           <CanvasThreadReferenceCardList
-            client={props.canvasClient}
-            mode="work"
+            cards={threadCanvases.cards.filter(
+              (card) => !canvasPlacement.placed.has(String(card.canvasId)),
+            )}
+            error={threadCanvases.error}
             {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
-            {...(props.onCanvasReferencesObserved === undefined
-              ? {}
-              : {
-                  onCardsObserved: (cards: ReadonlyArray<CanvasThreadReferenceCard>) =>
-                    props.onCanvasReferencesObserved?.(String(props.threadId), cards),
-                })}
-            projectId={projectId ?? null}
-            // A settled turn may have authored a Canvas; re-read the cards so
-            // the document appears without reopening the thread.
-            refreshKey={settledTurnCount}
-            threadId={props.threadId}
           />
         </div>
       )}

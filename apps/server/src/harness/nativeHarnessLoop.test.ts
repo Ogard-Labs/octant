@@ -10,6 +10,7 @@ import {
   type ProviderToolDefinition,
 } from "@octant/contracts";
 import type { ProviderConnection } from "@octant/provider-sdk/driver";
+import { deriveTurnMetrics } from "@octant/domain";
 import { Effect, Fiber, Stream, type Scope } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
@@ -687,6 +688,7 @@ describe("a lead whose model keeps failing", () => {
 
 describe("fitting a request to the endpoint", () => {
   const base: NativeHarnessRequest = {
+    sessionId,
     modelId,
     system: undefined,
     tools: [],
@@ -831,6 +833,106 @@ describe("fitting a request to the endpoint", () => {
       expect(usage).not.toHaveProperty("cacheReadInputTokens");
       expect(usage).not.toHaveProperty("cacheWriteInputTokens");
       expect(usage).not.toHaveProperty("reasoningTokens");
+    });
+  });
+
+  describe("timing across the requests of one turn", () => {
+    const epoch = Date.parse("2026-10-06T12:00:00.000Z");
+
+    it("times each request on its own and leaves the tool's time out of the decode window", async () => {
+      let elapsedMs = 0;
+      const at = (ms: number) => new Date(epoch + ms).toISOString();
+      const requests: NativeHarnessRequest[] = [];
+      const transport: NativeHarnessTransport = {
+        open: async () => ({
+          fits: () => true,
+          send: async (request, stream) => {
+            requests.push(request);
+            if (requests.length === 1) {
+              // Sent at 0s: first token at 1s, finished at 5s.
+              elapsedMs = 1_000;
+              stream.onEvent({ kind: "text-delta", text: "Looking" });
+              elapsedMs = 5_000;
+              const usage = { inputTokens: 100, outputTokens: 80, cacheReadInputTokens: 60 };
+              stream.onEvent({ kind: "usage", ...usage });
+              return {
+                text: "Looking",
+                toolCalls: [{ toolCallId: "call", toolName: "read", argumentsJson: "{}" }],
+                usage,
+              };
+            }
+            // Sent at 15s, after ten seconds in the tool: first token at 17s, finished at 19s.
+            elapsedMs = 17_000;
+            stream.onEvent({ kind: "text-delta", text: "Done" });
+            elapsedMs = 19_000;
+            const usage = { inputTokens: 160, outputTokens: 60, cacheReadInputTokens: 140 };
+            stream.onEvent({ kind: "usage", ...usage });
+            return { text: "Done", toolCalls: [], usage };
+          },
+          release: () => undefined,
+        }),
+      };
+
+      const events = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* createNativeHarnessConnection({
+              instanceId,
+              driverKind: "openai-compatible",
+              projectRoot,
+              mode: "code",
+              transport,
+              transcripts: new MemoryNativeHarnessTranscriptStore(),
+              admitTurn: () => undefined,
+              clock: () => at(elapsedMs),
+              correlationId: () => "80000000-0000-4000-8000-000000000903",
+            });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            const first = yield* sendAndCollect(
+              connection,
+              "look",
+              (event) => event.kind === "tool-request",
+            );
+            const finished = yield* Effect.fork(
+              Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+            );
+            elapsedMs = 15_000;
+            yield* connection.answerTool({
+              sessionId,
+              requestId: "call",
+              resultJson: "{}",
+              isError: false,
+            });
+            return [...first, ...Array.from(yield* Fiber.join(finished))];
+          }),
+        ),
+      );
+
+      const requestScoped = events.filter(
+        (event) => event.kind === "usage" && event.requestStartedAt !== undefined,
+      );
+      expect(
+        requestScoped.map((event) => event.kind === "usage" && event.requestStartedAt),
+      ).toEqual([at(0), at(15_000)]);
+      const { metrics, usage } = deriveTurnMetrics({
+        startedAt: at(0),
+        endedAt: at(19_000),
+        events,
+      });
+      expect(metrics).toEqual({
+        precision: "exact",
+        wallMs: 19_000,
+        timeToFirstTokenMs: 1_000,
+        decodeOutputTokens: 140,
+        decodeMs: 6_000,
+        toolMs: 10_000,
+        modelCalls: 2,
+      });
+      expect(usage).toEqual({
+        inputTokens: 260,
+        outputTokens: 140,
+        cacheReadInputTokens: 200,
+      });
     });
   });
 });

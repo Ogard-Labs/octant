@@ -19,6 +19,7 @@ import type { ProviderAcquireInput, ProviderDriver } from "@octant/provider-sdk/
 import { ContextHarnessService } from "../context/contextHarnessService";
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import { ResearchRouter, type ResearchRouteDecision } from "./research/researchRouter";
+import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ChatTurnRunner } from "./chatTurnRunner";
 
 const now = "2026-07-19T22:00:00.000Z";
@@ -2080,6 +2081,151 @@ describe("ChatTurnRunner", () => {
       }),
     );
     expect(updates.at(-1)?.usage).toEqual({ inputTokens: 12, outputTokens: 8 });
+  });
+
+  describe("what a turn leaves behind for its observers", () => {
+    const base = Date.parse(now);
+    const at = (ms: number) => new Date(base + ms).toISOString();
+
+    /** Runs one turn whose provider emits `events`, and returns what the runner told its observers. */
+    async function runTurn(
+      events: ReadonlyArray<Record<string, unknown>>,
+      options: { readonly finishedAtMs: number; readonly signal?: AbortSignal } = {
+        finishedAtMs: 8_000,
+      },
+    ) {
+      let nowMs = 0;
+      const completed: TurnEndSummary[] = [];
+      const ended: TurnEndSummary[] = [];
+      const queue = Effect.runSync(Queue.unbounded<never>());
+      const connection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: () => Effect.succeed({ sessionId }),
+        send: () =>
+          Effect.gen(function* () {
+            nowMs = options.finishedAtMs;
+            for (const next of events) yield* Queue.offer(queue, { sessionId, ...next } as never);
+          }),
+        interrupt: () => Effect.void,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const { scheduler, reservation } = makeScheduler();
+      const runner = new ChatTurnRunner({
+        capacityScheduler: scheduler,
+        contextHarness: makeHarness(),
+        researchRouter: new ResearchRouter({
+          searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+          providerNativeExecute: async () => ({
+            query: "x",
+            backend: "provider-native",
+            results: [],
+          }),
+        }),
+        timeoutMs: 5_000,
+      });
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          runner.run({
+            thread: thread(),
+            attempt: attempt(),
+            prompt: "hello",
+            scratchRoot: "/tmp/octant-scratch/thread",
+            driver: { acquire: () => Effect.succeed(connection) } as never,
+            providerInstanceId,
+            serviceLimits: serviceLimits(),
+            contextSubject: subject,
+            contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+            requestShape: "chat-turn",
+            varianceReserve: 20,
+            reservationId: reservation,
+            estimatedTokens: 100,
+            researchEnabled: false,
+            researchRoute: researchRoute({ kind: "disabled" }),
+            attachments: [],
+            clock: () => at(nowMs),
+            ...(options.signal === undefined ? {} : { signal: options.signal }),
+            onTurnCompleted: async ({ turn }) => {
+              completed.push(turn);
+            },
+            onTurnEnded: (turn) => ended.push(turn),
+            persistAttempt: () => Effect.void,
+            persistResponse: () =>
+              Effect.succeed({
+                contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                digest: "e".repeat(64),
+                byteLength: 5,
+              }),
+          }),
+        ),
+      );
+      return { exit, completed, ended };
+    }
+
+    it("hands a completed turn's full usage and speed to the observer", async () => {
+      const { exit, completed, ended } = await runTurn([
+        { kind: "reasoning-delta", text: "Thinking", occurredAt: at(1_000) },
+        { kind: "text-delta", text: "Done", occurredAt: at(2_000) },
+        {
+          kind: "usage",
+          occurredAt: at(8_000),
+          inputTokens: 1_000,
+          outputTokens: 90,
+          cacheReadInputTokens: 900,
+          reasoningTokens: 30,
+        },
+        { kind: "completed", occurredAt: at(8_000) },
+      ]);
+
+      expect(exit._tag).toBe("Success");
+      expect(completed).toHaveLength(1);
+      expect(completed[0]).toEqual({
+        stopReason: "end-of-turn",
+        startedAt: at(0),
+        endedAt: at(8_000),
+        usage: {
+          inputTokens: 1_000,
+          outputTokens: 90,
+          cacheReadInputTokens: 900,
+          reasoningTokens: 30,
+        },
+        metrics: {
+          precision: "exact",
+          wallMs: 8_000,
+          timeToFirstTokenMs: 1_000,
+          decodeOutputTokens: 90,
+          decodeMs: 7_000,
+          toolMs: 0,
+          modelCalls: 1,
+        },
+      });
+      expect(ended).toEqual(completed);
+    });
+
+    it("says an interrupted turn stopped without finishing, and keeps what it cost", async () => {
+      const { exit, completed, ended } = await runTurn(
+        [
+          { kind: "text-delta", text: "Partial", occurredAt: at(1_000) },
+          { kind: "usage", occurredAt: at(3_000), inputTokens: 100, outputTokens: 20 },
+          {
+            kind: "failed",
+            failure: { category: "provider-failed", message: "Provider stopped." },
+          },
+        ],
+        { finishedAtMs: 3_000 },
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(completed).toEqual([]);
+      expect(ended).toHaveLength(1);
+      expect(ended[0]).toMatchObject({
+        stopReason: "failed",
+        usage: { inputTokens: 100, outputTokens: 20 },
+        metrics: { precision: "exact", decodeMs: 2_000 },
+      });
+    });
   });
 
   it("records a completed Chat turn with no provider usage as unreported", async () => {

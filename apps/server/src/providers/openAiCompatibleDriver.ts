@@ -147,6 +147,7 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
                 instanceId,
                 host: options.subscriptionOAuth,
                 now: () => Date.parse(observedAt),
+                baseUrl: options.configuration.baseUrl,
               });
               if (gate.kind === "report") {
                 const refused = decodeProviderObservedState({
@@ -345,6 +346,7 @@ function openAiCompatibleTransport(
         instanceId: options.instanceId,
         host: options.subscriptionOAuth,
         now: () => Date.parse(observedAt),
+        baseUrl: options.configuration.baseUrl,
       });
       if (gate.kind === "report") throw failure(gate.readiness, gate.message);
       const plainCredential = gate.kind === "plain" ? gate.credential : undefined;
@@ -477,6 +479,9 @@ async function sendCompatibleRequest(
           value: await runProviderEffect(
             sendResponsesTurn({
               ...shared,
+              // One stable key per harness session, so every step of the
+              // conversation is routed to the same prompt cache.
+              promptCacheKey: String(request.sessionId),
               onAttemptFailure: (value) => {
                 metadata = value;
               },
@@ -571,6 +576,7 @@ function oauthResolverInput(
     instanceId: options.instanceId,
     host: options.subscriptionOAuth,
     now: () => Date.parse(clock()),
+    baseUrl: options.configuration.baseUrl,
   };
 }
 

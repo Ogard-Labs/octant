@@ -137,13 +137,13 @@ export function filterSidebarActivityView(
 export function buildSidebarActivityView(input: {
   readonly now?: Date;
   readonly projects: ReadonlyArray<SidebarActivityProject>;
-  readonly unfiledLabel?: "Unfiled" | "Recents" | "Chats";
+  readonly unfiledLabel?: "No project" | "Unfiled" | "Recents" | "Chats";
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
 }): SidebarActivityView {
   const now = input.now ?? new Date();
   const projectNames = new Map(input.projects.map((project) => [project.id, project.name]));
   const rows = input.threads
-    .map((thread) => toActivityThread(thread, projectNames, input.unfiledLabel ?? "Unfiled"))
+    .map((thread) => toActivityThread(thread, projectNames, input.unfiledLabel ?? "No project"))
     .sort(compareActivityThreads);
   // A pin is the user saying "keep this where I can see it", so it outranks
   // both attention and recency; a pinned thread that also needs attention still
@@ -181,7 +181,7 @@ export function buildSidebarActivityView(input: {
 function toActivityThread(
   thread: ChatThreadNavigationItem,
   projectNames: ReadonlyMap<string, string>,
-  unfiledLabel: "Unfiled" | "Recents" | "Chats",
+  unfiledLabel: "No project" | "Unfiled" | "Recents" | "Chats",
 ): SidebarActivityThread {
   const projectName =
     thread.projectId === undefined
