@@ -230,6 +230,7 @@ import {
   type CompletedThreadArchiveInput,
 } from "./completedThreadArchiveSweep";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
+import { LiveTurnRegistry } from "./liveTurn/liveTurnRegistry";
 import { CodePlannerService } from "./code/codePlannerService";
 import {
   createCodeProfileSkillResolver,
@@ -1812,6 +1813,13 @@ export function startOctantServer(
     const simulatorInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
     const androidInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
     const machineChangeFeed = new MachineChangeFeed();
+    // What each running turn is doing, for the Chat, Work, and Code navigation
+    // reads. Process-local by design: a restart interrupts every turn. A step
+    // is not a journal event, so the registry tells the change feed when one
+    // moves, and the navigation reads follow it as they do for any change.
+    const liveTurns = new LiveTurnRegistry({
+      onChanged: (topic) => machineChangeFeed.publish([topic]),
+    });
     const unsubscribeMachineChanges = persistence.journal.subscribeCommitted((append) =>
       machineChangeFeed.publishCommitted(append),
     );
@@ -3525,6 +3533,7 @@ export function startOctantServer(
     const codeService =
       options.codeService ??
       new CodeService({
+        liveTurns,
         gitHistory: new GitHistoryPort(),
         persistence,
         access: {
@@ -4624,6 +4633,7 @@ export function startOctantServer(
         },
       });
       codeOperationRuntime = createCodeOperationRuntime({
+        liveTurns,
         gitMutationPort,
         agentRuns: agentRunPersistence,
         resolveSelectedExtensions,
@@ -6163,6 +6173,7 @@ export function startOctantServer(
     let imageJobService!: ImageJobService;
     let purgeQueuedChatMessages: ((threadId: ChatThreadId) => Promise<void>) | undefined;
     const chatService = new ChatService({
+      liveTurns,
       attachmentStore: chatAttachmentStore,
       beforeAttachmentPurge: async (threadId) => {
         if (purgeQueuedChatMessages === undefined)
@@ -6630,7 +6641,10 @@ export function startOctantServer(
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
       onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
-      observeRuntime: (threadId) => observeWorkThreadRuntime?.(threadId) ?? { executing: false },
+      observeRuntime: (threadId) => ({
+        ...(observeWorkThreadRuntime?.(threadId) ?? { executing: false }),
+        ...liveTurns.read(String(threadId)),
+      }),
       projectDueReminder,
       readProviderModel: (providerInstanceId, modelId) =>
         persistence
@@ -6641,6 +6655,7 @@ export function startOctantServer(
     });
     let workRequestService: WorkRequestService | undefined;
     const workTurnService = new WorkTurnService({
+      liveTurns,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
       contextHarness,

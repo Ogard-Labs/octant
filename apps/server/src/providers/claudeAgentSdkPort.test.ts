@@ -2097,6 +2097,141 @@ describe("Claude Agent SDK port", () => {
     expect(threshold).toBeUndefined();
   });
 
+  describe("context breakdown", () => {
+    // Claude Code 2.1.287 answered a context-usage request with these
+    // categories (observed live); the answer also lists memory file paths and
+    // skill names, which must never leave the port.
+    const observedAnswer = {
+      categories: [
+        { name: "System prompt", tokens: 142, color: "promptBorder", kind: "used" },
+        { name: "System tools", tokens: 17_946, color: "inactive", kind: "used" },
+        {
+          name: "System tools (deferred)",
+          tokens: 19_824,
+          color: "inactive",
+          isDeferred: true,
+          kind: "deferred",
+        },
+        { name: "MCP tools", tokens: 900, color: "cyan", kind: "used" },
+        { name: "Memory files", tokens: 16_270, color: "claude", kind: "used" },
+        { name: "Skills", tokens: 2_511, color: "warning", kind: "used" },
+        { name: "Messages", tokens: 10, color: "purple", kind: "used" },
+        { name: "Autocompact buffer", tokens: 33_000, color: "inactive", kind: "buffer" },
+        { name: "Free space", tokens: 930_121, color: "promptBorder", kind: "free" },
+      ],
+      totalTokens: 37_779,
+      maxTokens: 1_000_000,
+      memoryFiles: [
+        { path: "/Users/someone/private/AGENTS.md", type: "Project", tokens: 8_690 },
+        { path: "/Users/someone/private/CLAUDE.md", type: "Project", tokens: 16 },
+      ],
+      mcpTools: [
+        { name: "a", serverName: "octant", tokens: 450, isLoaded: true },
+        { name: "b", serverName: "octant", tokens: 450, isLoaded: true },
+        { name: "c", serverName: "octant", tokens: 0, isLoaded: false },
+      ],
+      agents: [],
+      skills: {
+        totalSkills: 17,
+        includedSkills: 17,
+        tokens: 2_511,
+        skillFrontmatter: [{ name: "private-skill-name", source: "built-in", tokens: 482 }],
+      },
+      isAutoCompactEnabled: true,
+      autoCompactThreshold: 967_000,
+    };
+
+    async function settledTurn(answer: (() => Promise<unknown>) | undefined) {
+      const harness = makeHarness([safeRuntimeInitialization, validResult]);
+      if (answer !== undefined) harness.query.getContextUsage = answer;
+      const messages = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const query = yield* harness.port.openQuery(openInput);
+            return yield* Stream.runCollect(query.messages);
+          }),
+        ),
+      );
+      return Chunk.toReadonlyArray(messages).find((message) => message.kind === "result");
+    }
+
+    test("attaches the runtime's own categories to the result that settles a turn", async () => {
+      const result = await settledTurn(async () => observedAnswer);
+
+      expect(result).toMatchObject({
+        kind: "result",
+        contextBreakdown: {
+          parts: [
+            { kind: "system-prompt", tokens: 142, accuracy: "provider-reported" },
+            { kind: "system-tools", tokens: 17_946, accuracy: "provider-reported" },
+            { kind: "mcp-tools", tokens: 900, accuracy: "provider-reported", count: 2 },
+            { kind: "memory-files", tokens: 16_270, accuracy: "provider-reported", count: 2 },
+            { kind: "skills", tokens: 2_511, accuracy: "provider-reported", count: 17 },
+            { kind: "messages", tokens: 10, accuracy: "provider-reported" },
+            { kind: "reserved", tokens: 33_000, accuracy: "provider-reported" },
+          ],
+          deferred: [{ kind: "system-tools" }, { kind: "mcp-tools", count: 1 }],
+        },
+      });
+      // Free space is the reader's to derive, and paths and names are not data
+      // the host carries: only counts leave the lists.
+      const serialized = JSON.stringify(result);
+      expect(serialized).not.toContain("Free space");
+      expect(serialized).not.toContain("private");
+    });
+
+    test.each([
+      ["a runtime that cannot be asked", undefined],
+      [
+        "an answer the host cannot read",
+        async () => ({ categories: [{ name: "Messages", tokens: -5 }] }),
+      ],
+      [
+        "a runtime that refuses the request",
+        async () => {
+          throw new Error("unsupported control request");
+        },
+      ],
+    ])("settles the turn without a breakdown for %s", async (_name, answer) => {
+      const result = await settledTurn(answer);
+
+      expect(result).toMatchObject({ kind: "result" });
+      expect(result).not.toHaveProperty("contextBreakdown");
+    });
+
+    test("stops asking after one miss so a slow runtime delays only one turn", async () => {
+      const harness = makeHarness([
+        safeRuntimeInitialization,
+        validResult,
+        { ...validResult, uuid: "result-2" },
+      ]);
+      const answer = vi.fn(() => new Promise<unknown>(() => undefined));
+      harness.query.getContextUsage = answer;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const collected = Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const query = yield* harness.port.openQuery(openInput);
+              return yield* Stream.runCollect(query.messages);
+            }),
+          ),
+        );
+        await vi.advanceTimersByTimeAsync(10_000);
+        const results = Chunk.toReadonlyArray(await collected).filter(
+          (message) => message.kind === "result",
+        );
+
+        expect(results).toHaveLength(2);
+        // One ask when the session opened, one at the first result; the second
+        // result is not held up by a runtime that already failed to answer.
+        expect(answer).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   test("opens a new session under the assigned id and holds the runtime to it", async () => {
     const { resumeSessionId: _resume, ...fresh } = openInput;
     const harness = makeHarness([{ ...safeRuntimeInitialization, session_id: "assigned-1" }]);

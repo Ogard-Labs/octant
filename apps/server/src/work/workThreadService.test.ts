@@ -74,6 +74,42 @@ describe("WorkThreadService", () => {
     expect(fixture.projects.bootstrap).not.toHaveBeenCalled();
   });
 
+  it("carries a running turn's start time and latest step onto its navigation row and bootstrap", async () => {
+    const running = thread();
+    const idle = thread({ id: "72000000-0000-4000-8000-000000000006" as never });
+    const fixture = serviceFixture({
+      threads: [running, idle],
+      observeRuntime: (threadId) =>
+        String(threadId) === String(running.id)
+          ? {
+              executing: false,
+              awaitingInput: true,
+              awaitingKind: "approval",
+              turnStartedAt: now,
+              liveStep: { kind: "waiting", reason: "approval" },
+            }
+          : { executing: false },
+    });
+
+    const navigation = await fixture.service.navigation(ids.window);
+    expect(navigation.runtime).toEqual([
+      {
+        threadId: running.id,
+        executing: false,
+        awaitingInput: true,
+        awaitingKind: "approval",
+        turnStartedAt: now,
+        liveStep: { kind: "waiting", reason: "approval" },
+      },
+      { threadId: idle.id, executing: false },
+    ]);
+    const bootstrap = await fixture.service.bootstrap(ids.window);
+    expect(bootstrap.runtime[0]).toMatchObject({
+      turnStartedAt: now,
+      liveStep: { kind: "waiting", reason: "approval" },
+    });
+  });
+
   it("marks only the Project's newest open thread when a status date is due", async () => {
     const older = thread();
     const newest = thread({

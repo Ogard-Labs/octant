@@ -147,18 +147,26 @@ the sidebar's Running rule, so a snoozed or completed row is never listed) and
 the agent runs in progress from the AgentRun projection, most recently moved
 first. Work lists its Chat and Work threads together and Code its Code threads,
 as the sidebar's Running count does. A row shows the provider mark, the title, a
-step line in monospace (the host's latest line: on Code the board's activity
-line, otherwise the task of the agent run working in the thread, or the Project
-name when the host said nothing), and a time. A run says how long it has run
-("Running 12m"); a thread says when it last moved ("Active 4m ago"), because the
-host keeps no start time for a turn. A host name appears only when the window is
+step line, and a time. The step line is the most live thing the host knows, in
+this order: the running turn's own step (`Command: bun run test`, in monospace,
+or "Waiting for approval" / "Waiting for your answer" in plain text), the
+board's activity line on Code, the task of the agent run working in the thread,
+how far its plan has come, or the Project name when the host said nothing. A
+turn the host reports a start time for says how long it has run ("Running
+12m"), as does an agent run; a thread whose host reports none (an older host)
+says when it last moved ("Active 4m ago"). The time is read at minute
+resolution from the shell's once-a-minute clock. A host name appears only when the window is
 reading a host that is not this computer. A run reports under the running thread
 it belongs to rather than as a second row, and is its own row only when its
 thread is resting. At most five rows show, then **+N more**, which opens the
 Running view (the Board; Chat's Running tile opens Activity). A row opens its
 thread. The card reads what the window's controllers already hold; the run list
 is one read when the card mounts and again when the thread lists change, so it
-adds no timer, and a window sees only what its own authority returns.
+adds no timer, and a window sees only what its own authority returns. The turn
+start and step ride on the same navigation rows as the executing flag (see
+[Architecture: persistence](../architecture.md#persistence), fast thread
+reads), so a remote window sees them for exactly the threads it can already
+list.
 
 ## Tool lifecycles
 
