@@ -294,6 +294,19 @@ a group that carries its own value or a leaf that does not, a value that is
 negative, a measure that is not declared, and a hierarchy past the depth, node,
 measure, or label budget. The accessible fallback is a hierarchical table
 sortable by each measure.
+A heatmap is a grid coloured by value. A matrix names its rows and columns and
+carries a cell per coordinate with a value and an optional short note; a cell on
+a coordinate the block does not hold, a repeated row, column, or coordinate, and
+a grid past the row, column, or cell budget are each refused. A calendar carries
+one reading per date and lays the days out on a week grid whose first day comes
+from the locale. A coordinate the block does not list is drawn apart from a zero.
+Both read a value through the shared scale roles. The pure, deterministic layout
+lives in `packages/domain` (`canvasHeatmapLayout`), so the screen, the artifact
+preview SVG, and the Markdown and HTML export all draw the same cells. The person
+can sort a matrix's rows by their total and walk the cells with the arrow keys;
+these are view state and are never journaled. The accessible fallback is a table
+of every coordinate and its total for a matrix, or of every dated reading for a
+calendar.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the

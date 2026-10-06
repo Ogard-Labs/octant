@@ -365,6 +365,49 @@ describe("createCanvasAgentTools", () => {
     });
   });
 
+  it("lets an agent create a matrix and a calendar from the heatmap examples describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["heatmap"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.blockId)).toEqual([
+      "commits-by-hour",
+      "test-failures-calendar",
+    ]);
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks.every((block) => block.kind === "heatmap")).toBe(true);
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Activity grid",
+        blocks: examples,
+      }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Activity grid" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+    expect(examples[0]).toMatchObject({ kind: "heatmap", layout: "matrix", scale: "sequential" });
+    expect(examples[1]).toMatchObject({
+      kind: "heatmap",
+      layout: "calendar",
+      scale: "diverging",
+    });
+  });
+
   it("lets an agent create and then revise a settings screen mockup from the example describe returns", async () => {
     const { create, revise, set } = tools();
     const described = await set.execute({

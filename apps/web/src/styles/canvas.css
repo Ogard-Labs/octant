@@ -552,6 +552,179 @@
   }
 }
 
+/* ── Heatmap ─────────────────────────────────────────────────────────────
+   The same data-visualisation system as a chart and a treemap: shared scale
+   roles, marks that transition only when the colour changes, and a disclosed
+   table. A missing coordinate is drawn apart from a zero reading. */
+
+.canvas-block__heatmap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.canvas-block__heatmap-header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--oct-space-2);
+}
+
+.canvas-block__heatmap-plot {
+  position: relative;
+}
+
+.canvas-block__heatmap-plot:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.canvas-block__heatmap-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 480px;
+}
+
+.canvas-block__heatmap-axis {
+  fill: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__heatmap-mark {
+  cursor: pointer;
+  /* A hairline keeps neighbouring cells apart, so two similar readings do not
+     read as one cell, and it is what separates a zero from its neighbour. */
+  stroke: var(--oct-surface);
+  stroke-width: 1;
+  transition:
+    opacity var(--oct-motion-fast) var(--oct-ease-standard),
+    fill var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+/* A coordinate the block does not list: empty with a dashed edge, so it never
+   reads as the low end of the scale the way a zero does. */
+.canvas-block__heatmap-mark.is-missing {
+  fill: none;
+  stroke: var(--oct-muted);
+  stroke-dasharray: 2 2;
+}
+
+.canvas-block__heatmap-mark.is-active {
+  stroke: var(--octant-focus-ring);
+  stroke-width: 2;
+}
+
+.canvas-block__heatmap-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-fg-2);
+}
+
+.canvas-block__heatmap-legend-title {
+  color: var(--oct-meta);
+}
+
+.canvas-block__heatmap-scale {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas-block__heatmap-scale-step {
+  display: inline-block;
+  width: 20px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.canvas-block__heatmap-scale-bound {
+  font-variant-numeric: tabular-nums;
+  color: var(--oct-meta);
+}
+
+.canvas-block__heatmap-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-meta);
+}
+
+.canvas-block__heatmap-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+/* The legend's missing sample repeats the empty dashed reading of a cell; as a
+   plain element it takes a border rather than the SVG mark's stroke. */
+.canvas-block__heatmap-swatch.is-missing {
+  background: none;
+  border: 1px dashed var(--oct-muted);
+}
+
+.canvas-block__heatmap-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.canvas-block__heatmap-table:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.canvas-block__heatmap-data {
+  margin-top: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__heatmap-data summary {
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-block__heatmap-mark {
+    transition: none;
+  }
+}
+
+[data-octant-reduced-motion="true"] .canvas-block__heatmap-mark {
+  transition: none;
+}
+
+/* System colours keep the cells legible when the palette is replaced; the
+   dash pattern is what keeps a missing cell apart from a present one. */
+@media (forced-colors: active) {
+  .canvas-block__heatmap-mark {
+    fill: Highlight;
+    stroke: CanvasText;
+    stroke-width: 2;
+  }
+
+  .canvas-block__heatmap-mark.is-missing {
+    fill: Canvas;
+    stroke: GrayText;
+    stroke-dasharray: 2 2;
+  }
+
+  .canvas-block__heatmap-mark.is-active {
+    stroke: Highlight;
+  }
+
+  .canvas-block__heatmap-axis {
+    fill: CanvasText;
+  }
+}
+
 .canvas-block__timeline {
   list-style: none;
   margin: 0;

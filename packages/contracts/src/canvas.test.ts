@@ -849,3 +849,87 @@ describe("treemap blocks", () => {
     expect(() => decodeCanvasBlock({ ...treemap, onClick: "alert(1)" })).toThrow();
   });
 });
+
+describe("heatmap blocks", () => {
+  const matrix = {
+    blockId: "commits-by-hour",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "heatmap",
+    layout: "matrix",
+    valueLabel: "Commits",
+    format: "number",
+    scale: "sequential",
+    rows: [
+      { rowId: "mon", label: "Mon" },
+      { rowId: "tue", label: "Tue" },
+    ],
+    columns: [
+      { columnId: "h09", label: "09" },
+      { columnId: "h10", label: "10" },
+    ],
+    cells: [
+      { rowId: "mon", columnId: "h09", value: 3 },
+      { rowId: "tue", columnId: "h10", value: 6, note: "After the review" },
+    ],
+  };
+  const calendar = {
+    blockId: "test-failures",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "heatmap",
+    layout: "calendar",
+    valueLabel: "Test failures",
+    scale: "diverging",
+    days: [
+      { date: "2026-09-01", value: 0 },
+      { date: "2026-09-02", value: 2 },
+    ],
+  };
+
+  it("decodes a matrix with rows, columns, and a cell per coordinate", () => {
+    const block = decodeCanvasBlock(matrix);
+
+    expect(block).toMatchObject({
+      kind: "heatmap",
+      layout: "matrix",
+      valueLabel: "Commits",
+      scale: "sequential",
+    });
+  });
+
+  it("decodes a calendar with one reading per date", () => {
+    const block = decodeCanvasBlock(calendar);
+
+    expect(block).toMatchObject({ kind: "heatmap", layout: "calendar", scale: "diverging" });
+  });
+
+  it("admits a heatmap only under the version that declared it", () => {
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: 4,
+        blocks: [matrix],
+      }),
+    ).toThrow();
+    expect(
+      decodeCanvasDefinition({
+        ...definition,
+        blocks: [calendar],
+      }),
+    ).toMatchObject({ blocks: [calendar] });
+  });
+
+  it("rejects an unknown layout or scale, a bad date, an over-long note, and executable fields", () => {
+    expect(() => decodeCanvasBlock({ ...matrix, layout: "spiral" })).toThrow();
+    expect(() => decodeCanvasBlock({ ...matrix, scale: "rainbow" })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...calendar, days: [{ date: "2026-02-30", value: 1 }] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...matrix,
+        cells: [{ rowId: "mon", columnId: "h09", value: 1, note: "x".repeat(121) }],
+      }),
+    ).toThrow();
+    expect(() => decodeCanvasBlock({ ...matrix, onClick: "alert(1)" })).toThrow();
+  });
+});

@@ -199,7 +199,8 @@ describe("Canvas validation policy", () => {
 
   it("fails closed for unknown schema versions", () => {
     expectPolicyCode(
-      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 5 }),
+      () =>
+        validateCanvasDefinition({ ...baseDefinition, schemaVersion: CANVAS_SCHEMA_VERSION + 1 }),
       "unsupported-schema-version",
     );
     expectPolicyCode(
@@ -879,6 +880,171 @@ describe("treemap validation", () => {
           ]),
         ),
       "missing-source",
+    );
+  });
+});
+
+function heatmapMatrix(overrides: Record<string, unknown> = {}) {
+  return {
+    blockId: "commits-by-hour",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "heatmap" as const,
+    layout: "matrix" as const,
+    valueLabel: "Commits",
+    scale: "sequential" as const,
+    rows: [
+      { rowId: "mon", label: "Mon" },
+      { rowId: "tue", label: "Tue" },
+    ],
+    columns: [
+      { columnId: "h09", label: "09" },
+      { columnId: "h10", label: "10" },
+    ],
+    cells: [
+      { rowId: "mon", columnId: "h09", value: 3 },
+      { rowId: "tue", columnId: "h10", value: 6, note: "After the review" },
+    ],
+    ...overrides,
+  };
+}
+
+function heatmapCalendar(overrides: Record<string, unknown> = {}) {
+  return {
+    blockId: "test-failures",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "heatmap" as const,
+    layout: "calendar" as const,
+    valueLabel: "Test failures",
+    scale: "diverging" as const,
+    days: [
+      { date: "2026-09-01", value: 0 },
+      { date: "2026-09-02", value: 3 },
+    ],
+    ...overrides,
+  };
+}
+
+describe("heatmap validation", () => {
+  it("accepts a matrix whose cells name rows and columns it holds", () => {
+    expect(() => validateCanvasDefinition(withBlocks([heatmapMatrix()]))).not.toThrow();
+  });
+
+  it("accepts a calendar with one reading per date", () => {
+    expect(() => validateCanvasDefinition(withBlocks([heatmapCalendar()]))).not.toThrow();
+  });
+
+  it("refuses a heatmap block inside a document declaring an older schema version", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 4,
+          blocks: [heatmapMatrix()],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
+  it("rejects a matrix that lists one row id twice", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              rows: [
+                { rowId: "mon", label: "Mon" },
+                { rowId: "mon", label: "Monday" },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-heatmap-row-id",
+    );
+  });
+
+  it("rejects a cell on a row the matrix does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              cells: [{ rowId: "wed", columnId: "h09", value: 1 }],
+            }),
+          ]),
+        ),
+      "unknown-heatmap-row",
+    );
+  });
+
+  it("rejects a cell on a column the matrix does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              cells: [{ rowId: "mon", columnId: "h23", value: 1 }],
+            }),
+          ]),
+        ),
+      "unknown-heatmap-column",
+    );
+  });
+
+  it("rejects one coordinate listed more than once", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              cells: [
+                { rowId: "mon", columnId: "h09", value: 1 },
+                { rowId: "mon", columnId: "h09", value: 2 },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-heatmap-cell",
+    );
+  });
+
+  it("rejects a calendar that repeats a date and one that is not a real day", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapCalendar({
+              days: [
+                { date: "2026-09-01", value: 1 },
+                { date: "2026-09-01", value: 2 },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-heatmap-date",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([heatmapCalendar({ days: [{ date: "2026-02-30", value: 1 }] })]),
+        ),
+      "invalid-schema",
+    );
+  });
+
+  it("rejects a calendar that spans more days than the budget", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapCalendar({
+              days: [
+                { date: "2026-01-01", value: 1 },
+                { date: "2031-01-01", value: 2 },
+              ],
+            }),
+          ]),
+        ),
+      "heatmap-days-budget-exceeded",
     );
   });
 });

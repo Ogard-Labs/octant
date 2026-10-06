@@ -722,6 +722,19 @@ or categorical by top-level group, and reads through the shared scale roles.
 Cell labels are drawn only where they fit, and the disclosed table is the
 accessible reading, sortable by each measure.
 
+**Heatmap.** A grid is coloured by value
+(`packages/domain/src/canvasHeatmapLayout.ts`). A `matrix` names its rows and
+columns and carries a cell per coordinate with a value and an optional short
+note; a `calendar` carries one reading per date and lays the days out on a week
+grid whose first day comes from the locale. Both read a value through one of the
+same two scale roles — sequential or diverging — with a legend that shows a
+scale bar and its bounds. A coordinate the block does not list is drawn as an
+empty dashed cell, apart from a zero reading. The screen renderer and the static
+SVG export draw the same deterministic layout. A matrix's rows can be sorted by
+their total and the cells can be walked with the arrow keys; these are view
+state and revise nothing. The disclosed table is the accessible reading, and it
+shows a missing coordinate as an empty cell rather than a zero.
+
 **Motion.** A chart transitions only on a state change — a legend toggle, a zoom
 — never on entrance. A transition lasts at most 200ms and is off under
 `prefers-reduced-motion: reduce` and when the workspace sets
