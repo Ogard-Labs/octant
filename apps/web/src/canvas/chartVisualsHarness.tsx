@@ -8,6 +8,9 @@ import {
   heatmapExampleBlocks,
   barListExampleBlocks,
   metricExampleBlocks,
+  orderSchemaBlock,
+  supportFlowBlock,
+  releaseMindmapBlock,
 } from "@octant/domain";
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, getThemePreset } from "@octant/theme";
 import { CanvasDocument } from "./CanvasDocument";
@@ -214,6 +217,9 @@ const definition = {
     metric,
     table,
     timeline,
+    orderSchemaBlock,
+    supportFlowBlock,
+    releaseMindmapBlock,
   ],
 };
 

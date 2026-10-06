@@ -3,6 +3,7 @@ import {
   CANVAS_AGGREGATE_TYPE,
   CANVAS_CREATED,
   CANVAS_BAR_LIST_SCHEMA_VERSION,
+  CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_EVENT_NAMES,
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_MAX_BAR_LIST_ROWS,
@@ -11,7 +12,9 @@ import {
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_IMAGES,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
+  CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_TABLE_ROWS,
+  CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_VERSION_APPENDED,
@@ -1088,8 +1091,162 @@ describe("bar list blocks", () => {
   });
 
   it("keeps the bar-list floor ahead of every earlier version", () => {
-    expect(CANVAS_BAR_LIST_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
     expect(CANVAS_BAR_LIST_SCHEMA_VERSION).toBeGreaterThan(CANVAS_HEATMAP_SCHEMA_VERSION);
+    expect(CANVAS_BAR_LIST_SCHEMA_VERSION).toBeLessThan(CANVAS_SCHEMA_VERSION);
+  });
+});
+
+describe("entity-relationship, swimlane, and mind map diagram kinds", () => {
+  const er = {
+    blockId: "order-schema",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "er",
+    entities: [
+      {
+        entityId: "person",
+        label: "Person",
+        attributes: [{ attributeId: "person-id", name: "id", type: "uuid", key: true }],
+      },
+      {
+        entityId: "order",
+        label: "Order",
+        attributes: [{ attributeId: "order-id", name: "id", type: "uuid", key: true }],
+      },
+    ],
+    relationships: [
+      {
+        relationshipId: "person-places-order",
+        source: "person",
+        target: "order",
+        sourceCardinality: "one",
+        targetCardinality: "many",
+        label: "places",
+      },
+    ],
+  };
+
+  it("decodes an entity-relationship block with named attributes and cardinalities", () => {
+    const block = decodeCanvasBlock(er);
+    expect(block.kind).toBe("er");
+    if (block.kind !== "er") throw new Error("expected an er block");
+    expect(block.entities).toHaveLength(2);
+    expect(block.entities[0]?.attributes[0]).toMatchObject({ name: "id", key: true });
+    expect(block.relationships[0]).toMatchObject({
+      sourceCardinality: "one",
+      targetCardinality: "many",
+    });
+  });
+
+  it("rejects an entity-relationship cardinality outside the four named values", () => {
+    expect(() =>
+      decodeCanvasBlock({
+        ...er,
+        relationships: [{ ...er.relationships[0], targetCardinality: "several" }],
+      }),
+    ).toThrow();
+  });
+
+  it("keeps the diagram-kinds floor at the current version, ahead of bar-list", () => {
+    expect(CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
+    expect(CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION).toBeGreaterThan(CANVAS_BAR_LIST_SCHEMA_VERSION);
+  });
+
+  it("refuses a diagram kind inside a document declaring an earlier version", () => {
+    const definition = {
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      title: "Schema",
+      provenance,
+      sourceManifest: [],
+      blocks: [er],
+    };
+    for (const earlier of [
+      CANVAS_BAR_LIST_SCHEMA_VERSION,
+      CANVAS_HEATMAP_SCHEMA_VERSION,
+      CANVAS_PRESENTATION_SCHEMA_VERSION,
+    ]) {
+      expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: earlier })).toThrow();
+    }
+    expect(decodeCanvasDefinition(definition)).toMatchObject({ blocks: [er] });
+  });
+
+  it("decodes a swimlane block with ordered lanes, a decision step, and a connection", () => {
+    const swimlane = {
+      blockId: "support-flow",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "swimlane",
+      lanes: [
+        { laneId: "customer", label: "Customer", kind: "actor" },
+        { laneId: "support", label: "Support", kind: "team" },
+      ],
+      steps: [
+        { stepId: "report", laneId: "customer", label: "Report" },
+        { stepId: "triage", laneId: "support", label: "Is it a defect?", decision: true },
+      ],
+      connections: [{ connectionId: "report-triage", source: "report", target: "triage" }],
+    };
+    expect(decodeCanvasBlock(swimlane)).toMatchObject({
+      kind: "swimlane",
+      lanes: [
+        { laneId: "customer", label: "Customer", kind: "actor" },
+        { laneId: "support", label: "Support", kind: "team" },
+      ],
+    });
+    const decoded = decodeCanvasBlock(swimlane);
+    if (decoded.kind !== "swimlane") throw new Error("expected a swimlane block");
+    expect(decoded.steps[1]).toMatchObject({ stepId: "triage", decision: true });
+    expect(decoded.connections[0]).toMatchObject({ source: "report", target: "triage" });
+  });
+
+  it("refuses a swimlane without a lane", () => {
+    expect(() =>
+      decodeCanvasBlock({
+        blockId: "empty-lanes",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "swimlane",
+        lanes: [],
+        steps: [],
+        connections: [],
+      }),
+    ).toThrow();
+  });
+
+  it("decodes a mind map whose topics name a parent and a note", () => {
+    const mindmap = {
+      blockId: "release-mindmap",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "mindmap",
+      nodes: [
+        { nodeId: "release", label: "Release" },
+        { nodeId: "tests", label: "Tests", parentId: "release", note: "green on head" },
+      ],
+    };
+    const decoded = decodeCanvasBlock(mindmap);
+    expect(decoded.kind).toBe("mindmap");
+    if (decoded.kind !== "mindmap") throw new Error("expected a mindmap block");
+    expect(decoded.nodes[1]).toMatchObject({
+      nodeId: "tests",
+      parentId: "release",
+      note: "green on head",
+    });
+  });
+
+  it("refuses a mind map note past its bound", () => {
+    expect(() =>
+      decodeCanvasBlock({
+        blockId: "long-note",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "mindmap",
+        nodes: [
+          { nodeId: "root", label: "Root" },
+          {
+            nodeId: "leaf",
+            label: "Leaf",
+            parentId: "root",
+            note: "x".repeat(CANVAS_MAX_MINDMAP_NOTE_LENGTH + 1),
+          },
+        ],
+      }),
+    ).toThrow();
   });
 });
 

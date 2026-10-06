@@ -44,6 +44,9 @@ const DRAWN_KINDS = new Set<CanvasBlock["kind"]>([
   "diagram",
   "sequence",
   "state",
+  "er",
+  "swimlane",
+  "mindmap",
   "mockup",
   "treemap",
   "heatmap",
@@ -209,6 +212,12 @@ function drawBlock(
       return { markup: sequence(block, y, width, palette), height: 64 };
     case "state":
       return { markup: stateMachine(block, y, width, palette), height: 64 };
+    case "er":
+      return { markup: erThumbnail(block, y, width, palette), height: 60 };
+    case "swimlane":
+      return { markup: swimlaneThumbnail(block, y, width, palette), height: 56 };
+    case "mindmap":
+      return { markup: mindmapThumbnail(block, y, width, palette), height: 54 };
     case "mockup":
       return { markup: mockupFrame(block, y, width, palette), height: 52 };
     case "treemap":
@@ -614,6 +623,107 @@ function stateMachine(
     return `<line x1="${String(fromX)}" y1="${String(y + 9)}" x2="${String(toX)}" y2="${String(y + 9 + index)}" stroke="${palette.muted}" stroke-width="1"/>`;
   });
   return arrows.join("") + boxes;
+}
+
+/**
+ * A schema thumbnail: entity boxes with a header bar and attribute lines, and
+ * one connector between the first two, so the picture reads as a data model.
+ */
+function erThumbnail(
+  block: Extract<CanvasBlock, { readonly kind: "er" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const entities = block.entities.slice(0, 3);
+  if (entities.length === 0) return lines(y, 2, width, palette);
+  const slot = width / entities.length;
+  const boxWidth = Math.max(40, Math.round(slot - 12));
+  const boxes = entities
+    .map((entity, index) => {
+      const x = Math.round(PADDING + index * slot);
+      const rows = Math.min(entity.attributes.length, 3);
+      const height = 14 + rows * 8;
+      const header = `<rect x="${String(x)}" y="${String(y)}" width="${String(boxWidth)}" height="12" rx="2" fill="${palette.accent}" opacity="0.35"/>`;
+      const frame = `<rect x="${String(x)}" y="${String(y)}" width="${String(boxWidth)}" height="${String(height)}" rx="3" fill="none" stroke="${palette.accent}" stroke-width="1.2"/>`;
+      const attrLines = Array.from(
+        { length: rows },
+        (_unused, row) =>
+          `<rect x="${String(x + 4)}" y="${String(y + 16 + row * 8)}" width="${String(Math.round(boxWidth * 0.62))}" height="3" rx="1.5" fill="${palette.muted}" opacity="0.6"/>`,
+      ).join("");
+      return (
+        header +
+        frame +
+        attrLines +
+        text(x, y + height + 9, clamp(entity.label, 14), 7, palette.ink)
+      );
+    })
+    .join("");
+  const connector =
+    entities.length > 1
+      ? `<line x1="${String(PADDING + boxWidth)}" y1="${String(y + 12)}" x2="${String(PADDING + slot)}" y2="${String(y + 12)}" stroke="${palette.muted}" stroke-width="1"/>`
+      : "";
+  return connector + boxes;
+}
+
+/**
+ * A lane thumbnail: stacked bands with a header column and a few step boxes,
+ * so the picture reads as a process handed between owners.
+ */
+function swimlaneThumbnail(
+  block: Extract<CanvasBlock, { readonly kind: "swimlane" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const lanes = block.lanes.slice(0, 3);
+  if (lanes.length === 0) return lines(y, 2, width, palette);
+  const laneHeight = 16;
+  const headerWidth = Math.round(width * 0.22);
+  return lanes
+    .map((lane, index) => {
+      const top = y + index * laneHeight;
+      const band = `<rect x="${String(PADDING)}" y="${String(top)}" width="${String(width)}" height="${String(laneHeight - 3)}" rx="2" fill="none" stroke="${palette.muted}" opacity="0.7"/>`;
+      const divider = `<line x1="${String(PADDING + headerWidth)}" y1="${String(top)}" x2="${String(PADDING + headerWidth)}" y2="${String(top + laneHeight - 3)}" stroke="${palette.muted}" opacity="0.7"/>`;
+      const name = text(PADDING + 4, top + 10, clamp(lane.label, 12), 7, palette.ink, 600);
+      const step = `<rect x="${String(PADDING + headerWidth + 8)}" y="${String(top + 2)}" width="${String(Math.round(width * 0.3))}" height="9" rx="2" fill="${palette.accent}" opacity="0.5"/>`;
+      return band + divider + name + step;
+    })
+    .join("");
+}
+
+/**
+ * A mind map thumbnail: a root box with two branches to the right, so the
+ * picture reads as one topic and its children.
+ */
+function mindmapThumbnail(
+  block: Extract<CanvasBlock, { readonly kind: "mindmap" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const root = block.nodes.find((node) => node.parentId === undefined);
+  if (root === undefined) return lines(y, 2, width, palette);
+  const children = block.nodes
+    .filter((node) => String(node.parentId) === String(root.nodeId))
+    .slice(0, 3);
+  const rootX = PADDING;
+  const rootY = y + 18;
+  const rootBox = `<rect x="${String(rootX)}" y="${String(rootY)}" width="70" height="16" rx="3" fill="${palette.accent}" opacity="0.45"/>`;
+  const childX = PADDING + 90;
+  const links = children
+    .map(
+      (_child, index) =>
+        `<line x1="${String(rootX + 70)}" y1="${String(rootY + 8)}" x2="${String(childX)}" y2="${String(y + 6 + index * 16)}" stroke="${palette.muted}" stroke-width="1"/>`,
+    )
+    .join("");
+  const childBoxes = children
+    .map(
+      (_child, index) =>
+        `<rect x="${String(childX)}" y="${String(y + index * 16)}" width="${String(Math.min(120, width - childX))}" height="12" rx="2" fill="none" stroke="${palette.accent}" stroke-width="1"/>`,
+    )
+    .join("");
+  return links + rootBox + childBoxes;
 }
 
 function mockupFrame(

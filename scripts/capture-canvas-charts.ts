@@ -113,6 +113,9 @@ let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 const WIDTHS: ReadonlyArray<{ readonly suffix: string; readonly width: number }> = [
   { suffix: "", width: 1100 },
   { suffix: "-sidebar", width: 460 },
+  // A phone-width thread is narrower still; the diagrams must stay legible when
+  // the picture is wider than the column and has to scroll.
+  { suffix: "-narrow", width: 390 },
 ];
 
 try {
@@ -125,7 +128,7 @@ try {
     page.setDefaultTimeout(15_000);
     await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(
-      "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__table",
+      "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
     );
 
     // Show the table's sorted state in the capture: the sort mark and the

@@ -396,11 +396,23 @@ pure `admitCanvasDiagramLayoutRevision` policy (target must be a diagram,
 every moved node must exist, the sequence must be the head, budgets stand).
 Beside that generic node-and-edge diagram, a `sequence` block is participants,
 ordered messages, activations, and notes, and a `state` block is states that
-may nest by parent id, labeled transitions, and initial and final roles. Both
-use the diagram node and edge budgets. Layout is deterministic. Participants
-and states are node comment anchors; messages and transitions are edge comment
-anchors. Static export draws both through the same artifact SVG path as the
-other blocks.
+may nest by parent id, labeled transitions, and initial and final roles. Three
+further kinds share the same budgets: an `er` block is entities with named,
+typed attributes (an attribute may be a key) and relationships that name a
+cardinality at each end and an optional label; a `swimlane` block is ordered
+lanes of actors or teams, the steps each lane owns (a step may be flagged as a
+decision), and labeled connections; and a `mindmap` block is one root topic
+over children that name their parent, each with an optional note. Both
+sequence and state, and the three later kinds, use the diagram node and edge
+budgets; the er, swimlane, and mindmap kinds are version-gated together at
+Canvas schema version 8, so a document that declares an earlier version and
+carries one is refused as a declared future version. Layout is deterministic.
+Participants and states are node comment anchors; messages and transitions are
+edge comment anchors; entities, steps, and topics are node anchors and
+relationships and connections are edge anchors. Static export draws every kind
+through the same artifact SVG path as the other blocks, and the Markdown/HTML
+document renderer gives the er kind an attribute table, the swimlane kind
+numbered steps per lane, and the mindmap kind a nested list.
 Agent revisions and user layout share one history; a stale drag is refused and
 the renderer reloads rather than overwriting a newer version. Only the head
 version is editable. The route is host-window only; a paired browser reads

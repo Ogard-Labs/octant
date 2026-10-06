@@ -52,6 +52,12 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
       return "Sequence";
     case "state":
       return "State machine";
+    case "er":
+      return "Entity relationship";
+    case "swimlane":
+      return "Swimlane";
+    case "mindmap":
+      return "Mind map";
     case "mockup":
       return block.title;
     case "plan":

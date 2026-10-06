@@ -252,6 +252,60 @@ describe("createCanvasAgentTools", () => {
     );
   });
 
+  it("lets an agent create an entity-relationship, a swimlane, and a mind map from the examples describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "describe",
+        blockKinds: ["er", "swimlane", "mindmap"],
+      }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.kind)).toEqual(["er", "swimlane", "mindmap"]);
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks[0]).toMatchObject({
+      kind: "er",
+      entities: expect.arrayContaining([expect.objectContaining({ label: "Person" })]),
+      relationships: expect.arrayContaining([
+        expect.objectContaining({ label: "places", sourceCardinality: "one" }),
+      ]),
+    });
+    expect(blocks[1]).toMatchObject({
+      kind: "swimlane",
+      lanes: expect.arrayContaining([expect.objectContaining({ label: "Support", kind: "team" })]),
+      steps: expect.arrayContaining([expect.objectContaining({ label: "Is it a defect?" })]),
+    });
+    expect(blocks[2]).toMatchObject({
+      kind: "mindmap",
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ nodeId: "tests", parentId: "release" }),
+      ]),
+    });
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Order flow",
+        blocks: examples,
+      }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Order flow" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+  });
+
   it("lets an agent create a pie, a donut, stacked and grouped bars, and a bar and line chart from the examples describe returns", async () => {
     const { create, set } = tools();
     const described = await set.execute({

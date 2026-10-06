@@ -4,6 +4,7 @@ import {
   CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_DEPTH,
+  CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY,
   CANVAS_MAX_HEATMAP_CELLS,
   CANVAS_MAX_HEATMAP_COLUMNS,
   CANVAS_MAX_HEATMAP_DAYS,
@@ -11,16 +12,19 @@ import {
   CANVAS_MAX_HEATMAP_ROWS,
   CANVAS_MAX_IMAGES,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
+  CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_MOCKUP_DEPTH,
   CANVAS_MAX_MOCKUP_NODES,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_PAYLOAD_BYTES,
   CANVAS_MAX_SERIES,
+  CANVAS_MAX_SWIMLANE_LANES,
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
   CANVAS_MAX_TREEMAP_DEPTH,
   CANVAS_MAX_TREEMAP_LEAVES,
   CANVAS_BAR_LIST_SCHEMA_VERSION,
+  CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_MOCKUP_SCHEMA_VERSION,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
@@ -46,6 +50,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_HEATMAP_SCHEMA_VERSION,
+  CANVAS_BAR_LIST_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -58,6 +63,9 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "treemap", since: CANVAS_TREEMAP_SCHEMA_VERSION },
     { kind: "heatmap", since: CANVAS_HEATMAP_SCHEMA_VERSION },
     { kind: "bar-list", since: CANVAS_BAR_LIST_SCHEMA_VERSION },
+    { kind: "er", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
+    { kind: "swimlane", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
+    { kind: "mindmap", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -117,7 +125,16 @@ export type CanvasPolicyRejectionCode =
   | "bar-list-rows-budget-exceeded"
   | "duplicate-bar-list-label"
   | "bar-list-negative-value"
-  | "metric-sparkline-budget-exceeded";
+  | "metric-sparkline-budget-exceeded"
+  | "duplicate-er-attribute-id"
+  | "er-attribute-budget-exceeded"
+  | "unknown-swimlane-lane"
+  | "duplicate-swimlane-lane-id"
+  | "swimlane-lanes-budget-exceeded"
+  | "mindmap-roots"
+  | "dangling-mindmap-parent"
+  | "mindmap-nesting-cycle"
+  | "mindmap-note-budget-exceeded";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -282,6 +299,17 @@ function calculateBudgetUsage(
         diagramNodes += block.states.length;
         diagramEdges += block.transitions.length;
         break;
+      case "er":
+        diagramNodes += block.entities.length;
+        diagramEdges += block.relationships.length;
+        break;
+      case "swimlane":
+        diagramNodes += block.steps.length;
+        diagramEdges += block.connections.length;
+        break;
+      case "mindmap":
+        diagramNodes += block.nodes.length;
+        break;
       case "image":
         imageCount += 1;
         break;
@@ -395,6 +423,11 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       messages?: unknown;
       states?: unknown;
       transitions?: unknown;
+      entities?: unknown;
+      relationships?: unknown;
+      lanes?: unknown;
+      steps?: unknown;
+      connections?: unknown;
       title?: unknown;
       columns?: unknown;
       cells?: unknown;
@@ -432,6 +465,54 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       }
       if (Array.isArray(edges) && edges.length > CANVAS_MAX_DIAGRAM_EDGES) {
         return "edge-budget-exceeded";
+      }
+    }
+    if (block.kind === "er") {
+      if (Array.isArray(block.entities) && block.entities.length > CANVAS_MAX_DIAGRAM_NODES) {
+        return "node-budget-exceeded";
+      }
+      if (
+        Array.isArray(block.relationships) &&
+        block.relationships.length > CANVAS_MAX_DIAGRAM_EDGES
+      ) {
+        return "edge-budget-exceeded";
+      }
+      if (Array.isArray(block.entities)) {
+        for (const entity of block.entities) {
+          if (typeof entity !== "object" || entity === null) continue;
+          const attributes = (entity as { attributes?: unknown }).attributes;
+          if (
+            Array.isArray(attributes) &&
+            attributes.length > CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY
+          ) {
+            return "er-attribute-budget-exceeded";
+          }
+        }
+      }
+    }
+    if (block.kind === "swimlane") {
+      if (Array.isArray(block.steps) && block.steps.length > CANVAS_MAX_DIAGRAM_NODES) {
+        return "node-budget-exceeded";
+      }
+      if (Array.isArray(block.connections) && block.connections.length > CANVAS_MAX_DIAGRAM_EDGES) {
+        return "edge-budget-exceeded";
+      }
+      if (Array.isArray(block.lanes) && block.lanes.length > CANVAS_MAX_SWIMLANE_LANES) {
+        return "swimlane-lanes-budget-exceeded";
+      }
+    }
+    if (block.kind === "mindmap") {
+      if (Array.isArray(block.nodes) && block.nodes.length > CANVAS_MAX_DIAGRAM_NODES) {
+        return "node-budget-exceeded";
+      }
+      if (Array.isArray(block.nodes)) {
+        for (const node of block.nodes) {
+          if (typeof node !== "object" || node === null) continue;
+          const note = (node as { note?: unknown }).note;
+          if (typeof note === "string" && note.length > CANVAS_MAX_MINDMAP_NOTE_LENGTH) {
+            return "mindmap-note-budget-exceeded";
+          }
+        }
       }
     }
     if (block.kind === "mockup") {
@@ -594,6 +675,9 @@ function validateCrossReferences(definition: CanvasDefinition): void {
 
     if (block.kind === "sequence") validateSequence(block);
     if (block.kind === "state") validateState(block);
+    if (block.kind === "er") validateEr(block);
+    if (block.kind === "swimlane") validateSwimlane(block);
+    if (block.kind === "mindmap") validateMindmap(block);
     if (block.kind === "mockup") validateMockup(block);
     if (block.kind === "treemap") validateTreemap(block);
     if (block.kind === "heatmap") validateHeatmap(block);
@@ -742,6 +826,171 @@ function validateState(block: Extract<CanvasBlock, { readonly kind: "state" }>):
         "dangling-edge",
         `Canvas state diagram ${block.blockId} has a transition to a missing state.`,
       );
+    }
+  }
+}
+
+/**
+ * An entity-relationship block names each entity by id, and every relationship
+ * must land on two entities the block holds. An attribute id repeats only
+ * within its own entity, and the per-entity attribute list is bounded, so a
+ * schema that exceeds either would draw a table the picture cannot carry.
+ */
+function validateEr(block: Extract<CanvasBlock, { readonly kind: "er" }>): void {
+  const entities = new Set<string>();
+  for (const entity of block.entities) {
+    const id = String(entity.entityId);
+    if (entities.has(id)) {
+      reject(
+        "duplicate-node-id",
+        `Canvas entity relationship ${block.blockId} has duplicate entities.`,
+      );
+    }
+    entities.add(id);
+    if (entity.attributes.length > CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY) {
+      reject(
+        "er-attribute-budget-exceeded",
+        `Canvas entity relationship ${block.blockId} has an entity with more than ${String(CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY)} attributes.`,
+      );
+    }
+    const attributes = new Set<string>();
+    for (const attribute of entity.attributes) {
+      const attributeId = String(attribute.attributeId);
+      if (attributes.has(attributeId)) {
+        reject(
+          "duplicate-er-attribute-id",
+          `Canvas entity relationship ${block.blockId} repeats an attribute.`,
+        );
+      }
+      attributes.add(attributeId);
+    }
+  }
+  const relationships = new Set<string>();
+  for (const relationship of block.relationships) {
+    const id = String(relationship.relationshipId);
+    if (relationships.has(id)) {
+      reject(
+        "duplicate-edge-id",
+        `Canvas entity relationship ${block.blockId} has duplicate relationships.`,
+      );
+    }
+    relationships.add(id);
+    if (!entities.has(String(relationship.source)) || !entities.has(String(relationship.target))) {
+      reject(
+        "dangling-edge",
+        `Canvas entity relationship ${block.blockId} has a relationship to a missing entity.`,
+      );
+    }
+  }
+}
+
+/**
+ * A swimlane's steps name the lane they sit in, and every connection must land
+ * on two steps the block holds. A lane order past the lane budget or a step on
+ * a lane the block does not declare would draw a band nobody ordered.
+ */
+function validateSwimlane(block: Extract<CanvasBlock, { readonly kind: "swimlane" }>): void {
+  if (block.lanes.length > CANVAS_MAX_SWIMLANE_LANES) {
+    reject(
+      "swimlane-lanes-budget-exceeded",
+      `Canvas swimlane ${block.blockId} has more than ${String(CANVAS_MAX_SWIMLANE_LANES)} lanes.`,
+    );
+  }
+  const lanes = new Set<string>();
+  for (const lane of block.lanes) {
+    const id = String(lane.laneId);
+    if (lanes.has(id)) {
+      reject("duplicate-swimlane-lane-id", `Canvas swimlane ${block.blockId} repeats a lane.`);
+    }
+    lanes.add(id);
+  }
+  const steps = new Set<string>();
+  for (const step of block.steps) {
+    const id = String(step.stepId);
+    if (steps.has(id)) {
+      reject("duplicate-node-id", `Canvas swimlane ${block.blockId} has duplicate steps.`);
+    }
+    if (!lanes.has(String(step.laneId))) {
+      reject(
+        "unknown-swimlane-lane",
+        `Canvas swimlane ${block.blockId} places a step in a lane it does not hold.`,
+      );
+    }
+    steps.add(id);
+  }
+  const connections = new Set<string>();
+  for (const connection of block.connections) {
+    const id = String(connection.connectionId);
+    if (connections.has(id)) {
+      reject("duplicate-edge-id", `Canvas swimlane ${block.blockId} has duplicate connections.`);
+    }
+    connections.add(id);
+    if (!steps.has(String(connection.source)) || !steps.has(String(connection.target))) {
+      reject(
+        "dangling-edge",
+        `Canvas swimlane ${block.blockId} has a connection to a missing step.`,
+      );
+    }
+  }
+}
+
+/**
+ * A mind map is one root over topics that name their parent. A second root, a
+ * parent the block does not hold, a cycle, a chain past the depth budget, or a
+ * note past its length would each draw a map the data does not support.
+ */
+function validateMindmap(block: Extract<CanvasBlock, { readonly kind: "mindmap" }>): void {
+  const parents = new Map<string, string | undefined>();
+  for (const node of block.nodes) {
+    const id = String(node.nodeId);
+    if (parents.has(id)) {
+      reject("duplicate-node-id", `Canvas mind map ${block.blockId} has duplicate topics.`);
+    }
+    if (node.note !== undefined && node.note.length > CANVAS_MAX_MINDMAP_NOTE_LENGTH) {
+      reject(
+        "mindmap-note-budget-exceeded",
+        `Canvas mind map ${block.blockId} has a note longer than ${String(CANVAS_MAX_MINDMAP_NOTE_LENGTH)} characters.`,
+      );
+    }
+    parents.set(id, node.parentId === undefined ? undefined : String(node.parentId));
+  }
+  let roots = 0;
+  for (const [_id, parentId] of parents) {
+    if (parentId === undefined) {
+      roots += 1;
+      continue;
+    }
+    if (!parents.has(parentId)) {
+      reject(
+        "dangling-mindmap-parent",
+        `Canvas mind map ${block.blockId} nests a topic it does not hold.`,
+      );
+    }
+  }
+  // One root: a forest is not a map a reader can follow from a single topic.
+  if (parents.size > 0 && roots !== 1) {
+    reject("mindmap-roots", `Canvas mind map ${block.blockId} does not have exactly one root.`);
+  }
+  for (const [id, parentId] of parents) {
+    const seen = new Set<string>([id]);
+    let current = parentId;
+    let depth = 1;
+    while (current !== undefined) {
+      if (seen.has(current)) {
+        reject(
+          "mindmap-nesting-cycle",
+          `Canvas mind map ${block.blockId} nests a topic inside itself.`,
+        );
+      }
+      seen.add(current);
+      depth += 1;
+      if (depth > CANVAS_MAX_DEPTH) {
+        reject(
+          "depth-budget-exceeded",
+          `Canvas mind map ${block.blockId} nests topics deeper than ${CANVAS_MAX_DEPTH}.`,
+        );
+      }
+      current = parents.get(current);
     }
   }
 }

@@ -1602,6 +1602,92 @@
   font-size: var(--oct-text-xs);
 }
 
+/* The picture is reachable by keyboard so its overflow can be scrolled without
+   a pointer; a visible ring marks where focus is. */
+.canvas-block__kind-diagram:focus-visible {
+  outline: 2px solid var(--oct-focus-ring, var(--oct-fg));
+  outline-offset: 2px;
+}
+
+.canvas-block__er-frame {
+  fill: var(--oct-surface);
+  stroke: var(--oct-chart-axis);
+  stroke-width: 1;
+}
+
+.canvas-block__er-header {
+  fill: var(--oct-fg-soft);
+  stroke: var(--oct-chart-axis);
+  stroke-width: 1;
+}
+
+.canvas-block__er-entity-label {
+  fill: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.canvas-block__er-attribute {
+  fill: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__er-cardinality {
+  fill: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  text-anchor: middle;
+}
+
+.canvas-block__swimlane-band {
+  fill: var(--oct-surface);
+  stroke: var(--oct-border);
+  stroke-width: 1;
+}
+
+.canvas-block__swimlane-divider {
+  stroke: var(--oct-border);
+  stroke-width: 1;
+}
+
+.canvas-block__swimlane-label {
+  fill: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.canvas-block__swimlane-kind {
+  fill: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__swimlane-step {
+  fill: var(--oct-surface);
+  stroke: var(--oct-chart-axis);
+  stroke-width: 1;
+}
+
+.canvas-block__swimlane-step--decision {
+  stroke-dasharray: 4 3;
+}
+
+.canvas-block__mindmap-node {
+  fill: var(--oct-surface);
+  stroke: var(--oct-chart-axis);
+  stroke-width: 1;
+}
+
+.canvas-block__mindmap-node--root {
+  fill: var(--oct-fg-soft);
+  stroke-width: 1.5;
+}
+
+.canvas-block__mindmap-note {
+  fill: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  text-anchor: middle;
+}
+
 .canvas-block__code-head {
   display: flex;
   justify-content: space-between;

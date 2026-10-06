@@ -51,6 +51,11 @@ type Piece =
   | { readonly kind: "heading"; readonly level: number; readonly text: string }
   | { readonly kind: "paragraph"; readonly text: string }
   | { readonly kind: "list"; readonly items: ReadonlyArray<string> }
+  | { readonly kind: "ordered"; readonly items: ReadonlyArray<string> }
+  | {
+      readonly kind: "tree";
+      readonly items: ReadonlyArray<{ readonly depth: number; readonly text: string }>;
+    }
   | {
       readonly kind: "table";
       readonly headers: ReadonlyArray<string>;
@@ -397,6 +402,105 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
         },
       ];
     }
+    case "er": {
+      // The schema as one attribute table plus a relationship list: the same
+      // reading the picture shows, so an exported model is not a second model.
+      const keys = new Map(
+        block.entities.map((entity) => [String(entity.entityId), reading(entity.label)]),
+      );
+      const rows: Array<ReadonlyArray<string>> = [];
+      for (const entity of block.entities) {
+        if (entity.attributes.length === 0) {
+          rows.push([reading(entity.label), "", "", ""]);
+          continue;
+        }
+        for (const attribute of entity.attributes) {
+          rows.push([
+            reading(entity.label),
+            reading(attribute.name),
+            reading(attribute.type),
+            attribute.key === true ? "key" : "",
+          ]);
+        }
+      }
+      const relationshipItems = block.relationships.map((relationship) => {
+        const from = keys.get(String(relationship.source)) ?? "entity";
+        const to = keys.get(String(relationship.target)) ?? "entity";
+        const label = relationship.label === undefined ? "" : ` (${reading(relationship.label)})`;
+        return `${from} ${relationship.sourceCardinality} — ${relationship.targetCardinality} ${to}${label}`;
+      });
+      const pieces: Piece[] = [
+        {
+          kind: "table",
+          headers: ["Entity", "Attribute", "Type", "Key"],
+          rows,
+        },
+      ];
+      if (relationshipItems.length > 0) {
+        pieces.push({ kind: "list", items: relationshipItems });
+      }
+      return pieces;
+    }
+    case "swimlane": {
+      // Numbered steps per lane, in lane order, then the connections.
+      const pieces: Piece[] = [];
+      const laneSteps = new Map<string, string[]>();
+      for (const step of block.steps) {
+        const bucket = laneSteps.get(String(step.laneId)) ?? [];
+        bucket.push(reading(step.label));
+        laneSteps.set(String(step.laneId), bucket);
+      }
+      for (const lane of block.lanes) {
+        const steps = laneSteps.get(String(lane.laneId)) ?? [];
+        pieces.push({ kind: "heading", level: 3, text: reading(lane.label) });
+        pieces.push({
+          kind: "ordered",
+          items: steps.length === 0 ? ["(no steps)"] : steps,
+        });
+      }
+      if (block.connections.length > 0) {
+        const names = new Map(
+          block.steps.map((step) => [String(step.stepId), reading(step.label)]),
+        );
+        pieces.push({
+          kind: "list",
+          items: block.connections.map((connection) => {
+            const from = names.get(String(connection.source)) ?? "step";
+            const to = names.get(String(connection.target)) ?? "step";
+            const label = connection.label === undefined ? "" : `: ${reading(connection.label)}`;
+            return `${from} → ${to}${label}`;
+          }),
+        });
+      }
+      return pieces;
+    }
+    case "mindmap": {
+      // A nested list, indented by depth, so the branch structure survives the
+      // round trip even though the block stores parents rather than nesting.
+      const childrenOf = new Map<string, string[]>();
+      const nodesById = new Map(block.nodes.map((node) => [String(node.nodeId), node]));
+      let rootId: string | undefined;
+      for (const node of block.nodes) {
+        const id = String(node.nodeId);
+        if (node.parentId === undefined) {
+          rootId ??= id;
+          continue;
+        }
+        const siblings = childrenOf.get(String(node.parentId)) ?? [];
+        siblings.push(id);
+        childrenOf.set(String(node.parentId), siblings);
+      }
+      const items: Array<{ readonly depth: number; readonly text: string }> = [];
+      const walk = (id: string, depth: number) => {
+        const node = nodesById.get(id);
+        if (node === undefined) return;
+        const note = node.note === undefined ? "" : ` — ${reading(node.note)}`;
+        items.push({ depth, text: `${reading(node.label)}${note}` });
+        for (const child of childrenOf.get(id) ?? []) walk(child, depth + 1);
+      };
+      if (rootId !== undefined) walk(rootId, 0);
+      return [{ kind: "tree", items }];
+    }
     case "action":
       return paragraph(
         [reading(block.label), block.description === undefined ? "" : reading(block.description)]
@@ -450,6 +554,12 @@ function markdownPiece(piece: Piece): string {
       return inline(piece.text);
     case "list":
       return piece.items.map((item) => `- ${inline(item)}`).join("\n");
+    case "ordered":
+      return piece.items.map((item, index) => `${String(index + 1)}. ${inline(item)}`).join("\n");
+    case "tree":
+      return piece.items
+        .map((item) => `${"  ".repeat(item.depth)}- ${inline(item.text)}`)
+        .join("\n");
     case "table":
       return [
         `| ${piece.headers.map(cell).join(" | ")} |`,
@@ -498,6 +608,10 @@ function htmlPiece(piece: Piece): string {
       return `<p>${htmlInline(piece.text)}</p>`;
     case "list":
       return `<ul>${piece.items.map((item) => `<li>${htmlInline(item)}</li>`).join("")}</ul>`;
+    case "ordered":
+      return `<ol>${piece.items.map((item) => `<li>${htmlInline(item)}</li>`).join("")}</ol>`;
+    case "tree":
+      return htmlTree(piece.items);
     case "table":
       return `<table><thead><tr>${piece.headers.map((header) => `<th>${escapeXml(header)}</th>`).join("")}</tr></thead><tbody>${piece.rows
         .map((row) => `<tr>${row.map((value) => `<td>${escapeXml(value)}</td>`).join("")}</tr>`)
@@ -511,6 +625,37 @@ function htmlPiece(piece: Piece): string {
       return unhandled;
     }
   }
+}
+
+/**
+ * Render an indented list as real nested unordered lists, so an exported mind
+ * map keeps the branch structure rather than reading as a flat list.
+ */
+function htmlTree(items: ReadonlyArray<{ readonly depth: number; readonly text: string }>): string {
+  interface TreeNode {
+    readonly text: string;
+    readonly children: TreeNode[];
+  }
+  const roots: TreeNode[] = [];
+  const stack: Array<{ readonly depth: number; readonly node: TreeNode }> = [];
+  for (const item of items) {
+    const node: TreeNode = { text: item.text, children: [] };
+    while (stack.length > 0 && (stack[stack.length - 1]?.depth ?? -1) >= item.depth) {
+      stack.pop();
+    }
+    const parent = stack[stack.length - 1];
+    if (parent === undefined) roots.push(node);
+    else parent.node.children.push(node);
+    stack.push({ depth: item.depth, node });
+  }
+  const render = (nodes: ReadonlyArray<TreeNode>): string =>
+    `<ul>${nodes
+      .map(
+        (node) =>
+          `<li>${htmlInline(node.text)}${node.children.length === 0 ? "" : render(node.children)}</li>`,
+      )
+      .join("")}</ul>`;
+  return render(roots);
 }
 
 /** Markdown links stay links in HTML; everything else is escaped text. */

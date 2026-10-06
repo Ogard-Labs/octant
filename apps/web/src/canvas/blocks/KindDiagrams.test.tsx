@@ -1,7 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { loginSequenceBlock, orderStateBlock } from "@octant/domain";
+import {
+  loginSequenceBlock,
+  orderSchemaBlock,
+  orderStateBlock,
+  releaseMindmapBlock,
+  supportFlowBlock,
+} from "@octant/domain";
 import { CanvasCommentsPanel } from "../CanvasCommentsPanel";
 import { CanvasDocument } from "../CanvasDocument";
 import { canvasFixture } from "../test-fixtures";
@@ -53,5 +59,75 @@ describe("sequence and state diagrams", () => {
       await screen.findByRole("option", { name: "Sequence · Submit credentials" }),
     ).toBeVisible();
     expect(screen.getByRole("option", { name: "State · Paid" })).toBeVisible();
+  });
+});
+
+describe("entity-relationship, swimlane, and mind map diagrams", () => {
+  it("draws an entity-relationship model, a swimlane, and a mind map a reader can name", () => {
+    render(
+      <CanvasDocument
+        definition={{
+          ...canvasFixture,
+          blocks: [orderSchemaBlock, supportFlowBlock, releaseMindmapBlock],
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("figure", { name: /Entity relationship with 3 entities/ }),
+    ).toBeVisible();
+    expect(screen.getAllByText("Person").length).toBeGreaterThan(0);
+    expect(screen.getByRole("figure", { name: /Swimlane with 3 lanes/ })).toBeVisible();
+    expect(screen.getAllByText("Customer").length).toBeGreaterThan(0);
+    expect(screen.getByRole("figure", { name: /Mind map with 6 topics/ })).toBeVisible();
+    expect(screen.getAllByText("Release readiness").length).toBeGreaterThan(0);
+    expect(document.querySelector("[data-node-id='order']")).not.toBeNull();
+    expect(document.querySelector("[data-edge-id='person-places-order']")).not.toBeNull();
+    expect(document.querySelector("[data-node-id='triage']")).not.toBeNull();
+  });
+
+  it("gives each picture a screen-reader fallback and a keyboard focus ring", () => {
+    render(
+      <CanvasDocument
+        definition={{
+          ...canvasFixture,
+          blocks: [orderSchemaBlock, supportFlowBlock, releaseMindmapBlock],
+        }}
+      />,
+    );
+
+    // A table of the schema's attributes is the fallback for the entity model.
+    const erFigure = screen.getByRole("figure", { name: /Entity relationship with 3 entities/ });
+    expect(erFigure.querySelectorAll("figcaption table tbody tr").length).toBe(7);
+    // Numbered steps per lane are the fallback for the swimlane.
+    const swimlaneFigure = screen.getByRole("figure", { name: /Swimlane with 3 lanes/ });
+    expect(swimlaneFigure.querySelectorAll("figcaption ol").length).toBe(3);
+    // A nested list is the fallback for the mind map.
+    const mindmapFigure = screen.getByRole("figure", { name: /Mind map with 6 topics/ });
+    expect(mindmapFigure.querySelectorAll("figcaption ul ul").length).toBeGreaterThan(0);
+
+    erFigure.focus();
+    expect(document.activeElement).toBe(erFigure);
+  });
+
+  it("offers entity, step, topic, and connection identifiers as comment anchors", async () => {
+    const user = userEvent.setup();
+    render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={{
+          ...canvasFixture,
+          blocks: [orderSchemaBlock, supportFlowBlock, releaseMindmapBlock],
+        }}
+        load={async () => ({ kind: "ready", canvasId, sequence: 0, threads: [] })}
+        send={vi.fn()}
+      />,
+    );
+
+    await user.click(await screen.findByRole("combobox", { name: "Comment anchor" }));
+    expect(await screen.findByRole("option", { name: "Entity · Person" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Step · Fix the defect" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Topic · Release readiness" })).toBeVisible();
   });
 });
