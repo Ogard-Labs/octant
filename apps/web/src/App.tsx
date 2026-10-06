@@ -338,6 +338,7 @@ import {
 } from "./shell/rightUtilityDockSelection";
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { threadDragSurface } from "./shell/threadDragSurface";
+import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
 import {
   RemotePairingView,
   UsageWorkspace,
@@ -1267,6 +1268,21 @@ function LaunchedShell(
     onDrop: (source, destination) => {
       const row = sidebarDragRows.current.get(source.dragKey);
       sidebarDragRows.current.delete(source.dragKey);
+      if (destination.kind === "composer") {
+        if (row === undefined || row.threadId.trim().length === 0) {
+          void deliverComposerThreadDrop({
+            composerKey: destination.composerKey,
+            threadId: "",
+          });
+          return;
+        }
+        void deliverComposerThreadDrop({
+          composerKey: destination.composerKey,
+          threadId: row.threadId,
+          ...(row.title.trim().length === 0 ? {} : { searchHint: row.title }),
+        });
+        return;
+      }
       void controller.dropSurface(
         source.surface,
         destination,
@@ -4147,6 +4163,12 @@ function LaunchedShell(
     onMarkThreadRead: (threadId) => codeController.markThreadRead(decodeCodeThreadId(threadId)),
     onMarkThreadUnread: (threadId) => codeReadCursorStore.unmark(decodeCodeThreadId(threadId)),
     onPinInPane: pinCodeThreadInPane,
+    onAttachAsContext: (threadId, title) => {
+      void deliverComposerThreadDrop({
+        threadId,
+        ...(title.trim().length === 0 ? {} : { searchHint: title }),
+      });
+    },
     onPinThread: (threadId, pinned) =>
       void codeController.pinThread(decodeCodeThreadId(threadId), pinned),
     onOpenPullRequest: selectProjectPullRequestIdentity,
@@ -4180,6 +4202,12 @@ function LaunchedShell(
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
     onPinInPane: pinChatThreadInPane,
+    onAttachAsContext: (threadId, title) => {
+      void deliverComposerThreadDrop({
+        threadId,
+        ...(title.trim().length === 0 ? {} : { searchHint: title }),
+      });
+    },
   };
   // Work has no controller of its own for thread metadata: a rest command
   // goes straight to the client with the version the sidebar last saw, and
@@ -4238,6 +4266,12 @@ function LaunchedShell(
         expectedVersion,
       })),
     onPinInPane: pinWorkThreadInPane,
+    onAttachAsContext: (threadId, title) => {
+      void deliverComposerThreadDrop({
+        threadId,
+        ...(title.trim().length === 0 ? {} : { searchHint: title }),
+      });
+    },
   };
 
   // One thread-selection handler per mode. The sidebar and every Project

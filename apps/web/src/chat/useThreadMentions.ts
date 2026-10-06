@@ -7,6 +7,7 @@ import type {
 } from "@octant/contracts";
 import { reconcileThreadMentionChips } from "@octant/domain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { attachComposerThreadMention } from "./composerThreadDrop";
 import type { ChatComposerThreadMentionChip, ChatComposerThreadMentions } from "./ChatComposer";
 
 export interface ThreadMentionsOptions {
@@ -42,6 +43,16 @@ export interface ThreadMentionsController {
   readonly clear: () => void;
   /** Restore chips that belonged to a send the host refused. */
   readonly restore: (chips: ReadonlyArray<ChatComposerThreadMentionChip>) => void;
+  /**
+   * Attach one sidebar thread through the same host search and chip selection
+   * an explicit `#` choice uses. Does not send the draft.
+   */
+  readonly attachDroppedThread: (input: {
+    readonly threadId: string;
+    readonly searchHint?: string;
+    readonly currentThreadId?: string;
+    readonly onDraftChange: (draft: string, caretIndex: number) => void;
+  }) => Promise<void>;
 }
 
 /**
@@ -117,6 +128,10 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
   // Chips are structured selections over the draft; when the user edits a chip
   // out of the text, it must stop contributing context.
   const draft = options.draft;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const chipsRef = useRef(chips);
+  chipsRef.current = chips;
   useEffect(() => {
     setChips((current) => {
       const kept = reconcileThreadMentionChips(draft, current);
@@ -156,6 +171,47 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     );
     setQuery(undefined);
   }, []);
+
+  const attachDroppedThread = useCallback(
+    async (input: {
+      readonly threadId: string;
+      readonly searchHint?: string;
+      readonly currentThreadId?: string;
+      readonly onDraftChange: (draft: string, caretIndex: number) => void;
+    }) => {
+      if (client === undefined) {
+        await attachComposerThreadMention({
+          threadId: input.threadId,
+          existingThreadIds: chipsRef.current.map((chip) => String(chip.threadId)),
+          mentionCount: chipsRef.current.length,
+          draft: draftRef.current,
+          search: async () => [],
+          onDraftChange: input.onDraftChange,
+          onSelectCandidate,
+          onStatus: setStatusMessage,
+          ...(input.searchHint === undefined ? {} : { searchHint: input.searchHint }),
+          ...(input.currentThreadId === undefined
+            ? {}
+            : { currentThreadId: input.currentThreadId }),
+        });
+        return;
+      }
+      const mentionClient = client;
+      await attachComposerThreadMention({
+        threadId: input.threadId,
+        existingThreadIds: chipsRef.current.map((chip) => String(chip.threadId)),
+        mentionCount: chipsRef.current.length,
+        draft: draftRef.current,
+        search: (query: string) => mentionClient.search(newRequestId(), query),
+        onDraftChange: input.onDraftChange,
+        onSelectCandidate,
+        onStatus: setStatusMessage,
+        ...(input.searchHint === undefined ? {} : { searchHint: input.searchHint }),
+        ...(input.currentThreadId === undefined ? {} : { currentThreadId: input.currentThreadId }),
+      });
+    },
+    [client, newRequestId, onSelectCandidate],
+  );
 
   const onRemoveChip = useCallback((threadId: MentionableThreadId) => {
     setChips((current) => current.filter((chip) => String(chip.threadId) !== String(threadId)));
@@ -247,7 +303,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     statusMessage,
   ]);
 
-  return { composer, chips, resolveForSend, clear, restore };
+  return { composer, chips, resolveForSend, clear, restore, attachDroppedThread };
 }
 
 function placementLabel(placement: ThreadMentionCandidate["placement"]): string {
