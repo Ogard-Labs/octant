@@ -26,7 +26,12 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
-import type { Event, PermissionRuleset, Provider } from "@opencode-ai/sdk/v2/types";
+import type {
+  Event,
+  PermissionRuleset,
+  PermissionV2Ruleset,
+  Provider,
+} from "@opencode-ai/sdk/v2/types";
 import { Cause, Effect, Exit, Option, PubSub, Scope, Stream } from "effect";
 import { mapOpenCodeEvent } from "./openCodeEventMapper";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
@@ -70,10 +75,15 @@ export interface OpenCodeClientPort {
   readonly disconnectMcpServer: (name: string) => Promise<void>;
   readonly abort: (sessionId: string) => Promise<void>;
   readonly replyPermission: (
+    sessionId: string,
     requestId: string,
     reply: "once" | "always" | "reject",
   ) => Promise<void>;
-  readonly replyQuestion: (requestId: string, answers: ReadonlyArray<string>) => Promise<void>;
+  readonly replyQuestion: (
+    sessionId: string,
+    requestId: string,
+    answers: ReadonlyArray<string>,
+  ) => Promise<void>;
 }
 
 export interface OpenCodeDriverOptions {
@@ -184,9 +194,9 @@ function openCodeChatCapabilities(
 }
 
 /**
- * 2.x reports the operations this slice maps. Approvals, questions, file
- * changes, and app-managed tools stay unsupported until their rules can be
- * enforced; a caller that needs one fails closed.
+ * 2.x reports the operations this slice maps. Approvals and questions are
+ * mapped through the v2 permission/question event and reply routes; file
+ * changes stay unsupported until their events can be enforced.
  */
 function openCodeBetaCapabilities(reported: ProviderCapabilities): ProviderCapabilities {
   return {
@@ -194,10 +204,10 @@ function openCodeBetaCapabilities(reported: ProviderCapabilities): ProviderCapab
     resume: "supported",
     interruption: "supported",
     toolActivity: "supported",
-    approvals: "unsupported",
-    userQuestions: "unsupported",
+    approvals: "supported",
+    userQuestions: "supported",
     fileChanges: "unsupported",
-    appManagedTools: "unsupported",
+    appManagedTools: reported.appManagedTools,
   };
 }
 
@@ -279,17 +289,25 @@ const BETA_WRITE_REFUSAL_MESSAGE =
   "OpenCode 2 cannot enforce session permission rules, so Work and Code writes are refused.";
 
 /**
- * Session permission rules are not sent on 2.x. A turn is offered only when
- * the process jail already enforces the boundary those rules would: Chat never
- * writes, and Plan denies writes in every mode. Any other Work or Code policy
- * would let a write proceed without an approval, so it fails closed.
+ * Project resolution on 2.x spawns the Git binary for any directory inside a
+ * work tree, and the Chat, Plan, and Work jail refuses that spawn. Only the
+ * Code jail allows process execution, so only Code turns can run on 2.x until
+ * the confined jail learns to serve a Git work tree.
  */
-export function betaWritesUnenforceable(
+const BETA_NON_CODE_REFUSAL_MESSAGE =
+  "OpenCode 2 cannot resolve a Git project inside the Chat, Plan, or Work jail, so only Code turns are offered.";
+
+/**
+ * Session permission rules are not sent on 2.x. A turn is offered only in
+ * Code mode, where the process jail allows process execution and the 2.x
+ * agent's permission rules gate every write behind an approval. Chat, Plan,
+ * and Work turns are refused because their jail cannot serve a Git work tree.
+ */
+export function betaTurnsUnsupported(
   runtime: "legacy" | "beta" | undefined,
   mode: "chat" | "work" | "code",
-  policy: ProviderExecutionPolicy,
 ): boolean {
-  return runtime === "beta" && mode !== "chat" && policy !== "plan";
+  return runtime === "beta" && mode !== "code";
 }
 
 /**
@@ -297,15 +315,6 @@ export function betaWritesUnenforceable(
  * would write without an approval if the rules were dropped, so that ruleset
  * is refused even when the caller did not also name the mode.
  */
-function rulesPermitUnaskedWrites(rules: PermissionRuleset): boolean {
-  let action: PermissionRuleset[number]["action"] | undefined;
-  for (const rule of rules) {
-    if (rule.pattern !== "*") continue;
-    if (rule.permission === "*" || rule.permission === "edit") action = rule.action;
-  }
-  return action === "allow";
-}
-
 function betaRequestOptions() {
   return { throwOnError: true as const, signal: AbortSignal.timeout(BETA_API_TIMEOUT_MS) };
 }
@@ -563,12 +572,6 @@ function openCodeBetaPromptFiles(attachments: ProviderTurnInput["attachments"]) 
   }));
 }
 
-function refuseUnaskedBetaWrites(permission: PermissionRuleset): void {
-  if (rulesPermitUnaskedWrites(permission)) {
-    throw fail("unsupported", BETA_WRITE_REFUSAL_MESSAGE);
-  }
-}
-
 export function makeOfficialOpenCodeClient(
   server: OpenCodeServerConnection,
   projectRoot: string,
@@ -615,7 +618,6 @@ export function makeOfficialOpenCodeClient(
     createSession: async ({ permission, model }) => {
       if (!beta)
         return resultData(await client.session.create({ permission }, { throwOnError: true }));
-      refuseUnaskedBetaWrites(permission);
       return adaptBetaSession(
         resultData(
           await client.v2.session.create(
@@ -640,7 +642,6 @@ export function makeOfficialOpenCodeClient(
         : resultData(await client.session.get({ sessionID: sessionId }, { throwOnError: true })),
     prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [], permission }) => {
       if (beta) {
-        refuseUnaskedBetaWrites(permission);
         await client.v2.session.switchModel(
           { sessionID: sessionId, model: { providerID: providerId, id: modelId } },
           betaMutationOptions(),
@@ -670,7 +671,6 @@ export function makeOfficialOpenCodeClient(
       );
     },
     addMcpServer: async ({ name, url }) => {
-      if (beta) throw fail("unsupported", "OpenCode 2 app-managed tools are not mapped.");
       await client.mcp.add(
         {
           directory: projectRoot,
@@ -681,7 +681,6 @@ export function makeOfficialOpenCodeClient(
       );
     },
     disconnectMcpServer: async (name) => {
-      if (beta) throw fail("unsupported", "OpenCode 2 app-managed tools are not mapped.");
       await client.mcp.disconnect(
         { name, directory: projectRoot },
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
@@ -697,12 +696,28 @@ export function makeOfficialOpenCodeClient(
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
       );
     },
-    replyPermission: async (requestId, reply) => {
-      if (beta) throw fail("unsupported", "OpenCode 2 approval replies are not mapped.");
+    replyPermission: async (sessionId, requestId, reply) => {
+      if (beta) {
+        await client.v2.session.permission.reply(
+          { sessionID: sessionId, requestID: requestId, reply },
+          betaMutationOptions(),
+        );
+        return;
+      }
       await client.permission.reply({ requestID: requestId, reply }, { throwOnError: true });
     },
-    replyQuestion: async (requestId, answers) => {
-      if (beta) throw fail("unsupported", "OpenCode 2 questions are not mapped.");
+    replyQuestion: async (sessionId, requestId, answers) => {
+      if (beta) {
+        await client.v2.session.question.reply(
+          {
+            sessionID: sessionId,
+            requestID: requestId,
+            questionV2Reply: { answers: answers.map((answer) => [answer]) },
+          },
+          betaMutationOptions(),
+        );
+        return;
+      }
       await client.question.reply(
         { requestID: requestId, answers: answers.map((answer) => [answer]) },
         { throwOnError: true },
@@ -747,6 +762,8 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               options,
               projectRoot,
               bridge === undefined ? [] : [bridge.port],
+              "code",
+              "approval-gated",
             );
             const client = clientFactory(runtime, projectRoot);
             const health = yield* request(client.health);
@@ -843,6 +860,8 @@ function acquireRuntime(
   options: OpenCodeDriverOptions,
   projectRoot: string,
   loopbackPorts: ReadonlyArray<number> = [],
+  probeMode: "chat" | "work" | "code" = "chat",
+  probePolicy: ProviderExecutionPolicy = "plan",
 ) {
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
     idleMs: options.idleLeaseMs ?? 30_000,
@@ -855,8 +874,8 @@ function acquireRuntime(
             .start({
               binaryPath: options.binaryPath,
               cwd: projectRoot,
-              mode: "chat",
-              executionPolicy: "plan",
+              mode: probeMode,
+              executionPolicy: probePolicy,
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
@@ -1358,12 +1377,12 @@ function makeConnection(
               ),
             ),
             Effect.flatMap((runtimeClient) => {
-              if (betaWritesUnenforceable(runtimeKind, mode, input.executionPolicy)) {
+              if (betaTurnsUnsupported(runtimeKind, mode)) {
                 return Effect.promise(async () => {
                   await releaseManagedTools(state);
                   await closeRuntime();
                 }).pipe(
-                  Effect.zipRight(Effect.fail(fail("unsupported", BETA_WRITE_REFUSAL_MESSAGE))),
+                  Effect.zipRight(Effect.fail(fail("unsupported", BETA_NON_CODE_REFUSAL_MESSAGE))),
                 );
               }
               if (state.managedTools !== undefined && !runtimeIsolated) {
@@ -1490,12 +1509,14 @@ function makeConnection(
                   ),
                 ),
                 Effect.flatMap((runtimeClient) => {
-                  if (betaWritesUnenforceable(runtimeKind, mode, input.executionPolicy)) {
+                  if (betaTurnsUnsupported(runtimeKind, mode)) {
                     return Effect.promise(async () => {
                       await releaseManagedTools(state);
                       await closeRuntime();
                     }).pipe(
-                      Effect.zipRight(Effect.fail(fail("unsupported", BETA_WRITE_REFUSAL_MESSAGE))),
+                      Effect.zipRight(
+                        Effect.fail(fail("unsupported", BETA_NON_CODE_REFUSAL_MESSAGE)),
+                      ),
                     );
                   }
                   const attachManagedTools =
@@ -1573,8 +1594,8 @@ function makeConnection(
             if (state.terminal) {
               return Effect.fail(fail("protocol", "Provider session is already terminal."));
             }
-            if (betaWritesUnenforceable(runtimeKind, mode, state.executionPolicy)) {
-              return Effect.fail(fail("unsupported", BETA_WRITE_REFUSAL_MESSAGE));
+            if (betaTurnsUnsupported(runtimeKind, mode)) {
+              return Effect.fail(fail("unsupported", BETA_NON_CODE_REFUSAL_MESSAGE));
             }
             const observed = options.runtimeRegistry.observedState(options.instanceId);
             const model = observed?.models.find((candidate) => candidate.id === state.modelId);
@@ -1665,90 +1686,83 @@ function makeConnection(
           }),
         ),
       answerApproval: (input) =>
-        runtimeKind === "beta"
-          ? Effect.fail(fail("unsupported", "OpenCode 2 approval replies are not mapped."))
-          : usableStateFor(input.sessionId).pipe(
-              Effect.flatMap(([, state]) => {
-                const activeClient = client;
-                if (activeClient === undefined) {
-                  return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
-                }
-                return state.terminal
-                  ? Effect.fail(fail("protocol", "Provider session is already terminal."))
-                  : state.executionPolicy === "plan"
-                    ? Effect.fail(
-                        fail("unauthorized", "Plan mode cannot approve provider actions."),
-                      )
-                    : !state.approvals.has(input.requestId)
-                      ? Effect.fail(fail("protocol", "Provider approval request is not pending."))
-                      : request(() =>
-                          activeClient.replyPermission(
-                            input.requestId,
-                            input.approved
-                              ? (options.permissionPersistence?.() ?? "current-session") ===
-                                "project-default"
-                                ? "always"
-                                : "once"
-                              : "reject",
-                          ),
-                        ).pipe(
-                          Effect.tap(() =>
-                            Effect.sync(() => state.approvals.delete(input.requestId)),
-                          ),
-                        );
-              }),
-            ),
+        usableStateFor(input.sessionId).pipe(
+          Effect.flatMap(([source, state]) => {
+            const activeClient = client;
+            if (activeClient === undefined) {
+              return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
+            }
+            return state.terminal
+              ? Effect.fail(fail("protocol", "Provider session is already terminal."))
+              : state.executionPolicy === "plan"
+                ? Effect.fail(fail("unauthorized", "Plan mode cannot approve provider actions."))
+                : !state.approvals.has(input.requestId)
+                  ? Effect.fail(fail("protocol", "Provider approval request is not pending."))
+                  : request(() =>
+                      activeClient.replyPermission(
+                        source,
+                        input.requestId,
+                        input.approved
+                          ? (options.permissionPersistence?.() ?? "current-session") ===
+                            "project-default"
+                            ? "always"
+                            : "once"
+                          : "reject",
+                      ),
+                    ).pipe(
+                      Effect.tap(() => Effect.sync(() => state.approvals.delete(input.requestId))),
+                    );
+          }),
+        ),
       answerUserInput: (input) =>
-        runtimeKind === "beta"
-          ? Effect.fail(fail("unsupported", "OpenCode 2 questions are not mapped."))
-          : usableStateFor(input.sessionId).pipe(
-              Effect.flatMap(([, state]) => {
-                const activeClient = client;
-                if (activeClient === undefined) {
-                  return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
-                }
-                return state.terminal
-                  ? Effect.fail(fail("protocol", "Provider session is already terminal."))
-                  : !state.questions.has(input.requestId)
-                    ? Effect.fail(fail("protocol", "Provider question request is not pending."))
-                    : Effect.suspend(() => {
-                        const question = state.questions.get(input.requestId);
-                        if (question === undefined)
-                          return Effect.fail(
-                            fail("protocol", "Provider question request is not pending."),
-                          );
-                        const answers =
-                          state.questionAnswers.get(question.providerRequestId) ??
-                          new Map<number, string>();
-                        if (answers.has(question.index))
-                          return Effect.fail(
-                            fail("protocol", "Provider question was already answered."),
-                          );
-                        answers.set(question.index, input.answer);
-                        state.questionAnswers.set(question.providerRequestId, answers);
-                        if (answers.size < question.count) return Effect.void;
-                        const ordered = Array.from(
-                          { length: question.count },
-                          (_, index) => answers.get(index + 1) ?? "",
-                        );
-                        const reply = request(() =>
-                          activeClient.replyQuestion(question.providerRequestId, ordered),
-                        ).pipe(
-                          Effect.tap(() =>
-                            Effect.sync(() => {
-                              for (const [id, pending] of state.questions) {
-                                if (pending.providerRequestId === question.providerRequestId)
-                                  state.questions.delete(id);
-                              }
-                              state.questionAnswers.delete(question.providerRequestId);
-                            }),
-                          ),
-                          Effect.tapError(() => Effect.sync(() => answers.delete(question.index))),
-                        );
-                        return reply;
-                      });
-              }),
-            ),
+        usableStateFor(input.sessionId).pipe(
+          Effect.flatMap(([source, state]) => {
+            const activeClient = client;
+            if (activeClient === undefined) {
+              return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
+            }
+            return state.terminal
+              ? Effect.fail(fail("protocol", "Provider session is already terminal."))
+              : !state.questions.has(input.requestId)
+                ? Effect.fail(fail("protocol", "Provider question request is not pending."))
+                : Effect.suspend(() => {
+                    const question = state.questions.get(input.requestId);
+                    if (question === undefined)
+                      return Effect.fail(
+                        fail("protocol", "Provider question request is not pending."),
+                      );
+                    const answers =
+                      state.questionAnswers.get(question.providerRequestId) ??
+                      new Map<number, string>();
+                    if (answers.has(question.index))
+                      return Effect.fail(
+                        fail("protocol", "Provider question was already answered."),
+                      );
+                    answers.set(question.index, input.answer);
+                    state.questionAnswers.set(question.providerRequestId, answers);
+                    if (answers.size < question.count) return Effect.void;
+                    const ordered = Array.from(
+                      { length: question.count },
+                      (_, index) => answers.get(index + 1) ?? "",
+                    );
+                    const reply = request(() =>
+                      activeClient.replyQuestion(source, question.providerRequestId, ordered),
+                    ).pipe(
+                      Effect.tap(() =>
+                        Effect.sync(() => {
+                          for (const [id, pending] of state.questions) {
+                            if (pending.providerRequestId === question.providerRequestId)
+                              state.questions.delete(id);
+                          }
+                          state.questionAnswers.delete(question.providerRequestId);
+                        }),
+                      ),
+                      Effect.tapError(() => Effect.sync(() => answers.delete(question.index))),
+                    );
+                    return reply;
+                  });
+          }),
+        ),
       answerTool: (input) =>
         usableStateFor(input.sessionId).pipe(
           Effect.flatMap(([, state]) => {
@@ -1835,11 +1849,7 @@ function unmappedBetaFailure(
 }
 
 function failClosedBetaEvent(event: ProviderRuntimeEvent): ProviderRuntimeEvent {
-  if (
-    event.kind !== "approval-request" &&
-    event.kind !== "user-input-request" &&
-    event.kind !== "file-change"
-  ) {
+  if (event.kind !== "file-change") {
     return event;
   }
   return {
@@ -1851,10 +1861,7 @@ function failClosedBetaEvent(event: ProviderRuntimeEvent): ProviderRuntimeEvent 
     occurredAt: event.occurredAt,
     failure: {
       category: "unsupported",
-      message:
-        event.kind === "file-change"
-          ? BETA_WRITE_REFUSAL_MESSAGE
-          : "OpenCode 2 cannot map this provider request.",
+      message: BETA_WRITE_REFUSAL_MESSAGE,
     },
   };
 }
@@ -2001,6 +2008,53 @@ function splitModelId(value: string): { providerId: string; modelId: string } {
     throw fail("invalid-configuration", "Provider model identity is invalid.");
   }
   return { providerId: value.slice(0, separator), modelId: value.slice(separator + 1) };
+}
+
+/**
+ * Maps Octant's approval posture onto the 2.x agent permission ruleset. The
+ * 2.x ruleset uses `{action, resource, effect}` where the 1.x ruleset uses
+ * `{permission, pattern, action}`. The mapping mirrors `permissionRules`:
+ * Plan denies every write, approval-gated asks for everything, auto-accept
+ * allows edits, and full access allows everything, with external directory
+ * access denied in every posture and bash/task denied in Work mode.
+ */
+export function betaAgentPermissionRules(
+  policy: ProviderExecutionPolicy,
+  mode: "chat" | "work" | "code",
+): PermissionV2Ruleset {
+  const denyExternal: PermissionV2Ruleset = [
+    { action: "external_directory", resource: "*", effect: "deny" },
+  ];
+  let rules: PermissionV2Ruleset;
+  if (policy === "full-access") {
+    rules = [{ action: "*", resource: "*", effect: "allow" }, ...denyExternal];
+  } else if (policy === "auto-accept-edits") {
+    rules = [
+      { action: "*", resource: "*", effect: "ask" },
+      { action: "edit", resource: "*", effect: "allow" },
+      ...denyExternal,
+    ];
+  } else if (policy === "approval-gated") {
+    rules = [{ action: "*", resource: "*", effect: "ask" }, ...denyExternal];
+  } else {
+    rules = [
+      { action: "*", resource: "*", effect: "ask" },
+      { action: "edit", resource: "*", effect: "deny" },
+      { action: "bash", resource: "*", effect: "deny" },
+      { action: "task", resource: "*", effect: "deny" },
+      { action: "external_directory", resource: "*", effect: "deny" },
+      { action: "todowrite", resource: "*", effect: "deny" },
+      { action: "webfetch", resource: "*", effect: "deny" },
+      { action: "websearch", resource: "*", effect: "deny" },
+    ];
+  }
+  if (mode === "work") {
+    rules.push(
+      { action: "bash", resource: "*", effect: "deny" },
+      { action: "task", resource: "*", effect: "deny" },
+    );
+  }
+  return rules;
 }
 
 export function normalizeOpenCodeProbe(

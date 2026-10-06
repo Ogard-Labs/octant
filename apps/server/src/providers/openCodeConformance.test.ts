@@ -213,7 +213,7 @@ describe("OpenCode provider conformance", () => {
     expect(chatEvidence).toMatchObject({ appManagedToolRoundTrip: true, released: true });
   });
 
-  it("completes a Chat turn and a Code turn from recorded 2.x session fixtures", async () => {
+  it("completes a Code turn from recorded 2.x session fixtures", async () => {
     const codeSource = new EventSourceFixture();
     const codeDriver = makeBetaHarnessDriver(codeSource, {
       onPrompt: (sessionId) => {
@@ -232,18 +232,18 @@ describe("OpenCode provider conformance", () => {
     const codeEvidence = await runProviderConformance({
       driver: codeDriver.driver,
       probeInput: { instanceId },
-      acquireInput: { instanceId, projectRoot },
-      sessionStart: { sessionId, modelId, executionPolicy: "plan" },
+      acquireInput: { instanceId, projectRoot, mode: "code" },
+      sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
       turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
       resume: {
         sessionId,
         resumeCursor: { driverKind: "opencode", value: "provider-session" },
-        executionPolicy: "plan",
+        executionPolicy: "approval-gated",
       },
       staleResume: {
         sessionId,
         resumeCursor: { driverKind: "opencode", value: "stale" },
-        executionPolicy: "plan",
+        executionPolicy: "approval-gated",
       },
       unknownApproval: { sessionId, requestId: "unknown", approved: false },
       unknownUserInput: { sessionId, requestId: "unknown", answer: "none" },
@@ -255,12 +255,14 @@ describe("OpenCode provider conformance", () => {
         "usage",
         "diff",
         "task-progress",
+        "approval-request",
+        "user-input-request",
         "interrupted",
       ],
       expectedFailureCategories: {
         staleResume: "stale-resume",
-        unknownApproval: "unsupported",
-        unknownUserInput: "unsupported",
+        unknownApproval: "protocol",
+        unknownUserInput: "protocol",
       },
       isReleased: codeDriver.isReleased,
     });
@@ -271,42 +273,29 @@ describe("OpenCode provider conformance", () => {
       resumed: true,
       released: true,
     });
+  });
 
+  it("refuses a 2.x Chat turn with a typed runtime-incompatible failure", async () => {
     const chatSource = new EventSourceFixture();
     const chatDriver = makeBetaHarnessDriver(chatSource, {
-      onPrompt: (sessionId) => {
-        chatSource.emit({
-          type: "session.next.text.delta",
-          properties: {
-            sessionID: sessionId,
-            delta: "hello",
-            assistantMessageID: "m",
-            textID: "t",
-          },
-        } as Event);
-        chatSource.emit({
-          type: "session.idle",
-          properties: { sessionID: sessionId },
-        } as Event);
-      },
+      onPrompt: () => undefined,
       onAbort: () => undefined,
     });
-    const chatEvidence = await withProcessPlatform("darwin", () =>
-      runProviderChatConformance({
-        driver: chatDriver.driver,
-        probeInput: { instanceId },
-        acquireInput: { instanceId, projectRoot, mode: "chat" },
-        sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
-        turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
-        isReleased: chatDriver.isReleased,
-      }),
+    const exit = await Effect.runPromise(
+      Effect.scoped(
+        Effect.exit(
+          chatDriver.driver
+            .acquire({ instanceId, projectRoot, mode: "chat" })
+            .pipe(
+              Effect.flatMap((connection) =>
+                connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+              ),
+            ),
+        ),
+      ),
     );
-    expect(chatEvidence).toEqual({
-      nativeAttachmentHonest: true,
-      appManagedToolRoundTrip: true,
-      citationsNormalized: true,
-      released: true,
-    });
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("only Code turns are offered");
   });
 });
 
@@ -607,6 +596,29 @@ function recordedBetaTurn(sourceId: string): ReadonlyArray<Event> {
         todos: [{ content: "test", status: "pending", priority: "medium" }],
       },
     },
+    {
+      type: "permission.v2.asked",
+      properties: {
+        id: "permission",
+        sessionID: sourceId,
+        action: "edit",
+        resources: ["*"],
+      },
+    },
+    {
+      type: "question.v2.asked",
+      properties: {
+        id: "question",
+        sessionID: sourceId,
+        questions: [
+          {
+            question: "Continue?",
+            header: "Continue",
+            options: [{ label: "Yes", description: "Continue" }],
+          },
+        ],
+      },
+    },
   ] as unknown as ReadonlyArray<Event>;
 }
 
@@ -635,19 +647,13 @@ function makeBetaHarnessDriver(
     prompt: async ({ sessionId: nativeId }) => {
       handlers.onPrompt(nativeId);
     },
-    addMcpServer: async () => {
-      throw new Error("app-managed tools are not mapped");
-    },
+    addMcpServer: async () => undefined,
     disconnectMcpServer: async () => undefined,
     abort: async (nativeId) => {
       handlers.onAbort(nativeId);
     },
-    replyPermission: async () => {
-      throw new Error("approval replies are not mapped");
-    },
-    replyQuestion: async () => {
-      throw new Error("questions are not mapped");
-    },
+    replyPermission: async () => undefined,
+    replyQuestion: async () => undefined,
   };
   return {
     isReleased: () => released,
