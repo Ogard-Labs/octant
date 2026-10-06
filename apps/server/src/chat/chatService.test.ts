@@ -73,6 +73,12 @@ import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { Journal } from "../persistence/journal";
+import {
+  readAgentRunResultEvidence,
+  readAgentRunResultText,
+  writeAgentRunResultEvidence,
+  writeAgentRunResultText,
+} from "../persistence/agentRunContentStore";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { readDiagnosticsFailureIncident } from "../persistence/diagnosticsExportProjection";
 import {
@@ -8694,6 +8700,98 @@ describe("agent result delivery", () => {
       updatedAt: now,
       ...overrides,
     });
+
+  it.each(["deleting", "deleted"])(
+    "refuses late child content after ordinary Chat deletion reaches %s",
+    async (lifecycle) => {
+      const { service, persistence } = openFixture();
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Parent awaiting a child",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread");
+      const run = deliveryRunFor(created.thread.id);
+      const connection = persistence.connection;
+      const reference = `agent-run:${run.id}:result:1`;
+      const recordChildContent = () => {
+        writeAgentRunResultText(connection, {
+          run,
+          reference,
+          text: "Private child reply",
+          createdAt: now,
+        });
+        writeAgentRunResultEvidence(connection, {
+          run,
+          reference,
+          createdAt: now,
+          evidence: {
+            files: { status: "unavailable", items: [], reviewStatus: "unavailable" },
+            checks: {
+              status: "recorded",
+              items: [
+                {
+                  label: "Tool execution",
+                  outcome: "unknown",
+                  reference: "child-tool:1",
+                  source: "host-recorded",
+                  toolExecution: {
+                    toolName: "research",
+                    requestId: "request-1",
+                    isError: false,
+                    output: "Private tool output",
+                    truncated: false,
+                  },
+                },
+              ],
+            },
+          },
+        });
+      };
+      const resultIdentity = { runId: run.id, reference };
+      recordChildContent();
+      expect(readAgentRunResultEvidence(connection, resultIdentity)?.checks.status).toBe(
+        "recorded",
+      );
+      expect(readAgentRunResultText(connection, resultIdentity)).toBe("Private child reply");
+
+      if (lifecycle === "deleting") {
+        connection.exec(`
+          CREATE TRIGGER fail_deleted_lifecycle_event
+          BEFORE INSERT ON event_journal
+          WHEN NEW.event_name = 'chat.deleted@1'
+          BEGIN SELECT RAISE(ABORT, 'deterministic purge interruption'); END;
+        `);
+      }
+      const deletion = service.execute({
+        kind: "delete-chat-thread",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+      });
+      if (lifecycle === "deleting") {
+        await expect(deletion).rejects.toThrow();
+        connection.exec("DROP TRIGGER fail_deleted_lifecycle_event");
+      } else {
+        await expect(deletion).resolves.toMatchObject({ kind: "deleted" });
+      }
+      expect(
+        connection
+          .prepare("SELECT lifecycle FROM chat_thread_projection WHERE thread_id = ?")
+          .get(String(created.thread.id)),
+      ).toEqual({ lifecycle });
+      expect(
+        connection
+          .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
+          .get(String(created.thread.id)),
+      ).toBeUndefined();
+      expect(readAgentRunResultEvidence(connection, resultIdentity)).toBeUndefined();
+      expect(readAgentRunResultText(connection, resultIdentity)).toBeUndefined();
+
+      recordChildContent();
+      expect(readAgentRunResultEvidence(connection, resultIdentity)).toBeUndefined();
+      expect(readAgentRunResultText(connection, resultIdentity)).toBeUndefined();
+    },
+  );
 
   it("validates all siblings and keeps old group replay separate from a child's next result generation", async () => {
     const runs = new Map<string, AgentRun>();

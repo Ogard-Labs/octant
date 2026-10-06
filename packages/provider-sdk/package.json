@@ -9,6 +9,7 @@
     "./context-facts-conformance": "./src/contextFactsConformance.ts",
     "./chat-conformance": "./src/chatConformance.ts",
     "./discovery": "./src/discovery.ts",
+    "./child-observations": "./src/childObservations.ts",
     "./driver": "./src/driver.ts",
     "./driver-plugins": "./src/driverPlugins.ts",
     "./subscription-oauth": "./src/subscriptionOAuth.ts"

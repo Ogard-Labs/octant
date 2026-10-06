@@ -7,6 +7,7 @@ import { BindingRevisionId, ProjectId } from "./projects";
 import {
   PermissionPersistence,
   ProviderContextBlock,
+  ProviderChildActivityEvent,
   ProviderExecutionPolicy,
   ProviderInstanceId,
   ProviderModelId,
@@ -308,6 +309,63 @@ export type AgentRunResultText = typeof AgentRunResultText.Type;
  * The text is deliberately absent: it is stored, not journaled, and a run whose
  * parent thread was deleted keeps this identity with nothing behind it.
  */
+export const AgentRunReviewMetadata = Schema.Struct({
+  capturedAt: UtcTimestamp,
+  baseTree: Schema.String.pipe(Schema.pattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)),
+  resultTree: Schema.String.pipe(Schema.pattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)),
+  changedPaths: Schema.Array(Schema.NonEmptyString.pipe(Schema.maxLength(2048))).pipe(
+    Schema.maxItems(128),
+  ),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export const AgentRunReviewSnapshot = Schema.Struct({
+  ...AgentRunReviewMetadata.fields,
+  diff: Schema.String.pipe(Schema.maxLength(65_536)),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((value) => JSON.stringify(value).length <= 120_000));
+export type AgentRunReviewSnapshot = typeof AgentRunReviewSnapshot.Type;
+export const decodeAgentRunReviewSnapshot = Schema.decodeUnknownSync(AgentRunReviewSnapshot);
+
+export const AgentRunResultEvidence = Schema.Struct({
+  review: Schema.optional(AgentRunReviewSnapshot),
+  files: Schema.Struct({
+    reviewStatus: Schema.optional(Schema.Literal("available", "unavailable")),
+    status: Schema.Literal("recorded", "unavailable", "truncated"),
+    items: Schema.Array(
+      Schema.Struct({
+        path: Schema.NonEmptyString.pipe(Schema.maxLength(2048)),
+        change: Schema.Literal("created", "modified", "deleted"),
+        reference: Schema.NonEmptyString.pipe(Schema.maxLength(2048)),
+        source: Schema.Literal("provider-reported"),
+        verified: Schema.Literal(false),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(32)),
+  }).annotations(strict),
+  checks: Schema.Struct({
+    status: Schema.Literal("recorded", "unavailable", "truncated"),
+    items: Schema.Array(
+      Schema.Struct({
+        label: Schema.NonEmptyString.pipe(Schema.maxLength(512)),
+        outcome: Schema.Literal("passed", "failed", "unknown"),
+        reference: Schema.NonEmptyString.pipe(Schema.maxLength(2048)),
+        source: Schema.Literal("host-recorded"),
+        toolExecution: Schema.optional(
+          Schema.Struct({
+            toolName: Schema.NonEmptyString.pipe(Schema.maxLength(255)),
+            requestId: Schema.NonEmptyString.pipe(Schema.maxLength(255)),
+            isError: Schema.Boolean,
+            output: Schema.String.pipe(Schema.maxLength(2048)),
+            truncated: Schema.Boolean,
+          }).annotations(strict),
+        ),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(32)),
+  }).annotations(strict),
+}).annotations(strict);
+export type AgentRunResultEvidence = typeof AgentRunResultEvidence.Type;
+export const decodeAgentRunResultEvidence = Schema.decodeUnknownSync(AgentRunResultEvidence);
+
 export const AgentRunResult = Schema.Struct({
   reference: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
   truncated: Schema.Boolean,
@@ -508,6 +566,7 @@ export const AgentRunCommand = Schema.Union(
     result: AgentRunResult,
     /** Stored under `result.reference`; never journaled with the completion. */
     resultText: AgentRunResultText,
+    resultEvidence: Schema.optional(AgentRunResultEvidence),
     usage: Schema.optional(AgentRunTokenUsage),
   }).annotations(strict),
   Schema.Struct({
@@ -752,6 +811,8 @@ export const AgentRunConversationReadStatus = Schema.Literal(
 export type AgentRunConversationReadStatus = typeof AgentRunConversationReadStatus.Type;
 
 export const AgentRunConversationEntry = Schema.Struct({
+  childActivity: Schema.optional(ProviderChildActivityEvent),
+  generation: Schema.optional(Schema.Int.pipe(Schema.positive())),
   sequence: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
   kind: Schema.Literal("assistant", "status"),
   text: Schema.String.pipe(Schema.maxLength(MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS)),

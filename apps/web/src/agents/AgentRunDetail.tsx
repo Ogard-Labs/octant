@@ -5,6 +5,8 @@ import { relativeTimeLabel } from "../lib/relativeTime";
 import { Markdown } from "../markdown/Markdown";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { AgentRunResults } from "./AgentRunResults";
+import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import { FollowUpControl } from "./FollowUpControl";
 import type { AgentHierarchyRow } from "./buildAgentHierarchyModel";
 import {
@@ -29,6 +31,7 @@ type RunCommand = (input: { runId: string; version: number }) => void;
 export function AgentRunDetail(props: {
   readonly row: AgentHierarchyRow;
   readonly onBack: () => void;
+  readonly onReviewChanges?: (request: AgentResultReviewRequest) => void;
   readonly conversation?: AgentRunConversationResponse;
   readonly conversationLoading?: boolean;
   readonly conversationReconnecting?: boolean;
@@ -54,14 +57,19 @@ export function AgentRunDetail(props: {
   const followUp = props.onFollowUp;
   const status = row.lifecycleStatus;
   const command = { runId: row.runId, version: row.version };
-  const canSteer = status === "running" || status === "waiting";
-  const canRetry = status === "failed" || status === "interrupted";
+  const managed = row.executionKind === "octant-managed";
+  const canSteer = managed && (status === "running" || status === "waiting");
+  const canRetry = managed && (status === "failed" || status === "interrupted");
   const canResume =
-    status === "waiting" ||
-    (status === "interrupted" && row.recoveryReason !== "restart-without-resumable-execution");
-  const usageResumeScheduled = row.usageResume?.status === "scheduled";
+    managed &&
+    (status === "waiting" ||
+      (status === "interrupted" && row.recoveryReason !== "restart-without-resumable-execution"));
+  const usageResumeScheduled = managed && row.usageResume?.status === "scheduled";
   const canArmUsageResume =
-    status === "waiting" && row.usageLimit?.resetsAt !== undefined && !usageResumeScheduled;
+    managed &&
+    status === "waiting" &&
+    row.usageLimit?.resetsAt !== undefined &&
+    !usageResumeScheduled;
   const active = row.bucket === "active";
   const facts = [subagentRoleWord(row.role), row.model, relativeTimeLabel(row.updatedAt)].filter(
     (part): part is string => part !== undefined,
@@ -116,6 +124,13 @@ export function AgentRunDetail(props: {
           <span className="agent-run-detail__label">Brief</span>
           <p>{row.task}</p>
         </div>
+        <AgentRunResults
+          packets={row.resultPackets}
+          truncated={row.resultsTruncated === true}
+          {...(props.onReviewChanges === undefined
+            ? {}
+            : { onReviewChanges: props.onReviewChanges })}
+        />
         <AgentRunReply
           active={active}
           row={row}
@@ -189,7 +204,7 @@ export function AgentRunDetail(props: {
             Resume at reset
           </OctantButton>
         ) : null}
-        {active ? (
+        {active && managed ? (
           <OctantButton
             aria-label="Cancel this subagent"
             onClick={() => props.onCancel?.({ runId: row.runId })}

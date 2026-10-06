@@ -1,4 +1,5 @@
 import {
+  MAX_AGENT_RESULT_PACKETS,
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
   USAGE_RESUME_SETTLED,
@@ -154,6 +155,8 @@ export class AgentRunProjection implements Projection {
   // Runs live only in these maps, so every host start must replay them all:
   // resuming from the stored checkpoint showed a restarted host no children.
   readonly holdsStateInMemory = true as const;
+  readonly #resultHistory = new Map<AgentRunId, ReadonlyArray<AgentRun>>();
+  readonly #truncatedResults = new Set<AgentRunId>();
   readonly #byId = new Map<AgentRunId, AgentRun>();
   readonly #byRequestId = new Map<AgentRunRequestId, AgentRunId>();
   readonly #byParent = new Map<AgentRunParentThreadId, Set<AgentRunId>>();
@@ -273,6 +276,22 @@ export class AgentRunProjection implements Projection {
         : (input.resultAcknowledgement ?? existing.resultAcknowledgement),
     });
     this.#index(next);
+    if (next.result !== undefined || next.recoveryReason !== undefined) {
+      const previous = this.#resultHistory.get(runId) ?? [];
+      const snapshots = [...previous.filter((item) => (item.generation ?? 1) !== generation), next];
+      if (snapshots.length > MAX_AGENT_RESULT_PACKETS) this.#truncatedResults.add(runId);
+      this.#resultHistory.set(runId, snapshots.slice(-MAX_AGENT_RESULT_PACKETS));
+    }
+  }
+
+  resultHistory(runId: AgentRunId): {
+    readonly runs: ReadonlyArray<AgentRun>;
+    readonly truncated: boolean;
+  } {
+    return {
+      runs: this.#resultHistory.get(runId) ?? [],
+      truncated: this.#truncatedResults.has(runId),
+    };
   }
 
   /**
@@ -477,6 +496,8 @@ export class AgentRunProjection implements Projection {
   }
 
   clear(): void {
+    this.#resultHistory.clear();
+    this.#truncatedResults.clear();
     this.#byId.clear();
     this.#byRequestId.clear();
     this.#byParent.clear();

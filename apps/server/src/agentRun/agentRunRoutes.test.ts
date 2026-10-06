@@ -1,3 +1,4 @@
+import { decodeProviderRuntimeEvent } from "@octant/contracts";
 import { AGENT_RUN_MAX_ACTIVE_GLOBAL } from "@octant/domain";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -988,6 +989,172 @@ describe("agentRunRoutes", () => {
     const body = (await response!.json()) as { entries: Array<{ runId: string; task: string }> };
     expect(body.entries).toHaveLength(1);
     expect(body.entries[0]?.task).toBe("Summarize");
+  });
+
+  it.each(["parent", "child"])("refuses child data when %s scope is denied", async (scope) => {
+    const { handler, persistence, token, liveConversations } = createHandler({
+      authorizeCancellation: () => scope !== "child",
+      authorizeParentThread: () => scope !== "parent",
+    });
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Summarize",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
+    const readResults = vi.spyOn(persistence, "resultPackets");
+    const readConversation = vi.spyOn(liveConversations, "read");
+    const readReview = vi.spyOn(persistence, "reviewSnapshot");
+    for (const route of ["review", "results", "conversation", "conversation/stream"]) {
+      const response = await handler(
+        new Request(
+          `http://127.0.0.1/api/agent-runs/${route}?runId=${accepted.run.id}${route === "review" ? "&generation=1" : ""}`,
+          {
+            headers: { "x-octant-window-capability": token },
+          },
+        ),
+      );
+      expect(response?.status).toBe(403);
+    }
+    const summary = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/parent-summary?parentThreadId=${ids.thread}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    if (scope === "parent") expect(summary?.status).toBe(403);
+    else expect(await summary?.json()).toMatchObject({ entries: [], observations: [] });
+    expect(readReview).not.toHaveBeenCalled();
+    expect(readResults).not.toHaveBeenCalled();
+    expect(readConversation).not.toHaveBeenCalled();
+  });
+
+  it("attributes observed descendants to the authorized root and managed parent without run controls", async () => {
+    const { handler, persistence, token, liveConversations } = createHandler();
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Summarize",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
+    const report = decodeProviderRuntimeEvent({
+      kind: "child-agent-activity",
+      instanceId: ids.provider,
+      sessionId: "11111111-1111-4111-8111-111111111111",
+      sequence: 1,
+      correlationId: ids.request,
+      occurredAt: "2026-10-03T20:00:00.000Z",
+      childAgentId: "provider-child",
+      status: "running",
+      summary: "Reviewing",
+    });
+    if (report.kind !== "child-agent-activity") throw new Error("Invalid fixture");
+    liveConversations.begin(accepted.run.id);
+    liveConversations.appendChildActivity(accepted.run.id, report, 1);
+    liveConversations.appendChildActivity(accepted.run.id, report, 1);
+    const response = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/parent-summary?parentThreadId=${ids.thread}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(await response?.json()).toMatchObject({
+      observations: [
+        {
+          kind: "observed",
+          parentThreadId: ids.thread,
+          parentRunId: accepted.run.id,
+          childAgentId: "provider-child",
+          control: "unavailable",
+          historyStatus: "partial",
+        },
+      ],
+      entries: [{ resultPackets: [{ generation: 1, reportedSummary: { status: "unavailable" } }] }],
+    });
+    const results = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/results?runId=${accepted.run.id}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    const review = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/review?runId=${accepted.run.id}&generation=1`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(review?.status).toBe(200);
+    expect(await review?.json()).toMatchObject({
+      runId: accepted.run.id,
+      generation: 1,
+      status: "unavailable",
+    });
+    const invalid = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/review?runId=${accepted.run.id}&generation=-1`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(invalid?.status).toBe(400);
+    const snapshot = {
+      capturedAt: "2026-10-03T20:00:00.000Z",
+      baseTree: "a".repeat(40),
+      resultTree: "b".repeat(40),
+      diff: "private captured diff",
+      changedPaths: ["file.txt"],
+      truncated: false,
+    };
+    persistence.applyCommand({
+      kind: "start-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: accepted.run.version,
+    });
+    persistence.applyCommand({
+      kind: "mark-agent-run-running",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 1) as never,
+    });
+    const completion = persistence.applyCommand({
+      kind: "complete-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 2) as never,
+      result: { reference: `octant://agent-run/${accepted.run.id}/result`, truncated: false },
+      resultText: "Completed",
+      resultEvidence: {
+        files: { status: "unavailable", items: [] },
+        checks: { status: "unavailable", items: [] },
+        review: snapshot as never,
+      },
+    });
+    expect(completion.kind).toBe("run-updated");
+    const captured = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/review?runId=${accepted.run.id}&generation=1`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(await captured?.json()).toMatchObject({ status: "available", snapshot });
+    expect(results?.status).toBe(200);
+    expect(await results?.json()).toMatchObject({
+      runId: accepted.run.id,
+      packets: [{ parentThreadId: ids.thread, generation: 1 }],
+    });
   });
 
   it("returns authorized center rows with enriched parent titles", async () => {

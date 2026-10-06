@@ -21,6 +21,37 @@ that run. The document appears on the parent thread, and the child is recorded
 as its author. A provider that cannot carry Octant's tools does not start the
 child.
 
+## Observations and result evidence
+
+Managed children retain their existing controls. A provider-owned child report,
+when a provider supports it, is a read-only observation with its own identity and
+bounded activity history. Unknown model or history stays unknown. Observations
+cannot be messaged, cancelled, steered, or resumed through managed-child controls.
+The current bundled adapters keep native children disabled or unsupported, so
+there is no verified native-child observation support from those adapters.
+
+A result belongs to one child, execution generation, provider/model and workspace.
+Follow-ups preserve earlier generations. The child’s reported summary is separate
+from recorded lifecycle blockers, provider-reported file changes, and tools the
+host actually executed. File reports are unverified; a tool return is not proof
+that tests passed. Missing and truncated evidence is shown explicitly. A completed
+child does not establish review, merge, deployment, or completion of its parent.
+
+For writable Code children, **Review changes** opens the host's saved comparison
+for that generation in **Review**. It includes committed changes and non-ignored
+new files from the child's own workspace. Later follow-ups keep separate
+comparisons. Captured file links open this saved diff; they do not open the
+parent's current files. Review identifies partial or binary content and offers no
+staging or discard controls for saved child results.
+
+A waiting child can update its comparison when it settles again. If its original
+baseline is missing after a restart or Git cleanup, review is unavailable rather
+than showing only the resumed portion. Chat, Work and Plan children have no Git
+review capture. Failed captures and older sessions without a baseline also show
+review unavailable. Provider file reports remain separate, unverified claims.
+Tool records retain bounded output for inspection. Deleting the parent's content
+removes saved comparisons, tool records and earlier result text.
+
 ## Availability
 
 Subagent infrastructure — contracts, journaling, projection, the
@@ -30,13 +61,19 @@ server-authoritative switch, **Let the agent start subagents**: on (the
 default) or off. **Settings → Octant Harness → Model slots** configures shared
 role routing for both Octant and provider harnesses; Projects can override it.
 
-A thread's working subagents show in a small card behind its composer in
-Chat, Work, and Code: one row each with its task and "Working · 12s". Click the
-card's head to fold it to a tab; Octant remembers that. Hover or focus a row to
-**Stop** it; **Stop all** asks first and cancels only that thread's subagents.
-Choosing a row opens the **Agents** dock tool on that subagent. Finished
-subagents leave the card: **Environment → Subagents** lists every one, working
-and finished, and marks results you have not reviewed **To review**.
+A thread's subagents appear in a compact card above its composer in Chat,
+Work, and Code. It starts collapsed and remembers your choice. Its counts keep
+failed, waiting and unreviewed children visible. Expand it to preview up to
+three active or unresolved children with their task, status, model and last
+reported activity. **View all** opens the full **Agents** list, including finished
+children. A row opens that child's detail. **Stop** acts on one managed child;
+**Stop all** asks first and cancels only this thread's managed children.
+Observation-only rows have no execution controls. **Environment → Subagents**
+also lists managed children and marks results you have not reviewed **To review**.
+
+When the agent reports a task list, its separate collapsed header shows completed
+steps and failed or waiting counts. Expand it to read the steps. Task progress
+does not indicate that subagents or the parent delivery are complete.
 
 The **Agents** dock tool lists the thread's subagents under **Working** and
 **Finished** and marks results you have not reviewed with **Needs review**. On

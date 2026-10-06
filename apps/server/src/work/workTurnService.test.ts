@@ -1381,6 +1381,18 @@ describe("WorkTurnService", () => {
       turnRuntime: {
         run: async (input) => {
           input.onDelta?.("Partial");
+          const report = decodeProviderRuntimeEvent({
+            kind: "child-agent-activity",
+            instanceId: ids.provider,
+            sessionId: input.providerSessionId,
+            sequence: 1,
+            correlationId: String(ids.request),
+            occurredAt: now,
+            childAgentId: "observed-child",
+            status: "running",
+            summary: "Reading",
+          });
+          if (report.kind === "child-agent-activity") input.onChildActivity?.(report);
           input.onTasks?.([{ taskId: "task-1", state: "running", summary: "Watch CI" }]);
           await gate.promise;
           input.onTasks?.([
@@ -1421,6 +1433,9 @@ describe("WorkTurnService", () => {
       { taskId: "task-2", state: "pending", summary: "Commit the evidence" },
     ]);
     const transcript = await fixture.service.transcript(ids.window, ids.thread);
+    expect(transcript.turns[0]?.childObservations?.children).toMatchObject([
+      { childAgentId: "observed-child", historyStatus: "partial" },
+    ]);
     const settledTurn = transcript.turns.at(-1);
     expect(settledTurn?.tasks).toEqual([
       { taskId: "task-1", state: "completed", summary: "Watch CI" },

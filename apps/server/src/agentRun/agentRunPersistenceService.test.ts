@@ -7,6 +7,7 @@ import {
   AgentRunRequested,
   AgentRunStatusChanged,
   AgentRunResultAcknowledged,
+  AgentRunResultDeliverySettled,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
   decodeAgentRunId,
@@ -24,7 +25,10 @@ import {
   type AgentRunWorkspaceReceipt,
 } from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
-import { readAgentRunAdmittedContext } from "../persistence/agentRunContentStore";
+import {
+  writeAgentRunResultEvidence,
+  readAgentRunAdmittedContext,
+} from "../persistence/agentRunContentStore";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { purgeThreadContent } from "../persistence/chatProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -33,6 +37,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection, ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import {
+  AGENT_RUN_RESULT_DELIVERY_SETTLED,
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
   AGENT_RUN_STATUS_CHANGED,
@@ -233,6 +238,7 @@ function createHarness(connection = openConnection()) {
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
+    .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
     .register(USAGE_RESUME_SCHEDULED, 1, UsageResumeScheduled)
     .register(USAGE_RESUME_CANCELLED, 1, UsageResumeCancelled)
     .register(USAGE_RESUME_SETTLED, 1, UsageResumeSettled);
@@ -512,9 +518,309 @@ describe("AgentRunPersistenceService", () => {
       truncated: false,
     });
     expect(rebuiltService.resultText(accepted.run.id)).toBe("The fallback is safe.");
+    expect(rebuiltService.resultPackets(accepted.run.id)).toMatchObject({
+      packets: [
+        {
+          generation: 1,
+          providerInstanceId: ids.provider,
+          reportedSummary: { status: "available", text: "The fallback is safe." },
+          files: { status: "unavailable", items: [] },
+          checks: { status: "unavailable", items: [] },
+        },
+      ],
+      truncated: false,
+    });
     expect(rebuilt?.routingReceipt.usageQuality).toBe("provider-reported");
     expect(rebuilt?.authority.network).toBe(true);
     expect(rebuilt?.usage).toEqual({ inputTokens: 1200, outputTokens: 300 });
+  });
+
+  it("truncates large recorded evidence instead of losing the child completion", () => {
+    const harness = createHarness();
+    const accepted = harness.service.requestRun({
+      command: requestCommand(),
+      parentAuthority,
+      confirmed: true,
+    });
+    if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
+    const runId = accepted.run.id;
+    const apply = (command: Parameters<typeof harness.service.applyCommand>[0]) => {
+      const result = harness.service.applyCommand(command);
+      if (result.kind !== "run-updated") throw new Error("Update failed");
+      return result.run;
+    };
+    const started = apply({
+      kind: "start-agent-run",
+      runId,
+      expectedVersion: accepted.run.version,
+    });
+    const running = apply({
+      kind: "mark-agent-run-running",
+      runId,
+      expectedVersion: started.version,
+    });
+    apply({
+      kind: "complete-agent-run",
+      runId,
+      expectedVersion: running.version,
+      result: { reference: `octant://agent-run/${runId}/result`, truncated: false },
+      resultText: "Finished",
+      resultEvidence: {
+        files: {
+          status: "recorded",
+          items: Array.from({ length: 32 }, (_, i) => ({
+            path: "x".repeat(2048),
+            change: "modified",
+            reference: `${i}${"r".repeat(2000)}`,
+            source: "provider-reported",
+            verified: false,
+          })),
+        },
+        checks: {
+          status: "recorded",
+          items: Array.from({ length: 32 }, (_, i) => ({
+            label: "Tool execution: inspect",
+            outcome: "unknown",
+            reference: `${i}${"r".repeat(2000)}`,
+            source: "host-recorded",
+            toolExecution: {
+              toolName: "inspect",
+              requestId: String(i),
+              isError: false,
+              output: "o".repeat(2048),
+              truncated: false,
+            },
+          })),
+        },
+      },
+    });
+    const packet = harness.service.resultPackets(runId).packets[0];
+    expect(packet?.reportedSummary.text).toBe("Finished");
+    expect(packet?.files.status).toBe("truncated");
+    expect(packet?.checks.status).toBe("truncated");
+    expect(JSON.stringify(packet).length).toBeLessThan(131072);
+  });
+
+  it.each(["resume-agent-run", "interrupt-agent-run"] as const)(
+    "invalidates a waiting comparison when %s cannot provide a final capture",
+    (kind) => {
+      const harness = createHarness();
+      const command = requestCommand();
+      const admitted = harness.service.requestRun({
+        command: {
+          ...command,
+          routingReceipt: { ...command.routingReceipt, mode: "code" },
+          workspaceReceipt: {
+            kind: "code-worktree",
+            mode: "code",
+            projectId: "88888888-8888-4888-8888-888888888888" as never,
+            checkoutRoot: "/repo",
+            worktreeRoot: "/child",
+            verified: true,
+          },
+        },
+        parentAuthority,
+        confirmed: true,
+      });
+      if (admitted.kind !== "run-accepted") throw new Error(JSON.stringify(admitted));
+      const runId = admitted.run.id;
+      harness.service.applyCommand({
+        kind: "start-agent-run",
+        runId,
+        expectedVersion: admitted.run.version,
+      });
+      harness.service.applyCommand({
+        kind: "mark-agent-run-running",
+        runId,
+        expectedVersion: (admitted.run.version + 1) as never,
+      });
+      const review = {
+        capturedAt: now as never,
+        baseTree: "a".repeat(40),
+        resultTree: "b".repeat(40),
+        diff: "earlier waiting changes",
+        changedPaths: ["file.txt"],
+        truncated: false,
+      };
+      const waiting = harness.service.applyCommand(
+        {
+          kind: "wait-agent-run",
+          runId,
+          expectedVersion: (admitted.run.version + 2) as never,
+          recoveryReason: "Waiting",
+        },
+        {
+          review,
+          files: { status: "unavailable", items: [] },
+          checks: { status: "unavailable", items: [] },
+        },
+      );
+      if (waiting.kind !== "run-updated") throw new Error("Not waiting");
+      expect(harness.service.reviewSnapshot(runId, 1)).toEqual(review);
+      const next = harness.service.applyCommand({
+        kind,
+        runId,
+        expectedVersion: waiting.run.version,
+        ...(kind === "interrupt-agent-run" ? { recoveryReason: "Host restarted" } : {}),
+      } as never);
+      expect(next.kind).toBe("run-updated");
+      harness.service.rebuildFromJournal();
+      expect(harness.service.reviewSnapshot(runId, 1)).toBeUndefined();
+      expect(harness.service.resultPackets(runId).packets[0]?.files.reviewStatus).toBe(
+        "unavailable",
+      );
+    },
+  );
+
+  it("keeps earlier result generations through follow-ups, replay and content purge", () => {
+    const harness = createHarness();
+    const accepted = harness.service.requestRun({
+      command: requestCommand(),
+      parentAuthority,
+      confirmed: true,
+    });
+    if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
+    const runId = accepted.run.id;
+    const review = {
+      capturedAt: now as never,
+      baseTree: "a".repeat(40),
+      resultTree: "b".repeat(40),
+      changedPaths: ["src/first.ts"],
+      truncated: false,
+      diff: "diff --git a/src/first.ts b/src/first.ts\n-private before\n+private after\n",
+    };
+    const version = () => {
+      const run = harness.service.getById(runId);
+      if (run === undefined) throw new Error("Missing run");
+      return run.version;
+    };
+    const apply = (command: Parameters<typeof harness.service.applyCommand>[0]) => {
+      const result = harness.service.applyCommand(command);
+      expect(result.kind).toBe("run-updated");
+    };
+    apply({ kind: "start-agent-run", runId, expectedVersion: version() });
+    apply({ kind: "mark-agent-run-running", runId, expectedVersion: version() });
+    apply({
+      kind: "complete-agent-run",
+      runId,
+      expectedVersion: version(),
+      result: { reference: `octant://agent-run/${runId}/result`, truncated: false },
+      resultText: "Agent claims all checks pass.",
+      resultEvidence: {
+        review,
+        files: {
+          status: "recorded",
+          items: [
+            {
+              path: "src/first.ts",
+              change: "modified",
+              source: "provider-reported",
+              verified: false,
+              reference: "first-generation-file",
+            },
+          ],
+        },
+        checks: {
+          status: "recorded",
+          items: [
+            {
+              label: "Tool execution: inspect",
+              outcome: "unknown",
+              source: "host-recorded",
+              reference: "first-generation-tool",
+              toolExecution: {
+                toolName: "inspect",
+                requestId: "first-tool",
+                isError: false,
+                output: "Actual recorded output",
+                truncated: false,
+              },
+            },
+          ],
+        },
+      },
+    });
+    apply({
+      kind: "settle-agent-run-result-delivery",
+      runId,
+      expectedVersion: version(),
+      outcome: "consumed",
+    });
+    apply({
+      kind: "resume-agent-run",
+      runId,
+      expectedVersion: version(),
+      message: "Continue the work.",
+    });
+    expect(harness.service.resultPackets(runId).packets).toMatchObject([
+      { generation: 1, reportedSummary: { text: "Agent claims all checks pass." } },
+      { generation: 2, reportedSummary: { status: "unavailable" }, lifecycleStatus: "starting" },
+    ]);
+    apply({ kind: "mark-agent-run-running", runId, expectedVersion: version() });
+    apply({
+      kind: "complete-agent-run",
+      runId,
+      expectedVersion: version(),
+      result: { reference: `octant://agent-run/${runId}/result/2`, truncated: true },
+      resultText: "Second response.",
+    });
+    harness.service.rebuildFromJournal();
+    const packets = harness.service.resultPackets(runId).packets;
+    expect(packets.map((packet) => [packet.generation, packet.reportedSummary.text])).toEqual([
+      [1, "Agent claims all checks pass."],
+      [2, "Second response."],
+    ]);
+    expect(packets[0]?.files.items[0]?.path).toBe("src/first.ts");
+    expect(packets[0]?.files.reviewStatus).toBe("available");
+    expect(packets[0]?.review).toMatchObject({
+      baseTree: review.baseTree,
+      changedPaths: review.changedPaths,
+    });
+    expect(JSON.stringify(packets)).not.toContain("private after");
+    expect(harness.service.reviewSnapshot(runId, 1)).toEqual(review);
+    expect(harness.service.reviewSnapshot(runId, 2)).toBeUndefined();
+    expect(harness.service.reviewSnapshot(runId, 999)).toBeUndefined();
+    expect(harness.service.reviewSnapshot(ids.request as never, 1)).toBeUndefined();
+    expect(
+      JSON.stringify(harness.connection.prepare("SELECT * FROM event_journal").all()),
+    ).not.toContain("private after");
+    expect(packets[0]?.checks.items[0]?.outcome).toBe("unknown");
+    expect(packets[0]?.checks.items[0]?.toolExecution?.output).toBe("Actual recorded output");
+    expect(packets[1]?.files.status).toBe("unavailable");
+    expect(packets[1]?.checks.status).toBe("unavailable");
+    expect(packets[1]?.reportedSummary.truncated).toBe(true);
+    purgeThreadContent(harness.connection, String(ids.thread));
+    harness.connection
+      .prepare("INSERT INTO thread_purge_tombstone VALUES (?, ?, NULL, ?, 1)")
+      .run("chat", String(ids.thread), later);
+    const first = packets[0];
+    if (first === undefined) throw new Error("Missing result packet");
+    writeAgentRunResultEvidence(harness.connection, {
+      run: accepted.run,
+      reference: `octant://agent-run/${runId}/result`,
+      createdAt: later,
+      evidence: { files: first.files, checks: first.checks, review },
+    });
+    expect(
+      harness.connection
+        .prepare(
+          "SELECT content_id FROM agent_run_content_store WHERE content_kind = 'result-evidence'",
+        )
+        .all(),
+    ).toEqual([]);
+    harness.service.rebuildFromJournal();
+    expect(harness.service.reviewSnapshot(runId, 1)).toBeUndefined();
+    expect(
+      harness.service
+        .resultPackets(runId)
+        .packets.every(
+          (packet) =>
+            packet.reportedSummary.status === "unavailable" &&
+            packet.reportedSummary.text === undefined &&
+            packet.files.status === "unavailable" &&
+            packet.checks.status === "unavailable",
+        ),
+    ).toBe(true);
   });
 
   it("refuses an over-limit admitted selection and admits nothing", () => {

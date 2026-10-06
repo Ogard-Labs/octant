@@ -559,8 +559,10 @@ describe("createAgentRunSessionRuntime", () => {
   it("ignores malformed provider events and keeps a throwing observer from failing the run", async () => {
     const provider = fakeProvider();
     const deltas: string[] = [];
+    const observations: unknown[] = [];
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(provider, {
+        onChildActivity: (input) => observations.push(input),
         onTextDelta: ({ text }) => {
           deltas.push(text);
           throw new Error("observer failed");
@@ -572,6 +574,10 @@ describe("createAgentRunSessionRuntime", () => {
     await provider.emit({
       kind: "child-agent-activity",
       sessionId,
+      instanceId: providerInstanceId,
+      sequence: 1,
+      correlationId: "82000000-0000-4000-8000-000000000071",
+      occurredAt: now,
       childAgentId: "child-1",
       status: "running",
       summary: "secret native transcript",
@@ -580,7 +586,86 @@ describe("createAgentRunSessionRuntime", () => {
     await provider.emit({ kind: "completed", sessionId });
     await expect(outcome).resolves.toMatchObject({ kind: "completed", responseText: "visible" });
     expect(deltas).toEqual(["visible"]);
+    expect(observations).toMatchObject([
+      { run: { id: runId }, event: { childAgentId: "child-1", kind: "child-agent-activity" } },
+    ]);
   });
+
+  it.each(["completed", "failed"] as const)(
+    "records bounded reports and host tool returns on %s without inferring checks",
+    async (terminal) => {
+      const provider = fakeProvider();
+      const runtime = createAgentRunSessionRuntime(
+        runtimeOptions(provider, {
+          appManagedTools: () => ({
+            definitions: [{ name: "read_notes", description: "Read notes", inputSchema: {} }],
+            execute: async () => ({ result: { text: "All tests pass", exitCode: 0 } }),
+          }),
+        }),
+      );
+      const outcome = settled(runtime.start(agentRun()));
+      await provider.emit({
+        kind: "file-change",
+        sessionId,
+        instanceId: providerInstanceId,
+        sequence: 1,
+        path: "src/notes.ts",
+        change: "modified",
+        occurredAt: now,
+      });
+      await provider.emit({
+        kind: "file-change",
+        sessionId,
+        instanceId: providerInstanceId,
+        sequence: 2,
+        path: "/another/workspace/secret.ts",
+        change: "modified",
+        occurredAt: now,
+      });
+      await provider.emit({
+        kind: "tool-request",
+        sessionId,
+        instanceId: providerInstanceId,
+        sequence: 3,
+        requestId: "tool-1",
+        toolName: "read_notes",
+        inputJson: "{}",
+        occurredAt: now,
+      });
+      await provider.emit({ kind: "text-delta", sessionId, text: "All tests pass. Deployed." });
+      await provider.emit(
+        terminal === "completed"
+          ? { kind: "completed", sessionId }
+          : {
+              kind: "failed",
+              sessionId,
+              failure: { category: "provider-failed", message: "Stopped" },
+            },
+      );
+      const result = await outcome;
+      expect(result).toMatchObject({
+        kind: terminal,
+        evidence: {
+          files: {
+            status: "truncated",
+            items: [{ path: "src/notes.ts", source: "provider-reported", verified: false }],
+          },
+          checks: {
+            status: "recorded",
+            items: [
+              {
+                label: "Tool execution: read_notes",
+                outcome: "unknown",
+                source: "host-recorded",
+                toolExecution: { toolName: "read_notes", isError: false },
+              },
+            ],
+          },
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain("another/workspace");
+    },
+  );
 
   it("runs the child as an in-process provider session under the clamped authority", async () => {
     const provider = fakeProvider({
@@ -1330,6 +1415,167 @@ describe("durable child provider identity", () => {
     expect(onSessionStarted).not.toHaveBeenCalled();
     expect(provider.acquired).toEqual([]);
     expect(counted.recordTerminal).toHaveBeenCalledOnce();
+  });
+
+  it.each(["openai-compatible", "codex"] as const)(
+    "captures the verified generation around %s execution and after teardown",
+    async (kind) => {
+      const provider = fakeProvider();
+      const base = agentRun({
+        authority: { ...authority, filesystem: true, git: true, executionPolicy: "approval-gated" },
+        workspaceReceipt: {
+          kind: "code-worktree",
+          mode: "code",
+          projectId: "88888888-8888-4888-8888-888888888888" as never,
+          checkoutRoot: "/repo",
+          worktreeRoot: "/child",
+          verified: true,
+        },
+      });
+      const run = {
+        ...base,
+        routingReceipt: {
+          ...base.routingReceipt,
+          executionResolution: {
+            ...base.routingReceipt.executionResolution,
+            effectivePermissions: {
+              ...base.routingReceipt.executionResolution.effectivePermissions,
+              filesystem: true,
+              git: true,
+            },
+          },
+        },
+      };
+      const review = {
+        capturedAt: now as never,
+        baseTree: "a".repeat(40),
+        resultTree: "b".repeat(40),
+        diff: "retained generation",
+        changedPaths: ["file.txt"],
+        truncated: false,
+      };
+      const finish = vi.fn(async () => {
+        expect(provider.stops).toHaveLength(1);
+        return review;
+      });
+      const begin = vi.fn(
+        async (
+          input: Parameters<
+            NonNullable<AgentRunSessionRuntimeOptions["reviewCapture"]>["begin"]
+          >[0],
+        ) => {
+          expect(input.checkoutRoot).toBe("/child");
+          expect(provider.acquired).toHaveLength(0);
+          expect(await input.authorize(new AbortController().signal)).toBe(true);
+          return { baseTree: review.baseTree, finish };
+        },
+      );
+      const runtime = createAgentRunSessionRuntime(
+        runtimeOptions(provider, {
+          resolveDriver: () => ({ ...provider.driver, kind }),
+          verifyCodeWorkspace: async () => ({ status: "verified", identity: "child-identity" }),
+          canCaptureReview: () => true,
+          reviewCapture: { begin },
+        }),
+      );
+      const done = settled(runtime.start(run));
+      await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+      await provider.emit({ kind: "text-delta", sessionId, text: "Completed", occurredAt: now });
+      await provider.emit({ kind: "completed", sessionId });
+      expect(await done).toMatchObject({ kind: "completed", evidence: { review } });
+      expect(begin).toHaveBeenCalledOnce();
+      expect(finish).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("keeps the original generation baseline through a saved native resume", async () => {
+    const connection = openSqlite(databasePath());
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const base = agentRun({
+      authority: { ...authority, filesystem: true, git: true, executionPolicy: "approval-gated" },
+      workspaceReceipt: {
+        kind: "code-worktree",
+        mode: "code",
+        projectId: "88888888-8888-4888-8888-888888888888" as never,
+        checkoutRoot: "/repo",
+        worktreeRoot: "/child",
+        verified: true,
+      },
+    });
+    let run = {
+      ...base,
+      routingReceipt: {
+        ...base.routingReceipt,
+        executionResolution: {
+          ...base.routingReceipt.executionResolution,
+          effectivePermissions: {
+            ...base.routingReceipt.executionResolution.effectivePermissions,
+            filesystem: true,
+            git: true,
+          },
+        },
+      },
+    };
+    const store = new AgentRunSessionStore({ connection, getById: () => run });
+    const baseline = "a".repeat(40);
+    const begin = vi.fn(
+      async (
+        input: Parameters<NonNullable<AgentRunSessionRuntimeOptions["reviewCapture"]>["begin"]>[0],
+      ) => ({
+        baseTree: input.baseTree ?? baseline,
+        finish: async () => undefined,
+        release: async () => undefined,
+      }),
+    );
+    const provider = fakeProvider({ resumable: true });
+    const shared = {
+      sessionStore: store.sessions,
+      supportsResume: () => true,
+      verifyCodeWorkspace: async () => ({
+        status: "verified" as const,
+        identity: "child-identity",
+      }),
+      canCaptureReview: () => true,
+      reviewCapture: { begin },
+    };
+    const first = createAgentRunSessionRuntime(runtimeOptions(provider, shared));
+    const done = settled(first.start(run));
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    await first.stop(run.id);
+    await done;
+    run = { ...run, lifecycleStatus: "interrupted" };
+    expect(store.sessions.read(run)?.reviewBaseline).toMatchObject({
+      generation: 1,
+      tree: baseline,
+    });
+    const nextProvider = fakeProvider({ resumable: true });
+    const next = createAgentRunSessionRuntime(runtimeOptions(nextProvider, shared));
+    const resumed = next.resume?.(run);
+    if (resumed === undefined) throw new Error("No continuation");
+    await vi.waitFor(() => expect(nextProvider.turns).toHaveLength(1));
+    expect(begin.mock.calls[1]?.[0].baseTree).toBe(baseline);
+    await next.stop(run.id);
+    await settled(resumed);
+    const replacement = fakeProvider({ resumable: true });
+    const retried = createAgentRunSessionRuntime(
+      runtimeOptions(replacement, {
+        ...shared,
+        verifyCodeWorkspace: async () => ({
+          status: "verified",
+          identity: "replacement-directory",
+        }),
+      }),
+    );
+    const replaced = settled(retried.start(run));
+    await vi.waitFor(() => expect(replacement.turns).toHaveLength(1));
+    expect(begin).toHaveBeenCalledTimes(2);
+    expect(store.sessions.read(run)?.reviewBaseline).toEqual({
+      generation: 1,
+      workspaceIdentity: "replacement-directory",
+    });
+    await retried.stop(run.id);
+    await replaced;
+    connection.close();
   });
 
   it("refuses a Code start before provider acquisition without a live workspace verifier", async () => {

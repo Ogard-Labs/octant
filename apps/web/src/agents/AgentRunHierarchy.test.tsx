@@ -5,6 +5,8 @@ import { type AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { type AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { AgentRunHierarchy } from "./AgentRunHierarchy";
+import { AgentRunResults } from "./AgentRunResults";
+import { observedChildFixture, resultPacketFixture } from "./agentActivityFixtures";
 
 const parentThreadId = decodeAgentRunParentThreadId("11111111-1111-4111-8111-111111111111");
 const runId = decodeAgentRunId("22222222-2222-4222-8222-222222222222");
@@ -58,6 +60,217 @@ function summaryEntry(overrides: {
 }
 
 describe("AgentRunHierarchy", () => {
+  it.each([false, true])(
+    "qualifies an unlisted file when its captured comparison is truncated: %s",
+    (truncated) => {
+      const packet = resultPacketFixture();
+      render(
+        <AgentRunResults
+          packets={[
+            {
+              ...packet,
+              files: { ...packet.files, reviewStatus: "available" },
+              review: {
+                capturedAt: packet.occurredAt,
+                baseTree: "a".repeat(40),
+                resultTree: "b".repeat(40),
+                changedPaths: [],
+                truncated,
+              },
+            },
+          ]}
+          truncated={false}
+          onReviewChanges={vi.fn()}
+        />,
+      );
+      expect(
+        screen.getByText(
+          truncated
+            ? "Not in the retained part of the captured changes."
+            : "Not listed in captured changes.",
+        ),
+      ).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: "Review src/parser.ts" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it("inspects an observed child without sending its identity to managed conversation or controls", async () => {
+    const user = userEvent.setup();
+    const child = observedChildFixture({
+      observationId: "opaque/provider/child",
+      historyStatus: "conflicted",
+      lifecycleStatus: "unknown",
+    });
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [],
+        observations: [child],
+        observationsTruncated: true,
+      })),
+    });
+    render(
+      <AgentRunHierarchy
+        client={client}
+        parentThreadId={parentThreadId}
+        requestedView={{ kind: "child", runId: `observation:${child.observationId}` }}
+      />,
+    );
+    await screen.findByRole("region", { name: "Observed child" });
+    await user.click(screen.getByRole("button", { name: "Subagents" }));
+    await user.click(
+      await screen.findByRole("button", { name: /Inspect observed child: Inspect parser/ }),
+    );
+    expect(screen.getByText("Observation only. Controls are unavailable.")).toBeVisible();
+    expect(screen.getByText(/Conflicting observations/)).toBeVisible();
+    expect(screen.getByText("Model unavailable")).toBeVisible();
+    expect(screen.getByText("Reading the parser")).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Subagent actions" })).not.toBeInTheDocument();
+    expect(client.conversation).not.toHaveBeenCalled();
+    expect(client.cancel).not.toHaveBeenCalled();
+    expect(client.acknowledge).not.toHaveBeenCalled();
+  });
+
+  it("discovers later observations in an idle panel and labels the last report when refresh fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const summary = vi
+        .fn<AgentRunClient["parentSummary"]>()
+        .mockResolvedValueOnce({ parentThreadId, entries: [] })
+        .mockResolvedValueOnce({
+          parentThreadId,
+          entries: [],
+          observations: [observedChildFixture()],
+        })
+        .mockRejectedValue(new Error("disconnected"));
+      render(
+        <AgentRunHierarchy
+          client={emptyClient({ parentSummary: summary })}
+          parentThreadId={parentThreadId}
+        />,
+      );
+      await waitFor(() => expect(screen.getByText(/No subagents yet/)).toBeVisible());
+      await act(async () => vi.advanceTimersByTimeAsync(30_000));
+      expect(
+        screen.getByRole("button", { name: /Inspect observed child: Inspect parser/ }),
+      ).toBeVisible();
+      await act(async () => vi.advanceTimersByTimeAsync(2_000));
+      expect(screen.getByText(/Reconnecting. Showing the last child activity/)).toBeVisible();
+      expect(
+        screen.getByRole("button", { name: /Inspect observed child: Inspect parser/ }),
+      ).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps result generations attributed to their recorded model and workspace", async () => {
+    const user = userEvent.setup();
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [
+          {
+            ...summaryEntry({ lifecycleStatus: "completed", task: "Review parser" }),
+            resultPackets: [
+              resultPacketFixture({ generation: 1 }),
+              resultPacketFixture({ generation: 2, modelId: "second-model" }),
+            ],
+            resultsTruncated: true,
+          },
+        ],
+      })),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+    await user.click(await screen.findByRole("button", { name: /Review parser/ }));
+    const history = screen.getByRole("region", { name: "Attributed results" });
+    expect(history).toHaveTextContent("Earlier results are not retained.");
+    expect(history).toHaveTextContent("second-model");
+    expect(history).toHaveTextContent("Checks unavailable");
+    expect(history).toHaveTextContent("Provider reported · unverified");
+    expect(history).not.toHaveTextContent("/workspace/child");
+    await user.click(within(history).getByRole("button", { name: "Attribution" }));
+    expect(history).toHaveTextContent("/workspace/child");
+    await user.click(within(history).getByRole("button", { name: /Generation 1/ }));
+    expect(history).toHaveTextContent("first-model");
+    expect(history).toHaveTextContent("Summary unavailable");
+    expect(history).not.toHaveTextContent("Checks passed");
+  });
+
+  it("shows recorded check output on request without treating tool completion as a passed check", async () => {
+    const user = userEvent.setup();
+    const packet = resultPacketFixture({
+      reportedSummary: { status: "available", text: "Inspected the parser.", truncated: true },
+      files: { status: "unavailable", reviewStatus: "unavailable", items: [] },
+      checks: {
+        status: "truncated",
+        items: [
+          {
+            label: "Inspect source",
+            outcome: "unknown",
+            reference: "check-record",
+            source: "host-recorded",
+            toolExecution: {
+              toolName: "read-file",
+              requestId: "request-1",
+              isError: false,
+              output: "Captured source excerpt",
+              truncated: true,
+            },
+          },
+        ],
+      },
+    });
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [
+          {
+            ...summaryEntry({ lifecycleStatus: "completed", task: "Review checks" }),
+            resultPackets: [packet],
+          },
+        ],
+      })),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+    await user.click(await screen.findByRole("button", { name: /Review checks/ }));
+    const history = screen.getByRole("region", { name: "Attributed results" });
+    expect(history).toHaveTextContent("Inspected the parser.");
+    expect(history).toHaveTextContent("Summary truncated.");
+    expect(history).toHaveTextContent("File review unavailable.");
+    expect(history).toHaveTextContent("Inspect source · unknown · Host recorded");
+    expect(history).not.toHaveTextContent("Captured source excerpt");
+    await user.click(within(history).getByRole("button", { name: "Check evidence" }));
+    expect(history).toHaveTextContent("Captured source excerpt");
+    expect(history).toHaveTextContent("Recorded output is truncated.");
+    expect(history).not.toHaveTextContent("passed");
+  });
+
+  it.each(["running", "waiting", "failed"])(
+    "offers no execution controls for a %s provider-native run",
+    async (lifecycleStatus) => {
+      const user = userEvent.setup();
+      const client = emptyClient({
+        parentSummary: vi.fn(async () => ({
+          parentThreadId,
+          entries: [
+            {
+              ...summaryEntry({ lifecycleStatus, task: "Provider child" }),
+              executionKind: "provider-native",
+            },
+          ],
+        })),
+      });
+      render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+      await user.click(await screen.findByRole("button", { name: /Provider child/ }));
+      expect(
+        screen.queryByRole("button", { name: /Cancel this subagent|Steer|Resume|Retry/ }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
   it("follows up a completed managed child with its existing identity and version", async () => {
     const user = userEvent.setup();
     const resume = vi.fn<AgentRunClient["resume"]>().mockResolvedValue({ kind: "run-updated" });
@@ -196,7 +409,11 @@ describe("AgentRunHierarchy", () => {
       })),
     });
     const view = render(
-      <AgentRunHierarchy client={client} parentThreadId={parentThreadId} requestedRunId={runId} />,
+      <AgentRunHierarchy
+        client={client}
+        parentThreadId={parentThreadId}
+        requestedView={{ kind: "child", runId }}
+      />,
     );
     await user.click(await screen.findByRole("button", { name: "Follow up" }));
     await user.type(screen.getByRole("textbox", { name: "Follow-up message" }), "First draft");
@@ -205,7 +422,7 @@ describe("AgentRunHierarchy", () => {
       <AgentRunHierarchy
         client={client}
         parentThreadId={parentThreadId}
-        requestedRunId={secondRunId}
+        requestedView={{ kind: "child", runId: secondRunId }}
       />,
     );
     await user.click(await screen.findByRole("button", { name: "Follow up" }));
@@ -630,7 +847,7 @@ describe("AgentRunHierarchy", () => {
 
   it("stays on the subagent another surface asked for, even when the tool remounts, until the reader goes back", async () => {
     const user = userEvent.setup();
-    const onRequestedRunHandled = vi.fn();
+    const onRequestedViewHandled = vi.fn();
     const client = emptyClient({
       parentSummary: vi.fn(async () => ({
         parentThreadId,
@@ -640,9 +857,9 @@ describe("AgentRunHierarchy", () => {
     const tool = () => (
       <AgentRunHierarchy
         client={client}
-        onRequestedRunHandled={onRequestedRunHandled}
+        onRequestedViewHandled={onRequestedViewHandled}
         parentThreadId={parentThreadId}
-        requestedRunId={String(runId)}
+        requestedView={{ kind: "child", runId: String(runId) }}
       />
     );
     const first = render(tool());
@@ -651,9 +868,9 @@ describe("AgentRunHierarchy", () => {
     first.unmount();
     render(tool());
     expect(await screen.findByRole("region", { name: "Subagent" })).toBeVisible();
-    expect(onRequestedRunHandled).not.toHaveBeenCalled();
+    expect(onRequestedViewHandled).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Back to subagents" }));
-    expect(onRequestedRunHandled).toHaveBeenCalledTimes(1);
+    expect(onRequestedViewHandled).toHaveBeenCalledTimes(1);
   });
 });

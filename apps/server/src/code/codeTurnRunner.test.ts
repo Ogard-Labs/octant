@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect, Fiber, Queue, Stream } from "effect";
 import type { ProviderConnection } from "@octant/provider-sdk/driver";
+import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import type { WindowId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -792,6 +793,54 @@ describe("CodeTurnRunner", () => {
     }
   });
 
+  it("completes a turn with an oversized child report and retains explicitly truncated history", async () => {
+    const summary = "x".repeat(70_000);
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "child-agent-activity",
+            childAgentId: "child-1",
+            status: "running",
+            summary,
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    const outcomes: CodeTurnOutcome[] = [];
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(exit._tag).toBe("Success");
+    expect(outcomes).toEqual(["completed"]);
+    expect(observed.map((entry) => entry.category)).toEqual(["child-activity", "completion"]);
+    const childEvent = observed.find((entry) => entry.category === "child-activity");
+    const observation = childEvent?.childObservation;
+    if (observation === undefined) throw new Error("Expected child observation");
+    expect(Buffer.byteLength(JSON.stringify(childEvent), "utf8")).toBeLessThanOrEqual(
+      MAX_CODE_TURN_EVENT_BYTES,
+    );
+    expect(Buffer.byteLength(observation.summary, "utf8")).toBeLessThanOrEqual(8 * 1024);
+    expect(recordProviderChildObservation(undefined, observation).children).toMatchObject([
+      {
+        childAgentId: "child-1",
+        historyStatus: "truncated",
+        history: [{ status: "running", summary: summary.slice(0, 512) }],
+      },
+    ]);
+  });
+
   it("normalizes interactive and progress events under the immutable thread authority", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(
@@ -847,6 +896,13 @@ describe("CodeTurnRunner", () => {
       ),
     );
 
+    expect(
+      observed.find((entry) => entry.category === "child-activity")?.childObservation,
+    ).toMatchObject({
+      kind: "child-agent-activity",
+      childAgentId: "child-1",
+      instanceId: authorityThread.providerInstanceId,
+    });
     expect(observed.map((entry) => entry.category)).toEqual([
       "tool",
       "approval",

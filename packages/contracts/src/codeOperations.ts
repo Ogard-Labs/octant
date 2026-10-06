@@ -1,3 +1,4 @@
+import { ProviderChildActivityEvent } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
@@ -1270,6 +1271,7 @@ const ProviderLimitEvent = Schema.Struct({
   resetsAt: Schema.optional(UtcTimestamp),
 }).annotations(strict);
 const ChildActivityEvent = Schema.Struct({
+  observation: Schema.optional(ProviderChildActivityEvent),
   kind: Schema.Literal("child-activity"),
   childId: boundedNonEmptyText(255),
   state: Schema.Literal("starting", "running", "waiting", "completed", "failed"),

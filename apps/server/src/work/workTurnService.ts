@@ -1,3 +1,4 @@
+import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
@@ -1233,6 +1234,22 @@ export class WorkTurnService {
             // a failed outcome.
           }
         },
+        onChildActivity: (event) => {
+          if (input.signal.aborted) return;
+          const current = this.#projection.lookup(input.command.requestId);
+          if (
+            current === undefined ||
+            current.providerSessionId !== event.sessionId ||
+            current.authority.providerInstanceId !== event.instanceId
+          )
+            return;
+          const childObservations = recordProviderChildObservation(
+            current.childObservations,
+            event,
+          );
+          if (childObservations === current.childObservations) return;
+          this.#persistUpdate(current, { status: "running", childObservations });
+        },
         onTasks: (tasks) => {
           if (input.signal.aborted) return;
           this.#liveTasks.set(String(input.command.requestId), tasks);
@@ -1589,6 +1606,7 @@ export class WorkTurnService {
       readonly wroteFiles?: WorkTurnWrittenFiles;
       readonly failure?: WorkTurnState["failure"];
       readonly tasks?: ThreadTaskProgressList;
+      readonly childObservations?: WorkTurnState["childObservations"];
     },
   ): void {
     const latest = this.#projection.lookup(turn.requestId) ?? turn;
@@ -1621,6 +1639,9 @@ export class WorkTurnService {
         ...(update.wroteFiles === undefined ? {} : { wroteFiles: update.wroteFiles }),
         ...(update.failure === undefined ? {} : { failure: update.failure }),
         ...(tasks === undefined ? {} : { tasks }),
+        ...(update.childObservations === undefined
+          ? {}
+          : { childObservations: update.childObservations }),
         updatedAt,
       });
     } catch {
