@@ -1815,6 +1815,15 @@ export const ProviderRuntimeEvent = Schema.Union(
     kind: Schema.Literal("tool-start"),
     toolCallId: Schema.NonEmptyTrimmedString,
     toolName: Schema.NonEmptyTrimmedString,
+    /**
+     * What the tool was asked to do: the first line of the command a shell
+     * tool runs, the checkout-relative path a file tool edits. The adapter
+     * reduces it to one redacted, bounded line before it crosses, so a raw
+     * command or path never rides on a normalized event, and a consumer still
+     * redacts before showing it. Optional because many providers report none;
+     * never file contents.
+     */
+    argument: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
