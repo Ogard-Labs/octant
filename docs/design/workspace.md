@@ -25,6 +25,14 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+The Add folder browser reads one directory at a time from the confined home root.
+Because a filesystem call on a cloud-synced or network-mounted entry can block
+indefinitely, the host bounds each entry's checks and lists an entry it cannot
+verify within the budget as a plain folder; selection re-canonicalizes and
+re-validates the path before it is bound. A browse that fails returns an explicit
+failure the picker shows with Retry, and Retry re-issues the same folder and
+search rather than restarting at the root.
+
 Chat, Work, and Code keep the active mode's sidebar current with projection-only
 navigation reads (`GET /api/chat/navigation`, `GET /api/work/navigation`,
 `GET /api/code/navigation`). Work bootstrap still validates Project roots, while

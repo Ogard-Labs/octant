@@ -1,11 +1,15 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { WindowId } from "@octant/contracts";
 import type { FolderBrowseFailure } from "@octant/contracts/folder-browse";
 import type { BindingReceiptStore } from "./bindingReceiptStore";
-import { FolderBrowseService, FolderBrowseServiceError } from "./folderBrowseService";
+import {
+  FolderBrowseService,
+  FolderBrowseServiceError,
+  type FolderEntryInspection,
+} from "./folderBrowseService";
 import type { ProjectRootPort } from "./projectRootPort";
 
 const WINDOW_ID = "00000000-0000-4000-8000-000000000099" as WindowId;
@@ -25,6 +29,8 @@ function makeService(overrides?: {
   clock?: () => string;
   validate?: ProjectRootPort["validate"];
   issue?: BindingReceiptStore["issue"];
+  inspectEntry?: (entryPath: string) => Promise<FolderEntryInspection>;
+  entryInspectionTimeoutMs?: number;
 }) {
   const receipts: Pick<BindingReceiptStore, "issue"> = {
     issue:
@@ -44,7 +50,18 @@ function makeService(overrides?: {
     homeDir: overrides?.homeDir ?? "/tmp/test-home",
     now: overrides?.now ?? (() => 1000),
     clock: overrides?.clock ?? (() => "2026-07-24T12:00:00.000Z"),
+    ...(overrides?.inspectEntry === undefined ? {} : { inspectEntry: overrides.inspectEntry }),
+    ...(overrides?.entryInspectionTimeoutMs === undefined
+      ? {}
+      : { entryInspectionTimeoutMs: overrides.entryInspectionTimeoutMs }),
   });
+}
+
+/** Inspects an entry the way the host default does, without running Git. */
+async function hostInspection(entryPath: string): Promise<FolderEntryInspection> {
+  const details = await stat(entryPath);
+  if (!details.isDirectory()) return { kind: "skipped" };
+  return { kind: "folder", canonicalPath: await realpath(entryPath), isGitRepository: false };
 }
 
 async function makeTree(): Promise<{ home: string; outside: string }> {
@@ -254,6 +271,43 @@ describe("FolderBrowseService", () => {
       const service = makeService({ homeDir: home });
       const listed = await service.browse(WINDOW_ID, HOST);
       expect(names(listed.candidates)).not.toContain("escape");
+    });
+
+    it("lists the remaining folders when one entry's checks never resolve", async () => {
+      const { home } = await makeTree();
+      await mkdir(join(home, "stalled"));
+      const service = makeService({
+        homeDir: home,
+        entryInspectionTimeoutMs: 25,
+        inspectEntry: (entryPath) =>
+          basename(entryPath) === "stalled"
+            ? new Promise<FolderEntryInspection>(() => {})
+            : hostInspection(entryPath),
+      });
+
+      const startedAt = Date.now();
+      const listed = await service.browse(WINDOW_ID, HOST);
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(names(listed.candidates).sort()).toEqual(["alpha", "beta", "projects", "stalled"]);
+      const stalled = listed.candidates.find((candidate) => candidate.displayName === "stalled");
+      expect(stalled?.isGitRepository).toBe(false);
+      expect(elapsedMs).toBeLessThan(2_000);
+    });
+
+    it("omits an entry whose inspection fails while keeping the rest of the listing", async () => {
+      const { home } = await makeTree();
+      const service = makeService({
+        homeDir: home,
+        entryInspectionTimeoutMs: 25,
+        inspectEntry: (entryPath) =>
+          basename(entryPath) === "beta"
+            ? Promise.reject(new Error("inspection failed"))
+            : hostInspection(entryPath),
+      });
+
+      const listed = await service.browse(WINDOW_ID, HOST);
+      expect(names(listed.candidates).sort()).toEqual(["alpha", "projects"]);
     });
   });
 

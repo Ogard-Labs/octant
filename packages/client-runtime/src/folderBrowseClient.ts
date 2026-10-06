@@ -14,7 +14,13 @@ export interface FolderBrowseClientOptions {
   readonly baseUrl: string;
   readonly fetch: typeof globalThis.fetch;
   readonly windowCapability: string;
+  /** Aborts a request that produces no response in time; defaults to 20 000 ms. */
+  readonly requestTimeoutMs?: number;
 }
+
+// A browse that stalls has no server-side completion to wait for; aborting it
+// turns the dialog's "Loading…" into an error the person can retry.
+const REQUEST_TIMEOUT_MS = 20_000;
 
 export interface FolderBrowseClient {
   browse(request: FolderBrowseRequest): Promise<FolderBrowseResult>;
@@ -33,6 +39,7 @@ export class FolderBrowseClientFailure extends Error {
 export function createFolderBrowseClient(options: FolderBrowseClientOptions): FolderBrowseClient {
   const fetch = bindFetchPort(options.fetch);
   const headers = { "x-octant-window-capability": options.windowCapability };
+  const requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   return {
     browse(request) {
       return post(
@@ -44,6 +51,7 @@ export function createFolderBrowseClient(options: FolderBrowseClientOptions): Fo
           body: JSON.stringify(request),
         },
         decodeFolderBrowseResult,
+        requestTimeoutMs,
       );
     },
     select(request) {
@@ -56,6 +64,7 @@ export function createFolderBrowseClient(options: FolderBrowseClientOptions): Fo
           body: JSON.stringify(request),
         },
         decodeFolderSelectionResult,
+        requestTimeoutMs,
       );
     },
   };
@@ -66,15 +75,20 @@ async function post<T>(
   url: string,
   init: RequestInit,
   decode: (value: unknown) => T,
+  timeoutMs: number,
 ): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
   try {
-    response = await fetch(url, init);
+    response = await fetch(url, { ...init, signal: controller.signal });
   } catch {
     throw new FolderBrowseClientFailure({
       category: "unavailable",
       message: "Folder browse service is unavailable.",
     });
+  } finally {
+    clearTimeout(timer);
   }
   let body: unknown;
   try {

@@ -51,9 +51,15 @@ export function FolderPicker(props: FolderPickerProps) {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const mounted = useRef(true);
   const parentCandidateIdRef = useRef<string | undefined>(undefined);
+  // Retry must re-issue the exact request that failed, not reset to the root.
+  const lastRequestRef = useRef<{
+    parentCandidateId: string | undefined;
+    search: string | undefined;
+  }>({ parentCandidateId: undefined, search: undefined });
 
   const load = useCallback(
     async (parentCandidateId?: string, search?: string) => {
+      lastRequestRef.current = { parentCandidateId, search };
       setStatus("loading");
       setErrorMessage(undefined);
       try {
@@ -229,7 +235,14 @@ export function FolderPicker(props: FolderPickerProps) {
         ) : status === "error" ? (
           <div className="folder-picker__status folder-picker__status--error">
             <p>{errorMessage}</p>
-            <OctantButton onClick={() => void load()} type="button" variant="outline">
+            <OctantButton
+              onClick={() => {
+                const last = lastRequestRef.current;
+                void load(last.parentCandidateId, last.search);
+              }}
+              type="button"
+              variant="outline"
+            >
               Retry
             </OctantButton>
           </div>

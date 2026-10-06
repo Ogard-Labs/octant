@@ -25,7 +25,23 @@ const MAX_DEPTH = 20;
 const HIDDEN_PREFIX = ".";
 const CANDIDATE_TTL_MS = 120_000;
 
+// A cloud-synced or network-mounted entry can block its filesystem call
+// indefinitely. Each entry's checks are bounded so one stalled entry delays the
+// listing by at most this budget instead of stalling the whole request.
+const ENTRY_INSPECTION_TIMEOUT_MS = 2_000;
+// The Git probe spawns a process; bound it so a hung checkout cannot outlive the
+// per-entry budget as an orphaned process.
+const GIT_REV_PARSE_TIMEOUT_MS = 1_500;
+
 const execFileAsync = promisify(nodeExecFile);
+
+/**
+ * The outcome of inspecting one directory entry. A folder carries its canonical
+ * path and whether it is a Git repository root; every other case is skipped.
+ */
+export type FolderEntryInspection =
+  | { readonly kind: "folder"; readonly canonicalPath: string; readonly isGitRepository: boolean }
+  | { readonly kind: "skipped" };
 
 export interface FolderBrowseServiceOptions {
   readonly bindingReceiptStore: Pick<BindingReceiptStorePort, "issue">;
@@ -33,6 +49,14 @@ export interface FolderBrowseServiceOptions {
   readonly homeDir: string;
   readonly clock?: () => string;
   readonly now?: () => number;
+  /**
+   * Resolves one directory entry to a folder or a skip. Defaults to the host
+   * filesystem. Substituting an entry that never resolves exercises the
+   * per-entry budget.
+   */
+  readonly inspectEntry?: (entryPath: string) => Promise<FolderEntryInspection>;
+  /** Overrides the per-entry budget, in milliseconds. */
+  readonly entryInspectionTimeoutMs?: number;
 }
 
 export class FolderBrowseServiceError extends Error {
@@ -58,6 +82,8 @@ export class FolderBrowseService {
   readonly #homeDir: string;
   readonly #clock: () => string;
   readonly #now: () => number;
+  readonly #inspectEntry: (entryPath: string) => Promise<FolderEntryInspection>;
+  readonly #entryInspectionTimeoutMs: number;
   readonly #candidates = new Map<string, CandidateRecord>();
 
   constructor(options: FolderBrowseServiceOptions) {
@@ -66,6 +92,9 @@ export class FolderBrowseService {
     this.#homeDir = options.homeDir;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#now = options.now ?? Date.now;
+    this.#inspectEntry = options.inspectEntry ?? ((entryPath) => this.#inspectHostEntry(entryPath));
+    this.#entryInspectionTimeoutMs =
+      options.entryInspectionTimeoutMs ?? ENTRY_INSPECTION_TIMEOUT_MS;
   }
 
   async browse(authenticatedWindowId: WindowId, input: unknown): Promise<FolderBrowseResult> {
@@ -124,27 +153,14 @@ export class FolderBrowseService {
       if (search !== undefined && !entry.toLocaleLowerCase().includes(search)) continue;
 
       const fullPath = join(canonicalParent, entry);
-      let entryStat;
-      try {
-        entryStat = await stat(fullPath);
-      } catch {
-        continue;
-      }
-      if (!entryStat.isDirectory()) continue;
+      const inspection = await this.#inspectWithinBudget(fullPath);
+      if (inspection.kind === "skipped") continue;
+      if (!isWithinAuthorizedRoot(canonicalRoot, inspection.canonicalPath)) continue;
 
-      let canonicalEntry: string;
-      try {
-        canonicalEntry = await realpath(fullPath);
-      } catch {
-        continue;
-      }
-      if (!isWithinAuthorizedRoot(canonicalRoot, canonicalEntry)) continue;
-
-      const isGitRepo = await this.#checkGitRepository(canonicalEntry);
       const candidateId = this.#issueCandidate({
-        canonicalPath: canonicalEntry,
+        canonicalPath: inspection.canonicalPath,
         displayName: entry,
-        isGitRepository: isGitRepo,
+        isGitRepository: inspection.isGitRepository,
         expiresAt,
         windowId: authenticatedWindowId,
         mode: request.mode,
@@ -153,7 +169,7 @@ export class FolderBrowseService {
       candidates.push({
         candidateId,
         displayName: entry,
-        isGitRepository: isGitRepo,
+        isGitRepository: inspection.isGitRepository,
         // Both Work and Code bind any directory; Git status is informational.
         isSelectable: true,
       });
@@ -281,6 +297,38 @@ export class FolderBrowseService {
     }
   }
 
+  async #inspectWithinBudget(entryPath: string): Promise<FolderEntryInspection> {
+    const outcome = await withinBudget(
+      this.#inspectEntry(entryPath),
+      this.#entryInspectionTimeoutMs,
+    );
+    if (outcome.kind === "resolved") return outcome.value;
+    if (outcome.kind === "failed") return { kind: "skipped" };
+    // A blocked entry is listed as a plain folder rather than stalling the rest
+    // of the listing; selection re-canonicalizes and re-validates its path.
+    return { kind: "folder", canonicalPath: entryPath, isGitRepository: false };
+  }
+
+  async #inspectHostEntry(entryPath: string): Promise<FolderEntryInspection> {
+    let entryStat;
+    try {
+      entryStat = await stat(entryPath);
+    } catch {
+      return { kind: "skipped" };
+    }
+    if (!entryStat.isDirectory()) return { kind: "skipped" };
+
+    let canonicalEntry: string;
+    try {
+      canonicalEntry = await realpath(entryPath);
+    } catch {
+      return { kind: "skipped" };
+    }
+
+    const isGitRepository = await this.#checkGitRepository(canonicalEntry);
+    return { kind: "folder", canonicalPath: canonicalEntry, isGitRepository };
+  }
+
   async #checkGitRepository(path: string): Promise<boolean> {
     // Fast path: check for .git before spawning git process
     const gitDir = join(path, ".git");
@@ -295,6 +343,7 @@ export class FolderBrowseService {
         encoding: "utf8",
         env: childProcessEnvironment(process.env),
         shell: false,
+        timeout: GIT_REV_PARSE_TIMEOUT_MS,
       });
       const reportedRoot = await realpath(result.stdout.trim());
       const canonicalPath = await realpath(path);
@@ -397,6 +446,32 @@ export class FolderBrowseService {
 function isWithinAuthorizedRoot(root: string, candidate: string): boolean {
   const pathFromRoot = relative(root, candidate);
   return pathFromRoot === "" || (pathFromRoot !== ".." && !pathFromRoot.startsWith(`..${sep}`));
+}
+
+type BudgetOutcome<T> =
+  | { readonly kind: "resolved"; readonly value: T }
+  | { readonly kind: "expired" }
+  | { readonly kind: "failed" };
+
+/**
+ * Resolves with the work's value, or reports that its budget expired. The timer
+ * is always cleared, and the work's rejection is handled here, so a stalled or
+ * failing entry leaves no pending timer or unhandled rejection behind.
+ */
+async function withinBudget<T>(work: Promise<T>, budgetMs: number): Promise<BudgetOutcome<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const expired = new Promise<BudgetOutcome<T>>((resolve) => {
+      timer = setTimeout(() => resolve({ kind: "expired" }), budgetMs);
+    });
+    const settled = work.then(
+      (value): BudgetOutcome<T> => ({ kind: "resolved", value }),
+      (): BudgetOutcome<T> => ({ kind: "failed" }),
+    );
+    return await Promise.race([settled, expired]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function folderLabel(canonicalPath: string): string {
