@@ -180,9 +180,10 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
               // unadvertised paid request per turn and would only test the
               // first listed model while setting the provider-level
               // appManagedTools flag, enabling tools for unverified models.
-              // Tool support is gated on per-model verification
-              // (verifiedToolModelIds for Foundry; stickyToolSupport after a
-              // successful tool turn for non-Foundry) instead.
+              // Tool support is gated on per-model verification instead: a
+              // person's "Verify tools" request records the model in
+              // verifiedToolModelIds, and a profile that has seen a model call
+              // a tool in a real turn keeps that provider-level.
               const priorObserved = options.runtimeRegistry.observedState(instanceId);
               const priorVerified = priorObserved?.verifiedToolModelIds;
               // For non-Foundry profiles, preserve the prior sticky
@@ -302,11 +303,11 @@ function admitTurn(
   const model = observed?.models.find((candidate) => candidate.id === modelId);
   const isCapabilityEchoProbe =
     input.tools.length > 0 && input.tools.every((tool) => isCapabilityEchoToolCall(tool.name));
-  // For Azure AI Foundry, tool support is verified per-deployment via the
-  // separate verify-foundry-tools path. The sender gates tool requests on the
-  // per-model verifiedToolModelIds set, not on the provider-level
-  // appManagedTools flag, so one verified deployment does not unlock tools for
-  // other deployments in the same profile.
+  // Tool support is verified per model through the verify-model-tools command.
+  // For Azure AI Foundry the sender gates tool requests on the per-model
+  // verifiedToolModelIds set alone, so one verified deployment does not unlock
+  // tools for other deployments in the same profile; an OpenAI-compatible
+  // profile also honors the provider-level flag a real tool turn makes sticky.
   const isFoundry = options.profile?.driverKind === "azure-foundry";
   const isVerifiedModel =
     observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;

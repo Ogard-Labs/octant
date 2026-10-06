@@ -285,6 +285,7 @@ import { OctantToast } from "./ui/base/OctantToast";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import { useProviderController } from "./providers/useProviderController";
+import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
@@ -7492,7 +7493,11 @@ function LaunchedShell(
                     external open and copy rather than a dead anchor. */}
                     <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
                       <WorkKindChoiceContext.Provider value={workKindChoice}>
-                        {shell}
+                        <ModelToolVerificationContext.Provider
+                          value={providerController.verifyModelTools}
+                        >
+                          {shell}
+                        </ModelToolVerificationContext.Provider>
                       </WorkKindChoiceContext.Provider>
                     </MarkdownLinkActionsContext.Provider>
                   </StreamRepliesContext.Provider>

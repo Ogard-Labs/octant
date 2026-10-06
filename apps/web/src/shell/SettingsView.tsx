@@ -124,8 +124,8 @@ import {
   type NativeHarnessProviderOption,
 } from "../harness/NativeHarnessRoutingPanel";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
-import { LOCAL_HOST_ID } from "@octant/contracts";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { LOCAL_HOST_ID, type ProviderInstanceId, type ProviderModelId } from "@octant/contracts";
+import { isNativeHarnessDriverKind, modelCarriesAppManagedTools } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
@@ -959,6 +959,15 @@ function ActiveSectionContent({
                 hostId={LOCAL_HOST_ID}
                 onOpenProviders={() => onOpenSection("providers")}
                 providers={nativeHarnessProviderOptions(props.providerController)}
+                {...(props.providerController === undefined
+                  ? {}
+                  : {
+                      onVerifyTools: (providerInstanceId: string, modelId: string) =>
+                        props.providerController!.verifyModelTools(
+                          providerInstanceId as ProviderInstanceId,
+                          modelId as ProviderModelId,
+                        ),
+                    })}
               />
             </>
           )}
@@ -1263,7 +1272,7 @@ function ProvidersSection(props: {
         onProviderOrderChange={props.providerController.updateProviderOrder}
         onAgentEligibleModelsChange={props.providerController.updateAgentEligibleModels}
         onHiddenModelsChange={props.providerController.updateHiddenModels}
-        onVerifyFoundryTools={props.providerController.verifyFoundryTools}
+        onVerifyModelTools={props.providerController.verifyModelTools}
         onProviderCredentialStatus={props.providerController.providerCredentialStatus}
         onRemove={props.providerController.remove}
         onRename={props.providerController.rename}
@@ -2230,10 +2239,16 @@ function nativeHarnessProviderOptions(
     .map((instance) => ({
       instanceId: String(instance.id),
       label: instance.displayName,
-      models: (controller.observedByInstance.get(instance.id)?.models ?? []).map((model) => ({
-        id: String(model.id),
-        label: model.displayName,
-      })),
+      models: (controller.observedByInstance.get(instance.id)?.models ?? []).map((model) => {
+        const observed = controller.observedByInstance.get(instance.id);
+        return {
+          id: String(model.id),
+          label: model.displayName,
+          ...(observed === undefined
+            ? {}
+            : { toolsReady: modelCarriesAppManagedTools(observed, model.id) }),
+        };
+      }),
     }))
     .filter((option) => option.models.length > 0);
 }
