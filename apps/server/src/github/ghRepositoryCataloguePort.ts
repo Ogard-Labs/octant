@@ -648,7 +648,14 @@ export function createGhCatalogueCommandPort(
         });
         // A supplied body is the whole request; ending stdin is what lets gh
         // send it. A read above never reaches this branch.
-        if (options.stdin !== undefined) child.stdin?.end(options.stdin, "utf8");
+        if (options.stdin !== undefined) {
+          // gh may exit before reading the whole body — a refused credential
+          // or a deadline abort — and Node then emits EPIPE on this stream.
+          // The exit code already reports why, so the write error is dropped
+          // rather than becoming an uncaught exception that kills the host.
+          child.stdin?.on("error", () => undefined);
+          child.stdin?.end(options.stdin, "utf8");
+        }
         child.once("error", (error) => {
           cleanup();
           reject(error);

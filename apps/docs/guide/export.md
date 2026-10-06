@@ -84,7 +84,8 @@ with a `.md` extension. HTML can follow.
 The card carries the rendered payload, the account it will be posted as, and who
 can see it:
 
-- **Secret** (the default) — only you can see the gist.
+- **Secret** (the default) — the gist is unlisted: it appears on no profile
+  and in no search, but anyone who has its URL can view it.
 - **Public** — anyone on the internet can see it. The card says this plainly
   before you choose it.
 

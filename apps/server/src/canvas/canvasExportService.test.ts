@@ -761,4 +761,80 @@ describe("canvas export service", () => {
     });
     connection.close();
   });
+
+  it("does not pass a client's audience choice to a destination that offered none", async () => {
+    // A destination that describes nothing — no path, no account, no audience —
+    // is the shape a third-party target with no card facts has. The route
+    // forwards whatever visibility the client sent, so the service is what must
+    // keep that choice from arriving as a confirmed audience.
+    const seen: Array<{ readonly path?: string; readonly visibility?: string }> = [];
+    const silent: CanvasExportTargetBinding = {
+      facts: {
+        installed: true,
+        trusted: true,
+        desiredEnabled: true,
+        effectiveState: { kind: "effective" },
+        connected: true,
+      },
+      target: {
+        contribution: decodeCanvasExportContribution({
+          schemaVersion: 1,
+          kind: "canvas-export-contribution",
+          targetId: "silent-destination",
+          label: "Silent destination",
+          formats: ["markdown"],
+        }),
+        exportDocument: async (output, confirmed) => {
+          seen.push({ ...(confirmed === undefined ? {} : confirmed) });
+          return { kind: "receipt", receipt: { kind: "remote-id", remoteId: "copy-1" } };
+        },
+      },
+    };
+    const { service, connection } = harness(() => [silent]);
+    const prepared = service.prepare(prepareRequest("silent-destination"), true);
+    expect(prepared.kind).toBe("approval");
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+
+    const exported = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+      visibility: "public",
+    });
+
+    expect(exported.kind).toBe("exported");
+    expect(seen).toEqual([{}]);
+    connection.close();
+  });
+
+  it("keeps the destination's own audience when no choice arrives", async () => {
+    // The gist card offered an audience, so its destination hears the choice
+    // only as a change to that audience — and with no choice at all, the
+    // description the card showed stands.
+    const { registration, requests } = gistRegistration({ kind: "ready", account: "octocat" });
+    const { service, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+    const prepared = service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+
+    await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(requests[0]?.visibility).toBe("secret");
+    connection.close();
+  });
 });

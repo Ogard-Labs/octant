@@ -459,13 +459,15 @@ function digestOf(body: string): string {
  * The approved destination, with the audience the person chose folded in.
  *
  * Without a choice the destination's own description stands. A choice only
- * ever adds the audience field; it cannot invent a path, so a destination the
- * person never confirmed still cannot replace an existing file.
+ * ever reaches a destination that offered an audience on its card — one that
+ * described none never hears a choice — and it only ever adds the audience
+ * field, so a destination the person never confirmed still cannot replace an
+ * existing file.
  */
 function confirmedDestination(
   destination: CanvasExportDestination | undefined,
   visibility: CanvasExportVisibility | undefined,
 ): CanvasExportDestination | undefined {
-  if (visibility === undefined) return destination;
+  if (visibility === undefined || destination?.visibility === undefined) return destination;
   return { ...destination, visibility };
 }
