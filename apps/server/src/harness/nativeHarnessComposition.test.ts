@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CodeThread, ToolActionAuthority } from "@octant/contracts";
+import type { ChatThread, CodeThread, ToolActionAuthority, WorkThread } from "@octant/contracts";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
+import { createNativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { createNativeHarnessComposition } from "./nativeHarnessComposition";
 import { searxngHarnessWebSearch } from "./nativeHarnessWebSearch";
 
@@ -154,5 +155,129 @@ describe("native harness composition", () => {
       "web-search",
     );
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  describe("a brand-new thread's first web fetch", () => {
+    const providerInstanceId = "00000000-0000-4000-8000-0000000000e1";
+    const workProjectId = "00000000-0000-4000-8000-0000000000b1";
+    const chatProjectId = "00000000-0000-4000-8000-0000000000b2";
+    const revisionId = "00000000-0000-4000-8000-0000000000c1";
+    const chatThread = (projectId?: string) =>
+      ({
+        id:
+          projectId === undefined
+            ? "00000000-0000-4000-8000-000000000011"
+            : "00000000-0000-4000-8000-000000000013",
+        lifecycle: "active",
+        providerInstanceId,
+        modelId: "harness-model",
+        researchEnabled: true,
+        ...(projectId === undefined ? {} : { projectId }),
+      }) as unknown as ChatThread;
+    const workThread = {
+      id: "00000000-0000-4000-8000-000000000012",
+      lifecycle: "active",
+      projectId: workProjectId,
+      providerInstanceId,
+      modelId: "harness-model",
+      bindingRevisionId: revisionId,
+    } as unknown as WorkThread;
+
+    const harness = (options: { readonly threadLifecycle?: "active" | "archived" } = {}) => {
+      const lifecycle = options.threadLifecycle ?? "active";
+      const webFetch = vi.fn(async (input: { readonly url: string }) => ({
+        status: 200,
+        contentType: "text/plain",
+        text: "Sunny in Stavanger.",
+        truncated: false,
+        finalUrl: input.url,
+      }));
+      const composition = createNativeHarnessComposition({
+        isChildAuthorityCurrent: () => true,
+        authority: createNativeHarnessAuthority({
+          hostId: "00000000-0000-4000-8000-0000000000aa" as never,
+          persistence: {
+            readChatThread: (id) =>
+              [chatThread(), chatThread(chatProjectId)]
+                .map((thread) => ({ ...thread, lifecycle }))
+                .find((thread) => String(thread.id) === String(id)) as never,
+            readProject: (id) =>
+              String(id) === workProjectId
+                ? ({
+                    type: "work",
+                    lifecycle: "active",
+                    bindingHistory: [{ revisionId }],
+                  } as never)
+                : undefined,
+            readCodeThread: () => undefined,
+            readProviderInstance: () => ({ enabled: true }) as never,
+          },
+          workThreads: {
+            read: (id) =>
+              String(id) === String(workThread.id)
+                ? ({ ...workThread, lifecycle } as never)
+                : undefined,
+          },
+          readThreadTaint: () => ({ externalContentIngested: false }) as never,
+        }),
+        isHarnessProvider: () => true,
+        webFetch,
+        hostId: "00000000-0000-4000-8000-0000000000aa" as never,
+        readThreadTaint: () => false,
+        recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+        uuid: () => "00000000-0000-4000-8000-000000000099",
+        clock: () => "2026-10-06T00:00:00.000Z",
+      });
+      return { composition, webFetch };
+    };
+    const fetchYr = (tools: ReturnType<ReturnType<typeof harness>["composition"]["forChat"]>) =>
+      tools?.execute({
+        name: "web-fetch",
+        inputJson: JSON.stringify({ url: "https://www.yr.no/" }),
+      });
+
+    it.each([
+      ["a Chat thread with no Project", undefined],
+      ["a Chat thread in a Project", chatProjectId],
+    ])("fetches a page from %s", async (_label, projectId) => {
+      const { composition, webFetch } = harness();
+      const tools = composition.forChat({ thread: chatThread(projectId), windowId: "window-1" });
+      expect(await fetchYr(tools)).toMatchObject({
+        isError: false,
+        result: { status: 200, text: expect.stringContaining("Sunny in Stavanger.") },
+      });
+      expect(webFetch).toHaveBeenCalledOnce();
+    });
+
+    it("fetches a page from a Work thread in a folder", async () => {
+      const { composition, webFetch } = harness();
+      const tools = composition.forWork({
+        thread: workThread,
+        projectRoot: "/nonexistent",
+        windowId: "window-1",
+      });
+      expect(await fetchYr(tools)).toMatchObject({
+        isError: false,
+        result: { status: 200, text: expect.stringContaining("Sunny in Stavanger.") },
+      });
+      expect(webFetch).toHaveBeenCalledOnce();
+    });
+
+    it("refuses with a reason a person can read once the thread is archived", async () => {
+      const { composition, webFetch } = harness({ threadLifecycle: "archived" });
+      const chat = await fetchYr(
+        composition.forChat({ thread: chatThread(), windowId: "window-1" }),
+      );
+      const work = await fetchYr(
+        composition.forWork({ thread: workThread, projectRoot: "/nonexistent", windowId: "w" }),
+      );
+      for (const outcome of [chat, work]) {
+        expect(outcome).toMatchObject({
+          isError: true,
+          result: { error: "tool-authority-stale", message: expect.stringMatching(/thread/i) },
+        });
+      }
+      expect(webFetch).not.toHaveBeenCalled();
+    });
   });
 });

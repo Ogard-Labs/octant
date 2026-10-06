@@ -1621,8 +1621,13 @@ native harness in `apps/server/src/harness`:
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
   closed tool catalog (`harness-*` capability ids). Every call decodes its
   arguments, wraps a `ToolActionRequest` under the thread's current authority,
-  and passes `ToolCallAuthorityService.authorize` before any port runs. Files
-  go through `NativeHarnessFileSystem` (confined to the root, symlinks
+  and passes `ToolCallAuthorityService.authorize` before any port runs. The
+  thread's authority comes from the same resolver the browser tools use, in
+  every mode: a Chat thread holds it with or without a Project; a Work or Code
+  thread holds it only on its Project's current binding. When none resolves,
+  every call refuses as `tool-authority-stale` with a message the model
+  relays to the person; nothing renews it except the thread becoming usable
+  again. Files go through `NativeHarnessFileSystem` (confined to the root, symlinks
   resolved, edits require a prior read); `bash` runs through the same
   Seatbelt-confined owned-process-group port as repository tests; web fetches
   refuse private destinations, and connect through a `lookup` that checks
