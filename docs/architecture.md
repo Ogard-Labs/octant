@@ -2074,18 +2074,16 @@ mechanisms are:
   by
   [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md)
   and narrowed by 0145, and the tools those threads reach stay confined either
-  way. A Claude Plan launch on subscription sign-in may also reach its own
-  credential: it may fork, exec `/usr/bin/security` and no other program, look
-  up the security server, and read and rewrite the user's login keychain file
-  and its atomic-write siblings; every other keychain file stays denied. The
-  runtime reads and refreshes its sign-in through that tool, which opens the
-  keychain file itself, so the lookup alone that 0145 recorded left every
-  confined Claude launch signed out, Chat children included. This reach stays
-  inside what an approval-gated Claude launch, which Octant does not confine,
-  already has. A bound root a launch may not write is denied in the profile, so a
-  checkout under that launch's own temporary directory is not writable through
-  it. The `--version` read every family and the discovery scan perform before a
-  runtime starts is wrapped too, with no root, no home, no network and one
+  way. A confined Claude launch never reaches the keychain itself: the runtime
+  reads its subscription sign-in by running `/usr/bin/security`, which would
+  return any keychain item that trusts that tool, including other command-line
+  programs' tokens, so the profile runs neither the tool nor reads the keychain
+  file. Measured on macOS 27, the security-server lookup alone therefore leaves
+  a Claude Plan launch on subscription sign-in, Chat children included,
+  reporting itself signed out. A bound root a launch may not write is denied in
+  the profile, so a checkout under that launch's own temporary directory is not
+  writable through it. The `--version` read every family and the discovery
+  scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
   Toolchain commands the Android workbench issues keep their own deliberate

@@ -543,15 +543,13 @@ function confineClaudeLaunch(
       allowProcessExec: false,
       allowProcessFork: false,
       allowFileReadStar: true,
-      // Subscription authentication keeps its credential in the login keychain
-      // rather than in the provider home, and the runtime reaches it through
-      // the system `security` tool. A launch without this reports itself
-      // signed out and the turn never starts; that is how a Chat child on
-      // Claude failed while its unconfined Claude parent turn worked. The flag
-      // opens that one tool and the login keychain file, and nothing else in
-      // the store. An API-key launch already carries its credential and never
-      // resolves one from the store, and the same binary may be trusted for a
-      // stored subscription item it has no use for, so it stays closed there.
+      // Subscription authentication keeps its credential in the platform secret
+      // store rather than in the provider home, so a launch without this reports
+      // itself signed out and the turn never starts. The store's files stay
+      // denied; only the lookup opens (0145). An API-key launch already carries
+      // its credential and never resolves one from the store, and the same
+      // binary may be trusted for a stored subscription item it has no use for,
+      // so the lookup stays closed there.
       allowProviderCredentialLookup: spawnOptions.env.ANTHROPIC_API_KEY === undefined,
     });
     return {

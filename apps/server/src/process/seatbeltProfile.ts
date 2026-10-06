@@ -66,19 +66,13 @@ export interface SeatbeltProfileInput {
    * Whether this launch is a provider runtime that resolves its own subscription
    * credential from the platform secret store.
    *
-   * The Claude runtime keeps its subscription credential in the user's login
-   * keychain rather than in its provider home, and reads and rewrites it by
-   * running the system `security` tool, which opens the keychain file itself.
-   * Opening only the security server's lookup still left the runtime "Not
-   * logged in": measured on macOS 27, the confined runtime authenticated only
-   * once it could also fork, exec `/usr/bin/security`, and read
-   * `~/Library/Keychains/login.keychain-db`. This opens exactly those, plus
-   * writes to that one file and its atomic-write siblings so a refreshed
-   * sign-in lands back in the store rather than in the runtime's plaintext
-   * fallback. No other program may be executed, `/Library/Keychains` and every
-   * other keychain file stay denied, and the daemon's per-item rules still
-   * decide which secrets come back. Off by default, and never set for a tool
-   * launch.
+   * The Claude runtime keeps its subscription credential in the macOS Keychain
+   * rather than in its provider home, so a deny-default launch reports itself
+   * signed out and no turn starts. This opens the security server's lookup and
+   * nothing else: `/Library/Keychains` and the user's own `~/Library/Keychains`
+   * stay denied as files, so a confined process still cannot read the store off
+   * disk, and the daemon's per-item ACL hands back only the item this binary is
+   * already trusted for. Off by default, and never set for a tool launch.
    */
   readonly allowProviderCredentialLookup?: boolean;
   /**
@@ -603,17 +597,16 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
         ]
       : []),
     // A provider runtime that keeps its own subscription credential in the
-    // platform secret store runs the system `security` tool, which asks the
-    // security server over XPC to decrypt the item. Both service names are
-    // listed because the modern and legacy entry points are both in use. The
-    // tool is the one extra program this launch may start; the file it opens
-    // is granted after every denial below.
+    // platform secret store asks the security server for it over XPC; the
+    // daemon, not this process, opens the keychain file. Both service names are
+    // listed because the modern and legacy entry points are both in use and
+    // which one a given runtime takes could not be measured here. The keychain
+    // files stay denied above and below, so this opens the lookup and not the
+    // store (0145).
     ...(input.allowProviderCredentialLookup === true
       ? [
           '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
           '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
-          ...(allowProcessFork ? [] : ["(allow process-fork)"]),
-          ...(allowProcessExec ? [] : [seatbeltExecRule(SECURITY_TOOL_PATH)]),
         ]
       : []),
     // Driving the Simulator needs three things, and the failure without them is
@@ -715,33 +708,9 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
       seatbeltAllowRule("file-write*", path),
     ),
     '(allow file-write-data (literal "/dev/null"))',
-    ...(input.allowProviderCredentialLookup === true
-      ? [loginKeychainRule(input.homeDirectory)]
-      : []),
     ...(input.extraRules ?? []),
   ];
   return lines.join("\n");
-}
-
-const SECURITY_TOOL_PATH = "/usr/bin/security";
-
-/**
- * Read and write for the user's login keychain file and the siblings an atomic
- * rewrite creates beside it (`login.keychain-db.sb-…`), and nothing else under
- * `~/Library/Keychains`. Emitted last because the private-home denials above
- * cover the whole directory and Seatbelt resolves by last matching rule.
- */
-function loginKeychainRule(homeDirectory: string | undefined): string {
-  const keychain = join(
-    realpathSync(homeDirectory ?? homedir()),
-    "Library",
-    "Keychains",
-    "login.keychain-db",
-  );
-  // A quote would end the raw regex literal; matching any one character there
-  // keeps the rule well formed and still names this home's keychain only.
-  const pattern = keychain.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replaceAll('"', ".");
-  return seatbeltAllowRegexReadWriteRule(`^${pattern}(\\.[^/]+)?$`);
 }
 
 export function wrapCommandInSandboxExec(

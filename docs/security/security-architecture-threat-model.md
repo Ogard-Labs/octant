@@ -338,23 +338,20 @@ window, or approves an action class the host policy reserves for the local user.
   - _Consequence._ A model-generated shell command inside either runtime reads that environment
     and those files with no Octant-owned OS boundary in the way, and a write the runtime's own sandbox permits
     without announcing is not one Octant's approvals can prompt for.
-- **A confined runtime may reach its own subscription credential.** The Claude runtime keeps
-  that credential in the user's login keychain rather than in its provider home, and reads and
-  refreshes it by running `/usr/bin/security`, which opens the keychain file itself. A launch that
-  could only look up the security server (0145) reported itself signed out, measured on macOS 27,
-  so the confined Plan launch on subscription sign-in may now fork, exec `/usr/bin/security` and no
-  other program, look up the security server, and read and rewrite
-  `~/Library/Keychains/login.keychain-db` and the siblings an atomic rewrite creates beside it. The
-  write keeps a refreshed sign-in in the store; refused, the runtime falls back to a plaintext
-  credentials file in its config directory. `/Library/Keychains` and every other keychain file stay
-  denied, and the daemon's per-item rules still decide which secrets the tool returns. Those rules
-  trust the tool itself for items other command-line programs stored through it, so the runtime
-  process could ask for those too; a model-generated command cannot, because no shell or other
-  program may start in this launch. This is the one launch flag that reaches private credential
-  material; no tool launch sets it, an API-key launch never sets it, and the reach stays inside
-  what an approval-gated Claude launch, which Octant does not confine, already has. The severity table's "reading Keychain material" still
-  describes any other process reading the store. Both the modern and legacy security-server entry
-  points are opened.
+- **A confined runtime may look up its own subscription credential.** The Claude runtime keeps
+  that credential in the macOS Keychain rather than in its provider home, so the confined Plan
+  launch opens a mach-lookup to the security server (0145). The keychain files stay denied, so the
+  process cannot read the store off disk and the daemon returns only what that binary is already
+  trusted for. This is the one launch flag that reaches private credential material; no tool
+  launch sets it, and the severity table's "reading Keychain material" still describes reading the
+  store rather than this lookup. Which service name a given runtime takes was not measured on the
+  authoring host, so both the modern and legacy entry points are opened.
+- **The keychain stays closed to a confined runtime.** Measured on macOS 27, the Claude runtime
+  reads its subscription sign-in by running `/usr/bin/security`, which opens the login keychain
+  file itself, so the lookup above does not sign a confined launch in: a Claude Plan launch on
+  subscription sign-in, Chat children included, reports itself signed out. Opening the tool and
+  the keychain file was rejected, because the tool returns any item whose access list trusts it,
+  such as tokens other command-line programs store through it. A confined launch may run neither.
 - Vibe disables its keyring lookup in the confined launch and receives its Mistral API key through
   Octant's `api-key` authentication instead.
 - **Version reads are confined; three readiness probes are not.** Every `--version` read prepares

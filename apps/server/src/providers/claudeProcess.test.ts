@@ -687,49 +687,35 @@ describe("Claude runtime confinement", () => {
       const escapeTarget = join(target.root, "plan-must-not-exist.txt");
       writeFileSync(readable, "in-the-checkout\n");
 
-      const run = async (environment: NodeJS.ProcessEnv) => {
-        const child = makeClaudeProcessLive({ shutdownTimeoutMs: 500 }).spawn({
-          projectRoot: target.root,
-          executionPolicy: "plan",
-        })({
-          command: planProbePath,
-          args: [],
-          cwd: target.root,
-          env: {
-            ...environment,
-            OCTANT_PROBE_TARGET: escapeTarget,
-            OCTANT_PROBE_READABLE: readable,
-          },
-          signal: new AbortController().signal,
-        });
-        let output = "";
-        child.stdout.on("data", (chunk: Buffer | string) => {
-          output += chunk.toString();
-        });
-        await waitForExit(child);
-        return { output, exitCode: child.exitCode };
-      };
+      const child = makeClaudeProcessLive({ shutdownTimeoutMs: 500 }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: planProbePath,
+        args: [],
+        cwd: target.root,
+        env: {
+          ...target.environment,
+          OCTANT_PROBE_TARGET: escapeTarget,
+          OCTANT_PROBE_READABLE: readable,
+        },
+        signal: new AbortController().signal,
+      });
+      let output = "";
+      child.stdout.on("data", (chunk: Buffer | string) => {
+        output += chunk.toString();
+      });
+      await waitForExit(child);
 
-      // A subscription launch may fork so the runtime can start the system
-      // `security` tool for its sign-in; any other program is still refused.
-      const subscription = await run(target.environment);
-      expect(subscription.output).toContain("write=refused");
+      expect(output).toContain("write=refused");
       expect(existsSync(escapeTarget)).toBe(false);
       // The checkout is readable; only writing and running something is not.
-      expect(subscription.output).toContain("read=in-the-checkout");
-      expect(subscription.output).toContain("exec=refused");
-      expect(subscription.exitCode).toBe(0);
-
-      // An API-key launch resolves nothing from the store, so it may not even
-      // fork: the shell dies there and never reports an allowed exec.
-      const apiKey = await run({
-        ...target.environment,
-        ANTHROPIC_API_KEY: "sk-test-not-a-real-key",
-      });
-      expect(apiKey.output).toContain("write=refused");
-      expect(apiKey.output).not.toContain("exec=allowed");
-      expect(apiKey.exitCode).toBe(128);
-      expect(existsSync(escapeTarget)).toBe(false);
+      expect(output).toContain("read=in-the-checkout");
+      // The probe asks for a child process last. Under this posture the kernel
+      // refuses the fork before the exec, so the shell dies there — it never
+      // reaches the line that would report an allowed exec.
+      expect(output).not.toContain("exec=allowed");
+      expect(child.exitCode).toBe(128);
     },
   );
 });
