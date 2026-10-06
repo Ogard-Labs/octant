@@ -20,6 +20,7 @@ import {
   CANVAS_MAX_TREEMAP_LEAVES,
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_MOCKUP_SCHEMA_VERSION,
+  CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
   CanvasBlock,
@@ -35,7 +36,14 @@ const encoder = new TextEncoder();
 // Versions this runtime decodes: every historical version plus the current
 // one. A document declaring anything else is refused as a future version,
 // before its blocks are read, so a newer contract never reaches a renderer.
-const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, CANVAS_SCHEMA_VERSION];
+const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
+  1,
+  2,
+  3,
+  CANVAS_PRESENTATION_SCHEMA_VERSION,
+  CANVAS_TREEMAP_SCHEMA_VERSION,
+  CANVAS_SCHEMA_VERSION,
+];
 
 // A block kind that a document may only carry from the version that
 // introduced it. A document declaring an older version but carrying the kind
@@ -286,8 +294,9 @@ function calculateBudgetUsage(
 
 /**
  * A document a newer runtime declared with a version this runtime has never
- * seen — either a future schema version or a version-gated block (mockup)
- * inside a document that declares an older version — must fail closed as an
+ * seen — either a future schema version or a version-gated field (a mockup
+ * block from version 3, a thread presentation from version 4) inside a
+ * document that declares an older version — must fail closed as an
  * unsupported schema version, before any content is read, rather than
  * collapsing into a generic "corrupt" decode failure. Works on both a
  * definition (`blocks` at the top level) and a version envelope (blocks under
@@ -298,11 +307,16 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
   const envelope = input as {
     schemaVersion?: unknown;
     blocks?: unknown;
-    definition?: { blocks?: unknown };
+    presentation?: unknown;
+    definition?: { blocks?: unknown; presentation?: unknown };
   };
   const declared = envelope.schemaVersion;
   if (typeof declared !== "number") return undefined;
   if (!SUPPORTED_CANVAS_SCHEMA_VERSIONS.includes(declared)) return "unsupported-schema-version";
+  const presentation = envelope.presentation ?? envelope.definition?.presentation;
+  if (declared < CANVAS_PRESENTATION_SCHEMA_VERSION && presentation !== undefined) {
+    return "unsupported-schema-version";
+  }
   const blocks = Array.isArray(envelope.blocks)
     ? envelope.blocks
     : Array.isArray(envelope.definition?.blocks)

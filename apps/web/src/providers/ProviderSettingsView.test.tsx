@@ -2054,9 +2054,9 @@ describe("ProviderSettingsView", () => {
     );
     const card = screen.getByRole("article", { name: "Existing CLI" });
     const details = within(card).getByLabelText("Incompatibility details");
-    expect(within(card).getByText(/Review the listed models/i)).toBeVisible();
+    expect(within(card).getByText(/Review the installed OpenCode version/i)).toBeVisible();
     expect(
-      within(details).getByText("Host check: OpenCode 2 is listing only, turns not yet supported."),
+      within(details).getByText("Host check: The installed OpenCode runtime is incompatible."),
     ).toBeVisible();
     expect(within(details).getByText("Version: v0.0.0-beta-18721")).toBeVisible();
   });

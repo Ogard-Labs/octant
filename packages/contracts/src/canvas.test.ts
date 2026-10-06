@@ -9,6 +9,7 @@ import {
   CANVAS_MAX_IMAGES,
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_SCHEMA_VERSION,
+  CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_VERSION_APPENDED,
   CanvasCreated,
   CanvasDefinition,
@@ -120,6 +121,26 @@ describe("Canvas contracts", () => {
     expect(decodeCanvasDefinition({ ...definition, blocks: [mockup] })).toMatchObject({
       blocks: [mockup],
     });
+    // Version 3 documents written before the presentation hint keep decoding,
+    // and a version 4 document with a mockup still does too.
+    expect(
+      decodeCanvasDefinition({ ...definition, schemaVersion: 3, blocks: [mockup] }),
+    ).toMatchObject({ blocks: [mockup] });
+    expect(
+      decodeCanvasDefinition({ ...definition, schemaVersion: 4, blocks: [mockup] }),
+    ).toMatchObject({ blocks: [mockup] });
+  });
+
+  it("admits a thread presentation only under the version that declared it", () => {
+    expect(
+      decodeCanvasDefinition({ ...definition, schemaVersion: 4, presentation: "inline" }),
+    ).toMatchObject({ presentation: "inline" });
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 3, presentation: "inline" }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 4, presentation: "floating" }),
+    ).toThrow();
   });
 
   it("rejects unknown blocks and executable or renderer-owned fields", () => {
@@ -833,8 +854,13 @@ describe("treemap blocks", () => {
   });
 
   it("admits a treemap only under the version that declared it", () => {
+    // A treemap arrived at version 5: both the mockup-era v3 bound and the
+    // presentation-era v4 bound refuse it as a declared future version.
     expect(() =>
       decodeCanvasDefinition({ ...definition, schemaVersion: 3, blocks: [treemap] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 4, blocks: [treemap] }),
     ).toThrow();
     expect(decodeCanvasDefinition({ ...definition, blocks: [treemap] })).toMatchObject({
       blocks: [treemap],
@@ -903,10 +929,20 @@ describe("heatmap blocks", () => {
   });
 
   it("admits a heatmap only under the version that declared it", () => {
+    // A heatmap arrived at version 6: a document declaring the presentation-era
+    // v4 bound or the treemap-era v5 bound refuses it as a declared future
+    // version.
     expect(() =>
       decodeCanvasDefinition({
         ...definition,
         schemaVersion: 4,
+        blocks: [matrix],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_TREEMAP_SCHEMA_VERSION,
         blocks: [matrix],
       }),
     ).toThrow();

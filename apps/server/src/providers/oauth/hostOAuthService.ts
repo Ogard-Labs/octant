@@ -310,7 +310,8 @@ function wireDescriptor(
   : never {
   return {
     descriptorId: descriptor.descriptorId,
-    clientId: descriptor.clientId,
+    ...(descriptor.clientId === undefined ? {} : { clientId: descriptor.clientId }),
+    ...(descriptor.dialect === undefined ? {} : { dialect: descriptor.dialect }),
     flow: descriptor.flow,
     tokenEndpoint: descriptor.tokenEndpoint,
     scopes: descriptor.scopes,

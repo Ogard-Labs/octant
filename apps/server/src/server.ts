@@ -525,6 +525,8 @@ import { createWebAssetsHandler } from "./webAssets";
 import { createZenRouteHandler } from "./zenRoutes";
 import { createZenBackgroundRouteHandler } from "./zenBackgroundRoutes";
 import { createUsageRouteHandler } from "./usageRoutes";
+import { toTurnMetricsRecord, type TurnEndSummary } from "./metrics/turnEnd";
+import { TurnMetricsStore } from "./metrics/turnMetricsStore";
 import { SpendCeilingService } from "./spendCeilingService";
 import { createSpendCeilingRouteHandler } from "./spendCeilingRoutes";
 import { CacheStatsProjection } from "./cacheStatsProjection";
@@ -1931,6 +1933,13 @@ export function startOctantServer(
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       clock: () => new Date().toISOString(),
     });
+    // Every turn on every provider, so its usage and speed outlive the host.
+    const turnMetrics = new TurnMetricsStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+    });
     const sideTasks = new SideTaskStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -1951,9 +1960,18 @@ export function startOctantServer(
         nativeHarnessObserver?.turnStarted(scope);
         nativeHarnessLeadFallback?.turnStarted(scope);
       },
-      turnEnded: (scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0]) => {
-        nativeHarnessObserver?.turnEnded(scope);
+      turnEnded: (
+        scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0],
+        turn?: TurnEndSummary,
+      ) => {
+        nativeHarnessObserver?.turnEnded(scope, turn);
         nativeHarnessLeadFallback?.turnEnded(scope);
+        if (turn === undefined) return;
+        try {
+          turnMetrics.record(toTurnMetricsRecord(scope, turn));
+        } catch {
+          // A turn whose figures the journal refused still ended for the user.
+        }
       },
       turnCompleted: async (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) => {
         try {
@@ -2881,6 +2899,7 @@ export function startOctantServer(
       readWindowProjectScope: readWindowUsageProjectScope,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       latencyStats: () => latencyStats.read(),
+      turnMetrics,
     });
     const diagnosticsExportRoutes = createDiagnosticsExportRouteHandler({
       connection: persistence.connection,

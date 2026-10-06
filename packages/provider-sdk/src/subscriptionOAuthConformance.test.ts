@@ -1,7 +1,10 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { runSubscriptionOAuthCredentialConformance } from "./subscriptionOAuth";
+import {
+  resolveSubscriptionOAuthBearer,
+  runSubscriptionOAuthCredentialConformance,
+} from "./subscriptionOAuth";
 import { type SubscriptionOAuthCredential, type SubscriptionOAuthHost } from "./subscriptionOAuth";
 
 const ACCESS = "access-token-must-not-appear-in-the-report";
@@ -156,6 +159,88 @@ describe("subscription-oauth credential conformance", () => {
     });
     expect(called).toBe(false);
     await endpoint.close();
+  });
+
+  it("refuses a bearer at resolve time when the current endpoint no longer matches the offer", async () => {
+    // Signed in against the allowed endpoint, then the instance's base URL
+    // changed. The resolver revalidates against the CURRENT endpoint before
+    // contacting the host: the token is never minted for an arbitrary origin.
+    let hostCalled = false;
+    const resolution = await resolveSubscriptionOAuthBearer({
+      credential: credential(),
+      expectedDescriptorId: "sample-http",
+      host: host({
+        access: async () => {
+          hostCalled = true;
+          return { kind: "granted", accessToken: ACCESS };
+        },
+      }),
+      now: () => Date.parse("2026-10-04T14:00:00.000Z"),
+      endpoint: {
+        baseUrl: "https://attacker.example/v1",
+        allowedEndpoint: "https://api.example.com/v1/",
+      },
+    });
+    expect(resolution).toEqual({ kind: "incompatible" });
+    expect(hostCalled).toBe(false);
+
+    // The same credential resolves when the base URL still matches on
+    // canonical origin — path and trailing-slash differences neither smuggle
+    // nor spuriously refuse.
+    const allowed = await resolveSubscriptionOAuthBearer({
+      credential: credential(),
+      expectedDescriptorId: "sample-http",
+      host: host({
+        access: async () => ({ kind: "granted", accessToken: ACCESS }),
+      }),
+      now: () => Date.parse("2026-10-04T14:00:00.000Z"),
+      endpoint: {
+        baseUrl: "https://api.example.com",
+        allowedEndpoint: "https://api.example.com/v1/",
+      },
+    });
+    expect(allowed).toEqual({ kind: "bearer", token: ACCESS });
+
+    // A base URL that is not a valid URL fails closed.
+    const broken = await resolveSubscriptionOAuthBearer({
+      credential: credential(),
+      expectedDescriptorId: "sample-http",
+      host: host({
+        access: async () => ({ kind: "granted", accessToken: ACCESS }),
+      }),
+      now: () => Date.parse("2026-10-04T14:00:00.000Z"),
+      endpoint: { baseUrl: "not a url", allowedEndpoint: "https://api.example.com/v1" },
+    });
+    expect(broken).toEqual({ kind: "incompatible" });
+  });
+
+  it("treats a granted token without expiry as usable", async () => {
+    // A non-expiring credential (an OpenRouter key) has no expiresAt. It
+    // resolves as a bearer today and far in the future without a refresh.
+    let refreshes = 0;
+    const today = await resolveSubscriptionOAuthBearer({
+      credential: credential(),
+      expectedDescriptorId: "sample-http",
+      host: host({
+        access: async () => ({ kind: "granted", accessToken: ACCESS }),
+        refresh: async () => {
+          refreshes += 1;
+          return { kind: "refreshed" };
+        },
+      }),
+      now: () => Date.parse("2026-10-04T14:00:00.000Z"),
+    });
+    expect(today).toEqual({ kind: "bearer", token: ACCESS });
+    const inAHundredYears = await resolveSubscriptionOAuthBearer({
+      credential: credential(),
+      expectedDescriptorId: "sample-http",
+      host: host({
+        access: async () => ({ kind: "granted", accessToken: ACCESS }),
+      }),
+      now: () => Date.parse("2126-10-04T14:00:00.000Z"),
+    });
+    expect(inAHundredYears).toEqual({ kind: "bearer", token: ACCESS });
+    expect(refreshes).toBe(0);
   });
 });
 

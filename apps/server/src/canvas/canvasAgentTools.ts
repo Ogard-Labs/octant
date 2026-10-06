@@ -6,6 +6,7 @@ import {
   decodeCanvasId,
   type CanvasActor,
   type CanvasDocumentRecipe,
+  type CanvasPresentation,
   type ChatThread,
   type HostId,
   type PermissionPersistence,
@@ -25,9 +26,19 @@ import {
   settingsScreenExample,
   treemapExamples,
   heatmapExamples,
+  CANVAS_INLINE_MAX_BLOCKS,
+  canvasInlineRefusal,
+  effectiveCanvasPresentation,
 } from "@octant/domain";
 
 export const CANVAS_TOOL_NAME = "octant_canvas";
+
+/**
+ * Said back with every inline result. Agents read the guidance once and still
+ * wrote "the chart above" in live runs, while the thread draws it after the reply.
+ */
+const INLINE_WHERE_SHOWN =
+  "The thread draws this Canvas just below your reply, so refer to it as below.";
 
 /**
  * How many blocks one authoring call may carry.
@@ -86,6 +97,11 @@ const canvasDefinitionSchema = {
       items: { type: "object" },
       description:
         "Required for create and revise. Complete document blocks matching the schemas from describe; revise replaces the block list.",
+    },
+    presentation: {
+      type: "string",
+      enum: ["inline", "sidebar"],
+      description: `For create and revise: inline draws a small Canvas (at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks, no diagram board, plan, or mockup) inside the conversation; sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.`,
     },
   },
   required: ["operation"],
@@ -278,6 +294,7 @@ function toolDescription(
     "A hierarchy is a treemap: nodes that name a parent (one root, no cycles), a list of measures with ids, labels, and optional number formats, a default sizeBy and colorBy, and a colour scale of sequential, diverging, or categorical by top-level group. Values sit on leaves; a group sums its children, so give values only to leaves and never to a group. A leaf may name a manifest source id, which offers Open file through the allowlisted open-source action. The person can switch size and colour and zoom into a group without revising the Canvas; use startNodeId to open a static export at a chosen node. Describe treemap to get a repository map sized by lines of code and coloured by recent edits.",
     "A grid coloured by value is a heatmap with a layout of matrix or calendar. A matrix names its rows and columns and carries a cell per coordinate with a value and an optional short note; a coordinate you do not list reads as missing, not as zero, and the person can sort the rows by their total without revising the Canvas. A calendar carries one reading per date and reads as a week grid. Both take an optional format and a scale of sequential or diverging. Describe heatmap to get commits by weekday and hour, and test failures per day.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
+    `Choose where the thread shows it. Use presentation inline for one small visual that answers the question, such as a chart, a few metrics, a short table, or a sequence or state diagram; it is drawn in the conversation just below your reply to this turn, so refer to it as below, and the user can still open it in the sidebar. Leave presentation out (sidebar) for reports, plans, boards, mockups, and anything the user will keep working on. Inline holds at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks; when the host shows a card instead, the result says so in presentationNote.`,
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
   ].join(" ");
 }
@@ -289,6 +306,7 @@ interface CanvasAuthoringInput {
   readonly expectedSequence?: number;
   readonly prompt?: string;
   readonly blocks: ReadonlyArray<CanvasBlock>;
+  readonly presentation?: CanvasPresentation;
 }
 
 type CanvasToolInput =
@@ -399,6 +417,10 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
       return { error: `Block ${String(index + 1)} is not a Canvas block this host accepts.` };
     }
   }
+  const presentation = record["presentation"];
+  if (presentation !== undefined && presentation !== "inline" && presentation !== "sidebar") {
+    return { error: "A Canvas presentation is inline or sidebar." };
+  }
   const title = record["title"];
   const canvasId = record["canvasId"];
   const expectedSequence = record["expectedSequence"];
@@ -406,6 +428,7 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
   return {
     operation,
     blocks: decoded,
+    ...(presentation === undefined ? {} : { presentation }),
     ...(typeof title === "string" ? { title: title.slice(0, MAX_TITLE_CHARS) } : {}),
     ...(typeof canvasId === "string" ? { canvasId } : {}),
     ...(typeof expectedSequence === "number" ? { expectedSequence } : {}),
@@ -668,16 +691,26 @@ function canvasToolSet(options: {
           sourceManifest: [],
           requestedAuthority: documentAuthority(),
         };
+        const placed = placement(input);
         const result =
-          options.author === undefined
-            ? options.port.canvas.create(request, target.context, target.project, input.blocks)
-            : options.port.canvas.create(
+          placed.presentation !== undefined
+            ? options.port.canvas.create(
                 request,
                 target.context,
                 target.project,
                 input.blocks,
                 options.author,
-              );
+                placed.presentation,
+              )
+            : options.author === undefined
+              ? options.port.canvas.create(request, target.context, target.project, input.blocks)
+              : options.port.canvas.create(
+                  request,
+                  target.context,
+                  target.project,
+                  input.blocks,
+                  options.author,
+                );
         if (result.kind !== "accepted") {
           return { result: { error: result.message }, isError: true };
         }
@@ -687,6 +720,9 @@ function canvasToolSet(options: {
             versionId: result.card.versionId,
             sequence: 1,
             blocks: input.blocks.length,
+            presentation: result.card.presentation ?? "sidebar",
+            ...(placed.note === undefined ? {} : { presentationNote: placed.note }),
+            ...(result.card.presentation === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),
           },
         };
       }
@@ -697,39 +733,85 @@ function canvasToolSet(options: {
           isError: true,
         };
       }
+      const placed = placement(input);
       const actor =
         options.author ?? decodeCanvasActor({ kind: "agent", actorId: options.port.uuid() });
-      const result = options.port.canvas.revise(
-        {
-          schemaVersion: 1,
-          kind: "canvas-revise",
-          requestId: options.port.uuid(),
-          canvasId: input.canvasId,
-          expectedSequence: input.expectedSequence,
-          hostId: options.port.hostId,
-          mode: target.mode,
-          workspace: target.workspace,
-          originThreadId: options.originThreadId,
-          prompt: input.prompt ?? "Authored revision",
-          actor,
-          providerInstanceId: options.providerInstanceId,
-          modelId: options.modelId,
-          requestedAuthority: documentAuthority(),
-        },
-        target.context,
-        target.project,
-        input.blocks,
-      );
+      const revision = {
+        schemaVersion: 1,
+        kind: "canvas-revise",
+        requestId: options.port.uuid(),
+        canvasId: input.canvasId,
+        expectedSequence: input.expectedSequence,
+        hostId: options.port.hostId,
+        mode: target.mode,
+        workspace: target.workspace,
+        originThreadId: options.originThreadId,
+        prompt: input.prompt ?? "Authored revision",
+        actor,
+        providerInstanceId: options.providerInstanceId,
+        modelId: options.modelId,
+        requestedAuthority: documentAuthority(),
+      };
+      const result =
+        placed.presentation === undefined
+          ? options.port.canvas.revise(revision, target.context, target.project, input.blocks)
+          : options.port.canvas.revise(
+              revision,
+              target.context,
+              target.project,
+              input.blocks,
+              placed.presentation,
+            );
       if (result.kind !== "accepted") {
         return { result: { error: result.message }, isError: true };
       }
+      // A revision without a choice keeps the current one, which these blocks
+      // may have outgrown; say so rather than let the agent assume inline.
+      const revised = options.port.canvas.get(
+        result.receipt.canvasId,
+        target.context,
+        target.project,
+      );
+      const effective =
+        revised.kind === "ready"
+          ? effectiveCanvasPresentation(revised.version.definition)
+          : undefined;
+      const note =
+        placed.note ??
+        (revised.kind === "ready" &&
+        revised.version.definition.presentation === "inline" &&
+        effective === "sidebar"
+          ? canvasInlineRefusal(input.blocks)
+          : undefined);
       return {
         result: {
           canvasId: input.canvasId,
           versionId: result.receipt.versionId,
           sequence: result.receipt.sequence,
+          ...(effective === undefined ? {} : { presentation: effective }),
+          ...(note === undefined ? {} : { presentationNote: note }),
+          ...(effective === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),
         },
       };
     },
   };
+}
+
+/**
+ * The presentation to record for an authoring call. Inline is recorded only
+ * when the host would draw these blocks in the thread; otherwise the Canvas
+ * is recorded as sidebar and the agent is told why, so it never believes a
+ * document sits in the conversation when the person sees a card.
+ */
+function placement(input: CanvasAuthoringInput): {
+  readonly presentation?: CanvasPresentation;
+  readonly note?: string;
+} {
+  if (input.presentation !== "inline") {
+    return input.presentation === undefined ? {} : { presentation: input.presentation };
+  }
+  const refusal = canvasInlineRefusal(input.blocks);
+  return refusal === undefined
+    ? { presentation: "inline" }
+    : { presentation: "sidebar", note: refusal };
 }

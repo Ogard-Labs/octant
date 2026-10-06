@@ -1844,6 +1844,14 @@ export const ProviderRuntimeEvent = Schema.Union(
     cacheWriteInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
     providerExecutionDurationMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
     /**
+     * When the one model request this report covers was sent. Present only on
+     * a report for exactly one request, which is what lets its timing be exact
+     * with the tool time between requests left out. A report without it covers
+     * the whole turn: a later one replaces an earlier one, and the turn's
+     * speed is approximate whenever tools ran inside it.
+     */
+    requestStartedAt: Schema.optional(UtcTimestamp),
+    /**
      * What the provider says this turn cost, in US dollars. Only ever the
      * provider's own figure: Octant holds no price list and never multiplies
      * tokens by a rate it guessed, so a provider that reports no cost leaves

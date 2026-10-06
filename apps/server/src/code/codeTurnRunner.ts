@@ -8,13 +8,16 @@ import {
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderUsageLimit,
+  type TurnStopReason,
 } from "@octant/contracts";
+import { observeTurnMetrics, startTurnMetrics } from "@octant/domain";
 import { Effect, Fiber, Scope, Stream } from "effect";
 import type {
   ProviderAcquireInput,
   ProviderConnection,
   ProviderSessionHandle,
 } from "@octant/provider-sdk/driver";
+import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { countsTowardTurnEventBudget, makeIdleTimeout } from "../providers/turnBudget";
@@ -155,11 +158,16 @@ export interface CodeTurnRunnerInput {
     failure?: CodeTurnFailure,
   ) => Effect.Effect<void, CodeTurnFailure>;
   readonly signal?: AbortSignal;
-  /** Observes a completed reply with its full text and the tool calls it made. */
+  /** Observes a completed reply with its full text, the tool calls it made, and how the turn ran. */
   readonly onTurnCompleted?: (input: {
     readonly text: string;
     readonly toolCalls: number;
+    readonly turn: TurnEndSummary;
   }) => Promise<void>;
+  /** Told once when the turn is over, whatever its outcome, with what it cost and how it ran. */
+  readonly onTurnEnded?: (turn: TurnEndSummary) => void;
+  /** The wall clock the turn is timed against. */
+  readonly clock?: () => string;
 }
 
 export interface CodeTurnRunnerOptions {
@@ -189,6 +197,27 @@ export class CodeTurnRunner {
         }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
       );
       let outcome: CodeTurnOutcome | undefined;
+      const clock = input.clock ?? (() => new Date().toISOString());
+      const turnStartedAt = clock();
+      // Re-based when the prompt is sent, so the wait for a first token never
+      // includes starting the provider's session.
+      let timing = startTurnMetrics(turnStartedAt);
+      const endOfTurn = (stopReason: TurnStopReason) =>
+        summarizeTurnEnd({
+          metrics: timing,
+          stopReason,
+          startedAt: turnStartedAt,
+          endedAt: clock(),
+        });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          try {
+            input.onTurnEnded?.(endOfTurn(stopReasonOf(outcome)));
+          } catch {
+            // Measuring a turn never decides how it ends.
+          }
+        }),
+      );
       let handledEvents = 0;
       let unresolvedReconciliation = false;
       const toolNames = new Map<string, string>();
@@ -299,6 +328,7 @@ export class CodeTurnRunner {
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 yield* idle.touch;
+                timing = observeTurnMetrics(timing, event);
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > maxEvents) {
                   yield* connection
@@ -357,6 +387,7 @@ export class CodeTurnRunner {
                       input.onTurnCompleted!({
                         text: responseText,
                         toolCalls: answeredToolRequestIds.size,
+                        turn: endOfTurn("end-of-turn"),
                       }).catch(() => undefined),
                     );
                   }
@@ -459,6 +490,7 @@ export class CodeTurnRunner {
             yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
             return yield* fail("interrupted", "Code turn was cancelled before provider send.");
           }
+          timing = startTurnMetrics(clock());
           yield* connection
             .send({
               sessionId: input.sessionId,
@@ -509,6 +541,20 @@ export class CodeTurnRunner {
       );
       if (providerCompleted) yield* persistOutcome("completed");
     });
+  }
+}
+
+function stopReasonOf(outcome: CodeTurnOutcome | undefined): TurnStopReason {
+  switch (outcome) {
+    case "completed":
+      return "end-of-turn";
+    case "interrupted":
+      return "cancelled";
+    case "waiting":
+      return "waiting";
+    case "failed":
+    case undefined:
+      return "failed";
   }
 }
 

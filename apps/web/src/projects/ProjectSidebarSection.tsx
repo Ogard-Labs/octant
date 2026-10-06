@@ -277,7 +277,7 @@ export interface ProjectSidebarSectionProps {
   /** Absent when the host cannot accept a thread rename, which hides the affordance. */
   readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
-  readonly unfiledLabel?: "Unfiled" | "Recents" | "Chats";
+  readonly unfiledLabel?: "No project" | "Unfiled" | "Recents" | "Chats";
   readonly threads?: ReadonlyArray<ChatThreadNavigationItem>;
   readonly threadGroups?: Readonly<Record<ThreadGroupId, ReadonlyArray<ChatThreadNavigationItem>>>;
   readonly threadStatus?: "loading" | "ready" | "unavailable";
@@ -353,7 +353,10 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const snoozedThreads = everyListedThread?.filter((thread) => thread.shelf === "snoozed") ?? [];
   const completedThreads =
     everyListedThread?.filter((thread) => thread.shelf === "completed") ?? [];
-  const unfiledLabel = props.unfiledLabel ?? "Unfiled";
+  const unfiledLabel = props.unfiledLabel ?? "No project";
+  const [unfiledCollapsed, setUnfiledCollapsed] = useState(false);
+  const unfiledThreadsId = useId();
+  const unfiledExpanded = searching || !unfiledCollapsed;
   const onSelectThread = props.onSelectThread;
   const projectNames = useMemo(
     () => new Map(props.projects.map((project) => [String(project.id), project.name])),
@@ -429,7 +432,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const visibleProjectIds = new Set(visibleProjects.map((project) => String(project.id)));
   // A thread filed in no Project (a Chat started without one, a Code thread
   // in the default folder) belongs to no view but All Projects, which keeps it
-  // under Recents rather than hiding it because no Project names it.
+  // under No project rather than hiding it because no Project names it.
   const allProjectsView = projectViewState?.activeViewId === ALL_CODE_PROJECTS_VIEW_ID;
   const viewScopedThreads =
     currentFilters === undefined || timeFilteredThreads === undefined
@@ -750,26 +753,49 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                 ]
               : groupedViewProjects.map((group) => renderProjectGroup(group.label, group.projects))}
             {unfiled.length > 0 && props.onSelectThread !== undefined ? (
-              <section
-                aria-label={unfiledLabel}
-                className="project-section project-section--unfiled"
-              >
-                <h2 className="sidebar-section">{unfiledLabel}</h2>
-                <div className="project-threads">
-                  <ProjectThreadRows
-                    {...(props.threadActions === undefined ? {} : { actions: props.threadActions })}
-                    {...(props.activeThreadId === undefined
-                      ? {}
-                      : { activeThreadId: props.activeThreadId })}
-                    {...(props.onRenameThread === undefined
-                      ? {}
-                      : { onRenameThread: props.onRenameThread })}
-                    collapsedLimit={SIDEBAR_THREAD_LIMIT}
-                    onSelectThread={props.onSelectThread}
-                    projectNameForThread={projectNameForThread}
-                    threads={unfiled}
-                  />
+              <section aria-label={unfiledLabel} className="project-block project-block--unfiled">
+                <div
+                  className="project-row"
+                  data-folder-state={unfiledExpanded ? "open" : "closed"}
+                >
+                  <OctantButton
+                    aria-controls={unfiledExpanded ? unfiledThreadsId : undefined}
+                    aria-expanded={unfiledExpanded}
+                    aria-label={`${unfiledExpanded ? "Collapse" : "Expand"} ${unfiledLabel}`}
+                    className="project-row__select justify-start window-no-drag"
+                    onClick={() => setUnfiledCollapsed((collapsed) => !collapsed)}
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Folder aria-hidden="true" size={16} strokeWidth={1.5} />
+                    <span className="project-row__copy">{unfiledLabel}</span>
+                  </OctantButton>
+                  {unfiledExpanded ? null : (
+                    <ProjectStatusRollup projectName={unfiledLabel} threads={unfiled} />
+                  )}
                 </div>
+                {unfiledExpanded ? (
+                  <div className="project-threads" id={unfiledThreadsId}>
+                    <ProjectThreadRows
+                      {...(props.threadActions === undefined
+                        ? {}
+                        : { actions: props.threadActions })}
+                      {...(props.activeThreadId === undefined
+                        ? {}
+                        : { activeThreadId: props.activeThreadId })}
+                      {...(props.onRenameThread === undefined
+                        ? {}
+                        : { onRenameThread: props.onRenameThread })}
+                      collapsedLimit={SIDEBAR_THREAD_LIMIT}
+                      onSelectThread={props.onSelectThread}
+                      projectNameForThread={projectNameForThread}
+                      {...(props.openThreadIds === undefined
+                        ? {}
+                        : { openThreadIds: props.openThreadIds })}
+                      threads={unfiled}
+                    />
+                  </div>
+                ) : null}
               </section>
             ) : null}
           </>

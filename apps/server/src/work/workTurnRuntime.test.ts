@@ -14,6 +14,7 @@ import {
 import { Effect, Queue, Schema, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type { TurnEndSummary } from "../metrics/turnEnd";
 import { WorkTurnRuntime } from "./workTurnRuntime";
 
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -858,5 +859,127 @@ describe("WorkTurnRuntime", () => {
     });
     expect(outcome).toEqual({ kind: "cancelled" });
     expect(acquire).not.toHaveBeenCalled();
+  });
+
+  describe("how a turn ran", () => {
+    const base = Date.parse("2026-10-06T12:00:00.000Z");
+    const at = (seconds: number) => decodeTimestamp(new Date(base + seconds * 1000).toISOString());
+    const command = () =>
+      decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Summarize the brief",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      });
+    const event = (seconds: number, body: object): ProviderRuntimeEvent =>
+      ({
+        instanceId: ids.provider,
+        sequence: 1,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: at(seconds),
+        sessionId: ids.session as never,
+        ...body,
+      }) as unknown as ProviderRuntimeEvent;
+    const driverStreaming = (events: ProviderRuntimeEvent[]): ProviderDriver => ({
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          subscribe: Effect.succeed(Stream.fromIterable(events)),
+          start: () => Effect.void,
+          send: () => Effect.void,
+          resume: () => Effect.void,
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        } as never),
+    });
+    /** Reads the clock at the moments the runtime asks: turn start, prompt sent, turn end. */
+    const clockAt = (...seconds: number[]) => {
+      let next = 0;
+      return () => at(seconds[Math.min(next++, seconds.length - 1)] ?? 0);
+    };
+
+    it("says a turn with a tool call ran at approximate speed with the streamed tool span taken out", async () => {
+      const ended: TurnEndSummary[] = [];
+
+      const outcome = await new WorkTurnRuntime().run({
+        command: command(),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver: driverStreaming([
+          event(2, { kind: "text-delta", text: "Reading" }),
+          event(4, { kind: "tool-start", toolCallId: "t1", toolName: "read" }),
+          event(9, { kind: "tool-success", toolCallId: "t1", summary: "ok" }),
+          event(10, { kind: "text-delta", text: " done" }),
+          event(12, {
+            kind: "usage",
+            inputTokens: 900,
+            outputTokens: 50,
+            cacheReadInputTokens: 700,
+          }),
+          event(12, { kind: "completed" }),
+        ]),
+        signal: new AbortController().signal,
+        clock: clockAt(0, 0, 12),
+        onTurnEnded: (turn) => ended.push(turn),
+      });
+
+      expect(outcome.kind).toBe("completed");
+      expect(ended).toEqual([
+        {
+          stopReason: "end-of-turn",
+          startedAt: at(0),
+          endedAt: at(12),
+          usage: { inputTokens: 900, outputTokens: 50, cacheReadInputTokens: 700 },
+          metrics: {
+            precision: "approximate",
+            wallMs: 12_000,
+            timeToFirstTokenMs: 2_000,
+            decodeOutputTokens: 50,
+            decodeMs: 5_000,
+            toolMs: 5_000,
+            modelCalls: 1,
+          },
+        },
+      ]);
+    });
+
+    it("says a cancelled turn was cancelled, though it never reached the provider", async () => {
+      const ended: TurnEndSummary[] = [];
+      const controller = new AbortController();
+      controller.abort();
+
+      await new WorkTurnRuntime().run({
+        command: command(),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver: driverStreaming([]),
+        signal: controller.signal,
+        clock: clockAt(0, 1),
+        onTurnEnded: (turn) => ended.push(turn),
+      });
+
+      expect(ended).toEqual([
+        {
+          stopReason: "cancelled",
+          startedAt: at(0),
+          endedAt: at(1),
+          metrics: { precision: "unavailable", wallMs: 1_000 },
+        },
+      ]);
+    });
   });
 });

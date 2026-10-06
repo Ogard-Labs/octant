@@ -41,6 +41,7 @@ import {
 } from "./workTurnService";
 import { WorkProjectStatusFiles } from "./workProjectStatusFiles";
 import type { WorkTurnRuntimePort } from "./workTurnRuntime";
+import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 
 const attachmentRoots: string[] = [];
@@ -565,6 +566,42 @@ describe("WorkTurnService", () => {
     expect(run).not.toHaveBeenCalled();
     expect(turnStarted).not.toHaveBeenCalled();
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("hands what a Work turn cost and how it ran to the harness when it completes and when it ends", async () => {
+    const summary: TurnEndSummary = {
+      stopReason: "end-of-turn",
+      startedAt: "2026-07-29T11:59:00.000Z",
+      endedAt: "2026-07-29T11:59:30.000Z",
+      usage: { inputTokens: 900, outputTokens: 50, cacheReadInputTokens: 700 },
+      metrics: {
+        precision: "approximate",
+        wallMs: 30_000,
+        timeToFirstTokenMs: 2_000,
+        decodeOutputTokens: 50,
+        decodeMs: 5_000,
+        toolMs: 5_000,
+        modelCalls: 1,
+      },
+    };
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async (input) => {
+      input.onTurnEnded?.(summary);
+      return { kind: "completed", response: "Provider reply" };
+    });
+    const turnCompleted = vi.fn(async () => undefined);
+    const turnEnded = vi.fn();
+    const fixture = serviceFixture({
+      turnRuntime: { run },
+      nativeHarness: { contextFor: () => [], turnStarted: vi.fn(), turnCompleted, turnEnded },
+    });
+
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+
+    expect(turnCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "work", text: "Provider reply", turn: summary }),
+    );
+    expect(turnEnded).toHaveBeenCalledWith(expect.objectContaining({ mode: "work" }), summary);
   });
 
   it("refuses a saved reasoning level that the model no longer declares before launching", async () => {

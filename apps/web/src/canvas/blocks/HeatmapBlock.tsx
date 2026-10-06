@@ -120,8 +120,16 @@ function MatrixHeatmap({
   const show = (cell: CanvasHeatmapCellBox) => {
     setActive(cellKey(cell));
     setAnchor({
-      seriesLabel: `${rowLabel(layout, cell.rowId)} · ${columnLabel(layout, cell.columnId)}`,
-      valueLabel: cellLabel(block.valueLabel, cell.value, cell.note, block.format),
+      // A heatmap cell is one mark, so it reads through the tooltip's single
+      // head-and-value form: the coordinate names the cell, the value is its
+      // reading.
+      readings: [
+        {
+          seriesIndex: 0,
+          seriesLabel: `${rowLabel(layout, cell.rowId)} · ${columnLabel(layout, cell.columnId)}`,
+          valueLabel: cellLabel(block.valueLabel, cell.value, cell.note, block.format),
+        },
+      ],
       x: clamp01((cell.x + cell.width / 2) / layout.width),
       y: clamp01(cell.y / layout.height),
     });
@@ -325,8 +333,15 @@ function CalendarHeatmap({
     if (day === undefined) return;
     setActive(day.date);
     setAnchor({
-      seriesLabel: day.date,
-      valueLabel: cellLabel(block.valueLabel, day.value, day.note, block.format),
+      // A calendar day is one mark, so it reads through the tooltip's single
+      // head-and-value form: the date names the day, the value is its reading.
+      readings: [
+        {
+          seriesIndex: 0,
+          seriesLabel: day.date,
+          valueLabel: cellLabel(block.valueLabel, day.value, day.note, block.format),
+        },
+      ],
       x: clamp01((day.x + day.width / 2) / layout.width),
       y: clamp01(day.y / layout.height),
     });

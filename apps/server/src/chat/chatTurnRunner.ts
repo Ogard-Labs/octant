@@ -23,12 +23,15 @@ import {
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type ProviderServiceLimits,
+  type TurnStopReason,
   upsertThreadTaskProgress,
 } from "@octant/contracts";
+import { observeTurnMetrics, startTurnMetrics } from "@octant/domain";
 import { answerChatTurnQuestion, transitionChatAttempt } from "@octant/domain/chat-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Cause, Deferred, Effect, Fiber, Option, Schema, Scope, Stream } from "effect";
 import type { ContextHarnessService } from "../context/contextHarnessService";
+import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
@@ -226,12 +229,14 @@ export interface ChatTurnRunnerInput {
   readonly clock?: () => string;
   readonly ambiguousRecovery?: ChatAttemptOutcome;
   readonly signal?: AbortSignal;
-  /** Observes a completed reply with its full text and the tool calls it made. */
+  /** Observes a completed reply with its full text, the tool calls it made, and how the turn ran. */
   readonly onTurnCompleted?: (input: {
     readonly text: string;
     readonly toolCalls: number;
-    readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
+    readonly turn: TurnEndSummary;
   }) => Promise<void>;
+  /** Told once when the attempt is over, whatever its outcome, with what it cost and how it ran. */
+  readonly onTurnEnded?: (turn: TurnEndSummary) => void;
 }
 
 export type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -297,6 +302,17 @@ export class ChatTurnRunner {
       let sawUsage = false;
       let sawVisibleResponse = false;
       let terminalOutcome: ChatAttemptOutcome | undefined;
+      const turnStartedAt = clock();
+      // Re-based when the prompt is sent, so the wait for a first token never
+      // includes starting the provider's session.
+      let timing = startTurnMetrics(turnStartedAt);
+      const endOfTurn = (stopReason: TurnStopReason) =>
+        summarizeTurnEnd({
+          metrics: timing,
+          stopReason,
+          startedAt: turnStartedAt,
+          endedAt: clock(),
+        });
       const answeredToolRequestIds = new Set<string>();
       const answeredApprovalRequestIds = new Set<string>();
       let selectedResearchBackend: "searxng" | "provider-native" =
@@ -312,9 +328,7 @@ export class ChatTurnRunner {
               input.onTurnCompleted!({
                 text: responseText,
                 toolCalls: answeredToolRequestIds.size,
-                ...(sawUsage
-                  ? { usage: { inputTokens: actualInputTokens, outputTokens: actualOutputTokens } }
-                  : {}),
+                turn: endOfTurn("end-of-turn"),
               }).catch(() => undefined),
             );
 
@@ -576,6 +590,14 @@ export class ChatTurnRunner {
         Effect.gen(function* () {
           if (cleanup.released) return;
           cleanup.released = true;
+          try {
+            // Reattaching a session sends no prompt, so there is no turn to measure.
+            if (input.mode !== "resume") {
+              input.onTurnEnded?.(endOfTurn(stopReasonOf(terminalOutcome, input.signal?.aborted)));
+            }
+          } catch {
+            // Measuring a turn never decides how it ends.
+          }
           // A turn that ends without its question being answered — abort,
           // crash, interrupt — must not leave the answer channel reachable,
           // and an answerer already parked on the promise must be let go.
@@ -778,6 +800,7 @@ export class ChatTurnRunner {
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 yield* idle.touch;
+                timing = observeTurnMetrics(timing, event);
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > maxEvents) {
                   yield* persistOutcome("interrupted", {
@@ -1314,6 +1337,7 @@ export class ChatTurnRunner {
               decodeChatFailure({ category: "interrupted", message: "Chat turn was cancelled." }),
             );
           }
+          timing = startTurnMetrics(clock());
           yield* connection
             .send({
               sessionId: input.attempt.providerSessionId,
@@ -1402,5 +1426,27 @@ export class ChatTurnRunner {
         });
       }),
     );
+  }
+}
+
+/**
+ * How a turn stopped, from the outcome the attempt settled on. An interruption
+ * the person asked for is a cancel; one the host or provider caused is a failure.
+ */
+function stopReasonOf(
+  outcome: ChatAttemptOutcome | undefined,
+  cancelRequested: boolean | undefined,
+): TurnStopReason {
+  switch (outcome) {
+    case "completed":
+      return "end-of-turn";
+    case "cancelled":
+      return "cancelled";
+    case "interrupted":
+      return cancelRequested === true ? "cancelled" : "failed";
+    case "waiting":
+      return "waiting";
+    default:
+      return "failed";
   }
 }
