@@ -26,7 +26,7 @@ import {
   type CanvasExportRenderedOutput,
   type CanvasExportTargetId,
 } from "@octant/contracts/canvas-export";
-import type { CanvasExportTarget } from "@octant/plugin-api/canvas-export";
+import type { CanvasExportDestination, CanvasExportTarget } from "@octant/plugin-api/canvas-export";
 import {
   offerCanvasExportTargets,
   type CanvasExportActivationFacts,
@@ -63,7 +63,11 @@ export interface CanvasExportServiceOptions {
     canvasId: CanvasId,
     versionId?: CanvasVersionId,
   ) => CanvasExportDocument | undefined;
-  readonly targets: () => ReadonlyArray<CanvasExportTargetBinding>;
+  /**
+   * The destinations offered for one Canvas. Facts are per Canvas: whether a
+   * destination is connected can depend on where that Canvas's Project exports.
+   */
+  readonly targets: (canvasId: CanvasId) => ReadonlyArray<CanvasExportTargetBinding>;
   readonly eventStore: CanvasExportEventStore;
   readonly uuid: () => string;
   readonly clock: () => UtcTimestamp;
@@ -80,6 +84,11 @@ type PendingExport =
       readonly canvasId: CanvasId;
       readonly card: CanvasExportPrepareResult & { readonly kind: "approval" };
       readonly output: CanvasExportRenderedOutput;
+      /**
+       * The destination the card named, if it named one. Passed back to the
+       * target on approval, which is what lets it replace an existing file.
+       */
+      readonly confirmedDestination?: CanvasExportDestination;
       /** Instant past which answering this approval is an `expired` refusal. */
       readonly expiresAtMs: number;
     }
@@ -121,7 +130,7 @@ export class CanvasExportService {
       versionId: document.versionId,
       sequence: document.sequence,
       targets: offerCanvasExportTargets(
-        this.#targets().map((binding) => ({
+        this.#targets(canvasId).map((binding) => ({
           contribution: binding.target.contribution,
           facts: binding.facts,
         })),
@@ -155,7 +164,7 @@ export class CanvasExportService {
         refused("unsupported-format", "This host cannot render that format."),
       );
     }
-    const offer = this.#offerFor(request.targetId);
+    const offer = this.#offerFor(request.targetId, document.canvasId);
     if (offer === undefined) {
       return decodeCanvasExportPrepareResult(
         refused("not-offered", "That destination is not offered."),
@@ -202,6 +211,11 @@ export class CanvasExportService {
         refused("malformed", "The rendered document cannot be exported."),
       );
     }
+    const binding = this.#soleTargetBinding(offer.targetId, document.canvasId);
+    // A destination that can name its file does so here, so the person
+    // approves a place rather than a destination's promise. Naming it is also
+    // what makes the approval a confirmation to replace an existing file.
+    const destination = binding?.target.describeDestination?.(output);
     const nowMs = Date.parse(this.#clock());
     const expiresAtMs = nowMs + CANVAS_EXPORT_APPROVAL_TTL_MS;
     const card = decodeCanvasExportApprovalCard({
@@ -215,6 +229,9 @@ export class CanvasExportService {
       destinationLabel: offer.label,
       format: request.format,
       title: rendered.title,
+      ...(destination === undefined
+        ? {}
+        : { destinationPath: destination.path, replacesExisting: destination.replacesExisting }),
       payload: rendered.body,
       payloadDigest,
       byteLength,
@@ -222,7 +239,12 @@ export class CanvasExportService {
     });
     const result = decodeCanvasExportPrepareResult({ kind: "approval", card });
     if (result.kind === "approval") {
-      this.#holdPending(document.canvasId, { card: result, output, expiresAtMs });
+      this.#holdPending(document.canvasId, {
+        card: result,
+        output,
+        expiresAtMs,
+        ...(destination === undefined ? {} : { confirmedDestination: destination }),
+      });
     }
     return result;
   }
@@ -280,7 +302,7 @@ export class CanvasExportService {
       );
     }
 
-    const offer = this.#offerFor(pending.card.card.targetId);
+    const offer = this.#offerFor(pending.card.card.targetId, pending.card.card.canvasId);
     if (offer === undefined || offer.status !== "ready") {
       this.#pending.delete(key);
       return decodeCanvasExportDecideResult(
@@ -290,8 +312,7 @@ export class CanvasExportService {
     // Delivery goes through the binding the offer was made from. Two bindings
     // sharing one id is ambiguous: the offer omits it, and a stale approval
     // for it is refused rather than resolved by binding order.
-    const bindings = this.#targetBindings(pending.card.card.targetId);
-    const binding = bindings.length === 1 ? bindings[0] : undefined;
+    const binding = this.#soleTargetBinding(pending.card.card.targetId, pending.card.card.canvasId);
     if (binding === undefined) {
       this.#pending.delete(key);
       return decodeCanvasExportDecideResult(
@@ -300,7 +321,11 @@ export class CanvasExportService {
     }
 
     this.#pending.delete(key);
-    const delivery = await this.#deliver(binding.target, pending.output);
+    const delivery = await this.#deliver(
+      binding.target,
+      pending.output,
+      pending.confirmedDestination,
+    );
     const record = decodeCanvasExportRecorded({
       schemaVersion: 1,
       kind: "canvas-export",
@@ -366,27 +391,40 @@ export class CanvasExportService {
     }
   }
 
-  #offerFor(targetId: CanvasExportTargetId) {
+  #offerFor(targetId: CanvasExportTargetId, canvasId: CanvasId) {
     return offerCanvasExportTargets(
-      this.#targets().map((binding) => ({
+      this.#targets(canvasId).map((binding) => ({
         contribution: binding.target.contribution,
         facts: binding.facts,
       })),
     ).find((offer) => String(offer.targetId) === String(targetId));
   }
 
-  #targetBindings(targetId: CanvasExportTargetId): ReadonlyArray<CanvasExportTargetBinding> {
-    return this.#targets().filter(
+  #targetBindings(
+    targetId: CanvasExportTargetId,
+    canvasId: CanvasId,
+  ): ReadonlyArray<CanvasExportTargetBinding> {
+    return this.#targets(canvasId).filter(
       (binding) => String(binding.target.contribution.targetId) === String(targetId),
     );
+  }
+
+  /** The one binding that declares this id, or nothing when the id is ambiguous. */
+  #soleTargetBinding(
+    targetId: CanvasExportTargetId,
+    canvasId: CanvasId,
+  ): CanvasExportTargetBinding | undefined {
+    const bindings = this.#targetBindings(targetId, canvasId);
+    return bindings.length === 1 ? bindings[0] : undefined;
   }
 
   async #deliver(
     target: CanvasExportTarget,
     output: CanvasExportRenderedOutput,
+    confirmed?: CanvasExportDestination,
   ): Promise<CanvasExportDelivery> {
     try {
-      return decodeCanvasExportDelivery(await target.exportDocument(output));
+      return decodeCanvasExportDelivery(await target.exportDocument(output, confirmed));
     } catch {
       return refused("refused", "The destination did not complete the export.");
     }

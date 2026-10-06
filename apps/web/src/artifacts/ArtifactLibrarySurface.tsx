@@ -3,6 +3,7 @@ import type { CanvasExportOfferList } from "@octant/contracts/canvas-export";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
 import { useMemo, useRef, useState } from "react";
 import { CanvasExportPanel } from "../canvas/CanvasExportPanel";
+import { useCanvasExportFolder } from "../canvas/useCanvasExportFolder";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { Surface } from "../surface/SurfaceHeader";
 import { ArtifactLibraryView } from "./ArtifactLibraryView";
@@ -42,6 +43,11 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
   );
   const [exportOffers, setExportOffers] = useState<CanvasExportOfferList | undefined>(undefined);
   const [exportMessage, setExportMessage] = useState<string | undefined>(undefined);
+  const [exportEntry, setExportEntry] = useState<ArtifactLibraryEntry | undefined>(undefined);
+  const exportFolder = useCanvasExportFolder({
+    client: exportClient,
+    canvasId: exportEntry?.canvasId,
+  });
 
   // The newest request, or a closed dialog, supersedes an offers response that
   // resolves later, so an answer for one artifact never opens the dialog on
@@ -51,6 +57,7 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
   async function openExport(entry: ArtifactLibraryEntry) {
     if (exportClient?.exportOffers === undefined) return;
     const current = (exportToken.current += 1);
+    setExportEntry(entry);
     setExportMessage(undefined);
     setExportOffers(undefined);
     try {
@@ -96,6 +103,7 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
           exportToken.current += 1;
           setExportOffers(undefined);
           setExportMessage(undefined);
+          setExportEntry(undefined);
         }}
         open={exportOffers !== undefined || exportMessage !== undefined}
       >
@@ -104,8 +112,12 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
         exportClient.decideExport !== undefined ? (
           <CanvasExportPanel
             key={String(exportOffers.canvasId)}
+            folder={exportFolder}
             offers={exportOffers}
             onDecide={exportClient.decideExport}
+            onExportFolderChosen={() => {
+              if (exportEntry !== undefined) void openExport(exportEntry);
+            }}
             onPrepare={exportClient.prepareExport}
           />
         ) : exportMessage === undefined ? null : (
