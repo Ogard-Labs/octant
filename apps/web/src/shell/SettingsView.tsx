@@ -2236,21 +2236,27 @@ function nativeHarnessProviderOptions(
   if (controller === undefined) return [];
   return controller.instances
     .filter((instance) => instance.enabled && isNativeHarnessDriverKind(instance.driverKind))
-    .map((instance) => ({
-      instanceId: String(instance.id),
-      label: instance.displayName,
-      models: (controller.observedByInstance.get(instance.id)?.models ?? []).map((model) => {
-        const observed = controller.observedByInstance.get(instance.id);
-        return {
+    .map((instance) => {
+      const observed = controller.observedByInstance.get(instance.id);
+      const configured: ReadonlyArray<string> =
+        instance.configuration.kind === "openai-compatible-http" ||
+        instance.configuration.kind === "anthropic-compatible-http" ||
+        instance.configuration.kind === "azure-foundry-openai-http"
+          ? instance.configuration.manualModelIds.map(String)
+          : [];
+      return {
+        instanceId: String(instance.id),
+        label: instance.displayName,
+        models: (observed?.models ?? []).map((model) => ({
           id: String(model.id),
           label: model.displayName,
+          configured: configured.includes(String(model.id)),
           ...(observed === undefined
             ? {}
             : { toolsReady: modelCarriesAppManagedTools(observed, model.id) }),
-        };
-      }),
-    }))
-    .filter((option) => option.models.length > 0);
+        })),
+      };
+    });
 }
 
 function privacyThreadsFromSettings(props: SettingsViewProps): ReadonlyArray<PrivacyTarget> {
