@@ -36,6 +36,23 @@ When a turn offers Octant's own tools — the built-in browser, Canvas, computer
 use, the terminal, the Apple and Android simulators, helper agents — the model
 also gets one line per tool saying what it is for.
 
+## Verifying a model's tools
+
+Checking a connection never spends a request on a model, so Octant does not
+yet know whether an endpoint model can call tools, and it keeps tools off until
+you say so. A model without verified tools is **Chat only**: it can answer, but
+it gets none of Octant's tools and cannot start helper agents.
+
+To change that, choose **Verify tools** next to the model: in the model picker,
+under a model in **Settings → Octant Harness**, or in **Settings → Providers &
+Models → Connection details**. Octant sends one request that asks the model to
+call a test tool. That request may be billed by your provider, once per click.
+A model that calls the tool is verified and gets Octant's tools; one that
+answers in text stays Chat only, and a failed request (a wrong key, a timeout)
+shows its error instead of a verdict. Verifying one model never turns tools on
+for the others on the same endpoint, and changing the endpoint's configuration
+asks you to verify again. Ollama has no Verify tools action yet.
+
 ## Conversations that survive a restart
 
 The harness saves its conversation step by step as it works: your message,
@@ -327,4 +344,6 @@ table.
   candidate until it does.
 - Context is reduced by the host's planner; each prune and cut is journaled
   with the cache cost it paid, and the lead can read `context-remaining` to
-  checkpoint before one.
+  checkpoint before one. An endpoint that never reports the model's window,
+  such as some Azure AI Foundry deployments, gives the lead no figure: the tool
+  says the context is unavailable instead of reporting room against an estimate.

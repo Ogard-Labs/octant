@@ -92,6 +92,8 @@ export interface AnthropicMessagesTurnInput {
   /** A stable system prompt, sent as a cached system block when present. */
   readonly system?: string;
   readonly tools?: readonly ProviderToolDefinition[];
+  /** "required" makes the model answer with a tool call; a capability probe needs that. */
+  readonly toolChoice?: "auto" | "required";
   /** Answers to the previous turn's tool calls, when this request continues a tool loop. */
   readonly toolAnswers?: readonly ProviderToolAnswer[];
   readonly sequenceStart?: number;
@@ -147,7 +149,14 @@ interface TrackedContentBlock {
 export function buildAnthropicMessagesBody(
   input: Pick<
     AnthropicMessagesTurnInput,
-    "modelId" | "history" | "prompt" | "system" | "tools" | "toolAnswers" | "maxTokens"
+    | "modelId"
+    | "history"
+    | "prompt"
+    | "system"
+    | "tools"
+    | "toolChoice"
+    | "toolAnswers"
+    | "maxTokens"
   >,
 ): Record<string, unknown> {
   const messages: AnthropicWireMessage[] = [];
@@ -222,6 +231,7 @@ export function buildAnthropicMessagesBody(
             ...(tool.description === undefined ? {} : { description: tool.description }),
             input_schema: tool.inputSchema,
           })),
+          ...(input.toolChoice === "required" ? { tool_choice: { type: "any" } } : {}),
         }),
   };
 }

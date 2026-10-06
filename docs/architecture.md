@@ -1398,7 +1398,15 @@ from a response reservation. Emergency admission budgets are explicitly marked a
 conservative fallbacks. A matching runtime window from the same provider, model,
 and request shape is retained across restart and participates in subsequent
 planning; it replaces emergency estimates while conflicting model facts retain
-the more conservative bound.
+the more conservative bound. The Chat emergency window is 256,000 tokens: large
+enough that an ordinary thread is sent whole, small enough to remain an
+estimate. A limit whose source is `conservative-fallback` is never the model's
+window (`hasKnownContextWindow` in the domain policy says so). The composer meter
+then shows the fill alone, with no fraction, percentage, free space, or full
+ring; the context inspector names the number as an estimate; and the native
+harness's `context-remaining` tool refuses rather than hand the model an
+estimate of its own room. A window the provider's own usage report names still
+takes precedence.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. A runtime that compacts its own session may report where, as
 `autoCompactThreshold` on the usage report (tokens of the window the last request
@@ -1633,6 +1641,25 @@ native harness in `apps/server/src/harness`:
   refuse private destinations, and connect through a `lookup` that checks
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
+- **Tool verification.** A routine Check connection runs no generating
+  request, so an OpenAI-compatible or Azure AI Foundry endpoint offers a model
+  Octant's tools only after a person proved that model calls one. The
+  `verify-model-tools` command sends one forced `octant_capability_echo`
+  request through the same sender a turn uses, for one model; an
+  Anthropic-compatible endpoint takes the same command and request in its own
+  wire shape. A model that calls the tool joins `verifiedToolModelIds` on the
+  observed state, which the journal persists with the catalog and a
+  configuration change clears; a model that answers in text leaves it out, and
+  a transport failure (authentication, timeout) is reported rather than
+  recorded as "unsupported". Admission, the AgentRun transport check, and the
+  Chat preflight read that set per model, so verifying one model never offers
+  tools to its siblings. The command accepts only the models the endpoint
+  lists or the profile configures, and only a Foundry profile's configured
+  deployments, because its catalogue lists base models that are not
+  deployments. Ollama has no verify action until its driver runs the tool
+  loop. The model picker marks an unverified model "Chat only" with a "Verify
+  tools" action, and Settings → Octant Harness says the same for a slot's
+  chosen model.
 - **Goals.** A thread goal may carry up to twelve acceptance criteria
   (`ThreadGoalCriterion`), each with an optional check command; one without a
   command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
