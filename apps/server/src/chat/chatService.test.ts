@@ -6584,6 +6584,64 @@ describe("ChatService", () => {
     );
   });
 
+  it("keeps the whole conversation when no one named the model's window", async () => {
+    const [model] = probeFixture().models;
+    if (model === undefined) throw new Error("Expected a fixture model.");
+    const { contextLimit: _contextLimit, ...unsized } = model;
+    const probe = probeFixture({ models: [unsized] });
+    const sent: Array<SentTurn> = [];
+    const fixture = openFixture({ probe, driver: compactionDriver(sent) });
+    const { service, contextHarness } = fixture;
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unsized model",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    let version = created.thread.version;
+    for (let turn = 0; turn < 4; turn += 1) {
+      const accepted = await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: version,
+        prompt: `Turn ${turn}: ${"detail ".repeat(700)}`.trim(),
+      });
+      if (accepted.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      await until(
+        () =>
+          service
+            .read(created.thread.id)
+            .turns.at(-1)
+            ?.attempts.some((attempt) => attempt.outcome === "completed") === true,
+      );
+      await untilThreadSlotReleased(fixture);
+      version = service.read(created.thread.id).thread.version;
+    }
+
+    // About five thousand tokens of earlier turns is nothing to a model that
+    // was never said to be small. The planner's emergency estimate must not
+    // leave them out, nor spend a provider call summarising them.
+    const snapshot = contextHarness.inspect(
+      decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: created.thread.id }),
+    );
+    expect(snapshot.modelLimits.source).toBe("conservative-fallback");
+    expect(snapshot.modelLimits.contextWindow).toBe(256_000);
+    expect(snapshot.next.plan.entries.filter((entry) => entry.reason === "omitted-to-fit")).toEqual(
+      [],
+    );
+    expect(snapshot.next.plan.blocked).toBe(false);
+    expect(sent.some((request) => request.prompt.startsWith(MAINTENANCE_PROMPT_PREFIX))).toBe(
+      false,
+    );
+    const earlier = (sent.at(-1)?.context ?? []).filter((block) => block.kind === "user-message");
+    expect(earlier.map((block) => block.text.slice(0, 7))).toEqual([
+      "Turn 0:",
+      "Turn 1:",
+      "Turn 2:",
+    ]);
+  });
+
   it("sends only the conversation the compacted plan kept", async () => {
     const probe = probeFixture();
     const sent: Array<SentTurn> = [];

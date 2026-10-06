@@ -219,7 +219,16 @@ import { MultiModelRouteService } from "./multiModelRouteService";
 
 const RESEARCH_TOOL_NAME = "octant_web_research";
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
-const FALLBACK_CHAT_CONTEXT_WINDOW = 4_096;
+/**
+ * What a turn is planned against when neither the provider nor the reviewed
+ * catalog named the model's window. It is an estimate, journaled as the
+ * `conservative-fallback` source and never shown as the model's window. A floor
+ * of a few thousand tokens left a thread's earlier turns out, or summarised
+ * them, after a few messages, and blocked a request that alone passed it, on
+ * models with room for far more. A window this size admits an ordinary thread
+ * whole and leaves a model with a smaller window to say so itself.
+ */
+const FALLBACK_CHAT_CONTEXT_WINDOW = 256_000;
 const FALLBACK_CHAT_MAX_OUTPUT = 1_024;
 
 type ConfiguredChatSettings = ChatSettings & {

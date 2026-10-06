@@ -1398,7 +1398,15 @@ from a response reservation. Emergency admission budgets are explicitly marked a
 conservative fallbacks. A matching runtime window from the same provider, model,
 and request shape is retained across restart and participates in subsequent
 planning; it replaces emergency estimates while conflicting model facts retain
-the more conservative bound.
+the more conservative bound. The Chat emergency window is 256,000 tokens: large
+enough that an ordinary thread is sent whole, small enough to remain an
+estimate. A limit whose source is `conservative-fallback` is never the model's
+window (`hasKnownContextWindow` in the domain policy says so). The composer meter
+then shows the fill alone, with no fraction, percentage, free space, or full
+ring; the context inspector names the number as an estimate; and the native
+harness's `context-remaining` tool refuses rather than hand the model an
+estimate of its own room. A window the provider's own usage report names still
+takes precedence.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. A runtime that compacts its own session may report where, as
 `autoCompactThreshold` on the usage report (tokens of the window the last request

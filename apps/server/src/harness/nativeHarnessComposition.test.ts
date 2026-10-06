@@ -155,4 +155,58 @@ describe("native harness composition", () => {
     );
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    { source: "runtime-reported", answers: true },
+    { source: "conservative-fallback", answers: false },
+  ] as const)(
+    "tells the lead its remaining room only when the model's window is known (%s)",
+    async ({ source, answers }) => {
+      const composition = createNativeHarnessComposition({
+        isChildAuthorityCurrent: () => true,
+        authority: {
+          resolve: () => authority,
+          service: new ToolCallAuthorityService({
+            resolveGrantedAuthority: () => authority,
+            resolveLiveFacts: () => ({
+              providerAppManagedTools: "supported",
+              host: { computerUseEnabled: false },
+              executionPolicy: "plan",
+              approvalSatisfied: false,
+              externalContentIngested: false,
+            }),
+          }),
+        },
+        isHarnessProvider: () => true,
+        contextHarness: {
+          inspect: () =>
+            ({
+              snapshotAt: "2026-10-06T00:00:00.000Z",
+              modelLimits: { source, confidence: source === "runtime-reported" ? "high" : "low" },
+              next: { plan: { plannedInputTokens: 4_800, safeInputBudget: 100_000 } },
+            }) as never,
+        },
+        hostId: authority.hostId,
+        readThreadTaint: () => false,
+        recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+        uuid: () => "00000000-0000-4000-8000-000000000099",
+        clock: () => "2026-10-06T00:00:00.000Z",
+      });
+      const tools = composition.forChat({
+        thread: { ...thread, researchEnabled: false } as never,
+        windowId: "window-1",
+      });
+      const result = await tools?.execute({
+        name: "context-remaining",
+        inputJson: "{}",
+        signal: new AbortController().signal,
+      });
+      // An estimate would tell the lead to wrap up long before the model needs it to.
+      expect(result?.result).toEqual(
+        answers
+          ? expect.objectContaining({ remainingTokens: 95_200, source: "capacity-planner" })
+          : { error: "context-unavailable" },
+      );
+    },
+  );
 });
