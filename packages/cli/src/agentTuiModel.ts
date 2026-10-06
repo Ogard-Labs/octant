@@ -1,7 +1,7 @@
 import type { NativeHarnessSessionView, ThreadGoal } from "@octant/contracts";
 import type { AgentThreadSnapshot } from "./agentThread";
 import { BUILT_IN_THEME_PRESET_IDS, resolveThemePresetTokens } from "@octant/theme";
-import { nativeHarnessStatusLabel } from "@octant/domain";
+import { nativeHarnessStatusLabel, sessionStatsInputOf, threadStatsLine } from "@octant/domain";
 
 /**
  * What the terminal UI shows, computed from the same thread and harness
@@ -230,28 +230,16 @@ export function statusLineFrom(
     parts.push(String(session.session.lead.modelId));
     parts.push(`${session.session.turnsRun} turns`);
     if (session.session.cutovers > 0) parts.push(`${session.session.cutovers} context cuts`);
-    // The session's own totals survive the bounded turn list; older hosts
-    // without them fall back to what the list still holds.
-    const usage = session.session.usage ?? {
-      inputTokens: session.turns.reduce((sum, turn) => sum + turn.usage.inputTokens, 0),
-      outputTokens: session.turns.reduce((sum, turn) => sum + turn.usage.outputTokens, 0),
-      costUsd: session.turns.reduce((sum, turn) => sum + (turn.usage.costUsd ?? 0), 0),
-    };
-    if (usage.inputTokens > 0) {
-      parts.push(`${compact(usage.inputTokens)} in · ${compact(usage.outputTokens)} out`);
-    }
-    if ((usage.costUsd ?? 0) > 0) parts.push(`$${(usage.costUsd ?? 0).toFixed(2)}`);
+    // The web composer, the session card, and the phone word these figures
+    // from the same shared module: one the provider did not report is left
+    // out rather than shown as zero.
+    const stats = threadStatsLine(sessionStatsInputOf(session));
+    if (stats.length > 0) parts.push(stats);
   } else if (thread !== undefined) {
     parts.push(thread.modelId);
     parts.push(`${thread.turns.length} turns`);
   }
   return parts.join(" · ");
-}
-
-function compact(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
-  return String(count);
 }
 
 /** One line for the goal: its state, objective, and how many criteria an observed check met. */
