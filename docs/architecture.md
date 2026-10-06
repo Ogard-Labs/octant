@@ -1132,8 +1132,22 @@ flowchart LR
   file the sync client has not downloaded, and a conflict copy the sync client
   left behind, are reported instead of being treated as entries. A folder
   outside the user's home is refused unless the standing access-outside-project
-  approval exists — the same rule as the artifact mirror's global folder.
-  Publish and pull are not this store; they call it.
+  approval exists — the same rule as the artifact mirror's global folder. The
+  in-tree S3-compatible store sends every request to the configured endpoint and
+  only while sync is on. Its settings are the endpoint URL, region, bucket,
+  optional key prefix, and path-style or virtual-host addressing. The access key
+  and secret live in the host credential store — macOS Keychain or freedesktop
+  Secret Service — and are never journaled. A plaintext endpoint is refused and
+  no credential is sent on it. A publish uses a conditional create
+  (`If-None-Match: *`); a provider that does not enforce it is configured to
+  fall back to HEAD-then-PUT, where a key is already unique to one host's
+  instance and sequence so a lost race cannot overwrite another host's entry. A
+  failure is a typed outcome — unauthorized, not-found, throttled, unreachable;
+  a throttled or unreachable answer is retried a bounded number of times with
+  backoff, while a rejected credential or a missing object is not. A Test
+  connection action writes one probe object in a reserved key namespace and
+  deletes nothing; `list` skips that namespace. Publish and pull are not this
+  store; they call it.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
