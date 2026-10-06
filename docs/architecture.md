@@ -2017,7 +2017,7 @@ mechanisms are:
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
   OpenCode 2 runs `git rev-parse` at startup to resolve its project, and the
   Chat, Plan, and Work jail denies fork and exec outright. Rather than widen
-  the jail to a real Git binary, the 2.x launch gets a private stand-in: a
+  the jail to a real Git binary, a macOS 2.x launch gets a private stand-in: a
   `<TMPDIR>/git-standin-*/bin/git` symlink to `/usr/bin/false` placed first on
   the child's PATH, with `allowProcessFork` and exactly one exec grant,
   `(allow process-exec (literal "/usr/bin/false"))`. The spawn succeeds and
@@ -2026,11 +2026,11 @@ mechanisms are:
   possible; OpenCode 1.x and Code mode are unchanged. The readiness probe
   attests at a directory with a `.git` marker under the Chat/Plan
   confinement and fails closed — listing-only, no turns — if a future
-  OpenCode treats the failing git as fatal. On Linux the PATH shim is applied
-  but bwrap's seccomp still denies fork and masks host executables, so the
-  stand-in's spawn fails there; the probe fails closed and the runtime stays
-  listing-only until Linux confinement can express the narrow per-path exec
-  grant (named gap, not widened).
+  OpenCode treats the failing git as fatal. Linux confinement cannot express
+  that one exec without also allowing fork, which is the hole the Plan jail
+  exists to close, so a 2.x Chat, Plan, or Work launch on Linux keeps fork
+  and exec denied. The probe fails closed and the runtime stays listing-only
+  there until Linux confinement can express the narrow per-path exec grant.
   Toolchain commands the Android workbench issues keep their own deliberate
   carve-out: `~/.android` — the AVD store, adb keys, and emulator lock files —
   plus a non-empty `ANDROID_AVD_HOME` when configured are bound read-write even

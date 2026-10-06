@@ -137,14 +137,10 @@ const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$
  * `/usr/bin/false` put first on PATH makes the spawn succeed and git exit
  * non-zero, which OpenCode reads as "not a git project" and serves anyway.
  * The jail allows fork plus exec of exactly this one binary — no real git,
- * no shell, no other exec.
- *
- * Linux gap (named, not widened): bwrap's seccomp denies fork/clone outright
- * and masks host executable directories, so the stand-in's spawn still fails
- * there. The PATH shim is applied (harmless) and fork is allowed, but the
- * exec of the masked `/usr/bin/false` fails with ENOENT; the readiness probe
- * fails closed and the runtime stays listing-only until Linux confinement can
- * express the narrow per-path exec grant.
+ * no shell, no other exec. The stand-in is macOS only. Linux confinement
+ * cannot grant that one exec without also allowing fork, which reopens the
+ * Plan jail, so a 2.x Chat, Plan, or Work launch on Linux keeps both denied
+ * and the readiness probe fails closed.
  */
 const GIT_STANDIN_TARGET = "/usr/bin/false";
 
@@ -953,13 +949,15 @@ function prepareOpenCodeLaunch(
       const jailDeniesProcess = executionPolicy === "plan" || mode !== "code";
       // OpenCode 2 runs `git rev-parse` at startup to resolve its project.
       // Under the Chat/Plan/Work jail that spawn fails with EPERM and the
-      // server answers 500 for every route in a work tree. The stand-in puts
-      // an always-failing `git` first on PATH so the spawn succeeds and git
-      // exits non-zero, which OpenCode reads as "not a git project". The jail
-      // allows fork plus exec of exactly /usr/bin/false and nothing else.
-      // OpenCode 1.x and Code mode are unchanged: 1.x does not spawn git, and
-      // Code already allows exec behind approvals.
-      const betaGitStandin = runtime === "beta" && jailDeniesProcess;
+      // server answers 500 for every route in a work tree. On macOS the
+      // stand-in puts an always-failing `git` first on PATH so the spawn
+      // succeeds and git exits non-zero, which OpenCode reads as "not a git
+      // project". The jail allows fork plus exec of exactly /usr/bin/false
+      // and nothing else. Linux confinement cannot express that one exec
+      // without also allowing fork, which is the hole the Plan jail exists
+      // to close, so Linux keeps fork denied and the probe fails closed.
+      // OpenCode 1.x and Code mode are unchanged.
+      const betaGitStandin = runtime === "beta" && jailDeniesProcess && platform === "darwin";
       if (betaGitStandin) {
         const standinBin = prepareGitStandinDirectory(profile);
         const existingPath = profile.environment.PATH;

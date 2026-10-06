@@ -716,6 +716,37 @@ describe("OpenCodeProcessPort", () => {
     expect(execRules).toEqual(['(allow process-exec (literal "/usr/bin/false"))']);
   });
 
+  it("keeps fork and exec denied for a 2.x Chat launch on Linux", async () => {
+    const fixture = probeWrapper("v2-ready");
+    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    const confinement: SeatbeltConfinementPort = {
+      prepare: (input) => {
+        captured = input;
+        return { command: input.executable, args: input.args };
+      },
+    };
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "linux",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "chat",
+          executionPolicy: "plan",
+        }),
+      ),
+    );
+    expect(observed.runtime).toBe("beta");
+    expect(captured?.allowProcessFork).toBe(false);
+    expect(captured?.allowProcessExec).toBe(false);
+    const rules = captured?.extraRules ?? [];
+    expect(rules.some((rule) => rule.includes("process-exec"))).toBe(false);
+  });
+
   it("denies fork and exec for a 1.x Chat or Plan launch without the stand-in", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
     let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
