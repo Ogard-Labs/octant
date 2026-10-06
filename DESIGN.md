@@ -394,7 +394,10 @@ provider mark, the title, a time, and a one-line mono step; it says "Nothing is
 running right now." when empty. The host keeps no turn start time on the board
 or in navigation, so a thread's time says "Active 4m ago" and only an agent run
 says "Running 12m"; a fact the host does not report is left out rather than
-invented. Under the Vivid style the tiles'
+invented. **Pull requests** lists up to six rows on a Code start screen, in
+Waiting on your review and Yours. Each row is the title, a short repository
+and number, and the words for checks and review — never colour alone. It is
+absent when that read is not allowed. Under the Vivid style the tiles'
 icon squares take the blue, orange, and purple palette hues. Code's five prompt
 suggestions are one compact row of label-only chips under the cards, and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
