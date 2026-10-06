@@ -1,4 +1,5 @@
 import {
+  TURN_METRICS_AGGREGATE_TYPE,
   decodeChatThread,
   decodeContextSubjectRef,
   type OctantMode,
@@ -314,6 +315,7 @@ function collectOwnedAggregates(
   };
   add(THREAD_AGGREGATE_BY_MODE[mode], threadId);
   add("native-harness-session", threadId);
+  add(TURN_METRICS_AGGREGATE_TYPE, threadId);
   for (const match of aggregatesMatching(connection, THREAD_OWNERSHIP_PATHS, threadId)) {
     add(match.aggregateType, match.aggregateId);
   }

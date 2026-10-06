@@ -35,6 +35,7 @@ import {
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId, type ProviderToolDefinition } from "./providers";
 import { ThreadPlanStepId } from "./threadPlan";
+import { SessionMetrics, TurnMetrics, TurnUsage } from "./turnMetrics";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -782,14 +783,7 @@ export const NativeHarnessTurnStopReason = Schema.Literal(
 export type NativeHarnessTurnStopReason = typeof NativeHarnessTurnStopReason.Type;
 
 /** Only what the provider reported. Octant holds no price list. */
-export const NativeHarnessTurnUsage = Schema.Struct({
-  inputTokens: NonNegativeInt,
-  outputTokens: NonNegativeInt,
-  reasoningTokens: Schema.optional(NonNegativeInt),
-  cacheReadInputTokens: Schema.optional(NonNegativeInt),
-  cacheWriteInputTokens: Schema.optional(NonNegativeInt),
-  costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
-}).annotations(strict);
+export const NativeHarnessTurnUsage = TurnUsage;
 export type NativeHarnessTurnUsage = typeof NativeHarnessTurnUsage.Type;
 
 export const MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN = 64;
@@ -822,6 +816,8 @@ export const NativeHarnessTurnRecord = Schema.Struct({
   ),
   stopReason: NativeHarnessTurnStopReason,
   usage: NativeHarnessTurnUsage,
+  /** How fast the turn ran. Absent on a turn recorded before timing was kept. */
+  metrics: Schema.optional(TurnMetrics),
   startedAt: UtcTimestamp,
   endedAt: UtcTimestamp,
 })
@@ -1251,6 +1247,8 @@ export const NativeHarnessSession = Schema.Struct({
   cutovers: NonNegativeInt,
   /** Totals over every turn, kept even after the view's turn list has scrolled old ones out. */
   usage: Schema.optional(NativeHarnessTurnUsage),
+  /** Timing over every measured turn, folded from the journal like `usage`. */
+  metrics: Schema.optional(SessionMetrics),
   startedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
   version: AggregateVersion,

@@ -377,7 +377,7 @@ describe("OpenCode driver", () => {
       ),
     ).toMatchObject([
       {
-        inputTokens: 12,
+        inputTokens: 15,
         outputTokens: 7,
         reasoningTokens: 3,
         cacheReadInputTokens: 2,
@@ -385,7 +385,7 @@ describe("OpenCode driver", () => {
         costUsd: 0.25,
       },
       {
-        inputTokens: 42,
+        inputTokens: 51,
         outputTokens: 18,
         reasoningTokens: 8,
         cacheReadInputTokens: 6,
