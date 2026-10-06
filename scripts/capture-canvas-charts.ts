@@ -105,27 +105,41 @@ const written: string[] = [];
 let exitCode = 1;
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 
+/**
+ * The two surfaces a Canvas is drawn on: a thread draws it across the column,
+ * and a sidebar panel draws it narrow. Both must lay out their metrics and bar
+ * lists, so each scenario is captured at both widths.
+ */
+const WIDTHS: ReadonlyArray<{ readonly suffix: string; readonly width: number }> = [
+  { suffix: "", width: 1100 },
+  { suffix: "-sidebar", width: 460 },
+];
+
 try {
   await waitForServer(harnessUrl, 30_000);
   browser = await chromium.launch({ executablePath: executable, headless: true });
-  const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } });
-  page.setDefaultTimeout(15_000);
-  await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(
-    "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list",
-  );
   await Bun.$`mkdir -p ${evidenceDir}`.quiet();
 
-  for (const scenario of SCENARIOS) {
-    await page.emulateMedia({ forcedColors: scenario === "forced" ? "active" : "none" });
-    await page.evaluate((value: Scenario) => {
-      window.__applyChartTheme?.(value === "forced" ? "default-light" : value);
-    }, scenario);
-    // Let fonts and any layout settle before the capture.
-    await page.waitForTimeout(150);
-    const path = join(evidenceDir, `canvas-charts-${scenario}.png`);
-    await page.screenshot({ path, fullPage: true });
-    written.push(path);
+  for (const { suffix, width } of WIDTHS) {
+    const page = await browser.newPage({ viewport: { width, height: 1400 } });
+    page.setDefaultTimeout(15_000);
+    await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(
+      "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list",
+    );
+
+    for (const scenario of SCENARIOS) {
+      await page.emulateMedia({ forcedColors: scenario === "forced" ? "active" : "none" });
+      await page.evaluate((value: Scenario) => {
+        window.__applyChartTheme?.(value === "forced" ? "default-light" : value);
+      }, scenario);
+      // Let fonts and any layout settle before the capture.
+      await page.waitForTimeout(150);
+      const path = join(evidenceDir, `canvas-charts-${scenario}${suffix}.png`);
+      await page.screenshot({ path, fullPage: true });
+      written.push(path);
+    }
+    await page.close();
   }
   exitCode = 0;
 } finally {
