@@ -391,11 +391,12 @@ popover at most 340px wide: one row per card with a drag grip, the icon, the
 title, up and down icon buttons, and a switch, then **Reset to default**; a
 dragged row marks its drop target with a hairline above it. **Working now**
 lists up to five rows of threads and agent runs in progress, each with the
-provider mark, the title, a time, and a one-line mono step; it says "Nothing is
-running right now." when empty. The host keeps no turn start time on the board
-or in navigation, so a thread's time says "Active 4m ago" and only an agent run
-says "Running 12m"; a fact the host does not report is left out rather than
-invented. Under the Vivid style the tiles'
+provider mark, the title, a time, and a one-line step; it says "Nothing is
+running right now." when empty. A running tool is shown in mono
+(`Command: bun run test`); a turn waiting on the person is plain prose. A turn's
+time says "Running 12m" from the start time the host reports, and "Active 4m
+ago" only for a host that reports none; a fact the host does not report is left
+out rather than invented. Under the Vivid style the tiles'
 icon squares take the blue, orange, and purple palette hues. Code's five prompt
 suggestions are one compact row of label-only chips under the cards, and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline

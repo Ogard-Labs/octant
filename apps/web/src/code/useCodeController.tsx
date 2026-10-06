@@ -36,6 +36,7 @@ import {
   type ProviderExecutionPolicy,
   type ProviderUsageLimit,
   ThreadBoardPullRequestSummaries,
+  type ThreadLiveStep,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
@@ -124,6 +125,9 @@ export interface CodeThreadNavigationItem {
   /** Exact linked pull requests joined by the host; absent when it has none. */
   readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
   readonly executing?: boolean;
+  /** When the running turn began and its latest step; absent outside a live turn. */
+  readonly turnStartedAt?: string;
+  readonly liveStep?: ThreadLiveStep;
   readonly executionPolicy: CodeThread["executionPolicy"];
   readonly lifecycle: CodeThread["lifecycle"];
   readonly projectId: CodeThread["projectId"];
@@ -1388,11 +1392,15 @@ export function useCodeController(options: CodeControllerOptions) {
           readonly label: string;
         };
         readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
+        readonly turnStartedAt?: string;
+        readonly liveStep?: ThreadLiveStep;
       }
     >();
     for (const entry of bootstrap?.runtime ?? []) {
       byThread.set(String(entry.threadId), {
         executing: entry.executing,
+        ...(entry.turnStartedAt === undefined ? {} : { turnStartedAt: entry.turnStartedAt }),
+        ...(entry.liveStep === undefined ? {} : { liveStep: entry.liveStep }),
         ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
         ...(entry.pullRequestSummaries === undefined
           ? {}
@@ -1428,6 +1436,10 @@ export function useCodeController(options: CodeControllerOptions) {
               (activityByThread.get(String(thread.id)) ?? 0) >
                 (readCursors.get(String(thread.id)) ?? 0),
             ...(runtime?.executing === true ? { executing: true } : {}),
+            ...(runtime?.turnStartedAt === undefined
+              ? {}
+              : { turnStartedAt: runtime.turnStartedAt }),
+            ...(runtime?.liveStep === undefined ? {} : { liveStep: runtime.liveStep }),
             ...(runtime?.checkoutChip === undefined ? {} : { checkoutChip: runtime.checkoutChip }),
             ...(runtime?.pullRequestSummaries === undefined
               ? {}

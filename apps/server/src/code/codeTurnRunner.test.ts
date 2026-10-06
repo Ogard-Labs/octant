@@ -1366,6 +1366,50 @@ describe("CodeTurnRunner", () => {
         reasoningTokens: 10,
       });
 
+    it("tells the live-turn tracker only what survived sanitization, and ends it with the turn", async () => {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.make(
+            event({
+              kind: "tool-start",
+              toolCallId: "call-1",
+              toolName: "Command",
+              argument: "deploy --key hunter2-live",
+            }),
+            event({ kind: "completed", occurredAt: at(8_000) }),
+          ),
+        ),
+      });
+      const seen: string[] = [];
+
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              clock: scriptedClock([0, 500, 8_000, 8_000]),
+              sanitizeProviderEvent: ({ event: providerEvent }) =>
+                Effect.succeed(
+                  JSON.parse(
+                    JSON.stringify(providerEvent).replaceAll("hunter2-live", "[REDACTED]"),
+                  ) as ProviderRuntimeEvent,
+                ),
+              liveTurn: {
+                begin: (startedAt) => seen.push(`begin ${startedAt}`),
+                observe: (observed) => seen.push(JSON.stringify(observed)),
+                end: () => seen.push("end"),
+              },
+            }),
+          ),
+        ),
+      );
+
+      expect(seen[0]).toBe(`begin ${at(0)}`);
+      expect(seen.at(-1)).toBe("end");
+      expect(seen.join("\n")).toContain("deploy --key [REDACTED]");
+      expect(seen.join("\n")).not.toContain("hunter2-live");
+    });
+
     it("hands a completed turn's full usage, real start and speed to the observer", async () => {
       const connection = fakeConnection({
         subscribe: Effect.succeed(
