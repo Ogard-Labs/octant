@@ -1309,6 +1309,42 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("foundry-secret");
   });
 
+  it.each([
+    ["OpenAI-compatible", httpProvider(), "model-a"],
+    ["Anthropic-compatible", anthropicProvider(), "claude-3-5-sonnet"],
+    ["Azure AI Foundry", foundryProvider(), "deployment-a"],
+  ] as const)(
+    "verifies tools for a configured model of an %s provider on request",
+    async (_label, instance, modelId) => {
+      const user = userEvent.setup();
+      const props = fixture({ instance, observed: observation() });
+      renderExpanded(<ProviderSettingsView {...props} />);
+
+      const card = screen.getByLabelText(instance.displayName);
+      await user.click(within(card).getByRole("button", { name: "Connection details" }));
+      expect(within(card).getByText(/Chat only until you verify/)).toBeVisible();
+      await user.click(within(card).getByRole("button", { name: `Verify tools for ${modelId}` }));
+
+      expect(props.onVerifyModelTools).toHaveBeenCalledWith(id, modelId);
+    },
+  );
+
+  it("says which models are verified for tools and keeps the endpoint's other models Chat only", async () => {
+    const user = userEvent.setup();
+    const props = fixture({
+      instance: httpProvider(),
+      observed: observation({ verifiedToolModelIds: ["model-a" as never] }),
+    });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    const card = screen.getByLabelText("Private gateway");
+    await user.click(within(card).getByRole("button", { name: "Connection details" }));
+    expect(within(card).getByText("Verified (1 model)")).toBeVisible();
+    expect(
+      within(card).getByRole("button", { name: "Verify tools for model-a (verified)" }),
+    ).toBeVisible();
+  });
+
   it("saves Azure AI Foundry configuration changes for an existing provider", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: foundryProvider() });
@@ -2780,7 +2816,7 @@ function ControllerBackedProviderSettings(props: {
       onPermissionPersistenceChange={controller.updatePermissionPersistence}
       onProbe={controller.probe}
       onProviderOrderChange={controller.updateProviderOrder}
-      onVerifyFoundryTools={controller.verifyFoundryTools}
+      onVerifyModelTools={controller.verifyModelTools}
       onProviderCredentialStatus={controller.providerCredentialStatus}
       onRemove={controller.remove}
       onRename={controller.rename}
@@ -3014,7 +3050,7 @@ function fixture(
     onModelDataTagsChange: vi.fn(async () => true),
     onRemove: vi.fn(async () => true),
     onProbe: vi.fn(async () => true),
-    onVerifyFoundryTools: vi.fn(async () => true),
+    onVerifyModelTools: vi.fn(async () => "supported" as const),
     onPermissionPersistenceChange: vi.fn(async () => true),
     onProviderOrderChange: vi.fn(async () => true),
     onAgentEligibleModelsChange: vi.fn(async () => true),

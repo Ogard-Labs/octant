@@ -238,3 +238,66 @@ describe("NativeHarnessRoutingPanel slot rows", () => {
     });
   });
 });
+
+describe("NativeHarnessRoutingPanel tool verification", () => {
+  const hostId = "00000000-0000-0000-0000-000000000001";
+  const chosen: NativeHarnessRoutingSettings = {
+    ...settings,
+    configuration: {
+      slots: [
+        {
+          id: "default" as never,
+          candidates: [
+            {
+              hostId: hostId as never,
+              providerInstanceId: "endpoint-1" as never,
+              modelId: "model-a" as never,
+            },
+          ],
+        },
+      ],
+      jobSlots: [],
+    },
+  };
+  const providersWith = (toolsReady: boolean) => [
+    {
+      instanceId: "endpoint-1",
+      label: "Local endpoint",
+      models: [{ id: "model-a", label: "Model A", toolsReady }],
+    },
+  ];
+
+  it("says a chosen model is Chat only and verifies its tools from the row", async () => {
+    const user = userEvent.setup();
+    const onVerifyTools = vi.fn(async () => "unsupported" as const);
+    render(
+      <NativeHarnessRoutingPanel
+        client={{ routing: vi.fn(async () => chosen), updateRouting: vi.fn() }}
+        hostId={hostId}
+        onVerifyTools={onVerifyTools}
+        providers={providersWith(false)}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Chat only: tools not verified.")).toBeVisible());
+    await user.click(screen.getByRole("button", { name: "Verify tools for Main model, model 1" }));
+
+    expect(onVerifyTools).toHaveBeenCalledWith("endpoint-1", "model-a");
+    expect(await screen.findByText(/did not call the test tool/)).toBeVisible();
+  });
+
+  it("shows nothing about tools for a model Octant already sends tools to", async () => {
+    render(
+      <NativeHarnessRoutingPanel
+        client={{ routing: vi.fn(async () => chosen), updateRouting: vi.fn() }}
+        hostId={hostId}
+        onVerifyTools={vi.fn()}
+        providers={providersWith(true)}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Jobs")).toBeVisible());
+    expect(screen.queryByText("Chat only: tools not verified.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Verify tools/ })).not.toBeInTheDocument();
+  });
+});
