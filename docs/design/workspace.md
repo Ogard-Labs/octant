@@ -168,6 +168,28 @@ start and step ride on the same navigation rows as the executing flag (see
 reads), so a remote window sees them for exactly the threads it can already
 list.
 
+Above the composer the same screens carry two tabs on its top-left edge,
+**New task** and **Running**. New task is selected first and is the composer as
+it was: the Running tab never takes the focus the composer takes on arrival. The
+Running label carries the sidebar's own Running count for the current mode, read
+from the same place as the tile (nothing is added at zero), so the two cannot
+disagree; the list can run longer by an agent run whose thread is resting, which
+the sidebar does not count either. The tabs are a tablist: Arrow keys move
+between them, Enter or Space chooses, and Tab goes on to the composer. Choosing
+Running hides the composer without unmounting it, so the draft, the chosen
+Project, model, and attachments are all there when New task comes back; the list
+mounts, and reads, only while it is open. It shows the Working now rows
+without the five-row limit, compact, each with **Open** (the thread, as a Working
+now row does) and **Stop**. A start screen has no thread open, and the
+navigation rows carry no turn or attempt identity, so Stop first reads the
+thread's running turn and then sends the command its mode already uses for the
+Stop control inside the thread (interrupt a Chat attempt, cancel a Work turn,
+cancel a Code provider turn, or cancel an agent run for a row that is only a
+run). It asks first, in the row: "Stop this turn?" with **Stop** and **Keep
+running**, the safe answer holding the focus. A turn that finished meanwhile is
+reported ("Already finished.") and never cancelled twice, and a host refusal
+shows in the row in the host's words. The tabs and list add no persisted state or authority.
+
 ## Tool lifecycles
 
 Thread utilities live in the Right Utility Dock outside the split tree.

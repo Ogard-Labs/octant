@@ -3381,6 +3381,35 @@ describe("App", () => {
     ).toBeVisible();
   });
 
+  it("shows the sidebar's own Running count on the start screen's Running tab and lists that thread there", async () => {
+    const user = userEvent.setup();
+    const codeApi = codes();
+    const listed = await codeApi.navigation();
+    vi.mocked(codeApi.navigation).mockResolvedValue({
+      ...listed,
+      runtime: [{ threadId: codeThreadId, executing: true }],
+    } as never);
+    render(
+      <App
+        codeClient={codeApi}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects({ ...projectBootstrap(), availability: [] })}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "New task" }));
+    const tile = await screen.findByRole("button", { name: "Running, 1" });
+    const tab = await screen.findByRole("tab", { name: "Running 1" });
+    expect(tile).toBeVisible();
+
+    await user.click(tab);
+    const list = await screen.findByRole("list", { name: "Running now" });
+    expect(within(list).getByText("Controller foundation")).toBeVisible();
+  });
+
   it("keeps the threads to continue on screen when a new task starts over", async () => {
     const user = userEvent.setup();
     const codeApi = codes();

@@ -84,6 +84,7 @@ import { HostSelector } from "./HostSelector";
 import { HomeStart, type HomeAction } from "./HomeStart";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { HomeDashboard } from "../home/HomeDashboard";
+import type { HomeComposerTabsSlot } from "../home/HomeComposerTabs";
 import type { HomeCardDefinition } from "../home/homeCards";
 import type { OctantHostBridge } from "./hostBridge";
 import { WorkKindSwitch } from "./WorkKindSwitch";
@@ -218,6 +219,8 @@ export interface DraftThreadWorkspaceProps {
     readonly cards?: ReadonlyArray<HomeCardDefinition>;
     readonly cardCustomization: HomeCardCustomization;
     readonly onCardCustomizationChange: (next: HomeCardCustomization) => void;
+    /** The Running tab above the composer; absent leaves the composer on its own. */
+    readonly composerTabs?: HomeComposerTabsSlot;
     /** Code only: a shell at the selected Project's root. Work has no shell. */
     readonly onOpenTerminal?: (projectId: ProjectId) => void;
   };
@@ -741,6 +744,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           runningCount={props.homeStart?.runningCount}
           suggestions={CODE_SUGGESTIONS}
           {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
+          {...(props.homeStart?.composerTabs === undefined
+            ? {}
+            : { composerTabs: props.homeStart.composerTabs })}
           {...(beneath === undefined ? {} : { beneath })}
           {...(promptRequest === undefined ? {} : { promptRequest })}
           {...hostSelectorBinding}
@@ -860,6 +866,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           reviewCount={props.homeStart?.reviewCount}
           runningCount={props.homeStart?.runningCount}
           {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
+          {...(props.homeStart?.composerTabs === undefined
+            ? {}
+            : { composerTabs: props.homeStart.composerTabs })}
           {...hostSelectorBinding}
           {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}

@@ -56,6 +56,15 @@ is showing another computer's work, the row names that computer. Up to five rows
 show, then **+N more** opens Running. Choose a row to open its thread. When
 nothing is running, the card says so in one line.
 
+Above the composer, two tabs sit on its top-left edge: **New task**, which is the
+composer, and **Running**, with the number of threads running now (the same
+number the sidebar's Running tile shows). Running lists every running row, not
+just five, each with **Open** and **Stop**. Stop asks "Stop this turn?" first;
+choose **Stop** to end it or **Keep running** to leave it. Switching tabs never
+loses what you were typing: the draft, Project, and model are kept while you
+look. The tabs work from the keyboard: arrow keys move between them, and Enter
+chooses.
+
 **Customize**, on the right under the composer, turns each card on or off and
 reorders them: drag a card by its handle, or use the up and down buttons from the
 keyboard. **Reset to default** puts them back. Your choices are kept on this
