@@ -1045,3 +1045,91 @@ describe("a managed child's Canvas tool", () => {
     expect(create).not.toHaveBeenCalled();
   });
 });
+
+describe("Canvas preview through the tool", () => {
+  const previewCanvasId = "77777777-7777-4777-8777-777777777777";
+
+  function previewPort(
+    imagesInToolResults: (input: unknown) => boolean,
+    preview: (request: { readonly imagesInToolResults: boolean }) => unknown,
+  ) {
+    return tools({
+      imagesInToolResults: vi.fn(imagesInToolResults),
+      preview: { preview: vi.fn(async (request: unknown) => preview(request as never)) },
+    }).set;
+  }
+
+  it("reports the warnings and the reason a model that cannot take images got no picture", async () => {
+    const set = previewPort(
+      () => false,
+      (request) => ({
+        kind: "preview",
+        canvasId: previewCanvasId,
+        sequence: 1,
+        width: 380,
+        height: 360,
+        warnings: [{ kind: "empty-series", blockId: "revenue" }],
+        ...(request.imagesInToolResults
+          ? {}
+          : { imageOmitted: "provider-cannot-take-images" as const }),
+      }),
+    );
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "preview",
+        canvasId: previewCanvasId,
+        width: "inline",
+      }),
+    });
+    expect(outcome.isError).not.toBe(true);
+    expect(outcome.images).toBeUndefined();
+    expect(outcome.result).toMatchObject({
+      canvasId: previewCanvasId,
+      warnings: [{ kind: "empty-series", blockId: "revenue" }],
+      imagesInToolResults: false,
+      imageIncluded: false,
+      imageOmitted: "provider-cannot-take-images",
+    });
+  });
+
+  it("attaches the picture to a model that takes images in a tool result", async () => {
+    const set = previewPort(
+      () => true,
+      () => ({
+        kind: "preview",
+        canvasId: previewCanvasId,
+        sequence: 1,
+        width: 720,
+        height: 360,
+        warnings: [],
+        image: { mimeType: "image/png" as const, data: "AAAA" },
+      }),
+    );
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "preview", canvasId: previewCanvasId }),
+    });
+    expect(outcome.isError).not.toBe(true);
+    expect(outcome.images).toEqual([{ mimeType: "image/png", data: "AAAA" }]);
+    expect(outcome.result).toMatchObject({
+      imagesInToolResults: true,
+      imageIncluded: true,
+    });
+  });
+
+  it("refuses a preview that names no Canvas", async () => {
+    const set = previewPort(
+      () => true,
+      () => ({ kind: "unavailable", message: "unused" }),
+    );
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "preview" }),
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.result).toEqual({
+      error: "A preview needs the canvasId of the Canvas to look at.",
+    });
+  });
+});

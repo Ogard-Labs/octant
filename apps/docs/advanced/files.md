@@ -130,6 +130,37 @@ on those there. Sequence and state diagrams can be shown inline. If a Canvas gro
 past that, later or through your own edits, it turns back into a card. The
 agent is told when that happens.
 
+### The agent looks at a Canvas before it replies
+
+After building a chart, a treemap, or a small inline Canvas, the agent can look
+at the shipped drawing before it writes back, using the read-only `preview`
+operation:
+
+```json
+{ "operation": "preview", "canvasId": "…", "width": "inline", "theme": "light" }
+```
+
+`width` is `inline`, `sidebar`, or a number of pixels from 320 to 1200, and
+`theme` is `light` or `dark`; both default to `sidebar` and `light`. The agent
+can name a `version` sequence to look at an earlier version instead of the
+current one. Preview returns the picture the thread will draw and a list of
+layout warnings: a label too long for its slot, a legend that overflows its row,
+a chart with an empty series, an inline document past its height cap, and text
+or marks below their contrast target. The agent fixes what the warnings name
+with a revision, then replies.
+
+Preview is bounded so a loop cannot spend your machine or the model's attention
+on the same page: one preview runs at a time per thread, and only a few are
+allowed per minute.
+
+Preview needs a browser to draw. Octant uses a Chromium that is already on your
+Mac — Google Chrome, Chromium, or Microsoft Edge — and never a second browser of
+its own. The signed app does not bundle a browser, so on a Mac with none of
+those installed, `preview` still returns the layout warnings but no picture, and
+says so. Some models cannot take a picture in a tool result; for those the
+warnings alone come back, and the result says the model could not be shown an
+image.
+
 ### Diagrams as boards
 
 A diagram block opens as a board. Zoom with the `+` and `−` controls, `⌘`/`Ctrl`

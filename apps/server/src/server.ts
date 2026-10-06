@@ -791,6 +791,8 @@ import {
   createChildCanvasAgentTools,
   type CanvasAgentToolPort,
 } from "./canvas/canvasAgentTools";
+import { createCanvasPreviewService } from "./canvas/canvasPreviewService";
+import { createPlaywrightCanvasPreviewRenderer } from "./canvas/canvasPreviewRenderer";
 import { loadChildCanvasWorkspace } from "./canvas/childCanvasWorkspace";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "./providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "./providers/appManagedToolTaint";
@@ -8697,6 +8699,16 @@ export function startOctantServer(
           : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
       },
       canvas: canvasService,
+      preview: createCanvasPreviewService({
+        canvas: canvasService,
+        renderer: createPlaywrightCanvasPreviewRenderer(),
+      }),
+      imagesInToolResults: ({ providerInstanceId, modelId }) => {
+        const model = providerRuntimeRegistry
+          .observedState(providerInstanceId)
+          ?.models.find((candidate) => String(candidate.id) === String(modelId));
+        return model?.inputModalities.includes("image") === true;
+      },
       uuid: randomUUID,
       hostId: LOCAL_HOST_ID,
       resolveWorkspace: resolveCanvasWorkspace,

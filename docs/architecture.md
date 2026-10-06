@@ -282,6 +282,26 @@ with no `diagram`, `plan` or `mockup`. When an author asks for `inline` over
 that bound, the host records `sidebar` and returns the reason as
 `presentationNote`.
 A revise without a choice keeps the current presentation.
+`preview` returns a picture and a layout reading of one shipped version. Its
+input is the `canvasId`, an optional `version` (a sequence), a `width`
+(`inline`, `sidebar`, or 320–1200 px) and a `theme` (`light` or `dark`). The
+layout warnings are computed from the document and the target width alone and
+are typed values — a clipped label, a legend over its row, an empty series, an
+inline document past the block cap, and ink below its contrast target — so a
+build reports them whether or not a browser rendered the picture. The picture is
+rasterised by the host's own headless Chromium, found through the same
+executable list the browser runtime and the Canvas browser smokes use, from a
+page the host builds out of its own renderer: no script, no remote reference,
+and every request aborted, so the network is off. The operation is bounded: one
+preview in flight per thread, a small allowance per minute, and an image no
+wider than 1,600 px. When no Chromium is present, or the model driving the turn
+does not accept images in a tool result, the warnings still return and the
+result says which was missing; the capability is reported per provider from the
+model's own input modalities.
+The signed desktop app bundles the `playwright-core` driver but no browser
+binary, so it resolves Chromium from the host's installed browsers. On a host
+with none, `preview` is warnings-only; that gap is named in the release notes
+rather than hidden.
 A thread reference card reports the effective presentation and the first
 version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
 revision or a person's edit, is listed as `sidebar`.
