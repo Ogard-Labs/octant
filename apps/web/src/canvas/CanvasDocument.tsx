@@ -85,6 +85,7 @@ export function CanvasDocument({
               block={block}
               {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
               {...(planRuntime === undefined ? {} : { planRuntime })}
+              {...(actionRuntime === undefined ? {} : { actionRuntime })}
             />
             {comments === undefined ? null : (
               <CommentMarker

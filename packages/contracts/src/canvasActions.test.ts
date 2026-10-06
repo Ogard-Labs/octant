@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CANVAS_SCHEMA_VERSION } from "./canvas";
 import {
   CANVAS_ACTION_MAX_FILTERS,
   CANVAS_ACTION_MAX_SELECTION_REFS,
@@ -165,7 +166,7 @@ describe("Canvas action block contract", () => {
     expect(() =>
       decodeCanvasActionBlock({
         ...actionBlock({ command: "canvas.request-refresh" }),
-        schemaVersion: 4,
+        schemaVersion: CANVAS_SCHEMA_VERSION + 1,
       }),
     ).toThrow();
   });

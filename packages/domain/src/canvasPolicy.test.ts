@@ -10,6 +10,7 @@ import {
   CANVAS_MAX_SERIES,
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
+  CANVAS_MAX_TREEMAP_DEPTH,
   CANVAS_SCHEMA_VERSION,
   decodeCanvasDefinition,
   type CanvasDefinition,
@@ -198,7 +199,7 @@ describe("Canvas validation policy", () => {
 
   it("fails closed for unknown schema versions", () => {
     expectPolicyCode(
-      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 4 }),
+      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 5 }),
       "unsupported-schema-version",
     );
     expectPolicyCode(
@@ -658,6 +659,226 @@ describe("mockup limits", () => {
           ]),
         ),
       "mockup-text-budget-exceeded",
+    );
+  });
+});
+
+function treemap(overrides: Record<string, unknown> = {}) {
+  return {
+    blockId: "repository-map",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "treemap" as const,
+    measures: [
+      { measureId: "loc", label: "Lines of code" },
+      { measureId: "edits", label: "Edits" },
+    ],
+    sizeBy: "loc",
+    colorBy: "edits",
+    colorScale: "sequential" as const,
+    nodes: [
+      { nodeId: "root", label: "Repository" },
+      { nodeId: "web", label: "web", parentId: "root", values: { loc: 210, edits: 12 } },
+      { nodeId: "server", label: "server", parentId: "root", values: { loc: 96, edits: 7 } },
+    ],
+    ...overrides,
+  };
+}
+
+describe("treemap validation", () => {
+  it("accepts a hierarchy whose leaves carry every measure", () => {
+    expect(() => validateCanvasDefinition(withBlocks([treemap()]))).not.toThrow();
+  });
+
+  it("rejects a hierarchy with more than one root", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                { nodeId: "web", label: "web", parentId: "root", values: { loc: 1, edits: 1 } },
+                { nodeId: "orphan", label: "orphan", values: { loc: 1, edits: 1 } },
+              ],
+            }),
+          ]),
+        ),
+      "treemap-roots",
+    );
+  });
+
+  it("rejects a hierarchy that nests a node inside itself", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                { nodeId: "web", label: "web", parentId: "root" },
+                { nodeId: "left", label: "left", parentId: "right", values: { loc: 1, edits: 1 } },
+                { nodeId: "right", label: "right", parentId: "left", values: { loc: 1, edits: 1 } },
+              ],
+            }),
+          ]),
+        ),
+      "treemap-nesting-cycle",
+    );
+  });
+
+  it("rejects a node whose parent the hierarchy does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                { nodeId: "web", label: "web", parentId: "missing", values: { loc: 1, edits: 1 } },
+              ],
+            }),
+          ]),
+        ),
+      "dangling-treemap-parent",
+    );
+  });
+
+  it("rejects a hierarchy nested deeper than the depth limit", () => {
+    const nodes: Array<Record<string, unknown>> = [{ nodeId: "n0", label: "n0" }];
+    for (let index = 1; index <= CANVAS_MAX_TREEMAP_DEPTH; index += 1) {
+      const id = `n${String(index)}`;
+      const parent = `n${String(index - 1)}`;
+      nodes.push(
+        index === CANVAS_MAX_TREEMAP_DEPTH
+          ? { nodeId: id, label: id, parentId: parent, values: { loc: 1, edits: 1 } }
+          : { nodeId: id, label: id, parentId: parent },
+      );
+    }
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([treemap({ nodes })])),
+      "depth-budget-exceeded",
+    );
+  });
+
+  it("rejects two measures that share an id", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              measures: [
+                { measureId: "loc", label: "Lines" },
+                { measureId: "loc", label: "Other" },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-measure-id",
+    );
+  });
+
+  it("rejects sizing by a measure the hierarchy does not declare", () => {
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([treemap({ sizeBy: "missing" })])),
+      "unknown-treemap-measure",
+    );
+  });
+
+  it("rejects a value placed on a group that sums its children", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository", values: { loc: 5, edits: 1 } },
+                { nodeId: "web", label: "web", parentId: "root", values: { loc: 1, edits: 1 } },
+                {
+                  nodeId: "server",
+                  label: "server",
+                  parentId: "root",
+                  values: { loc: 1, edits: 1 },
+                },
+              ],
+            }),
+          ]),
+        ),
+      "treemap-value-placement",
+    );
+  });
+
+  it("rejects a leaf that carries no value", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                { nodeId: "web", label: "web", parentId: "root" },
+                {
+                  nodeId: "server",
+                  label: "server",
+                  parentId: "root",
+                  values: { loc: 1, edits: 1 },
+                },
+              ],
+            }),
+          ]),
+        ),
+      "treemap-value-placement",
+    );
+  });
+
+  it("rejects a value that is negative", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                { nodeId: "web", label: "web", parentId: "root", values: { loc: -1, edits: 1 } },
+                {
+                  nodeId: "server",
+                  label: "server",
+                  parentId: "root",
+                  values: { loc: 1, edits: 1 },
+                },
+              ],
+            }),
+          ]),
+        ),
+      "treemap-negative-value",
+    );
+  });
+
+  it("rejects a leaf that names a file the manifest does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                {
+                  nodeId: "web",
+                  label: "web",
+                  parentId: "root",
+                  sourceId: "99999999-9999-4999-8999-999999999999",
+                  values: { loc: 1, edits: 1 },
+                },
+                {
+                  nodeId: "server",
+                  label: "server",
+                  parentId: "root",
+                  values: { loc: 1, edits: 1 },
+                },
+              ],
+            }),
+          ]),
+        ),
+      "missing-source",
     );
   });
 });

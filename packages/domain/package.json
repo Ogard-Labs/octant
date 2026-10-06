@@ -26,6 +26,7 @@
     "./automation-notification-policy": "./src/automationNotificationPolicy.ts",
     "./mobile-hardening-policy": "./src/mobileHardeningPolicy.ts",
     "./canvas-policy": "./src/canvasPolicy.ts",
+    "./canvas-treemap-layout": "./src/canvasTreemapLayout.ts",
     "./canvas-number-format": "./src/canvasNumberFormat.ts",
     "./canvas-action-policy": "./src/canvasActionPolicy.ts",
     "./canvas-action-availability-policy": "./src/canvasActionAvailabilityPolicy.ts",

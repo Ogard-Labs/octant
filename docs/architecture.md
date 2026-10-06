@@ -280,6 +280,20 @@ categories across series; a bar-and-line series names itself as a bar or a line.
 The accessible table lists every reading. A pie or donut legend toggles at most
 24 slices; the rest stay in the picture and the table. A shared snapshot keeps
 the chart and drops no series mark.
+A treemap is a hierarchy drawn as squarified rectangles: nodes name a parent,
+one root, values sit on leaves, and a group's reading is the sum of its
+children. A leaf carries a value for every declared measure and may name a
+manifest source, which offers Open file through the allowlisted open-source
+action; the host reauthorizes it. The pure, deterministic layout lives in
+`packages/domain`, so the screen, the artifact preview SVG, and the Markdown and
+HTML export all draw the same rectangles. The person switches the size and
+colour measures and zooms into a group (click, breadcrumb, Escape, right-click,
+or Enter on a keyboard-selected cell); these are view state and are never
+journaled. The domain policy refuses a second root, a cycle, a dangling parent,
+a group that carries its own value or a leaf that does not, a value that is
+negative, a measure that is not declared, and a hierarchy past the depth, node,
+measure, or label budget. The accessible fallback is a hierarchical table
+sortable by each measure.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -1697,8 +1711,9 @@ never reported as a failed export. PDF and PNG are named formats the seam can ca
 not render them. A target that passed activation is still reported honestly as
 `not-connected`, `ready`, or `refused`. The rendered Markdown, HTML, and the
 artifact preview SVG read numbers through the shared Canvas formatter and draw
-marks to the shared chart specifications, so an exported reading matches the
-screen rather than growing a second reading.
+marks to the shared chart specifications and the shared squarified treemap
+layout, so an exported reading matches the screen rather than growing a second
+reading.
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured
