@@ -327,14 +327,52 @@ describe("window of a provider-run thread", () => {
     expect(sum(model.segments)).toBe(100_000);
   });
 
-  it("never reports more free space than the window has left", () => {
+  it("holds reserved room to what the window has left, so the segments never add up to more than the window", () => {
     const model = providerWindowModel({
-      breakdown: { parts: [{ kind: "reserved", tokens: 50_000, accuracy: "provider-reported" }] },
+      breakdown: {
+        parts: [
+          { kind: "messages", tokens: 90_000, accuracy: "provider-reported" },
+          { kind: "reserved", tokens: 50_000, accuracy: "provider-reported" },
+        ],
+      },
       usedTokens: 90_000,
       windowTokens: 100_000,
     });
 
+    // 10,000 tokens are left after the 90,000 held; the reserve is 50,000, so
+    // only the 10,000 that exist are shown, and nothing is left free.
+    expect(model.segments.find((segment) => segment.kind === "reserved")).toMatchObject({
+      tokens: 10_000,
+      percent: 10,
+    });
+    expect(model.segments.find((segment) => segment.kind === "free")).toMatchObject({
+      tokens: 0,
+      percent: 0,
+    });
+    expect(sum(model.segments)).toBe(100_000);
+    expect(model.segments.reduce((total, segment) => total + segment.percent, 0)).toBeCloseTo(100);
+  });
+
+  it("shows no reserved room, and no free space, once the window is full", () => {
+    const model = providerWindowModel({
+      breakdown: { parts: [{ kind: "reserved", tokens: 50_000, accuracy: "provider-reported" }] },
+      usedTokens: 100_000,
+      windowTokens: 100_000,
+    });
+
+    expect(model.segments.some((segment) => segment.kind === "reserved")).toBe(false);
     expect(model.segments.find((segment) => segment.kind === "free")?.tokens).toBe(0);
+  });
+
+  it("keeps the whole reserve while it fits", () => {
+    const model = providerWindowModel({
+      breakdown: { parts: [{ kind: "reserved", tokens: 33_000, accuracy: "provider-reported" }] },
+      usedTokens: 50_000,
+      windowTokens: 1_000_000,
+    });
+
+    expect(model.segments.find((segment) => segment.kind === "reserved")?.tokens).toBe(33_000);
+    expect(model.segments.find((segment) => segment.kind === "free")?.tokens).toBe(917_000);
   });
 });
 

@@ -563,17 +563,24 @@ export function providerWindowModel(input: {
       });
     }
   }
-  if (reservedTokens > 0) {
+  // Reserved room is held out of what the window has left after what it holds.
+  // A runtime can reserve more than is left (a buffer set for a larger window,
+  // a window that is nearly full), and the part that does not fit is not in the
+  // window: showing it would make the segments and shares add up to more than
+  // the window. The segment is the room that exists, and free space is the rest.
+  const roomLeft = Math.max(0, windowTokens - usedTokens);
+  const heldReservedTokens = Math.min(reservedTokens, roomLeft);
+  if (heldReservedTokens > 0) {
     segments.push({
       key: "reserved",
       kind: "reserved",
       label: "Reserved",
-      percent: share(reservedTokens),
-      tokens: reservedTokens,
+      percent: share(heldReservedTokens),
+      tokens: heldReservedTokens,
       accuracy: "provider-reported",
     });
   }
-  const freeTokens = Math.max(0, windowTokens - usedTokens - reservedTokens);
+  const freeTokens = roomLeft - heldReservedTokens;
   segments.push({
     key: "free",
     kind: "free",
