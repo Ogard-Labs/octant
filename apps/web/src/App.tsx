@@ -213,6 +213,7 @@ import {
   clearLaunchTokenFragment,
   isProjectWindowCapability,
   launchFromLocation,
+  tabLaunchMemory,
   type ShellLaunch,
 } from "./shell/shellLaunch";
 import {
@@ -489,7 +490,9 @@ const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 const NO_VOICE_SETTINGS: VoiceSettings = {};
 
 export function App(props: AppProps) {
-  const [locationLaunch] = useState(() => launchFromLocation(window.location.href));
+  const [locationLaunch] = useState(() =>
+    launchFromLocation(window.location.href, tabLaunchMemory()),
+  );
   const launch =
     props.launch ?? (locationLaunch.status === "accepted" ? locationLaunch.launch : undefined);
   const initialInjectedCapability =
@@ -2552,9 +2555,8 @@ function LaunchedShell(
   );
   const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery);
   const recordFirstRunOutcome = useCallback(
-    async (outcome: FirstRunOnboardingOutcome) => {
-      await controller.updateSettings({ firstRunOnboarding: outcome });
-    },
+    (outcome: FirstRunOnboardingOutcome) =>
+      controller.updateSettings({ firstRunOnboarding: outcome }),
     [controller],
   );
   const saveUserProfile = useCallback(

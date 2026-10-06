@@ -2332,7 +2332,11 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
 - `octant web --dev` changes only the renderer: it starts Vite and attaches it
   to the canonical Machine host. Browser QA and Electron share the same store,
   Projects, threads, and live journal. Destructive tests use an explicit
-  `OCTANT_DATA_DIR`; development mode never creates an implicit profile.
+  `OCTANT_DATA_DIR`; development mode never creates an implicit profile. The
+  Vite page is not the host, so the tab remembers the `serverUrl` it was
+  launched with (per renderer origin, in tab session storage, judged again like
+  a typed address); a reload or in-tab navigation that loses the query keeps
+  its Machine instead of reading the Vite origin as one.
 - `bun run package:desktop` packages the peer Machine for the build host:
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with
