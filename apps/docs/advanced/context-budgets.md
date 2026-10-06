@@ -94,13 +94,12 @@ Opening the popover does not make a further provider or network call.
 
 Open the chevron beside the figure to see what the window holds. Each part has
 one colour wherever it appears: the popover's bar and key, and the entries in
-the context inspector. Free space and Reserved are always grey. Hues name
-families of the same kind of thing (conversation in blue, tool results in
-orange, memory in purple, tool definitions in teal, MCP in green, instructions
-in yellow, and what nothing accounts for in pink), and a darker step of the
-hue separates two parts of one family. The colour never carries the meaning
-alone: every part is named beside its swatch. The ring itself stays amber, and
-turns red when the window is nearly full.
+the context inspector. Free space and Reserved are always grey. Parts are
+listed in a fixed order and the colours are chosen so that neighbouring parts
+look clearly different in both the light and the dark theme. The colour never
+carries the meaning alone: every part is named beside its swatch, with its
+tokens and share. The ring itself stays amber, and turns red when the window is
+nearly full.
 
 What the breakdown can say depends on the runtime:
 

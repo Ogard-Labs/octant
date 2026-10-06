@@ -180,7 +180,9 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
     byCategory.set(entry.category, retained);
   }
 
-  const content = [...byCategory.values()];
+  const content = [...byCategory.values()].sort(
+    (a, b) => rankIn(CONTEXT_CATEGORY_ORDER, a.key) - rankIn(CONTEXT_CATEGORY_ORDER, b.key),
+  );
   const knownContentTokens = content.reduce((sum, entry) => sum + entry.tokens, 0);
   const hasUnknown = content.some((entry) => entry.unknown);
   const hasEstimate = planSnapshot.plan.entries.some(
@@ -361,49 +363,87 @@ function percentOf(value: number, total: number): number {
 
 /**
  * One hue per category, the same in the popover's bar and key and on the
- * inspector's entries, whichever thread it is on. Categories that are the same
- * kind of thing share a family (conversation and current request are blues,
- * the tool results and subagent results are oranges), and a darker step
- * separates two members of a family that can stand in one bar. Seven hues in
- * two steps hold the fourteen categories of a planned thread without any two of
- * them sharing a tone; a provider-run window uses a subset of the same table.
- * Free space and reserved room have no tone: they are the window's own space,
- * not something that fills it.
+ * inspector's entries, whichever thread it is on. Seven hues in two steps hold
+ * the fourteen categories of a planned thread without any two of them sharing a
+ * tone, and a provider-run window uses a subset of the same table: a category
+ * that is the same thing in both (conversation and messages, MCP and MCP tools,
+ * Octant tools and system tools, framing and system prompt, the unattributed
+ * remainder) shares one tone, and the pairs that share one never stand in the
+ * same bar. The assignment was chosen so that neighbours in the display order
+ * (`CONTEXT_CATEGORY_ORDER`, `PROVIDER_PART_ORDER`) differ clearly in both
+ * themes: the worst neighbouring pair is 0.134 apart in OKLab, and every tone
+ * holds at least 5.2:1 against the popover. `visualLanguageContract.test.ts`
+ * measures both. Free space and reserved room have no tone: they are the
+ * window's own space, not something that fills it.
  */
-const UNATTRIBUTED_TONE: ContextTone = 6;
+const UNATTRIBUTED_TONE: ContextTone = 14;
 
 const CATEGORY_TONES: Readonly<Record<string, ContextTone>> = {
-  // What was said.
   conversation: 1,
-  "current-request": 8,
   messages: 1,
   used: 1,
-  // What came back.
-  "tool-results": 2,
-  "subagent-results": 9,
-  agents: 9,
-  // What the project remembers.
-  "project-memory": 3,
-  "memory-files": 3,
-  "workspace-context": 10,
-  // Tool definitions.
-  "octant-tools": 4,
-  "system-tools": 4,
-  mcp: 5,
-  "mcp-tools": 5,
-  // Instructions.
+  mcp: 2,
+  "mcp-tools": 2,
+  "subagent-results": 3,
+  agents: 3,
+  "workspace-context": 4,
+  "user-instructions": 5,
+  "extension-instructions": 6,
+  skills: 6,
   "provider-framing": 7,
   "system-prompt": 7,
-  "octant-policy": 14,
-  "user-instructions": 11,
-  "project-instructions": 13,
-  "extension-instructions": 12,
-  skills: 12,
-  // What no category accounts for. Pink is kept for it alone among the
-  // first-step hues, so the remainder never reads as a neighbouring tool part.
+  "octant-tools": 8,
+  "system-tools": 8,
+  "current-request": 9,
+  "project-instructions": 10,
+  "tool-results": 11,
+  "project-memory": 12,
+  "memory-files": 12,
+  "octant-policy": 13,
   "observed-overhead": UNATTRIBUTED_TONE,
   "other-provider": UNATTRIBUTED_TONE,
 };
+
+/**
+ * The order a planned thread's categories are listed in: the order the contract
+ * names them, which follows how the prompt is laid out. Listing them in a fixed
+ * order, not in manifest order, is what makes "neighbouring" a thing the tones
+ * can be chosen and checked against.
+ */
+export const CONTEXT_CATEGORY_ORDER: ReadonlyArray<ContextEntryCategory> = [
+  "provider-framing",
+  "octant-policy",
+  "user-instructions",
+  "project-instructions",
+  "project-memory",
+  "conversation",
+  "current-request",
+  "workspace-context",
+  "extension-instructions",
+  "octant-tools",
+  "mcp",
+  "tool-results",
+  "subagent-results",
+  "reserves",
+];
+
+/** The order a provider-run window's parts are listed in. */
+export const PROVIDER_PART_ORDER: ReadonlyArray<ProviderContextPartKind> = [
+  "system-prompt",
+  "system-tools",
+  "octant-tools",
+  "mcp-tools",
+  "agents",
+  "memory-files",
+  "skills",
+  "messages",
+  "reserved",
+];
+
+function rankIn(order: ReadonlyArray<string>, key: string): number {
+  const index = order.indexOf(key);
+  return index === -1 ? order.length : index;
+}
 
 export function contextCategoryTone(key: string): ContextTone | undefined {
   return CATEGORY_TONES[key];
@@ -463,7 +503,9 @@ export function providerWindowModel(input: {
   // 85.5% and 14.5% read as 86% and 15%: a window a point over full.
   const share = (tokens: number) =>
     windowTokens <= 0 ? 0 : Math.max(0, Math.min(100, (tokens / windowTokens) * 100));
-  const parts = (breakdown?.parts ?? []).filter((part) => part.kind !== "reserved");
+  const parts = (breakdown?.parts ?? [])
+    .filter((part) => part.kind !== "reserved")
+    .sort((a, b) => rankIn(PROVIDER_PART_ORDER, a.kind) - rankIn(PROVIDER_PART_ORDER, b.kind));
   const reservedTokens = (breakdown?.parts ?? [])
     .filter((part) => part.kind === "reserved")
     .reduce((sum, part) => sum + part.tokens, 0);

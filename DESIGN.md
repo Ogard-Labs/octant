@@ -1272,11 +1272,18 @@ style. Each category has one tone, taken from the palette roles in seven hues
 and a second, darker step of each (the same hue mixed toward the ink, which only
 raises contrast against the panel in either theme), and keeps it wherever it
 appears: the popover's bar and key, and the swatch on the context inspector's
-entries. Related categories share a hue (conversation, current request and
-messages are blues; tool results and subagent results oranges; memory and
-workspace context purples; tool definitions teal; MCP green; the instruction
-categories yellow, pink, teal and green steps; what nothing accounts for pink).
-Red is left to the ring's near-full warning. **Free space and Reserved stay
+entries. Categories are listed in one fixed order (the contract's category order
+for a planned thread, a fixed part order for a provider-run window) and the
+tones are chosen against that order, so neighbours differ clearly. A category
+that is the same thing in both kinds of window (conversation and messages, MCP
+and MCP tools, Octant tools and system tools, provider framing and system
+prompt, what nothing accounts for) shares one tone. Neighbour contrast is
+measured, not judged by eye: every tone holds at least 5.2:1 against the popover
+in light and dark, and the worst neighbouring pair is 0.134 apart in OKLab.
+Adjacent lightness ratios stay under 2:1, because seven hues that each clear 5:1
+cannot also sit 3:1 from one another; the one-pixel gap and the name beside every
+swatch carry the rest. `visualLanguageContract.test.ts` computes both numbers
+from the stylesheet. Red is left to the ring's near-full warning. **Free space and Reserved stay
 neutral**: no hue, the panel's ink mixed into its ground, with Free space drawn
 as the bar's empty track. Every part is named beside its swatch and carries its
 tokens and share, so hue never stands alone. The exception is scoped to these

@@ -397,6 +397,30 @@ describe("category colours", () => {
     );
   });
 
+  it("lists parts in one fixed order, whatever order the runtime reported them in", () => {
+    const model = providerWindowModel({
+      breakdown: {
+        parts: [
+          { kind: "messages", tokens: 10, accuracy: "provider-reported" },
+          { kind: "skills", tokens: 10, accuracy: "provider-reported" },
+          { kind: "memory-files", tokens: 10, accuracy: "provider-reported" },
+          { kind: "agents", tokens: 10, accuracy: "provider-reported" },
+          { kind: "system-prompt", tokens: 10, accuracy: "provider-reported" },
+        ],
+      },
+      usedTokens: 50,
+      windowTokens: 1_000,
+    });
+
+    expect(model.segments.filter((s) => s.kind === "content").map((s) => s.key)).toEqual([
+      "system-prompt",
+      "agents",
+      "memory-files",
+      "skills",
+      "messages",
+    ]);
+  });
+
   it("leaves free space and reserved room without a tone so they stay neutral", () => {
     const harness = contextWindowModel(contextFixture()).segments;
     const provider = providerWindowModel({
