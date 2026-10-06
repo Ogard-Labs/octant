@@ -773,6 +773,7 @@ export type NativeHarnessContextReduction = typeof NativeHarnessContextReduction
 
 export const NativeHarnessTurnStopReason = Schema.Literal(
   "end-of-turn",
+  "max-tokens",
   "user-interrupt",
   "budget-ceiling",
   "repeated-failing-tool-call",

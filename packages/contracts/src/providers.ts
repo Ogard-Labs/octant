@@ -1736,6 +1736,14 @@ export const ProviderFailure = Schema.Struct({
 }).annotations(strict);
 export type ProviderFailure = typeof ProviderFailure.Type;
 
+/**
+ * Why a completed reply stopped, when the runtime said so. Absent means the
+ * runtime did not say — a normal finish is not guessed into one of these.
+ * `max-tokens` is the output limit; `content-filter` is a filter stop.
+ */
+export const ProviderOutputStopReason = Schema.Literal("max-tokens", "content-filter");
+export type ProviderOutputStopReason = typeof ProviderOutputStopReason.Type;
+
 const ProviderRuntimeEventFields = {
   instanceId: ProviderInstanceId,
   sessionId: ProviderSessionId,
@@ -2030,6 +2038,8 @@ export const ProviderRuntimeEvent = Schema.Union(
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("completed"),
     resumeCursor: Schema.optional(ProviderResumeCursor),
+    /** Present only when the runtime said why this reply stopped. */
+    stopReason: Schema.optional(ProviderOutputStopReason),
   }).annotations(strict),
 );
 export type ProviderRuntimeEvent = typeof ProviderRuntimeEvent.Type;

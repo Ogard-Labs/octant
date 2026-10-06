@@ -675,4 +675,45 @@ describe("mapOpenCodeEvent", () => {
       ),
     ).toMatchObject([{ kind: "text-delta", text: " hello " }]);
   });
+
+  it("carries a length finish onto the completed event and leaves an ordinary finish unstated", () => {
+    const stopMemory: { current: "max-tokens" | "content-filter" | undefined } = {
+      current: undefined,
+    };
+    const limited = mapOpenCodeEvent(
+      { ...context(), stopMemory },
+      official({
+        id: "event-step-length",
+        type: "session.next.step.ended",
+        properties: {
+          timestamp: 1,
+          sessionID: "provider-session",
+          assistantMessageID: "message-1",
+          finish: "length",
+          cost: 0,
+          tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      }),
+    );
+    const completed = mapOpenCodeEvent(
+      { ...context(42), stopMemory },
+      official({
+        id: "event-idle",
+        type: "session.idle",
+        properties: { sessionID: "provider-session" },
+      }),
+    );
+    expect(limited[0]).toMatchObject({ kind: "usage" });
+    expect(completed[0]).toMatchObject({ kind: "completed", stopReason: "max-tokens" });
+
+    const ordinary = mapOpenCodeEvent(
+      context(),
+      official({
+        id: "event-idle-plain",
+        type: "session.idle",
+        properties: { sessionID: "provider-session" },
+      }),
+    );
+    expect(ordinary[0]).not.toHaveProperty("stopReason");
+  });
 });

@@ -366,6 +366,7 @@ export interface TurnDetail {
 
 const ENDED_LABEL: Readonly<Record<TurnMetricsRecord["stopReason"], string>> = {
   "end-of-turn": "Finished",
+  "max-tokens": "Cut off at the output limit",
   cancelled: "Stopped",
   failed: "Failed",
   waiting: "Waiting",

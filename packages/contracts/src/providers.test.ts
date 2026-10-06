@@ -2313,6 +2313,14 @@ describe("provider runtime contracts", () => {
       resumeCursor: { driverKind: "codex", value: "opaque-thread-id" },
     },
     {
+      kind: "completed",
+      stopReason: "max-tokens",
+    },
+    {
+      kind: "completed",
+      stopReason: "content-filter",
+    },
+    {
       kind: "tool-request",
       requestId: "tool-request-1",
       toolName: "octant_web_research",
@@ -2340,6 +2348,16 @@ describe("provider runtime contracts", () => {
     expect(decodeProviderRuntimeEvent({ ...common, ...event })).toMatchObject(event);
     expect(() =>
       decodeProviderRuntimeEvent({ ...common, ...event, providerPayload: { private: true } }),
+    ).toThrow();
+  });
+
+  it("refuses a completed event whose stop reason is not one Octant normalizes", () => {
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...common,
+        kind: "completed",
+        stopReason: "end_turn",
+      }),
     ).toThrow();
   });
 

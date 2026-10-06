@@ -314,6 +314,42 @@ describe("sendResponsesTurn", () => {
     expect(JSON.stringify(failure)).not.toContain("private");
   });
 
+  it.each([
+    ["max_output_tokens", "max-tokens"],
+    ["content_filter", "content-filter"],
+  ] as const)(
+    "keeps the partial reply when an incomplete response says %s",
+    async (reason, stopReason) => {
+      const fetch = vi.fn(async () =>
+        sse(
+          created(1),
+          {
+            type: "response.output_text.delta",
+            sequence_number: 2,
+            item_id: "msg_1",
+            output_index: 0,
+            content_index: 0,
+            delta: "partial",
+            logprobs: [],
+          },
+          {
+            type: "response.incomplete",
+            sequence_number: 3,
+            response: {
+              ...responseState("incomplete"),
+              incomplete_details: { reason },
+            },
+          },
+        ),
+      );
+
+      const result = await Effect.runPromise(sendResponsesTurn(input(fetch)));
+
+      expect(result.text).toBe("partial");
+      expect(result.outputStopReason).toBe(stopReason);
+    },
+  );
+
   it("treats cancellation as interruption and does not verify the manual model", async () => {
     const controller = new AbortController();
     let cancelled = false;

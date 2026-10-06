@@ -17,6 +17,7 @@ import type {
   ClaudeToolRequest,
   ClaudeUsage,
 } from "./claudeAgentSdkPort";
+import { outputStopReason } from "./outputStopReason";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const DIFF_MAX_CHARACTERS = 65_536;
@@ -799,10 +800,12 @@ function mapResult(
     usageEvent(context, message.usage, message.durationMs, message.totalCostUsd),
   ];
   if (message.outcome === "success") {
+    const stop = outputStopReason(message.stopReason);
     results.push(
       terminal(context, {
         kind: "completed",
         resumeCursor: { driverKind: "claude", value: context.claudeSessionId },
+        ...(stop === undefined ? {} : { stopReason: stop }),
       }),
     );
     return results;

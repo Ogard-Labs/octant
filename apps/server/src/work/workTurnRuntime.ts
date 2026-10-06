@@ -39,7 +39,11 @@ const RESPONSE_TRUNCATION_MARKER = "\n[Output truncated by Octant.]";
 const textEncoder = new TextEncoder();
 
 export type WorkTurnRuntimeOutcome =
-  | { readonly kind: "completed"; readonly response: string }
+  | {
+      readonly kind: "completed";
+      readonly response: string;
+      readonly outputLimited?: true;
+    }
   | { readonly kind: "cancelled" }
   | { readonly kind: "waiting"; readonly failure: WorkTurnFailure }
   | { readonly kind: "failed"; readonly failure: WorkTurnFailure };
@@ -423,7 +427,7 @@ function boundedCleanup<E, R>(
 function stopReasonOf(outcome: WorkTurnRuntimeOutcome): TurnStopReason {
   switch (outcome.kind) {
     case "completed":
-      return "end-of-turn";
+      return outcome.outputLimited === true ? "max-tokens" : "end-of-turn";
     case "cancelled":
       return "cancelled";
     case "waiting":
@@ -442,7 +446,11 @@ function outcomeFromEvents(
   response: string,
 ): WorkTurnRuntimeOutcome {
   if (terminal?.kind === "completed") {
-    return { kind: "completed", response };
+    return {
+      kind: "completed",
+      response,
+      ...(terminal.stopReason === "max-tokens" ? { outputLimited: true as const } : {}),
+    };
   }
   if (terminal?.kind === "interrupted") {
     return {

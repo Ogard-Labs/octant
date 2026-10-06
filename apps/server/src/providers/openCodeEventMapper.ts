@@ -2,11 +2,13 @@ import type { OpenCodeMessageParts } from "./openCodeMessageParts";
 import type {
   CorrelationId,
   ProviderInstanceId,
+  ProviderOutputStopReason,
   ProviderRuntimeEvent,
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
 import type { Event } from "@opencode-ai/sdk/v2/types";
+import { outputStopReason } from "./outputStopReason";
 
 export interface OpenCodeEventContext {
   readonly instanceId: ProviderInstanceId;
@@ -15,6 +17,11 @@ export interface OpenCodeEventContext {
   readonly occurredAt: UtcTimestamp;
   readonly sequenceStart: number;
   readonly messageParts?: OpenCodeMessageParts;
+  /**
+   * The last step finish the session reported, kept across events so the
+   * completed event can carry it. Absent in a one-shot map.
+   */
+  readonly stopMemory?: { current: ProviderOutputStopReason | undefined };
 }
 
 type RuntimeEventWithoutEnvelope = ProviderRuntimeEvent extends infer RuntimeEvent
@@ -57,11 +64,16 @@ function mappedEvent(
 
 function completed(context: OpenCodeEventContext, providerSessionId: string): ProviderRuntimeEvent {
   const value = normalizeText(providerSessionId);
+  const stop = context.stopMemory?.current;
   return mappedEvent(
     context,
     value === undefined
-      ? { kind: "completed" }
-      : { kind: "completed", resumeCursor: { driverKind: "opencode", value } },
+      ? { kind: "completed", ...(stop === undefined ? {} : { stopReason: stop }) }
+      : {
+          kind: "completed",
+          resumeCursor: { driverKind: "opencode", value },
+          ...(stop === undefined ? {} : { stopReason: stop }),
+        },
   );
 }
 
@@ -228,6 +240,10 @@ export function mapOpenCodeEvent(
           ];
     }
     case "session.next.step.ended": {
+      const stop = outputStopReason(event.properties.finish);
+      if (context.stopMemory !== undefined && stop !== undefined) {
+        context.stopMemory.current = stop;
+      }
       const inputTokens = nonNegativeInteger(event.properties.tokens.input);
       const outputTokens = nonNegativeInteger(event.properties.tokens.output);
       const reasoningTokens = nonNegativeInteger(event.properties.tokens.reasoning);

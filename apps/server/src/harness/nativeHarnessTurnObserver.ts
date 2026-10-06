@@ -180,7 +180,7 @@ export class NativeHarnessTurnObserver {
     this.#options.sessions.clearSteering(input.threadId, "delivered");
     this.#recordTurn(input, {
       turnId,
-      stopReason: "end-of-turn",
+      stopReason: input.turn?.stopReason === "max-tokens" ? "max-tokens" : "end-of-turn",
       toolCalls: input.toolCalls,
       ...(input.turn === undefined ? {} : { turn: input.turn }),
     });

@@ -206,6 +206,15 @@ describe("the thread line", () => {
   });
 });
 
+describe("turn detail", () => {
+  it("says a reply cut off at the output limit was cut off", () => {
+    const ended = turnDetail(record({ stopReason: "max-tokens" })).timing.find(
+      (row) => row.key === "ended",
+    );
+    expect(ended?.value).toBe("Cut off at the output limit");
+  });
+});
+
 describe("thread cost", () => {
   it("prices each turn on its own model", () => {
     const cost = costOfTurns([{ modelId: "gpt-5.6-luna", usage: record().usage }], true);
