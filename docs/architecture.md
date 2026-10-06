@@ -698,6 +698,13 @@ Delivery does not wait for every sibling to finish. Each member's identity and
 result generation are validated and journaled on the receiving turn; replay
 settles only those members. Actual fallback provider/model attribution is kept.
 The delivery service serializes work per parent and defers while it is busy.
+A Chat delivery names the parent at its thread aggregate's head version, the
+version Chat admission checks, and a refusal that only says the parent is
+mid-turn or moved on is deferred and retried, never journaled as a failed
+delivery. A child that ends without a reply (failed, interrupted, or cancelled)
+reports why on the managed `wait` and `status` answers and in the delivered
+outcome line: its journaled reason, redacted with the diagnostics rules and cut
+to 512 characters.
 
 A completed managed child accepts an explicit follow-up through either
 delegation tool or the Agents views. The caller supplies its current version
@@ -2096,10 +2103,16 @@ mechanisms are:
   by
   [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md)
   and narrowed by 0145, and the tools those threads reach stay confined either
-  way. A bound root a launch may not write is denied in the profile, so a
-  checkout under that launch's own temporary directory is not writable through
-  it. The `--version` read every family and the discovery scan perform before a
-  runtime starts is wrapped too, with no root, no home, no network and one
+  way. A confined Claude launch never reaches the keychain itself: the runtime
+  reads its subscription sign-in by running `/usr/bin/security`, which would
+  return any keychain item that trusts that tool, including other command-line
+  programs' tokens, so the profile runs neither the tool nor reads the keychain
+  file. Measured on macOS 27, the security-server lookup alone therefore leaves
+  a Claude Plan launch on subscription sign-in, Chat children included,
+  reporting itself signed out. A bound root a launch may not write is denied in
+  the profile, so a checkout under that launch's own temporary directory is not
+  writable through it. The `--version` read every family and the discovery
+  scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
   Toolchain commands the Android workbench issues keep their own deliberate
