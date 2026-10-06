@@ -56,6 +56,10 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
   const [message, setMessage] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
+  // The audience the person chose for a remote export. Reset to the
+  // destination's own default each time a card is prepared, so a previous
+  // choice never silently carries over to a different export.
+  const [visibility, setVisibility] = useState<"secret" | "public">("secret");
 
   const chosenFormat = formats.includes(format) ? format : formats[0];
   const folder = props.folder;
@@ -80,6 +84,7 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
       });
       if (result.kind === "approval") {
         setCard(result.card);
+        setVisibility(result.card.destinationVisibility ?? "secret");
         return;
       }
       setMessage(result.message);
@@ -107,6 +112,9 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
         canvasId: props.offers.canvasId,
         approvalId: card.approvalId,
         decision,
+        // The choice is only sent when the card actually offered one; a
+        // destination with no audience never sees an audience field.
+        ...(card.destinationVisibility === undefined ? {} : { visibility }),
       });
       setCard(undefined);
       if (result.kind === "exported") {
@@ -238,6 +246,30 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
               {card.replacesExisting === true
                 ? `Replaces ${card.destinationPath}`
                 : `Writes ${card.destinationPath}`}
+            </p>
+          )}
+          {card.destinationAccount === undefined ? null : (
+            <p className="canvas-export__account" data-testid="canvas-export-account">
+              {`Posts as ${card.destinationAccount}`}
+            </p>
+          )}
+          {card.destinationVisibility === undefined ? null : (
+            <OctantSelectField
+              aria-label="Who can see this export"
+              id="canvas-export-visibility"
+              onValueChange={(value) => {
+                if (value === "secret" || value === "public") setVisibility(value);
+              }}
+              options={[
+                { id: "secret", label: "Secret — only you" },
+                { id: "public", label: "Public — visible to anyone" },
+              ]}
+              value={visibility}
+            />
+          )}
+          {card.destinationNote === undefined ? null : (
+            <p className="canvas-export__note" data-testid="canvas-export-note">
+              {card.destinationNote}
             </p>
           )}
           <pre className="canvas-export__payload" data-testid="canvas-export-payload">

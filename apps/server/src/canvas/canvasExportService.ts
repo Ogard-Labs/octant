@@ -25,6 +25,7 @@ import {
   type CanvasExportRefusal,
   type CanvasExportRenderedOutput,
   type CanvasExportTargetId,
+  type CanvasExportVisibility,
 } from "@octant/contracts/canvas-export";
 import type { CanvasExportDestination, CanvasExportTarget } from "@octant/plugin-api/canvas-export";
 import {
@@ -212,9 +213,11 @@ export class CanvasExportService {
       );
     }
     const binding = this.#soleTargetBinding(offer.targetId, document.canvasId);
-    // A destination that can name its file does so here, so the person
-    // approves a place rather than a destination's promise. Naming it is also
-    // what makes the approval a confirmation to replace an existing file.
+    // A destination that can describe itself does so here, so the person
+    // approves a place and its terms rather than a destination's promise.
+    // Naming a file is also what makes the approval a confirmation to replace
+    // an existing one; naming an account and an audience is what lets the
+    // person see whose name it goes out under and who can see it.
     const destination = binding?.target.describeDestination?.(output);
     const nowMs = Date.parse(this.#clock());
     const expiresAtMs = nowMs + CANVAS_EXPORT_APPROVAL_TTL_MS;
@@ -229,9 +232,17 @@ export class CanvasExportService {
       destinationLabel: offer.label,
       format: request.format,
       title: rendered.title,
-      ...(destination === undefined
+      ...(destination?.path === undefined
         ? {}
-        : { destinationPath: destination.path, replacesExisting: destination.replacesExisting }),
+        : {
+            destinationPath: destination.path,
+            replacesExisting: destination.replacesExisting ?? false,
+          }),
+      ...(destination?.account === undefined ? {} : { destinationAccount: destination.account }),
+      ...(destination?.visibility === undefined
+        ? {}
+        : { destinationVisibility: destination.visibility }),
+      ...(destination?.note === undefined ? {} : { destinationNote: destination.note }),
       payload: rendered.body,
       payloadDigest,
       byteLength,
@@ -262,6 +273,11 @@ export class CanvasExportService {
     readonly decision: "approved" | "denied";
     readonly permitted: boolean;
     readonly actor: EventActor;
+    /**
+     * The audience the person chose on the card. Absent keeps whatever the
+     * destination described; a destination that offered no audience ignores it.
+     */
+    readonly visibility?: CanvasExportVisibility;
   }): Promise<CanvasExportDecideResult> {
     const key = String(input.approvalId);
     const pending = this.#pending.get(key);
@@ -321,10 +337,14 @@ export class CanvasExportService {
     }
 
     this.#pending.delete(key);
+    // The audience the person chose on the card travels back to the target as
+    // part of the approved destination; the target described the default it
+    // showed, and nothing here lets a choice reach a destination that never
+    // offered one.
     const delivery = await this.#deliver(
       binding.target,
       pending.output,
-      pending.confirmedDestination,
+      confirmedDestination(pending.confirmedDestination, input.visibility),
     );
     const record = decodeCanvasExportRecorded({
       schemaVersion: 1,
@@ -433,4 +453,19 @@ export class CanvasExportService {
 
 function digestOf(body: string): string {
   return `sha256:${createHash("sha256").update(body).digest("hex")}`;
+}
+
+/**
+ * The approved destination, with the audience the person chose folded in.
+ *
+ * Without a choice the destination's own description stands. A choice only
+ * ever adds the audience field; it cannot invent a path, so a destination the
+ * person never confirmed still cannot replace an existing file.
+ */
+function confirmedDestination(
+  destination: CanvasExportDestination | undefined,
+  visibility: CanvasExportVisibility | undefined,
+): CanvasExportDestination | undefined {
+  if (visibility === undefined) return destination;
+  return { ...destination, visibility };
 }

@@ -218,4 +218,53 @@ describe("CanvasExportPanel", () => {
     expect(choose).toHaveBeenCalledWith(candidateId);
     expect(onExportFolderChosen).toHaveBeenCalled();
   });
+
+  it("shows the account and the public note, and sends the audience the person chose", async () => {
+    const user = userEvent.setup();
+    const onPrepare = vi.fn(async () => ({
+      kind: "approval" as const,
+      card: {
+        schemaVersion: 1 as const,
+        kind: "canvas-export-approval" as const,
+        approvalId,
+        canvasId,
+        versionId,
+        sequence: 1,
+        targetId: "github-gist",
+        destinationLabel: "GitHub Gist",
+        format: "markdown" as const,
+        title: "Launch plan",
+        destinationAccount: "octocat",
+        destinationVisibility: "secret" as const,
+        destinationNote: "A public gist is visible to anyone on the internet.",
+        payload: "# Launch plan\n",
+        payloadDigest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        byteLength: 15,
+      },
+    }));
+    const onDecide = vi.fn(async () => ({
+      kind: "denied" as const,
+      message: "Export was not approved.",
+    }));
+    render(
+      <CanvasExportPanel
+        offers={offers()}
+        onDecide={onDecide as never}
+        onPrepare={onPrepare as never}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Review export" }));
+
+    expect(await screen.findByTestId("canvas-export-account")).toHaveTextContent(
+      "Posts as octocat",
+    );
+    expect(screen.getByTestId("canvas-export-note")).toHaveTextContent("visible to anyone");
+
+    await user.click(screen.getByRole("combobox", { name: "Who can see this export" }));
+    await user.click(await screen.findByRole("option", { name: "Public — visible to anyone" }));
+    await user.click(screen.getByRole("button", { name: "Approve export" }));
+
+    expect(onDecide).toHaveBeenCalledWith(expect.objectContaining({ visibility: "public" }));
+  });
 });

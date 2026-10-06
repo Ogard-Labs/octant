@@ -320,6 +320,8 @@ import { GhRepositoryCataloguePort } from "./github/ghRepositoryCataloguePort";
 import { GhRepositoryObservationPort } from "./github/ghRepositoryObservationPort";
 import { GithubCapabilityService } from "./github/githubCapabilityService";
 import { GithubCatalogueService } from "./github/githubCatalogueService";
+import { createGhGistCreationPort } from "./github/gistCreationPort";
+import type { GithubAuthenticationSnapshot } from "@octant/contracts/github-onboarding";
 import { GithubIssueContextService } from "./github/githubIssueContextService";
 import { LinearIssueContextService } from "./plugins/linear/linearIssueContextService";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
@@ -631,6 +633,7 @@ import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
 } from "./canvas/canvasExportTargets";
+import { gistExportAvailability } from "./canvas/gistExportTarget";
 import { createDefaultCodexPluginPackageSources } from "./extensions/curatedBuildIosAppsCatalog";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "./scaffold/curatedScaffoldCatalog";
 import { resolveAvailableTools } from "./scaffold/scaffoldFilesystem";
@@ -2692,15 +2695,37 @@ export function startOctantServer(
       options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable },
     );
     let revokeProjectPullRequests: (() => void) | undefined;
+    /**
+     * The latest GitHub connection state, kept here because the gist export
+     * destination reads it while the offer list is built, which is synchronous
+     * and cannot wait on `gh`. A host with no usable `gh` starts not-connected
+     * and only refreshes when a real executable exists.
+     */
+    let githubAuthenticationSnapshot: GithubAuthenticationSnapshot = {
+      state: "unavailable",
+      capabilities: [],
+    };
     const githubCapabilityService = new GithubCapabilityService(githubAuthenticationPort, {
       probes: githubCataloguePort,
       onAuthenticationChanged: (snapshot) => {
+        githubAuthenticationSnapshot = snapshot;
         const readable = snapshot.capabilities.some(
           (capability) => capability.kind === "pull-requests-read" && capability.available,
         );
         if (!readable) revokeProjectPullRequests?.();
       },
     });
+    if (options.ghExecutable !== undefined) {
+      // One bounded read at startup so the gist destination is offered honestly
+      // before anyone opens GitHub settings. A failure just leaves it
+      // not-connected.
+      void githubCapabilityService
+        .snapshot(new AbortController().signal)
+        .then((snapshot) => {
+          githubAuthenticationSnapshot = snapshot;
+        })
+        .catch(() => undefined);
+    }
     // One reading for every cache this host keeps, so the usage dashboard can
     // report them together and a failing external cache paces itself.
     const cacheStats = new CacheStatsProjection();
@@ -8737,6 +8762,13 @@ export function startOctantServer(
       home: homedir(),
       standingOutsideApproval: false,
       newTempId: randomUUID,
+      // The gist destination reuses the GitHub connection Octant already has:
+      // the same host-managed credential `gh` resolves, and the snapshot the
+      // host keeps current. It reads that credential nowhere here.
+      gist: {
+        availability: () => gistExportAvailability(githubAuthenticationSnapshot),
+        gists: createGhGistCreationPort(options.ghExecutable),
+      },
     };
     // Destinations arrive through the export contribution and are offered
     // through the same activation policy a plugin's contribution passes. The

@@ -32,7 +32,7 @@ const PROJECTS_QUERY =
 export interface GhCatalogueCommandPort {
   run(
     arguments_: readonly string[],
-    options: { readonly environment: NodeJS.ProcessEnv },
+    options: { readonly environment: NodeJS.ProcessEnv; readonly stdin?: string },
     signal: AbortSignal,
   ): Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr?: string }>;
   close?(): void;
@@ -613,7 +613,9 @@ export function createGhCatalogueCommandPort(
         const child = spawn(ghExecutable, [...arguments_], {
           env: options.environment,
           shell: false,
-          stdio: ["ignore", "pipe", "pipe"],
+          // A caller that supplies a body (a gist POST) opens stdin; every
+          // read leaves it closed so gh never waits for input it will not get.
+          stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
           signal: deadline.signal,
           detached: process.platform !== "win32",
           windowsHide: true,
@@ -631,7 +633,7 @@ export function createGhCatalogueCommandPort(
           deadline.signal.removeEventListener("abort", terminate);
           ownedChildren.delete(child);
         };
-        child.stdout.on("data", (chunk: Buffer) => {
+        child.stdout?.on("data", (chunk: Buffer) => {
           if (overflow) return;
           if (Buffer.byteLength(stdout, "utf8") + chunk.byteLength > MAX_OUTPUT_BYTES) {
             overflow = true;
@@ -640,10 +642,13 @@ export function createGhCatalogueCommandPort(
           }
           stdout += chunk.toString("utf8");
         });
-        child.stderr.on("data", (chunk: Buffer) => {
+        child.stderr?.on("data", (chunk: Buffer) => {
           if (Buffer.byteLength(stderr, "utf8") <= MAX_OUTPUT_BYTES)
             stderr += chunk.toString("utf8");
         });
+        // A supplied body is the whole request; ending stdin is what lets gh
+        // send it. A read above never reaches this branch.
+        if (options.stdin !== undefined) child.stdin?.end(options.stdin, "utf8");
         child.once("error", (error) => {
           cleanup();
           reject(error);

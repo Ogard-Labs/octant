@@ -1011,6 +1011,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               approvalId: requestBody.approvalId,
               decision: requestBody.decision,
               permitted: context.kind === "ok",
+              ...(requestBody.visibility === undefined
+                ? {}
+                : { visibility: requestBody.visibility }),
               // The envelope names the transport principal this host
               // authenticated for the approval, never a fixed local user.
               actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
