@@ -627,6 +627,26 @@ export function decodeInitialization(value: unknown): ClaudeInitialization {
   };
 }
 
+/**
+ * The compaction point in a runtime's context-usage answer. Claude Code 2.1.287
+ * answers with `autoCompactThreshold` beside `maxTokens`, both in tokens (the
+ * observed pairs are 167000 of 200000 and 967000 of 1000000), and with
+ * `isAutoCompactEnabled`. The same release documents its other report of this
+ * figure as "the token count where threshold-triggered compaction fires". The
+ * threshold counts only while compaction is on and sits inside the window it
+ * is measured against; anything else promises nothing.
+ */
+export function decodeAutoCompactThreshold(value: unknown): number | undefined {
+  const usage = object(value);
+  if (usage === undefined || usage.isAutoCompactEnabled !== true) return undefined;
+  const { autoCompactThreshold, maxTokens } = usage;
+  if (!Number.isSafeInteger(autoCompactThreshold) || !Number.isSafeInteger(maxTokens)) {
+    return undefined;
+  }
+  const threshold = autoCompactThreshold as number;
+  return threshold > 0 && threshold <= (maxTokens as number) ? threshold : undefined;
+}
+
 export function permissionMode(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,

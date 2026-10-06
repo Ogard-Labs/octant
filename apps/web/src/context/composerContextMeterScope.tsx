@@ -32,6 +32,13 @@ export interface ComposerContextUsageFallback {
   readonly contextWindow?: number;
   readonly contextTokens?: number;
   /**
+   * Where the provider's runtime compacts the session by itself, in tokens of
+   * the window it reported. Present only when the runtime said so: it is what
+   * makes this thread's compaction `automatic`, and no one derives it from the
+   * window.
+   */
+  readonly autoCompactThreshold?: number;
+  /**
    * The window the selected model declares, when the provider's usage report
    * did not name one. A driver that lists a model's context limit already
    * attested it; the meter may divide the reported occupancy by it, but the

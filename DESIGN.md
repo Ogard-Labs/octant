@@ -1256,6 +1256,12 @@ sums over turns, not parts of the window. Categories are told apart by palette
 hues (the largest share in blue) and each swatch is named; limit bars fill in
 blue. A limit near its cap is marked on its row and in its bar's value text,
 never by ink alone. Unknown or stale data is labeled as such and never rendered as zero.
+Where a provider runtime compacts the session by itself and has said where, one
+secondary line under the window bar reads `N until auto-compact` in the bar's
+compact token format (the room between that point and the latest request's
+fill, or `At the auto-compact threshold` once none is left). The line is
+shown only for automatic compaction with a reported point, never derived from the
+window, and it leaves the ring and the bar's colours alone.
 
 The task visualizer is a compact composer-adjacent chip backed by the thread's
 journaled plan. It appears only when a real plan exists, shows proposed review

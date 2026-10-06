@@ -80,6 +80,14 @@ they cannot recover runtime occupancy retroactively. Code turns without context
 values need a new provider usage report before a context percentage can appear. A thread that
 has no plan yet is checked again when its turns advance; reopening the app is
 not required to pick up its first plan.
+For Claude Code threads, the popover also says how much room is left before
+the runtime compacts the session by itself, for example **152.8K until
+auto-compact**. That figure is the runtime's own compaction point, which
+Claude Code states when the session opens, less what the latest request put in
+the window. It appears only while the runtime says compaction is on and has
+given a point, so a thread whose runtime says nothing, such as one on Codex CLI,
+shows no line rather than a guess. The popover does not compact the session;
+Claude Code does that itself when the session reaches the point.
 Opening the popover does not make a further provider or network call.
 Inspect context opens the composition list so you can pin, exclude, or
 rebuild the next-turn plan. A thread that has not been planned yet is an

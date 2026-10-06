@@ -302,6 +302,77 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent("Reported by the provider with its last turn.");
   });
 
+  it("says how much room is left before the runtime compacts the session by itself", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          inputTokens: 25_500,
+          outputTokens: 38,
+          contextWindow: 200_000,
+          contextTokens: 120_000,
+          autoCompactThreshold: 167_000,
+          limits: [],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Context window 120K of 200K/i }));
+    const popover = screen.getByRole("dialog", { name: "Context window" });
+    expect(popover).toHaveTextContent("47K until auto-compact");
+  });
+
+  it("says the session is at the compaction point rather than a negative room", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          contextWindow: 200_000,
+          contextTokens: 170_000,
+          autoCompactThreshold: 167_000,
+          limits: [],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Context window 170K of 200K/i }));
+    expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
+      "At the auto-compact threshold",
+    );
+  });
+
+  it("shows no compaction line when the provider reported no threshold", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{ contextWindow: 200_000, contextTokens: 120_000, limits: [] }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Context window 120K of 200K/i }));
+    expect(screen.getByRole("dialog", { name: "Context window" })).not.toHaveTextContent(
+      /auto-compact/i,
+    );
+  });
+
   it("fills the ring from the model's declared limit when the provider reported occupancy without a window", async () => {
     const user = userEvent.setup();
     render(
