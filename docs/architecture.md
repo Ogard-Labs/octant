@@ -1192,8 +1192,22 @@ flowchart LR
   file the sync client has not downloaded, and a conflict copy the sync client
   left behind, are reported instead of being treated as entries. A folder
   outside the user's home is refused unless the standing access-outside-project
-  approval exists — the same rule as the artifact mirror's global folder.
-  Publish and pull are not this store; they call it.
+  approval exists — the same rule as the artifact mirror's global folder. The
+  in-tree S3-compatible store sends every request to the configured endpoint and
+  only while sync is on. Its settings are the endpoint URL, region, bucket,
+  optional key prefix, and path-style or virtual-host addressing. The access key
+  and secret live in the host credential store — macOS Keychain or freedesktop
+  Secret Service — and are never journaled. A plaintext endpoint is refused and
+  no credential is sent on it. A publish uses a conditional create
+  (`If-None-Match: *`); a provider that does not enforce it is configured to
+  fall back to HEAD-then-PUT, where a key is already unique to one host's
+  instance and sequence so a lost race cannot overwrite another host's entry. A
+  failure is a typed outcome — unauthorized, not-found, throttled, unreachable;
+  a throttled or unreachable answer is retried a bounded number of times with
+  backoff, while a rejected credential or a missing object is not. A Test
+  connection action writes one probe object in a reserved key namespace and
+  deletes nothing; `list` skips that namespace. Publish and pull are not this
+  store; they call it.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -1824,11 +1838,26 @@ replay. When the destination was called but the journal could not take the
 record, the answer is `unrecorded` and carries the destination's outcome; it is
 never reported as a failed export. PDF and PNG are named formats the seam can carry later; this host does
 not render them. A target that passed activation is still reported honestly as
-`not-connected`, `ready`, or `refused`. The rendered Markdown, HTML, and the
-artifact preview SVG read numbers through the shared Canvas formatter and draw
-marks to the shared chart specifications and the shared squarified treemap
-layout, so an exported reading matches the screen rather than growing a second
-reading.
+`not-connected`, `ready`, or `refused`. A local target may describe the exact
+file it would write, and the card then names that path: approving a card that
+names an existing file is the confirmation to replace it, and a call without
+that confirmation writes a numbered copy beside the file instead of over it.
+The rendered Markdown, HTML, and the artifact preview SVG read numbers through
+the shared Canvas formatter and draw marks to the shared chart specifications
+and the shared squarified treemap layout, so an exported reading matches the
+screen rather than growing a second reading.
+
+The folder destination ships in-tree on that same port, so it is offered,
+approved, and journaled exactly as a plugin's contribution is. Its folder comes
+from the host folder browser — a renderer sends a candidate the host listed, and
+the host resolves the path — and is remembered per Project, with a host-wide
+folder for a thread filed nowhere, in a `canvas.export-folder-changed@1` journal
+frame rebuilt on restart. A folder must be inside the person's home unless the
+standing access-outside-project approval exists, the same rule the artifact
+mirror's global folder follows. Writes are confined to the chosen folder and are
+atomic: a temporary file is renamed into place, so a reader never sees a
+half-written export. The user guide's exporting page
+(`apps/docs/guide/export.md`) states the same rules for a person.
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured

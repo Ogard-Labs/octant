@@ -67,6 +67,54 @@ function view(): NativeHarnessSessionView {
 }
 
 describe("NativeHarnessSessionCard", () => {
+  it("shows the session's tokens, cache, speed, first-token time, and cost worded like the composer line", async () => {
+    const base = view();
+    const measured = {
+      ...base,
+      session: {
+        ...base.session,
+        lead: { ...base.session.lead, modelId: "gpt-5.6-luna" },
+        usage: { inputTokens: 48_000, outputTokens: 3_100, cacheReadInputTokens: 44_160 },
+        metrics: {
+          turns: 3,
+          measuredTurns: 2,
+          precision: "approximate",
+          decodeOutputTokens: 820,
+          decodeMs: 20_000,
+          toolMs: 3_000,
+          timeToFirstTokenTotalMs: 1_800,
+        },
+      },
+    } as NativeHarnessSessionView;
+    const client = {
+      session: vi.fn(async () => measured),
+      command: vi.fn(),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(),
+    };
+    render(<NativeHarnessSessionCard client={client} threadId={threadId} />);
+
+    const usage = await screen.findByTestId("native-harness-stats");
+    expect(usage).toHaveTextContent("↑ 48k in");
+    expect(usage).toHaveTextContent("↓ 3.1k out");
+    expect(usage).toHaveTextContent("cache 92%");
+    expect(usage).toHaveTextContent("~41 tok/s");
+    expect(usage).toHaveTextContent("0.9 s first token");
+  });
+
+  it("shows no usage row for a session whose provider reported nothing", async () => {
+    const client = {
+      session: vi.fn(async () => view()),
+      command: vi.fn(),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(),
+    };
+    render(<NativeHarnessSessionCard client={client} threadId={threadId} />);
+    await waitFor(() => expect(screen.getByText(/frontier-large/)).toBeVisible());
+
+    expect(screen.queryByTestId("native-harness-stats")).not.toBeInTheDocument();
+  });
+
   it("shows the lead and a fallback routing decision", async () => {
     const client = {
       session: vi.fn(async () => view()),

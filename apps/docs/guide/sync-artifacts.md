@@ -42,6 +42,21 @@ The mirror and the export are separate. They still write plain files for you
 and for other tools, and they never push to git. Pointing a sync client at
 the mirror folder is not this sync.
 
+## An S3-compatible bucket
+
+An S3-compatible bucket needs its endpoint address, region, bucket name, an
+optional folder prefix, and whether the provider uses path-style or
+virtual-host addressing. The access key and secret are kept in your computer's
+Keychain (macOS) or Secret Service (Linux) — the same place your model provider
+credentials live. Octant never writes them to a store entry, to your journal,
+or to a log. It contacts only the endpoint you configured, and only while sync
+is on. The endpoint must be an `https` address; a plain one is refused, and no
+credential is sent on it.
+
+A **Test connection** button proves the setup by writing one small probe file
+in the bucket. It deletes nothing, and the app ignores that file when it reads
+the store. Octant does not delete objects from your bucket on your behalf.
+
 ## Turning sync off
 
 Turning sync off stops this computer writing to the store and reading from
