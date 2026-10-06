@@ -1,3 +1,4 @@
+import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type {
   CanvasCardStatus,
   CanvasThreadReferenceCard as Card,
@@ -5,9 +6,17 @@ import type {
 import { ChevronRight, FileStack } from "lucide-react";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
+import { CanvasView } from "./CanvasView";
+import { canvasDigest } from "./canvasDigest";
+import { useCanvasDefinition } from "./useCanvasDefinition";
 
 export interface CanvasThreadReferenceCardProps {
   readonly card: Card;
+  /**
+   * Reads the Canvas for a live preview and a digest of what it holds.
+   * Without it the row shows the document's mark and its card facts only.
+   */
+  readonly client?: CanvasClient;
   /** Opens the Canvas; without it the row only names the document. */
   readonly onOpen?: (card: Card) => void;
 }
@@ -27,23 +36,42 @@ const STATUS_WORDS: Record<Exclude<CanvasCardStatus, "ready">, string> = {
 };
 
 /**
- * A Canvas the thread wrote, as one row: the document's mark, its title, and
- * one line saying what it is and when it last changed. The whole row opens
- * it, the way a count tile or a board card opens what it names.
+ * A Canvas the thread wrote, as one row: a live miniature of the document,
+ * its title, and one line read off its content (a plan's next task, a
+ * chart's series), with a plan's progress under it. The whole row opens it,
+ * the way a count tile or a board card opens what it names.
  */
-export function CanvasThreadReferenceCard({ card, onOpen }: CanvasThreadReferenceCardProps) {
+export function CanvasThreadReferenceCard({
+  card,
+  client,
+  onOpen,
+}: CanvasThreadReferenceCardProps) {
+  const loaded = useCanvasDefinition(client, card, client !== undefined);
+  const digest = loaded.kind === "ready" ? canvasDigest(loaded.definition) : undefined;
   const facts = [
-    card.status === "ready" ? "Canvas" : STATUS_WORDS[card.status],
+    card.status === "ready" ? (digest?.label ?? "Canvas") : STATUS_WORDS[card.status],
+    ...(digest?.facts ?? []),
     card.actionCount > 0
       ? `${String(card.actionCount)} ${card.actionCount === 1 ? "action" : "actions"}`
       : undefined,
     `Updated ${relativeTimeLabel(card.createdAt)}`,
   ].filter((fact): fact is string => fact !== undefined);
+  const progress = digest?.progress;
   const face = (
     <>
-      <span aria-hidden="true" className="canvas-ref__icon">
-        <FileStack size={16} strokeWidth={1.7} />
-      </span>
+      {loaded.kind === "ready" ? (
+        // A miniature of the real renderer, not a picture of it. It is
+        // decorative and inert, so nothing inside it can take focus or a click.
+        <span aria-hidden="true" className="canvas-ref__preview" inert>
+          <span className="canvas-ref__preview-page">
+            <CanvasView input={loaded.definition} placement="thread" />
+          </span>
+        </span>
+      ) : (
+        <span aria-hidden="true" className="canvas-ref__icon">
+          <FileStack size={16} strokeWidth={1.7} />
+        </span>
+      )}
       <span className="canvas-ref__text">
         <span className="canvas-ref__title" data-testid="canvas-card-title">
           {card.title}
@@ -60,25 +88,40 @@ export function CanvasThreadReferenceCard({ card, onOpen }: CanvasThreadReferenc
         >
           {facts.join(" · ")}
         </span>
+        {progress === undefined || progress.total === 0 ? null : (
+          <span className="canvas-ref__progress">
+            <span className="canvas-ref__progress-track" aria-hidden="true">
+              <span
+                className="canvas-ref__progress-fill"
+                style={{ width: `${String(Math.round((progress.done / progress.total) * 100))}%` }}
+              />
+            </span>
+            <span className="canvas-ref__progress-label">
+              {`${String(progress.done)} of ${String(progress.total)} done`}
+            </span>
+          </span>
+        )}
       </span>
       {onOpen === undefined ? null : (
         <ChevronRight aria-hidden="true" className="canvas-ref__chevron" size={16} />
       )}
     </>
   );
-  return onOpen === undefined ? (
-    <div className="canvas-ref" data-testid="canvas-card">
+  // The open control lies over the whole row rather than wrapping it: the
+  // miniature is a real document with its own controls, and a button may not
+  // hold other interactive content.
+  return (
+    <div className="canvas-ref" data-kind={digest?.kind} data-testid="canvas-card">
+      {onOpen === undefined ? null : (
+        <OctantButton
+          aria-label={`Open ${card.title}`}
+          className="canvas-ref__hit"
+          onClick={() => onOpen(card)}
+          type="button"
+          variant="bare"
+        />
+      )}
       {face}
     </div>
-  ) : (
-    <OctantButton
-      className="canvas-ref"
-      data-testid="canvas-card"
-      onClick={() => onOpen(card)}
-      type="button"
-      variant="bare"
-    >
-      {face}
-    </OctantButton>
   );
 }

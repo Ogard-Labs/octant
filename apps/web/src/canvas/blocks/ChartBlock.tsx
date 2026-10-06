@@ -1,4 +1,5 @@
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   CanvasChartBlock,
   CanvasChartSeries,
@@ -11,6 +12,7 @@ import {
   formatTick,
   niceAxis,
   pieWedges,
+  smoothPath,
   ringPath,
   scaleY,
   type YDomain,
@@ -82,8 +84,10 @@ function useMeasuredWidth() {
   useLayoutEffect(() => {
     const element = ref.current;
     if (element === null || typeof ResizeObserver === "undefined") return;
+    // The layout width, not the painted one: a scaled-down preview of the
+    // Canvas must still draw the chart at its own size and let the scale shrink it.
     const measure = () => {
-      const next = Math.round(element.getBoundingClientRect().width);
+      const next = element.clientWidth;
       if (next > 0) setWidth(next);
     };
     measure();
@@ -133,6 +137,8 @@ function CartesianChart({
   readonly width: number;
 }) {
   const [hover, setHover] = useState<number | undefined>(undefined);
+  // useId yields characters a url(#…) reference cannot carry.
+  const gradientId = `chart-${useId().replace(/[^A-Za-z0-9_-]/g, "")}`;
   const visible = visibleSeries(block, hidden);
   const barLike = block.chartType === "bar" || block.chartType === "distribution";
   const axis = niceAxis(
@@ -183,6 +189,7 @@ function CartesianChart({
 
   return (
     <div className="canvas-chart">
+      <TrendHeadline block={block} />
       <svg
         aria-label={chartLabel(block)}
         className="canvas-chart__svg"
@@ -268,28 +275,43 @@ function CartesianChart({
               </g>
             );
           }
-          const line = coords.map((coord) => `${String(coord.x)},${String(coord.y)}`).join(" ");
+          const curve = smoothPath(coords);
           const first = coords[0];
           const last = coords[coords.length - 1];
+          const fillId = `${gradientId}-${series}`;
+          // A lone line or area fades a wash of its own colour to the floor,
+          // which reads as volume; several overlapping washes would muddy.
+          const washed = block.chartType === "area" || visible.length === 1;
           return (
-            <g data-series={series} key={item.series.seriesId}>
-              {block.chartType === "area" && first !== undefined && last !== undefined ? (
-                <path
-                  className={`${mark} is-area`}
-                  d={`M ${String(first.x)} ${String(frame.bottom)} L ${line.replaceAll(" ", " L ")} L ${String(last.x)} ${String(frame.bottom)} Z`}
-                  data-series={series}
-                />
+            <g className={seriesClass(item.index)} data-series={series} key={item.series.seriesId}>
+              {washed &&
+              block.chartType !== "scatter" &&
+              first !== undefined &&
+              last !== undefined ? (
+                <>
+                  <defs>
+                    <linearGradient id={fillId} x1="0" x2="0" y1="0" y2="1">
+                      <stop
+                        className="canvas-chart__wash-top"
+                        data-kind={block.chartType}
+                        offset="0"
+                      />
+                      <stop className="canvas-chart__wash-floor" offset="1" />
+                    </linearGradient>
+                  </defs>
+                  <path
+                    className="canvas-chart__wash"
+                    d={`${curve} L ${String(last.x)} ${String(frame.bottom)} L ${String(first.x)} ${String(frame.bottom)} Z`}
+                    data-kind={block.chartType}
+                    fill={`url(#${fillId})`}
+                  />
+                </>
               ) : null}
               {block.chartType === "scatter" ? null : (
-                <polyline
-                  className={`${mark} is-line`}
-                  data-series={series}
-                  fill="none"
-                  points={line}
-                />
+                <path className={`${mark} is-line`} d={curve} data-series={series} fill="none" />
               )}
               {coords.map((coord, index) =>
-                block.chartType === "scatter" || hover === index || coords.length <= 16 ? (
+                block.chartType === "scatter" || hover === index || index === coords.length - 1 ? (
                   <circle
                     className={`canvas-chart__dot ${seriesClass(item.index)}`}
                     cx={coord.x}
@@ -297,7 +319,7 @@ function CartesianChart({
                     data-active={hover === index ? "true" : undefined}
                     data-series={series}
                     key={index}
-                    r={hover === index ? 4 : 2.5}
+                    r={block.chartType === "scatter" ? 3 : 4}
                   />
                 ) : null,
               )}
@@ -319,6 +341,35 @@ function CartesianChart({
           width={width}
           x={xAt(hover)}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * A lone line or area over time leads with where it ended and how far it
+ * moved from where it began, which is what a reader looks for first. It quotes
+ * the first and last readings only; with several series, or a first reading
+ * of zero, there is no single honest change to state, so it says nothing.
+ */
+function TrendHeadline({ block }: { readonly block: CanvasChartBlock }) {
+  if (block.chartType !== "line" && block.chartType !== "area") return null;
+  const points = block.series.length === 1 ? (block.series[0]?.points ?? []) : [];
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (first === undefined || last === undefined || points.length < 2) return null;
+  const change = first.y === 0 ? undefined : ((last.y - first.y) / Math.abs(first.y)) * 100;
+  const Arrow =
+    change === undefined || change === 0 ? Minus : change > 0 ? ArrowUpRight : ArrowDownRight;
+  return (
+    <div className="canvas-chart__headline">
+      <span className="canvas-chart__headline-value">{formatScalar(last.y)}</span>
+      <span className="canvas-chart__headline-at">{String(last.x)}</span>
+      {change === undefined ? null : (
+        <span className="canvas-chart__headline-change">
+          <Arrow aria-hidden="true" size={12} strokeWidth={2} />
+          {`${change > 0 ? "+" : ""}${formatTick(Math.round(change))}% since ${String(first.x)}`}
+        </span>
       )}
     </div>
   );

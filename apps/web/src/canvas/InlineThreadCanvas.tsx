@@ -1,5 +1,4 @@
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
-import type { CanvasDefinition } from "@octant/contracts/canvas";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { ChevronsDownUp, ChevronsUpDown, FileStack, PanelRightOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -7,6 +6,8 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { CanvasThreadReferenceCard as CanvasReferenceRow } from "./CanvasThreadReferenceCard";
 import { CanvasView } from "./CanvasView";
+import { canvasDigest } from "./canvasDigest";
+import { useCanvasDefinition } from "./useCanvasDefinition";
 
 const SHOWN_AS_CARD_KEY = "octant.canvas.shown-as-card.v1";
 /** Oldest entries fall off first; the list never grows without bound. */
@@ -47,11 +48,6 @@ export function rememberCanvasShownAsCard(
   }
 }
 
-type Loaded =
-  | { readonly kind: "loading" }
-  | { readonly kind: "ready"; readonly definition: CanvasDefinition }
-  | { readonly kind: "unavailable" };
-
 export interface InlineThreadCanvasProps {
   readonly client: CanvasClient;
   readonly card: CanvasThreadReferenceCard;
@@ -73,34 +69,10 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
   const { card, client } = props;
   const canvasId = String(card.canvasId);
   const [shownAsCard, setShownAsCard] = useState(() => readCanvasesShownAsCard().has(canvasId));
-  const [loaded, setLoaded] = useState<Loaded>({ kind: "loading" });
+  const loaded = useCanvasDefinition(client, card, !shownAsCard);
+  const digest = loaded.kind === "ready" ? canvasDigest(loaded.definition) : undefined;
   const [clipped, setClipped] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (shownAsCard) return;
-    let cancelled = false;
-    // A revision swaps the document in place; blanking it first would make
-    // the thread jump while the new version loads.
-    setLoaded((current) => (current.kind === "ready" ? current : { kind: "loading" }));
-    void client
-      .get(card.canvasId)
-      .then((outcome) => {
-        if (cancelled) return;
-        setLoaded(
-          outcome.kind === "ready"
-            ? { kind: "ready", definition: outcome.version.definition }
-            : { kind: "unavailable" },
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setLoaded({ kind: "unavailable" });
-      });
-    return () => {
-      cancelled = true;
-    };
-    // The version id changes when the Canvas is revised; read it again then.
-  }, [card.canvasId, card.versionId, client, shownAsCard]);
 
   // The body is capped rather than scrolled: a nested scroller would take the
   // wheel from the thread. Content past the cap fades into an offer to read
@@ -128,6 +100,7 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
     <section
       aria-label={`Canvas: ${card.title}`}
       className="thread-canvas"
+      data-kind={digest?.kind}
       data-shown-as={shownAsCard ? "card" : "inline"}
       data-testid="thread-canvas"
     >
@@ -230,6 +203,7 @@ export function ThreadCanvases(props: {
         ) : (
           <CanvasReferenceRow
             card={card}
+            client={props.client}
             key={String(card.canvasId)}
             {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
           />

@@ -122,6 +122,67 @@ describe("CanvasThreadReferenceCard", () => {
     );
   });
 
+  it("previews a plan and says how far it has got and what comes next", async () => {
+    const definition = {
+      schemaVersion: 4,
+      title: "Launch plan",
+      provenance: {
+        mode: "chat",
+        hostId: "local",
+        projectId,
+        threadId,
+        actor: { kind: "agent", actorId: "99999999-9999-4999-8999-999999999999" },
+        providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        modelId: "octant-test-model",
+        createdAt: "2026-08-01T21:00:00.000Z",
+      },
+      sourceManifest: [],
+      blocks: [
+        {
+          blockId: "plan",
+          schemaVersion: 1,
+          kind: "plan",
+          title: "Launch",
+          phases: [{ phaseId: "ship", title: "Ship" }],
+          tasks: [
+            { taskId: "fix", phaseId: "ship", title: "Ship the fix", status: "done" },
+            { taskId: "note", phaseId: "ship", title: "Write the note", status: "todo" },
+          ],
+        },
+      ],
+    };
+    const client = {
+      get: vi.fn().mockResolvedValue({
+        kind: "ready",
+        version: {
+          schemaVersion: 4,
+          canvasId: "20000000-0000-4000-8000-000000000002",
+          versionId: "20000000-0000-4000-8000-000000000003",
+          sequence: 1,
+          definition,
+          createdBy: definition.provenance.actor,
+          createdAt: "2026-08-01T21:00:00.000Z",
+        },
+      }),
+    } as unknown as CanvasClient;
+    const { container } = render(
+      <CanvasThreadReferenceCard card={referenceCardFixture()} client={client} onOpen={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("canvas-card-meta")).toHaveTextContent(
+        /^Plan · 2 tasks · next: Write the note · Updated /,
+      );
+    });
+    expect(container.querySelector(".canvas-ref__progress-label")).toHaveTextContent("1 of 2 done");
+    expect(screen.getByTestId("canvas-card")).toHaveAttribute("data-kind", "plan");
+    // The miniature is decorative: nothing inside it is reachable or announced.
+    const preview = container.querySelector(".canvas-ref__preview");
+    expect(preview).toHaveAttribute("aria-hidden", "true");
+    expect(preview).toHaveAttribute("inert");
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+
   it("opens the Canvas from the whole row", async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();

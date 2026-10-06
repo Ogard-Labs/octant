@@ -165,3 +165,63 @@ export function formatTick(value: number): string {
 function trimNumber(value: number): string {
   return String(Number(value.toFixed(2)));
 }
+
+export interface PlotPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * A smooth line through every reading that never swings past one. A plain
+ * cubic overshoots between a rise and a fall and draws a peak the data does
+ * not have; monotone tangents (Fritsch–Carlson) keep each span inside its two
+ * readings, so the curve stays honest at any spacing.
+ */
+export function smoothPath(points: ReadonlyArray<PlotPoint>): string {
+  const first = points[0];
+  if (first === undefined) return "";
+  if (points.length < 3) {
+    return points
+      .map(
+        (point, index) =>
+          `${index === 0 ? "M" : "L"} ${roundCoord(point.x)} ${roundCoord(point.y)}`,
+      )
+      .join(" ");
+  }
+  const slopes: number[] = [];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const a = points[index];
+    const b = points[index + 1];
+    if (a === undefined || b === undefined) continue;
+    const dx = b.x - a.x;
+    slopes.push(dx === 0 ? 0 : (b.y - a.y) / dx);
+  }
+  const tangents = points.map((point, index) => {
+    const before = slopes[index - 1];
+    const after = slopes[index];
+    if (before === undefined) return after ?? 0;
+    if (after === undefined) return before;
+    // A turning point or a flat run keeps a flat tangent, which is what stops the overshoot.
+    if (before * after <= 0) return 0;
+    // Otherwise the weighted harmonic mean of the two slopes, weighted by the
+    // neighbouring spans, which keeps the curve inside each span's readings.
+    const previous = points[index - 1];
+    const next = points[index + 1];
+    const spanBefore = previous === undefined ? 0 : point.x - previous.x;
+    const spanAfter = next === undefined ? 0 : next.x - point.x;
+    const weightBefore = 2 * spanAfter + spanBefore;
+    const weightAfter = spanAfter + 2 * spanBefore;
+    return (weightBefore + weightAfter) / (weightBefore / before + weightAfter / after);
+  });
+  let path = `M ${roundCoord(first.x)} ${roundCoord(first.y)}`;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const a = points[index];
+    const b = points[index + 1];
+    if (a === undefined || b === undefined) continue;
+    const third = (b.x - a.x) / 3;
+    const startTangent = tangents[index] ?? 0;
+    const endTangent = tangents[index + 1] ?? 0;
+    path += ` C ${roundCoord(a.x + third)} ${roundCoord(a.y + startTangent * third)} ${roundCoord(b.x - third)} ${roundCoord(b.y - endTangent * third)} ${roundCoord(b.x)} ${roundCoord(b.y)}`;
+  }
+  return path;
+}

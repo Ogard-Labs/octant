@@ -216,18 +216,63 @@
 }
 
 .canvas-chart .canvas-block__chart-mark.is-line {
-  stroke-width: 1.5;
+  stroke-width: 2;
 }
 
-.canvas-chart .canvas-block__chart-mark.is-area {
-  stroke: none;
-  opacity: 0.16;
+/* A lone line or an area fades a wash of its own colour to the floor. */
+.canvas-chart__wash-top {
+  stop-color: var(--oct-ser, var(--oct-series-1));
+  stop-opacity: 0.22;
+}
+
+.canvas-chart__wash-top[data-kind="area"] {
+  stop-opacity: 0.32;
+}
+
+.canvas-chart__wash-floor {
+  stop-color: var(--oct-ser, var(--oct-series-1));
+  stop-opacity: 0;
 }
 
 .canvas-chart__dot {
   fill: var(--oct-ser, var(--oct-series-1));
   stroke: var(--octant-card, var(--oct-surface));
-  stroke-width: 1.5;
+  stroke-width: 2;
+}
+
+/* Where a lone trend ended, and how far it moved since it began. */
+.canvas-chart__headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  margin: 0 0 var(--oct-space-2);
+}
+
+.canvas-chart__headline-value {
+  font-size: var(--oct-text-2xl);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1.1;
+}
+
+.canvas-chart__headline-at {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.canvas-chart__headline-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 2px var(--oct-space-2);
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .canvas-chart__bar[data-active="true"] {
@@ -1947,8 +1992,79 @@
   text-align: start;
 }
 
-button.canvas-ref:hover {
+/* The open control lies over the whole row; the row's content sits beneath
+   it and the hover wash is drawn on the row. */
+.canvas-ref {
+  position: relative;
+}
+
+.canvas-ref__hit {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border-radius: inherit;
+}
+
+.canvas-ref:has(.canvas-ref__hit:hover) {
   background: color-mix(in oklab, var(--oct-fg) 3%, var(--octant-card, var(--octant-workspace)));
+}
+
+/* A live miniature of the document: the real renderer laid out at a narrow
+   page width and scaled down into a 104 × 72 tile, faded at its foot. */
+.canvas-ref__preview {
+  position: relative;
+  flex: none;
+  width: 104px;
+  height: 72px;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 8%, transparent);
+  border-radius: var(--oct-radius-inset);
+  background: var(--octant-workspace, var(--oct-surface));
+  mask-image: linear-gradient(to bottom, var(--oct-fg) 70%, transparent);
+  pointer-events: none;
+}
+
+.canvas-ref__preview-page {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 320px;
+  transform: scale(0.325);
+  transform-origin: top left;
+}
+
+.canvas-ref__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-1);
+}
+
+.canvas-ref__progress-track {
+  flex: 1 1 auto;
+  max-width: 12rem;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--oct-fg) 10%, transparent);
+}
+
+.canvas-ref__progress-fill {
+  display: block;
+  min-width: 4px;
+  height: 100%;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+}
+
+.canvas-ref__progress-label {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .canvas-ref__icon {
@@ -2024,6 +2140,18 @@ button.canvas-ref:hover {
   .canvas-ref__icon,
   .thread-canvas {
     border-color: CanvasText;
+    background: Canvas;
+  }
+}
+
+@media (forced-colors: active) {
+  .canvas-ref__progress-fill {
+    background: CanvasText;
+  }
+
+  .canvas-ref__progress-track,
+  .canvas-chart__headline-change {
+    border: 1px solid CanvasText;
     background: Canvas;
   }
 }

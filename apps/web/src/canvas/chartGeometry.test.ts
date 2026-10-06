@@ -3,6 +3,7 @@ import {
   categoryCenter,
   formatTick,
   niceAxis,
+  smoothPath,
   computeYDomain,
   pieWedges,
   ringPath,
@@ -75,5 +76,48 @@ describe("value axis gridlines", () => {
     expect(formatTick(1_250_000)).toBe("1.25M");
     expect(formatTick(42_000)).toBe("42k");
     expect(formatTick(2500)).toBe("2500");
+  });
+});
+
+describe("smooth line through readings", () => {
+  it("draws a straight segment for two readings and a curve through every reading for more", () => {
+    expect(
+      smoothPath([
+        { x: 0, y: 10 },
+        { x: 10, y: 0 },
+      ]),
+    ).toBe("M 0.00 10.00 L 10.00 0.00");
+    const path = smoothPath([
+      { x: 0, y: 50 },
+      { x: 10, y: 20 },
+      { x: 20, y: 40 },
+    ]);
+    expect(path.startsWith("M 0.00 50.00 C")).toBe(true);
+    expect(path).toContain(" 10.00 20.00 C");
+    expect(path.endsWith(" 20.00 40.00")).toBe(true);
+  });
+
+  it("keeps a peak's control points level so the curve never draws past the reading", () => {
+    const path = smoothPath([
+      { x: 0, y: 50 },
+      { x: 10, y: 20 },
+      { x: 20, y: 50 },
+    ]);
+    // Both handles beside the peak sit at its height: a flat tangent at the turn.
+    expect(path).toContain("6.67 20.00 10.00 20.00 C 13.33 20.00");
+  });
+});
+
+describe("smooth line tangents", () => {
+  it("passes straight through evenly rising readings instead of flattening between them", () => {
+    // Three evenly spaced readings on one straight rise: the smooth line is that straight line.
+    const path = smoothPath([
+      { x: 0, y: 30 },
+      { x: 30, y: 20 },
+      { x: 60, y: 10 },
+    ]);
+    expect(path).toBe(
+      "M 0.00 30.00 C 10.00 26.67 20.00 23.33 30.00 20.00 C 40.00 16.67 50.00 13.33 60.00 10.00",
+    );
   });
 });
