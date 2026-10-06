@@ -30,6 +30,7 @@ export * from "./canvasActionExecutionPolicy";
 export * from "./canvasActionAvailabilityPolicy";
 export * from "./canvasLifecyclePolicy";
 export * from "./canvasCardsPolicy";
+export * from "./canvasPresentationPolicy";
 export * from "./canvasInventoryPolicy";
 export * from "./canvasRevisionPolicy";
 export * from "./canvasRefreshPolicy";

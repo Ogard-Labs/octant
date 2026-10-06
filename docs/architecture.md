@@ -273,6 +273,23 @@ recipes through its Canvas contribution; a skill that is not enabled contributes
 none, and a contributed recipe cannot replace an in-tree id. A recipe is a
 starting shape, not a document and not authority. Describe reads no Project
 data and creates no artifact.
+`create` and `revise` take an optional thread `presentation`: `inline` or
+`sidebar` (the default). The value is part of the definition and needs Canvas
+schema version 4. An older runtime refuses a version-4 document as a future
+version and does not report it corrupt.
+The pure `canvasInlineRefusal` policy admits `inline` only for at most 12 blocks
+with no `diagram`, `plan` or `mockup`. When an author asks for `inline` over
+that bound, the host records `sidebar` and returns the reason as
+`presentationNote`.
+A revise without a choice keeps the current presentation.
+A thread reference card reports the effective presentation and the first
+version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
+revision or a person's edit, is listed as `sidebar`.
+The renderer places every Canvas after the last row of the turn the person
+opened at or before `canvasCreatedAt`. An inline one is drawn there read-only:
+it gets no layout, plan, comment or action runtime, so nothing drawn inline can
+journal a version. Any other is a row that opens it. A card from an older host,
+or one no loaded turn can place, stays in the thread's card list.
 A chart is a closed type: line, area, bar, scatter, distribution, pie, donut,
 stacked bar, grouped bar, or bar-and-line. Pie and donut are one series of
 labeled non-negative slices. Stacked, grouped, and bar-and-line charts share

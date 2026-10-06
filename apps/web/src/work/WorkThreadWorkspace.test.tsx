@@ -708,7 +708,7 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Open Canvas" }));
+    await user.click(await screen.findByRole("button", { name: /Launch plan/ }));
     expect(threadReferenceCards).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "work", threadId: String(threadId) }),
     );

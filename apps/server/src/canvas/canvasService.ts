@@ -20,6 +20,7 @@ import {
   type CanvasActionRequest,
   type CanvasActionResult,
   type CanvasActor,
+  type CanvasPresentation,
   type CanvasVersion,
   type CanvasVersionId,
   type CanvasBoardDenialCode,
@@ -391,6 +392,7 @@ export class CanvasService {
     context: CanvasAuthorizationContext,
     project: CanvasProjectRecord | undefined,
     blocks?: ReadonlyArray<CanvasDefinition["blocks"][number]>,
+    presentation?: CanvasPresentation,
   ): CanvasReviseResult {
     let request;
     try {
@@ -428,6 +430,7 @@ export class CanvasService {
         nextVersionId: this.#uuid(),
         now: this.#clock(),
         ...(blocks === undefined ? {} : { blocks }),
+        ...(presentation === undefined ? {} : { presentation }),
       });
       this.#eventStore.appendVersion({
         canvasId,
@@ -604,6 +607,7 @@ export class CanvasService {
      * renderer cannot choose who a Canvas says wrote it.
      */
     authoredBy?: CanvasActor,
+    presentation?: CanvasPresentation,
   ): CanvasCreateResult {
     let request;
     try {
@@ -649,6 +653,7 @@ export class CanvasService {
         modelId: this.#modelId,
         createdAt: admitted.receipt.createdAt,
         ...(blocks === undefined ? {} : { blocks }),
+        ...(presentation === undefined ? {} : { presentation }),
       });
       this.#eventStore.appendCreate({
         canvasId,
@@ -1493,6 +1498,9 @@ export class CanvasService {
         projectThreadReferenceCardFromVersion({
           version: entry.currentVersion,
           cardId: entry.currentVersion.versionId,
+          ...(entry.versions[0] === undefined
+            ? {}
+            : { canvasCreatedAt: entry.versions[0].createdAt }),
           authority: {
             filesystem: false,
             shell: false,

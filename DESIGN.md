@@ -128,7 +128,9 @@ greys and the same hairline carry the hierarchy on a white or graphite ground.
 Settings › Appearance › Style chooses how much of that palette the chrome
 uses. **Default** is the monochrome described above. **Vivid** lets the
 places that name something carry colour: the welcome greeting, the sidebar's
-count tiles, board column marks, and a Project's accent. Vivid draws every
+count tiles, board column marks, a Project's accent, and a thread's Canvases,
+which take the hue of what they hold (a plan purple, a chart or figures
+amber, a diagram teal, a mockup pink, a table or document blue). Vivid draws every
 hue from the preset's palette roles (`--octant-palette-*`, read through the
 `--oct-vivid-*` aliases in `styles/vivid.css`), so it follows the light or
 dark theme and any tinted preset, and it never recolours a warning, a
