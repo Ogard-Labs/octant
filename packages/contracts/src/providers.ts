@@ -1907,6 +1907,22 @@ export const ProviderRuntimeEvent = Schema.Union(
   })
     .annotations(strict)
     .pipe(Schema.filter((event) => event.remaining <= event.limit)),
+  /**
+   * A direct endpoint failed in a way that usually passes and the request is
+   * going out again once `delayMs` has elapsed. It is sent before the wait, so
+   * a surface can say "retrying 2/5 in 4 s" while the turn is quiet. `attempt`
+   * is the attempt about to start, counted from 1; the turn is still running.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("retrying"),
+    attempt: Schema.Int.pipe(Schema.between(2, 16)),
+    maxAttempts: Schema.Int.pipe(Schema.between(2, 16)),
+    delayMs: Schema.Int.pipe(Schema.between(0, 3_600_000)),
+    reason: Schema.Literal("rate-limited", "unavailable", "stream-interrupted", "empty-completion"),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter((event) => event.attempt <= event.maxAttempts)),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("task-progress"),

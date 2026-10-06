@@ -180,7 +180,10 @@ function createHandler(
       readonly resolve: (input: {
         readonly parentThreadId: unknown;
         readonly mode: string;
-      }) => ReadonlyArray<{ readonly kind: string; readonly text: string }> | undefined;
+      }) =>
+        | ReadonlyArray<{ readonly kind: string; readonly text: string }>
+        | { readonly unavailable: string }
+        | undefined;
     };
     readonly parentMode?: "chat" | "work" | "code";
     readonly workspace?: AgentRunControlAdmissionDependencies["workspace"];
@@ -1755,6 +1758,25 @@ describe("agentRunRoutes", () => {
         status: 400,
       });
     }
+  });
+
+  it("names why parent context is unavailable and allocates no workspace for the refused child", async () => {
+    const prepare = vi.fn();
+    const { create } = createHandler({
+      parentContext: { resolve: () => ({ unavailable: "source-changed" }) },
+      workspace: { prepare, confirm: vi.fn(), admit: vi.fn() } as never,
+    });
+
+    const refused = await create({ ...creationBody(), includeParentContext: true });
+
+    expect(refused).toMatchObject({
+      kind: "invalid",
+      status: 400,
+      message: expect.stringMatching(/conversation changed while it was being read/),
+    });
+    // A worktree allocated before this refusal would be left behind for a
+    // child that never started.
+    expect(prepare).not.toHaveBeenCalled();
   });
 
   it("rejects a request ID reused with a different parent-context ask", async () => {

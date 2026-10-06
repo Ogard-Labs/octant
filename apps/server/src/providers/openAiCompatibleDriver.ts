@@ -21,6 +21,7 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { Cause, Effect, Exit, Option } from "effect";
+import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
 import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
 import type {
   NativeHarnessRequest,
@@ -32,6 +33,8 @@ import {
   type NativeHarnessTranscriptStore,
 } from "../harness/nativeHarnessTranscriptStore";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import { sendWithEndpointRetry } from "./endpointRetry";
+import { runProviderEffect } from "./runProviderEffect";
 import {
   directEndpointRequestResolver,
   honestDirectEndpointCapabilities,
@@ -105,6 +108,8 @@ export interface OpenAiCompatibleDriverOptions {
    * one started; the server passes the journal-backed store.
    */
   readonly transcripts?: NativeHarnessTranscriptStore;
+  /** How the harness retries this endpoint and where its lead goes when it stays down. */
+  readonly harness?: NativeHarnessEndpointHooks;
   /**
    * Host refresh and access for a subscription-oauth credential. Absent means
    * a stored pointer cannot be used; it is never sent as an API key.
@@ -122,6 +127,11 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
     authStrategy: options.configuration.authentication,
   };
   const transcripts = options.transcripts ?? new MemoryNativeHarnessTranscriptStore();
+  const transport = openAiCompatibleTransport(options, profile, clock);
+  options.harness?.endpoints?.register(options.instanceId, {
+    open: transport.open,
+    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
+  });
   return {
     kind: profile.driverKind,
     probe: ({ instanceId }) =>
@@ -241,7 +251,7 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
                 "Provider Project root must be an absolute normalized path.",
               ),
             )
-          : makeConnection(options, profile, clock, makeCorrelation, transcripts, {
+          : makeConnection(options, profile, transport, clock, makeCorrelation, transcripts, {
               projectRoot,
               mode: mode ?? "chat",
             }),
@@ -251,6 +261,7 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
 function makeConnection(
   options: OpenAiCompatibleDriverOptions,
   profile: OpenAiCompatibleDriverProfile,
+  transport: NativeHarnessTransport,
   clock: () => string,
   makeCorrelation: () => string,
   transcripts: NativeHarnessTranscriptStore,
@@ -261,8 +272,11 @@ function makeConnection(
     driverKind: profile.driverKind,
     projectRoot: input.projectRoot,
     mode: input.mode,
-    transport: openAiCompatibleTransport(options, profile, clock),
+    transport,
     transcripts,
+    ...(options.harness?.leadFallback === undefined
+      ? {}
+      : { leadFallback: options.harness.leadFallback }),
     admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
     onSessionCountChange: (delta) =>
       options.runtimeRegistry.setActiveSessionCount(
@@ -353,16 +367,23 @@ function openAiCompatibleTransport(
         send: async (request, stream) => {
           const active = endpoint;
           if (active === undefined) throw failure("protocol", "Provider session is not active.");
-          const result = await sendCompatibleRequest(options, active, request, stream);
-          recordObservedTurn(options, result, clock);
-          return {
-            text: result.text,
-            toolCalls: result.toolCalls,
-            ...(result.usage === undefined ? {} : { usage: result.usage }),
-            ...(result.rateLimitBuckets === undefined
-              ? {}
-              : { rateLimitBuckets: result.rateLimitBuckets }),
-          };
+          return sendWithEndpointRetry({
+            signal: stream.signal,
+            onEvent: stream.onEvent,
+            options: options.harness?.retry,
+            attempt: async (attempt) => {
+              const result = await sendCompatibleRequest(options, active, request, attempt);
+              recordObservedTurn(options, result, clock);
+              return {
+                text: result.text,
+                toolCalls: result.toolCalls,
+                ...(result.usage === undefined ? {} : { usage: result.usage }),
+                ...(result.rateLimitBuckets === undefined
+                  ? {}
+                  : { rateLimitBuckets: result.rateLimitBuckets }),
+              };
+            },
+          });
         },
         release: () => {
           endpoint = undefined;
@@ -411,11 +432,12 @@ async function sendCompatibleRequest(
   const onEvent = (event: ProtocolTurnEvent) => {
     // Tool calls arrive on the result; the loop asks for them as a step.
     if (event.kind === "tool-call") return;
-    stream.onEvent(
-      event.kind === "usage"
-        ? { kind: "usage", inputTokens: event.inputTokens, outputTokens: event.outputTokens }
-        : { kind: event.kind, text: event.text },
-    );
+    if (event.kind === "usage") {
+      const { sequence: _sequence, ...usage } = event;
+      stream.onEvent(usage);
+      return;
+    }
+    stream.onEvent({ kind: event.kind, text: event.text });
   };
   const shared = {
     endpoint,
@@ -436,7 +458,7 @@ async function sendCompatibleRequest(
     attempt: async (protocol): Promise<CompatibleProtocolAttemptResult<CompatibleTurnResult>> => {
       if (protocol === "chat-completions") {
         try {
-          return { ok: true, value: await Effect.runPromise(sendChatCompletionsTurn(shared)) };
+          return { ok: true, value: await runProviderEffect(sendChatCompletionsTurn(shared)) };
         } catch (error) {
           return {
             ok: false,
@@ -452,7 +474,7 @@ async function sendCompatibleRequest(
       try {
         return {
           ok: true,
-          value: await Effect.runPromise(
+          value: await runProviderEffect(
             sendResponsesTurn({
               ...shared,
               onAttemptFailure: (value) => {

@@ -430,4 +430,199 @@ describe("sendChatCompletionsTurn", () => {
 
     expect(fetch).toHaveBeenCalledOnce();
   });
+
+  it("reads cached and reasoning tokens and ignores reasoning_content and other extra keys", async () => {
+    const observed = vi.fn();
+    const fetch = vi.fn(async () =>
+      stream(
+        {
+          id: "chatcmpl_private",
+          object: "chat.completion.chunk",
+          provider_extra: { region: "eu" },
+          choices: [
+            {
+              index: 0,
+              delta: { role: "assistant", content: null, reasoning_content: "thinking" },
+              finish_reason: null,
+              logprobs: null,
+              native_finish_reason: null,
+            },
+          ],
+          usage: null,
+        },
+        chunk({ content: "Hello", reasoning_content: "" }),
+        chunk({}, "stop"),
+        {
+          id: "chatcmpl_private",
+          object: "chat.completion.chunk",
+          choices: [],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 12,
+            total_tokens: 112,
+            prompt_tokens_details: { cached_tokens: 64, audio_tokens: 0 },
+            completion_tokens_details: { reasoning_tokens: 5, accepted_prediction_tokens: 0 },
+          },
+        },
+        "[DONE]",
+      ),
+    );
+
+    const result = await Effect.runPromise(
+      sendChatCompletionsTurn(input(fetch, { onEvent: observed })),
+    );
+
+    const expected = {
+      inputTokens: 100,
+      outputTokens: 12,
+      cacheReadInputTokens: 64,
+      reasoningTokens: 5,
+    };
+    expect(result.text).toBe("Hello");
+    expect(result.usage).toEqual(expected);
+    expect(result.events.at(-1)).toEqual({ kind: "usage", sequence: 2, ...expected });
+    expect(observed.mock.calls.map(([event]) => event)).toEqual(result.events);
+  });
+
+  it("reports zero cache reads for an uncached response and nothing when the endpoint reports none", async () => {
+    const uncached = vi.fn(async () =>
+      stream(
+        chunk({ role: "assistant", content: "Hi" }),
+        chunk({}, "stop"),
+        {
+          id: "chatcmpl_private",
+          object: "chat.completion.chunk",
+          choices: [],
+          usage: {
+            prompt_tokens: 9,
+            completion_tokens: 1,
+            total_tokens: 10,
+            prompt_tokens_details: { cached_tokens: 0 },
+            completion_tokens_details: { reasoning_tokens: 0 },
+          },
+        },
+        "[DONE]",
+      ),
+    );
+    const silent = vi.fn(async () =>
+      stream(chunk({ role: "assistant", content: "Hi" }), chunk({}, "stop"), usage(9, 1), "[DONE]"),
+    );
+
+    const withDetails = await Effect.runPromise(sendChatCompletionsTurn(input(uncached)));
+    const without = await Effect.runPromise(sendChatCompletionsTurn(input(silent)));
+
+    expect(withDetails.usage).toEqual({
+      inputTokens: 9,
+      outputTokens: 1,
+      cacheReadInputTokens: 0,
+      reasoningTokens: 0,
+    });
+    expect(without.usage).toEqual({ inputTokens: 9, outputTokens: 1 });
+  });
+
+  it("reads prompt cache hits from the hit and miss counters some endpoints report", async () => {
+    const fetch = vi.fn(async () =>
+      stream(
+        chunk({ role: "assistant", content: "Hi" }),
+        chunk({}, "stop"),
+        {
+          id: "chatcmpl_private",
+          object: "chat.completion.chunk",
+          choices: [],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 4,
+            total_tokens: 104,
+            prompt_cache_hit_tokens: 80,
+            prompt_cache_miss_tokens: 20,
+          },
+        },
+        "[DONE]",
+      ),
+    );
+
+    const result = await Effect.runPromise(sendChatCompletionsTurn(input(fetch)));
+
+    expect(result.usage).toEqual({ inputTokens: 100, outputTokens: 4, cacheReadInputTokens: 80 });
+  });
+
+  it("reads cache and reasoning tokens from a non-streaming completion", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              message: "unsupported",
+              type: "invalid_request_error",
+              param: "stream",
+              code: "unsupported_parameter",
+            },
+          },
+          { status: 400 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          id: "chatcmpl_private",
+          object: "chat.completion",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "Complete", reasoning_content: "why" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: {
+            prompt_tokens: 40,
+            completion_tokens: 6,
+            total_tokens: 46,
+            prompt_tokens_details: { cached_tokens: 32 },
+            completion_tokens_details: { reasoning_tokens: 2 },
+          },
+        }),
+      );
+
+    const result = await Effect.runPromise(sendChatCompletionsTurn(input(fetch)));
+
+    expect(result.usage).toEqual({
+      inputTokens: 40,
+      outputTokens: 6,
+      cacheReadInputTokens: 32,
+      reasoningTokens: 2,
+    });
+  });
+
+  it.each([
+    ["a string cached count", { prompt_tokens_details: { cached_tokens: "64" } }],
+    ["a negative cached count", { prompt_tokens_details: { cached_tokens: -1 } }],
+    ["a non-object prompt detail", { prompt_tokens_details: 64 }],
+    ["a fractional reasoning count", { completion_tokens_details: { reasoning_tokens: 1.5 } }],
+    ["more cached tokens than prompt tokens", { prompt_tokens_details: { cached_tokens: 11 } }],
+    [
+      "more reasoning tokens than completion tokens",
+      { completion_tokens_details: { reasoning_tokens: 3 } },
+    ],
+    ["a string cache hit count", { prompt_cache_hit_tokens: "8" }],
+    [
+      "a malformed cache hit count beside a valid cached count",
+      { prompt_tokens_details: { cached_tokens: 4 }, prompt_cache_hit_tokens: "8" },
+    ],
+  ])("still rejects %s in usage", async (_name, extra) => {
+    const fetch = vi.fn(async () =>
+      stream(chunk({ role: "assistant", content: "Hi" }), chunk({}, "stop"), {
+        id: "chatcmpl_private",
+        object: "chat.completion.chunk",
+        choices: [],
+        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12, ...extra },
+      }),
+    );
+
+    const failure = await failureOf(sendChatCompletionsTurn(input(fetch)));
+
+    expect(failure).toEqual({
+      category: "protocol",
+      message: "The provider returned invalid usage data.",
+    });
+  });
 });

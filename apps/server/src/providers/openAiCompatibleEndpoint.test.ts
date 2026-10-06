@@ -454,10 +454,29 @@ describe("compatible HTTP failures", () => {
     [404, "unsupported"],
     [405, "unsupported"],
     [501, "unsupported"],
-    [500, "provider-failed"],
+    [400, "provider-failed"],
+    [408, "unavailable"],
+    [429, "rate-limited"],
+    [500, "unavailable"],
+    [502, "unavailable"],
+    [503, "unavailable"],
+    [504, "unavailable"],
+    [529, "unavailable"],
   ] as const)("classifies status %s as %s", (status, category) => {
     expect(classifyCompatibleHttpFailure(new Response(null, { status }))).toMatchObject({
       category,
+    });
+  });
+
+  it("carries a provider's Retry-After on an overloaded endpoint so a retry waits as long as it asked", () => {
+    expect(
+      classifyCompatibleHttpFailure(
+        new Response(null, { status: 503, headers: { "retry-after": "7" } }),
+      ),
+    ).toEqual({
+      category: "unavailable",
+      message: "The provider request failed with HTTP 503.",
+      retryAfterMs: 7_000,
     });
   });
 

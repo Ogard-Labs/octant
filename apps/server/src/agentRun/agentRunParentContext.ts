@@ -40,6 +40,16 @@ interface ParentContextOmissions {
   readonly truncatedCharacters: number;
   readonly sourceTruncatedMessages: number;
 }
+export type AgentRunParentContextUnavailableReason =
+  | "thread-unavailable"
+  | "foreign-thread"
+  | "foreign-project"
+  | "source-point-unavailable"
+  | "source-unavailable"
+  | "source-changed"
+  | "source-empty"
+  | "invalid-page"
+  | "history-window-exceeded";
 export type AgentRunParentContextSelection =
   | {
       readonly status: "available";
@@ -49,16 +59,7 @@ export type AgentRunParentContextSelection =
     }
   | {
       readonly status: "unavailable";
-      readonly reason:
-        | "thread-unavailable"
-        | "foreign-thread"
-        | "foreign-project"
-        | "source-point-unavailable"
-        | "source-unavailable"
-        | "source-changed"
-        | "source-empty"
-        | "invalid-page"
-        | "history-window-exceeded";
+      readonly reason: AgentRunParentContextUnavailableReason;
     };
 
 type ThreadSource = Pick<WorkThread | CodeThread, "id" | "projectId" | "version" | "lifecycle">;

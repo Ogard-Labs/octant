@@ -641,6 +641,13 @@ frame, and a parent purge removes all generations' text and evidence. Nested
 observations retain the authorized root thread and identify their managed parent
 separately. Result reads do not consume or acknowledge delivery.
 
+A managed child's lifecycle moves from Starting to Running once its workspace
+is verified and its provider session starts, not at completion. One turn,
+from provider acquisition to its terminal event, may run for at most 30
+minutes (`MANAGED_AGENT_RUN_TURN_DEADLINE_MS`); a turn that reaches that bound
+is recorded as Interrupted and releases its capacity. The bound covers time a
+child spends waiting for an approval or answer.
+
 Managed children retain a private provider-session cursor and a bounded,
 purgeable conversation alongside their journaled lifecycle. A cursor is bound
 to the run, provider, model, workspace, context, and authority. Resume uses that
@@ -678,7 +685,12 @@ admitted conversation; Work and Code expose bounded accepted prompts and
 completed replies with source attribution, provider/model identity, taint, and
 omission metadata. Work/Code selections contain at most 24 blocks of 4,000
 characters, including metadata. Reasoning and tool bodies are excluded. A
-foreign, changing, or incompletely read selection fails closed.
+foreign, changing, or incompletely read selection fails closed. A Code or Work
+parent's own running turn is readable: its accepted prompts are selected and its
+unfinished reply is disclosed as omitted. The selection is read before a child
+workspace is allocated, so a refusal names the reason (for example, no readable
+messages yet or a conversation that changed during the read) and leaves no
+worktree behind.
 
 Finished siblings currently owing a result to the same parent can be delivered
 in one ordinary parent turn, capped at 16 members and 32,768 prompt characters.
@@ -1352,7 +1364,19 @@ Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. One operation contributes one request; a later report replaces its
 previous totals. Code conversation usage also preserves optional cache-read and cache-write
 counters. Codex native-thread totals are normalized to turn usage before recording;
-missing cache reports remain unknown. ACP and Pi resume cursors carry a durable
+missing cache reports remain unknown. Direct-endpoint (native harness) usage is
+normalized from every wire protocol into the same buckets: `inputTokens` is all input,
+cached or not, so context math never depends on whether an endpoint caches;
+`cacheReadInputTokens` and `cacheWriteInputTokens` are the parts of it read from or
+written to the prompt cache; `reasoningTokens` is the part of `outputTokens` spent
+thinking. Protocols that already count cached tokens inside their input figure (Chat
+Completions `prompt_tokens`, Responses `input_tokens`) are read as they come, and the
+protocol that reports uncached input, cache reads, and cache writes as disjoint figures
+(Messages) has them summed into `inputTokens`. A figure the endpoint did not report is
+absent rather than zero, a turn of several requests reports the sum of the figures its
+requests reported, and a report whose cache or reasoning figure exceeds its total is
+refused as invalid usage. Unknown fields in a response are ignored; a known field of
+the wrong type still fails the turn. ACP and Pi resume cursors carry a durable
 task binding, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
 follow-ups; Chat retries retain that identity and native scratch files. Native
@@ -1473,7 +1497,45 @@ native harness in `apps/server/src/harness`:
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns
   and a per-slot circuit breaker. Child runs take their model from the role's
   slot through `admitAgentRunControlRequest`, the one path that starts a
-  subagent.
+  subagent. The lead is the exception: it runs on the model its thread chose,
+  and the `default` slot decides only where it continues once that model has
+  failed (below).
+- **Endpoint failures.** Each direct-endpoint transport sends through
+  `sendWithEndpointRetry`, one policy for both wire protocols. Retryable are
+  HTTP 408, 429, 500, 502, 503, 504, and 529 (classified `unavailable` or
+  `rate-limited`, with a provider's `Retry-After` carried on the failure), a
+  refused or reset connection, an idle stream, a stream that closes before its
+  terminal event, and a completion with no text and no tool call. A request goes
+  out at most five times, waiting 0.5 s doubling to 10 s with about a tenth of
+  jitter; `Retry-After` replaces the wait, capped at a minute. A request is
+  retried only while nothing of it has streamed (text or reasoning); tool calls
+  reach the loop only with the settled response, so they never count as output.
+  Each retry is a `retrying` runtime event emitted before its wait, and what a
+  failed attempt billed is added to the usage of the attempts after it. A
+  cancel ends a wait at once and stays `interrupted`. The stream idle limit is
+  120 s and restarts on any byte, so keep-alive comments and reasoning deltas
+  count. A spent allowance (`usageLimit` other than `temporary`), a rejected
+  credential, and a malformed event are never retried. Transports reject with
+  the typed `ProviderFailure` (`runProviderEffect`), not the Effect runtime's
+  wrapper, because the category is what these rules decide on.
+- **Lead fallback.** When a request's retries are spent, the loop asks its
+  `NativeHarnessLeadFallback` once per model it has not yet run on this turn.
+  `NativeHarnessLeadFallbackService` reports the failure to
+  `NativeHarnessRouter.reportFailure` (the model sits out its cooldown and the
+  slot's breaker counts it), resolves the `lead` job again under the running
+  turn's Project (a Project's table may only narrow the host's; turns of
+  different Projects that would pick different models get no fallback), journals
+  that decision on the thread's harness session, and opens the next model's
+  endpoint through the `NativeHarnessEndpointRegistry` that every direct-endpoint
+  driver fills as it is built. The target may belong to another provider
+  instance; it must be a harness endpoint and must admit the turn's input, or
+  the fallback is refused. The turn continues on it for its remaining steps and
+  the next turn starts on the thread's own model. With no other ready model the
+  turn fails with the endpoint's own failure and the typed refusal (`slot-empty`,
+  `no-eligible-candidate`, `circuit-open`, `no-other-model`, `not-routed`,
+  `refused`) in its message and, for the first three, in the journaled
+  `unroutable` decision. A failure that was not retried, or that happened after
+  output streamed, never moves the turn.
 - **Session.** `NativeHarnessSessionStore` journals one session per thread:
   routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
@@ -1975,7 +2037,11 @@ mechanisms are:
   receives `octant_canvas` bound to the workspace and Project the host resolved
   for that run. The model cannot name a path. Create and revise succeed only
   inside that scope; another Project or an unresolved checkout is refused, and
-  the child run is the author. A provider transport that cannot carry
+  the child run is the author. A Code child's scope is the managed worktree the
+  host allocated for that delegation, found through the same receipt lookup that
+  allocated it and valid only while that receipt is ready and still names the
+  worktree the run was admitted with; a child's worktree is never a journaled
+  thread checkout, so none is required. A provider transport that cannot carry
   app-managed tools fails the start with a typed reason rather than dropping
   the tool. Each adapter turns its provider's own subagent feature off, because a child
   the provider starts itself runs outside the journal and the approval path.

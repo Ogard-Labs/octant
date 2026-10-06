@@ -5,20 +5,26 @@ import {
   decodeCodeRepositoryId,
   ThreadCreationRootId,
   type AgentRun,
-  type CodeCheckoutIdentity,
 } from "@octant/contracts";
 import type { CanvasWorkspaceScope } from "@octant/contracts/canvas-cards";
-import { deriveAgentRunChildWorktreeThreadId } from "../agentRun/agentRunChildWorktreePort";
-import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
-import type { ManagedWorktreeReceipt } from "../code/managedWorktreeReceiptStore";
+import {
+  agentRunChildWorktreeLookup,
+  resolveAgentRunChildWorktreeThreadId,
+} from "../agentRun/agentRunChildWorktreePort";
+import type {
+  ManagedWorktreeReceipt,
+  ManagedWorktreeReceiptLookup,
+} from "../code/managedWorktreeReceiptStore";
 
 /**
  * The Canvas scope a managed child may write, decided by the host.
  *
  * The model never supplies a path. Work uses the run's journaled binding,
- * re-checked against the live Project. Code uses the checkout the host derived
- * for that parent thread, and only when the managed receipt still names the
- * same worktree the run was admitted with.
+ * re-checked against the live Project. Code uses the managed worktree the host
+ * allocated for this run, found through the same receipt lookup that allocated
+ * it, and only while that receipt is ready and still names the worktree the run
+ * was admitted with. A child's worktree is never a journaled thread checkout,
+ * so no checkout record is consulted.
  */
 export interface ChildCanvasBinding {
   readonly mode: "work" | "code";
@@ -54,8 +60,9 @@ export interface ChildCanvasWorkspaceHost {
         readonly bindingRevisionId: string;
       }
     | undefined;
-  readonly readCodeCheckout: (checkoutId: string) => CodeCheckoutIdentity | undefined;
-  readonly loadManagedReceipt: (receiptId: string) => Promise<ManagedWorktreeReceipt | undefined>;
+  readonly findManagedWorktreeReceipt: (
+    lookup: ManagedWorktreeReceiptLookup,
+  ) => Promise<ManagedWorktreeReceipt | undefined>;
 }
 
 function refused(reason: "unresolved" | "foreign-project"): ChildCanvasWorkspaceResolution {
@@ -160,40 +167,47 @@ async function resolveCode(
   if (revision === undefined || String(revision.revisionId) !== String(thread.bindingRevisionId)) {
     return refused("unresolved");
   }
-  let checkoutId: string;
+  if (project.binding === undefined || project.binding.canonicalRoot !== receipt.checkoutRoot) {
+    return refused("unresolved");
+  }
   let repositoryId: string;
+  let lookup: ManagedWorktreeReceiptLookup;
   try {
     repositoryId = String(decodeCodeRepositoryId(thread.repositoryId));
-    checkoutId = String(
-      deriveManagedWorktreeCheckoutId({
-        repositoryId,
-        threadId: deriveAgentRunChildWorktreeThreadId(String(run.parentThreadId)),
-      }),
-    );
-    decodeCodeCheckoutId(checkoutId);
     decodeBindingRevisionId(String(thread.bindingRevisionId));
+    const childThreadId = resolveAgentRunChildWorktreeThreadId({
+      parentThreadId: String(run.parentThreadId),
+      requestId: String(run.requestId),
+      repositoryId,
+      workspace: receipt,
+    });
+    if (childThreadId === undefined) return refused("unresolved");
+    lookup = agentRunChildWorktreeLookup({
+      repositoryId,
+      repositoryRoot: receipt.checkoutRoot,
+      childThreadId: String(childThreadId),
+    });
+    decodeCodeCheckoutId(lookup.checkoutId);
   } catch {
     return refused("unresolved");
   }
-  const checkout = host.readCodeCheckout(checkoutId);
-  if (
-    checkout === undefined ||
-    checkout.kind !== "managed-worktree" ||
-    checkout.availability !== "available" ||
-    String(checkout.repositoryId) !== repositoryId
-  ) {
+  let managed: ManagedWorktreeReceipt | undefined;
+  try {
+    managed = await host.findManagedWorktreeReceipt(lookup);
+  } catch {
     return refused("unresolved");
   }
-  const managed = await host.loadManagedReceipt(String(checkout.ownershipReceiptId));
   if (
     managed === undefined ||
     managed.state !== "ready" ||
     managed.canonicalWorktreePath !== receipt.worktreeRoot ||
-    String(managed.checkoutId) !== checkoutId ||
+    managed.canonicalRepositoryPath !== receipt.checkoutRoot ||
+    managed.checkoutId !== lookup.checkoutId ||
     managed.repositoryId !== repositoryId
   ) {
     return refused("unresolved");
   }
+  const checkoutId = lookup.checkoutId;
   return {
     status: "ready",
     binding: {

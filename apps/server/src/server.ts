@@ -660,6 +660,11 @@ import {
 } from "./harness/nativeHarnessComposition";
 import { createNativeHarnessShell } from "./harness/nativeHarnessShell";
 import { createNativeHarnessDelegatePort } from "./harness/nativeHarnessDelegatePort";
+import {
+  NativeHarnessEndpointRegistry,
+  type NativeHarnessEndpointHooks,
+} from "./harness/nativeHarnessEndpointRegistry";
+import { NativeHarnessLeadFallbackService } from "./harness/nativeHarnessLeadFallback";
 import { NativeHarnessRouter } from "./harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "./harness/nativeHarnessRoutingStore";
 import { createNativeHarnessRoutingRouteHandler } from "./harness/nativeHarnessRoutingRoutes";
@@ -918,6 +923,8 @@ interface ConfiguredProviderDriverOptions {
   readonly ollamaHistoryStore?: OllamaHistoryStore;
   /** Shared by every harness driver built from these options, so a later turn can resume an earlier one. */
   readonly nativeHarnessTranscripts?: NativeHarnessTranscriptStore;
+  /** How every harness driver built from these options retries and where its lead falls back. */
+  readonly nativeHarness?: NativeHarnessEndpointHooks;
   readonly onRuntimeEvent?: (event: ProviderRuntimeEvent) => void;
   readonly admittedDriverKinds?: ReadonlySet<ProviderDriverKind>;
   readonly localUsageHistorySourceForInstance?: (
@@ -948,6 +955,7 @@ export function makeConfiguredProviderDriver(
       ...(options.nativeHarnessTranscripts === undefined
         ? {}
         : { transcripts: options.nativeHarnessTranscripts }),
+      ...(options.nativeHarness === undefined ? {} : { harness: options.nativeHarness }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -964,6 +972,7 @@ export function makeConfiguredProviderDriver(
       ...(options.nativeHarnessTranscripts === undefined
         ? {}
         : { transcripts: options.nativeHarnessTranscripts }),
+      ...(options.nativeHarness === undefined ? {} : { harness: options.nativeHarness }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -980,6 +989,7 @@ export function makeConfiguredProviderDriver(
       ...(options.nativeHarnessTranscripts === undefined
         ? {}
         : { transcripts: options.nativeHarnessTranscripts }),
+      ...(options.nativeHarness === undefined ? {} : { harness: options.nativeHarness }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -1909,6 +1919,7 @@ export function startOctantServer(
     let nativeHarnessRouter: NativeHarnessRouter | undefined;
     let nativeHarnessSessions: NativeHarnessSessionStore | undefined;
     let nativeHarnessObserver: NativeHarnessTurnObserver | undefined;
+    let nativeHarnessLeadFallback: NativeHarnessLeadFallbackService | undefined;
     let nativeHarnessQuestions: NativeHarnessQuestionStore | undefined;
     let agentRunInteractions: ReturnType<typeof createAgentRunInteractions> | undefined;
     // Follow-up suggestions ride the same per-turn hooks as the harness, but
@@ -1936,10 +1947,14 @@ export function startOctantServer(
       ],
       admitTurn: (scope: Parameters<NativeHarnessTurnObserver["admitTurn"]>[0]) =>
         nativeHarnessObserver?.admitTurn(scope) ?? { kind: "admitted" as const },
-      turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) =>
-        nativeHarnessObserver?.turnStarted(scope),
-      turnEnded: (scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0]) =>
-        nativeHarnessObserver?.turnEnded(scope),
+      turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) => {
+        nativeHarnessObserver?.turnStarted(scope);
+        nativeHarnessLeadFallback?.turnStarted(scope);
+      },
+      turnEnded: (scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0]) => {
+        nativeHarnessObserver?.turnEnded(scope);
+        nativeHarnessLeadFallback?.turnEnded(scope);
+      },
       turnCompleted: async (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) => {
         try {
           threadFollowUpSuggestions.recordReply({
@@ -2130,15 +2145,8 @@ export function startOctantServer(
                               return undefined;
                             }
                           },
-                          readCodeCheckout: (checkoutId) => {
-                            try {
-                              return persistence.readCodeCheckout(decodeCodeCheckoutId(checkoutId));
-                            } catch {
-                              return undefined;
-                            }
-                          },
-                          loadManagedReceipt: (receiptId) =>
-                            managedWorktreeReceipts.load(receiptId),
+                          findManagedWorktreeReceipt: (lookup) =>
+                            managedWorktreeReceipts.findActive(lookup),
                         },
                         query.runId,
                       ),
@@ -2221,6 +2229,9 @@ export function startOctantServer(
           scheduler: capacityScheduler,
           now: () => new Date().toISOString() as UtcTimestamp,
         }),
+        // `agentRunOrchestration` is declared below; this closure runs only
+        // once a child's session has started.
+        onSessionRunning: ({ runId }) => void agentRunOrchestration.onSessionRunning(runId),
         onSessionStarted: ({ runId, resumed }) =>
           agentRunLiveConversations.begin(runId, { resume: resumed }),
         onUserMessage: ({ runId, kind, text, occurredAt }) =>
@@ -2413,7 +2424,9 @@ export function startOctantServer(
                     conversation: (input) => codeBoardEventStore.conversation(input),
                     readEvidence: (reference) => codeEvidence.read(reference),
                   });
-            return selection.status === "available" ? selection.blocks : undefined;
+            return selection.status === "available"
+              ? selection.blocks
+              : { unavailable: selection.reason };
           } catch {
             return undefined;
           }
@@ -4067,6 +4080,20 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
+    // A harness driver registers its endpoint here as it is built, and its lead
+    // asks the fallback (bound once the router and sessions exist) where to go
+    // when its own model stays down.
+    const nativeHarnessEndpoints = new NativeHarnessEndpointRegistry();
+    const nativeHarnessEndpointHooks: NativeHarnessEndpointHooks = {
+      endpoints: nativeHarnessEndpoints,
+      leadFallback: {
+        next: async (input) =>
+          (await nativeHarnessLeadFallback?.next(input)) ?? {
+            status: "none",
+            reason: "not-routed",
+          },
+      },
+    };
     const isProjectConfinedPath = options.isProjectConfinedPath ?? pathIsProjectConfined;
     const credentialResolver =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
@@ -4132,6 +4159,7 @@ export function startOctantServer(
             ohMyPiHome,
             ollamaHistoryStore,
             nativeHarnessTranscripts,
+            nativeHarness: nativeHarnessEndpointHooks,
             claudeProcess,
             claudeSdk,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
@@ -4246,6 +4274,7 @@ export function startOctantServer(
       ohMyPiHome,
       ollamaHistoryStore,
       nativeHarnessTranscripts,
+      nativeHarness: nativeHarnessEndpointHooks,
       claudeProcess,
       claudeSdk,
       claudeResumeIdentityPort: claudeResumeIdentityStore,
@@ -5870,6 +5899,23 @@ export function startOctantServer(
       readGoal: (threadId) => goalService.read(threadId).goal ?? undefined,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+    });
+    nativeHarnessLeadFallback = new NativeHarnessLeadFallbackService({
+      router: nativeHarnessRouterLive,
+      sessions: nativeHarnessSessionsLive,
+      hostId: String(LOCAL_HOST_ID),
+      // Building the driver is what registers its endpoint, so a fallback onto an
+      // instance no turn has used yet since boot still finds it.
+      endpointFor: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId as never);
+        if (instance === undefined || !instance.enabled) return undefined;
+        try {
+          makeConfiguredProviderDriver(instance, configuredDriverOptions);
+        } catch {
+          return undefined;
+        }
+        return nativeHarnessEndpoints.get(instance.id);
+      },
     });
     nativeHarnessComposition = createNativeHarnessComposition({
       goals: goalService,

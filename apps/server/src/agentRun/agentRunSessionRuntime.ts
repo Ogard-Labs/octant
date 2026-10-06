@@ -52,7 +52,19 @@ import {
 } from "./agentRunSessionPort";
 
 const DEFAULT_MAX_EVENTS = 256;
-const DEFAULT_TIMEOUT_MS = 120_000;
+/**
+ * The longest one managed child turn may run, from acquiring the provider to
+ * its terminal event.
+ *
+ * A child doing real work reads, edits, and runs checks for many minutes, and a
+ * live Code child was cut off at the previous two-minute bound while still
+ * calling tools. The bound still has to exist: a provider that wedges holds its
+ * capacity reservation until it fires, and nothing else ends a silent turn.
+ * Thirty minutes is long enough for a bounded implementation or review task and
+ * short enough that a stuck child frees its slot within one working session.
+ * A child waiting on a person's approval or answer is inside this bound too.
+ */
+export const MANAGED_AGENT_RUN_TURN_DEADLINE_MS = 30 * 60_000;
 /**
  * How long teardown may wait for the provider to confirm it ended the session.
  *
@@ -222,6 +234,12 @@ export interface AgentRunSessionRuntimeOptions {
   /** Bound on one teardown attempt; see {@link DEFAULT_SHUTDOWN_TIMEOUT_MS}. */
   readonly shutdownTimeoutMs?: number;
   /** Publishes ephemeral managed-child transcript facts to the host read model. */
+  /**
+   * Called once the child's workspace is verified and its provider session is
+   * about to start, so the durable lifecycle can say Running instead of leaving
+   * a child that is calling tools in Starting.
+   */
+  readonly onSessionRunning?: (input: { readonly runId: AgentRunId }) => void;
   readonly onSessionStarted?: (input: {
     readonly runId: AgentRunId;
     readonly resumed: boolean;
@@ -317,7 +335,7 @@ export function createAgentRunSessionRuntime(
 ): AgentRunSessionPort {
   const sessions = new Map<AgentRunId, LiveSession>();
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? MANAGED_AGENT_RUN_TURN_DEADLINE_MS;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
 
   const modelOptionsFor = (run: AgentRun): ProviderModelOptionValues | undefined => {
@@ -817,6 +835,11 @@ export function createAgentRunSessionRuntime(
           verifyWorkspace,
           onSessionReady: () => {
             publishedStart = true;
+            try {
+              options.onSessionRunning?.({ runId: run.id });
+            } catch {
+              // Recording Running is a lifecycle fact, not a precondition for the turn.
+            }
             try {
               options.onSessionStarted?.({ runId: run.id, resumed: continuation !== undefined });
               options.onUserMessage?.({

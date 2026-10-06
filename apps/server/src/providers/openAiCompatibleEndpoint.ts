@@ -13,7 +13,7 @@ const DEFAULT_LIMITS: CompatibleHttpLimits = {
   connectionTimeoutMs: 10_000,
   requestBodyBytes: 1_048_576,
   responseBodyBytes: 1_048_576,
-  streamIdleTimeoutMs: 30_000,
+  streamIdleTimeoutMs: 120_000,
 };
 
 export interface CompatibleHttpLimits {
@@ -201,15 +201,24 @@ export function classifyCompatibleHttpFailure(
       return fail("unsupported", "The provider does not support this endpoint.");
     case 408:
     case 504:
-      return fail("unavailable", "The provider request timed out.");
-    case 429: {
-      const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"), now);
-      return {
-        category: "rate-limited",
-        message: "The provider rate limit was reached.",
-        ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
-      };
-    }
+      return withRetryAfter(fail("unavailable", "The provider request timed out."), response, now);
+    case 429:
+      return withRetryAfter(
+        fail("rate-limited", "The provider rate limit was reached."),
+        response,
+        now,
+      );
+    // Overload and gateway errors lift on their own, so they read as an
+    // endpoint that is down for now rather than a request the provider refused.
+    case 500:
+    case 502:
+    case 503:
+    case 529:
+      return withRetryAfter(
+        fail("unavailable", `The provider request failed with HTTP ${response.status}.`),
+        response,
+        now,
+      );
     default:
       return fail("provider-failed", `The provider request failed with HTTP ${response.status}.`);
   }
@@ -481,6 +490,16 @@ function parseRetryAfter(value: string | null, now: number): number | undefined 
   if (!Number.isFinite(retryAt)) return undefined;
   const delay = retryAt - now;
   return delay <= 0 ? undefined : Math.min(delay, MAX_RETRY_AFTER_MS);
+}
+
+/** A provider's own `Retry-After`, carried on the failure so a retry waits as long as it asked. */
+function withRetryAfter(
+  failure: ProviderFailure,
+  response: Response,
+  now: number,
+): ProviderFailure {
+  const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"), now);
+  return retryAfterMs === undefined ? failure : { ...failure, retryAfterMs };
 }
 
 function parseContentLength(value: string | null): number | undefined {

@@ -2261,6 +2261,7 @@ describe("provider runtime contracts", () => {
       remaining: 999,
       resetsAt: "2026-07-15T10:01:00.000Z",
     },
+    { kind: "retrying", attempt: 2, maxAttempts: 5, delayMs: 4000, reason: "unavailable" },
     { kind: "file-change", path: "src/index.ts", change: "modified" },
     { kind: "diff", diff: "@@ -1 +1 @@" },
     { kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "Working" },
@@ -2337,6 +2338,19 @@ describe("provider runtime contracts", () => {
         bucket: "tokens",
         limit: 10,
         remaining: 11,
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a retry notice for an attempt past the last one", () => {
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...common,
+        kind: "retrying",
+        attempt: 6,
+        maxAttempts: 5,
+        delayMs: 500,
+        reason: "unavailable",
       }),
     ).toThrow();
   });

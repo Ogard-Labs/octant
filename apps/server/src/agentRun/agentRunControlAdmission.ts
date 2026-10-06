@@ -23,6 +23,7 @@ import {
   type AgentRunParentContextPort,
   type AgentRunPoolRoutingContext,
   type ProviderReadinessPort,
+  resolveParentContextSelection,
 } from "./agentRunCreationService";
 import type { AgentRunNativeCapabilityEvidence } from "@octant/domain/agent-run-control-policy";
 import type { AgentRunOrchestrationService } from "./agentRunOrchestrationService";
@@ -131,6 +132,24 @@ export async function admitAgentRunControlRequest(
     }
     return { kind: "admitted", result: existing, liveAuthority: creationAuthority.liveAuthority };
   }
+  // The parent's conversation is read before any child workspace exists, so a
+  // refusal never leaves an allocated worktree behind. The selection is read
+  // once; the command below is built from this same selection.
+  let parentContext = dependencies.parentContext;
+  if (controlRequest.includeParentContext === true) {
+    try {
+      const selection = resolveParentContextSelection(dependencies.parentContext, {
+        parentThreadId: controlRequest.parentThreadId,
+        mode: creationAuthority.parentMode,
+      });
+      parentContext = { resolve: () => selection };
+    } catch (error) {
+      if (error instanceof AgentRunCreationRejected) {
+        return { kind: "invalid", message: error.message, status: 400 };
+      }
+      throw error;
+    }
+  }
   let admittedWorkspace: AgentRunWorkspaceReceipt | undefined;
   if (dependencies.workspace !== undefined) {
     const admitted = await prepareAdmittedControlWorkspace({
@@ -174,9 +193,7 @@ export async function admitAgentRunControlRequest(
       providerReadiness: dependencies.providerReadiness,
       uuid: dependencies.uuid,
       ...(poolRoutingContext === undefined ? {} : { poolRouting: poolRoutingContext }),
-      ...(dependencies.parentContext === undefined
-        ? {}
-        : { parentContext: dependencies.parentContext }),
+      ...(parentContext === undefined ? {} : { parentContext }),
     });
   } catch (error) {
     if (error instanceof AgentRunControlRefused) {
