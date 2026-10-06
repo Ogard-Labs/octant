@@ -113,9 +113,11 @@ cross-mode, or cross-host placement is refused or offered in a new window.
 
 ## Start-screen cards
 
-Under the composer, the Work and Code start screens carry a card area: a
-**Customize** control on the right, then cards in a grid (two columns, one at
-phone width). The composer paints first; the area mounts on the frame after the
+Under the composer, every start screen carries a card area: Chat, Work, and
+Code, in each variant a mode has, including the Chat screen that also lists the
+threads to continue. It is the same area with the same stored setting on all of
+them; Chat has no folder tiles. The area is a **Customize** control on the
+right, then cards in a grid (two columns, one at phone width). The composer paints first; the area mounts on the frame after the
 first commit, and each card begins its reads only then, so a start screen never
 waits on a card. A card that is off or unavailable is never mounted and reads
 nothing.
