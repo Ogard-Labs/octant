@@ -5005,17 +5005,17 @@ export class ChatService {
               onTurnEnded: (ended) => {
                 endedTurn = ended;
               },
-                ...(this.#liveTurns === undefined
-                  ? {}
-                  : {
-                      liveTurn: this.#liveTurns.tracker(String(input.thread.id), "chat-navigation"),
-                    }),
-                onHarnessRetry: (notice) => {
-                  this.#nativeHarness?.noteRetry?.(harnessScope, notice);
-                },
-                onHarnessRetryCleared: () => {
-                  this.#nativeHarness?.clearRetry?.(harnessScope);
-                },
+              ...(this.#liveTurns === undefined
+                ? {}
+                : {
+                    liveTurn: this.#liveTurns.tracker(String(input.thread.id), "chat-navigation"),
+                  }),
+              onHarnessRetry: (notice) => {
+                this.#nativeHarness?.noteRetry?.(harnessScope, notice);
+              },
+              onHarnessRetryCleared: () => {
+                this.#nativeHarness?.clearRetry?.(harnessScope);
+              },
               ...(this.#nativeHarness === undefined
                 ? {}
                 : {
