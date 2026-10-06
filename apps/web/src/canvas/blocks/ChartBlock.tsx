@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useState, type SVGAttributes } from "react";
 import type {
   CanvasChartBlock,
   CanvasChartSeries,
   CanvasChartType,
+  CanvasNumberFormat,
 } from "@octant/contracts/canvas";
 import { OctantButton } from "../../ui/base/OctantButton";
+import { CHART_BAR_RADIUS, CHART_DOT_RADIUS } from "@octant/theme";
+import { ChartTooltip, type ChartTooltipAnchor } from "../ChartTooltip";
+import { gridValues } from "../chartStyle";
 import {
   categoryCenter,
   computeYDomain,
@@ -14,21 +18,65 @@ import {
   scaleY,
   type YDomain,
 } from "../chartGeometry";
-import { formatScalar } from "../canvasRuntime";
+import { formatCanvasValue } from "../canvasRuntime";
 
 const PLOT_WIDTH = 320;
 const PLOT_HEIGHT = 168;
 const INSET = 12;
 const AXIS_Y = 148;
 const MAX_INTERACTIVE_LEGEND_ITEMS = 24;
+/** Above this many marks a chart is read through its disclosed data table, so
+ * the keyboard does not walk a thousand tab stops. Matches the legend cap. */
+const MAX_INTERACTIVE_MARKS = 24;
 
 type ChartCategory = {
   readonly key: string;
   readonly label: string;
 };
 
+/** What each mark reads out on hover and on keyboard focus. */
+interface MarkInteraction {
+  readonly enabled: boolean;
+  readonly format: CanvasNumberFormat | undefined;
+  readonly onAnchor: (anchor: ChartTooltipAnchor) => void;
+  readonly onLeave: () => void;
+}
+
+function anchorFor(
+  x: number,
+  y: number,
+  seriesLabel: string,
+  value: number,
+  format: CanvasNumberFormat | undefined,
+): ChartTooltipAnchor {
+  return {
+    seriesLabel,
+    valueLabel: formatCanvasValue(value, format),
+    // Clamped: a mark at the edge of the plot still keeps its tip on the surface.
+    x: Math.min(1, Math.max(0, x / PLOT_WIDTH)),
+    y: Math.min(1, Math.max(0, y / PLOT_HEIGHT)),
+  };
+}
+
+function markInteraction(
+  interaction: MarkInteraction,
+  anchor: () => ChartTooltipAnchor,
+  label: string,
+): SVGAttributes<SVGElement> {
+  if (!interaction.enabled) return {};
+  return {
+    tabIndex: 0,
+    "aria-label": label,
+    onPointerEnter: () => interaction.onAnchor(anchor()),
+    onPointerLeave: interaction.onLeave,
+    onFocus: () => interaction.onAnchor(anchor()),
+    onBlur: interaction.onLeave,
+  };
+}
+
 export function ChartBlock({ block }: { readonly block: CanvasChartBlock }) {
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
+  const [anchor, setAnchor] = useState<ChartTooltipAnchor | undefined>(undefined);
   const toggle = (id: string) => {
     setHidden((current) => {
       const next = new Set(current);
@@ -37,47 +85,64 @@ export function ChartBlock({ block }: { readonly block: CanvasChartBlock }) {
       return next;
     });
   };
+  const interaction: MarkInteraction = {
+    enabled: markCount(block) <= MAX_INTERACTIVE_MARKS,
+    format: block.format,
+    onAnchor: setAnchor,
+    onLeave: () => {
+      setAnchor(undefined);
+    },
+  };
 
   return (
     <figure className={`canvas-block__chart canvas-block__chart--${block.chartType}`}>
-      <svg
-        aria-label={chartLabel(block)}
-        className="canvas-block__chart-svg"
-        role="img"
-        viewBox={`0 0 ${PLOT_WIDTH} ${PLOT_HEIGHT}`}
-      >
-        <ChartMarks block={block} hidden={hidden} />
-      </svg>
+      <div className="canvas-block__chart-plot">
+        <svg
+          aria-label={chartLabel(block)}
+          className="canvas-block__chart-svg"
+          role="img"
+          viewBox={`0 0 ${PLOT_WIDTH} ${PLOT_HEIGHT}`}
+        >
+          <ChartMarks block={block} hidden={hidden} interaction={interaction} />
+        </svg>
+        <ChartTooltip anchor={anchor} />
+      </div>
       <ChartLegend block={block} hidden={hidden} onToggle={toggle} />
       <ChartData block={block} />
     </figure>
   );
 }
 
+function markCount(block: CanvasChartBlock): number {
+  return block.series.reduce((count, series) => count + series.points.length, 0);
+}
+
 function ChartMarks({
   block,
   hidden,
+  interaction,
 }: {
   readonly block: CanvasChartBlock;
   readonly hidden: ReadonlySet<string>;
+  readonly interaction: MarkInteraction;
 }) {
   switch (block.chartType) {
     case "pie":
-      return <PieMarks block={block} hidden={hidden} hole={false} />;
+      return <PieMarks block={block} hidden={hidden} hole={false} interaction={interaction} />;
     case "donut":
-      return <PieMarks block={block} hidden={hidden} hole />;
+      return <PieMarks block={block} hidden={hidden} hole interaction={interaction} />;
     case "stacked-bar":
-      return <StackedMarks block={block} hidden={hidden} />;
+      return <StackedMarks block={block} hidden={hidden} interaction={interaction} />;
     case "grouped-bar":
-      return <GroupedMarks block={block} hidden={hidden} />;
+      return <GroupedMarks block={block} hidden={hidden} interaction={interaction} />;
     case "bar-line":
-      return <ComboMarks block={block} hidden={hidden} />;
+      return <ComboMarks block={block} hidden={hidden} interaction={interaction} />;
     case "line":
     case "area":
     case "scatter":
     case "bar":
     case "distribution":
-      return <CartesianMarks block={block} hidden={hidden} />;
+      return <CartesianMarks block={block} hidden={hidden} interaction={interaction} />;
     default: {
       const exhaustive: never = block.chartType;
       return exhaustive;
@@ -85,14 +150,52 @@ function ChartMarks({
   }
 }
 
+function ChartGrid({
+  domain,
+  zero,
+}: {
+  readonly domain: YDomain;
+  readonly zero: number | undefined;
+}) {
+  return (
+    <g className="canvas-block__chart-grid" aria-hidden="true">
+      {gridValues(domain).map((value) => {
+        const y = plotY(value, domain);
+        if (y <= INSET) return null;
+        return (
+          <line
+            key={value}
+            className="canvas-block__chart-gridline"
+            x1={INSET}
+            x2={PLOT_WIDTH - INSET}
+            y1={y}
+            y2={y}
+          />
+        );
+      })}
+      {zero === undefined ? null : (
+        <line
+          className="canvas-block__chart-axis"
+          x1={INSET}
+          x2={PLOT_WIDTH - INSET}
+          y1={zero}
+          y2={zero}
+        />
+      )}
+    </g>
+  );
+}
+
 function PieMarks({
   block,
   hidden,
   hole,
+  interaction,
 }: {
   readonly block: CanvasChartBlock;
   readonly hidden: ReadonlySet<string>;
   readonly hole: boolean;
+  readonly interaction: MarkInteraction;
 }) {
   const series = block.series[0];
   if (series === undefined) return null;
@@ -111,13 +214,30 @@ function PieMarks({
         if (wedge === undefined) return null;
         const path = ringPath(cx, cy, outer, inner, wedge.start, wedge.end);
         if (path === "") return null;
+        const label = String(item.point.x);
+        const value = formatCanvasValue(item.point.y, interaction.format);
         return (
           <path
             key={item.index}
             className={`canvas-block__chart-mark canvas-block__chart-slice ${seriesClass(item.index)}`}
             d={path}
             data-series={String(item.index % 6)}
-            data-slice={String(item.point.x)}
+            data-slice={label}
+            {...markInteraction(
+              interaction,
+              () => {
+                const mid = (wedge.start + wedge.end) / 2;
+                const radius = hole ? (outer + inner) / 2 : outer * 0.62;
+                return anchorFor(
+                  cx + radius * Math.cos(mid),
+                  cy + radius * Math.sin(mid),
+                  label,
+                  item.point.y,
+                  interaction.format,
+                );
+              },
+              `${label}: ${value}`,
+            )}
           />
         );
       })}
@@ -128,11 +248,13 @@ function PieMarks({
 function StackedMarks({
   block,
   hidden,
+  interaction,
 }: {
   readonly block: CanvasChartBlock;
   readonly hidden: ReadonlySet<string>;
+  readonly interaction: MarkInteraction;
 }) {
-  const categories = categoryLabels(block.series);
+  const categories = categoryLabels(block.series, interaction.format);
   const visible = visibleSeries(block, hidden);
   const bands = stackOffsets(visible.map((item) => item.series.points.map((point) => point.y)));
   const totals = categories.map((_, category) =>
@@ -143,11 +265,15 @@ function StackedMarks({
   const barWidth = Math.max(4, slot * 0.62);
   return (
     <g>
-      <Axis categories={categories} zero={undefined} />
+      <ChartGrid domain={domain} zero={undefined} />
+      <AxisLine />
+      <Axis categories={categories} />
       {visible.map((item, visibleIndex) =>
         item.series.points.map((point, category) => {
           const y0 = bands[visibleIndex]?.[category] ?? 0;
           const x = INSET + slot * category + (slot - barWidth) / 2;
+          const top = Math.min(plotY(y0, domain), plotY(y0 + point.y, domain));
+          const value = formatCanvasValue(point.y, interaction.format);
           return (
             <rect
               key={`${item.series.seriesId}-${String(category)}`}
@@ -156,7 +282,14 @@ function StackedMarks({
               height={barSpan(y0, y0 + point.y, domain)}
               width={barWidth}
               x={x}
-              y={Math.min(plotY(y0, domain), plotY(y0 + point.y, domain))}
+              y={top}
+              rx={CHART_BAR_RADIUS}
+              {...markInteraction(
+                interaction,
+                () =>
+                  anchorFor(x + barWidth / 2, top, item.series.label, point.y, interaction.format),
+                `${item.series.label}: ${value}`,
+              )}
             />
           );
         }),
@@ -168,11 +301,13 @@ function StackedMarks({
 function GroupedMarks({
   block,
   hidden,
+  interaction,
 }: {
   readonly block: CanvasChartBlock;
   readonly hidden: ReadonlySet<string>;
+  readonly interaction: MarkInteraction;
 }) {
-  const categories = categoryLabels(block.series);
+  const categories = categoryLabels(block.series, interaction.format);
   const visible = visibleSeries(block, hidden);
   const values = visible.flatMap((item) => item.series.points.map((point) => point.y));
   const domain = zeroDomain(values);
@@ -183,7 +318,9 @@ function GroupedMarks({
     visible.length > 0 ? Math.max(2, (inner - gap * (visible.length - 1)) / visible.length) : 2;
   return (
     <g>
-      <Axis categories={categories} zero={domain.min < 0 ? plotY(0, domain) : undefined} />
+      <ChartGrid domain={domain} zero={domain.min < 0 ? plotY(0, domain) : undefined} />
+      <AxisLine />
+      <Axis categories={categories} />
       {categories.map((_, category) =>
         visible.map((item, visibleIndex) => {
           const value = item.series.points[category]?.y ?? 0;
@@ -191,6 +328,8 @@ function GroupedMarks({
           const x = INSET + slot * category + (slot - used) / 2 + visibleIndex * (barWidth + gap);
           const yValue = plotY(value, domain);
           const yBase = plotY(0, domain);
+          const top = Math.min(yBase, yValue);
+          const reading = formatCanvasValue(value, interaction.format);
           return (
             <rect
               key={`${item.series.seriesId}-${String(category)}`}
@@ -199,7 +338,14 @@ function GroupedMarks({
               height={Math.max(1, Math.abs(yBase - yValue))}
               width={barWidth}
               x={x}
-              y={Math.min(yBase, yValue)}
+              y={top}
+              rx={CHART_BAR_RADIUS}
+              {...markInteraction(
+                interaction,
+                () =>
+                  anchorFor(x + barWidth / 2, top, item.series.label, value, interaction.format),
+                `${item.series.label}: ${reading}`,
+              )}
             />
           );
         }),
@@ -211,11 +357,13 @@ function GroupedMarks({
 function ComboMarks({
   block,
   hidden,
+  interaction,
 }: {
   readonly block: CanvasChartBlock;
   readonly hidden: ReadonlySet<string>;
+  readonly interaction: MarkInteraction;
 }) {
-  const categories = categoryLabels(block.series);
+  const categories = categoryLabels(block.series, interaction.format);
   const visible = visibleSeries(block, hidden);
   const bars = visible.filter((item) => item.series.mark !== "line");
   const lines = visible.filter((item) => item.series.mark === "line");
@@ -228,7 +376,9 @@ function ComboMarks({
     bars.length > 0 ? Math.max(2, (inner - gap * (bars.length - 1)) / bars.length) : 2;
   return (
     <g>
-      <Axis categories={categories} zero={domain.min < 0 ? plotY(0, domain) : undefined} />
+      <ChartGrid domain={domain} zero={domain.min < 0 ? plotY(0, domain) : undefined} />
+      <AxisLine />
+      <Axis categories={categories} />
       {categories.map((_, category) =>
         bars.map((item, barIndex) => {
           const value = item.series.points[category]?.y ?? 0;
@@ -236,6 +386,8 @@ function ComboMarks({
           const x = INSET + slot * category + (slot - used) / 2 + barIndex * (barWidth + gap);
           const yValue = plotY(value, domain);
           const yBase = plotY(0, domain);
+          const top = Math.min(yBase, yValue);
+          const reading = formatCanvasValue(value, interaction.format);
           return (
             <rect
               key={`${item.series.seriesId}-${String(category)}`}
@@ -244,7 +396,14 @@ function ComboMarks({
               height={Math.max(1, Math.abs(yBase - yValue))}
               width={barWidth}
               x={x}
-              y={Math.min(yBase, yValue)}
+              y={top}
+              rx={CHART_BAR_RADIUS}
+              {...markInteraction(
+                interaction,
+                () =>
+                  anchorFor(x + barWidth / 2, top, item.series.label, value, interaction.format),
+                `${item.series.label}: ${reading}`,
+              )}
             />
           );
         }),
@@ -253,14 +412,16 @@ function ComboMarks({
         const coords = item.series.points.map((point, index) => ({
           x: categoryCenter(index, categories.length, PLOT_WIDTH, INSET),
           y: plotY(point.y, domain),
+          value: point.y,
         }));
         return (
-          <polyline
+          <LineMark
             key={item.series.seriesId}
-            className={`canvas-block__chart-mark is-line ${seriesClass(item.index)}`}
-            data-series={String(item.index % 6)}
-            fill="none"
-            points={coords.map((coord) => `${String(coord.x)},${String(coord.y)}`).join(" ")}
+            coords={coords}
+            interaction={interaction}
+            label={item.series.label}
+            seriesAttr={String(item.index % 6)}
+            seriesIndex={item.index}
           />
         );
       })}
@@ -271,9 +432,11 @@ function ComboMarks({
 function CartesianMarks({
   block,
   hidden,
+  interaction,
 }: {
   readonly block: CanvasChartBlock;
   readonly hidden: ReadonlySet<string>;
+  readonly interaction: MarkInteraction;
 }) {
   const visible = visibleSeries(block, hidden);
   const domain = computeYDomain(
@@ -285,13 +448,8 @@ function CartesianMarks({
   );
   return (
     <g>
-      <line
-        className="canvas-block__chart-axis"
-        x1={INSET}
-        x2={PLOT_WIDTH - INSET}
-        y1={PLOT_HEIGHT - INSET}
-        y2={PLOT_HEIGHT - INSET}
-      />
+      {block.chartType === "scatter" ? null : <ChartGrid domain={domain} zero={undefined} />}
+      <AxisLine />
       {visible.map((item) => (
         <SeriesShapes
           key={item.series.seriesId}
@@ -299,6 +457,7 @@ function CartesianMarks({
           domain={domain}
           series={item.series}
           seriesIndex={item.index}
+          interaction={interaction}
         />
       ))}
     </g>
@@ -310,26 +469,30 @@ function SeriesShapes({
   series,
   domain,
   seriesIndex,
+  interaction,
 }: {
   readonly chartType: CanvasChartType;
   readonly series: CanvasChartSeries;
   readonly domain: YDomain;
   readonly seriesIndex: number;
+  readonly interaction: MarkInteraction;
 }) {
   const count = series.points.length;
   const coords = series.points.map((point, index) => ({
     x: scaleX(index, count, PLOT_WIDTH, INSET),
     y: scaleY(point.y, domain, PLOT_HEIGHT, INSET),
+    value: point.y,
   }));
   const points = coords.map((coord) => `${String(coord.x)},${String(coord.y)}`).join(" ");
   const mark = `canvas-block__chart-mark ${seriesClass(seriesIndex)}`;
   if (chartType === "line") {
     return (
-      <polyline
-        className={`${mark} is-line`}
-        data-series={String(seriesIndex % 6)}
-        fill="none"
-        points={points}
+      <LineMark
+        coords={coords}
+        interaction={interaction}
+        label={series.label}
+        seriesAttr={String(seriesIndex % 6)}
+        seriesIndex={seriesIndex}
       />
     );
   }
@@ -345,7 +508,18 @@ function SeriesShapes({
     return (
       <g className={mark} data-series={String(seriesIndex % 6)}>
         {coords.map((coord, index) => (
-          <circle key={index} className="canvas-block__chart-dot" cx={coord.x} cy={coord.y} r={3} />
+          <circle
+            key={index}
+            className="canvas-block__chart-mark canvas-block__chart-dot"
+            cx={coord.x}
+            cy={coord.y}
+            r={CHART_DOT_RADIUS}
+            {...markInteraction(
+              interaction,
+              () => anchorFor(coord.x, coord.y, series.label, coord.value, interaction.format),
+              `${series.label}: ${formatCanvasValue(coord.value, interaction.format)}`,
+            )}
+          />
         ))}
       </g>
     );
@@ -356,27 +530,83 @@ function SeriesShapes({
       {coords.map((coord, index) => (
         <rect
           key={index}
+          className="canvas-block__chart-mark"
           height={Math.max(1, PLOT_HEIGHT - INSET - coord.y)}
           width={barWidth}
           x={coord.x - barWidth / 2}
           y={coord.y}
+          rx={CHART_BAR_RADIUS}
+          {...markInteraction(
+            interaction,
+            () => anchorFor(coord.x, coord.y, series.label, coord.value, interaction.format),
+            `${series.label}: ${formatCanvasValue(coord.value, interaction.format)}`,
+          )}
         />
       ))}
     </g>
   );
 }
 
-function Axis({
-  categories,
-  zero,
+function LineMark({
+  coords,
+  interaction,
+  label,
+  seriesAttr,
+  seriesIndex,
 }: {
-  readonly categories: ReadonlyArray<ChartCategory>;
-  readonly zero: number | undefined;
+  readonly coords: ReadonlyArray<{
+    readonly x: number;
+    readonly y: number;
+    readonly value: number;
+  }>;
+  readonly interaction: MarkInteraction;
+  readonly label: string;
+  readonly seriesAttr: string;
+  readonly seriesIndex: number;
 }) {
-  const y = zero ?? AXIS_Y;
+  const points = coords.map((coord) => `${String(coord.x)},${String(coord.y)}`).join(" ");
+  return (
+    <g data-series={seriesAttr}>
+      <polyline
+        className={`canvas-block__chart-mark is-line ${seriesClass(seriesIndex)}`}
+        data-series={seriesAttr}
+        fill="none"
+        points={points}
+      />
+      {coords.map((coord, index) => (
+        <circle
+          key={index}
+          className={`canvas-block__chart-mark canvas-block__chart-dot ${seriesClass(seriesIndex)}`}
+          cx={coord.x}
+          cy={coord.y}
+          data-series={seriesAttr}
+          r={CHART_DOT_RADIUS}
+          {...markInteraction(
+            interaction,
+            () => anchorFor(coord.x, coord.y, label, coord.value, interaction.format),
+            `${label}: ${formatCanvasValue(coord.value, interaction.format)}`,
+          )}
+        />
+      ))}
+    </g>
+  );
+}
+
+function AxisLine() {
+  return (
+    <line
+      className="canvas-block__chart-axis"
+      x1={INSET}
+      x2={PLOT_WIDTH - INSET}
+      y1={AXIS_Y}
+      y2={AXIS_Y}
+    />
+  );
+}
+
+function Axis({ categories }: { readonly categories: ReadonlyArray<ChartCategory> }) {
   return (
     <g>
-      <line className="canvas-block__chart-axis" x1={INSET} x2={PLOT_WIDTH - INSET} y1={y} y2={y} />
       {categories.length <= 6
         ? categories.map((category, index) => (
             <text
@@ -456,7 +686,7 @@ function SliceTable({ block }: { readonly block: CanvasChartBlock }) {
         {points.map((point, index) => (
           <tr key={index}>
             <th scope="row">{String(point.x)}</th>
-            <td>{formatScalar(point.y)}</td>
+            <td>{formatCanvasValue(point.y, block.format)}</td>
             <td>{formatShare(point.y, total)}</td>
           </tr>
         ))}
@@ -466,7 +696,7 @@ function SliceTable({ block }: { readonly block: CanvasChartBlock }) {
 }
 
 function SeriesTable({ block }: { readonly block: CanvasChartBlock }) {
-  const categories = categoryLabels(block.series);
+  const categories = categoryLabels(block.series, block.format);
   const aligned =
     block.chartType === "stacked-bar" ||
     block.chartType === "grouped-bar" ||
@@ -493,7 +723,9 @@ function SeriesTable({ block }: { readonly block: CanvasChartBlock }) {
             <tr key={category.key}>
               <th scope="row">{category.label}</th>
               {block.series.map((series) => (
-                <td key={series.seriesId}>{formatScalar(valueAt(series, category.key))}</td>
+                <td key={series.seriesId}>
+                  {formatCanvasValue(valueAt(series, category.key), block.format)}
+                </td>
               ))}
             </tr>
           ))}
@@ -518,8 +750,8 @@ function SeriesTable({ block }: { readonly block: CanvasChartBlock }) {
           series.points.map((point, index) => (
             <tr key={`${String(series.seriesId)}:${String(index)}`}>
               <th scope="row">{series.label}</th>
-              <td>{String(point.x)}</td>
-              <td>{formatScalar(point.y)}</td>
+              <td>{formatCanvasValue(point.x, block.format)}</td>
+              <td>{formatCanvasValue(point.y, block.format)}</td>
             </tr>
           )),
         )}
@@ -571,7 +803,10 @@ function categoryKey(x: number | string): string {
   return typeof x === "number" ? `n:${String(x)}` : `s:${x}`;
 }
 
-function categoryLabels(series: ReadonlyArray<CanvasChartSeries>): ReadonlyArray<ChartCategory> {
+function categoryLabels(
+  series: ReadonlyArray<CanvasChartSeries>,
+  format: CanvasNumberFormat | undefined,
+): ReadonlyArray<ChartCategory> {
   const seen = new Set<string>();
   const labels: ChartCategory[] = [];
   for (const item of series) {
@@ -579,7 +814,7 @@ function categoryLabels(series: ReadonlyArray<CanvasChartSeries>): ReadonlyArray
       const key = categoryKey(point.x);
       if (seen.has(key)) continue;
       seen.add(key);
-      labels.push({ key, label: String(point.x) });
+      labels.push({ key, label: formatCanvasValue(point.x, format) });
     }
   }
   return labels;

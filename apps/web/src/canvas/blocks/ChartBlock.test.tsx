@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts/canvas";
 import type { CanvasChartBlock } from "@octant/contracts/canvas";
@@ -171,6 +171,76 @@ describe("chart marks", () => {
         .getAllByRole("cell")
         .map((cell) => cell.textContent),
     ).toEqual(["20", "7"]);
+  });
+});
+
+describe("chart tooltip", () => {
+  function barBlock(format?: "compact" | "bytes") {
+    return chartBlock({
+      blockId: "requests",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "chart",
+      chartType: "bar",
+      ...(format === undefined ? {} : { format }),
+      series: [
+        {
+          seriesId: "requests",
+          label: "Requests",
+          points: [
+            { x: "Mon", y: format === "compact" ? 1_360_000 : 12 },
+            { x: "Tue", y: 8 },
+          ],
+        },
+      ],
+    });
+  }
+
+  function renderBar(format?: "compact" | "bytes") {
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [barBlock(format)] }} />);
+    const figure = document.querySelector(".canvas-block__chart--bar");
+    if (figure === null) throw new Error("Bar chart was not drawn.");
+    const mark = figure.querySelector("svg rect.canvas-block__chart-mark");
+    if (mark === null) throw new Error("Bar mark was not drawn.");
+    return figure as HTMLElement;
+  }
+
+  it("shows the series and value on hover and clears it when the pointer leaves", () => {
+    const figure = renderBar();
+    const mark = figure.querySelector("svg rect.canvas-block__chart-mark");
+    if (mark === null) throw new Error("Bar mark was not drawn.");
+
+    fireEvent.pointerEnter(mark);
+    const tip = screen.getByRole("tooltip");
+    expect(tip).toHaveTextContent("Requests");
+    expect(tip).toHaveTextContent("12");
+
+    fireEvent.pointerLeave(mark);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("follows keyboard focus so a mark is readable without a pointer", () => {
+    const figure = renderBar();
+    const mark = figure.querySelector("svg rect.canvas-block__chart-mark");
+    if (mark === null) throw new Error("Bar mark was not drawn.");
+    expect(mark.getAttribute("tabindex")).toBe("0");
+
+    fireEvent.focus(mark);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Requests");
+    expect(screen.getByRole("tooltip").textContent).toContain("12");
+
+    fireEvent.blur(mark);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("reads a named format in the tooltip and the disclosed table", () => {
+    const figure = renderBar("compact");
+    const mark = figure.querySelector("svg rect.canvas-block__chart-mark");
+    if (mark === null) throw new Error("Bar mark was not drawn.");
+
+    fireEvent.focus(mark);
+    // The reading is the shared compact reading, never the raw integer.
+    expect(screen.getByRole("tooltip").textContent).toContain("M");
+    expect(screen.getByRole("tooltip").textContent).not.toContain("1360000");
   });
 });
 

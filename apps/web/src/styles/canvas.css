@@ -137,6 +137,60 @@
   max-width: 420px;
 }
 
+/* The plot is the positioning context for the shared tooltip, which is placed
+   from the mark's own plotted coordinates rather than from the pointer. */
+.canvas-block__chart-plot {
+  position: relative;
+}
+
+.canvas-block__chart-gridline {
+  stroke: var(--oct-chart-grid);
+  stroke-width: 1;
+}
+
+/* A mark transitions only when a legend toggle or a zoom changes what is drawn.
+   That is a state change, not an entrance; it stays under 200ms and is off when
+   the person asked for reduced motion. */
+.canvas-block__chart-mark {
+  transition:
+    opacity var(--oct-motion-fast) var(--oct-ease-standard),
+    fill var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.canvas-block__chart-tip {
+  transform: translate(-50%, calc(-100% - 10px));
+}
+
+/* Near the top of the plot the tip flips below its mark so it stays on the
+   surface rather than above the frame. */
+.canvas-block__chart-tip[data-placement="below"] {
+  transform: translate(-50%, 10px);
+}
+
+/* A file path is read in the code font; the directory locates the file and is
+   dimmed, the name identifies it and keeps full ink. */
+.canvas-block__path {
+  font-family: var(--oct-font-mono);
+}
+
+.canvas-block__path-dir {
+  color: var(--oct-meta);
+}
+
+.canvas-block__path-name {
+  color: var(--oct-fg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-block__chart-mark {
+    transition: none;
+  }
+}
+
+[data-octant-reduced-motion="true"] .canvas-block__chart-mark {
+  transition: none;
+}
+
 .canvas-block__chart-mark {
   fill: var(--oct-ser, var(--oct-series-1));
   stroke: none;

@@ -1695,7 +1695,10 @@ replay. When the destination was called but the journal could not take the
 record, the answer is `unrecorded` and carries the destination's outcome; it is
 never reported as a failed export. PDF and PNG are named formats the seam can carry later; this host does
 not render them. A target that passed activation is still reported honestly as
-`not-connected`, `ready`, or `refused`.
+`not-connected`, `ready`, or `refused`. The rendered Markdown, HTML, and the
+artifact preview SVG read numbers through the shared Canvas formatter and draw
+marks to the shared chart specifications, so an exported reading matches the
+screen rather than growing a second reading.
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured

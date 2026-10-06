@@ -1,6 +1,6 @@
-import type { CanvasBlock, CanvasTableCell } from "@octant/contracts/canvas";
+import type { CanvasBlock, CanvasNumberFormat, CanvasTableCell } from "@octant/contracts/canvas";
 import { Fragment } from "react";
-import { formatScalar } from "../canvasRuntime";
+import { formatCanvasValue, formatScalar } from "../canvasRuntime";
 
 type Block = Extract<
   CanvasBlock,
@@ -24,13 +24,15 @@ export function DataBlocks({ block }: { readonly block: Block }) {
         <div className="canvas-block__metric">
           <span className="canvas-block__metric-label">{block.label}</span>
           <strong className="canvas-block__metric-value">
-            {formatScalar(block.value)}
+            {formatCanvasValue(block.value, block.format)}
             {block.unit !== undefined ? (
               <span className="canvas-block__metric-unit"> {block.unit}</span>
             ) : null}
           </strong>
           {block.delta !== undefined ? (
-            <span className="canvas-block__metric-delta">{formatDelta(block.delta)}</span>
+            <span className="canvas-block__metric-delta">
+              {formatDelta(block.delta, block.format)}
+            </span>
           ) : null}
         </div>
       );
@@ -68,11 +70,11 @@ export function DataBlocks({ block }: { readonly block: Block }) {
   }
 }
 
-function formatDelta(delta: number): string {
+function formatDelta(delta: number, format: CanvasNumberFormat | undefined): string {
   const sign = delta > 0 ? "+" : "";
-  return `${sign}${formatScalar(delta)}`;
+  return `${sign}${formatCanvasValue(delta, format)}`;
 }
 
-export function formatTableCell(value: CanvasTableCell): string {
-  return formatScalar(value);
+export function formatTableCell(value: CanvasTableCell, format?: CanvasNumberFormat): string {
+  return formatCanvasValue(value, format);
 }
