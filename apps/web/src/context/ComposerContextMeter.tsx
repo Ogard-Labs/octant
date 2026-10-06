@@ -12,6 +12,7 @@ import { isApplePlatform } from "../platform";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { ContextInspector } from "./ContextInspector";
 import {
+  autoCompactRoom,
   contextHealthLabel,
   contextWindowModel,
   contextWindowUsedSourceLabel,
@@ -392,6 +393,7 @@ function ContextUsageFallback(props: {
 }) {
   const { fallback } = props;
   const reported = reportedWindow(fallback);
+  const room = fallbackAutoCompactRoom(fallback);
   const [expanded, setExpanded] = useState(false);
   const breakdownId = useId();
   const totals = <ThreadTotals fallback={fallback} />;
@@ -413,6 +415,7 @@ function ContextUsageFallback(props: {
               ? "No usage has been reported for this thread."
               : "This provider reports what a turn spent, but not a context-window maximum, so there is no share of a window to show."}
           </p>
+          <AutoCompactRoom room={room} />
           {totals}
         </>
       ) : (
@@ -429,6 +432,7 @@ function ContextUsageFallback(props: {
             percent={reported.percent}
             segments={reportedSegments(reported)}
           />
+          <AutoCompactRoom room={room} />
           {/* A window the provider did not name is a caveat on the figure
               itself, so it stays in view; the ordinary provenance line waits
               in the breakdown with the rest of the detail. */}
@@ -471,6 +475,30 @@ function ContextUsageFallback(props: {
         <FooterAction label="View usage" onClick={props.onOpenUsage} />
       )}
     </>
+  );
+}
+
+/**
+ * The room a runtime that compacts its own session has left. The report's
+ * threshold is what makes this thread's compaction automatic: a runtime that
+ * names none leaves the kind unknown, and the line stays out.
+ */
+function fallbackAutoCompactRoom(fallback: ComposerContextUsageFallback) {
+  return autoCompactRoom({
+    compaction: fallback.autoCompactThreshold === undefined ? "unknown" : "automatic",
+    thresholdTokens: fallback.autoCompactThreshold,
+    usedTokens: fallback.contextTokens,
+  });
+}
+
+function AutoCompactRoom(props: { readonly room: ReturnType<typeof autoCompactRoom> }) {
+  if (props.room === undefined) return null;
+  return (
+    <p className="context-window-popover__source" data-auto-compact="">
+      {props.room.tokens === 0
+        ? "At the auto-compact threshold"
+        : `${compactTokens(props.room.tokens)} until auto-compact`}
+    </p>
   );
 }
 

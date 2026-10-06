@@ -15,6 +15,7 @@ import { Effect, Stream, type Scope } from "effect";
 
 import {
   decodeAccount,
+  decodeAutoCompactThreshold,
   decodeInitialization,
   type ClaudeDecodePhase,
   decodeInterruptReceipt,
@@ -139,6 +140,11 @@ export interface ClaudeAccountState {
 export interface ClaudeInitialization {
   readonly models: readonly ClaudeModelInfo[];
   readonly account: ClaudeAccountState;
+  /**
+   * Where the runtime compacts the session by itself, in tokens, when it said
+   * compaction is on. Absent when it said nothing usable.
+   */
+  readonly autoCompactThreshold?: number;
 }
 
 export interface ClaudeSessionMetadata {
@@ -450,6 +456,8 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
   readonly interrupt: () => Promise<unknown>;
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Promise<void>;
   readonly initializationResult: () => Promise<unknown>;
+  /** The runtime's own account of its window; older runtimes do not answer. */
+  readonly getContextUsage?: () => Promise<unknown>;
   readonly supportedModels: () => Promise<unknown>;
   readonly accountInfo: () => Promise<unknown>;
   readonly close: () => void;
@@ -467,6 +475,38 @@ export interface ClaudeAgentSdkPortOptions {
 }
 
 const DEFAULT_INPUT_CAPACITY = 1;
+/** The answer is a local control request; one that takes longer is not coming. */
+const CONTEXT_USAGE_TIMEOUT_MS = 3_000;
+
+function compactionPoint(autoCompactThreshold: number | undefined) {
+  return autoCompactThreshold === undefined ? {} : { autoCompactThreshold };
+}
+
+/**
+ * Asks the runtime where it compacts the session. Compaction is the runtime's
+ * own, so the threshold is its figure or nothing: a runtime that does not
+ * answer, answers late, or answers in a shape the host cannot read leaves the
+ * session with no stated threshold rather than a guessed one.
+ */
+async function askAutoCompactThreshold(
+  query: ClaudeAgentSdkQueryLike,
+): Promise<number | undefined> {
+  if (query.getContextUsage === undefined) return undefined;
+  let timer: number | undefined;
+  try {
+    const answer = await Promise.race([
+      query.getContextUsage(),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(resolve, CONTEXT_USAGE_TIMEOUT_MS);
+      }),
+    ]);
+    return decodeAutoCompactThreshold(answer);
+  } catch {
+    return undefined;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 const SANDBOX_KEYS = [
   "allowUnsandboxedCommands",
   "autoAllowBashIfSandboxed",
@@ -796,7 +836,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
             };
             query = sdk.query({ prompt, options: invocationOptions });
-            const initialization = decodeInitialization(await query.initializationResult());
+            const initialization = {
+              ...decodeInitialization(await query.initializationResult()),
+              ...compactionPoint(await askAutoCompactThreshold(query)),
+            };
             // The runtime echoes the model an alias such as `sonnet` resolved
             // to, so the initialized message is checked against the resolved
             // id its own catalogue declares for the requested model.

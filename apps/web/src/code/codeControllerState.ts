@@ -165,6 +165,7 @@ export interface CodeTurnUsage {
   readonly costUsd?: number | undefined;
   readonly contextWindow?: number | undefined;
   readonly contextTokens?: number | undefined;
+  readonly autoCompactThreshold?: number | undefined;
 }
 
 /**
@@ -185,6 +186,7 @@ export function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>):
   readonly costUsd?: number;
   readonly contextWindow?: number;
   readonly contextTokens?: number;
+  readonly autoCompactThreshold?: number;
 } {
   if (byOperation.size === 0) return {};
   let inputTokens = 0;
@@ -196,6 +198,7 @@ export function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>):
   let costUsd: number | undefined;
   let contextWindow: number | undefined;
   let contextTokens: number | undefined;
+  let autoCompactThreshold: number | undefined;
   for (const usage of byOperation.values()) {
     inputTokens += usage.inputTokens;
     outputTokens += usage.outputTokens;
@@ -210,6 +213,9 @@ export function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>):
     if (usage.costUsd !== undefined) costUsd = (costUsd ?? 0) + usage.costUsd;
     if (usage.contextWindow !== undefined) contextWindow = usage.contextWindow;
     if (usage.contextTokens !== undefined) contextTokens = usage.contextTokens;
+    // Unlike the window, a promise to compact ends when the runtime stops
+    // making it, so the latest turn's report stands even when it names none.
+    autoCompactThreshold = usage.autoCompactThreshold;
   }
   return {
     inputTokens,
@@ -228,6 +234,7 @@ export function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>):
     },
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(contextTokens === undefined ? {} : { contextTokens }),
+    ...(autoCompactThreshold === undefined ? {} : { autoCompactThreshold }),
   };
 }
 

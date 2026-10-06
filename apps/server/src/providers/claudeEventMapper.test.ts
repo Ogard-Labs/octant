@@ -1323,6 +1323,55 @@ describe("mapClaudeMessage", () => {
     });
   });
 
+  it("reports how much of the window the last request filled, and where the runtime compacts", () => {
+    const ctx = context({ autoCompactThreshold: 167_000 });
+    const result = {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage: { ...usage, inputTokens: 60, cacheReadInputTokens: 130, cacheCreationInputTokens: 10 },
+      permissionDenials: [],
+    } satisfies ClaudeDecodedMessage;
+
+    const assistant = mapped(ctx, {
+      kind: "assistant",
+      sessionId: claudeSessionId,
+      messageId: "sdk-message-1",
+      content: [{ kind: "text", text: "Done." }],
+      usage: { ...usage, inputTokens: 40, cacheReadInputTokens: 100, cacheCreationInputTokens: 10 },
+    });
+    // The turn's usage sums every request, so the window's fill must come from
+    // the request itself: the input the model read, cached or not.
+    expect(assistant).toMatchObject([
+      {
+        kind: "event",
+        event: { kind: "usage", contextTokens: 150, autoCompactThreshold: 167_000 },
+      },
+    ]);
+    expect(mapped(ctx, result)[0]).toMatchObject({
+      kind: "event",
+      event: { kind: "usage", inputTokens: 200, contextTokens: 150, autoCompactThreshold: 167_000 },
+    });
+  });
+
+  it("names no compaction point when the runtime promised none", () => {
+    const ctx = context();
+
+    const results = mapped(ctx, {
+      kind: "assistant",
+      sessionId: claudeSessionId,
+      messageId: "sdk-message-1",
+      content: [{ kind: "text", text: "Done." }],
+      usage,
+    });
+
+    const [usageEvent] = eventValues(results);
+    expect(usageEvent).toMatchObject({ kind: "usage", contextTokens: 17 });
+    expect(usageEvent).not.toHaveProperty("autoCompactThreshold");
+  });
+
   it("maps interruption and successful completion as exactly one terminal transition", () => {
     const interruptedContext = context();
     const interrupted = mapped(interruptedContext, {
