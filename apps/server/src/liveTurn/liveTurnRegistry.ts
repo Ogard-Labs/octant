@@ -106,9 +106,14 @@ export class LiveTurnRegistry {
       observe: (event) => {
         const turn = own();
         if (turn === undefined) return;
-        const before = JSON.stringify(liveTurnStep(turn.state));
-        turn.state = observeLiveTurn(turn.state, event);
-        if (JSON.stringify(liveTurnStep(turn.state)) !== before) this.#changed(topic);
+        // Text deltas arrive many times a second and never move the step; the
+        // fold hands back the same state for them, so they cost one comparison.
+        const next = observeLiveTurn(turn.state, event);
+        if (next === turn.state) return;
+        const moved =
+          JSON.stringify(liveTurnStep(next)) !== JSON.stringify(liveTurnStep(turn.state));
+        turn.state = next;
+        if (moved) this.#changed(topic);
       },
       end: () => {
         if (own() === undefined) return;
