@@ -405,11 +405,32 @@ export type CanvasKeyValueBlock = typeof CanvasKeyValueBlock.Type;
 export const CanvasTableColumnType = Schema.Literal("text", "number", "boolean", "date", "status");
 export type CanvasTableColumnType = typeof CanvasTableColumnType.Type;
 
+/**
+ * How a table column draws its cells.
+ *
+ * Absent reads as plain text. `bar` draws an in-cell bar whose length is the
+ * value's share of the column's largest reading, `heat` tints the cell on the
+ * shared sequential scale, and `status` reads each value as a badge. A bar or
+ * a tint is presentation only: the value is always shown, so colour never
+ * carries a reading on its own, and both fall back to the plain value under
+ * forced colours.
+ */
+export const CanvasTableColumnDisplay = Schema.Literal("text", "bar", "heat", "status");
+export type CanvasTableColumnDisplay = typeof CanvasTableColumnDisplay.Type;
+
+// `format` and `display` are additive optional presentation fields on the
+// existing table kind: they refine how a value an older runtime already reads
+// is drawn, they never change its order or add a block kind. The repository
+// treated `format` this way when it was added to the table, metric, and chart
+// columns, so `display` follows the same ungated convention rather than
+// minting a schema version a rolled-back runtime would have to learn for a
+// field it can safely draw as plain text.
 export const CanvasTableColumn = Schema.Struct({
   id: boundedToken("CanvasTableColumnId"),
   label: CanvasLabel,
   type: CanvasTableColumnType,
   format: Schema.optional(CanvasNumberFormat),
+  display: Schema.optional(CanvasTableColumnDisplay),
 }).annotations(strict);
 export type CanvasTableColumn = typeof CanvasTableColumn.Type;
 

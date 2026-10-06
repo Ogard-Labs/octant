@@ -831,6 +831,41 @@ describe("canvas number formats", () => {
   });
 });
 
+describe("canvas table column displays", () => {
+  it("accepts an optional display on a table column and leaves it absent otherwise", () => {
+    const block = decodeCanvasBlock({
+      blockId: "table-display",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "table",
+      columns: [
+        { id: "asset", label: "Asset", type: "text" },
+        { id: "requests", label: "Requests", type: "number", display: "bar" },
+        { id: "errors", label: "Errors", type: "number", display: "heat" },
+        { id: "state", label: "State", type: "text", display: "status" },
+      ],
+      rows: [["bundle.js", 1200, 3, "Ready"]],
+    });
+
+    expect(block).toMatchObject({
+      columns: [{}, { display: "bar" }, { display: "heat" }, { display: "status" }],
+    });
+    const columns = (block as { readonly columns: ReadonlyArray<Record<string, unknown>> }).columns;
+    expect(columns[0]).not.toHaveProperty("display");
+  });
+
+  it("rejects a display outside the closed set", () => {
+    expect(() =>
+      decodeCanvasBlock({
+        blockId: "bad-column-display",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "table",
+        columns: [{ id: "requests", label: "Requests", type: "number", display: "sparkline" }],
+        rows: [[1]],
+      }),
+    ).toThrow();
+  });
+});
+
 describe("treemap blocks", () => {
   const treemap = {
     blockId: "repository-map",

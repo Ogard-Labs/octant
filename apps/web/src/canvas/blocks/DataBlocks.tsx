@@ -2,7 +2,6 @@ import type {
   CanvasBlock,
   CanvasMetricDirection,
   CanvasNumberFormat,
-  CanvasTableCell,
 } from "@octant/contracts/canvas";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { Fragment } from "react";
@@ -157,8 +156,4 @@ function MetricSparkline({ values }: { readonly values: ReadonlyArray<number> })
 function formatDelta(delta: number, format: CanvasNumberFormat | undefined): string {
   const sign = delta > 0 ? "+" : "";
   return `${sign}${formatCanvasValue(delta, format)}`;
-}
-
-export function formatTableCell(value: CanvasTableCell, format?: CanvasNumberFormat): string {
-  return formatCanvasValue(value, format);
 }
