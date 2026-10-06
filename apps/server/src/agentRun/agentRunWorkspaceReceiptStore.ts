@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   decodeAgentRunWorkspaceReceiptId,
@@ -198,7 +199,18 @@ export class AgentRunWorkspaceReceiptStore {
   async #write(receipt: StoredAgentRunWorkspaceReceipt): Promise<void> {
     await mkdir(this.#root, { recursive: true, mode: 0o700 });
     const payload = JSON.stringify({ version: RECEIPT_VERSION, ...receipt });
-    await writeFile(this.#path(receipt.receiptId), payload, { encoding: "utf8", mode: 0o600 });
+    // A replayed request confirms and admits the same receipt that its first
+    // attempt is still saving. Writing in place truncates the file first, so a
+    // concurrent load read it as empty, treated the grant as missing, and
+    // refused a workspace that existed. Rename publishes the whole file at once.
+    const temporaryPath = join(this.#root, `.${receipt.receiptId}.${randomUUID()}.tmp`);
+    try {
+      await writeFile(temporaryPath, payload, { encoding: "utf8", mode: 0o600 });
+      await rename(temporaryPath, this.#path(receipt.receiptId));
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => undefined);
+      throw error;
+    }
   }
 
   async forgetExpired(now: number): Promise<void> {
