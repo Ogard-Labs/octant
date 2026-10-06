@@ -134,6 +134,64 @@ describe("provider OAuth routes", () => {
     expect(await response?.json()).toEqual({ kind: "refused", reason: "invalid" });
   });
 
+  it("passes the instance credential ref when beginning a sign-in for an offer that already has a pointer", async () => {
+    const begin = vi.fn(async () => ({ kind: "refused", reason: "invalid" }) as const);
+    const credentials = {
+      has: vi.fn(async () => true),
+      resolve: vi.fn(async () =>
+        encodeSubscriptionOAuthCredential({
+          kind: "subscription-oauth",
+          credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          descriptorId: "fixture-oauth",
+          accountLabel: "Fixture account",
+        }),
+      ),
+      set: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    };
+    const route = fixture({
+      begin,
+      credentials,
+      readInstance: () => instanceAt("https://example.com/v1"),
+    });
+    await route(command("begin"));
+    expect(begin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      }),
+    );
+  });
+
+  it("does not pass a credential ref from a pointer for a different offer", async () => {
+    const seen: unknown[] = [];
+    const begin: HostOAuthService["begin"] = async (input) => {
+      seen.push(input);
+      return { kind: "refused", reason: "invalid" };
+    };
+    const credentials = {
+      has: vi.fn(async () => true),
+      resolve: vi.fn(async () =>
+        encodeSubscriptionOAuthCredential({
+          kind: "subscription-oauth",
+          credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          descriptorId: "other-oauth",
+          accountLabel: "Other account",
+        }),
+      ),
+      set: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    };
+    const route = fixture({
+      begin,
+      credentials,
+      readInstance: () => instanceAt("https://example.com/v1"),
+    });
+    await route(command("begin"));
+    expect(seen).toHaveLength(1);
+    const input = seen[0];
+    expect(typeof input === "object" && input !== null && "credentialRef" in input).toBe(false);
+  });
+
   it("refuses to store a credential pointer when the endpoint no longer matches on poll", async () => {
     const credentials = {
       has: vi.fn(async () => false),

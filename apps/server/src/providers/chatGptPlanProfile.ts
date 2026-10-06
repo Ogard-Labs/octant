@@ -1,4 +1,4 @@
-import type { ProviderFailure, ProviderToolDefinition } from "@octant/contracts";
+import type { ProviderFailure } from "@octant/contracts";
 
 /**
  * The ChatGPT plan (Sign in with ChatGPT) request profile.
@@ -50,11 +50,18 @@ export const CHATGPT_PLAN_FORBIDDEN_FIELDS = [
 export type ChatGptPlanForbiddenField = (typeof CHATGPT_PLAN_FORBIDDEN_FIELDS)[number];
 
 /**
- * A request the plan profile cannot express. `field` names the offending
- * parameter; `tool` names a hosted tool the profile refuses.
+ * A request the plan profile cannot express. `field` names a parameter the
+ * preview omits entirely. `store`, `stream`, and `input-shape` name a
+ * mandatory wire constraint that was not met, rather than pretending the
+ * problem was some other field.
  */
 export type ChatGptPlanProfileRefusal =
   | { readonly kind: "forbidden-field"; readonly field: ChatGptPlanForbiddenField }
+  | { readonly kind: "store" }
+  | { readonly kind: "stream" }
+  | { readonly kind: "input-shape" }
+  | { readonly kind: "body-shape" }
+  | { readonly kind: "tools-shape" }
   | { readonly kind: "hosted-tool"; readonly tool: string }
   | { readonly kind: "system-message-item" }
   | { readonly kind: "plan-usage-disabled" };
@@ -68,20 +75,13 @@ export type ChatGptPlanProfileRefusal =
 export function inspectChatGptPlanRequestBody(
   body: unknown,
 ): ChatGptPlanProfileRefusal | undefined {
-  if (!isRecord(body)) return { kind: "forbidden-field", field: "metadata" };
+  if (!isRecord(body)) return { kind: "body-shape" };
   for (const field of CHATGPT_PLAN_FORBIDDEN_FIELDS) {
     if (field in body) return { kind: "forbidden-field", field };
   }
-  if (body.store !== false) {
-    // store:false is mandatory; anything else is a profile violation.
-    return { kind: "forbidden-field", field: "metadata" };
-  }
-  if (body.stream !== true) {
-    return { kind: "forbidden-field", field: "metadata" };
-  }
-  if (!Array.isArray(body.input)) {
-    return { kind: "forbidden-field", field: "metadata" };
-  }
+  if (body.store !== false) return { kind: "store" };
+  if (body.stream !== true) return { kind: "stream" };
+  if (!Array.isArray(body.input)) return { kind: "input-shape" };
   for (const item of body.input) {
     if (isRecord(item) && item.type === "message" && item.role === "system") {
       return { kind: "system-message-item" };
@@ -89,24 +89,15 @@ export function inspectChatGptPlanRequestBody(
   }
   const tools = body.tools;
   if (tools !== undefined) {
-    if (!Array.isArray(tools)) return { kind: "forbidden-field", field: "metadata" };
+    if (!Array.isArray(tools)) return { kind: "tools-shape" };
     for (const tool of tools) {
-      if (!isRecord(tool)) return { kind: "forbidden-field", field: "metadata" };
+      if (!isRecord(tool)) return { kind: "tools-shape" };
       if (tool.type !== "function") {
         return { kind: "hosted-tool", tool: typeof tool.type === "string" ? tool.type : "unknown" };
       }
     }
   }
   return undefined;
-}
-
-/**
- * Whether a tool definition is a hosted tool the plan profile refuses. The
- * provider-sdk tool shape is function-only today; this check fails closed if
- * a hosted tool kind ever reaches the encoder.
- */
-export function isHostedToolDefinition(_tool: ProviderToolDefinition): boolean {
-  return false;
 }
 
 /** The typed provider failure a profile refusal maps to. */
@@ -116,6 +107,33 @@ export function chatGptPlanRefusalFailure(refusal: ChatGptPlanProfileRefusal): P
       return {
         category: "unsupported",
         message: `The ChatGPT plan route does not accept the "${refusal.field}" parameter.`,
+      };
+    case "store":
+      return {
+        category: "unsupported",
+        message: 'The ChatGPT plan route requires "store" to be false.',
+      };
+    case "stream":
+      return {
+        category: "unsupported",
+        message: 'The ChatGPT plan route requires "stream" to be true.',
+      };
+    case "input-shape":
+      return {
+        category: "unsupported",
+        message:
+          'The ChatGPT plan route requires "input" to be an array carrying the full history.',
+      };
+    case "body-shape":
+      return {
+        category: "unsupported",
+        message: "The ChatGPT plan route requires a JSON object body.",
+      };
+    case "tools-shape":
+      return {
+        category: "unsupported",
+        message:
+          "The ChatGPT plan route requires tools to be an array of function tool definitions.",
       };
     case "hosted-tool":
       return {

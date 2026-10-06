@@ -2219,12 +2219,20 @@ mechanisms are:
   by the catalog). The loopback callback returns the issued `oaiapp_…` client
   id, which is stored and used for the exchange and every refresh — never the
   placeholder. The exchange and refresh send `resource=https://api.openai.com/v1`
-  and no client secret. The identity token is validated against the issuer's
-  JWKS (RS256 signature, issuer, audience, expiry, and the per-attempt OIDC
-  nonce) before the grant is stored; the verified `sub`/`email`, the issued
-  client id, the retained identity token (for `id_token_hint` on
-  reauthorization), and the stable host id live on the stored grant. A
-  reauthorization reuses the issued client id and omits the agent name hint.
+  and no client secret. The identity token from the authorization-code exchange
+  is validated against the issuer's JWKS (RS256 signature, issuer, audience,
+  expiry, and the per-attempt OIDC nonce) before the grant is stored; the
+  verified `sub`/`email`, the issued client id, the retained identity token
+  (for `id_token_hint` on reauthorization), and the stable host id live on the
+  stored grant. Reauthorization is addressed by the instance's stored
+  credential ref — the host does not scan the credential store, because
+  production stores cannot list their entries. It reuses the issued client id,
+  sends `id_token_hint`, and omits the agent name hint. The reauthorization
+  callback may omit `client_id`; the issued id used in the authorize request
+  is retained, and a different `client_id` is refused. A refresh that returns
+  no identity token keeps the prior identity. A refresh that returns one is
+  checked for signature, issuer, audience, expiry, and subject equal to the
+  stored subject — not for a nonce, because refresh does not send one.
   When the granted scopes omit `chatgpt.tokens.use.direct`, the sign-in is
   still valid as identity-only and plan usage is reported disabled. Sign-out
   revokes the refresh token at the issuer's discovery `revocation_endpoint`

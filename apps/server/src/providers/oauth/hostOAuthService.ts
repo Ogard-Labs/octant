@@ -35,6 +35,8 @@ export interface HostOAuthService {
     readonly principalKind: PrincipalKind;
     readonly actorId: string;
     readonly descriptor: HostOAuthDescriptor;
+    /** ChatGPT plan reauthorization: the instance's stored grant. Optional. */
+    readonly credentialRef?: string;
   }) => Promise<HostOAuthSignInState>;
   readonly status: (input: {
     readonly principalKind: PrincipalKind;
@@ -207,6 +209,7 @@ export function createHostOAuthService(options: {
           descriptor: wireDescriptor(descriptor),
           actorId: input.actorId,
           termsAcknowledgedAt: acknowledgment.acknowledgedAt,
+          ...(input.credentialRef === undefined ? {} : { credentialRef: input.credentialRef }),
         });
       } catch {
         return refuse(input.descriptor, "unavailable");

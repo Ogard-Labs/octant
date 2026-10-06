@@ -161,10 +161,16 @@ async function dispatch(input: {
   if (command.kind === "begin") {
     const unmatched = unmatchedInstance(dependencies, command.instanceId, offer);
     if (unmatched !== undefined) return unmatched;
+    const pointer = await readPointer(dependencies, command.instanceId);
+    const credentialRef =
+      pointer !== undefined && pointer.descriptorId === offer.descriptor.descriptorId
+        ? pointer.credentialRef
+        : undefined;
     const started = await dependencies.service.begin({
       principalKind: principal,
       actorId,
       descriptor,
+      ...(credentialRef === undefined ? {} : { credentialRef }),
     });
     return finish(dependencies, command, offer, started, actorId, principal);
   }

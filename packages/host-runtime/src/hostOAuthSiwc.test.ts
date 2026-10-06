@@ -9,7 +9,11 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
-import { createHostOAuthRuntime, type HostOAuthDescriptor } from "./hostOAuth";
+import {
+  createHostOAuthRuntime,
+  handleHostOAuthBrokerRoute,
+  type HostOAuthDescriptor,
+} from "./hostOAuth";
 
 const HOST_ID = "urn:uuid:11111111-2222-4333-8444-555555555555";
 const ISSUED_CLIENT_ID = "oaiapp_test-client-123";
@@ -31,6 +35,23 @@ function memoryStore(): CredentialStore & { readonly values: Map<string, string>
     },
     delete: async (id) => void values.delete(id),
     list: async () => [...values.keys()],
+  };
+}
+
+/** A store that can resolve a named ref but cannot enumerate, like Keychain. */
+function unlistableStore(
+  values: Map<string, string> = new Map(),
+): CredentialStore & { readonly values: Map<string, string> } {
+  return {
+    values,
+    set: async (id, value) => void values.set(id, value),
+    has: async (id) => values.has(id),
+    resolve: async (id) => {
+      const value = values.get(id);
+      if (value === undefined) throw new CredentialStoreFailure("missing");
+      return value;
+    },
+    delete: async (id) => void values.delete(id),
   };
 }
 
@@ -103,6 +124,12 @@ async function startFakeSiwcServer(options?: {
   readonly refresh?: { readonly status: number; readonly error?: string };
   readonly omitIdToken?: boolean;
   readonly issuer?: string;
+  /**
+   * When set, a successful refresh response includes an identity token.
+   * `authorize-nonce` reuses the nonce from the authorize request.
+   * `wrong-subject` does the same but names a different subject.
+   */
+  readonly refreshIdToken?: "authorize-nonce" | "wrong-subject";
 }): Promise<FakeSiwcServer> {
   const keyPair = options?.keyPair ?? rsaKeyPair();
   let issuer = options?.issuer ?? "";
@@ -113,6 +140,7 @@ async function startFakeSiwcServer(options?: {
   let lastRevocation: Record<string, string> | undefined;
   const challenges = new Map<string, string>();
   const nonces = new Map<string, string>();
+  let authorizeNonce: string | undefined;
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     if (request.method === "GET" && url.pathname === "/authorize") {
@@ -126,7 +154,10 @@ async function startFakeSiwcServer(options?: {
         return;
       }
       challenges.set(state, challenge);
-      if (nonce !== null) nonces.set(state, nonce);
+      if (nonce !== null) {
+        nonces.set(state, nonce);
+        authorizeNonce = nonce;
+      }
       const callback = new URL(redirect);
       callback.searchParams.set("code", "siwc-auth-code");
       callback.searchParams.set("state", state);
@@ -188,12 +219,18 @@ async function startFakeSiwcServer(options?: {
           response.end(JSON.stringify(refresh.error === undefined ? {} : { error: refresh.error }));
           return;
         }
-        // The runtime generates a fresh nonce per refresh and does not send
-        // it on the wire, so the fake cannot sign a matching nonce claim.
-        // The runtime tolerates a refresh response without an id_token ("a
-        // refresh without a new identity token keeps the prior one"), so the
-        // fake omits it on refresh.
-        const token = undefined;
+        const refreshKind = options?.refreshIdToken;
+        const token =
+          refreshKind === undefined
+            ? undefined
+            : idToken(keyPair, {
+                iss: issuer,
+                aud: ISSUED_CLIENT_ID,
+                sub: refreshKind === "wrong-subject" ? "other-subject" : SUBJECT,
+                email: EMAIL,
+                exp: Math.floor(Date.now() / 1000) + 3600,
+                nonce: authorizeNonce ?? "missing-authorize-nonce",
+              });
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
@@ -292,6 +329,33 @@ async function waitForState(
     latest = read();
   }
   return latest;
+}
+
+async function completeSignIn(
+  runtime: ReturnType<typeof createHostOAuthRuntime>,
+  fake: FakeSiwcServer,
+): Promise<string> {
+  const started = await runtime.begin({
+    descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+    actorId: randomUUID(),
+    termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+  });
+  if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+    throw new Error("expected a PKCE attempt");
+  }
+  await fetch(started.authorizationUrl);
+  const done = await waitForState(() => runtime.status(started.attemptId), "signed-in");
+  if (done.kind !== "signed-in") throw new Error("expected a signed-in state");
+  const status = runtime.status(started.attemptId);
+  if (status.kind !== "signed-in") throw new Error("missing credential ref");
+  return status.credentialRef;
+}
+
+async function callbackWithoutFollowing(authorizationUrl: string): Promise<URL> {
+  const redirected = await fetch(authorizationUrl, { redirect: "manual" });
+  const location = redirected.headers.get("location");
+  if (location === null) throw new Error("expected a callback redirect");
+  return new URL(location);
 }
 
 describe("ChatGPT plan (SIWC) dialect", () => {
@@ -498,6 +562,142 @@ describe("ChatGPT plan (SIWC) dialect", () => {
     }
   });
 
+  it("reauthorizes from the named credential when the store cannot list grants", async () => {
+    const fake = await startFakeSiwcServer();
+    const listed = memoryStore();
+    const firstRuntime = runtimeFor(listed, fake);
+    let credentialRef = "";
+    let idToken = "";
+    try {
+      const first = await firstRuntime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+      });
+      if (first.kind !== "awaiting-consent" || first.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      await fetch(first.authorizationUrl);
+      const done = await waitForState(() => firstRuntime.status(first.attemptId), "signed-in");
+      if (done.kind !== "signed-in") throw new Error("expected a signed-in state");
+      const status = firstRuntime.status(first.attemptId);
+      if (status.kind !== "signed-in") throw new Error("missing credential ref");
+      credentialRef = status.credentialRef;
+      const stored = JSON.parse(listed.values.get(credentialRef) ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      if (typeof stored.idToken !== "string") throw new Error("missing identity token");
+      idToken = stored.idToken;
+    } finally {
+      await firstRuntime.close();
+    }
+    const runtime = runtimeFor(unlistableStore(listed.values), fake);
+    try {
+      const second = await runtime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+        credentialRef,
+      });
+      if (second.kind !== "awaiting-consent" || second.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      const authorization = new URL(second.authorizationUrl);
+      expect(authorization.searchParams.get("client_id")).toBe(ISSUED_CLIENT_ID);
+      expect(authorization.searchParams.get("agent_name_hint")).toBeNull();
+      expect(authorization.searchParams.get("id_token_hint")).toBe(idToken);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("starts a first sign-in when no credential is named, even if a grant is stored and the store cannot list", async () => {
+    const fake = await startFakeSiwcServer();
+    const listed = memoryStore();
+    const firstRuntime = runtimeFor(listed, fake);
+    try {
+      const first = await firstRuntime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+      });
+      if (first.kind !== "awaiting-consent" || first.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      await fetch(first.authorizationUrl);
+      const done = await waitForState(() => firstRuntime.status(first.attemptId), "signed-in");
+      expect(done.kind).toBe("signed-in");
+    } finally {
+      await firstRuntime.close();
+    }
+    const runtime = runtimeFor(unlistableStore(listed.values), fake);
+    try {
+      const started = await runtime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      const authorization = new URL(started.authorizationUrl);
+      expect(authorization.searchParams.get("client_id")).toBe("dynamic_agent_client");
+      expect(authorization.searchParams.get("agent_name_hint")).toBe("Octant");
+      expect(authorization.searchParams.get("id_token_hint")).toBeNull();
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("uses a named credential ref from the begin route instead of listing the store", async () => {
+    const fake = await startFakeSiwcServer();
+    const listed = memoryStore();
+    const firstRuntime = runtimeFor(listed, fake);
+    let credentialRef = "";
+    try {
+      credentialRef = await completeSignIn(firstRuntime, fake);
+    } finally {
+      await firstRuntime.close();
+    }
+    const runtime = runtimeFor(unlistableStore(listed.values), fake);
+    try {
+      const response = await handleHostOAuthBrokerRoute(
+        "/v1/oauth/begin",
+        new Request("http://127.0.0.1/v1/oauth/begin", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            actorId: randomUUID(),
+            termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+            credentialRef,
+            descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+          }),
+        }),
+        runtime,
+      );
+      expect(response.status).toBe(200);
+      const body: unknown = await response.json();
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        !("authorizationUrl" in body) ||
+        typeof body.authorizationUrl !== "string"
+      ) {
+        throw new Error("expected an authorize URL");
+      }
+      const authorization = new URL(body.authorizationUrl);
+      expect(authorization.searchParams.get("client_id")).toBe(ISSUED_CLIENT_ID);
+      expect(authorization.searchParams.get("agent_name_hint")).toBeNull();
+      expect(authorization.searchParams.get("id_token_hint")).not.toBeNull();
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
   it("reuses the issued client id and omits the agent name hint on reauthorization", async () => {
     const fake = await startFakeSiwcServer();
     const store = memoryStore();
@@ -515,12 +715,15 @@ describe("ChatGPT plan (SIWC) dialect", () => {
       await fetch(first.authorizationUrl);
       const done = await waitForState(() => runtime.status(first.attemptId), "signed-in");
       expect(done.kind).toBe("signed-in");
-      // Second begin finds the stored grant and reauthorizes with the issued
+      const signedIn = runtime.status(first.attemptId);
+      if (signedIn.kind !== "signed-in") throw new Error("missing credential ref");
+      // Second begin names the stored grant and reauthorizes with the issued
       // client id, no agent name hint, and an id_token_hint.
       const second = await runtime.begin({
         descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
         actorId: randomUUID(),
         termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+        credentialRef: signedIn.credentialRef,
       });
       if (second.kind !== "awaiting-consent" || second.flow !== "authorization-code-pkce") {
         throw new Error("expected a PKCE attempt");
@@ -530,6 +733,90 @@ describe("ChatGPT plan (SIWC) dialect", () => {
       expect(authorization.searchParams.get("agent_name_hint")).toBeNull();
       expect(authorization.searchParams.get("id_token_hint")).not.toBeNull();
       expect(authorization.searchParams.get("ext_agent_host_id")).toBe(HOST_ID);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("keeps the issued client id when a reauthorization callback omits client_id", async () => {
+    const fake = await startFakeSiwcServer();
+    const store = memoryStore();
+    const runtime = runtimeFor(store, fake);
+    try {
+      const credentialRef = await completeSignIn(runtime, fake);
+      const second = await runtime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+        credentialRef,
+      });
+      if (second.kind !== "awaiting-consent" || second.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      const callback = await callbackWithoutFollowing(second.authorizationUrl);
+      callback.searchParams.delete("client_id");
+      const hitsBefore = fake.tokenHits();
+      await fetch(callback);
+      const done = await waitForState(() => runtime.status(second.attemptId), "signed-in");
+      expect(done.kind).toBe("signed-in");
+      expect(fake.tokenHits()).toBe(hitsBefore + 1);
+      expect(fake.lastExchange()?.client_id).toBe(ISSUED_CLIENT_ID);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("refuses a reauthorization callback that returns a different client id", async () => {
+    const fake = await startFakeSiwcServer();
+    const store = memoryStore();
+    const runtime = runtimeFor(store, fake);
+    try {
+      const credentialRef = await completeSignIn(runtime, fake);
+      const second = await runtime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+        credentialRef,
+      });
+      if (second.kind !== "awaiting-consent" || second.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      const callback = await callbackWithoutFollowing(second.authorizationUrl);
+      callback.searchParams.set("client_id", "oaiapp_other-client");
+      const hitsBefore = fake.tokenHits();
+      await fetch(callback);
+      const done = await waitForState(() => runtime.status(second.attemptId), "refused");
+      expect(done).toMatchObject({ kind: "refused", reason: "exchange-refused" });
+      expect(fake.tokenHits()).toBe(hitsBefore);
+      expect(store.values.has(credentialRef)).toBe(true);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("refuses a first sign-in callback that returns the dynamic client placeholder", async () => {
+    const fake = await startFakeSiwcServer();
+    const store = memoryStore();
+    const runtime = runtimeFor(store, fake);
+    try {
+      const started = await runtime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      const callback = await callbackWithoutFollowing(started.authorizationUrl);
+      callback.searchParams.set("client_id", "dynamic_agent_client");
+      await fetch(callback);
+      const done = await waitForState(() => runtime.status(started.attemptId), "refused");
+      expect(done).toMatchObject({ kind: "refused", reason: "exchange-refused" });
+      expect(fake.tokenHits()).toBe(0);
+      expect(store.values.size).toBe(0);
     } finally {
       await runtime.close();
       await fake.close();
@@ -554,6 +841,11 @@ describe("ChatGPT plan (SIWC) dialect", () => {
       if (done.kind !== "signed-in") throw new Error("expected a signed-in state");
       const status = runtime.status(started.attemptId);
       if (status.kind !== "signed-in") throw new Error("missing credential ref");
+      const prior = JSON.parse(store.values.get(status.credentialRef) ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      const priorIdToken = prior.idToken;
       const refreshed = await runtime.refresh(status.credentialRef);
       expect(refreshed).toEqual({ kind: "refreshed" });
       expect(fake.lastRefresh()).toMatchObject({
@@ -569,6 +861,72 @@ describe("ChatGPT plan (SIWC) dialect", () => {
       // The rotating replacement refresh token is stored.
       expect(stored.refreshToken).toBe("rotated-refresh-token");
       expect(stored.accessToken).toBe("rotated-access-token");
+      // A refresh without a new identity token keeps the prior identity.
+      expect(stored.idToken).toBe(priorIdToken);
+      expect(stored.subject).toBe(SUBJECT);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("accepts a refresh identity token that still carries the authorize nonce", async () => {
+    const fake = await startFakeSiwcServer({ refreshIdToken: "authorize-nonce" });
+    const store = memoryStore();
+    const runtime = runtimeFor(store, fake);
+    try {
+      const started = await runtime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      await fetch(started.authorizationUrl);
+      const done = await waitForState(() => runtime.status(started.attemptId), "signed-in");
+      if (done.kind !== "signed-in") throw new Error("expected a signed-in state");
+      const status = runtime.status(started.attemptId);
+      if (status.kind !== "signed-in") throw new Error("missing credential ref");
+      const refreshed = await runtime.refresh(status.credentialRef);
+      expect(refreshed).toEqual({ kind: "refreshed" });
+      expect(store.values.has(status.credentialRef)).toBe(true);
+      const stored = JSON.parse(store.values.get(status.credentialRef) ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(stored.subject).toBe(SUBJECT);
+      expect(typeof stored.idToken).toBe("string");
+      expect(stored.refreshToken).toBe("rotated-refresh-token");
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("asks to sign in again when a refresh identity token names a different subject", async () => {
+    const fake = await startFakeSiwcServer({ refreshIdToken: "wrong-subject" });
+    const store = memoryStore();
+    const runtime = runtimeFor(store, fake);
+    try {
+      const started = await runtime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      await fetch(started.authorizationUrl);
+      const done = await waitForState(() => runtime.status(started.attemptId), "signed-in");
+      if (done.kind !== "signed-in") throw new Error("expected a signed-in state");
+      const status = runtime.status(started.attemptId);
+      if (status.kind !== "signed-in") throw new Error("missing credential ref");
+      await expect(runtime.refresh(status.credentialRef)).resolves.toEqual({
+        kind: "sign-in-again",
+        reason: "revoked",
+      });
+      expect(store.values.has(status.credentialRef)).toBe(false);
     } finally {
       await runtime.close();
       await fake.close();
@@ -697,6 +1055,7 @@ describe("ChatGPT plan (SIWC) dialect", () => {
     const fake = await startFakeSiwcServer();
     const store = memoryStore();
     const first = runtimeFor(store, fake);
+    let credentialRef = "";
     try {
       const started = await first.begin({
         descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
@@ -709,16 +1068,21 @@ describe("ChatGPT plan (SIWC) dialect", () => {
       await fetch(started.authorizationUrl);
       const done = await waitForState(() => first.status(started.attemptId), "signed-in");
       expect(done.kind).toBe("signed-in");
+      const signedIn = first.status(started.attemptId);
+      if (signedIn.kind !== "signed-in") throw new Error("missing credential ref");
+      credentialRef = signedIn.credentialRef;
     } finally {
       await first.close();
     }
-    // A fresh runtime over the same store reauthorizes with the same host id.
+    // A fresh runtime over the same store reauthorizes the named grant with
+    // the same host id and the issued client id.
     const second = runtimeFor(store, fake);
     try {
       const started = await second.begin({
         descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
         actorId: randomUUID(),
         termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+        credentialRef,
       });
       if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
         throw new Error("expected a PKCE attempt");

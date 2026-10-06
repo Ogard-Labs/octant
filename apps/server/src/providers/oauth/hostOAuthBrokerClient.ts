@@ -21,6 +21,8 @@ export interface HostOAuthBrokerPort {
     readonly descriptor: HostOAuthBrokerDescriptor;
     readonly actorId: string;
     readonly termsAcknowledgedAt: string;
+    /** ChatGPT plan reauthorization: the instance's stored grant. Optional. */
+    readonly credentialRef?: string;
   }) => Promise<unknown>;
   readonly status: (attemptId: string) => Promise<unknown>;
   readonly refresh: (credentialRef: string) => Promise<unknown>;
@@ -36,7 +38,11 @@ export interface HostOAuthBrokerPort {
 export function makeHostOAuthBrokerClient(options: {
   readonly url: string;
   readonly token: string;
-  readonly fetch?: typeof fetch;
+  /**
+   * Injectable fetch. A call signature, not `typeof fetch`: Bun's fetch
+   * carries extra methods a test double does not, and the client only calls it.
+   */
+  readonly fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }): HostOAuthBrokerPort {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const post = async (path: string, body: unknown): Promise<unknown> => {
@@ -59,9 +65,13 @@ export function makeHostOAuthBrokerClient(options: {
       if (!UUID_PATTERN.test(input.actorId)) {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));
       }
+      if (input.credentialRef !== undefined && !UUID_PATTERN.test(input.credentialRef)) {
+        return Promise.reject(new Error("Octant host OAuth broker refused the request."));
+      }
       return post("/v1/oauth/begin", {
         actorId: input.actorId,
         termsAcknowledgedAt: input.termsAcknowledgedAt,
+        ...(input.credentialRef === undefined ? {} : { credentialRef: input.credentialRef }),
         descriptor: {
           descriptorId: input.descriptor.descriptorId,
           ...(input.descriptor.clientId === undefined

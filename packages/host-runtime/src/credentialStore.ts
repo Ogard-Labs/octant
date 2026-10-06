@@ -5,9 +5,8 @@ export interface CredentialStore {
   readonly delete: (providerInstanceId: string) => Promise<void>;
   /**
    * List the opaque credential references this store holds. Optional: a store
-   * that cannot enumerate (some platform backends) simply omits it, and
-   * flows that need to locate a stored grant by content — the ChatGPT plan
-   * reauthorization — treat the absence as "no stored grant".
+   * that cannot enumerate (Keychain, Secret Service) omits it. A flow that
+   * needs one grant passes that credential ref to resolve; it does not scan.
    */
   readonly list?: () => Promise<readonly string[]>;
 }

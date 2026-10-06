@@ -224,6 +224,79 @@ describe("host OAuth service", () => {
     expect(started).toMatchObject({ kind: "refused", reason: "unavailable" });
     expect(JSON.stringify(journal)).not.toContain(leaked);
   });
+
+  it("forwards an optional credential ref to the broker when beginning sign-in", async () => {
+    let forwarded: { readonly credentialRef?: string } | undefined;
+    const service = createHostOAuthService({
+      journal: { append: () => undefined },
+      broker: {
+        begin: async (input) => {
+          forwarded = input;
+          return { kind: "refused", reason: "invalid" };
+        },
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
+      },
+      now: () => new Date("2026-10-03T18:04:00.000Z"),
+    });
+    const sample = descriptor("https://idp.example/authorize", "https://idp.example/token");
+    service.acknowledgeTerms({
+      principalKind: "local-window",
+      actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+      descriptor: sample,
+    });
+    await service.begin({
+      principalKind: "local-window",
+      actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+      descriptor: sample,
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    expect(forwarded?.credentialRef).toBe("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+  });
+});
+
+describe("host OAuth broker client", () => {
+  it("posts an optional credential ref on begin and omits it when absent", async () => {
+    const bodies: unknown[] = [];
+    const client = makeHostOAuthBrokerClient({
+      url: "http://127.0.0.1:9",
+      token: "broker-token",
+      fetch: async (_input, init) => {
+        const parsed: unknown = JSON.parse(String(init?.body));
+        bodies.push(parsed);
+        return new Response(JSON.stringify({ kind: "refused", reason: "invalid" }), {
+          status: 200,
+        });
+      },
+    });
+    const brokerDescriptor = {
+      descriptorId: "sample-http",
+      clientId: "public-client",
+      flow: "authorization-code-pkce" as const,
+      authorizationEndpoint: "https://idp.example/authorize",
+      tokenEndpoint: "https://idp.example/token",
+      scopes: ["read"],
+      termsId: "terms-v1",
+    };
+    await client.begin({
+      descriptor: brokerDescriptor,
+      actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+      termsAcknowledgedAt: "2026-10-03T18:04:00.000Z",
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    await client.begin({
+      descriptor: brokerDescriptor,
+      actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+      termsAcknowledgedAt: "2026-10-03T18:04:00.000Z",
+    });
+    expect(bodies[0]).toMatchObject({
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    expect(bodies[1]).not.toHaveProperty("credentialRef");
+  });
 });
 
 function throwingBroker() {

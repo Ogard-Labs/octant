@@ -149,6 +149,13 @@ export interface HostOAuthRuntime {
     readonly descriptor: HostOAuthDescriptor;
     readonly actorId: string;
     readonly termsAcknowledgedAt: string;
+    /**
+     * ChatGPT plan reauthorization: the instance's stored grant. The runtime
+     * resolves this one credential and reuses its issued client id and
+     * identity token. Absent means a first sign-in. The store is not scanned;
+     * production stores cannot list their entries.
+     */
+    readonly credentialRef?: string;
   }) => Promise<HostOAuthBeginResult>;
   readonly status: (attemptId: string) => HostOAuthPublicState;
   readonly refresh: (credentialRef: string) => Promise<HostOAuthRefreshResult>;
@@ -207,6 +214,12 @@ interface Attempt {
   listener: Server | undefined;
   timer: ReturnType<typeof setTimeout> | undefined;
   closed: boolean;
+  /**
+   * Issued client id the authorize request used, when this attempt is a
+   * ChatGPT plan reauthorization. The callback may omit client_id; this is
+   * the id retained. A different callback client id is refused.
+   */
+  expectedIssuedClientId?: string;
 }
 
 export function codeVerifierMatchesChallenge(verifier: string, challenge: string): boolean {
@@ -445,7 +458,12 @@ interface SiwcExchangeContext {
   readonly tokenEndpoint: string;
   readonly issuedClientId: string;
   readonly extAgentHostId: string;
-  readonly nonce: string;
+  /**
+   * The OIDC nonce bound to an authorization-code exchange. Absent on
+   * refresh: a refresh identity token is not bound to a nonce this process
+   * sent.
+   */
+  readonly nonce?: string;
   readonly jwks: { current: SiwcJwksCache | undefined };
   readonly issuer: string;
 }
@@ -501,7 +519,7 @@ async function exchangeChatGptPlanCode(
     now: input.now,
     idToken,
     expectedAudience: input.issuedClientId,
-    expectedNonce: input.nonce,
+    ...(input.nonce === undefined ? {} : { expectedNonce: input.nonce }),
     jwks: input.jwks,
     issuer: input.issuer,
   });
@@ -524,12 +542,18 @@ async function exchangeChatGptPlanCode(
 /**
  * Refresh a ChatGPT plan grant. The form carries the issued client id, the
  * refresh token, and the resource; the rotating replacement refresh token is
- * stored by the caller. The identity token is revalidated when present.
+ * stored by the caller. A response without an identity token keeps the prior
+ * identity. A response with one is checked for signature, issuer, audience,
+ * expiry, and subject — not for a nonce, because refresh does not send one.
  */
 async function refreshChatGptPlanGrant(
   input: SiwcExchangeContext & {
     readonly refreshToken: string;
     readonly generation: number;
+    readonly priorIdToken?: string;
+    readonly priorSubject?: string;
+    readonly priorEmail?: string;
+    readonly priorPlanUsageEnabled?: boolean;
   },
 ): Promise<TokenRequestResult> {
   const exchanged = await requestTokens({
@@ -553,15 +577,32 @@ async function refreshChatGptPlanGrant(
   const idToken = grant.idToken;
   if (idToken === undefined) {
     // A refresh without a new identity token keeps the prior one; the
-    // identity it proved is unchanged.
-    return { kind: "tokens", grant };
+    // identity it proved is unchanged. The token response itself does not
+    // carry those fields, so they are copied from the stored grant.
+    return {
+      kind: "tokens",
+      grant: {
+        ...grant,
+        dialect: CHATGPT_PLAN_DIALECT,
+        extAgentHostId: input.extAgentHostId,
+        ...(input.priorIdToken === undefined ? {} : { idToken: input.priorIdToken }),
+        ...(input.priorSubject === undefined ? {} : { subject: input.priorSubject }),
+        ...(input.priorEmail === undefined ? {} : { email: input.priorEmail }),
+        ...(input.priorPlanUsageEnabled === undefined
+          ? {}
+          : { planUsageEnabled: input.priorPlanUsageEnabled }),
+      },
+    };
+  }
+  if (input.priorSubject === undefined) {
+    return { kind: "refused", reason: "exchange-refused", error: "id_token_invalid" };
   }
   const identity = await validateSiwcIdToken({
     fetch: input.fetch,
     now: input.now,
     idToken,
     expectedAudience: input.issuedClientId,
-    expectedNonce: input.nonce,
+    expectedSubject: input.priorSubject,
     jwks: input.jwks,
     issuer: input.issuer,
   });
@@ -593,16 +634,19 @@ type SiwcIdTokenValidation =
 
 /**
  * Validate a ChatGPT plan identity token: RS256 signature against the
- * issuer's JWKS, issuer, audience (the issued client id), expiry, and the
- * nonce issued for this attempt. Implemented on node:crypto so the host
- * runtime keeps no JWT dependency.
+ * issuer's JWKS, issuer, audience (the issued client id), and expiry.
+ * An authorization-code exchange also checks the nonce issued for that
+ * attempt. A refresh does not: no nonce was sent, so a nonce check would
+ * reject a token that is otherwise valid and delete the grant. A refresh
+ * instead requires the subject to equal the stored subject.
  */
 async function validateSiwcIdToken(input: {
   readonly fetch: typeof fetch;
   readonly now: () => number;
   readonly idToken: string;
   readonly expectedAudience: string;
-  readonly expectedNonce: string;
+  readonly expectedNonce?: string;
+  readonly expectedSubject?: string;
   readonly jwks: { current: SiwcJwksCache | undefined };
   readonly issuer: string;
 }): Promise<SiwcIdTokenValidation> {
@@ -648,8 +692,13 @@ async function validateSiwcIdToken(input: {
   if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) return { kind: "invalid" };
   // Allow a small clock skew on expiry, matching the resolver's skew.
   if (payload.exp * 1_000 <= input.now() - 60_000) return { kind: "invalid" };
-  if (payload.nonce !== input.expectedNonce) return { kind: "invalid" };
+  if (input.expectedNonce !== undefined && payload.nonce !== input.expectedNonce) {
+    return { kind: "invalid" };
+  }
   if (typeof payload.sub !== "string" || payload.sub.length === 0) return { kind: "invalid" };
+  if (input.expectedSubject !== undefined && payload.sub !== input.expectedSubject) {
+    return { kind: "invalid" };
+  }
   const email = payload.email;
   return {
     kind: "valid",
@@ -810,6 +859,7 @@ export function createHostOAuthRuntime(options: {
     readonly descriptor: HostOAuthDescriptor;
     readonly actorId: string;
     readonly termsAcknowledgedAt: string;
+    readonly credentialRef?: string;
   }): Promise<HostOAuthBeginResult> => {
     if (closed) return { kind: "refused", reason: "unavailable" };
     if (!UUID_PATTERN.test(input.actorId) || input.termsAcknowledgedAt.trim().length === 0) {
@@ -818,12 +868,24 @@ export function createHostOAuthRuntime(options: {
     const descriptor = validateDescriptor(input.descriptor);
     if (descriptor === undefined) return { kind: "refused", reason: "invalid" };
     if (descriptor.flow === "device-code") return beginDevice(descriptor);
-    return beginPkce(descriptor);
+    return beginPkce(descriptor, input.credentialRef);
   };
 
-  const beginPkce = async (descriptor: HostOAuthDescriptor): Promise<HostOAuthBeginResult> => {
+  const beginPkce = async (
+    descriptor: HostOAuthDescriptor,
+    credentialRef: string | undefined,
+  ): Promise<HostOAuthBeginResult> => {
     const authorizationEndpoint = descriptor.authorizationEndpoint;
     if (authorizationEndpoint === undefined) return { kind: "refused", reason: "invalid" };
+    // Resolve a named grant before opening the loopback listener, so a store
+    // failure does not leave a listener behind and a missing grant falls
+    // through to first sign-in.
+    let issuedGrant: StoredGrant | undefined;
+    if (descriptor.dialect === CHATGPT_PLAN_DIALECT && credentialRef !== undefined) {
+      const resolved = await resolveChatGptPlanGrant(credentialRef);
+      if (resolved.kind === "unavailable") return { kind: "refused", reason: "unavailable" };
+      if (resolved.kind === "grant") issuedGrant = resolved.grant;
+    }
     const attemptId = randomUUID();
     const verifier = randomBytes(32).toString("base64url");
     const challenge = createHash("sha256").update(verifier).digest("base64url");
@@ -837,6 +899,7 @@ export function createHostOAuthRuntime(options: {
       closed: false,
       listener: undefined,
       timer: undefined,
+      ...(issuedGrant === undefined ? {} : { expectedIssuedClientId: issuedGrant.clientId }),
       status: {
         kind: "awaiting-consent",
         attemptId,
@@ -877,10 +940,9 @@ export function createHostOAuthRuntime(options: {
           state,
         });
       } else if (descriptor.dialect === CHATGPT_PLAN_DIALECT) {
-        // A reauthorization reuses the issued client id and the retained
-        // identity token from the stored grant; a first sign-in registers
-        // under the placeholder with the agent name hint.
-        const existing = await findChatGptPlanGrant(descriptor);
+        // A named grant is a reauthorization: reuse its issued client id and
+        // retained identity token. No named grant is a first sign-in under
+        // the placeholder, with the agent name hint. The store is not scanned.
         authorizationUrl = chatGptPlanAuthorizationRequest(authorizationEndpoint, {
           redirectUri,
           scope: descriptor.scopes.join(" "),
@@ -888,9 +950,9 @@ export function createHostOAuthRuntime(options: {
           challenge,
           nonce,
           extAgentHostId: descriptor.extAgentHostId ?? "",
-          agentNameHint: existing === undefined ? descriptor.agentNameHint : undefined,
-          issuedClientId: existing?.clientId,
-          idTokenHint: existing?.idToken,
+          agentNameHint: issuedGrant === undefined ? descriptor.agentNameHint : undefined,
+          issuedClientId: issuedGrant?.clientId,
+          idTokenHint: issuedGrant?.idToken,
         });
       } else {
         authorizationUrl = authorizationRequest(authorizationEndpoint, {
@@ -925,31 +987,33 @@ export function createHostOAuthRuntime(options: {
   };
 
   /**
-   * Find the stored ChatGPT plan grant for a descriptor, so a reauthorization
-   * can reuse the issued client id and the retained identity token. The
-   * credential store is keyed by opaque refs, so the grant is located by
-   * scanning stored grant material for this descriptor's dialect and host id.
+   * Resolve the one ChatGPT plan grant a reauthorization named. A missing or
+   * non-plan grant is absent (first sign-in); a store that cannot be read is
+   * unavailable. The store is never listed.
    */
-  const findChatGptPlanGrant = async (
-    descriptor: HostOAuthDescriptor,
-  ): Promise<StoredGrant | undefined> => {
-    const list = await options.store.list?.();
-    if (list === undefined) return undefined;
-    for (const ref of list) {
-      try {
-        const grant = decodeGrant(await options.store.resolve(ref));
-        if (
-          grant.dialect === CHATGPT_PLAN_DIALECT &&
-          grant.extAgentHostId === descriptor.extAgentHostId &&
-          ISSUED_CLIENT_ID_PATTERN.test(grant.clientId)
-        ) {
-          return grant;
-        }
-      } catch {
-        continue;
+  const resolveChatGptPlanGrant = async (
+    credentialRef: string,
+  ): Promise<
+    | { readonly kind: "grant"; readonly grant: StoredGrant }
+    | { readonly kind: "absent" }
+    | { readonly kind: "unavailable" }
+  > => {
+    if (!UUID_PATTERN.test(credentialRef)) return { kind: "absent" };
+    try {
+      const grant = decodeGrant(await options.store.resolve(credentialRef));
+      if (grant.dialect === CHATGPT_PLAN_DIALECT && ISSUED_CLIENT_ID_PATTERN.test(grant.clientId)) {
+        return { kind: "grant", grant };
       }
+      return { kind: "absent" };
+    } catch (error) {
+      if (
+        error instanceof CredentialStoreFailure &&
+        (error.category === "missing" || error.category === "invalid")
+      ) {
+        return { kind: "absent" };
+      }
+      return { kind: "unavailable" };
     }
-    return undefined;
   };
 
   const handleCallback = async (
@@ -1020,13 +1084,27 @@ export function createHostOAuthRuntime(options: {
       return;
     }
     // The ChatGPT plan callback returns the issued client id alongside the
-    // code. The exchange and every later refresh must use the issued id —
-    // never the dynamic_agent_client placeholder. A reauthorization that
-    // returns a different client id than the stored grant is refused.
+    // code. A first sign-in must present an oaiapp_ id — never the
+    // dynamic_agent_client placeholder. A reauthorization may omit client_id;
+    // the issued id used in the authorize request is retained. A callback
+    // client id that differs from that expected id is refused before exchange.
     let issuedClientId: string | undefined;
     if (session.descriptor.dialect === CHATGPT_PLAN_DIALECT) {
-      const returned = params.get("client_id") ?? "";
-      if (!ISSUED_CLIENT_ID_PATTERN.test(returned)) {
+      const returned = params.get("client_id");
+      const expected = session.attempt.expectedIssuedClientId;
+      const omitted = returned === null || returned.length === 0;
+      if (omitted) {
+        if (expected === undefined) {
+          publish(
+            session.attemptId,
+            refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
+          );
+          replyCallback(response, 400);
+          finishListener(session.attempt);
+          return;
+        }
+        issuedClientId = expected;
+      } else if (expected !== undefined && returned !== expected) {
         publish(
           session.attemptId,
           refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
@@ -1034,8 +1112,17 @@ export function createHostOAuthRuntime(options: {
         replyCallback(response, 400);
         finishListener(session.attempt);
         return;
+      } else if (!ISSUED_CLIENT_ID_PATTERN.test(returned)) {
+        publish(
+          session.attemptId,
+          refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
+        );
+        replyCallback(response, 400);
+        finishListener(session.attempt);
+        return;
+      } else {
+        issuedClientId = returned;
       }
-      issuedClientId = returned;
     }
     const exchanged = await exchangeAuthorizationCode({
       tokenEndpoint: session.descriptor.tokenEndpoint,
@@ -1237,9 +1324,9 @@ export function createHostOAuthRuntime(options: {
     // needs no token exchange: while the grant is stored, it is valid.
     if (current.dialect === OPENROUTER_DIALECT) return { kind: "refreshed" };
     // The ChatGPT plan dialect refreshes with the issued client id and the
-    // resource, revalidates the identity token, and stores the rotating
-    // replacement refresh token. The nonce is fresh per refresh: the identity
-    // token is bound to this attempt, not to the original sign-in.
+    // resource, and stores the rotating replacement refresh token. A new
+    // identity token is checked without a nonce: refresh does not send one,
+    // and inventing one would reject the issuer's token and delete the grant.
     if (current.dialect === CHATGPT_PLAN_DIALECT) {
       const exchanged = await refreshChatGptPlanGrant({
         fetch: fetchImpl,
@@ -1247,11 +1334,16 @@ export function createHostOAuthRuntime(options: {
         tokenEndpoint: current.tokenEndpoint,
         issuedClientId: current.clientId,
         extAgentHostId: current.extAgentHostId ?? "",
-        nonce: randomBytes(24).toString("base64url"),
         jwks: siwcJwks,
         issuer: siwcIssuer,
         refreshToken: current.refreshToken,
         generation,
+        ...(current.idToken === undefined ? {} : { priorIdToken: current.idToken }),
+        ...(current.subject === undefined ? {} : { priorSubject: current.subject }),
+        ...(current.email === undefined ? {} : { priorEmail: current.email }),
+        ...(current.planUsageEnabled === undefined
+          ? {}
+          : { priorPlanUsageEnabled: current.planUsageEnabled }),
       });
       if (exchanged.kind === "transient") return { kind: "transient" };
       if (exchanged.kind === "pending") return { kind: "transient" };
@@ -1410,16 +1502,24 @@ async function beginRoute(
   const descriptor = value.descriptor;
   const actorId = value.actorId;
   const termsAcknowledgedAt = value.termsAcknowledgedAt;
+  const credentialRef = value.credentialRef;
   if (
     !isRecord(descriptor) ||
     typeof actorId !== "string" ||
-    typeof termsAcknowledgedAt !== "string"
+    typeof termsAcknowledgedAt !== "string" ||
+    (credentialRef !== undefined &&
+      (typeof credentialRef !== "string" || !UUID_PATTERN.test(credentialRef)))
   ) {
     return Response.json({ error: "invalid-request" }, { status: 400 });
   }
   const parsed = descriptorFromRecord(descriptor);
   if (parsed === undefined) return Response.json({ error: "invalid-request" }, { status: 400 });
-  const started = await runtime.begin({ descriptor: parsed, actorId, termsAcknowledgedAt });
+  const started = await runtime.begin({
+    descriptor: parsed,
+    actorId,
+    termsAcknowledgedAt,
+    ...(typeof credentialRef === "string" ? { credentialRef } : {}),
+  });
   return Response.json(publicBegin(started), { headers: { "cache-control": "no-store" } });
 }
 

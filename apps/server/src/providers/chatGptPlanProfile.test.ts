@@ -41,26 +41,22 @@ describe("inspectChatGptPlanRequestBody", () => {
 
   it("refuses store other than false", () => {
     expect(inspectChatGptPlanRequestBody({ ...validBody(), store: true })).toEqual({
-      kind: "forbidden-field",
-      field: "metadata",
+      kind: "store",
     });
     expect(inspectChatGptPlanRequestBody({ ...validBody(), store: undefined })).toEqual({
-      kind: "forbidden-field",
-      field: "metadata",
+      kind: "store",
     });
   });
 
   it("refuses stream other than true", () => {
     expect(inspectChatGptPlanRequestBody({ ...validBody(), stream: false })).toEqual({
-      kind: "forbidden-field",
-      field: "metadata",
+      kind: "stream",
     });
   });
 
   it("refuses a non-array input", () => {
     expect(inspectChatGptPlanRequestBody({ ...validBody(), input: "hi" })).toEqual({
-      kind: "forbidden-field",
-      field: "metadata",
+      kind: "input-shape",
     });
   });
 
@@ -96,14 +92,49 @@ describe("inspectChatGptPlanRequestBody", () => {
   });
 
   it("refuses a non-record body", () => {
-    expect(inspectChatGptPlanRequestBody("nope")).toEqual({
-      kind: "forbidden-field",
-      field: "metadata",
+    expect(inspectChatGptPlanRequestBody("nope")).toEqual({ kind: "body-shape" });
+  });
+
+  it("refuses tools that are not an array of tool definitions", () => {
+    expect(inspectChatGptPlanRequestBody({ ...validBody(), tools: { type: "function" } })).toEqual({
+      kind: "tools-shape",
+    });
+    expect(inspectChatGptPlanRequestBody({ ...validBody(), tools: ["nope"] })).toEqual({
+      kind: "tools-shape",
     });
   });
 });
 
 describe("chatGptPlanRefusalFailure", () => {
+  it("maps a store violation to a failure that names store", () => {
+    expect(chatGptPlanRefusalFailure({ kind: "store" })).toEqual({
+      category: "unsupported",
+      message: 'The ChatGPT plan route requires "store" to be false.',
+    });
+  });
+
+  it("maps a stream violation to a failure that names stream", () => {
+    expect(chatGptPlanRefusalFailure({ kind: "stream" })).toEqual({
+      category: "unsupported",
+      message: 'The ChatGPT plan route requires "stream" to be true.',
+    });
+  });
+
+  it("maps an input-shape violation to a failure that names input", () => {
+    expect(chatGptPlanRefusalFailure({ kind: "input-shape" })).toEqual({
+      category: "unsupported",
+      message: 'The ChatGPT plan route requires "input" to be an array carrying the full history.',
+    });
+  });
+
+  it("maps a body-shape violation to a failure that names the body", () => {
+    expect(chatGptPlanRefusalFailure({ kind: "body-shape" }).message).toContain("JSON object");
+  });
+
+  it("maps a tools-shape violation to a failure that names tools", () => {
+    expect(chatGptPlanRefusalFailure({ kind: "tools-shape" }).message).toContain("tools");
+  });
+
   it("maps a forbidden field to an unsupported failure naming the field", () => {
     expect(chatGptPlanRefusalFailure({ kind: "forbidden-field", field: "temperature" })).toEqual({
       category: "unsupported",
