@@ -957,6 +957,53 @@ describe("WorkTurnRuntime", () => {
       ]);
     });
 
+    it("tells the live-turn tracker when the turn starts, what the provider does, and that it ended", async () => {
+      const calls: string[] = [];
+      const tracker = {
+        begin: (startedAt: string) => calls.push(`begin ${startedAt}`),
+        observe: (observed: { readonly kind: string }) => calls.push(observed.kind),
+        end: () => calls.push("end"),
+      };
+
+      await new WorkTurnRuntime().run({
+        command: command(),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver: driverStreaming([
+          event(4, { kind: "tool-start", toolCallId: "t1", toolName: "Command", argument: "ls" }),
+          event(9, { kind: "text-delta", text: "done" }),
+          event(12, { kind: "completed" }),
+        ]),
+        signal: new AbortController().signal,
+        clock: clockAt(0, 0, 12),
+        liveTurn: tracker,
+      });
+
+      expect(calls).toEqual([`begin ${at(0)}`, "tool-start", "text-delta", "completed", "end"]);
+    });
+
+    it("ends the live turn even when the turn was cancelled before it began", async () => {
+      const calls: string[] = [];
+      const controller = new AbortController();
+      controller.abort();
+
+      await new WorkTurnRuntime().run({
+        command: command(),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver: driverStreaming([]),
+        signal: controller.signal,
+        clock: clockAt(0, 1),
+        liveTurn: {
+          begin: () => calls.push("begin"),
+          observe: () => calls.push("observe"),
+          end: () => calls.push("end"),
+        },
+      });
+
+      expect(calls).toEqual(["begin", "end"]);
+    });
+
     it("says a cancelled turn was cancelled, though it never reached the provider", async () => {
       const ended: TurnEndSummary[] = [];
       const controller = new AbortController();

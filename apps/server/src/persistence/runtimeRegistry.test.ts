@@ -717,6 +717,21 @@ describe("createPhase1RuntimeRegistries", () => {
     });
   });
 
+  it("keeps the start-screen card choices when settings are replayed", () => {
+    const registry = createPhase1RuntimeRegistries().events;
+    const settings = {
+      ...decodePersistedShellSettings(legacySettingsPayload().settings),
+      homeCards: {
+        order: ["pull-requests", "working-now"],
+        visibility: [{ id: "ci-failures", visible: false }],
+      },
+    };
+
+    expect(registry.decodePersisted("shell.settings-replaced", 1, { settings })).toEqual({
+      settings,
+    });
+  });
+
   it("upcasts exact legacy shell settings events and preserves current authored values", () => {
     const registry = createPhase1RuntimeRegistries().events;
     const legacyPayload = legacySettingsPayload();
@@ -754,6 +769,7 @@ describe("createPhase1RuntimeRegistries", () => {
           transcriptWidth: "narrow",
           showThreadProviderIcons: true,
           showThreadStats: true,
+          homeCards: { order: [], visibility: [] },
           sidebarRowProperties: {
             projects: {
               project: false,
@@ -989,6 +1005,7 @@ function validSettingsPayload() {
       transcriptWidth: "narrow",
       showThreadProviderIcons: true,
       showThreadStats: true,
+      homeCards: { order: [], visibility: [] },
       sidebarRowProperties: {
         projects: {
           project: false,
