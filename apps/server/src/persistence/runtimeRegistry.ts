@@ -228,6 +228,7 @@ import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
 import { registerShipEvents } from "../ship/shipEventStore";
 import { registerCanvasCommentEvents } from "../canvas/canvasCommentService";
 import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
+import { registerCanvasExportEvents } from "../canvas/canvasExportEventStore";
 import type { HostIdentityMigrationRegistry } from "./hostIdentityMigration";
 import { createRuntimeHostIdentityMigrationRegistry } from "./hostIdentityTransforms";
 import {
@@ -414,6 +415,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   }
   registerAutomationEvents(events);
   registerCanvasShareEvents(events);
+  registerCanvasExportEvents(events);
   registerCanvasCommentEvents(events);
   registerArtifactMirrorEvents(events);
   registerGoalLoopEvents(events);

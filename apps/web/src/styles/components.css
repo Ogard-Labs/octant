@@ -717,13 +717,11 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   }
 }
 
-/* The live task list sits in the conversation like the plan viewer does, but
-   reads as one floating card: it is a projection the host journals, not an
-   action surface, so it stays quiet until the next task moves. */
+/* Task progress stays separate from child execution and opens only on request. */
 .thread-tasks {
-  width: min(560px, 100%);
-  margin: 0 12px 10px;
-  padding: 10px 12px;
+  width: min(560px, calc(100% - 2 * var(--oct-space-3)));
+  margin: 0 var(--oct-space-3) var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
   border: 1px solid var(--octant-border);
   border-radius: var(--oct-radius-md);
   background: var(--octant-floating);
@@ -733,28 +731,48 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 
 .thread-tasks__header {
   display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 24px;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
-  color: var(--octant-text-secondary);
+  gap: var(--oct-space-2);
+  padding-inline: var(--oct-space-1);
   font-size: var(--oct-text-xs);
+  font-weight: normal;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-.thread-tasks[data-running="true"] .thread-tasks__header {
-  color: var(--octant-text-primary);
+.thread-tasks__status {
+  color: var(--octant-text-secondary);
 }
 
-.thread-tasks[data-running="true"] .thread-tasks__header-icon {
+.thread-tasks__chevron {
+  margin-inline-start: auto;
+}
+
+.thread-tasks__chevron[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+.thread-tasks[data-state="running"] .thread-tasks__header-icon {
   animation: turn-header-spin var(--oct-motion-spin) linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .thread-tasks[data-running="true"] .thread-tasks__header-icon {
+  .thread-tasks[data-state="running"] .thread-tasks__header-icon {
     animation: none;
   }
 }
 
 .thread-tasks__list {
   display: grid;
+  max-height: 12rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   gap: 2px;
   margin: 8px 0 0;
   padding: 0;

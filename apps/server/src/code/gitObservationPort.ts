@@ -406,6 +406,43 @@ export class GitObservationPort {
     }
   }
 
+  /** Reads immutable trees without invoking external diff programs or text conversion. */
+  async readTreeDiff(
+    input: { readonly checkoutRoot: string; readonly from: string; readonly to: string },
+    signal?: AbortSignal,
+  ): Promise<GitScopedDiffResult> {
+    const changes = await this.readTreeChanges(input, signal);
+    if (changes.status !== "ready") return { status: "unavailable" };
+    try {
+      const checkoutRoot = await this.#dependencies.realpath(input.checkoutRoot);
+      const result = await this.#run(
+        [
+          "-C",
+          checkoutRoot,
+          "diff",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--no-color",
+          "--no-renames",
+          "--src-prefix=a/",
+          "--dst-prefix=b/",
+          input.from,
+          input.to,
+          "--",
+        ],
+        signal,
+      );
+      if (result.exitCode !== 0) return { status: "unavailable" };
+      return {
+        status: "ready",
+        paths: changes.changes.map((change) => change.path),
+        diff: boundUtf8(result.stdout, this.#maxDiffBytes),
+      };
+    } catch {
+      return { status: "unavailable" };
+    }
+  }
+
   /**
    * What differs between two trees Git already holds, one row per path.
    *

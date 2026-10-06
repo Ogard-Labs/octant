@@ -49,6 +49,7 @@ import {
   decodeThreadStartResult,
   decodeTurnInterruptResult,
   decodeTurnStartResult,
+  decodeTurnSteerResult,
   type CodexAccountReadResult,
   type CodexConfigReadResult,
   type CodexDynamicToolSpec,
@@ -58,6 +59,7 @@ import {
   type CodexServerMessage,
   type CodexThreadResult,
   type CodexTurnResult,
+  type CodexTurnSteerResult,
 } from "./codexProtocol";
 import { CodexRpcClientFailure } from "./codexRpcClient";
 import { modelEvidenceFromObservedState } from "./providerContextFacts";
@@ -208,6 +210,15 @@ export interface CodexClientPort {
   threadStart(input: CodexThreadStartInput): Promise<CodexThreadResult>;
   threadResume(input: CodexThreadResumeInput): Promise<CodexThreadResult>;
   turnStart(input: CodexTurnStartInput): Promise<CodexTurnResult>;
+  turnSteer?(input: {
+    readonly threadId: string;
+    readonly expectedTurnId: string;
+    readonly input: ReadonlyArray<{
+      readonly type: "text";
+      readonly text: string;
+      readonly text_elements: readonly [];
+    }>;
+  }): Promise<CodexTurnSteerResult>;
   turnInterrupt(input: { readonly threadId: string; readonly turnId: string }): Promise<void>;
   respondApproval(input: CodexApprovalResponse): Promise<void>;
   respondTool(input: CodexApprovalResponse): Promise<void>;
@@ -607,6 +618,7 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
     threadStart: (input) => rpc.request("thread/start", input, decodeThreadStartResult),
     threadResume: (input) => rpc.request("thread/resume", input, decodeThreadResumeResult),
     turnStart: (input) => rpc.request("turn/start", input, decodeTurnStartResult),
+    turnSteer: (input) => rpc.request("turn/steer", input, decodeTurnSteerResult),
     turnInterrupt: async (input) => {
       await rpc.request("turn/interrupt", input, decodeTurnInterruptResult);
     },
@@ -1384,6 +1396,36 @@ function makeConnection(
               },
               catch: providerFailure,
             });
+          }),
+        ),
+      steer: ({ sessionId, message }) =>
+        stateFor(sessionId).pipe(
+          Effect.flatMap((state) => {
+            const expectedTurnId = state.activeTurnId;
+            const turnSteer = client.turnSteer;
+            if (
+              state.terminal ||
+              expectedTurnId === undefined ||
+              turnSteer === undefined ||
+              message.trim().length === 0 ||
+              message.length > 4096
+            )
+              return Effect.succeed("unsupported" as const);
+            return request(() =>
+              turnSteer({
+                threadId: state.threadId,
+                expectedTurnId,
+                input: [{ type: "text", text: message, text_elements: [] }],
+              }),
+            ).pipe(
+              Effect.flatMap((result) =>
+                result.turnId === expectedTurnId
+                  ? Effect.succeed("steered" as const)
+                  : Effect.fail(
+                      failure("protocol", "Codex steering response did not match the active turn."),
+                    ),
+              ),
+            );
           }),
         ),
       interrupt: (sessionId) =>

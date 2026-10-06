@@ -1,10 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import { connect as connectTcp, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { domainToASCII, fileURLToPath } from "node:url";
+import { deriveHostRuntimeHostId } from "@octant/host-runtime";
 import { createQuitAppleScript, waitForChildExit } from "./package-desktop";
 import {
   PACKAGED_SMOKE_SERVER_URL,
@@ -84,6 +85,7 @@ export function packagedClaudeEnvironment(
 ): NodeJS.ProcessEnv {
   return {
     ...packagedServerEnvironment({ ...source, TMPDIR: temporaryDirectory }, dataDirectory),
+    ...(source.USER === undefined ? {} : { USER: source.USER }),
     OCTANT_PACKAGED_PROVIDER_SMOKE_CONTROL: "1",
     OCTANT_CLAUDE_CONNECT_OBSERVER_URL: `http://127.0.0.1:${observerPort}`,
   };
@@ -95,7 +97,7 @@ export function sanitizedClaudeSmokeSubprocessEnvironment(
   const environment: NodeJS.ProcessEnv = {
     PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
   };
-  for (const name of ["HOME", "TMPDIR", "LANG"] as const) {
+  for (const name of ["HOME", "USER", "TMPDIR", "LANG"] as const) {
     if (source[name] !== undefined) environment[name] = source[name];
   }
   for (const [name, value] of Object.entries(source)) {
@@ -147,11 +149,15 @@ export function claudeSmokeTurnPath(instanceId: string): string {
   return `/api/providers/${encodeURIComponent(instanceId)}/packaged-smoke-turn`;
 }
 
-export function keychainHelperInvocation(command: string, request: HelperRequest) {
+export function keychainHelperInvocation(
+  command: string,
+  request: HelperRequest,
+  storeScope: string,
+) {
   return {
     command,
     args: [] as readonly string[],
-    stdin: `${JSON.stringify({ version: 1, ...request })}\n`,
+    stdin: `${JSON.stringify({ version: 1, storeScope, ...request })}\n`,
   };
 }
 
@@ -681,8 +687,8 @@ async function smokePackagedLifecycle(
 ): Promise<void> {
   await withIncrementalClaudeCleanup(async (registerCleanup) => {
     const providerInstanceId = randomUUID();
-    const dataDirectory = await mkdtemp(
-      resolve(tmpdir(), `octant-claude-${authentication}-${shutdown}.`),
+    const dataDirectory = await realpath(
+      await mkdtemp(resolve(tmpdir(), `octant-claude-${authentication}-${shutdown}.`)),
     );
     const temporaryDirectory = resolve(dataDirectory, "tmp");
     registerCleanup("temporary configuration", async () => {
@@ -707,7 +713,7 @@ async function smokePackagedLifecycle(
       temporaryDirectory,
       observer.port,
     );
-    const helper = packagedCredentialHelper();
+    const helper = packagedCredentialHelper(deriveHostRuntimeHostId(dataDirectory));
     registerCleanup(
       "Keychain",
       async () => {
@@ -853,14 +859,14 @@ async function observeOwnedClaudeGroups<T>(
   return await operation;
 }
 
-function packagedCredentialHelper(): CredentialHelper {
+function packagedCredentialHelper(storeScope: string): CredentialHelper {
   const registry = createClaudeKeychainHandleRegistry();
   const startHelper: StartClaudeKeychainHelper = (command, args, env, stdin) => {
     return registry.track(startClaudeKeychainHelper(command, args, env, stdin));
   };
   const invoke = async (request: HelperRequest): Promise<Record<string, unknown>> => {
     return await runBoundedClaudeKeychainHelper(
-      keychainHelperInvocation(helperPath, request),
+      keychainHelperInvocation(helperPath, request, storeScope),
       process.env,
       { startHelper },
     );

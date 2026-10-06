@@ -1,5 +1,12 @@
 import {
   decodeAgentRunCommandResult,
+  decodeAgentObservedChild,
+  decodeAgentRunResultsResponse,
+  decodeAgentRunReviewResponse,
+  type AgentRunReviewResponse,
+  type AgentObservedChild,
+  type AgentRunResultPacket,
+  type AgentRunResultsResponse,
   decodeAgentRunCanvasSnapshotRequest,
   decodeAgentRunCanvasSnapshotResult,
   decodeAgentRunCenterResponse,
@@ -52,6 +59,8 @@ export interface AgentRunClientOptions {
 }
 
 export interface AgentRunParentSummaryResponse {
+  readonly observations?: ReadonlyArray<AgentObservedChild>;
+  readonly observationsTruncated?: boolean;
   readonly parentThreadId: AgentRunParentThreadId;
   readonly entries: ReadonlyArray<AgentRunParentSummaryClientEntry>;
 }
@@ -72,6 +81,8 @@ export interface AgentRunClientRoute {
 }
 
 export interface AgentRunParentSummaryClientEntry {
+  readonly resultPackets?: ReadonlyArray<AgentRunResultPacket>;
+  readonly resultsTruncated?: boolean;
   readonly runId: AgentRunId;
   readonly requestId: string;
   readonly parentThreadId: AgentRunParentThreadId;
@@ -118,6 +129,8 @@ export interface AgentRunCenterQueryInput {
 }
 
 export interface AgentRunClient {
+  results?(runId: AgentRunId): Promise<AgentRunResultsResponse>;
+  review?(runId: AgentRunId, generation: number): Promise<AgentRunReviewResponse>;
   center(input?: AgentRunCenterQueryInput): Promise<AgentRunCenterResponse>;
   conversation(runId: AgentRunId, afterSequence?: number): Promise<AgentRunConversationResponse>;
   /**
@@ -191,6 +204,33 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
         throw new AgentRunClientFailure("unavailable", "AgentRun center response is malformed.");
       }
     },
+    async review(runId, generation) {
+      const url = new URL("/api/agent-runs/review", options.baseUrl);
+      url.searchParams.set("runId", String(runId));
+      url.searchParams.set("generation", String(generation));
+      const body = await requestJson(options.fetch, url.toString(), { method: "GET", headers });
+      try {
+        const result = decodeAgentRunReviewResponse(body);
+        if (String(result.runId) !== String(runId) || result.generation !== generation)
+          throw new Error("Review identity mismatch");
+        return result;
+      } catch {
+        throw new AgentRunClientFailure("unavailable", "AgentRun review is malformed.");
+      }
+    },
+    async results(runId) {
+      const url = new URL("/api/agent-runs/results", options.baseUrl);
+      url.searchParams.set("runId", String(runId));
+      const body = await requestJson(options.fetch, url.toString(), { method: "GET", headers });
+      try {
+        const result = decodeAgentRunResultsResponse(body);
+        if (result.runId !== runId || result.packets.some((packet) => packet.runId !== runId))
+          throw new Error("Result identity mismatch");
+        return result;
+      } catch {
+        throw new AgentRunClientFailure("unavailable", "AgentRun results are malformed.");
+      }
+    },
     async conversation(runId, afterSequence) {
       const url = new URL("/api/agent-runs/conversation", options.baseUrl);
       url.searchParams.set("runId", String(runId));
@@ -255,10 +295,47 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
       if (!isRecord(body) || !Array.isArray(body.entries)) {
         throw new AgentRunClientFailure("unavailable", "AgentRun parent summary is malformed.");
       }
-      return {
-        parentThreadId: validated,
-        entries: body.entries as AgentRunParentSummaryClientEntry[],
-      };
+      try {
+        const observations =
+          body.observations === undefined
+            ? undefined
+            : Array.isArray(body.observations) && body.observations.length <= 64
+              ? body.observations.map((child) => decodeAgentObservedChild(child))
+              : (() => {
+                  throw new Error("Invalid observations");
+                })();
+        if (
+          observations?.some((child) => child.parentThreadId !== validated) ||
+          (body.observationsTruncated !== undefined &&
+            typeof body.observationsTruncated !== "boolean")
+        )
+          throw new Error("Observation identity mismatch");
+        const entries = (body.entries as AgentRunParentSummaryClientEntry[]).map((entry) => {
+          if (entry.resultPackets === undefined) return entry;
+          const result = decodeAgentRunResultsResponse({
+            runId: entry.runId,
+            packets: entry.resultPackets,
+            truncated: entry.resultsTruncated,
+          });
+          if (
+            result.packets.some(
+              (packet) => packet.runId !== entry.runId || packet.parentThreadId !== validated,
+            )
+          )
+            throw new Error("Result identity mismatch");
+          return { ...entry, resultPackets: result.packets, resultsTruncated: result.truncated };
+        });
+        return {
+          parentThreadId: validated,
+          entries,
+          ...(observations === undefined ? {} : { observations }),
+          ...(typeof body.observationsTruncated !== "boolean"
+            ? {}
+            : { observationsTruncated: body.observationsTruncated }),
+        };
+      } catch {
+        throw new AgentRunClientFailure("unavailable", "AgentRun parent summary is malformed.");
+      }
     },
     async acknowledge(input) {
       const body = await requestJson(

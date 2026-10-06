@@ -4,6 +4,7 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentRunClient } from "@octant/client-runtime";
 import type { AgentRunParentThreadId } from "@octant/contracts";
+import { observedChildFixture } from "./agentActivityFixtures";
 import { useChildRunStatus } from "./useChildRunStatus";
 
 const parentThreadId = "00000000-0000-4000-8000-000000000001" as AgentRunParentThreadId;
@@ -18,7 +19,7 @@ function summaryEntry(runId: string, lifecycleStatus: string, parentRunId?: stri
     role: "worker",
     task: `task ${runId}`,
     lifecycleStatus,
-    executionKind: "managed",
+    executionKind: "octant-managed",
     usageQuality: "measured",
     resultAcknowledgement: { required: false, acknowledged: false },
     version: 1,
@@ -52,6 +53,9 @@ function Harness(props: {
     <div>
       <output aria-label="label">{status.summary.label}</output>
       <output aria-label="stoppable">{status.summary.stoppableRunIds.join(",")}</output>
+      <output aria-label="observations">
+        {status.observations.map((child) => child.observationId).join(",")}
+      </output>
       <output aria-label="entries">{status.entries.map((entry) => entry.runId).join(",")}</output>
       <output aria-label="status">{status.status}</output>
       <output aria-label="reconnecting">{status.reconnecting ? "stale" : "live"}</output>
@@ -68,6 +72,27 @@ function Harness(props: {
 }
 
 describe("useChildRunStatus", () => {
+  it("keeps observations out of stop targets and removes them immediately when switching parents", async () => {
+    const client = stubClient({
+      parentSummary: vi
+        .fn()
+        .mockResolvedValueOnce({
+          parentThreadId,
+          entries: [summaryEntry("a", "running")],
+          observations: [observedChildFixture({ parentThreadId })],
+          observationsTruncated: true,
+        })
+        .mockReturnValue(new Promise(() => {})),
+    });
+    const { rerender } = render(<Harness client={client} parentThreadId={parentThreadId} />);
+    await waitFor(() =>
+      expect(screen.getByLabelText("observations")).toHaveTextContent("provider-child"),
+    );
+    expect(screen.getByLabelText("stoppable")).toHaveTextContent(/^a$/);
+    rerender(<Harness client={client} />);
+    expect(screen.getByLabelText("observations")).toBeEmptyDOMElement();
+    expect(screen.getByLabelText("stoppable")).toBeEmptyDOMElement();
+  });
   it("reads the host's parent summary and reports it in words", async () => {
     const client = stubClient();
     render(<Harness client={client} parentThreadId={parentThreadId} />);

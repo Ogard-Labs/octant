@@ -9,6 +9,7 @@
     "./contributions": "./src/contributions.ts",
     "./integration": "./src/integration.ts",
     "./computer-use": "./src/computerUse.ts",
+    "./canvas-export": "./src/canvasExport.ts",
     "./replica-store": "./src/replicaStore.ts"
   },
   "scripts": {

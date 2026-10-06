@@ -13,6 +13,11 @@ import {
   decodeCanvasDiagramLayoutReviseResult,
   decodeCanvasReviseResult,
   decodeCanvasRefreshResult,
+  decodeCanvasExportDecideRequest,
+  decodeCanvasExportDecideResult,
+  decodeCanvasExportOfferList,
+  decodeCanvasExportPrepareRequest,
+  decodeCanvasExportPrepareResult,
   decodeCanvasShareAccessResult,
   decodeCanvasShareOverview,
   decodeCanvasShareResult,
@@ -32,6 +37,9 @@ import {
 import type { CanvasService } from "./canvas/canvasService";
 import type { CanvasCommentService } from "./canvas/canvasCommentService";
 import type { CanvasShareService } from "./canvas/canvasShareService";
+import type { CanvasExportService } from "./canvas/canvasExportService";
+import { canvasExportEventActor } from "./canvas/canvasExportActor";
+import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvas/canvasProjection";
 import type { ClientPrincipal } from "./clientPrincipal";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
@@ -51,6 +59,8 @@ export interface CanvasRouteDependencies {
    * surface at all rather than a surface whose revocation would be decorative.
    */
   readonly canvasShareService?: CanvasShareService;
+  /** Destination export. Absent when the host cannot journal an export. */
+  readonly canvasExportService?: CanvasExportService;
   /** Comment journal; a host without it serves boards without a conversation. */
   readonly canvasCommentService?: CanvasCommentService;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -124,6 +134,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "share" &&
       route !== "share-revoke" &&
       route !== "share-access" &&
+      route !== "export-targets" &&
+      route !== "export-prepare" &&
+      route !== "export-decide" &&
       route !== "thread-reference-cards"
     ) {
       return undefined;
@@ -869,6 +882,122 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           ...(userAgent === null ? {} : { userAgent }),
         });
         return jsonResponse(decodeCanvasShareAccessResult(result), 200, origin);
+      }
+
+      if (route === "export-targets" && request.method === "GET") {
+        const exportService = dependencies.canvasExportService;
+        if (exportService === undefined) {
+          return failureResponse("Canvas export is unavailable on this host.", 404, origin);
+        }
+        if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
+          return failureResponse("Canvas export request is invalid.", 400, origin);
+        }
+        let canvasId;
+        try {
+          canvasId = decodeCanvasId(url.searchParams.get("canvasId") ?? "");
+        } catch {
+          return failureResponse("Canvas ID is invalid.", 400, origin);
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          canvasId,
+        );
+        if (context.kind !== "ok") {
+          return failureResponse(
+            "Canvas export is not available for this canvas.",
+            context.kind === "unauthorized" ? 403 : 404,
+            origin,
+          );
+        }
+        const offers = exportService.offers(canvasId);
+        if (offers === undefined) {
+          return failureResponse("Canvas export is not available for this canvas.", 404, origin);
+        }
+        return jsonResponse(decodeCanvasExportOfferList(offers), 200, origin);
+      }
+
+      if ((route === "export-prepare" || route === "export-decide") && request.method === "POST") {
+        const exportService = dependencies.canvasExportService;
+        const malformed =
+          route === "export-prepare"
+            ? decodeCanvasExportPrepareResult({
+                kind: "refused",
+                code: "malformed",
+                message: "Canvas export request is malformed.",
+              })
+            : decodeCanvasExportDecideResult({
+                kind: "refused",
+                code: "malformed",
+                message: "Canvas export request is malformed.",
+              });
+        if (exportService === undefined) {
+          return jsonResponse(
+            route === "export-prepare"
+              ? decodeCanvasExportPrepareResult({
+                  kind: "refused",
+                  code: "unavailable",
+                  message: "Canvas export is unavailable on this host.",
+                })
+              : decodeCanvasExportDecideResult({
+                  kind: "refused",
+                  code: "unavailable",
+                  message: "Canvas export is unavailable on this host.",
+                }),
+            200,
+            origin,
+          );
+        }
+        const body = await readJson(request);
+        if (body.kind === "too-large" || body.kind === "invalid") {
+          return jsonResponse(malformed, 200, origin);
+        }
+        if (route === "export-prepare") {
+          let requestBody;
+          try {
+            requestBody = decodeCanvasExportPrepareRequest(body.value);
+          } catch {
+            return jsonResponse(malformed, 200, origin);
+          }
+          const context = await resolveAuthorizedContext(
+            dependencies,
+            authenticatedWindowId,
+            requestBody.canvasId,
+          );
+          return jsonResponse(
+            decodeCanvasExportPrepareResult(
+              exportService.prepare(requestBody, context.kind === "ok"),
+            ),
+            200,
+            origin,
+          );
+        }
+        let requestBody;
+        try {
+          requestBody = decodeCanvasExportDecideRequest(body.value);
+        } catch {
+          return jsonResponse(malformed, 200, origin);
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          requestBody.canvasId,
+        );
+        return jsonResponse(
+          decodeCanvasExportDecideResult(
+            await exportService.decide({
+              canvasId: requestBody.canvasId,
+              approvalId: requestBody.approvalId,
+              decision: requestBody.decision,
+              permitted: context.kind === "ok",
+              // The envelope names the transport principal this host
+              // authenticated for the approval, never a fixed local user.
+              actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
+            }),
+          ),
+          200,
+          origin,
+        );
       }
 
       if (route === "thread-reference-cards" && request.method === "GET") {

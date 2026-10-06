@@ -145,6 +145,17 @@ describe("native harness routing commands", () => {
 describe("native harness route decisions", () => {
   const base = { job: "lead", decidedAt: at, rejected: [] } as const;
 
+  it("records inherited parent routing without claiming any configured slot", () => {
+    const inherited = {
+      ...base,
+      kind: "inherited-parent",
+      requestedSlotId: "task",
+      candidate: opus,
+    };
+    expect(decodeNativeHarnessRouteDecision(inherited)).toEqual(inherited);
+    expect(() => decodeNativeHarnessRouteDecision({ ...inherited, slotId: "default" })).toThrow();
+  });
+
   it("records the primary route with nothing rejected", () => {
     const decision = decodeNativeHarnessRouteDecision({
       ...base,

@@ -95,6 +95,7 @@ import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
+import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { useWorkResearchController } from "../work/useWorkResearchController";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
@@ -145,6 +146,7 @@ type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
 export interface WorkspaceViewProps {
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly agentRunClient?: AgentRunClient;
+  readonly nativeHarnessClient?: NativeHarnessClient;
   /** Opens the Agents tool; with a run id, on that subagent's page. */
   readonly onOpenSubagent?: (runId?: string) => void;
   readonly chatClient: ChatClient;
@@ -777,6 +779,9 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
   return (
     <ThreadSubagentsTray
       client={props.agentRunClient}
+      {...(props.nativeHarnessClient === undefined
+        ? {}
+        : { interactionsClient: props.nativeHarnessClient })}
       {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
       threadId={String(surface.threadId)}
     />

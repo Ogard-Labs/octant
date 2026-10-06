@@ -7,6 +7,7 @@ import { BindingRevisionId, ProjectId } from "./projects";
 import {
   PermissionPersistence,
   ProviderContextBlock,
+  ProviderChildActivityEvent,
   ProviderExecutionPolicy,
   ProviderInstanceId,
   ProviderModelId,
@@ -308,6 +309,63 @@ export type AgentRunResultText = typeof AgentRunResultText.Type;
  * The text is deliberately absent: it is stored, not journaled, and a run whose
  * parent thread was deleted keeps this identity with nothing behind it.
  */
+export const AgentRunReviewMetadata = Schema.Struct({
+  capturedAt: UtcTimestamp,
+  baseTree: Schema.String.pipe(Schema.pattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)),
+  resultTree: Schema.String.pipe(Schema.pattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)),
+  changedPaths: Schema.Array(Schema.NonEmptyString.pipe(Schema.maxLength(2048))).pipe(
+    Schema.maxItems(128),
+  ),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export const AgentRunReviewSnapshot = Schema.Struct({
+  ...AgentRunReviewMetadata.fields,
+  diff: Schema.String.pipe(Schema.maxLength(65_536)),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((value) => JSON.stringify(value).length <= 120_000));
+export type AgentRunReviewSnapshot = typeof AgentRunReviewSnapshot.Type;
+export const decodeAgentRunReviewSnapshot = Schema.decodeUnknownSync(AgentRunReviewSnapshot);
+
+export const AgentRunResultEvidence = Schema.Struct({
+  review: Schema.optional(AgentRunReviewSnapshot),
+  files: Schema.Struct({
+    reviewStatus: Schema.optional(Schema.Literal("available", "unavailable")),
+    status: Schema.Literal("recorded", "unavailable", "truncated"),
+    items: Schema.Array(
+      Schema.Struct({
+        path: Schema.NonEmptyString.pipe(Schema.maxLength(2048)),
+        change: Schema.Literal("created", "modified", "deleted"),
+        reference: Schema.NonEmptyString.pipe(Schema.maxLength(2048)),
+        source: Schema.Literal("provider-reported"),
+        verified: Schema.Literal(false),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(32)),
+  }).annotations(strict),
+  checks: Schema.Struct({
+    status: Schema.Literal("recorded", "unavailable", "truncated"),
+    items: Schema.Array(
+      Schema.Struct({
+        label: Schema.NonEmptyString.pipe(Schema.maxLength(512)),
+        outcome: Schema.Literal("passed", "failed", "unknown"),
+        reference: Schema.NonEmptyString.pipe(Schema.maxLength(2048)),
+        source: Schema.Literal("host-recorded"),
+        toolExecution: Schema.optional(
+          Schema.Struct({
+            toolName: Schema.NonEmptyString.pipe(Schema.maxLength(255)),
+            requestId: Schema.NonEmptyString.pipe(Schema.maxLength(255)),
+            isError: Schema.Boolean,
+            output: Schema.String.pipe(Schema.maxLength(2048)),
+            truncated: Schema.Boolean,
+          }).annotations(strict),
+        ),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(32)),
+  }).annotations(strict),
+}).annotations(strict);
+export type AgentRunResultEvidence = typeof AgentRunResultEvidence.Type;
+export const decodeAgentRunResultEvidence = Schema.decodeUnknownSync(AgentRunResultEvidence);
+
 export const AgentRunResult = Schema.Struct({
   reference: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
   truncated: Schema.Boolean,
@@ -323,15 +381,47 @@ export const AgentRunResultAcknowledgement = Schema.Struct({
 export type AgentRunResultAcknowledgement = typeof AgentRunResultAcknowledgement.Type;
 
 /**
- * Marks a turn the host itself started to carry a finished subagent run's
- * result into its parent thread. `kind` names what the turn is; `runId`
- * names the run it delivers, so a delivery replayed after a crash can never
- * mint a second turn for the same result.
+ * Bounds one parent wake to the results already finished. Legacy marks name
+ * one run; batches include their primary run exactly once. Generation-less
+ * marks cover generation 1 only, so a resumed child can deliver a new result.
  */
+export const MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE = 16;
+export const AgentRunResultDeliveryRunIds = Schema.Array(AgentRunId).pipe(
+  Schema.minItems(1),
+  Schema.maxItems(MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE),
+  Schema.filter((ids) => new Set(ids.map(String)).size === ids.length),
+);
+
+export const AgentRunResultDeliveryGeneration = Schema.Struct({
+  runId: AgentRunId,
+  generation: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
+}).annotations(strict);
+export const AgentRunResultDeliveryGenerations = Schema.Array(
+  AgentRunResultDeliveryGeneration,
+).pipe(Schema.minItems(1), Schema.maxItems(MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE));
+
 export const AgentRunResultDeliveryMark = Schema.Struct({
   kind: Schema.Literal("agent-result"),
   runId: AgentRunId,
-}).annotations(strict);
+  runIds: Schema.optional(AgentRunResultDeliveryRunIds),
+  runGenerations: Schema.optional(AgentRunResultDeliveryGenerations),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((mark) => {
+      const ids = mark.runIds ?? [mark.runId];
+      return (
+        ids.some((id) => String(id) === String(mark.runId)) &&
+        (mark.runGenerations === undefined ||
+          (mark.runGenerations.length === ids.length &&
+            new Set(mark.runGenerations.map((member) => String(member.runId))).size ===
+              ids.length &&
+            mark.runGenerations.every((member) =>
+              ids.some((id) => String(id) === String(member.runId)),
+            )))
+      );
+    }),
+  );
 export type AgentRunResultDeliveryMark = typeof AgentRunResultDeliveryMark.Type;
 
 /**
@@ -374,6 +464,13 @@ export type AgentRunDependencies = typeof AgentRunDependencies.Type;
 
 export const AgentRun = Schema.Struct({
   id: AgentRunId,
+  /** Absent on legacy runs, which belong to generation 1. */
+  generation: Schema.optional(
+    Schema.Int.pipe(
+      Schema.greaterThanOrEqualTo(1),
+      Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+    ),
+  ),
   requestId: AgentRunRequestId,
   parentThreadId: AgentRunParentThreadId,
   parentRunId: Schema.optional(AgentRunId),
@@ -469,6 +566,7 @@ export const AgentRunCommand = Schema.Union(
     result: AgentRunResult,
     /** Stored under `result.reference`; never journaled with the completion. */
     resultText: AgentRunResultText,
+    resultEvidence: Schema.optional(AgentRunResultEvidence),
     usage: Schema.optional(AgentRunTokenUsage),
   }).annotations(strict),
   Schema.Struct({
@@ -496,13 +594,20 @@ export const AgentRunCommand = Schema.Union(
   }).annotations(strict),
   /**
    * Journals how a finished run's result reached its parent. Written once per
-   * run, only after the delivery actually happened — a turn carrying it, the
+   * result generation, only after the delivery actually happened — a turn carrying it, the
    * parent's tool returning it, or a refused/invalidated outcome — so a
    * restarted host can tell an owed delivery from a settled one.
    */
   Schema.Struct({
     kind: Schema.Literal("settle-agent-run-result-delivery"),
     runId: AgentRunId,
+    /** Omission names generation 1, never the latest generation. */
+    generation: Schema.optional(
+      Schema.Int.pipe(
+        Schema.greaterThanOrEqualTo(1),
+        Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+      ),
+    ),
     expectedVersion: AggregateVersion,
     outcome: AgentRunResultDeliveryOutcome,
     detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
@@ -515,6 +620,7 @@ export const AgentRunCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("resume-agent-run"),
     runId: AgentRunId,
+    message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
     expectedVersion: AggregateVersion,
   }).annotations(strict),
   /**
@@ -563,6 +669,12 @@ export type AgentRunRequested = typeof AgentRunRequested.Type;
 
 export const AgentRunStatusChanged = Schema.Struct({
   runId: AgentRunId,
+  generation: Schema.optional(
+    Schema.Int.pipe(
+      Schema.greaterThanOrEqualTo(1),
+      Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+    ),
+  ),
   fromStatus: AgentRunLifecycleStatus,
   toStatus: AgentRunLifecycleStatus,
   version: AggregateVersion,
@@ -699,6 +811,8 @@ export const AgentRunConversationReadStatus = Schema.Literal(
 export type AgentRunConversationReadStatus = typeof AgentRunConversationReadStatus.Type;
 
 export const AgentRunConversationEntry = Schema.Struct({
+  childActivity: Schema.optional(ProviderChildActivityEvent),
+  generation: Schema.optional(Schema.Int.pipe(Schema.positive())),
   sequence: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
   kind: Schema.Literal("assistant", "status"),
   text: Schema.String.pipe(Schema.maxLength(MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS)),

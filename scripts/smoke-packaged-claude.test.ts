@@ -98,6 +98,7 @@ describe("packaged Claude dual-auth harness", () => {
   it("gives every smoke subprocess a positive environment without ambient credentials", () => {
     const source = {
       HOME: "/Users/test",
+      USER: "test",
       TMPDIR: "/private/tmp",
       LANG: "en_US.UTF-8",
       LC_ALL: "en_US.UTF-8",
@@ -112,6 +113,7 @@ describe("packaged Claude dual-auth harness", () => {
     };
     const expected = {
       HOME: "/Users/test",
+      USER: "test",
       TMPDIR: "/private/tmp",
       LANG: "en_US.UTF-8",
       LC_ALL: "en_US.UTF-8",
@@ -145,6 +147,7 @@ describe("packaged Claude dual-auth harness", () => {
       packagedClaudeEnvironment(
         {
           HOME: "/Users/test",
+          USER: "test",
           ANTHROPIC_API_KEY: "private-value",
           CLAUDE_CODE_OAUTH_TOKEN: "private-oauth",
         },
@@ -154,6 +157,7 @@ describe("packaged Claude dual-auth harness", () => {
       ),
     ).toEqual({
       HOME: "/Users/test",
+      USER: "test",
       PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
       TMPDIR: "/tmp/octant-claude-temp",
       OCTANT_DATA_DIR: "/tmp/octant-claude-data",
@@ -187,12 +191,23 @@ describe("packaged Claude dual-auth harness", () => {
   });
 
   it("passes API keys only through Keychain helper stdin", () => {
-    const invocation = keychainHelperInvocation("/Applications/Octant/helper", {
+    const invocation = keychainHelperInvocation(
+      "/Applications/Octant/helper",
+      {
+        operation: "set",
+        providerInstanceId: "80000000-0000-4000-8000-000000000701",
+        credential: "private-value",
+      },
+      "80000000-0000-4000-8000-000000000702",
+    );
+    expect(invocation.args).toEqual([]);
+    expect(JSON.parse(invocation.stdin)).toEqual({
+      version: 1,
       operation: "set",
       providerInstanceId: "80000000-0000-4000-8000-000000000701",
+      storeScope: "80000000-0000-4000-8000-000000000702",
       credential: "private-value",
     });
-    expect(invocation.args).toEqual([]);
     expect(invocation.stdin).toContain("private-value");
     expect(`${invocation.command}\0${invocation.args.join("\0")}`).not.toContain("private-value");
   });
@@ -424,11 +439,15 @@ describe("packaged Claude cleanup and redaction", () => {
     };
     const invoke = () =>
       runBoundedClaudeKeychainHelper(
-        keychainHelperInvocation("/Applications/Octant/helper", {
-          operation: "set",
-          providerInstanceId: "fixture-id",
-          credential: "private-helper-value",
-        }),
+        keychainHelperInvocation(
+          "/Applications/Octant/helper",
+          {
+            operation: "set",
+            providerInstanceId: "fixture-id",
+            credential: "private-helper-value",
+          },
+          "80000000-0000-4000-8000-000000000702",
+        ),
         {
           HOME: "/Users/test",
           ANTHROPIC_API_KEY: "ambient-private-value",

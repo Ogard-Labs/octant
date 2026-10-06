@@ -8,7 +8,7 @@ import {
   type NativeHarnessSlotId,
   type ProjectId,
 } from "@octant/contracts";
-import { resolveNativeHarnessRoute } from "@octant/domain";
+import { resolveNativeHarnessRoute, type NativeHarnessCandidateFacts } from "@octant/domain";
 import type { NativeHarnessRoutingStore } from "./nativeHarnessRoutingStore";
 
 const DEFAULT_COOLDOWN_MS = 60_000;
@@ -47,34 +47,62 @@ export class NativeHarnessRouter {
   resolve(input: {
     readonly job: NativeHarnessJob;
     readonly projectId?: ProjectId | undefined;
+    readonly isEligible?: (candidate: NativeHarnessSlotCandidate) => boolean;
+    /** Current authorized parent, used only when neither role nor default slot exists. */
+    readonly inheritParent?: NativeHarnessSlotCandidate;
   }): NativeHarnessRouteDecision {
     const nowMs = this.#now();
     const override =
       input.projectId === undefined
         ? undefined
         : this.#options.store.projectOverride(input.projectId);
-    return resolveNativeHarnessRoute({
+    const now = decodeUtcTimestamp(new Date(nowMs).toISOString());
+    const facts = (candidate: NativeHarnessSlotCandidate): NativeHarnessCandidateFacts => {
+      const cooldown = this.#cooldowns.get(nativeHarnessSlotCandidateKey(candidate));
+      const active = cooldown !== undefined && cooldown.untilMs > nowMs;
+      return {
+        ready: this.#options.isReady(candidate) && (input.isEligible?.(candidate) ?? true),
+        ...(active
+          ? {
+              coolingDown: {
+                reason: cooldown.reason,
+                until: decodeUtcTimestamp(new Date(cooldown.untilMs).toISOString()),
+              },
+            }
+          : {}),
+      };
+    };
+    const circuitOpen = (slotId: NativeHarnessSlotId) =>
+      (this.#circuits.get(String(slotId)) ?? 0) > nowMs;
+    const decision = resolveNativeHarnessRoute({
       job: input.job,
       host: this.#options.store.host().configuration,
       ...(override === undefined ? {} : { project: override.configuration }),
-      facts: (candidate) => {
-        const cooldown = this.#cooldowns.get(nativeHarnessSlotCandidateKey(candidate));
-        const active = cooldown !== undefined && cooldown.untilMs > nowMs;
-        return {
-          ready: this.#options.isReady(candidate),
-          ...(active
-            ? {
-                coolingDown: {
-                  reason: cooldown.reason,
-                  until: decodeUtcTimestamp(new Date(cooldown.untilMs).toISOString()),
-                },
-              }
-            : {}),
-        };
-      },
-      circuitOpen: (slotId) => (this.#circuits.get(String(slotId)) ?? 0) > nowMs,
-      now: decodeUtcTimestamp(new Date(nowMs).toISOString()),
+      facts,
+      circuitOpen,
+      now,
     });
+    const parent = input.inheritParent;
+    // A configured slot that failed must never escape its policy or breaker
+    // through the parent. Only absent slots preserve implicit parent routing.
+    if (parent === undefined || decision.kind !== "unroutable" || decision.reason !== "slot-empty")
+      return decision;
+    if (circuitOpen(decision.slotId)) return { ...decision, reason: "circuit-open" };
+    const parentFacts = facts(parent);
+    if (!parentFacts.ready || parentFacts.coolingDown !== undefined)
+      return {
+        ...decision,
+        reason: "no-eligible-candidate",
+        rejected: [{ candidate: parent, reasons: ["provider-not-ready"] }],
+      };
+    return {
+      kind: "inherited-parent",
+      job: input.job,
+      decidedAt: now,
+      requestedSlotId: decision.slotId,
+      candidate: parent,
+      rejected: [],
+    };
   }
 
   /** A failure the chain should step around, with the reason the model sees. */

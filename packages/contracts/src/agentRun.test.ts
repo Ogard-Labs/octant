@@ -1,10 +1,14 @@
+import { Schema } from "effect";
+import { decodeChatCommand } from "./chat";
 import { describe, expect, it } from "vitest";
 import {
   AGENT_RUN_EVENT_NAMES,
+  AgentRunResultDeliveryMark,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
   MAX_AGENT_RUN_CONVERSATION_ENTRIES,
   decodeAgentRun,
+  decodeAgentRunReviewSnapshot,
   decodeAgentRunAdmittedContext,
   decodeAgentRunAuthority,
   decodeAgentRunCommand,
@@ -16,6 +20,28 @@ import {
   decodeAgentRunStatusChanged,
   decodeAgentRunWorkspaceReceipt,
 } from "./agentRun";
+
+describe("Retained child review", () => {
+  it("accepts an immutable bounded comparison and refuses oversized or invalid identities", () => {
+    const snapshot = {
+      capturedAt: "2026-10-04T00:00:00.000Z",
+      baseTree: "a".repeat(40),
+      resultTree: "b".repeat(40),
+      diff: "patch",
+      changedPaths: ["file.txt"],
+      truncated: false,
+    };
+    expect(decodeAgentRunReviewSnapshot(snapshot)).toEqual(snapshot);
+    expect(() => decodeAgentRunReviewSnapshot({ ...snapshot, baseTree: "HEAD" })).toThrow();
+    expect(() => decodeAgentRunReviewSnapshot({ ...snapshot, diff: "x".repeat(65_537) })).toThrow();
+    expect(() =>
+      decodeAgentRunReviewSnapshot({ ...snapshot, diff: "\u0000".repeat(30_000) }),
+    ).toThrow();
+    expect(() =>
+      decodeAgentRunReviewSnapshot({ ...snapshot, changedPaths: Array(129).fill("file.txt") }),
+    ).toThrow();
+  });
+});
 
 describe("AgentRunConversationResponse", () => {
   it("accepts a bounded live snapshot and rejects oversized entry lists", () => {
@@ -529,4 +555,74 @@ describe("agentRun pool-derived route receipts", () => {
     });
     expect(response.items).toHaveLength(1);
   });
+});
+
+describe("Agent result delivery marks", () => {
+  it("reads legacy marks and only accepts bounded groups with complete generation identities", () => {
+    const decode = Schema.decodeUnknownSync(AgentRunResultDeliveryMark);
+    const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const legacy = { kind: "agent-result", runId: first };
+    expect(decode(legacy)).toEqual(legacy);
+    const batch = {
+      ...legacy,
+      runIds: [first, second],
+      runGenerations: [
+        { runId: first, generation: 1 },
+        { runId: second, generation: 2 },
+      ],
+    };
+    expect(decode(batch)).toEqual(batch);
+    for (const invalid of [
+      { ...legacy, runIds: [] },
+      { ...legacy, runIds: [second] },
+      { ...legacy, runIds: [first, first] },
+      { ...batch, runGenerations: [{ runId: first, generation: 1 }] },
+      {
+        ...batch,
+        runGenerations: [
+          { runId: first, generation: 1 },
+          { runId: first, generation: 2 },
+        ],
+      },
+      { ...legacy, runGenerations: [{ runId: first, generation: 0 }] },
+      {
+        ...legacy,
+        runIds: Array.from(
+          { length: 17 },
+          (_, index) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, "0")}`,
+        ),
+      },
+    ])
+      expect(() => decode(invalid)).toThrow();
+    const command = {
+      kind: "deliver-chat-agent-result",
+      threadId: second,
+      expectedVersion: 1,
+      runId: first,
+      runIds: batch.runIds,
+      runGenerations: batch.runGenerations,
+    };
+    expect(decodeChatCommand(command)).toEqual(command);
+    expect(() => decodeChatCommand({ ...command, runGenerations: [] })).toThrow();
+    expect(() => decodeChatCommand({ ...command, runIds: [first] })).toThrow();
+  });
+});
+
+it("decodes legacy result events and binds new delivery commands to a positive result generation", () => {
+  const event = { runId: ids.run, fromStatus: "completed", toStatus: "starting", version: 5 };
+  expect(decodeAgentRunStatusChanged(event).generation).toBeUndefined();
+  expect(decodeAgentRunStatusChanged({ ...event, generation: 2 }).generation).toBe(2);
+  const command = {
+    kind: "settle-agent-run-result-delivery",
+    runId: ids.run,
+    expectedVersion: 7,
+    outcome: "delivered",
+  };
+  expect(decodeAgentRunCommand(command).kind).toBe("settle-agent-run-result-delivery");
+  expect(decodeAgentRunCommand({ ...command, generation: 2 })).toMatchObject({ generation: 2 });
+  for (const generation of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    expect(() => decodeAgentRunStatusChanged({ ...event, generation })).toThrow();
+    expect(() => decodeAgentRunCommand({ ...command, generation })).toThrow();
+  }
 });

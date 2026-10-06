@@ -1,12 +1,17 @@
+import { isAbsolute, relative } from "node:path";
+import { createHash } from "node:crypto";
 import { boundedToolResultJson } from "../providers/toolResultJson";
+import type { AgentRunReviewCapture, AgentRunReviewCaptureLease } from "./agentRunReviewCapture";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
   decodeCapacityReservationId,
   decodeContextSubjectRef,
   decodeProviderSessionId,
+  decodeProviderResumeCursor,
   decodeUtcTimestamp,
   type AgentRun,
   type AgentRunAuthority,
+  type AgentRunResultEvidence,
   type AgentRunContextSnapshotId,
   type AgentRunId,
   type CapacityReservationId,
@@ -15,7 +20,9 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
+  type ProviderModelOptionValues,
   type ProviderRuntimeEvent,
+  type ProviderResumeCursor,
   type ProviderServiceLimits,
   type ProviderSessionId,
   type UtcTimestamp,
@@ -27,7 +34,7 @@ import {
   effectiveAgentRunExecutionTarget,
 } from "@octant/domain/agent-run-policy";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
-import { Cause, Effect, Exit, Fiber, Option, Scope, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Scope, Stream } from "effect";
 import {
   ProviderCapacitySchedulerRejected,
   type ProviderCapacityScheduler,
@@ -35,6 +42,7 @@ import {
 } from "../context/providerCapacityScheduler";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
+import type { AgentRunSessionRecord, AgentRunSessionStatePort } from "./agentRunSessionStore";
 import { AGENT_RUN_AGGREGATE_TYPE } from "./agentRunEventStore";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import {
@@ -154,9 +162,42 @@ function dependencyResultBlocks(
   return blocks;
 }
 
+export interface AgentRunSessionInteractions {
+  /** The host checks current child authority and asks the person; this port never grants it. */
+  readonly approve?: (input: {
+    readonly run: AgentRun;
+    readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "approval-request" }>;
+    readonly signal: AbortSignal;
+  }) => Promise<boolean>;
+  readonly askUser?: (input: {
+    readonly run: AgentRun;
+    readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "user-input-request" }>;
+    readonly signal: AbortSignal;
+  }) => Promise<string | undefined>;
+}
+
 export interface AgentRunSessionRuntimeOptions {
+  readonly reviewCapture?: AgentRunReviewCapture;
+  readonly canCaptureReview?: (run: AgentRun) => boolean;
+  readonly interactions?: AgentRunSessionInteractions;
+  readonly sessionStore?: AgentRunSessionStatePort;
+  /** Live host ownership, independent of HEAD so a child can resume after committing. */
+  readonly verifyCodeWorkspace?: (input: {
+    readonly run: AgentRun;
+    readonly signal: AbortSignal;
+  }) => Promise<
+    | { readonly status: "verified"; readonly identity: string }
+    | { readonly status: "refused"; readonly reason: string }
+  >;
+  /** Current observed capability; absent is unsupported, never an optimistic probe. */
+  readonly supportsResume?: (providerInstanceId: ProviderInstanceId) => boolean;
+  /** Maps the admitted reasoning choice to the current model's declared option key. */
+  readonly resolveModelOptionValues?: (run: AgentRun) => ProviderModelOptionValues | undefined;
   /** Resolves the configured driver for a provider instance, or undefined. */
-  readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
+  readonly resolveDriver: (
+    providerInstanceId: ProviderInstanceId,
+    run: AgentRun,
+  ) => ProviderDriver | undefined;
   readonly capacityScheduler: ProviderCapacityScheduler;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
@@ -181,7 +222,21 @@ export interface AgentRunSessionRuntimeOptions {
   /** Bound on one teardown attempt; see {@link DEFAULT_SHUTDOWN_TIMEOUT_MS}. */
   readonly shutdownTimeoutMs?: number;
   /** Publishes ephemeral managed-child transcript facts to the host read model. */
-  readonly onSessionStarted?: (input: { readonly runId: AgentRunId }) => void;
+  readonly onSessionStarted?: (input: {
+    readonly runId: AgentRunId;
+    readonly resumed: boolean;
+  }) => void;
+  /** Input attribution for the bounded display history; it never exposes private cursors. */
+  readonly onUserMessage?: (input: {
+    readonly runId: AgentRunId;
+    readonly kind: "task" | "follow-up" | "resume" | "steering" | "answer";
+    readonly text: string;
+    readonly occurredAt: UtcTimestamp;
+  }) => void;
+  readonly onChildActivity?: (input: {
+    readonly run: AgentRun;
+    readonly event: Extract<ProviderRuntimeEvent, { kind: "child-agent-activity" }>;
+  }) => void;
   readonly onTextDelta?: (input: {
     readonly runId: AgentRunId;
     readonly text: string;
@@ -235,6 +290,7 @@ interface SessionShutdown {
 
 interface LiveSession {
   readonly controller: AbortController;
+  steer: ((message: string) => Promise<"steered" | "unsupported">) | undefined;
   /** Resolves once the managed session ended, whether or not it settled. */
   readonly finished: Promise<void>;
   readonly shutdown: SessionShutdown;
@@ -252,10 +308,9 @@ interface LiveSession {
  * same capacity scheduler, same normalized events — is what keeps that promise
  * without inventing a second launch path or a second authority path.
  *
- * Every start-time dependency is resolved before the session is considered
- * live, and a missing one throws {@link AgentRunSessionError}. Orchestration
- * already treats a throwing `start` as process death, so an unstartable child
- * lands in a durable recoverable state instead of appearing to run.
+ * Durable execution prerequisites fail synchronously with AgentRunSessionError.
+ * Live Code workspace ownership is checked asynchronously under the runtime
+ * deadline, before acquiring the provider or publishing a new conversation.
  */
 export function createAgentRunSessionRuntime(
   options: AgentRunSessionRuntimeOptions,
@@ -265,184 +320,675 @@ export function createAgentRunSessionRuntime(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
 
-  return {
-    start: (run) => {
-      // Authority is re-derived from the persisted run, never inherited from
-      // the parent thread at execution time: the parent's live grant may have
-      // widened since admission, and a child must never gain from that.
-      const authority = clampAgentRunSessionAuthority(run);
-      const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
-      const driver = options.resolveDriver(target.providerInstanceId);
-      if (driver === undefined) {
-        throw new AgentRunSessionError(
-          "provider-unavailable",
-          `Provider instance ${String(target.providerInstanceId)} is not configured on this host.`,
-        );
-      }
-      const projectRoot = resolveProjectRoot(run, options.scratchRoot);
-      const context = options.context.resolve({
+  const modelOptionsFor = (run: AgentRun): ProviderModelOptionValues | undefined => {
+    const reasoning = run.routingReceipt.rawReasoning;
+    if (reasoning === undefined) return undefined;
+    const values = options.resolveModelOptionValues?.(run);
+    if (values === undefined || !Object.values(values).includes(reasoning)) {
+      throw new AgentRunSessionError(
+        "provider-unavailable",
+        "The child's selected reasoning is no longer supported by its current model.",
+      );
+    }
+    return values;
+  };
+
+  const savedConversation = (run: AgentRun): AgentRunSessionRecord => {
+    const previous = options.sessionStore?.read(run);
+    if (previous === undefined || previous.resumeCursor === undefined) {
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        run.lifecycleStatus === "waiting"
+          ? "This child has no saved session to resume; its existing wait remains unchanged."
+          : run.lifecycleStatus === "completed"
+            ? "The child has no compatible saved provider conversation. Start a new delegation from the parent."
+            : "The child has no compatible saved provider conversation. Use Retry to start a fresh session.",
+      );
+    }
+    const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+    const driver = options.resolveDriver(target.providerInstanceId, run);
+    clampAgentRunSessionAuthority(run);
+    const projectRoot = resolveProjectRoot(run, options.scratchRoot);
+    if (
+      sessions.has(run.id) ||
+      run.lifecycleStatus === "cancelled" ||
+      driver === undefined ||
+      options.supportsResume?.(target.providerInstanceId) !== true ||
+      previous.binding !== childSessionBinding(run, driver, projectRoot) ||
+      (run.workspaceReceipt.kind === "code-worktree" && previous.workspaceIdentity === undefined) ||
+      !validResumeCursor(previous.resumeCursor, {
+        driver,
+        run,
+        projectRoot,
+        sessionId: previous.sessionId,
+      }) ||
+      options.context.resolve({
         runId: run.id,
         contextSnapshotId: run.routingReceipt.contextSnapshotId,
+      }) === undefined
+    ) {
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        run.lifecycleStatus === "completed"
+          ? "The child has no compatible saved provider conversation. Start a new delegation from the parent."
+          : "The child has no compatible saved provider conversation. Use Retry to start a fresh session.",
+      );
+    }
+    modelOptionsFor(run);
+    if (
+      run.lifecycleStatus !== "completed" &&
+      previous.pendingContinuation?.generation === (run.generation ?? 1) &&
+      previous.pendingContinuation.state === "delivery-unknown"
+    )
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "The saved follow-up may already have reached the provider. Review the child conversation before starting a new delegation; it will not be silently resent.",
+      );
+    return previous;
+  };
+
+  const prepareSession = (run: AgentRun, continuation?: { readonly message?: string }) => {
+    if (sessions.has(run.id))
+      throw new AgentRunSessionError(
+        "provider-unavailable",
+        "This child already owns a live session.",
+      );
+    // Authority is re-derived from the persisted run, never inherited from
+    // the parent thread at execution time: the parent's live grant may have
+    // widened since admission, and a child must never gain from that.
+    const authority = clampAgentRunSessionAuthority(run);
+    const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+    const driver = options.resolveDriver(target.providerInstanceId, run);
+    if (driver === undefined) {
+      throw new AgentRunSessionError(
+        "provider-unavailable",
+        `Provider instance ${String(target.providerInstanceId)} is not configured on this host.`,
+      );
+    }
+    const projectRoot = resolveProjectRoot(run, options.scratchRoot);
+    const context = options.context.resolve({
+      runId: run.id,
+      contextSnapshotId: run.routingReceipt.contextSnapshotId,
+    });
+    if (context === undefined) {
+      throw new AgentRunSessionError(
+        "context-unavailable",
+        "The AgentRun context snapshot could not be resolved for execution.",
+      );
+    }
+
+    const appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
+    if (appManagedTools !== undefined && appManagedTools.definitions.length > 0) {
+      const transport = options.appManagedToolTransport?.({
+        providerInstanceId: target.providerInstanceId,
+        modelId: target.modelId,
       });
-      if (context === undefined) {
+      if (transport !== undefined && transport !== "supported") {
         throw new AgentRunSessionError(
-          "context-unavailable",
-          "The AgentRun context snapshot could not be resolved for execution.",
+          "tools-unsupported",
+          "This provider cannot carry Octant's tools.",
         );
       }
-      const appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
-      if (appManagedTools !== undefined && appManagedTools.definitions.length > 0) {
-        const transport = options.appManagedToolTransport?.({
+    }
+
+    const modelOptionValues = modelOptionsFor(run);
+    const binding = childSessionBinding(run, driver, projectRoot);
+    const previous = continuation === undefined ? undefined : savedConversation(run);
+    const pendingInput =
+      previous?.pendingContinuation?.generation === (run.generation ?? 1)
+        ? previous.pendingContinuation
+        : undefined;
+    if (
+      run.lifecycleStatus !== "completed" &&
+      pendingInput !== undefined &&
+      continuation?.message !== undefined &&
+      continuation.message !== pendingInput.message
+    )
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "Resume the saved unsent follow-up before replacing its message.",
+      );
+    const prompt =
+      continuation === undefined
+        ? run.task
+        : (continuation.message ??
+          pendingInput?.message ??
+          "Continue the existing task from the saved conversation. Check what already completed before repeating work.");
+    if (prompt.trim().length === 0 || (continuation !== undefined && prompt.length > 4096)) {
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "A child follow-up must contain between 1 and 4096 characters.",
+      );
+    }
+
+    const subject = decodeContextSubjectRef({
+      aggregateType: AGENT_RUN_AGGREGATE_TYPE,
+      aggregateId: String(run.id),
+    });
+    const estimatedTokens = estimateInputTokens(
+      continuation === undefined ? run.task : `${run.task}\n${prompt}`,
+      context,
+    );
+    const spendReservationId =
+      options.spendCeiling === undefined
+        ? undefined
+        : decodeSpendCeilingReservationId(options.uuid());
+    if (options.spendCeiling !== undefined && spendReservationId !== undefined) {
+      const threadType =
+        run.workspaceReceipt.kind === "work-root"
+          ? ("work-thread" as const)
+          : run.workspaceReceipt.kind === "code-worktree"
+            ? ("code-thread" as const)
+            : ("chat-thread" as const);
+      const spendAdmission = options.spendCeiling.admit({
+        reservationId: spendReservationId,
+        threadId: String(run.parentThreadId),
+        threadType,
+        ...("projectId" in run.workspaceReceipt
+          ? { projectId: String(run.workspaceReceipt.projectId) }
+          : {}),
+        turnUpperBoundTokens: estimatedTokens,
+        childSubjectIds: [String(run.id)],
+      });
+      if (spendAdmission.status === "refused") {
+        throw new AgentRunSessionError("spend-ceiling-exhausted", spendAdmission.refusal.message);
+      }
+    }
+    const reservationId = (() => {
+      try {
+        return reserveCapacity({
+          capacityScheduler: options.capacityScheduler,
+          ...(options.serviceLimits === undefined ? {} : { serviceLimits: options.serviceLimits }),
+          ...(options.capacityEnforcement === undefined
+            ? {}
+            : { capacityEnforcement: options.capacityEnforcement }),
+          uuid: options.uuid,
+          subject,
           providerInstanceId: target.providerInstanceId,
           modelId: target.modelId,
+          estimatedTokens,
         });
-        if (transport !== undefined && transport !== "supported") {
-          throw new AgentRunSessionError(
-            "tools-unsupported",
-            "This provider cannot carry Octant's tools.",
-          );
+      } catch (error) {
+        // Capacity refusal happens before the managed session owns cleanup.
+        if (spendReservationId !== undefined) {
+          options.spendCeiling?.settle({ reservationId: spendReservationId });
         }
+        throw error;
       }
+    })();
 
-      const subject = decodeContextSubjectRef({
-        aggregateType: AGENT_RUN_AGGREGATE_TYPE,
-        aggregateId: String(run.id),
-      });
-      const estimatedTokens = estimateInputTokens(run, context);
-      const spendReservationId =
-        options.spendCeiling === undefined
-          ? undefined
-          : decodeSpendCeilingReservationId(options.uuid());
-      if (options.spendCeiling !== undefined && spendReservationId !== undefined) {
-        const threadType =
-          run.workspaceReceipt.kind === "work-root"
-            ? ("work-thread" as const)
-            : run.workspaceReceipt.kind === "code-worktree"
-              ? ("code-thread" as const)
-              : ("chat-thread" as const);
-        const spendAdmission = options.spendCeiling.admit({
-          reservationId: spendReservationId,
-          threadId: String(run.parentThreadId),
-          threadType,
-          ...("projectId" in run.workspaceReceipt
-            ? { projectId: String(run.workspaceReceipt.projectId) }
-            : {}),
-          turnUpperBoundTokens: estimatedTokens,
-          childSubjectIds: [String(run.id)],
-        });
-        if (spendAdmission.status === "refused") {
-          throw new AgentRunSessionError("spend-ceiling-exhausted", spendAdmission.refusal.message);
-        }
-      }
-      const reservationId = (() => {
-        try {
-          return reserveCapacity({
-            capacityScheduler: options.capacityScheduler,
-            ...(options.serviceLimits === undefined
-              ? {}
-              : { serviceLimits: options.serviceLimits }),
-            ...(options.capacityEnforcement === undefined
-              ? {}
-              : { capacityEnforcement: options.capacityEnforcement }),
-            uuid: options.uuid,
-            subject,
-            providerInstanceId: target.providerInstanceId,
-            modelId: target.modelId,
-            estimatedTokens,
-          });
-        } catch (error) {
-          // Capacity refusal happens before the managed session owns cleanup.
-          if (spendReservationId !== undefined) {
-            options.spendCeiling?.settle({ reservationId: spendReservationId });
+    const providerSessionId = previous?.sessionId ?? decodeProviderSessionId(options.uuid());
+    const retainedReview =
+      run.workspaceReceipt.kind === "code-worktree" ? options.sessionStore?.read(run) : undefined;
+    const record: AgentRunSessionRecord = {
+      ...(previous ?? { sessionId: providerSessionId, binding }),
+      ...(retainedReview?.reviewBaseline === undefined
+        ? retainedReview === undefined
+          ? {}
+          : {
+              reviewBaseline: {
+                generation: run.generation ?? 1,
+                workspaceIdentity: retainedReview.workspaceIdentity ?? "unavailable",
+              },
+            }
+        : { reviewBaseline: retainedReview.reviewBaseline }),
+      ...(continuation !== undefined &&
+      run.lifecycleStatus === "completed" &&
+      continuation.message !== undefined
+        ? {
+            pendingContinuation: {
+              generation: (run.generation ?? 1) + 1,
+              message: continuation.message,
+              state: "unsent" as const,
+            },
           }
-          throw error;
-        }
-      })();
-
-      const listeners = new Set<(outcome: AgentRunSessionOutcome) => void>();
-      let settledOutcome: AgentRunSessionOutcome | undefined;
-      const settle = (outcome: AgentRunSessionOutcome): void => {
-        if (settledOutcome !== undefined) return;
-        settledOutcome = outcome;
-        try {
-          options.onSessionSettled?.({ runId: run.id, outcome });
-        } catch {
-          // A transient observer must never prevent lifecycle settlement.
-        }
-        sessions.delete(run.id);
-        for (const listener of listeners) listener(outcome);
-      };
-
-      const shutdown: SessionShutdown = { unconfirmed: undefined };
-      let endedOutcome: AgentRunSessionOutcome | undefined;
-      let markFinished: () => void = () => undefined;
-      const finished = new Promise<void>((resolve) => {
-        markFinished = resolve;
-      });
-      const end = (outcome: AgentRunSessionOutcome): void => {
-        endedOutcome = outcome;
-        // A shutdown the provider never confirmed is not a terminal fact.
-        // Withholding the outcome keeps the session owned here and at the
-        // supervisor, so the cancellation stays pending and retryable instead
-        // of being reported as a termination nobody observed.
-        if (shutdown.unconfirmed === undefined) settle(outcome);
-        markFinished();
-      };
-
-      const controller = new AbortController();
-      sessions.set(run.id, {
-        controller,
-        finished,
-        shutdown,
-        publish: () => {
-          if (endedOutcome !== undefined) settle(endedOutcome);
-        },
-      });
-      try {
-        options.onSessionStarted?.({ runId: run.id });
-      } catch {
-        // A transient observer must never prevent provider startup.
+        : {}),
+    };
+    try {
+      if (
+        (run.workspaceReceipt.kind !== "code-worktree" || continuation !== undefined) &&
+        options.sessionStore !== undefined &&
+        !options.sessionStore.write(run, record)
+      ) {
+        throw new AgentRunSessionError(
+          "resume-unavailable",
+          "The child session cannot be persisted under its parent thread.",
+        );
       }
-
-      void Effect.runPromiseExit(
-        Effect.scoped(
-          runManagedSession({
-            run,
-            driver,
-            authority,
-            projectRoot,
-            context,
-            reservationId,
-            ...(spendReservationId === undefined ? {} : { spendReservationId }),
-            ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
-            capacityScheduler: options.capacityScheduler,
-            providerInstanceId: target.providerInstanceId,
-            modelId: target.modelId,
-            sessionId: decodeProviderSessionId(options.uuid()),
-            maxEvents,
-            timeoutMs,
-            shutdownTimeoutMs,
-            shutdown,
-            onTextDelta: options.onTextDelta,
-            ...(appManagedTools === undefined ? {} : { appManagedTools }),
-          }),
-        ),
-        { signal: controller.signal },
-      ).then(
-        (exit) => end(outcomeFromExit(exit)),
-        (error: unknown) => end({ kind: "interrupted", reason: boundedReason(error) }),
+    } catch {
+      options.capacityScheduler.releaseUnstarted(reservationId);
+      if (spendReservationId !== undefined)
+        options.spendCeiling?.settle({ reservationId: spendReservationId });
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "The child session cannot be persisted under its parent thread.",
       );
+    }
+    let owned = false;
+    return {
+      authority,
+      target,
+      driver,
+      projectRoot,
+      context,
+      modelOptionValues,
+      previous,
+      prompt,
+      reservationId,
+      spendReservationId,
+      providerSessionId,
+      record,
+      claim: () => {
+        if (owned)
+          throw new AgentRunSessionError(
+            "resume-unavailable",
+            "This child continuation preparation is no longer available.",
+          );
+        owned = true;
+      },
+      release: () => {
+        if (owned) return;
+        owned = true;
+        options.capacityScheduler.releaseUnstarted(reservationId);
+        if (spendReservationId !== undefined)
+          options.spendCeiling?.settle({ reservationId: spendReservationId });
+      },
+    };
+  };
 
-      return {
-        runId: run.id,
-        onSettled: (listener) => {
-          if (settledOutcome !== undefined) {
-            listener(settledOutcome);
-            return;
+  const startSession = (
+    run: AgentRun,
+    continuation?: { readonly message?: string },
+    prepared = prepareSession(run, continuation),
+  ) => {
+    const {
+      authority,
+      target,
+      driver,
+      projectRoot,
+      context,
+      modelOptionValues,
+      previous,
+      prompt,
+      reservationId,
+      spendReservationId,
+      providerSessionId,
+    } = prepared;
+    let record = prepared.record;
+    let reviewCapture: AgentRunReviewCaptureLease | undefined;
+    let appManagedTools: AppManagedToolSet | undefined;
+    try {
+      if (sessions.has(run.id))
+        throw new AgentRunSessionError(
+          "provider-unavailable",
+          "This child already owns a live session.",
+        );
+      appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
+      options.capacityScheduler.markRunning(reservationId);
+      prepared.claim();
+    } catch (error) {
+      prepared.release();
+      throw error;
+    }
+    const verifyWorkspace = async (signal: AbortSignal): Promise<string | undefined> => {
+      if (run.workspaceReceipt.kind !== "code-worktree") return undefined;
+      const refusal =
+        "workspace-unavailable: The child's original managed workspace could not be verified. Restore it or delegate a new child.";
+      try {
+        const observed = await options.verifyCodeWorkspace?.({ run, signal });
+        signal.throwIfAborted();
+        if (observed === undefined) return refusal;
+        if (observed.status === "refused") return `workspace-unavailable: ${observed.reason}`;
+        if (previous !== undefined && previous.workspaceIdentity !== observed.identity)
+          return refusal;
+        record = { ...record, workspaceIdentity: observed.identity };
+        if (options.sessionStore !== undefined && !options.sessionStore.write(run, record))
+          return refusal;
+        const baseline =
+          record.reviewBaseline?.generation === (run.generation ?? 1)
+            ? record.reviewBaseline
+            : undefined;
+        const knowsBeginning =
+          baseline === undefined
+            ? previous === undefined || record.pendingContinuation?.state === "unsent"
+            : baseline.tree !== undefined && baseline.workspaceIdentity === observed.identity;
+        // Persist even a missing baseline: a retry cannot relabel its midpoint as
+        // the beginning of a generation whose earlier capture was unavailable.
+        record = {
+          ...record,
+          reviewBaseline: {
+            generation: run.generation ?? 1,
+            workspaceIdentity: observed.identity,
+            ...(knowsBeginning && baseline?.tree !== undefined ? { tree: baseline.tree } : {}),
+          },
+        };
+        const baselineWritable = options.sessionStore?.write(run, record) ?? true;
+        if (
+          knowsBeginning &&
+          baselineWritable &&
+          authority.filesystem &&
+          authority.git &&
+          authority.executionPolicy !== "plan" &&
+          options.canCaptureReview?.(run) === true
+        ) {
+          try {
+            reviewCapture = await options.reviewCapture?.begin(
+              {
+                checkoutRoot: run.workspaceReceipt.worktreeRoot,
+                runId: String(run.id),
+                executionPolicy: authority.executionPolicy,
+                ...(baseline?.tree === undefined ? {} : { baseTree: baseline.tree }),
+                authorize: async (captureSignal) => {
+                  if (options.canCaptureReview?.(run) !== true) return false;
+                  const current = await options.verifyCodeWorkspace?.({
+                    run,
+                    signal: captureSignal,
+                  });
+                  return current?.status === "verified" && current.identity === observed.identity;
+                },
+              },
+              signal,
+            );
+            if (reviewCapture !== undefined) {
+              record = {
+                ...record,
+                reviewBaseline: {
+                  generation: run.generation ?? 1,
+                  workspaceIdentity: observed.identity,
+                  tree: reviewCapture.baseTree,
+                },
+              };
+              if (options.sessionStore !== undefined && !options.sessionStore.write(run, record)) {
+                reviewCapture = undefined;
+              }
+            }
+          } catch {
+            // Checkpoint availability must not turn a runnable child into a failure.
           }
-          listeners.add(listener);
-        },
+        }
+        return undefined;
+      } catch {
+        return refusal;
+      }
+    };
+    const recordCursor = (cursor: ProviderResumeCursor | undefined): boolean => {
+      if (cursor === undefined) return true;
+      if (!validResumeCursor(cursor, { driver, run, projectRoot, sessionId: providerSessionId }))
+        return false;
+      record = { ...record, resumeCursor: cursor };
+      try {
+        return options.sessionStore?.write(run, record) ?? true;
+      } catch {
+        return false;
+      }
+    };
+
+    const recordContinuation = (state: "delivery-unknown" | "delivered"): boolean => {
+      if (record.pendingContinuation?.generation !== (run.generation ?? 1)) return true;
+      const { pendingContinuation, ...withoutPending } = record;
+      const next =
+        state === "delivery-unknown"
+          ? { ...record, pendingContinuation: { ...pendingContinuation, state } }
+          : withoutPending;
+      try {
+        if (options.sessionStore?.write(run, next) !== true) return false;
+        record = next;
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const listeners = new Set<(outcome: AgentRunSessionOutcome) => void>();
+    let settledOutcome: AgentRunSessionOutcome | undefined;
+    let publishedStart = false;
+    const settle = (outcome: AgentRunSessionOutcome): void => {
+      if (settledOutcome !== undefined) return;
+      settledOutcome = outcome;
+      try {
+        if (publishedStart) options.onSessionSettled?.({ runId: run.id, outcome });
+      } catch {
+        // A transient observer must never prevent lifecycle settlement.
+      }
+      sessions.delete(run.id);
+      for (const listener of listeners) listener(outcome);
+    };
+
+    const shutdown: SessionShutdown = { unconfirmed: undefined };
+    let endedOutcome: AgentRunSessionOutcome | undefined;
+    let markFinished: () => void = () => undefined;
+    const finished = new Promise<void>((resolve) => {
+      markFinished = resolve;
+    });
+    const end = (outcome: AgentRunSessionOutcome): void => {
+      if (
+        outcome.kind === "failed" &&
+        record.pendingContinuation?.generation === (run.generation ?? 1) &&
+        record.pendingContinuation.state === "unsent"
+      ) {
+        // Acquisition or native resume can fail before send. The accepted
+        // input is still durable and must remain reachable through Resume.
+        outcome = {
+          kind: "interrupted",
+          reason: boundedReason(
+            `follow-up-not-sent: ${outcome.failure.category}: ${outcome.failure.message}`,
+          ),
+        };
+      }
+      endedOutcome = outcome;
+      // A shutdown the provider never confirmed is not a terminal fact.
+      // Withholding the outcome keeps the session owned here and at the
+      // supervisor, so the cancellation stays pending and retryable instead
+      // of being reported as a termination nobody observed.
+      if (shutdown.unconfirmed === undefined) settle(outcome);
+      markFinished();
+    };
+
+    const controller = new AbortController();
+    const inputController = new AbortController();
+    const live: LiveSession = {
+      controller,
+      steer: undefined,
+      finished,
+      shutdown,
+      publish: () => {
+        if (endedOutcome !== undefined) settle(endedOutcome);
+      },
+    };
+    sessions.set(run.id, live);
+
+    void Effect.runPromiseExit(
+      Effect.scoped(
+        runManagedSession({
+          run,
+          driver,
+          authority,
+          projectRoot,
+          context: continuation === undefined ? context : [],
+          reservationId,
+          ...(spendReservationId === undefined ? {} : { spendReservationId }),
+          ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
+          capacityScheduler: options.capacityScheduler,
+          providerInstanceId: target.providerInstanceId,
+          modelId: target.modelId,
+          ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
+          sessionId: providerSessionId,
+          prompt,
+          verifyWorkspace,
+          onSessionReady: () => {
+            publishedStart = true;
+            try {
+              options.onSessionStarted?.({ runId: run.id, resumed: continuation !== undefined });
+              options.onUserMessage?.({
+                runId: run.id,
+                kind:
+                  continuation === undefined
+                    ? "task"
+                    : continuation.message === undefined &&
+                        record.pendingContinuation?.generation !== (run.generation ?? 1)
+                      ? "resume"
+                      : "follow-up",
+                text: prompt,
+                occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+              });
+            } catch {
+              // A transient observer must never prevent provider startup.
+            }
+          },
+          resumeCursor: previous?.resumeCursor,
+          recordCursor,
+          recordContinuation,
+          requireResumeCursor: options.supportsResume?.(target.providerInstanceId) === true,
+          maxEvents,
+          timeoutMs,
+          shutdownTimeoutMs,
+          shutdown,
+          onTextDelta: options.onTextDelta,
+          onChildActivity: options.onChildActivity,
+          onUserMessage: options.onUserMessage,
+          interactions: options.interactions,
+          onSessionEnding: () => {
+            live.steer = undefined;
+            inputController.abort();
+          },
+          onConnectionReady: (connection, providerSessionId) => {
+            if (connection.steer === undefined) return;
+            live.steer = async (message) => {
+              if (
+                controller.signal.aborted ||
+                inputController.signal.aborted ||
+                sessions.get(run.id) !== live
+              )
+                return "unsupported";
+              const steer = connection.steer;
+              if (steer === undefined) return "unsupported";
+              const result = await Effect.runPromiseExit(
+                steer({ sessionId: providerSessionId, message }).pipe(
+                  Effect.tap((acknowledgement) =>
+                    Effect.sync(() => {
+                      if (acknowledgement !== "steered") return;
+                      options.onUserMessage?.({
+                        runId: run.id,
+                        kind: "steering",
+                        text: message,
+                        occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+                      });
+                    }),
+                  ),
+                ),
+                { signal: AbortSignal.any([controller.signal, inputController.signal]) },
+              );
+              // An acknowledged delivery already happened. Completion/cancellation
+              // before this Promise continuation cannot retract the provider's receipt.
+              return Exit.isSuccess(result) && result.value === "steered"
+                ? "steered"
+                : "unsupported";
+            };
+          },
+          ...(appManagedTools === undefined ? {} : { appManagedTools }),
+        }),
+      ),
+      { signal: controller.signal },
+    ).then(
+      async (exit) => {
+        let outcome = outcomeFromExit(exit);
+        try {
+          // Teardown has completed before this promise resolves. An unconfirmed
+          // provider shutdown cannot supply a final generation comparison.
+          const review =
+            shutdown.unconfirmed === undefined
+              ? await reviewCapture?.finish(AbortSignal.timeout(10_000))
+              : undefined;
+          if (run.workspaceReceipt.kind === "code-worktree")
+            outcome = {
+              ...outcome,
+              evidence: {
+                ...(outcome.evidence ?? {
+                  files: { status: "unavailable", items: [] },
+                  checks: { status: "unavailable", items: [] },
+                }),
+                ...(review === undefined ? {} : { review }),
+              },
+            };
+        } catch {
+          // Missing capture is explicit in results and never changes execution success.
+        } finally {
+          end(outcome);
+        }
+      },
+      (error: unknown) => end({ kind: "interrupted", reason: boundedReason(error) }),
+    );
+
+    return {
+      runId: run.id,
+      onSettled: (listener: (outcome: AgentRunSessionOutcome) => void) => {
+        if (settledOutcome !== undefined) {
+          listener(settledOutcome);
+          return;
+        }
+        listeners.add(listener);
+      },
+    };
+  };
+
+  return {
+    checkResume: async (run) => {
+      try {
+        const previous = savedConversation(run);
+        if (run.workspaceReceipt.kind === "code-worktree") {
+          const controller = new AbortController();
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const observed = await Promise.race([
+              options.verifyCodeWorkspace?.({ run, signal: controller.signal }),
+              new Promise<undefined>((resolve) => {
+                timer = setTimeout(() => {
+                  controller.abort();
+                  resolve(undefined);
+                }, 10_000);
+              }),
+            ]);
+            if (observed?.status !== "verified" || observed.identity !== previous.workspaceIdentity)
+              return {
+                status: "refused",
+                message:
+                  "The child's original managed workspace could not be verified. Restore it or delegate a new child.",
+              };
+          } finally {
+            if (timer !== undefined) clearTimeout(timer);
+            controller.abort();
+          }
+        }
+        return { status: "ready" };
+      } catch (error) {
+        return {
+          status: "refused",
+          message:
+            error instanceof AgentRunSessionError
+              ? error.message
+              : "The saved child conversation could not be verified.",
+        };
+      }
+    },
+    prepareResume: (run, input) => {
+      const prepared = prepareSession(run, input ?? {});
+      return {
+        start: (started) => startSession(started, input ?? {}, prepared),
+        release: prepared.release,
       };
+    },
+    start: (run) => startSession(run),
+    resume: (run, input) => startSession(run, input ?? {}),
+    steer: async ({ runId, message }) => {
+      const live = sessions.get(runId);
+      if (
+        live === undefined ||
+        live.controller.signal.aborted ||
+        message.trim().length === 0 ||
+        message.length > 4096
+      )
+        return "unsupported";
+      return live.steer?.(message) ?? "unsupported";
     },
 
     stop: async (runId) => {
@@ -586,7 +1132,6 @@ function reserveCapacity(input: {
         `Provider capacity is unavailable for this AgentRun: ${submission.reason}.`,
       );
     }
-    input.capacityScheduler.markRunning(reservationId);
     return reservationId;
   } catch (error) {
     if (error instanceof ProviderCapacitySchedulerRejected) {
@@ -611,18 +1156,38 @@ interface ManagedSessionInput {
   readonly capacityScheduler: ProviderCapacityScheduler;
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
+  readonly modelOptionValues?: ProviderModelOptionValues;
   readonly sessionId: ProviderSessionId;
+  readonly prompt: string;
+  readonly verifyWorkspace: (signal: AbortSignal) => Promise<string | undefined>;
+  readonly onSessionReady: () => void;
+  readonly resumeCursor: ProviderResumeCursor | undefined;
+  readonly recordCursor: (cursor: ProviderResumeCursor | undefined) => boolean;
+  readonly recordContinuation: (state: "delivery-unknown" | "delivered") => boolean;
+  readonly requireResumeCursor: boolean;
   readonly maxEvents: number;
   readonly timeoutMs: number;
   readonly shutdownTimeoutMs: number;
   readonly shutdown: SessionShutdown;
   readonly onTextDelta?: AgentRunSessionRuntimeOptions["onTextDelta"];
+  readonly onChildActivity?: AgentRunSessionRuntimeOptions["onChildActivity"];
+  readonly onUserMessage?: AgentRunSessionRuntimeOptions["onUserMessage"];
+  readonly interactions: AgentRunSessionRuntimeOptions["interactions"];
+  readonly onConnectionReady: (
+    connection: ProviderConnection,
+    sessionId: ProviderSessionId,
+  ) => void;
+  readonly onSessionEnding: () => void;
   readonly appManagedTools?: AppManagedToolSet | undefined;
 }
 
 interface ManagedSessionState {
   outcome: AgentRunSessionOutcome | undefined;
   responseText: string;
+  fileReports: Array<AgentRunResultEvidence["files"]["items"][number]>;
+  toolExecutions: Array<AgentRunResultEvidence["checks"]["items"][number]>;
+  filesTruncated: boolean;
+  toolsTruncated: boolean;
   inputTokens: number;
   outputTokens: number;
   sawUsage: boolean;
@@ -651,6 +1216,10 @@ function runManagedSession(
       const state: ManagedSessionState = {
         outcome: undefined,
         responseText: "",
+        fileReports: [],
+        toolExecutions: [],
+        filesTruncated: false,
+        toolsTruncated: false,
         inputTokens: 0,
         outputTokens: 0,
         sawUsage: false,
@@ -713,6 +1282,7 @@ function runManagedSession(
           onSuccess: (outcome: AgentRunSessionOutcome) => outcome,
         }),
       );
+      const evidence = sessionEvidence(state);
       if (finished === "timed-out") {
         // Deliberately not recorded on `state.outcome`: the provider never
         // reported a terminal event, so the shutdown below must still interrupt
@@ -721,11 +1291,41 @@ function runManagedSession(
         return {
           kind: "interrupted",
           reason: "Managed AgentRun turn exceeded its runtime deadline.",
+          ...(evidence === undefined ? {} : { evidence }),
         };
       }
-      return finished;
+      return { ...finished, ...(evidence === undefined ? {} : { evidence }) };
     }),
   );
+}
+
+function sessionEvidence(state: ManagedSessionState): AgentRunResultEvidence | undefined {
+  if (
+    state.fileReports.length === 0 &&
+    state.toolExecutions.length === 0 &&
+    !state.filesTruncated &&
+    !state.toolsTruncated
+  )
+    return undefined;
+  return {
+    files: {
+      status: state.filesTruncated
+        ? "truncated"
+        : state.fileReports.length > 0
+          ? "recorded"
+          : "unavailable",
+      items: state.fileReports,
+      reviewStatus: "unavailable",
+    },
+    checks: {
+      status: state.toolsTruncated
+        ? "truncated"
+        : state.toolExecutions.length > 0
+          ? "recorded"
+          : "unavailable",
+      items: state.toolExecutions,
+    },
+  };
 }
 
 /**
@@ -739,6 +1339,11 @@ function runSessionTurn(
   releaseCapacity: () => void,
 ): Effect.Effect<AgentRunSessionOutcome, ProviderFailure, Scope.Scope> {
   return Effect.gen(function* () {
+    const workspaceRefusal = yield* Effect.promise(input.verifyWorkspace);
+    if (workspaceRefusal !== undefined) {
+      return { kind: "interrupted", reason: boundedReason(workspaceRefusal) };
+    }
+    input.onSessionReady();
     const connection = yield* input.driver.acquire({
       instanceId: input.providerInstanceId,
       projectRoot: input.projectRoot,
@@ -748,35 +1353,76 @@ function runSessionTurn(
 
     // A stopped run must also stop a tool call still working for it.
     const toolAbort = new AbortController();
-    yield* Effect.addFinalizer(() => Effect.sync(() => toolAbort.abort()));
     yield* Effect.addFinalizer(() =>
       shutdownProviderSession(connection, input, state, releaseCapacity),
     );
+    // End authority-bearing input before provider teardown, which may need a retry.
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        toolAbort.abort();
+        input.onSessionEnding();
+      }),
+    );
 
-    yield* connection.start({
-      sessionId: input.sessionId,
-      modelId: input.modelId,
-      // The clamped run authority is what reaches the provider. Nothing here
-      // may widen it, and no parent-thread policy is consulted.
-      executionPolicy: input.authority.executionPolicy,
-      tools: input.appManagedTools?.definitions ?? [],
-    });
+    const handle = yield* input.resumeCursor === undefined
+      ? connection.start({
+          sessionId: input.sessionId,
+          modelId: input.modelId,
+          ...(input.modelOptionValues === undefined
+            ? {}
+            : { modelOptionValues: input.modelOptionValues }),
+          // The clamped run authority is what reaches the provider. Nothing here
+          // may widen it, and no parent-thread policy is consulted.
+          executionPolicy: input.authority.executionPolicy,
+          tools: input.appManagedTools?.definitions ?? [],
+        })
+      : connection.resume({
+          sessionId: input.sessionId,
+          resumeCursor: input.resumeCursor,
+          modelId: input.modelId,
+          ...(input.modelOptionValues === undefined
+            ? {}
+            : { modelOptionValues: input.modelOptionValues }),
+          executionPolicy: input.authority.executionPolicy,
+          tools: input.appManagedTools?.definitions ?? [],
+        });
+    if (
+      String(handle.sessionId) !== String(input.sessionId) ||
+      (input.requireResumeCursor &&
+        handle.resumeCursor === undefined &&
+        input.resumeCursor === undefined) ||
+      !input.recordCursor(handle.resumeCursor)
+    ) {
+      return yield* Effect.fail({
+        category: "stale-resume",
+        message:
+          "The provider did not preserve a compatible child session identity and resume cursor.",
+      } satisfies ProviderFailure);
+    }
+
+    input.onConnectionReady(connection, input.sessionId);
 
     const collected = yield* subscribeThenSend({
       connection,
       consume: (events) => collectSessionEvents(connection, events, input, state, toolAbort),
-      send: connection.send({
-        sessionId: input.sessionId,
-        prompt: input.run.task,
-        context: [...input.context],
-        // A managed child gets no attachments; its tools are whatever the
-        // host composed from the run's own clamped authority, or none.
-        attachments: [],
-        tools: [...(input.appManagedTools?.definitions ?? [])],
+      send: Effect.suspend(() => {
+        if (!input.recordContinuation("delivery-unknown"))
+          return Effect.fail({
+            category: "stale-resume",
+            message: "The follow-up could not be recorded before provider delivery.",
+          } satisfies ProviderFailure);
+        return connection.send({
+          sessionId: input.sessionId,
+          prompt: input.prompt,
+          context: [...input.context],
+          attachments: [],
+          tools: [...(input.appManagedTools?.definitions ?? [])],
+        });
       }),
     });
 
     yield* Fiber.join(collected);
+    input.onSessionEnding();
 
     return (
       state.outcome ?? {
@@ -878,155 +1524,298 @@ function collectSessionEvents(
 ): Effect.Effect<void, ProviderFailure> {
   const answeredToolRequestIds = new Set<string>();
   const answeredApprovalRequestIds = new Set<string>();
+  const answeredQuestionRequestIds = new Set<string>();
 
-  return events.pipe(
-    Stream.filter((event) => event.sessionId === input.sessionId),
-    Stream.take(input.maxEvents + 1),
-    Stream.takeUntil(
-      (event) =>
-        event.kind === "waiting" ||
-        event.kind === "completed" ||
-        event.kind === "interrupted" ||
-        event.kind === "failed",
-    ),
-    Stream.runForEach((event) =>
-      Effect.gen(function* () {
-        state.handledEvents += 1;
-        if (state.handledEvents > input.maxEvents) {
-          state.outcome = {
-            kind: "interrupted",
-            reason: "Managed AgentRun turn exceeded its bounded event budget.",
-          };
-          return;
-        }
-        if (event.kind === "text-delta") {
-          const delta = publishableTextDelta(event);
-          if (delta === undefined) return;
-          state.responseText = (state.responseText + delta.text).slice(0, MAX_RESPONSE_CHARACTERS);
-          try {
-            input.onTextDelta?.({
-              runId: input.run.id,
-              text: delta.text,
-              occurredAt: delta.occurredAt,
-            });
-          } catch {
-            // A transient observer must never interrupt provider collection.
-          }
-          return;
-        }
-        if (event.kind === "usage") {
-          const observation = usageFromRuntimeEvent(event);
-          if (observation !== undefined) {
-            state.sawUsage = true;
-            state.inputTokens = observation.inputTokens;
-            state.outputTokens = observation.outputTokens;
-          }
-          return;
-        }
-        if (event.kind === "approval-request") {
-          if (answeredApprovalRequestIds.has(event.requestId)) return;
-          answeredApprovalRequestIds.add(event.requestId);
-          // A managed child has no interactive approver on this path. Declining
-          // keeps the run inside its admitted authority; approving on the
-          // child's behalf would manufacture consent nobody gave.
-          yield* connection.answerApproval({
-            sessionId: input.sessionId,
-            requestId: event.requestId,
-            approved: false,
-          });
-          return;
-        }
-        if (event.kind === "tool-request") {
-          if (answeredToolRequestIds.has(event.requestId)) return;
-          answeredToolRequestIds.add(event.requestId);
-          const requestSignal = connection.toolRequestSignal?.({
-            sessionId: input.sessionId,
-            requestId: event.requestId,
-          });
-          const executionSignal =
-            requestSignal === undefined
-              ? toolAbort.signal
-              : AbortSignal.any([toolAbort.signal, requestSignal]);
-          if (executionSignal.aborted) return;
-          const toolSet = input.appManagedTools;
-          const offered = toolSet?.definitions.some(
-            (definition) => definition.name === event.toolName,
-          );
-          if (toolSet === undefined || offered !== true) {
-            yield* connection.answerTool({
-              sessionId: input.sessionId,
-              requestId: event.requestId,
-              resultJson: JSON.stringify({ error: "tool-unavailable" }),
-              isError: true,
-            });
-            return;
-          }
-          const execution = yield* Effect.promise(async () => {
-            try {
-              return await toolSet.execute({
-                name: event.toolName,
-                inputJson: event.inputJson,
-                signal: executionSignal,
-              });
-            } catch {
-              return { result: { error: "tool-execution-failed" }, isError: true } as const;
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const interactionFailure = yield* Deferred.make<never, ProviderFailure>();
+      const forkInteraction = (effect: Effect.Effect<void, ProviderFailure>) =>
+        Effect.forkScoped(
+          effect.pipe(Effect.catchAll((failure) => Deferred.fail(interactionFailure, failure))),
+        );
+      const collection = events.pipe(
+        Stream.filter((event) => event.sessionId === input.sessionId),
+        Stream.take(input.maxEvents + 1),
+        Stream.takeUntil(
+          (event) =>
+            event.kind === "waiting" ||
+            event.kind === "completed" ||
+            event.kind === "interrupted" ||
+            event.kind === "failed",
+        ),
+        Stream.runForEach((event) =>
+          Effect.gen(function* () {
+            state.handledEvents += 1;
+            if (state.handledEvents > input.maxEvents) {
+              state.outcome = {
+                kind: "interrupted",
+                reason: "Managed AgentRun turn exceeded its bounded event budget.",
+              };
+              return;
             }
-          });
-          if (executionSignal.aborted) return;
-          yield* connection.answerTool({
-            sessionId: input.sessionId,
-            requestId: event.requestId,
-            resultJson: boundedToolResultJson(execution.result),
-            isError: execution.isError === true,
-          });
-          return;
-        }
-        if (event.kind === "waiting") {
-          state.outcome = {
-            kind: "waiting",
-            reason: boundedReason(event.message),
-          };
-          return;
-        }
-        if (event.kind === "interrupted") {
-          state.outcome = {
-            kind: "interrupted",
-            reason: boundedReason(event.message),
-          };
-          return;
-        }
-        if (event.kind === "failed") {
-          state.outcome = { kind: "failed", failure: event.failure };
-          return;
-        }
-        if (event.kind === "completed") {
-          // A provider that completes without a visible reply produced no
-          // result to return to the parent; reporting completion would be a
-          // fabricated success.
-          state.outcome =
-            state.responseText.trim().length === 0
-              ? {
-                  kind: "failed",
-                  failure: {
-                    category: "provider-failed",
-                    message: "The provider completed without a visible reply.",
-                  },
+            if (event.kind === "file-change" && event.instanceId === input.providerInstanceId) {
+              const path = isAbsolute(event.path)
+                ? relative(input.projectRoot, event.path)
+                : event.path;
+              if (
+                path.length === 0 ||
+                path.length > 2048 ||
+                path.includes("\\") ||
+                path.includes("\0") ||
+                path.split("/").includes("..") ||
+                isAbsolute(path)
+              ) {
+                state.filesTruncated = true;
+                return;
+              }
+              const reference = `octant://agent-run/${String(input.run.id)}/generation/${input.run.generation ?? 1}/provider/${event.sessionId}/${event.sequence}`;
+              if (state.fileReports.some((report) => report.reference === reference)) return;
+              if (state.fileReports.length >= 32) {
+                state.filesTruncated = true;
+                return;
+              }
+              state.fileReports.push({
+                path,
+                change: event.change,
+                reference,
+                source: "provider-reported",
+                verified: false,
+              });
+              return;
+            }
+            if (
+              event.kind === "child-agent-activity" &&
+              event.instanceId === input.providerInstanceId
+            ) {
+              input.onChildActivity?.({ run: input.run, event });
+              return;
+            }
+            if (event.kind === "text-delta") {
+              const delta = publishableTextDelta(event);
+              if (delta === undefined) return;
+              state.responseText = (state.responseText + delta.text).slice(
+                0,
+                MAX_RESPONSE_CHARACTERS,
+              );
+              try {
+                input.onTextDelta?.({
+                  runId: input.run.id,
+                  text: delta.text,
+                  occurredAt: delta.occurredAt,
+                });
+              } catch {
+                // A transient observer must never interrupt provider collection.
+              }
+              return;
+            }
+            if (event.kind === "usage") {
+              const observation = usageFromRuntimeEvent(event);
+              if (observation !== undefined) {
+                state.sawUsage = true;
+                state.inputTokens = observation.inputTokens;
+                state.outputTokens = observation.outputTokens;
+              }
+              return;
+            }
+            if (event.kind === "approval-request") {
+              if (answeredApprovalRequestIds.has(event.requestId)) return;
+              answeredApprovalRequestIds.add(event.requestId);
+              yield* forkInteraction(
+                Effect.gen(function* () {
+                  let interactionSignal: AbortSignal | undefined;
+                  const approved = yield* Effect.tryPromise({
+                    try: async (signal) => {
+                      interactionSignal = AbortSignal.any([signal, toolAbort.signal]);
+                      return (
+                        (await input.interactions?.approve?.({
+                          run: input.run,
+                          event,
+                          signal: interactionSignal,
+                        })) ?? false
+                      );
+                    },
+                    catch: (): ProviderFailure => ({
+                      category: "unavailable",
+                      message: "The child permission request could not be answered.",
+                    }),
+                  });
+                  if (interactionSignal?.aborted) return;
+                  yield* connection.answerApproval({
+                    sessionId: input.sessionId,
+                    requestId: event.requestId,
+                    approved,
+                  });
+                }),
+              );
+              return;
+            }
+            if (event.kind === "user-input-request") {
+              if (answeredQuestionRequestIds.has(event.requestId)) return;
+              answeredQuestionRequestIds.add(event.requestId);
+              yield* forkInteraction(
+                Effect.gen(function* () {
+                  let interactionSignal: AbortSignal | undefined;
+                  const answer = yield* Effect.tryPromise({
+                    try: async (signal) => {
+                      interactionSignal = AbortSignal.any([signal, toolAbort.signal]);
+                      return input.interactions?.askUser?.({
+                        run: input.run,
+                        event,
+                        signal: interactionSignal,
+                      });
+                    },
+                    catch: (): ProviderFailure => ({
+                      category: "unavailable",
+                      message: "The child question could not be answered.",
+                    }),
+                  });
+                  if (interactionSignal?.aborted) return;
+                  if (answer === undefined || answer.trim().length === 0) {
+                    yield* Effect.fail({
+                      category: "unsupported",
+                      message:
+                        "The child question was not answered. Resume after providing input or retry explicitly.",
+                    } satisfies ProviderFailure);
+                    return;
+                  }
+                  yield* connection.answerUserInput({
+                    sessionId: input.sessionId,
+                    requestId: event.requestId,
+                    answer,
+                  });
+                  try {
+                    input.onUserMessage?.({
+                      runId: input.run.id,
+                      kind: "answer",
+                      text: `Question: ${event.prompt}\nAnswer: ${answer}`,
+                      occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+                    });
+                  } catch {
+                    /* A display observer does not undo a delivered answer. */
+                  }
+                }),
+              );
+              return;
+            }
+            if (event.kind === "tool-request") {
+              if (answeredToolRequestIds.has(event.requestId)) return;
+              answeredToolRequestIds.add(event.requestId);
+              const requestSignal = connection.toolRequestSignal?.({
+                sessionId: input.sessionId,
+                requestId: event.requestId,
+              });
+              const executionSignal =
+                requestSignal === undefined
+                  ? toolAbort.signal
+                  : AbortSignal.any([toolAbort.signal, requestSignal]);
+              if (executionSignal.aborted) return;
+              const toolSet = input.appManagedTools;
+              const offered = toolSet?.definitions.some(
+                (definition) => definition.name === event.toolName,
+              );
+              if (toolSet === undefined || offered !== true) {
+                yield* connection.answerTool({
+                  sessionId: input.sessionId,
+                  requestId: event.requestId,
+                  resultJson: JSON.stringify({ error: "tool-unavailable" }),
+                  isError: true,
+                });
+                return;
+              }
+              const execution = yield* Effect.promise(async () => {
+                try {
+                  return await toolSet.execute({
+                    name: event.toolName,
+                    inputJson: event.inputJson,
+                    signal: executionSignal,
+                  });
+                } catch {
+                  return { result: { error: "tool-execution-failed" }, isError: true } as const;
                 }
-              : {
-                  kind: "completed",
-                  responseText: state.responseText,
-                  ...(state.sawUsage
-                    ? {
-                        usage: {
-                          inputTokens: state.inputTokens,
-                          outputTokens: state.outputTokens,
-                        },
-                      }
-                    : {}),
-                };
-        }
-      }),
-    ),
+              });
+              if (executionSignal.aborted) return;
+              const output = boundedToolResultJson(execution.result);
+              if (state.toolExecutions.length >= 32) state.toolsTruncated = true;
+              else
+                state.toolExecutions.push({
+                  label: `Tool execution: ${event.toolName.slice(0, 255)}`,
+                  outcome: "unknown",
+                  source: "host-recorded",
+                  reference: `octant://agent-run/${String(input.run.id)}/generation/${input.run.generation ?? 1}/tool/${event.sessionId}/${event.sequence}`,
+                  toolExecution: {
+                    toolName: event.toolName.slice(0, 255),
+                    requestId: event.requestId.slice(0, 255),
+                    isError: execution.isError === true,
+                    output: output.slice(0, 2048),
+                    truncated: output.length > 2048,
+                  },
+                });
+              yield* connection.answerTool({
+                sessionId: input.sessionId,
+                requestId: event.requestId,
+                resultJson: boundedToolResultJson(execution.result),
+                isError: execution.isError === true,
+              });
+              return;
+            }
+            if (event.kind === "waiting") {
+              state.outcome = {
+                kind: "waiting",
+                reason: boundedReason(event.message),
+              };
+              return;
+            }
+            if (event.kind === "interrupted") {
+              state.outcome = {
+                kind: "interrupted",
+                reason: boundedReason(event.message),
+              };
+              return;
+            }
+            if (event.kind === "failed") {
+              state.outcome = { kind: "failed", failure: event.failure };
+              return;
+            }
+            if (event.kind === "completed") {
+              if (!input.recordCursor(event.resumeCursor)) {
+                return yield* Effect.fail({
+                  category: "stale-resume",
+                  message: "The provider returned incompatible child continuation state.",
+                } satisfies ProviderFailure);
+              }
+              // A provider that completes without a visible reply produced no
+              // result to return to the parent; reporting completion would be a
+              // fabricated success.
+              // Some adapters acknowledge a local input queue before native
+              // history is durable. Completion proves this turn was received.
+              input.recordContinuation("delivered");
+              state.outcome =
+                state.responseText.trim().length === 0
+                  ? {
+                      kind: "failed",
+                      failure: {
+                        category: "provider-failed",
+                        message: "The provider completed without a visible reply.",
+                      },
+                    }
+                  : {
+                      kind: "completed",
+                      responseText: state.responseText,
+                      ...(state.sawUsage
+                        ? {
+                            usage: {
+                              inputTokens: state.inputTokens,
+                              outputTokens: state.outputTokens,
+                            },
+                          }
+                        : {}),
+                    };
+            }
+          }),
+        ),
+      );
+      yield* Effect.raceFirst(collection, Deferred.await(interactionFailure));
+    }),
   );
 }
 
@@ -1088,8 +1877,8 @@ function outcomeFromExit(
  * path in this slice, and the routing receipt already records usage quality as
  * unavailable, so this reserves capacity without claiming measured accuracy.
  */
-function estimateInputTokens(run: AgentRun, context: ReadonlyArray<ProviderContextBlock>): number {
-  const characters = context.reduce((total, block) => total + block.text.length, run.task.length);
+function estimateInputTokens(task: string, context: ReadonlyArray<ProviderContextBlock>): number {
+  const characters = context.reduce((total, block) => total + block.text.length, task.length);
   return Math.max(1, Math.ceil(characters / AVERAGE_CHARACTERS_PER_TOKEN));
 }
 
@@ -1104,4 +1893,58 @@ function boundedReason(reason: unknown): string {
   return trimmed.length === 0
     ? "Managed AgentRun session ended unexpectedly."
     : trimmed.slice(0, MAX_REASON_CHARACTERS);
+}
+
+function childSessionBinding(run: AgentRun, driver: ProviderDriver, projectRoot: string): string {
+  const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        run.id,
+        run.requestId,
+        run.parentThreadId,
+        run.routingReceipt.hostId,
+        run.routingReceipt.mode,
+        run.routingReceipt.contextSnapshotId,
+        target.providerInstanceId,
+        target.modelId,
+        driver.kind,
+        projectRoot,
+        run.workspaceReceipt,
+        run.authority,
+        ...(run.routingReceipt.rawReasoning === undefined ? [] : [run.routingReceipt.rawReasoning]),
+      ]),
+    )
+    .digest("hex");
+}
+
+function validResumeCursor(
+  cursor: ProviderResumeCursor,
+  input: {
+    readonly driver: ProviderDriver;
+    readonly run: AgentRun;
+    readonly projectRoot: string;
+    readonly sessionId: ProviderSessionId;
+  },
+): boolean {
+  try {
+    const decoded = decodeProviderResumeCursor(cursor);
+    if (
+      decoded.driverKind !== input.driver.kind ||
+      new TextEncoder().encode(JSON.stringify(decoded)).byteLength > 60 * 1024
+    )
+      return false;
+    const binding = decoded.binding;
+    if (binding === undefined) return true;
+    const target = effectiveAgentRunExecutionTarget(input.run.routingReceipt);
+    return (
+      String(binding.instanceId) === String(target.providerInstanceId) &&
+      String(binding.sessionId) === String(input.sessionId) &&
+      binding.projectRoot === input.projectRoot &&
+      binding.mode === input.run.routingReceipt.mode &&
+      String(binding.modelId) === String(target.modelId)
+    );
+  } catch {
+    return false;
+  }
 }

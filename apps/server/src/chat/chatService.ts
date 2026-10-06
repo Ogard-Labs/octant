@@ -158,7 +158,11 @@ import {
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
 import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
-import { agentResultDeliveryPrompt } from "../agentRun/agentResultDeliveryPrompt";
+import { agentResultDeliveryBatchPrompt } from "../agentRun/agentResultDeliveryPrompt";
+import {
+  coveredAgentResultDeliveryMembers,
+  validateAgentResultDelivery,
+} from "../agentRun/agentResultDeliveryBatch";
 import { Schema } from "effect";
 import { Effect } from "effect";
 import {
@@ -2268,42 +2272,51 @@ export class ChatService {
           }),
         );
       }
-      const run = this.#agentRuns.getById(command.runId);
-      if (run === undefined || String(run.parentThreadId) !== String(command.threadId)) {
+      const requested = command;
+      const validation = validateAgentResultDelivery({
+        delivery: requested,
+        threadId: String(thread.id),
+        mode: "chat",
+        getById: (id) => this.#agentRuns?.getById(id),
+      });
+      if (validation.kind === "invalid")
         throw new ChatServiceError(
-          decodeChatFailure({
-            category: "invalid",
-            message: "The named subagent run does not belong to this Chat thread.",
-          }),
+          decodeChatFailure({ category: "invalid", message: validation.detail }),
         );
-      }
+      const view = this.#persistence.readChatThreadView(thread.id);
+      const existing = view?.turns.find(
+        (turn) =>
+          turn.delivery !== undefined &&
+          coveredAgentResultDeliveryMembers(requested, [turn.delivery]).length > 0,
+      );
+      const covered = new Set(
+        coveredAgentResultDeliveryMembers(
+          requested,
+          (view?.turns ?? []).flatMap((turn) =>
+            turn.delivery === undefined ? [] : [turn.delivery],
+          ),
+        ).map((member) => String(member.runId)),
+      );
       if (
-        run.lifecycleStatus !== "completed" &&
-        run.lifecycleStatus !== "failed" &&
-        run.lifecycleStatus !== "cancelled"
-      ) {
+        validation.runs.some(
+          (run) => run.resultDelivery !== undefined && !covered.has(String(run.id)),
+        )
+      )
         throw new ChatServiceError(
           decodeChatFailure({
             category: "invalid",
-            message: "The named subagent run has not finished.",
+            message: "A named subagent run's result delivery already settled.",
           }),
         );
-      }
+      if (existing !== undefined) return { kind: "existing" as const, turn: existing };
       this.#admitHarnessTurn(thread);
       this.#assertExpectedThreadVersion(thread, command.expectedVersion);
       const timestamp = decodeTimestamp(this.#clock());
-      const prompt = agentResultDeliveryPrompt(run, this.#agentRuns?.resultText(run.id));
+      const prompt = agentResultDeliveryBatchPrompt(validation.runs, (id) =>
+        this.#agentRuns?.resultText(id),
+      );
       const userMessage = this.#prepareContent(thread.id, "user", prompt);
       const userMessageRef = userMessage.reference;
-      const view = this.#persistence.readChatThreadView(thread.id);
-      const existing = view?.turns.find(
-        (candidate) =>
-          candidate.delivery !== undefined &&
-          String(candidate.delivery.runId) === String(command.runId),
-      );
-      if (existing !== undefined) {
-        return { kind: "existing" as const, turn: existing };
-      }
       this.#assertNoActiveTurn(view, thread.id);
       const sequence = (view?.turns.length ?? 0) + 1;
       const turnId = this.#uuid() as ChatTurn["id"];
@@ -2331,6 +2344,23 @@ export class ChatService {
         executionContext,
         undefined,
       );
+      const beforeAdmission = validateAgentResultDelivery({
+        delivery: requested,
+        threadId: String(thread.id),
+        mode: "chat",
+        getById: (id) => this.#agentRuns?.getById(id),
+      });
+      if (
+        beforeAdmission.kind === "invalid" ||
+        beforeAdmission.runs.some((run) => run.resultDelivery !== undefined)
+      ) {
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "stale",
+            message: "A child result changed while preparing its delivery.",
+          }),
+        );
+      }
       const turn = beginChatTurn(prepared.executionThread, {
         turnId,
         attemptId: this.#uuid() as ChatAttempt["id"],
@@ -2341,7 +2371,14 @@ export class ChatService {
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
         userMessageRef,
-        delivery: { kind: "agent-result", runId: run.id },
+        delivery: {
+          kind: "agent-result",
+          runId: command.runId,
+          ...(command.runIds === undefined ? {} : { runIds: command.runIds }),
+          ...(command.runGenerations === undefined
+            ? {}
+            : { runGenerations: command.runGenerations }),
+        },
         sequence,
         expectedVersion: command.expectedVersion,
         createdAt: timestamp,

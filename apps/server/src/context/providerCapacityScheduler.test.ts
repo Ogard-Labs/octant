@@ -534,6 +534,24 @@ describe("ProviderCapacityScheduler", () => {
     expect(state.scheduler.snapshot(providerA)).toEqual(beforeReconcileSnapshot);
   });
 
+  it("returns all reserved capacity before execution and refuses to release running work as unstarted", () => {
+    const { scheduler } = fixture();
+    scheduler.updateProviderFacts({
+      limits: providerLimits(providerA),
+      enforcement: { kind: "observable-api", maxObservableConcurrency: 2 },
+    });
+    const before = scheduler.snapshot(providerA);
+    expect(scheduler.submit(work(75)).status).toBe("dispatched");
+    expect(scheduler.releaseUnstarted(id(75)).reservation.state).toBe("released");
+    expect(scheduler.snapshot(providerA)).toEqual(before);
+    expect(scheduler.releaseUnstarted(id(75)).dispatched).toEqual([]);
+    scheduler.submit(work(76));
+    scheduler.markRunning(id(76));
+    const running = scheduler.snapshot(providerA);
+    expect(() => scheduler.releaseUnstarted(id(76))).toThrow(ProviderCapacitySchedulerRejected);
+    expect(scheduler.snapshot(providerA)).toEqual(running);
+  });
+
   it("releases never-dispatched cancellation without consuming capacity", () => {
     const { scheduler } = fixture();
     scheduler.updateProviderFacts({

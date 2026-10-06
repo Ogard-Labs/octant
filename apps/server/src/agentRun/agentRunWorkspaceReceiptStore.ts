@@ -14,6 +14,10 @@ const RECEIPT_VERSION = 1;
 export interface StoredAgentRunWorkspaceReceipt extends AgentRunIssuedWorkspaceGrant {
   readonly windowId: string;
   readonly issuedAt: string;
+  readonly requestId?: string;
+  readonly repositoryId?: string;
+  readonly startingRevision?: string;
+  readonly parentCheckoutRoot?: string;
 }
 
 export interface AgentRunWorkspaceReceiptStoreOptions {
@@ -47,6 +51,10 @@ function decodeStored(value: unknown): StoredAgentRunWorkspaceReceipt | undefine
   const checkoutRoot = optionalString("checkoutRoot");
   const worktreeRoot = optionalString("worktreeRoot");
   const worktreeState = optionalString("worktreeState");
+  const requestId = optionalString("requestId");
+  const repositoryId = optionalString("repositoryId");
+  const startingRevision = optionalString("startingRevision");
+  const parentCheckoutRoot = optionalString("parentCheckoutRoot");
   return {
     receiptId: value.receiptId,
     parentThreadId: value.parentThreadId,
@@ -62,6 +70,10 @@ function decodeStored(value: unknown): StoredAgentRunWorkspaceReceipt | undefine
     ...(checkoutRoot === undefined ? {} : { checkoutRoot }),
     ...(worktreeRoot === undefined ? {} : { worktreeRoot }),
     ...(worktreeState === undefined ? {} : { worktreeState }),
+    ...(requestId === undefined ? {} : { requestId }),
+    ...(repositoryId === undefined ? {} : { repositoryId }),
+    ...(startingRevision === undefined ? {} : { startingRevision }),
+    ...(parentCheckoutRoot === undefined ? {} : { parentCheckoutRoot }),
   };
 }
 
@@ -109,6 +121,12 @@ export class AgentRunWorkspaceReceiptStore {
       ...(input.checkoutRoot === undefined ? {} : { checkoutRoot: input.checkoutRoot }),
       ...(input.worktreeRoot === undefined ? {} : { worktreeRoot: input.worktreeRoot }),
       ...(input.worktreeState === undefined ? {} : { worktreeState: input.worktreeState }),
+      ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
+      ...(input.repositoryId === undefined ? {} : { repositoryId: input.repositoryId }),
+      ...(input.startingRevision === undefined ? {} : { startingRevision: input.startingRevision }),
+      ...(input.parentCheckoutRoot === undefined
+        ? {}
+        : { parentCheckoutRoot: input.parentCheckoutRoot }),
     };
     await this.#write(stored);
     return stored;
@@ -135,6 +153,7 @@ export class AgentRunWorkspaceReceiptStore {
   }
 
   async findReusable(input: {
+    readonly requestId?: string;
     readonly parentThreadId: string;
     readonly mode: OctantMode;
     readonly windowId: string;
@@ -157,6 +176,11 @@ export class AgentRunWorkspaceReceiptStore {
       ) {
         continue;
       }
+      if (
+        input.mode === "code" &&
+        (input.requestId === undefined || receipt.requestId !== input.requestId)
+      )
+        continue;
       return receipt;
     }
     return undefined;
