@@ -56,6 +56,18 @@ is showing another computer's work, the row names that computer. Up to five rows
 show, then **+N more** opens Running. Choose a row to open its thread. When
 nothing is running, the card says so in one line.
 
+**Needs you** comes first and appears only while an agent is waiting on you. It
+lists every approval and question across your Projects, oldest first: the
+provider mark, the thread's title, how long it has waited, and what it asked.
+Choose **Approve** or **Deny** on an approval. A question with choices has one
+numbered button per choice (press the number while the row has focus), and
+**Reply…** opens the thread so you can type your own answer. Answering works the
+same as in the thread itself, with the same permissions. If the request changed
+before your answer arrived (it was answered elsewhere, or the turn ended), the
+row says so once and refreshes. Up to five rows show, then **+N more** opens the
+Inbox. On Work this covers Chat and Work threads; on Code, Code threads. The
+card is only available in a window on this computer.
+
 **Customize**, on the right under the composer, turns each card on or off and
 reorders them: drag a card by its handle, or use the up and down buttons from the
 keyboard. **Reset to default** puts them back. Your choices are kept on this

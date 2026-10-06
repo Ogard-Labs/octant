@@ -389,7 +389,14 @@ fills at 5% ink on hover and focus, the provider mark and a row label on its
 first line, and a mono meta line for what is happening. The Customize panel is a
 popover at most 340px wide: one row per card with a drag grip, the icon, the
 title, up and down icon buttons, and a switch, then **Reset to default**; a
-dragged row marks its drop target with a hairline above it. **Working now**
+dragged row marks its drop target with a hairline above it. **Needs you**
+comes first and leaves the grid while nothing waits: each row is the provider
+mark (or the mode's glyph), the thread title, "Waiting 4m" with a pause glyph
+at the 12px step, the Project as meta text, and the request text clamped to two
+lines, with small buttons below (Approve filled, Deny ghost; a question's
+choices as outline buttons with a leading number, then a ghost Reply…). Rows
+are told apart by a hairline, never a tinted fill, and the waiting state is a
+glyph and words with no hue. **Working now**
 lists up to five rows of threads and agent runs in progress, each with the
 provider mark, the title, a time, and a one-line step; it says "Nothing is
 running right now." when empty. A running tool is shown in mono
