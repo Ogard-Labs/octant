@@ -7,3 +7,4 @@ export * from "./driver";
 export * from "./driverPlugins";
 export * from "./acpClientCapabilities";
 export * from "./subscriptionOAuth";
+export * from "./childObservations";

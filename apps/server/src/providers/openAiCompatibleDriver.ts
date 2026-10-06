@@ -432,11 +432,12 @@ async function sendCompatibleRequest(
   const onEvent = (event: ProtocolTurnEvent) => {
     // Tool calls arrive on the result; the loop asks for them as a step.
     if (event.kind === "tool-call") return;
-    stream.onEvent(
-      event.kind === "usage"
-        ? { kind: "usage", inputTokens: event.inputTokens, outputTokens: event.outputTokens }
-        : { kind: event.kind, text: event.text },
-    );
+    if (event.kind === "usage") {
+      const { sequence: _sequence, ...usage } = event;
+      stream.onEvent(usage);
+      return;
+    }
+    stream.onEvent({ kind: event.kind, text: event.text });
   };
   const shared = {
     endpoint,

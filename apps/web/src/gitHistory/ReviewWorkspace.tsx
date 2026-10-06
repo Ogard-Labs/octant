@@ -1,6 +1,8 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { createGitHistoryClient } from "@octant/client-runtime/git-history-client";
 import type { DockReviewToolProps } from "../shell/DockReviewTool";
+import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import { SavedAgentReview, type AgentResultReviewRequest } from "./SavedAgentReview";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ShellState } from "../shell/ShellState";
 import "./git-history.css";
@@ -12,8 +14,26 @@ const History = lazy(() =>
   import("./GitHistoryPanel").then((module) => ({ default: module.GitHistoryPanel })),
 );
 
-/** Review owns the two Git views. Neither view is loaded until it is selected. */
-export function ReviewWorkspace(props: DockReviewToolProps) {
+export interface ReviewWorkspaceProps extends DockReviewToolProps {
+  readonly agentRunClient?: Pick<AgentRunClient, "review">;
+  readonly requestedAgentReview?: AgentResultReviewRequest;
+  readonly onAgentReviewBack?: () => void;
+}
+
+/** Saved child comparisons never mount the live checkout views. */
+export function ReviewWorkspace(props: ReviewWorkspaceProps) {
+  const request = props.requestedAgentReview;
+  if (request !== undefined) {
+    return (
+      <SavedAgentReview
+        key={`${props.threadId}:${request.packet.runId}:${request.packet.generation}:${request.filePath ?? ""}`}
+        request={request}
+        parentThreadId={String(props.threadId)}
+        {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
+        {...(props.onAgentReviewBack === undefined ? {} : { onBack: props.onAgentReviewBack })}
+      />
+    );
+  }
   const checkoutId = props.checkoutId ?? props.controller?.activeView?.checkout.id;
   return (
     <BoundReview

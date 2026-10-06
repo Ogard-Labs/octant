@@ -30,10 +30,44 @@ export interface NativeHarnessMessage {
     | undefined;
 }
 
+/**
+ * What one request cost, as the endpoint reported it. `inputTokens` is all
+ * input, cached or not, so context math does not depend on whether an endpoint
+ * caches; the cache figures are how much of it was read from or written to the
+ * prompt cache. `reasoningTokens` is the part of `outputTokens` spent thinking.
+ * A figure the endpoint did not report is absent, never zero.
+ */
+export interface NativeHarnessUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+  readonly reasoningTokens?: number;
+}
+
+/** A figure only appears in the total once some request has reported it. */
+export function addNativeHarnessUsage(
+  total: NativeHarnessUsage,
+  step: NativeHarnessUsage,
+): NativeHarnessUsage {
+  const sum = (a: number | undefined, b: number | undefined) =>
+    a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
+  const cacheRead = sum(total.cacheReadInputTokens, step.cacheReadInputTokens);
+  const cacheWrite = sum(total.cacheWriteInputTokens, step.cacheWriteInputTokens);
+  const reasoning = sum(total.reasoningTokens, step.reasoningTokens);
+  return {
+    inputTokens: total.inputTokens + step.inputTokens,
+    outputTokens: total.outputTokens + step.outputTokens,
+    ...(cacheRead === undefined ? {} : { cacheReadInputTokens: cacheRead }),
+    ...(cacheWrite === undefined ? {} : { cacheWriteInputTokens: cacheWrite }),
+    ...(reasoning === undefined ? {} : { reasoningTokens: reasoning }),
+  };
+}
+
 export type NativeHarnessStreamEvent =
   | { readonly kind: "text-delta"; readonly text: string }
   | { readonly kind: "reasoning-delta"; readonly text: string }
-  | { readonly kind: "usage"; readonly inputTokens: number; readonly outputTokens: number }
+  | ({ readonly kind: "usage" } & NativeHarnessUsage)
   /** The request failed in a way that usually passes and goes out again after `delayMs`. */
   | {
       readonly kind: "retrying";
@@ -56,7 +90,7 @@ export interface NativeHarnessRequest {
 export interface NativeHarnessResponse {
   readonly text: string;
   readonly toolCalls: ReadonlyArray<NativeHarnessTranscriptToolCall>;
-  readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
+  readonly usage?: NativeHarnessUsage;
   readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
 }
 

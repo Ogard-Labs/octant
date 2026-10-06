@@ -6,11 +6,13 @@ description: Child agent runs, their hierarchy, isolation, recovery, and how res
 
 Subagents are child agent runs that a thread's agent starts to delegate
 research, implementation, or review. They are one durable **AgentRun** each and
-inherit the parent thread's provider, model, and authority ceiling.
+run under the parent thread's authority ceiling. Their provider and model can
+come from the parent, a configured role slot, or an explicit eligible target.
 
-Only the thread's agent starts a subagent: the Octant Harness hands it a
-bounded task with its `delegate` tool, and the subagent's result returns to that
-agent through `collect`. You watch and control subagents from the composer and
+Only the thread's agent starts a subagent. Octant's harness and supported
+provider harnesses both hand bounded tasks to the same host-managed child
+runtime, and both can collect results and continue a completed child. An
+Octant-harness parent can use a provider-harness child and the reverse. You watch and control subagents from the composer and
 the **Agents** dock tool, but you do not start them there; a subagent a person
 started by hand would have no agent to hand its result back to.
 
@@ -19,28 +21,67 @@ that run. The document appears on the parent thread, and the child is recorded
 as its author. A provider that cannot carry Octant's tools does not start the
 child.
 
+## Observations and result evidence
+
+Managed children retain their existing controls. A provider-owned child report,
+when a provider supports it, is a read-only observation with its own identity and
+bounded activity history. Unknown model or history stays unknown. Observations
+cannot be messaged, cancelled, steered, or resumed through managed-child controls.
+The current bundled adapters keep native children disabled or unsupported, so
+there is no verified native-child observation support from those adapters.
+
+A result belongs to one child, execution generation, provider/model and workspace.
+Follow-ups preserve earlier generations. The child’s reported summary is separate
+from recorded lifecycle blockers, provider-reported file changes, and tools the
+host actually executed. File reports are unverified; a tool return is not proof
+that tests passed. Missing and truncated evidence is shown explicitly. A completed
+child does not establish review, merge, deployment, or completion of its parent.
+
+For writable Code children, **Review changes** opens the host's saved comparison
+for that generation in **Review**. It includes committed changes and non-ignored
+new files from the child's own workspace. Later follow-ups keep separate
+comparisons. Captured file links open this saved diff; they do not open the
+parent's current files. Review identifies partial or binary content and offers no
+staging or discard controls for saved child results.
+
+A waiting child can update its comparison when it settles again. If its original
+baseline is missing after a restart or Git cleanup, review is unavailable rather
+than showing only the resumed portion. Chat, Work and Plan children have no Git
+review capture. Failed captures and older sessions without a baseline also show
+review unavailable. Provider file reports remain separate, unverified claims.
+Tool records retain bounded output for inspection. Deleting the parent's content
+removes saved comparisons, tool records and earlier result text.
+
 ## Availability
 
 Subagent infrastructure — contracts, journaling, projection, the
 orchestration service, process supervision, and packaged child smoke — is on
 `main`. **Settings → Octant Harness → Helper agents** holds one
 server-authoritative switch, **Let the agent start subagents**: on (the
-default) or off. Role cards and mixed-vendor routing per role remain planned.
+default) or off. **Settings → Octant Harness → Model slots** configures shared
+role routing for both Octant and provider harnesses; Projects can override it.
 
-A thread's working subagents show in a small card behind its composer in
-Chat, Work, and Code: one row each with its task and "Working · 12s". Click the
-card's head to fold it to a tab; Octant remembers that. Hover or focus a row to
-**Stop** it; **Stop all** asks first and cancels only that thread's subagents.
-Choosing a row opens the **Agents** dock tool on that subagent. Finished
-subagents leave the card: **Environment → Subagents** lists every one, working
-and finished, and marks results you have not reviewed **To review**.
+A thread's subagents appear in a compact card above its composer in Chat,
+Work, and Code. It starts collapsed and remembers your choice. Its counts keep
+failed, waiting and unreviewed children visible. Expand it to preview up to
+three active or unresolved children with their task, status, model and last
+reported activity. **View all** opens the full **Agents** list, including finished
+children. A row opens that child's detail. **Stop** acts on one managed child;
+**Stop all** asks first and cancels only this thread's managed children.
+Observation-only rows have no execution controls. **Environment → Subagents**
+also lists managed children and marks results you have not reviewed **To review**.
+
+When the agent reports a task list, its separate collapsed header shows completed
+steps and failed or waiting counts. Expand it to read the steps. Task progress
+does not indicate that subagents or the parent delivery are complete.
 
 The **Agents** dock tool lists the thread's subagents under **Working** and
 **Finished** and marks results you have not reviewed with **Needs review**. On
 a thread with none it says they appear when the agent hands off part of its
 work, or that subagents are turned off in Settings. Choosing a row opens its page: the task as the brief,
-then its replies, live while it runs, or its retained final reply once the live
-conversation is gone. **Mark reviewed**, **Steer**, **Retry**, **Resume**, and
+then its replies, live while it runs, with a bounded saved conversation after
+restart. Older entries may be omitted; the view identifies truncation or stale
+history. **Mark reviewed**, **Steer**, **Retry**, **Resume**, and
 **Cancel** sit under the conversation when they apply. A subagent that runs
 inside the provider's own runtime says so on its page.
 
@@ -63,10 +104,13 @@ right-dock tool, not a generic Thread-tab accordion.
 
 Every child is one **AgentRun** with an execution kind of `provider-native`
 or `octant-managed`, and a role of **Research**, **Implementation**,
-**Review**, or **Custom**. Children normally inherit the parent's
-provider/model/reasoning. Mixed-vendor routing is **opt-in and disabled by
-default**; enabling it opens role-card setup for Research, Implementation,
-and Review, with advanced rules behind an **Advanced** disclosure.
+**Review**, or **Custom**. Research uses **Research and tasks**, implementation
+and custom work use **Main model**, and review uses **Careful review** in Model
+slots. An unconfigured route can use the parent's eligible model. A configured
+route that is unavailable reports that problem rather than silently choosing a
+different provider. The lead can also name an eligible provider, model, and
+supported reasoning setting for a specific child. All choices retain the same
+authority and budget checks.
 
 A provider's own subagent feature stays off inside Octant, because a child it
 starts itself would run where Octant cannot show it or answer its approvals.
@@ -102,7 +146,8 @@ an immutable ceiling set at start — a child can narrow it, never widen it.
 - **Work** children stay inside the one OS-confined Project root.
 - **Code** children get **isolated worktrees** by default; the worktree must
   be verified before the child starts, and failure prevents running in the
-  parent checkout.
+  parent checkout. Concurrent children use separate worktrees, starting from
+  the parent's committed revision. Uncommitted parent edits are not copied.
 
 ## Lifecycle, cancellation, and recovery
 
@@ -112,9 +157,22 @@ cancellation or restart resolves to **Waiting** or **Interrupted**, never
 **Completed**.
 
 Cancellation is leaf-first; a run is **Cancelled** only after its stop is
-confirmed. After a restart, Octant rebuilds the hierarchy, resumable runs
-reconnect, and non-resumable runs become **Interrupted** with a restart or
-retry. Approvals, tasks, outputs, transcripts, and usage are retained.
+confirmed. After a restart, Octant rebuilds the hierarchy and identifies
+interrupted work. **Resume** reconnects to the saved provider session, keeping
+its conversation and verified workspace. If the provider cannot resume it, the
+saved session is missing, or its authority no longer matches, Octant refuses
+Resume and asks you to use **Retry**, which starts a new execution.
+
+When a child needs an approval or an answer, the composer shows **A subagent
+needs your input**. **Review request** opens its detail view. The request names
+the child, provider, and model. Allowing a child action covers that request
+only; it does not grant access to siblings or later requests. Unanswered
+requests expire when the child stops or Octant restarts.
+
+**Steer** sends a note to a running child when its provider supports it.
+Octant's harness applies the note at the next complete response or tool-results
+boundary; Codex delivers it to the active turn. An unsupported provider reports
+that the note was not delivered.
 
 A run waiting for other runs to finish never starts on its own after a
 restart, even once they finish: **Resume** on the run, or resuming the parent
@@ -123,6 +181,33 @@ a restart, a waiting run stays waiting too, and its own **Resume** asks you to
 resume the parent thread first.
 
 ## Following up on results
+
+Finished siblings can return together in one parent turn. Octant does not wait
+for the entire group: independent results can reach the parent while other
+children are still working. Saved delivery records prevent a restart from
+delivering the same result twice.
+
+Open a completed managed child and choose **Follow up** to send another
+instruction in its existing conversation. The parent agent can do the same
+through either delegation tool. The provider must support genuine resume; if
+it cannot, start a new delegation from the parent. Cancelled children cannot
+continue. The earlier conversation stays available, and the new reply needs
+its own acknowledgement. The previous reply must reach the parent or be
+collected before a follow-up starts. Checking status does not collect it; an
+oversized reply remains available when a tool cannot return it completely.
+A follow-up also requires the child's provider, model, and reasoning choice to
+remain available under the parent's current Project policy.
+If capacity or the spend ceiling refuses a follow-up, the completed reply and
+your draft stay available so you can retry. Once accepted, the follow-up is saved
+with the child. If its connection fails before sending, the child becomes
+interrupted; choose **Resume** to send the saved follow-up in its existing
+conversation. Recovery sends an unsent follow-up as written; if delivery is
+uncertain, Octant says so and preserves it for inspection rather than silently
+sending it again.
+
+When the lead includes parent context, the child receives a bounded, attributed
+selection of accepted prompts and completed replies. Missing or omitted text
+is identified; private reasoning and tool bodies are excluded.
 
 Child results must be **acknowledged** by the parent. On a terminal parent
 turn, unacknowledged, failed, interrupted, waiting, or unfinished descendants

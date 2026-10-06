@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import {
   decodeAgentRunParentThreadId,
+  decodeAgentRunRequestId,
   decodeChatThread,
   decodeChatThreadId,
   decodeCodeThread,
@@ -22,11 +24,14 @@ import {
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { contextKeyForProject, defaultWindowWorkspace } from "@octant/domain";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { WINDOW_AUTHORITY_TTL_MS, WindowAuthorityStore } from "../windowAuthorityStore";
 import { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
 import {
   authorizeAgentRunCreation,
+  boundAgentRunLiveAuthority,
   layoutContainsAgentRunThread,
+  scheduledAgentRunLiveAuthority,
 } from "./authorizeAgentRunCreation";
 
 const now = "2026-08-29T12:00:00.000Z";
@@ -186,6 +191,104 @@ function authorize(input: {
     codeSessionAuthority: input.authority ?? new CodeSessionAuthorityStore(),
   });
 }
+
+describe("live child execution authority", () => {
+  it("expires a cached child execution window without waiting for renderer authentication", () => {
+    const startedAt = Date.parse(now);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    try {
+      const authority = new CodeSessionAuthorityStore();
+      const otherWindow = decodeWindowId("00000000-0000-4000-8000-00000000a002");
+      const requestId = decodeAgentRunRequestId("00000000-0000-4000-8000-00000000a003");
+      const otherRequestId = decodeAgentRunRequestId("00000000-0000-4000-8000-00000000a004");
+      const parentThreadId = parentId(ids.code);
+      const executionWindows = new Map([
+        [requestId, { windowId: ids.window, parentThreadId }],
+        [otherRequestId, { windowId: otherWindow, parentThreadId }],
+      ]);
+      const revoked: string[] = [];
+      const windowAuthorityStore = new WindowAuthorityStore((windowId) => {
+        revoked.push(String(windowId));
+        authority.revokeWindow(windowId);
+        for (const [request, binding] of executionWindows) {
+          if (String(binding.windowId) === String(windowId)) executionWindows.delete(request);
+        }
+      });
+      windowAuthorityStore.register({
+        windowId: ids.window,
+        capability: randomBytes(32).toString("base64url"),
+        now: startedAt,
+      });
+      windowAuthorityStore.register({
+        windowId: otherWindow,
+        capability: randomBytes(32).toString("base64url"),
+        now: startedAt + 1_000,
+      });
+      authority.grantFullAccess(ids.window, ids.code);
+      authority.grantFullAccess(otherWindow, ids.code);
+      const readWindowWorkspace = vi.fn(() => undefined);
+      const persistence = { readCodeThread: () => codeThread(), readWindowWorkspace };
+      const input = {
+        persistence,
+        run: { requestId, parentThreadId, routingReceipt: { mode: "code" as const } },
+        executionWindows,
+        codeSessionAuthority: authority,
+        windowAuthorityStore,
+      };
+
+      clock.mockReturnValue(startedAt + WINDOW_AUTHORITY_TTL_MS - 1);
+      expect(boundAgentRunLiveAuthority(input)?.executionPolicy).toBe("full-access");
+      expect(revoked).toEqual([]);
+      expect(readWindowWorkspace).not.toHaveBeenCalled();
+
+      // No authentication or window listing happens between these reads.
+      clock.mockReturnValue(startedAt + WINDOW_AUTHORITY_TTL_MS);
+      expect(boundAgentRunLiveAuthority(input)?.executionPolicy).toBe("approval-gated");
+      expect(revoked).toEqual([String(ids.window)]);
+      expect(executionWindows.has(requestId)).toBe(false);
+      expect(authority.effectiveThread(ids.window, codeThread()).executionPolicy).toBe(
+        "approval-gated",
+      );
+      expect(
+        boundAgentRunLiveAuthority({ ...input, run: { ...input.run, requestId: otherRequestId } })
+          ?.executionPolicy,
+      ).toBe("full-access");
+      expect(executionWindows.has(otherRequestId)).toBe(true);
+      expect(readWindowWorkspace).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("uses only the admitted window's session grant without requiring a visible parent tab", () => {
+    const authority = new CodeSessionAuthorityStore();
+    const otherWindow = decodeWindowId("00000000-0000-4000-8000-00000000a002");
+    const readWindowWorkspace = vi.fn(() => undefined);
+    const input = {
+      persistence: { readCodeThread: () => codeThread(), readWindowWorkspace } as never,
+      run: { parentThreadId: parentId(ids.code), routingReceipt: { mode: "code" } } as never,
+      executionWindow: { windowId: ids.window, codeSessionAuthority: authority },
+    };
+    authority.grantFullAccess(otherWindow, ids.code);
+    expect(scheduledAgentRunLiveAuthority(input)?.executionPolicy).toBe("approval-gated");
+    authority.grantFullAccess(ids.window, ids.code);
+    expect(scheduledAgentRunLiveAuthority(input)?.executionPolicy).toBe("full-access");
+    expect(readWindowWorkspace).not.toHaveBeenCalled();
+    authority.revokeWindow(ids.window);
+    expect(scheduledAgentRunLiveAuthority(input)?.executionPolicy).toBe("approval-gated");
+    authority.grantFullAccess(ids.window, ids.code);
+    const { executionWindow: _, ...afterRestart } = input;
+    expect(scheduledAgentRunLiveAuthority(afterRestart)?.executionPolicy).toBe("approval-gated");
+    expect(
+      scheduledAgentRunLiveAuthority({
+        ...input,
+        persistence: {
+          readCodeThread: () => ({ ...codeThread(), lifecycle: "archived" }),
+        } as never,
+      }),
+    ).toBeUndefined();
+  });
+});
 
 describe("authorizeAgentRunCreation", () => {
   it("refuses creation when the window has no persisted workspace", () => {

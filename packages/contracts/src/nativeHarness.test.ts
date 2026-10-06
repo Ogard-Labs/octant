@@ -41,6 +41,49 @@ describe("native harness tools", () => {
     expect(NATIVE_HARNESS_TOOL_NAMES).toContain("context-remaining");
   });
 
+  it("accepts explicit child targets, reasoning and dependency context on the delegate transport", () => {
+    const input = {
+      operation: "start",
+      role: "research",
+      task: "Look",
+      providerInstanceId: lead.providerInstanceId,
+      modelId: "small",
+      reasoning: "high",
+      after: [turn],
+      includeParentContext: true,
+    };
+    expect(decodeNativeHarnessToolArguments("delegate", input)).toEqual(input);
+    expect(decodeNativeHarnessToolArguments("delegate", { operation: "capabilities" })).toEqual({
+      operation: "capabilities",
+    });
+    for (const invalid of [
+      { ...input, modelId: undefined },
+      { ...input, reasoning: " " },
+    ]) {
+      expect(() => decodeNativeHarnessToolArguments("delegate", invalid)).toThrow();
+    }
+  });
+
+  it("requires an explicit version and bounded message to follow up a child", () => {
+    const input = {
+      operation: "follow-up",
+      runId: turn,
+      expectedVersion: 4,
+      message: "Compare the results",
+    };
+    expect(decodeNativeHarnessToolArguments("delegate", input)).toEqual(input);
+    for (const invalid of [
+      { ...input, expectedVersion: undefined },
+      { ...input, expectedVersion: 0 },
+      { ...input, expectedVersion: 1.5 },
+      { ...input, message: undefined },
+      { ...input, message: " " },
+      { ...input, message: "x".repeat(4097) },
+      { ...input, providerInstanceId: lead.providerInstanceId },
+    ])
+      expect(() => decodeNativeHarnessToolArguments("delegate", invalid)).toThrow();
+  });
+
   it("a truncated tool result always says how much was omitted and where to continue", () => {
     expect(
       decodeNativeHarnessToolResultBounds({

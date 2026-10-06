@@ -212,6 +212,65 @@ describe("Anthropic-compatible provider conformance", () => {
     });
     expect(events[3]).toMatchObject({ bucket: "tokens", limit: 40_000, remaining: 39_000 });
   });
+
+  it("carries the cache buckets of a Messages response onto the runtime usage event", async () => {
+    const driver = makeAnthropicCompatibleDriver({
+      instanceId,
+      configuration: configuration("messages"),
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+      fetch: async (url) =>
+        String(url).endsWith("/models")
+          ? models()
+          : messagesStream("cached answer", {
+              input_tokens: 12,
+              output_tokens: 0,
+              cache_read_input_tokens: 800,
+              cache_creation_input_tokens: 150,
+            }),
+      clock: () => "2026-07-15T12:00:00.000Z",
+      correlationId: () => "80000000-0000-4000-8000-000000000613",
+    });
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/octant-anthropic-conformance",
+          });
+          yield* connection.start({
+            sessionId: successfulSessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          const collected = yield* Effect.fork(
+            Stream.runCollect(
+              (yield* connection.subscribe).pipe(
+                Stream.takeUntil((event: ProviderRuntimeEvent) => event.kind === "completed"),
+              ),
+            ),
+          );
+          yield* connection.send({
+            sessionId: successfulSessionId,
+            prompt: "cache",
+            attachments: [],
+            tools: [],
+          });
+          return Array.from(yield* Fiber.join(collected));
+        }),
+      ),
+    );
+
+    const usage = events.find((event) => event.kind === "usage");
+    expect(usage).toMatchObject({
+      inputTokens: 962,
+      outputTokens: 2,
+      cacheReadInputTokens: 800,
+      cacheWriteInputTokens: 150,
+    });
+    expect(usage).not.toHaveProperty("reasoningTokens");
+  });
 });
 
 function configuration(protocol: AnthropicCompatibleProtocol) {
@@ -252,7 +311,10 @@ function hangingResponse(signal?: AbortSignal): Response {
   );
 }
 
-function messagesStream(text: string): Response {
+function messagesStream(
+  text: string,
+  openingUsage: Record<string, unknown> = { input_tokens: 2, output_tokens: 0 },
+): Response {
   const events = [
     {
       type: "message_start",
@@ -263,7 +325,7 @@ function messagesStream(text: string): Response {
         content: [],
         model: "fixture-model",
         stop_reason: null,
-        usage: { input_tokens: 2, output_tokens: 0 },
+        usage: openingUsage,
       },
     },
     {

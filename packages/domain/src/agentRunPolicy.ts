@@ -53,8 +53,8 @@ function reject(code: AgentRunPolicyRejectionCode, message: string): never {
  * whatever observed the session. Anything holding a reference can name the run
  * it belongs to, and reading the run yields the reply itself.
  */
-export function agentRunResultReference(runId: AgentRun["id"]): string {
-  return `octant://agent-run/${String(runId)}/result`;
+export function agentRunResultReference(runId: AgentRun["id"], generation = 1): string {
+  return `octant://agent-run/${String(runId)}/result${generation === 1 ? "" : `/${generation}`}`;
 }
 
 export const AGENT_RUN_MAX_DEPTH = 2;
@@ -498,7 +498,7 @@ export function applyAgentRunLifecycleTransition(
     if (resultText.length > MAX_AGENT_RUN_RESULT_CHARACTERS) {
       reject("invalid-completion", "Completed requires a bounded result reply.");
     }
-    if (result.reference !== agentRunResultReference(run.id)) {
+    if (result.reference !== agentRunResultReference(run.id, run.generation)) {
       reject("invalid-completion", "Completed requires the result reference of this run's reply.");
     }
   }
@@ -568,8 +568,8 @@ export function acknowledgeAgentRunResult(
  * Journals how a finished run's result reached its parent. A delivery is
  * owed only for a genuinely final outcome — `interrupted` runs may still be
  * retried, so they carry no delivery until their retry's own terminal state
- * lands — and each run settles at most once, so a delivery retried after a
- * crash can never mark the same result twice.
+ * lands. Successful delivery or consumption settles a generation once; explicit
+ * collection can recover a failed or invalidated attempt without losing its journal history.
  */
 export function settleAgentRunResultDelivery(
   run: AgentRun,
@@ -577,8 +577,12 @@ export function settleAgentRunResultDelivery(
   expectedVersion: AggregateVersion,
   outcome: AgentRunResultDeliveryOutcome,
   detail?: string,
+  generation = 1,
 ): AgentRun {
   assertExpectedVersion(run, expectedVersion);
+  if (generation !== (run.generation ?? 1)) {
+    reject("invalid-delivery", "The delivery belongs to a different child result generation.");
+  }
   if (
     run.lifecycleStatus !== "completed" &&
     run.lifecycleStatus !== "failed" &&
@@ -586,7 +590,13 @@ export function settleAgentRunResultDelivery(
   ) {
     reject("invalid-delivery", "Only a finally-finished AgentRun can settle result delivery.");
   }
-  if (run.resultDelivery !== undefined) {
+  if (
+    run.resultDelivery !== undefined &&
+    !(
+      outcome === "consumed" &&
+      (run.resultDelivery.outcome === "failed" || run.resultDelivery.outcome === "invalidated")
+    )
+  ) {
     reject("invalid-delivery", "AgentRun result delivery is already settled.");
   }
   return {
@@ -649,6 +659,7 @@ export function evaluateAgentRunCommand(
         command.expectedVersion,
         command.outcome,
         command.detail,
+        command.generation,
       );
     }
   }
@@ -700,6 +711,48 @@ export function evaluateAgentRunCommand(
         expectedVersion: command.expectedVersion,
       });
     case "resume-agent-run":
+      if (current.lifecycleStatus === "completed") {
+        assertExpectedVersion(current, command.expectedVersion);
+        if (
+          command.message === undefined ||
+          command.message.trim().length === 0 ||
+          command.message.length > 4096
+        ) {
+          reject(
+            "unsupported-transition",
+            "A completed child requires an explicit follow-up message.",
+          );
+        }
+        if (
+          current.resultDelivery?.outcome !== "delivered" &&
+          current.resultDelivery?.outcome !== "consumed"
+        ) {
+          reject(
+            "unsupported-transition",
+            "Collect the current result or wait for delivery to the parent before following up.",
+          );
+        }
+        const generation = (current.generation ?? 1) + 1;
+        if (!Number.isSafeInteger(generation))
+          reject("unsupported-transition", "Child result generation limit reached.");
+        const {
+          result: _result,
+          resultDelivery: _delivery,
+          usage: _usage,
+          recoveryReason: _reason,
+          usageLimit: _limit,
+          usageResume: _resume,
+          ...retained
+        } = current;
+        return {
+          ...retained,
+          generation,
+          lifecycleStatus: "starting",
+          resultAcknowledgement: { required: false, acknowledged: false },
+          version: nextVersion(current.version),
+          updatedAt: now,
+        };
+      }
       return applyAgentRunLifecycleTransition(current, "starting", now, {
         expectedVersion: command.expectedVersion,
       });
@@ -761,6 +814,7 @@ export function createAgentRunFromRequest(input: {
         });
   const run: AgentRun = {
     id: input.runId,
+    generation: 1,
     requestId: input.command.requestId,
     parentThreadId: input.command.parentThreadId,
     parentRunId: input.command.parentRunId,

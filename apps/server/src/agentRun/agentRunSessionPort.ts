@@ -1,4 +1,9 @@
-import type { AgentRun, AgentRunId, ProviderFailure } from "@octant/contracts";
+import type {
+  AgentRun,
+  AgentRunId,
+  AgentRunResultEvidence,
+  ProviderFailure,
+} from "@octant/contracts";
 
 /**
  * Why a managed AgentRun could not be started at all.
@@ -15,7 +20,8 @@ export type AgentRunSessionFailureReason =
   | "spend-ceiling-exhausted"
   | "workspace-unavailable"
   | "authority-drift"
-  | "tools-unsupported";
+  | "tools-unsupported"
+  | "resume-unavailable";
 
 export class AgentRunSessionError extends Error {
   override readonly name = "AgentRunSessionError";
@@ -36,7 +42,7 @@ export class AgentRunSessionError extends Error {
  * generating and expects input is `waiting`, and an end we cannot classify is
  * `interrupted` — never silently upgraded to completion.
  */
-export type AgentRunSessionOutcome =
+export type AgentRunSessionOutcome = (
   | {
       readonly kind: "completed";
       readonly responseText: string;
@@ -48,7 +54,8 @@ export type AgentRunSessionOutcome =
   | { readonly kind: "waiting"; readonly reason: string }
   | { readonly kind: "cancelled" }
   | { readonly kind: "failed"; readonly failure: ProviderFailure }
-  | { readonly kind: "interrupted"; readonly reason: string };
+  | { readonly kind: "interrupted"; readonly reason: string }
+) & { readonly evidence?: AgentRunResultEvidence };
 
 export interface AgentRunSessionHandle {
   readonly runId: AgentRunId;
@@ -66,6 +73,16 @@ export interface AgentRunSessionHandle {
   readonly startupReady?: Promise<void>;
 }
 
+export type AgentRunResumeReadiness =
+  | { readonly status: "ready" }
+  | { readonly status: "refused"; readonly message: string };
+
+/** Resources reserved before lifecycle admission; release is safe after start or refusal. */
+export interface AgentRunPreparedResume {
+  readonly start: (run: AgentRun) => AgentRunSessionHandle;
+  readonly release: () => void;
+}
+
 /**
  * Provider-agnostic seam between AgentRun supervision and whatever actually
  * executes a managed child. Keeping the supervisor behind this interface is
@@ -73,18 +90,33 @@ export interface AgentRunSessionHandle {
  * design forbids core child semantics from depending on any one provider.
  */
 export interface AgentRunSessionPort {
+  /** Checks persisted identity/cursor and current capability without starting or reserving execution. */
+  readonly checkResume?: (
+    run: AgentRun,
+  ) => AgentRunResumeReadiness | Promise<AgentRunResumeReadiness>;
+  /** Resolves synchronous execution prerequisites and reserves resources without launching. */
+  readonly prepareResume?: (
+    run: AgentRun,
+    input?: { readonly message?: string },
+  ) => AgentRunPreparedResume;
   /**
    * Starts one managed session. Implementations resolve every start-time
    * dependency before returning and throw {@link AgentRunSessionError} when one
    * is missing, so an unstartable child fails closed instead of appearing live.
    */
   readonly start: (run: AgentRun) => AgentRunSessionHandle;
+  /** Continues a recorded conversation; refusal must never fall back to start. */
+  readonly resume?: (run: AgentRun, input?: { readonly message?: string }) => AgentRunSessionHandle;
   /**
    * Stops a managed session and resolves only once its execution is confirmed
    * stopped. Cancellation is durable only after that confirmation, so a port
    * must not resolve optimistically. Stopping an unknown run is a no-op.
    */
   readonly stop: (runId: AgentRunId) => Promise<void>;
+  readonly steer?: (input: {
+    readonly runId: AgentRunId;
+    readonly message: string;
+  }) => Promise<"steered" | "unsupported">;
   /** Optional provider-side cleanup performed once at host startup. */
   readonly reconcile?: () => Promise<void>;
 }

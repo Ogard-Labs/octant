@@ -162,9 +162,21 @@ move to another model mid-request.
 ## Delegation
 
 The lead can hand a bounded task to a child with `delegate`: research,
-implementation, or review. The child runs on the model its role's slot names,
-under authority no wider than its parent, in its own worktree for Code, and
-returns a reply the lead collects. This is the only way a subagent starts.
+implementation, or review. Provider harnesses use `octant_agents` for the same
+host-managed workflow. Either parent can choose an Octant-harness or a
+provider-harness child. The child runs on the model its role's slot names, or
+an explicit eligible provider/model selected for that task, under authority no
+wider than its parent. Code children have separate worktrees. An unconfigured
+route can inherit the parent's eligible model; a configured but unavailable
+route reports its refusal.
+
+Both tools can collect replies and send a bounded follow-up to a completed
+child, using its current version. A follow-up resumes the same conversation
+and produces a new result to acknowledge. It never starts a fresh session
+silently. The child status reports the identity and version needed for the
+next request. The earlier reply must reach the parent or be explicitly collected
+first. Status inspection does not consume replies, and collection refuses an
+oversized response without marking it consumed.
 Whether one may start at all is **Let the agent start subagents** under
 **Settings → Octant Harness → Helper agents**: on by default, and when it is
 off the lead is told subagents are turned off and does the work itself.

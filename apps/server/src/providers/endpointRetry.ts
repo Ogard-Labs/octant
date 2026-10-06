@@ -1,7 +1,9 @@
 import type { ProviderFailure } from "@octant/contracts";
-import type {
-  NativeHarnessResponse,
-  NativeHarnessStreamEvent,
+import {
+  addNativeHarnessUsage,
+  type NativeHarnessResponse,
+  type NativeHarnessStreamEvent,
+  type NativeHarnessUsage,
 } from "../harness/nativeHarnessTransport";
 
 /**
@@ -91,11 +93,6 @@ export function isEndpointRetriesExhausted(error: unknown): boolean {
   return typeof error === "object" && error !== null && exhausted.has(error);
 }
 
-interface UsageTotals {
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-}
-
 /**
  * Sends one model request through `attempt`, and sends it again while the
  * failure is retryable and nothing the user could see has streamed yet. Once
@@ -120,10 +117,10 @@ export async function sendWithEndpointRetry(input: {
   const policy: EndpointRetryPolicy = { ...DEFAULT_ENDPOINT_RETRY_POLICY, ...input.options };
   const random = input.options?.random ?? Math.random;
   const sleep = input.options?.sleep ?? sleepUnlessCancelled;
-  let billed: UsageTotals = { inputTokens: 0, outputTokens: 0 };
+  let billed: NativeHarnessUsage | undefined;
 
   for (let attemptNumber = 1; ; attemptNumber += 1) {
-    const seen: { outputStarted: boolean; usage: UsageTotals | undefined } = {
+    const seen: { outputStarted: boolean; usage: NativeHarnessUsage | undefined } = {
       outputStarted: false,
       usage: undefined,
     };
@@ -136,11 +133,11 @@ export async function sendWithEndpointRetry(input: {
         input.onEvent(event);
         return;
       }
-      seen.usage = { inputTokens: event.inputTokens, outputTokens: event.outputTokens };
+      const { kind: _kind, ...own } = event;
+      seen.usage = own;
       input.onEvent({
-        ...event,
-        inputTokens: event.inputTokens + priorBilled.inputTokens,
-        outputTokens: event.outputTokens + priorBilled.outputTokens,
+        kind: "usage",
+        ...(priorBilled === undefined ? own : addNativeHarnessUsage(priorBilled, own)),
       });
     };
 
@@ -162,7 +159,9 @@ export async function sendWithEndpointRetry(input: {
       failure = error;
       reason = retryReason;
     }
-    if (seen.usage !== undefined) billed = addUsage(billed, seen.usage);
+    if (seen.usage !== undefined) {
+      billed = billed === undefined ? seen.usage : addNativeHarnessUsage(billed, seen.usage);
+    }
 
     if (attemptNumber >= policy.maxAttempts) {
       exhausted.add(failure);
@@ -189,16 +188,14 @@ function isEmptyCompletion(response: NativeHarnessResponse): boolean {
   return response.text.trim() === "" && response.toolCalls.length === 0;
 }
 
-function withBilled(response: NativeHarnessResponse, billed: UsageTotals): NativeHarnessResponse {
-  if (billed.inputTokens === 0 && billed.outputTokens === 0) return response;
-  const own = response.usage ?? { inputTokens: 0, outputTokens: 0 };
-  return { ...response, usage: addUsage(billed, own) };
-}
-
-function addUsage(left: UsageTotals, right: UsageTotals): UsageTotals {
+function withBilled(
+  response: NativeHarnessResponse,
+  billed: NativeHarnessUsage | undefined,
+): NativeHarnessResponse {
+  if (billed === undefined) return response;
   return {
-    inputTokens: left.inputTokens + right.inputTokens,
-    outputTokens: left.outputTokens + right.outputTokens,
+    ...response,
+    usage: response.usage === undefined ? billed : addNativeHarnessUsage(billed, response.usage),
   };
 }
 

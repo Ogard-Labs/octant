@@ -107,7 +107,9 @@ export class NativeHarnessLeadFallbackService implements NativeHarnessLeadFallba
       const projectId = group[0]?.projectId;
       const before = this.#options.router.resolve({ job: "lead", projectId });
       this.#options.router.reportFailure({
-        slotId: before.slotId,
+        // A lead resolves without a parent to inherit, so only the type admits
+        // `inherited-parent`; its requested slot is the one that failed.
+        slotId: before.kind === "inherited-parent" ? before.requestedSlotId : before.slotId,
         candidate: failed,
         reason: routeFailureReason(input.failure),
         ...(input.failure.retryAfterMs === undefined

@@ -89,6 +89,7 @@ export type CodeTurnEventCategory =
 
 export interface CodeTurnEvent {
   readonly category: CodeTurnEventCategory;
+  readonly childObservation?: Extract<ProviderRuntimeEvent, { kind: "child-agent-activity" }>;
   readonly providerKind: ProviderRuntimeEvent["kind"];
   readonly instanceId: ProviderInstanceId;
   readonly sessionId: ProviderRuntimeEvent["sessionId"];
@@ -289,7 +290,11 @@ export class CodeTurnRunner {
         connection,
         consume: (runtimeEvents) =>
           runtimeEvents.pipe(
-            Stream.filter((event) => event.sessionId === input.sessionId),
+            Stream.filter(
+              (event) =>
+                event.sessionId === input.sessionId &&
+                event.instanceId === input.thread.providerInstanceId,
+            ),
             Stream.takeUntil(isTerminalProviderEvent),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
@@ -631,6 +636,7 @@ function normalizeProviderEvent(
       return Effect.succeed({
         ...base,
         category: "child-activity",
+        childObservation: { ...event, summary: text(event.summary) },
         requestId: text(event.childAgentId),
         status: event.status,
         text: text(event.summary),

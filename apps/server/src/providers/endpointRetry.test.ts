@@ -140,6 +140,39 @@ describe("sending a request again", () => {
     expect(response.usage).toEqual({ inputTokens: 60, outputTokens: 6 });
   });
 
+  it("adds every usage bucket a failed attempt billed and leaves unreported ones absent", async () => {
+    let calls = 0;
+    const response = await sendWithEndpointRetry({
+      signal: new AbortController().signal,
+      onEvent: () => undefined,
+      attempt: async (stream) => {
+        calls += 1;
+        if (calls === 1) {
+          stream.onEvent({
+            kind: "usage",
+            inputTokens: 100,
+            outputTokens: 10,
+            cacheReadInputTokens: 60,
+            reasoningTokens: 4,
+          });
+          throw failure("unavailable");
+        }
+        return {
+          ...answer,
+          usage: { inputTokens: 200, outputTokens: 20, cacheReadInputTokens: 50 },
+        };
+      },
+      options: instant,
+    });
+
+    expect(response.usage).toEqual({
+      inputTokens: 300,
+      outputTokens: 30,
+      cacheReadInputTokens: 110,
+      reasoningTokens: 4,
+    });
+  });
+
   it("ends a backoff wait the moment the request is cancelled", async () => {
     const controller = new AbortController();
     const events: string[] = [];

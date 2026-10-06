@@ -126,6 +126,31 @@ describe("buildAgentRunRequestCommand", () => {
     }
   });
 
+  it("tells the caller why the parent's context is unavailable and what to do instead", () => {
+    const refusal = (unavailable: "source-empty" | "history-window-exceeded") => {
+      try {
+        buildAgentRunRequestCommand({
+          request: baseRequest({ includeParentContext: true } as never),
+          creationPosture: "automatic",
+          providerReadiness: readyPort,
+          uuid,
+          parentContext: { resolve: () => ({ unavailable }) },
+        });
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    };
+
+    expect(refusal("source-empty")).toMatchObject({
+      reason: "parent-context-unavailable",
+      message: expect.stringMatching(/no readable messages.*without parent context/),
+    });
+    expect(refusal("history-window-exceeded")).toMatchObject({
+      message: expect.stringMatching(/too long.*in the task/),
+    });
+  });
+
   it("always uses the server-resolved posture, never one from the client", () => {
     const command = buildAgentRunRequestCommand({
       request: baseRequest(),

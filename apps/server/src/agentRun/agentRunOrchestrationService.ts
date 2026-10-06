@@ -7,6 +7,7 @@ import type {
   AgentRunId,
   AgentRunParentThreadId,
   AgentRunWorkspaceReceipt,
+  AgentRunResultEvidence,
 } from "@octant/contracts";
 import { DEFAULT_AGENT_RUN_CONCURRENCY, MAX_AGENT_RUN_RESULT_CHARACTERS } from "@octant/contracts";
 import {
@@ -18,7 +19,12 @@ import {
   decideAgentRunDependencies,
 } from "@octant/domain";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
-import { AgentRunSessionError, type AgentRunSessionOutcome } from "./agentRunSessionPort";
+import {
+  AgentRunSessionError,
+  type AgentRunSessionOutcome,
+  type AgentRunPreparedResume,
+  type AgentRunResumeReadiness,
+} from "./agentRunSessionPort";
 
 const MAX_RECOVERY_REASON_CHARACTERS = 1_024;
 
@@ -78,7 +84,16 @@ export interface AgentRunApprovalPort {
 }
 
 export interface AgentRunProcessSupervisorPort {
+  readonly checkResume?: (
+    run: AgentRun,
+  ) => AgentRunResumeReadiness | Promise<AgentRunResumeReadiness>;
+  readonly prepareResume?: (
+    run: AgentRun,
+    input?: { readonly message?: string },
+  ) => AgentRunPreparedResume | undefined;
   readonly start: (run: AgentRun) => unknown;
+  /** Continues a saved provider conversation; absent means only explicit fresh retry is available. */
+  readonly resume?: (run: AgentRun, input?: { readonly message?: string }) => unknown;
   readonly stop: (runId: AgentRunId) => Promise<void>;
   readonly reconcile?: () => Promise<void>;
   readonly subscribeToProcessDeath?: (listener: (runId: AgentRunId) => void) => () => void;
@@ -147,7 +162,7 @@ export class AgentRunOrchestrationService {
    */
   readonly #settledSessions = new Set<AgentRunId>();
   /** Runs currently being stopped by {@link cancelLeafFirst}. */
-  readonly #cancelling = new Set<AgentRunId>();
+  readonly #cancelling = new Map<AgentRunId, AgentRunResultEvidence | undefined>();
 
   constructor(options: AgentRunOrchestrationServiceOptions) {
     this.#persistence = options.persistence;
@@ -268,6 +283,18 @@ export class AgentRunOrchestrationService {
     expectedVersion: number,
     liveAuthority: AgentRunAuthority,
   ): AgentRunCommandResult {
+    return this.#start(runId, expectedVersion, liveAuthority);
+  }
+
+  #start(
+    runId: AgentRunId,
+    expectedVersion: number,
+    liveAuthority: AgentRunAuthority,
+    continuation?: {
+      readonly message?: string;
+      readonly onExecutionAccepted?: (run: AgentRun) => void;
+    },
+  ): AgentRunCommandResult {
     const current = this.#persistence.getById(runId);
     if (current === undefined) {
       return {
@@ -286,7 +313,56 @@ export class AgentRunOrchestrationService {
     }
     this.#assertWorkspaceAllowed(current.workspaceReceipt);
     this.#assertAuthorityWithinLiveAuthority(current.authority, liveAuthority);
+    if (continuation !== undefined) {
+      if (current.version !== expectedVersion) {
+        return {
+          kind: "run-command-failed",
+          reason: "stale-version",
+          message: `Expected version ${expectedVersion}, got ${current.version}`,
+        };
+      }
+      if (this.#processes?.resume === undefined) {
+        return {
+          kind: "run-command-failed",
+          reason: "unsupported-transition",
+          message:
+            current.lifecycleStatus === "completed"
+              ? "This execution cannot resume a saved child session. Start a new delegation from the parent."
+              : "This execution cannot resume a saved child session. Use Retry for a fresh session.",
+        };
+      }
+      if (
+        current.lifecycleStatus !== "waiting" &&
+        current.lifecycleStatus !== "interrupted" &&
+        current.lifecycleStatus !== "completed"
+      ) {
+        return {
+          kind: "run-command-failed",
+          reason: "unsupported-transition",
+          message: "Only waiting, interrupted or completed children can resume.",
+        };
+      }
+      if (
+        current.lifecycleStatus === "completed" &&
+        (continuation.message === undefined ||
+          continuation.message.trim().length === 0 ||
+          continuation.message.length > 4096)
+      ) {
+        return {
+          kind: "run-command-failed",
+          reason: "unsupported-transition",
+          message: "A completed child requires an explicit follow-up message.",
+        };
+      }
+    }
     if (!this.#approvals.isCurrent({ runId, authority: liveAuthority })) {
+      if (isAgentRunTerminalStatus(current.lifecycleStatus)) {
+        return {
+          kind: "run-command-failed",
+          reason: "unsupported-transition",
+          message: "The child approval or extension grant has changed.",
+        };
+      }
       if (current.lifecycleStatus === "queued") {
         return this.#persistence.applyCommand({
           kind: "interrupt-agent-run",
@@ -302,35 +378,116 @@ export class AgentRunOrchestrationService {
         recoveryReason: "approval-or-extension-drift",
       });
     }
-    const started = this.#persistence.applyCommand({
-      kind: "start-agent-run",
-      runId,
-      expectedVersion: expectedVersion as never,
-    });
-    if (
-      this.#processes === undefined ||
-      started.kind !== "run-updated" ||
-      started.run.lifecycleStatus !== "starting"
-    ) {
-      return started;
+    let prepared: AgentRunPreparedResume | undefined;
+    try {
+      if (continuation !== undefined)
+        prepared = this.#processes?.prepareResume?.(
+          current,
+          continuation.message === undefined ? {} : { message: continuation.message },
+        );
+    } catch (error) {
+      if (error instanceof AgentRunSessionError)
+        return {
+          kind: "run-command-failed",
+          reason:
+            error.reason === "spend-ceiling-exhausted" || error.reason === "capacity-unavailable"
+              ? "limit-reached"
+              : "unsupported-transition",
+          message: error.message,
+        };
+      throw error;
     }
     try {
-      // A run that waited after an earlier settlement is live again, so that
-      // settlement must no longer suppress this incarnation's death report.
-      this.#settledSessions.delete(started.run.id);
-      this.#processes.start(started.run);
-      return started;
-    } catch (error) {
-      if (error instanceof AgentRunSessionError && error.reason === "tools-unsupported") {
-        this.#releaseReservation(started.run.id);
-        return this.#persistence.applyCommand({
-          kind: "interrupt-agent-run",
-          runId: started.run.id,
-          expectedVersion: started.run.version as never,
-          recoveryReason: error.reason,
-        });
+      let reservedForResume = false;
+      if (continuation !== undefined) {
+        if (!this.#reservations.has(runId)) {
+          const reservation = this.#capacity.tryReserve({
+            runId,
+            parentThreadId: current.parentThreadId,
+            providerInstanceId: String(
+              effectiveAgentRunExecutionTarget(current.routingReceipt).providerInstanceId,
+            ),
+          });
+          if (reservation.status === "queued") {
+            return {
+              kind: "run-command-failed",
+              reason: "limit-reached",
+              message:
+                "The child cannot resume until a concurrency slot is free. Its saved conversation is unchanged.",
+            };
+          }
+          this.#reservations.set(runId, reservation.reservationId);
+          reservedForResume = true;
+        }
       }
-      return this.onProcessDeath(started.run.id, started.run.version);
+      let started: AgentRunCommandResult;
+      try {
+        started = this.#persistence.applyCommand({
+          kind: continuation === undefined ? "start-agent-run" : "resume-agent-run",
+          ...(continuation?.message === undefined ? {} : { message: continuation.message }),
+          runId,
+          expectedVersion: expectedVersion as never,
+        });
+      } catch (error) {
+        if (reservedForResume) {
+          const reservationId = this.#reservations.get(runId);
+          if (reservationId !== undefined) this.#capacity.release(reservationId);
+          this.#reservations.delete(runId);
+          // The freed slot belongs to other waiters. This unchanged continuation
+          // must not enter the fresh-start path after its resume failed to persist.
+          this.#dequeueCapacityWaiter(runId);
+        }
+        throw error;
+      }
+      if (
+        this.#processes === undefined ||
+        started.kind !== "run-updated" ||
+        started.run.lifecycleStatus !== "starting"
+      ) {
+        prepared?.release();
+        if (reservedForResume) this.#releaseReservation(runId);
+        return started;
+      }
+      try {
+        // A run that waited after an earlier settlement is live again, so that
+        // settlement must no longer suppress this incarnation's death report.
+        this.#settledSessions.delete(started.run.id);
+        if (continuation === undefined) this.#processes.start(started.run);
+        else {
+          if (prepared !== undefined) prepared.start(started.run);
+          else
+            this.#processes.resume?.(
+              started.run,
+              continuation.message === undefined ? {} : { message: continuation.message },
+            );
+          continuation.onExecutionAccepted?.(started.run);
+        }
+        return started;
+      } catch (error) {
+        prepared?.release();
+        if (continuation !== undefined && error instanceof AgentRunSessionError) {
+          const waited = this.#persistence.applyCommand({
+            kind: "wait-agent-run",
+            runId: started.run.id,
+            expectedVersion: started.run.version,
+            recoveryReason: boundedRecoveryReason(`${error.reason}: ${error.message}`),
+          });
+          this.#releaseReservation(started.run.id);
+          return waited;
+        }
+        if (error instanceof AgentRunSessionError && error.reason === "tools-unsupported") {
+          this.#releaseReservation(started.run.id);
+          return this.#persistence.applyCommand({
+            kind: "interrupt-agent-run",
+            runId: started.run.id,
+            expectedVersion: started.run.version as never,
+            recoveryReason: error.reason,
+          });
+        }
+        return this.onProcessDeath(started.run.id, started.run.version);
+      }
+    } finally {
+      prepared?.release();
     }
   }
 
@@ -348,18 +505,40 @@ export class AgentRunOrchestrationService {
     return this.start(retried.run.id, retried.run.version, liveAuthority);
   }
 
-  resume(
+  async resume(
     runId: AgentRunId,
     expectedVersion: number,
     liveAuthority: AgentRunAuthority,
-  ): AgentRunCommandResult {
-    // A paused parent starts nothing new, and that includes a child parked on
-    // its dependencies: resuming the parent comes first, or the child's
-    // Resume would undo the pause the parent's own controls show.
-    const run = this.#persistence.getById(runId);
+    input?: {
+      readonly message?: string;
+      readonly resolveLiveAuthority?: () => AgentRunAuthority | undefined;
+      readonly onExecutionAccepted?: (run: AgentRun) => void;
+    },
+  ): Promise<AgentRunCommandResult> {
+    const current = this.#persistence.getById(runId);
+    if (current === undefined)
+      return {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: "AgentRun does not exist.",
+      };
+    if (current.version !== expectedVersion)
+      return {
+        kind: "run-command-failed",
+        reason: "stale-version",
+        message: `Expected version ${expectedVersion}, got ${current.version}`,
+      };
+    const waitingOnDependencies =
+      current.lifecycleStatus === "waiting" &&
+      current.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON;
+    const readiness = waitingOnDependencies
+      ? undefined
+      : await this.#processes?.checkResume?.(current);
+    // Resume cannot release a dependency hold while its parent is paused,
+    // including a pause that arrived during the asynchronous preflight.
     if (
-      run?.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON &&
-      this.#parentSessions?.isHeld(run.parentThreadId) === true
+      current.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON &&
+      this.#parentSessions?.isHeld(current.parentThreadId) === true
     ) {
       return {
         kind: "run-command-failed",
@@ -367,9 +546,38 @@ export class AgentRunOrchestrationService {
         message: "The parent thread is paused. Resume it first, and this run continues.",
       };
     }
+    if (
+      readiness?.status === "refused" ||
+      (current.lifecycleStatus === "completed" && readiness === undefined)
+    )
+      return {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message:
+          readiness?.status === "refused"
+            ? readiness.message
+            : "This execution cannot verify a saved conversation for a completed child. Start a new delegation from the parent.",
+      };
+    // The filesystem preflight can yield. The start boundary repeats version,
+    // lifecycle and authority checks before reserving or advancing a generation.
+    const authority =
+      input?.resolveLiveAuthority === undefined ? liveAuthority : input.resolveLiveAuthority();
+    if (authority === undefined)
+      return {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: "The parent execution authority is no longer available.",
+      };
+    this.#assertAuthorityWithinLiveAuthority(current.authority, authority);
     // A person resuming the run is the release a restart waits for.
     this.#heldSinceRestart.delete(runId);
-    return this.start(runId, expectedVersion, liveAuthority);
+    if (waitingOnDependencies) {
+      // A dependency-parked child has never opened a provider session. Keep
+      // dependency and capacity admission rather than requiring a saved cursor.
+      this.releaseDependencyWait(runId);
+      return { kind: "run-updated", run: this.#persistence.getById(runId) ?? current };
+    }
+    return this.#start(runId, expectedVersion, authority, input ?? {});
   }
 
   async steer(input: {
@@ -439,13 +647,15 @@ export class AgentRunOrchestrationService {
       const run = this.#persistence.getById(id);
       if (run === undefined) continue;
       if (isAgentRunTerminalStatus(run.lifecycleStatus)) continue;
+      let cancellationEvidence: AgentRunResultEvidence | undefined;
       if (this.#processes !== undefined) {
         // A managed session settles `cancelled` while this stop is still
         // awaited. Marking the run here is what lets that settlement defer to
         // this loop, which owns the leaf-first ordering and the reservation.
-        this.#cancelling.add(id);
+        this.#cancelling.set(id, undefined);
         try {
           await this.#processes.stop(id);
+          cancellationEvidence = this.#cancelling.get(id);
         } catch {
           results.push({
             kind: "run-command-failed",
@@ -459,12 +669,15 @@ export class AgentRunOrchestrationService {
       }
       this.#releaseReservation(id);
       results.push(
-        this.#persistence.applyCommand({
-          kind: "cancel-agent-run",
-          runId: id,
-          expectedVersion: run.version as never,
-          scope: "self",
-        }),
+        this.#persistence.applyCommand(
+          {
+            kind: "cancel-agent-run",
+            runId: id,
+            expectedVersion: run.version as never,
+            scope: "self",
+          },
+          cancellationEvidence,
+        ),
       );
     }
     return results;
@@ -478,6 +691,31 @@ export class AgentRunOrchestrationService {
       expectedVersion: expectedVersion as never,
       recoveryReason: "provider-process-death",
     });
+  }
+
+  /**
+   * Records Running once a managed session has verified its workspace and is
+   * starting its provider, so a child that is calling tools no longer reads as
+   * Starting. Only a Starting run moves: a run already past it, or whose
+   * session settled first, has nothing honest left to record.
+   */
+  onSessionRunning(runId: AgentRunId): AgentRunCommandResult | undefined {
+    const current = this.#persistence.getById(runId);
+    if (current?.lifecycleStatus !== "starting" || this.#settledSessions.has(runId)) {
+      return undefined;
+    }
+    try {
+      return this.#persistence.applyCommand({
+        kind: "mark-agent-run-running",
+        runId: current.id,
+        expectedVersion: current.version as never,
+      });
+    } catch (error) {
+      console.error(
+        `AgentRun ${String(runId)} could not be recorded as running: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return undefined;
+    }
   }
 
   /**
@@ -507,7 +745,10 @@ export class AgentRunOrchestrationService {
     if (current === undefined) return undefined;
     if (isAgentRunTerminalStatus(current.lifecycleStatus)) return undefined;
     if (this.#settledSessions.has(input.runId)) return undefined;
-    if (input.outcome.kind === "cancelled" && this.#cancelling.has(input.runId)) return undefined;
+    if (input.outcome.kind === "cancelled" && this.#cancelling.has(input.runId)) {
+      this.#cancelling.set(input.runId, input.outcome.evidence);
+      return undefined;
+    }
 
     this.#releaseReservation(input.runId);
     let recorded: AgentRunCommandResult;
@@ -526,19 +767,25 @@ export class AgentRunOrchestrationService {
       case "completed":
         return this.#recordSessionCompletion(current, outcome);
       case "waiting":
-        return this.#persistence.applyCommand({
-          kind: "wait-agent-run",
-          runId: current.id,
-          expectedVersion,
-          recoveryReason: boundedRecoveryReason(outcome.reason),
-        });
+        return this.#persistence.applyCommand(
+          {
+            kind: "wait-agent-run",
+            runId: current.id,
+            expectedVersion,
+            recoveryReason: boundedRecoveryReason(outcome.reason),
+          },
+          outcome.evidence,
+        );
       case "cancelled":
-        return this.#persistence.applyCommand({
-          kind: "cancel-agent-run",
-          runId: current.id,
-          expectedVersion,
-          scope: "self",
-        });
+        return this.#persistence.applyCommand(
+          {
+            kind: "cancel-agent-run",
+            runId: current.id,
+            expectedVersion,
+            scope: "self",
+          },
+          outcome.evidence,
+        );
       case "failed":
         if (outcome.failure.usageLimit !== undefined) {
           // The provider's own protocol signal says this stop is a usage
@@ -546,31 +793,40 @@ export class AgentRunOrchestrationService {
           // never Failed, which would report a bounded wait as a dead run and
           // would offer Retry where the honest action is waiting out the
           // reset. Every other failure keeps the honest terminal state.
-          return this.#persistence.applyCommand({
-            kind: "wait-agent-run",
+          return this.#persistence.applyCommand(
+            {
+              kind: "wait-agent-run",
+              runId: current.id,
+              expectedVersion,
+              recoveryReason: boundedRecoveryReason(
+                `${outcome.failure.category}: ${outcome.failure.message}`,
+              ),
+              usageLimit: outcome.failure.usageLimit,
+            },
+            outcome.evidence,
+          );
+        }
+        return this.#persistence.applyCommand(
+          {
+            kind: "fail-agent-run",
             runId: current.id,
             expectedVersion,
             recoveryReason: boundedRecoveryReason(
               `${outcome.failure.category}: ${outcome.failure.message}`,
             ),
-            usageLimit: outcome.failure.usageLimit,
-          });
-        }
-        return this.#persistence.applyCommand({
-          kind: "fail-agent-run",
-          runId: current.id,
-          expectedVersion,
-          recoveryReason: boundedRecoveryReason(
-            `${outcome.failure.category}: ${outcome.failure.message}`,
-          ),
-        });
+          },
+          outcome.evidence,
+        );
       case "interrupted":
-        return this.#persistence.applyCommand({
-          kind: "interrupt-agent-run",
-          runId: current.id,
-          expectedVersion,
-          recoveryReason: boundedRecoveryReason(outcome.reason),
-        });
+        return this.#persistence.applyCommand(
+          {
+            kind: "interrupt-agent-run",
+            runId: current.id,
+            expectedVersion,
+            recoveryReason: boundedRecoveryReason(outcome.reason),
+          },
+          outcome.evidence,
+        );
     }
   }
 
@@ -656,10 +912,11 @@ export class AgentRunOrchestrationService {
       runId: current.id,
       expectedVersion: current.version as never,
       result: {
-        reference: agentRunResultReference(current.id),
+        reference: agentRunResultReference(current.id, current.generation),
         truncated: reply.truncated,
       },
       resultText: reply.text,
+      ...(outcome.evidence === undefined ? {} : { resultEvidence: outcome.evidence }),
       ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
     });
   }
@@ -795,12 +1052,12 @@ export class AgentRunOrchestrationService {
   }
 
   /**
-   * Capacity is released only after a terminal process signal. At that point,
-   * atomically attempt the oldest persisted capacity waiter and let the normal
-   * start path repeat approval and workspace checks before spawning it.
+   * A released reservation can admit the oldest persisted capacity waiter.
+   * The normal start path repeats approval and workspace checks before spawning it.
    */
-  #dequeueCapacityWaiter(): void {
+  #dequeueCapacityWaiter(excludedRunId?: AgentRunId): void {
     for (const run of this.#persistence.snapshot().values()) {
+      if (excludedRunId !== undefined && String(run.id) === String(excludedRunId)) continue;
       // A run parked on dependencies that all completed is waiting only for a
       // slot now, exactly like a capacity waiter — unless it is held.
       const waitsForSlot =

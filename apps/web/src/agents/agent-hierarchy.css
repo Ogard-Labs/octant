@@ -267,50 +267,36 @@
   animation: oct-spin var(--oct-motion-spin) linear infinite;
 }
 
-/*
- * The composer's workbench tray. It sits at the top of the thread composer,
- * inside its surface and above the follow-up chips, because delegated work
- * that is still running or waiting for review is part of what the person
- * does next — the strip it replaced hung over the transcript, detached.
- */
-/* The tray is its own card, tucked behind the composer's top edge: the
-   composer is where the person types, and the subagents sat inside it as rows
-   between the chips and the field, where they read as part of the message.
-   Out of the flow it lays over the transcript's last lines the way the
-   composer's notice does, and it rises from behind the composer on arrival. */
-.composer:has(> .composer-subagents) {
-  position: relative;
-  isolation: isolate;
-}
-
+/* The attached tray participates in layout so it cannot cover the preceding
+   task list or transcript. Its height follows wrapped text and expansion. */
 .composer-subagents {
-  position: absolute;
-  z-index: -1;
-  right: var(--oct-space-3);
-  bottom: calc(100% - var(--oct-space-3));
-  left: var(--oct-space-3);
   display: grid;
+  min-width: 0;
   gap: 2px;
-  padding: var(--oct-space-1) var(--oct-space-2) calc(var(--oct-space-3) + var(--oct-space-1));
+  margin-inline: var(--oct-space-3);
+  padding: var(--oct-space-1) var(--oct-space-2);
   border: 1px solid var(--octant-border);
+  border-bottom: 0;
   border-radius: var(--oct-radius-md) var(--oct-radius-md) 0 0;
   background: var(--octant-floating);
   animation: composer-notice-reveal var(--oct-motion-fast) ease-out;
 }
 
-/* A cross-context notice takes the same place; it is brief and must be read,
-   so the tray yields to it and the Agents tool still lists every subagent. */
-.composer--has-notice > .composer-subagents {
-  display: none;
-}
-
-/* Folded, the card is a tab just wide enough for its head. */
-.composer-subagents[data-open="false"] {
-  right: auto;
+/* A notice and failed child work both need attention; neither hides the other. */
+.composer:has(> .composer-subagents) > .workspace-cross-context-banner--inline {
+  position: relative;
+  z-index: auto;
+  bottom: auto;
+  left: auto;
+  width: auto;
+  margin-inline: var(--oct-space-3);
+  padding-bottom: var(--oct-space-2);
+  transform: none;
 }
 
 .composer-subagents__head {
   display: flex;
+  min-width: 0;
   min-height: 24px;
   align-items: center;
   justify-content: space-between;
@@ -318,10 +304,16 @@
 }
 
 .composer-subagents__toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
   gap: var(--oct-space-2);
-  height: 24px;
+  height: auto;
+  min-height: 24px;
   padding-inline: var(--oct-space-1);
+  text-align: start;
   text-decoration: none;
+  white-space: normal;
 }
 
 .composer-subagents__toggle:hover {
@@ -335,10 +327,23 @@
 }
 
 .composer-subagents__count {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
   font-weight: normal;
+}
+
+.composer-subagents__all {
+  flex: 0 0 auto;
+}
+
+.composer-subagents__body {
+  display: grid;
+  min-width: 0;
+  justify-items: start;
+  gap: var(--oct-space-1);
 }
 
 .composer-subagents__chevron {
@@ -350,11 +355,11 @@
   transform: rotate(180deg);
 }
 
-/* Three rows, then the list scrolls: a thread that delegates a lot does not
-   grow a tall card over its own transcript. */
+/* Bounded previews still scroll when long task text wraps at a narrow width. */
 .composer-subagents__list {
   display: grid;
-  max-height: 72px;
+  width: 100%;
+  max-height: 10rem;
   margin: 0;
   padding: 0;
   overflow-y: auto;
@@ -374,25 +379,33 @@
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
+  height: auto;
+  min-height: 24px;
+  align-items: flex-start;
   justify-content: flex-start;
   gap: var(--oct-space-2);
   padding-inline: var(--oct-space-1);
+  padding-block: var(--oct-space-1);
   text-align: start;
+  white-space: normal;
+}
+
+.composer-subagents__content {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px;
+  overflow-wrap: anywhere;
 }
 
 .composer-subagents__task {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
   color: var(--oct-fg);
   font-size: var(--oct-text-xs);
   font-weight: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.composer-subagents__meta {
-  flex: 0 0 auto;
+.composer-subagents__meta,
+.composer-subagents__reason {
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
@@ -415,6 +428,7 @@
 .composer-subagents__notice,
 .composer-subagents__confirm p {
   margin: 0;
+  overflow-wrap: anywhere;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
@@ -433,7 +447,80 @@
 
 .composer-subagents__confirm-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--oct-space-1);
+}
+
+.agent-result-preview,
+.agent-results,
+.agent-result__body {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+  overflow-wrap: anywhere;
+}
+
+.agent-result-preview {
+  gap: 2px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: normal;
+}
+
+.agent-results h3,
+.agent-result__body h4,
+.agent-result__body p,
+.agent-observation__history p {
+  margin: 0;
+}
+
+.agent-result__toggle {
+  width: 100%;
+  height: auto;
+  min-height: 24px;
+  justify-content: space-between;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.agent-result__body {
+  padding: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+.agent-result__file {
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+.agent-result__evidence {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2);
+}
+
+.agent-result__output {
+  max-height: 12rem;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.agent-result__body ul,
+.agent-observation__history {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding-inline-start: var(--oct-space-4);
+  overflow-wrap: anywhere;
+}
+
+.agent-run-detail__fact {
+  overflow-wrap: anywhere;
 }
 
 /* Touch has no hover, so the action is simply there. */

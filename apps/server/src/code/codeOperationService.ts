@@ -1,3 +1,7 @@
+import {
+  coveredAgentResultDeliveryMembers,
+  validateAgentResultDelivery,
+} from "../agentRun/agentResultDeliveryBatch";
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { randomUUID } from "node:crypto";
@@ -861,9 +865,19 @@ export class CodeOperationService {
     options: CodeOperationExecuteOptions = {},
   ): Promise<CodeOperationResult> {
     const command = decodeCodeOperationCommand(rawCommand);
+    const deliveredResult = (result: CodeOperationResult): CodeOperationResult =>
+      command.kind === "start-provider-turn" &&
+      command.delivery !== undefined &&
+      result.kind === "provider-turn-state"
+        ? decodeCodeOperationResult({ ...result, delivery: command.delivery })
+        : result;
     const initiator = options.initiator ?? "agent";
     const scope = await this.#scope(windowId, command);
     if ("failure" in scope) return this.#failed(command.operationId, scope.failure, scope.message);
+    if (command.kind === "start-provider-turn" && command.delivery !== undefined) {
+      const delivery = this.#agentResultDelivery(command);
+      if (delivery !== undefined) return delivery;
+    }
     const replay = this.#replay(command.threadId, command.operationId, 0, 256);
     const existing = replay.frames.find(
       (
@@ -877,13 +891,15 @@ export class CodeOperationService {
         command.kind === "start-provider-turn" &&
         isStaleRunningProviderTurn(existing.event.result, replay.frames)
       ) {
-        return this.#recoverStaleProviderTurn(
-          windowId,
-          command,
-          scope.thread,
-          scope.checkout,
-          existing.event.result,
-          options.admissionCurrent,
+        return deliveredResult(
+          await this.#recoverStaleProviderTurn(
+            windowId,
+            command,
+            scope.thread,
+            scope.checkout,
+            existing.event.result,
+            options.admissionCurrent,
+          ),
         );
       }
       if (command.kind === "start-provider-turn") {
@@ -894,14 +910,16 @@ export class CodeOperationService {
           replay,
         );
         if (settlementCursor !== undefined) {
-          return this.#interruptUnfinishedSettlement(
-            command.threadId,
-            command.operationId,
-            settlementCursor,
+          return deliveredResult(
+            await this.#interruptUnfinishedSettlement(
+              command.threadId,
+              command.operationId,
+              settlementCursor,
+            ),
           );
         }
       }
-      return existing.event.result;
+      return deliveredResult(existing.event.result);
     }
 
     if (
@@ -1032,6 +1050,10 @@ export class CodeOperationService {
                 scope.checkout.id,
                 root.checkoutRoot,
               );
+              // Check again after the asynchronous checkpoint so a changed generation or
+              // an intervening parent admission cannot acquire a stale delivery mark.
+              const afterCheckpoint = this.#agentResultDelivery(command);
+              if (afterCheckpoint !== undefined) return afterCheckpoint;
               if (options.admissionCurrent?.() === false) {
                 turnRefusal = this.#failed(
                   command.operationId,
@@ -1092,6 +1114,7 @@ export class CodeOperationService {
         }
       }
     }
+    result = deliveredResult(result);
     this.#options.events.append({
       threadId: command.threadId,
       operationId: command.operationId,
@@ -3018,35 +3041,122 @@ export class CodeOperationService {
   #refuseInvalidAgentRunDelivery(
     command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
   ): CodeOperationResult | undefined {
+    if (command.delivery === undefined) return undefined;
+    const validation = validateAgentResultDelivery({
+      delivery: command.delivery,
+      threadId: String(command.threadId),
+      mode: "code",
+      getById: (id) => this.#options.agentRuns?.getById(id),
+    });
+    if (validation.kind === "invalid")
+      return this.#failed(command.operationId, "invalid", validation.detail);
+    if (validation.runs.some((run) => run.resultDelivery !== undefined))
+      return this.#failed(
+        command.operationId,
+        "invalid",
+        "A named subagent run's result delivery already settled.",
+      );
+    return undefined;
+  }
+
+  #agentResultDelivery(
+    command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
+  ): CodeOperationResult | undefined {
     const mark = command.delivery;
     if (mark === undefined) return undefined;
-    const run = this.#options.agentRuns?.getById(mark.runId);
-    if (run === undefined || String(run.parentThreadId) !== String(command.threadId)) {
+    const validation = validateAgentResultDelivery({
+      delivery: mark,
+      threadId: String(command.threadId),
+      mode: "code",
+      getById: (id) => this.#options.agentRuns?.getById(id),
+    });
+    if (validation.kind === "invalid")
+      return this.#failed(command.operationId, "invalid", validation.detail);
+    const history = this.#options.events.historyForThread(command.threadId);
+    if (history.status !== "ok")
       return this.#failed(
         command.operationId,
-        "invalid",
-        "The named subagent run does not belong to this Code thread.",
+        "unavailable",
+        "Code result delivery history must be rebuilt before another delivery can start.",
       );
-    }
+    const starts = history.frames.flatMap((frame) =>
+      frame.event.kind === "conversation-turn-started" && frame.event.delivery !== undefined
+        ? [{ operationId: frame.operationId, delivery: frame.event.delivery }]
+        : [],
+    );
+    const covered = new Set(
+      coveredAgentResultDeliveryMembers(
+        mark,
+        starts.map((start) => start.delivery),
+      ).map((member) => String(member.runId)),
+    );
     if (
-      run.lifecycleStatus !== "completed" &&
-      run.lifecycleStatus !== "failed" &&
-      run.lifecycleStatus !== "cancelled"
-    ) {
+      validation.runs.some(
+        (run) => run.resultDelivery !== undefined && !covered.has(String(run.id)),
+      )
+    )
       return this.#failed(
         command.operationId,
         "invalid",
-        "The named subagent run has not finished.",
+        "A named subagent run's result delivery already settled.",
       );
+    const existing = starts.find(
+      (start) => coveredAgentResultDeliveryMembers(mark, [start.delivery]).length > 0,
+    );
+    if (existing === undefined) {
+      if (
+        history.frames.some(
+          (frame) =>
+            String(frame.operationId) === String(command.operationId) &&
+            frame.event.kind === "conversation-turn-started",
+        )
+      )
+        return this.#failed(
+          command.operationId,
+          "invalid",
+          "Provider turn identity does not match the requested child results.",
+        );
+      const active = new Set<string>();
+      for (const frame of history.frames) {
+        if (frame.event.kind === "conversation-turn-started") active.add(String(frame.operationId));
+        else if (
+          isTerminalSettlement(frame.event) ||
+          (frame.event.kind === "operation-result" &&
+            frame.event.result.kind === "operation-failed")
+        )
+          active.delete(String(frame.operationId));
+      }
+      if (active.size > 0)
+        return this.#failed(
+          command.operationId,
+          "waiting",
+          "The Code parent already has an active turn.",
+        );
+      return undefined;
     }
-    if (run.resultDelivery !== undefined) {
-      return this.#failed(
-        command.operationId,
-        "invalid",
-        "The named subagent run's result delivery already settled.",
-      );
-    }
-    return undefined;
+    // Retrying the original operation must retain Code's launch/settlement
+    // recovery. A newly composed batch only needs the prior admission receipt.
+    if (
+      String(existing.operationId) === String(command.operationId) &&
+      JSON.stringify(existing.delivery) === JSON.stringify(mark)
+    )
+      return undefined;
+    const recordedResult = history.frames.findLast(
+      (frame) =>
+        String(frame.operationId) === String(existing.operationId) &&
+        frame.event.kind === "operation-result",
+    );
+    const state =
+      recordedResult?.event.kind === "operation-result" &&
+      recordedResult.event.result.kind === "provider-turn-state"
+        ? recordedResult.event.result.state
+        : "waiting";
+    return decodeCodeOperationResult({
+      kind: "provider-turn-state",
+      operationId: existing.operationId,
+      state,
+      delivery: existing.delivery,
+    });
   }
 }
 

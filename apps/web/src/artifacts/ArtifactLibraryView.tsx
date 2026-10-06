@@ -22,6 +22,7 @@ export interface ArtifactLibraryViewProps {
   readonly observedAt: string;
   readonly onFiltersChange: (next: ArtifactLibraryFilters) => void;
   readonly onOpen: (entry: ArtifactLibraryEntry) => void;
+  readonly onExport?: (entry: ArtifactLibraryEntry) => void;
   /**
    * Starts a thread to make an artifact in. Absent on a host that cannot start
    * one, which hides the action rather than offering a dead gesture.
@@ -196,7 +197,12 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
       )}
 
       {filters.tab === "by-project" ? (
-        <ArtifactsByProject entries={entries} observedAt={props.observedAt} onOpen={props.onOpen} />
+        <ArtifactsByProject
+          entries={entries}
+          observedAt={props.observedAt}
+          onOpen={props.onOpen}
+          {...(props.onExport === undefined ? {} : { onExport: props.onExport })}
+        />
       ) : (
         <ul className="artifact-library__grid">
           {entries.map((entry) => (
@@ -205,6 +211,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
               key={String(entry.canvasId)}
               observedAt={props.observedAt}
               onOpen={props.onOpen}
+              {...(props.onExport === undefined ? {} : { onExport: props.onExport })}
             />
           ))}
         </ul>
@@ -257,6 +264,7 @@ function ArtifactsByProject(props: {
   readonly entries: ReadonlyArray<ArtifactLibraryEntry>;
   readonly observedAt: string;
   readonly onOpen: (entry: ArtifactLibraryEntry) => void;
+  readonly onExport?: (entry: ArtifactLibraryEntry) => void;
 }) {
   const grouped = new Map<string, ArtifactLibraryEntry[]>();
   for (const entry of props.entries) {
@@ -277,6 +285,7 @@ function ArtifactsByProject(props: {
                   key={String(entry.canvasId)}
                   observedAt={props.observedAt}
                   onOpen={props.onOpen}
+                  {...(props.onExport === undefined ? {} : { onExport: props.onExport })}
                 />
               ))}
             </ul>

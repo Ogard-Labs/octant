@@ -1629,3 +1629,59 @@
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
+
+/* Destination export. The approval card shows the payload and the destination
+   before anything leaves. Status is words, not color alone. */
+.canvas-export {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.canvas-export__title {
+  font-size: var(--oct-text-sm);
+  margin: 0;
+}
+
+.canvas-export__description,
+.canvas-export__note {
+  font-size: var(--oct-text-xs);
+  margin: 0;
+  color: var(--oct-muted);
+}
+
+.canvas-export__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+.canvas-export__statuses {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.canvas-export__statuses li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}
+
+.canvas-export__payload {
+  max-height: 12rem;
+  margin: var(--oct-space-2) 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: var(--oct-text-xs);
+}
+
+.octant-dialog__popup:has(> .canvas-export) {
+  padding: var(--oct-space-4);
+}

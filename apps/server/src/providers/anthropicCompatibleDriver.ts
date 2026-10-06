@@ -280,16 +280,14 @@ function anthropicCompatibleTransport(
                     tools: request.tools,
                     toolAnswers: [],
                     signal: attempt.signal,
-                    onEvent: (event: AnthropicTurnEvent) =>
-                      attempt.onEvent(
-                        event.kind === "usage"
-                          ? {
-                              kind: "usage",
-                              inputTokens: event.inputTokens,
-                              outputTokens: event.outputTokens,
-                            }
-                          : { kind: event.kind, text: event.text },
-                      ),
+                    onEvent: (event: AnthropicTurnEvent) => {
+                      if (event.kind === "usage") {
+                        const { sequence: _sequence, ...usage } = event;
+                        attempt.onEvent(usage);
+                        return;
+                      }
+                      attempt.onEvent({ kind: event.kind, text: event.text });
+                    },
                   }),
                 );
               } catch (error) {

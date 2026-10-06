@@ -20,6 +20,7 @@ import {
 import type { AgentRunWorkspaceReceiptStore } from "./agentRunWorkspaceReceiptStore";
 
 export interface AgentRunChildWorktreePrepareInput {
+  readonly requestId: string;
   readonly parentThreadId: string;
   readonly windowId: string;
   readonly projectId: string;
@@ -59,6 +60,10 @@ export interface AgentRunChildWorktreePort {
     input: AgentRunChildWorktreePrepareInput,
   ) => Promise<AgentRunChildWorktreePrepareResult>;
   readonly confirm: (input: {
+    readonly requestId: string;
+    readonly repositoryId: string;
+    readonly repositoryRoot: string;
+    readonly startingRevision: string;
     readonly worktreeReceiptId: string;
     readonly parentThreadId: string;
     readonly parentCheckoutRoot: string;
@@ -103,6 +108,7 @@ export class AgentRunWorkspaceService {
   readonly #receipts: AgentRunWorkspaceReceiptStore;
   readonly #childWorktree: AgentRunChildWorktreePort | undefined;
   readonly #now: () => number;
+  readonly #codePreparations = new Map<string, Promise<AgentRunWorkspacePreparationResult>>();
 
   constructor(options: AgentRunWorkspaceServiceOptions) {
     this.#receipts = options.receipts;
@@ -111,6 +117,7 @@ export class AgentRunWorkspaceService {
   }
 
   async prepare(input: {
+    readonly requestId: string;
     readonly windowId: string;
     readonly parent: AgentRunWorkspaceParentFacts;
     readonly code?: AgentRunCodeWorkspaceContext;
@@ -183,10 +190,25 @@ export class AgentRunWorkspaceService {
         },
       };
     }
-    return this.#prepareCode(input, now);
+    if (input.code === undefined) return refused("unavailable");
+    // Git exposes a temporarily locked inventory while adding a worktree.
+    // Serialize allocation in one repository, while child execution remains concurrent.
+    const key = input.code.repositoryId;
+    const previous = this.#codePreparations.get(key);
+    const preparation = (async () => {
+      await previous?.catch(() => undefined);
+      return this.#prepareCode(input, this.#now());
+    })();
+    this.#codePreparations.set(key, preparation);
+    try {
+      return await preparation;
+    } finally {
+      if (this.#codePreparations.get(key) === preparation) this.#codePreparations.delete(key);
+    }
   }
 
   async confirm(input: {
+    readonly requestId: string;
     readonly windowId: string;
     readonly parent: AgentRunWorkspaceParentFacts;
     readonly worktreeReceiptId: string;
@@ -195,13 +217,34 @@ export class AgentRunWorkspaceService {
     const now = this.#now();
     const grant = await this.#loadGrant(input.worktreeReceiptId, now);
     if (grant === undefined) return refused("unavailable");
+    if (now >= grant.expiresAt) return refused("expired");
     if (grant.windowId !== input.windowId) return refused("unauthorized");
     if (grant.parentThreadId !== input.parent.threadId) return refused("foreign-thread");
+    if (grant.requestId !== input.requestId) return refused("foreign-thread");
     if (grant.mode !== "code") return refused("unsupported");
+    if (grant.projectId !== input.parent.projectId) return refused("foreign-project");
+    if (
+      input.parent.bindingRevisionId !== undefined &&
+      grant.bindingRevisionId !== input.parent.bindingRevisionId
+    )
+      return refused("stale");
+    if (
+      grant.repositoryId === undefined ||
+      grant.startingRevision === undefined ||
+      grant.checkoutRoot === undefined ||
+      grant.parentCheckoutRoot === undefined
+    )
+      return refused("unavailable");
     if (this.#childWorktree === undefined) return refused("unavailable");
     const parentCheckout = input.parent.checkoutRoot ?? grant.checkoutRoot;
     if (parentCheckout === undefined) return refused("unavailable");
+    if (grant.worktreeRoot === parentCheckout) return refused("parent-checkout");
+    if (parentCheckout !== grant.parentCheckoutRoot) return refused("stale");
     const confirmed = await this.#childWorktree.confirm({
+      requestId: input.requestId,
+      repositoryId: grant.repositoryId,
+      repositoryRoot: grant.checkoutRoot,
+      startingRevision: grant.startingRevision,
       worktreeReceiptId: grant.worktreeReceiptId ?? grant.receiptId,
       parentThreadId: input.parent.threadId,
       parentCheckoutRoot: parentCheckout,
@@ -221,6 +264,7 @@ export class AgentRunWorkspaceService {
   }
 
   async admit(input: {
+    readonly requestId: string;
     readonly windowId: string;
     readonly requested: AgentRunCreationWorkspace;
     readonly role: AgentRunRole;
@@ -239,11 +283,23 @@ export class AgentRunWorkspaceService {
     if (issued !== undefined && issued.windowId !== input.windowId) {
       return refused("unauthorized");
     }
+    if (input.requested.kind === "code-worktree") {
+      const confirmed = await this.confirm({
+        requestId: input.requestId,
+        windowId: input.windowId,
+        parent: input.parent,
+        worktreeReceiptId: String(input.requested.worktreeReceiptId),
+      });
+      if (confirmed.status === "refused") return confirmed;
+    }
     return admitAgentRunWorkspace({
       requested: input.requested,
       role: input.role,
       parent: input.parent,
-      issued,
+      issued:
+        input.requested.kind === "code-worktree" && receiptId !== undefined
+          ? await this.#receipts.load(receiptId)
+          : issued,
       now,
     });
   }
@@ -257,6 +313,7 @@ export class AgentRunWorkspaceService {
 
   async #prepareCode(
     input: {
+      readonly requestId: string;
       readonly windowId: string;
       readonly parent: AgentRunWorkspaceParentFacts;
       readonly code?: AgentRunCodeWorkspaceContext;
@@ -266,16 +323,39 @@ export class AgentRunWorkspaceService {
     if (this.#childWorktree === undefined || input.code === undefined) {
       return refused("unavailable");
     }
+    if (!input.requestId) return refused("unavailable");
+    if (input.code.projectId !== input.parent.projectId) return refused("foreign-project");
+    if (
+      input.parent.bindingRevisionId !== undefined &&
+      input.code.bindingRevisionId !== input.parent.bindingRevisionId
+    )
+      return refused("stale");
+    if (
+      input.parent.checkoutRoot !== undefined &&
+      input.code.parentCheckoutRoot !== input.parent.checkoutRoot
+    )
+      return refused("stale");
     const reused = await this.#receipts.findReusable({
+      requestId: input.requestId,
       parentThreadId: input.parent.threadId,
       mode: "code",
       windowId: input.windowId,
       now,
     });
     if (reused !== undefined) {
+      if (
+        reused.projectId !== input.code.projectId ||
+        reused.bindingRevisionId !== input.code.bindingRevisionId ||
+        reused.repositoryId !== input.code.repositoryId ||
+        reused.checkoutRoot !== input.code.repositoryRoot ||
+        reused.parentCheckoutRoot !== input.code.parentCheckoutRoot ||
+        reused.startingRevision !== input.code.startPoint
+      )
+        return refused("stale");
       return { status: "prepared", workspace: toHandle(reused) };
     }
     const prepared = await this.#childWorktree.prepare({
+      requestId: input.requestId,
       parentThreadId: input.parent.threadId,
       windowId: input.windowId,
       projectId: input.code.projectId,
@@ -292,6 +372,11 @@ export class AgentRunWorkspaceService {
     });
     if (prepared.status === "refused") return prepared;
     const issued = await this.#receipts.issue({
+      requestId: input.requestId,
+      repositoryId: input.code.repositoryId,
+      bindingRevisionId: input.code.bindingRevisionId,
+      startingRevision: input.code.startPoint,
+      parentCheckoutRoot: input.code.parentCheckoutRoot,
       receiptId: prepared.worktreeReceiptId,
       parentThreadId: input.parent.threadId,
       windowId: input.windowId,
