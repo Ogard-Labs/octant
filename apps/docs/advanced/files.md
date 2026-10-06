@@ -98,6 +98,30 @@ content.
 A created Canvas appears as a card in its thread with **Open Canvas**. Octant
 can also offer newly authored documents beside the conversation.
 
+### Small Canvases inside the thread
+
+When you ask for something small, such as a chart, a few numbers, a short table,
+or a sequence diagram, the agent can ask for it to be shown in the thread
+(`"presentation": "inline"`). The Canvas then appears at the end of the turn
+that made it, drawn with the same blocks it has in the sidebar. It is still one
+Canvas: it keeps its versions, it appears in your library, and you can share or
+export it.
+
+- **Open in sidebar** opens the same Canvas in the sidebar next to a Work or
+  Code thread. There you can comment, edit a board or plan, and see its
+  history. Chat has no sidebar, so in Chat the button says **Open Canvas** and
+  opens the Canvas in its own tab.
+- **Show as card** folds it to a single row. **Show in thread** unfolds it. This
+  window remembers your choice.
+- A tall Canvas is cut off at a fixed height and fades out. Its button opens
+  the whole Canvas in the sidebar. Scrolling always moves the thread, never the
+  Canvas.
+
+Inside the thread a Canvas holds at most 12 blocks. A board, plan, or mockup
+always opens in the sidebar, because you work on those there. If a Canvas grows
+past that, later or through your own edits, it turns back into a card. The
+agent is told when that happens.
+
 ### Diagrams as boards
 
 A diagram block opens as a board. Zoom with the `+` and `−` controls, `⌘`/`Ctrl`

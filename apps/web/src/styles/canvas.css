@@ -1685,3 +1685,87 @@
 .octant-dialog__popup:has(> .canvas-export) {
   padding: var(--oct-space-4);
 }
+
+/* A Canvas drawn in the conversation that wrote it. It reads as part of the
+   reply: a hairline frame on the workspace surface, not a raised card. The
+   body is capped instead of scrolled, so the wheel always belongs to the
+   thread; what runs past the cap fades into an offer to open the sidebar. */
+.thread-canvas-list {
+  display: grid;
+  gap: var(--oct-space-3);
+  margin-top: var(--oct-space-3);
+}
+
+.thread-canvas {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+}
+
+/* In a narrow column the actions wrap under the title rather than squeeze it
+   to a few letters. */
+.thread-canvas__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-1) var(--oct-space-1) var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.thread-canvas[data-shown-as="card"] .thread-canvas__header {
+  border-bottom: 0;
+}
+
+.thread-canvas__title {
+  flex: 1 1 10rem;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-canvas__actions {
+  display: flex;
+  flex: none;
+  gap: var(--oct-space-1);
+  margin-left: auto;
+}
+
+.thread-canvas__body {
+  max-height: 560px;
+  overflow: hidden;
+}
+
+.thread-canvas__body[data-clipped="true"] {
+  /* A mask reads only alpha, so any opaque ink draws the visible part. */
+  mask-image: linear-gradient(
+    to bottom,
+    var(--oct-fg) calc(100% - var(--oct-space-12)),
+    transparent
+  );
+}
+
+.thread-canvas .canvas-view--thread {
+  padding: var(--oct-space-4);
+}
+
+.thread-canvas__more {
+  display: flex;
+  justify-content: center;
+  padding: 0 var(--oct-space-4) var(--oct-space-3);
+}
+
+.thread-canvas__status {
+  margin: 0;
+  padding: var(--oct-space-4);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}

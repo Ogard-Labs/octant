@@ -6,6 +6,8 @@ import { CanvasThreadReferenceCard } from "./CanvasThreadReferenceCard";
 import { CreateCanvasDraft } from "./CreateCanvasDraft";
 import { CanvasCreatePanel } from "./CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "./CanvasThreadReferenceCardList";
+import { InlineThreadCanvas } from "./InlineThreadCanvas";
+import { useThreadCanvasCards } from "./useThreadCanvasCards";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 
 const threadId = "11111111-1111-4111-8111-111111111111";
@@ -274,14 +276,16 @@ describe("Canvas create panel and card list", () => {
         cards: [card],
       }),
     } as unknown as CanvasClient;
-    render(
-      <CanvasThreadReferenceCardList
-        client={client}
-        mode="chat"
-        projectId={null}
-        threadId={threadId as never}
-      />,
-    );
+    function ThreadCards() {
+      const loaded = useThreadCanvasCards({
+        client,
+        mode: "chat",
+        projectId: null,
+        threadId: threadId as never,
+      });
+      return <CanvasThreadReferenceCardList cards={loaded.cards} error={loaded.error} />;
+    }
+    render(<ThreadCards />);
     await waitFor(() => {
       expect(screen.getByTestId("canvas-card-title")).toHaveTextContent("Canvas card");
     });
@@ -289,6 +293,88 @@ describe("Canvas create panel and card list", () => {
       mode: "chat",
       threadId,
       projectId: null,
+    });
+  });
+  describe("a Canvas drawn inside its thread", () => {
+    const definition = {
+      schemaVersion: 4,
+      title: "Weekly signups",
+      provenance: {
+        mode: "chat",
+        hostId: "local",
+        projectId,
+        threadId,
+        actor: { kind: "agent", actorId: "99999999-9999-4999-8999-999999999999" },
+        providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        modelId: "octant-test-model",
+        createdAt: "2026-08-01T21:00:00.000Z",
+      },
+      sourceManifest: [],
+      presentation: "inline",
+      blocks: [
+        {
+          blockId: "signups",
+          schemaVersion: 1,
+          kind: "metric",
+          label: "Signups this week",
+          value: 1284,
+        },
+      ],
+    };
+    const inlineCard = () =>
+      referenceCardFixture({
+        title: "Weekly signups",
+        presentation: "inline",
+        canvasCreatedAt: "2026-08-01T21:00:00.000Z",
+      }) as never;
+    const clientWith = () =>
+      ({
+        get: vi.fn().mockResolvedValue({
+          kind: "ready",
+          version: {
+            schemaVersion: 4,
+            canvasId: "20000000-0000-4000-8000-000000000002",
+            versionId: "20000000-0000-4000-8000-000000000003",
+            sequence: 1,
+            definition,
+            createdBy: definition.provenance.actor,
+            createdAt: "2026-08-01T21:00:00.000Z",
+          },
+        }),
+      }) as unknown as CanvasClient;
+
+    it("draws the Canvas's blocks in the conversation and opens the same Canvas in the sidebar", async () => {
+      const user = userEvent.setup();
+      const onOpen = vi.fn();
+      const client = clientWith();
+      render(<InlineThreadCanvas card={inlineCard()} client={client} onOpen={onOpen} />);
+
+      expect(await screen.findByText("Signups this week")).toBeInTheDocument();
+      expect(client.get).toHaveBeenCalledWith("20000000-0000-4000-8000-000000000002");
+      // The frame names the Canvas once; the document inside does not repeat it as a page title.
+      expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: "Open in sidebar" }));
+      expect(onOpen).toHaveBeenCalledWith(
+        expect.objectContaining({ canvasId: "20000000-0000-4000-8000-000000000002" }),
+      );
+    });
+
+    it("folds to a card on request and stays folded when the thread is opened again", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      const first = render(<InlineThreadCanvas card={inlineCard()} client={clientWith()} />);
+      await screen.findByText("Signups this week");
+
+      await user.click(screen.getByRole("button", { name: "Show as card" }));
+      expect(screen.queryByText("Signups this week")).toBeNull();
+      first.unmount();
+
+      const client = clientWith();
+      render(<InlineThreadCanvas card={inlineCard()} client={client} />);
+      expect(screen.getByRole("button", { name: "Show in thread" })).toBeInTheDocument();
+      expect(client.get).not.toHaveBeenCalled();
+      localStorage.clear();
     });
   });
 });

@@ -1,60 +1,21 @@
-import type { CanvasClient } from "@octant/client-runtime/canvas-client";
-import type {
-  CanvasOriginThreadId,
-  CanvasThreadReferenceCard,
-} from "@octant/contracts/canvas-cards";
-import type { OctantMode } from "@octant/contracts/modes";
-import type { ProjectId } from "@octant/contracts/projects";
-import { useEffect, useRef, useState } from "react";
+import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { OctantButton } from "../ui/base/OctantButton";
 import { CanvasThreadReferenceCard as CardView } from "./CanvasThreadReferenceCard";
 
 export interface CanvasThreadReferenceCardListProps {
-  readonly client: CanvasClient;
-  readonly mode: OctantMode;
-  readonly threadId: CanvasOriginThreadId;
-  readonly projectId: ProjectId | null;
-  readonly refreshKey?: number;
+  readonly cards: ReadonlyArray<CanvasThreadReferenceCard>;
+  readonly error: string | null;
   readonly onOpen?: (card: CanvasThreadReferenceCard) => void;
-  /** The cards the host currently lists for this thread, each time they are read. */
-  readonly onCardsObserved?: (cards: ReadonlyArray<CanvasThreadReferenceCard>) => void;
 }
 
 export function CanvasThreadReferenceCardList(props: CanvasThreadReferenceCardListProps) {
-  const [cards, setCards] = useState<ReadonlyArray<CanvasThreadReferenceCard>>([]);
-  const [error, setError] = useState<string | null>(null);
-  // Read through a ref so an inline observer does not refetch on every render.
-  const onCardsObserved = useRef(props.onCardsObserved);
-  onCardsObserved.current = props.onCardsObserved;
-  useEffect(() => {
-    let cancelled = false;
-    setError(null);
-    void props.client
-      .threadReferenceCards({
-        mode: props.mode,
-        threadId: String(props.threadId),
-        projectId: props.projectId,
-      })
-      .then((outcome) => {
-        if (cancelled) return;
-        setCards(outcome.cards);
-        onCardsObserved.current?.(outcome.cards);
-      })
-      .catch(() => {
-        if (!cancelled) setError("Canvas references are unavailable.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [props.client, props.mode, props.projectId, props.refreshKey, props.threadId]);
-
-  if (error) {
-    return <p data-testid="canvas-card-list-error">{error}</p>;
+  if (props.error) {
+    return <p data-testid="canvas-card-list-error">{props.error}</p>;
   }
-  if (cards.length === 0) return null;
+  if (props.cards.length === 0) return null;
   return (
     <section aria-label="Canvas references" className="stack" data-testid="canvas-card-list">
-      {cards.map((card) => (
+      {props.cards.map((card) => (
         <div key={String(card.cardId)}>
           <CardView card={card} />
           {props.onOpen ? (

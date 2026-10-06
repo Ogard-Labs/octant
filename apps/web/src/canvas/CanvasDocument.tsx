@@ -29,6 +29,11 @@ export interface CanvasDocumentProps {
    * including those on its rows or nodes.
    */
   readonly comments?: CanvasDocumentComments;
+  /**
+   * `thread` draws the document inside a conversation, where the frame around
+   * it already names the Canvas, so the document drops its own title.
+   */
+  readonly placement?: "document" | "thread";
 }
 
 export interface CanvasDocumentComments {
@@ -64,6 +69,7 @@ export function CanvasDocument({
   layoutRuntime,
   planRuntime,
   comments,
+  placement = "document",
 }: CanvasDocumentProps) {
   // Action blocks are collected out of the inline flow into one panel so the
   // document reads as content and every offered action sits under a single
@@ -74,10 +80,15 @@ export function CanvasDocument({
   const content = definition.blocks.filter((block) => block.kind !== "action");
 
   return (
-    <article className="canvas-view" aria-label={definition.title}>
-      <header className="canvas-view__header">
-        <h1>{definition.title}</h1>
-      </header>
+    <article
+      className={placement === "thread" ? "canvas-view canvas-view--thread" : "canvas-view"}
+      aria-label={definition.title}
+    >
+      {placement === "thread" ? null : (
+        <header className="canvas-view__header">
+          <h1>{definition.title}</h1>
+        </header>
+      )}
       <div className="canvas-view__body">
         {content.map((block) => (
           <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>

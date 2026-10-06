@@ -126,7 +126,14 @@ what the source offers once the host names the source's mode. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
 the host-authorized file open; the renderer offers a written document (or a
 Canvas the thread's agent authored in Chat, Work, or Code) in the dock once per
-document, never after the person closed its tab, and never by moving focus. An
+document, never after the person closed its tab, and never by moving focus. A Canvas
+the agent asked to show inline is drawn read-only at the end of the turn that
+wrote it, within a fixed height that fades out instead of scrolling. It is not
+offered in the dock, because it is already in front of the person. Its frame
+holds **Show as card**, a fold the window remembers. In Work and Code it also
+holds **Open in sidebar**, which opens the same Canvas in the dock tool. Chat
+has no dock, so there the frame holds **Open Canvas**, which opens the Canvas
+as a content tab. An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code
 thread's checkout; a thread whose binding the host cannot resolve is refused

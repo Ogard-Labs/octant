@@ -1,7 +1,6 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
 import {
-  CANVAS_SCHEMA_VERSION,
   CanvasActor,
   CanvasBlockId,
   CanvasEdgeId,
@@ -26,8 +25,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // Canvas wire contracts are deliberately versioned independently from event
 // envelopes. A decoder must reject a future version until its renderer and
 // policy have been reviewed together. The current schema version is declared
-// in `canvasIdentity.ts`: version 3 added the mockup block, which the
-// definition filter below admits only under that declared version.
+// in `canvasIdentity.ts`: version 3 added the mockup block and version 4 the
+// thread presentation, which the definition filters below admit only under
+// those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -929,11 +929,18 @@ export const CanvasBlock = Schema.Union(
 );
 export type CanvasBlock = typeof CanvasBlock.Type;
 
+// Where the originating thread shows a Canvas. `inline` draws the document in
+// the conversation; `sidebar` shows a card that opens it beside the thread.
+// Either way the Canvas is one journaled object: the hint never copies it.
+export const CanvasPresentation = Schema.Literal("inline", "sidebar");
+export type CanvasPresentation = typeof CanvasPresentation.Type;
+
 export const CanvasDefinition = Schema.Struct({
   schemaVersion: CanvasSchemaVersion,
   title: boundedNonEmptyText(256),
   provenance: CanvasProvenance,
   sourceManifest: CanvasSourceManifest,
+  presentation: Schema.optional(CanvasPresentation),
   blocks: Schema.Array(CanvasBlock)
     .pipe(Schema.maxItems(CANVAS_MAX_BLOCKS))
     .pipe(
@@ -950,11 +957,16 @@ export const CanvasDefinition = Schema.Struct({
     // a declared future version, not as a v2 document that failed to decode.
     Schema.filter(
       (definition) =>
-        definition.schemaVersion === CANVAS_SCHEMA_VERSION ||
+        definition.schemaVersion >= 3 ||
         !definition.blocks.some((block) => block.kind === "mockup"),
       {
-        message: () =>
-          `Mockup blocks require Canvas schema version ${String(CANVAS_SCHEMA_VERSION)}.`,
+        message: () => "Mockup blocks require Canvas schema version 3.",
+      },
+    ),
+    Schema.filter(
+      (definition) => definition.schemaVersion >= 4 || definition.presentation === undefined,
+      {
+        message: () => "A thread presentation requires Canvas schema version 4.",
       },
     ),
   );
@@ -987,6 +999,7 @@ export const decodeCanvasBlockKind = Schema.decodeUnknownSync(CanvasBlockKind);
 export const decodeCanvasBlock = Schema.decodeUnknownSync(CanvasBlock);
 export const decodeCanvasDefinition = Schema.decodeUnknownSync(CanvasDefinition);
 export const decodeCanvasVersion = Schema.decodeUnknownSync(CanvasVersion);
+export const decodeCanvasPresentation = Schema.decodeUnknownSync(CanvasPresentation);
 export const decodeCanvasDiagramLayoutKind = Schema.decodeUnknownSync(CanvasDiagramLayoutKind);
 export const decodeCanvasPlanTaskId = Schema.decodeUnknownSync(CanvasPlanTaskId);
 
