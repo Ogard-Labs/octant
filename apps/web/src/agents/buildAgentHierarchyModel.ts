@@ -27,6 +27,8 @@ export interface AgentHierarchyInputEntry {
   };
   readonly route?: AgentHierarchyInputRoute;
   readonly recoveryReason?: string;
+  /** How the host settled delivering this result to the parent; absent while owed. */
+  readonly resultDeliveryOutcome?: "delivered" | "consumed" | "invalidated" | "failed";
   /** The normalized limit fact the host journaled when the run last waited. */
   readonly usageLimit?: {
     readonly kind: "temporary" | "exhausted" | "billing";

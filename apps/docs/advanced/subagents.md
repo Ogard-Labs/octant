@@ -62,8 +62,13 @@ default) or off. **Settings → Octant Harness → Model slots** configures shar
 role routing for both Octant and provider harnesses; Projects can override it.
 
 A thread's subagents appear in a compact card above its composer in Chat,
-Work, and Code. It starts collapsed and remembers your choice. Its counts keep
-failed, waiting and unreviewed children visible. Expand it to preview up to
+Work, and Code, the same width as the message box. It starts collapsed and
+remembers your choice. Its head names each state the children are in, such as
+**1 working · 1 failed · 2 done**, and puts failed, waiting and unreviewed children
+first. A result counts as **to review** only while you could still act on it: once
+the host has handed a finished result to the thread's agent, the card counts it as
+done. When the host cannot be reached the card dims and **Stop** is unavailable;
+the thread's connection notice says why. Expand it to preview up to
 three active or unresolved children with their task, status, model and last
 reported activity. **View all** opens the full **Agents** list, including finished
 children. A row opens that child's detail. **Stop** acts on one managed child;
@@ -71,12 +76,19 @@ children. A row opens that child's detail. **Stop** acts on one managed child;
 Observation-only rows have no execution controls. **Environment → Subagents**
 also lists managed children and marks results you have not reviewed **To review**.
 
+A finished subagent's result appears in the thread as a card of its own, not as
+a message from you: it names the subagent's role, its provider and model, the task
+it was given and its reply. A long reply starts folded. The run ID, generation and
+provider ID sit behind **Details**. A subagent that stopped without finishing says
+so and gives the reason the host recorded.
+
 When the agent reports a task list, its separate collapsed header shows completed
 steps and failed or waiting counts. Expand it to read the steps. Task progress
 does not indicate that subagents or the parent delivery are complete.
 
 The **Agents** dock tool lists the thread's subagents under **Working** and
-**Finished** and marks results you have not reviewed with **Needs review**. On
+**Finished** and marks results you have not reviewed, and that the thread's agent
+has not already received, with **Needs review**. On
 a thread with none it says they appear when the agent hands off part of its
 work, or that subagents are turned off in Settings. Choosing a row opens its page: the task as the brief,
 then its replies, live while it runs, with a bounded saved conversation after

@@ -279,13 +279,19 @@ names the state and claims no elapsed time. See
 
 ### Welcome and composer
 
-A thread's subagents sit in an inset card attached above the composer's message
-surface. The card participates in normal layout so expansion cannot cover the
-preceding task list or transcript. Cross-context notices share the same flow;
+A thread's subagents sit in a card attached above the composer's message
+surface, edge to edge with it so the two read as one stack. The card
+participates in normal layout so expansion cannot cover the preceding task list
+or transcript. Cross-context notices share the same flow;
 they never hide failed children or results needing review. The card starts
-collapsed and remembers the viewer's fold choice. Its head names the total,
-prioritizing failed, waiting, review-needed and unknown states over redundant
-activity counts. A truncated list identifies its count as listed children.
+collapsed and remembers the viewer's fold choice. Its head names every state
+the children are in as counts of that state ("1 failed · 1 to review · 1
+working · 2 done"), attention states first, with no unexplained total. A result
+counts as to review only while a person can still act on it: one the host has
+already delivered to the parent, or the parent consumed through its own tool,
+is done, because it sits in the thread as a child-result card. A truncated list
+says earlier children are not retained. While the host cannot be reached the
+card dims and withholds Stop; the thread's connection notice says why.
 Task-plan completion is never counted as child completion. View all opens the
 full Agents list even when every child has finished. Expansion previews at most
 three active or unresolved children; longer history stays in Environment and
@@ -296,6 +302,17 @@ in details. Rows open the child in Agents. Only managed active children offer
 Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
 narrow widths, disclosures work with the keyboard and retain visible focus,
 and expanded lists have bounded height.
+
+A result the host delivers into the parent thread is a turn the person did
+not write, so it never renders as their right-aligned bubble. It is a
+left-aligned child-result card in the thread's measure: a status mark and
+"<Role> subagent finished" (or the state it stopped in), the provider and
+model, the task in meta ink, then the reply as Markdown, folded after about
+eight lines behind Show full result. A subagent that stopped gives the host's
+recorded reason in place of a reply. Run ID, generation and provider ID sit
+behind a Details disclosure. The card is one component in Chat, Work and
+Code; a delivery the card cannot read is shown as its text under a plain
+"Subagent result" head.
 
 Provider-observed children remain separate from managed runs. Their detail shows
 reported activity, observation timing, available lineage and explicit partial,
@@ -1378,6 +1395,15 @@ and Tooltip. Composition rules:
   panels stay anchored in the surface; `OctantDialog` would add a backdrop,
   focus trap, and portal. The recipe owners (`OctantAlert`, `OctantToast`,
   `OctantApprovalCard`, `FieldError`, and `ShellState`) set the role themselves.
+- A lost host connection is one condition with one voice. A thread shows a
+  single `OctantAlert` in plain words ("Can't reach the host" with Retry now),
+  above its transcript in the thread's own measure; it becomes a success alert,
+  "Reconnected", for a few seconds when the host answers, then goes quiet. The
+  thread's other surfaces (the subagent card, the message queue, the composer's
+  status line) never repeat the loss: they dim and disable their controls. Use
+  no other wording for it, and never show internal vocabulary such as "the
+  authoritative transcript". A failure unrelated to the connection keeps its own
+  alert.
 - Product notices use `OctantToast`: a semantic icon, short title, supporting
   detail, and an explicit Dismiss button. An optional inline action can open the
   relevant destination without implicitly dismissing the notice. Success and

@@ -3,7 +3,7 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { ChevronDown, X } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useContext, useEffect, useId, useState } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import {
@@ -22,6 +22,7 @@ import { ObservedChildRow } from "./ObservedChildActivity";
 import { useChildRunStatus } from "./useChildRunStatus";
 import "./agent-hierarchy.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { ThreadConnectionLostContext } from "../transcript/ThreadConnectionNotice";
 
 /**
  * One thread's subagents, read for the composer of the pane that shows it.
@@ -37,6 +38,9 @@ export function ThreadSubagentsTray(props: {
   /** Opens the Agents tool; with a run id, on that subagent's conversation. */
   readonly onOpenSubagent?: (runId?: string) => void;
 }) {
+  // The thread already says its host connection is lost; the tray dims and
+  // disables its controls rather than saying so a second time.
+  const connectionLost = useContext(ThreadConnectionLostContext);
   const subagents = useChildRunStatus({
     client: props.client,
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
@@ -64,7 +68,7 @@ export function ThreadSubagentsTray(props: {
         {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
         onStop={(runId) => void subagents.cancelRun(runId)}
         onStopAll={() => void subagents.stopAll()}
-        reconnecting={subagents.reconnecting}
+        reconnecting={subagents.reconnecting || connectionLost}
       />
     </>
   );
@@ -141,6 +145,11 @@ export interface SubagentsTrayProps {
   /** Cancels every active subagent on the thread. Already confirmed when called. */
   readonly onStopAll: () => void;
   readonly busy?: boolean;
+  /**
+   * What is shown is the last status the host reported. The tray dims and stops
+   * offering Stop; it does not say why, because the thread's connection notice
+   * already does and a second voice made one condition read as two.
+   */
   readonly reconnecting?: boolean;
   readonly errorMessage?: string;
   /** Injectable for tests; defaults to `window.localStorage` when available. */
@@ -166,7 +175,13 @@ export function SubagentsTray(props: SubagentsTrayProps) {
       isActiveAgentHierarchyStatus(entry.lifecycleStatus),
   );
   const outstanding = props.entries.filter(
-    (entry) => isActiveAgentHierarchyStatus(entry.lifecycleStatus) || subagentNeedsReview(entry),
+    (entry) =>
+      isActiveAgentHierarchyStatus(entry.lifecycleStatus) ||
+      // A child the head counts as failed or interrupted is listed too, with the
+      // reason the host recorded, so no count names a child the person cannot find.
+      entry.lifecycleStatus === "failed" ||
+      entry.lifecycleStatus === "interrupted" ||
+      subagentNeedsReview(entry),
   );
   const observations = props.observations ?? [];
   const observedOutstanding = observations.filter((child) => child.lifecycleStatus !== "completed");
@@ -175,6 +190,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
     ...observedOutstanding.map((child) => ({ kind: "observed" as const, child })),
   ];
   const preview = candidates.slice(0, 3);
+  const stale = props.reconnecting === true;
   const total = props.entries.length + observations.length;
   const now = useNow(preview.length > 0 && open);
   if (total === 0 && props.errorMessage === undefined) return null;
@@ -192,6 +208,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
       aria-label="Subagents"
       className="composer-subagents"
       data-open={open ? "true" : "false"}
+      data-stale={stale ? "true" : "false"}
       role="group"
     >
       <div className="composer-subagents__head">
@@ -227,7 +244,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
         <div id={listId} className="composer-subagents__body">
           {working.length > 1 && !confirming ? (
             <OctantButton
-              disabled={props.busy === true}
+              disabled={props.busy === true || stale}
               onClick={() => setConfirming(true)}
               size="xs"
               type="button"
@@ -279,7 +296,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
               {preview.map((item) =>
                 item.kind === "managed" ? (
                   <SubagentTrayRow
-                    busy={props.busy === true}
+                    busy={props.busy === true || stale}
                     entry={item.entry}
                     key={item.entry.runId}
                     now={now}
@@ -319,11 +336,6 @@ export function SubagentsTray(props: SubagentsTrayProps) {
 
       {props.observationsTruncated ? (
         <p className="composer-subagents__notice">Earlier observed children are not retained.</p>
-      ) : null}
-      {props.reconnecting === true ? (
-        <p className="composer-subagents__notice" role="status">
-          Reconnecting. Showing the last status the host reported.
-        </p>
       ) : null}
       {props.errorMessage === undefined ? null : (
         <OctantAlert className="composer-subagents__notice" tone="warning">
@@ -392,6 +404,11 @@ function SubagentTrayRow(props: {
   );
 }
 
+/**
+ * The head's one line: every state the thread's children are in, what needs
+ * the person first. Each count names a state, so nothing reads as an unexplained
+ * total, and a result the parent already holds is just "done".
+ */
 function trayStatus(
   entries: ReadonlyArray<AgentHierarchyInputEntry>,
   observations: ReadonlyArray<AgentObservedChild>,
@@ -400,10 +417,9 @@ function trayStatus(
   const children = [...entries, ...observations];
   const count = (status: string) =>
     children.filter((child) => child.lifecycleStatus === status).length;
-  const review = entries.filter(subagentNeedsReview).length;
-  const failed = count("failed");
-  const waiting = count("waiting");
-  const stopped = count("interrupted") + count("cancelled");
+  const review = entries.filter(
+    (entry) => entry.lifecycleStatus === "completed" && subagentNeedsReview(entry),
+  ).length;
   const known = new Set([
     "failed",
     "waiting",
@@ -415,23 +431,18 @@ function trayStatus(
     "completed",
   ]);
   const unknown = children.filter((child) => !known.has(child.lifecycleStatus)).length;
-  const attention = [
-    failed > 0 ? `${failed} failed` : undefined,
-    waiting > 0 ? `${waiting} waiting` : undefined,
-    review > 0 ? `${review} ${review === 1 ? "needs" : "need"} review` : undefined,
+  const working = count("queued") + count("starting") + count("running");
+  const stopped = count("interrupted") + count("cancelled");
+  const parts = [
+    count("failed") > 0 ? `${count("failed")} failed` : undefined,
+    count("waiting") > 0 ? `${count("waiting")} waiting` : undefined,
+    review > 0 ? `${review} to review` : undefined,
     stopped > 0 ? `${stopped} stopped` : undefined,
     unknown > 0 ? `${unknown} status unavailable` : undefined,
+    working > 0 ? `${working} working` : undefined,
+    count("completed") - review > 0 ? `${count("completed") - review} done` : undefined,
   ].filter((part) => part !== undefined);
-  const active = children.filter((child) =>
-    isActiveAgentHierarchyStatus(child.lifecycleStatus),
-  ).length;
-  const status =
-    attention.length > 0
-      ? attention.join(" · ")
-      : active > 0
-        ? `${active} active`
-        : `${count("completed")} completed`;
-  return `${children.length} ${truncated ? "listed" : "total"} · ${status}`;
+  return `${parts.join(" · ")}${truncated ? " · earlier ones not retained" : ""}`;
 }
 
 function browserStorage(): Pick<Storage, "getItem" | "setItem"> | undefined {
