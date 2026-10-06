@@ -1110,7 +1110,11 @@ First run is a five-step wizard with a progress rail. Each step is pending,
 current, or completed: the current step is a filled card, completed steps show
 a check, and pending steps show their number. Mode choices on the readiness
 step use `OctantToggleGroup`. Answers still write through to the settings that
-own them.
+own them. First run records its outcome only after every answer has landed. When
+the host refused an answer, the first press of Skip setup or the primary action
+says so in a warning notice and records nothing; the next press goes on without
+that answer, so a refusing host can never leave the dialog impossible to leave.
+A refused outcome is reported the same way and the dialog stays open.
 
 The right dock follows the active pane and never leaks another pane's content.
 The dock and the bottom panel both step aside while a reader route (Board,
