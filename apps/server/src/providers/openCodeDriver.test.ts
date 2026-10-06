@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 import {
   adaptBetaOpenCodeEvent,
   betaAgentPermissionRules,
+  betaPermissionEffect,
   makeOpenCodeDriver,
   normalizeOpenCodeProbe,
   openCodePromptParts,
@@ -1448,6 +1449,182 @@ describe("OpenCode driver", () => {
     expect(fixture.calls).toContain("permission.reply:once");
   });
 
+  it("does not reply to an approval-gated 2.x write until the user approves it", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "permission.v2.asked",
+          properties: {
+            id: "perm-held",
+            sessionID: "provider-session",
+            action: "edit",
+            resources: ["*"],
+          },
+        } as unknown as Event,
+      ],
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver
+          .acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection
+                .start({ sessionId, modelId, executionPolicy: "approval-gated" })
+                .pipe(
+                  Effect.tap(() =>
+                    connection.send({ sessionId, prompt: "edit", attachments: [], tools: [] }),
+                  ),
+                ),
+            ),
+          ),
+      ),
+    );
+    expect(fixture.calls.some((call) => call.startsWith("permission.reply:"))).toBe(false);
+  });
+
+  it("rejects a 2.x Plan write without asking the user", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "permission.v2.asked",
+          properties: {
+            id: "perm-plan",
+            sessionID: "provider-session",
+            action: "edit",
+            resources: ["*"],
+          },
+        } as unknown as Event,
+        {
+          type: "session.idle",
+          properties: { sessionID: "provider-session" },
+        } as unknown as Event,
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(Stream.takeUntil((event) => event.kind === "completed")),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(fixture.calls).toContain("permission.reply:reject");
+    expect(Array.from(output).some((event) => event.kind === "approval-request")).toBe(false);
+  });
+
+  it("allows a 2.x edit under auto-accept without asking, and reports the file change", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "permission.v2.asked",
+          properties: {
+            id: "perm-auto",
+            sessionID: "provider-session",
+            action: "edit",
+            resources: ["*"],
+          },
+        } as unknown as Event,
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/src/index.ts" },
+        } as unknown as Event,
+        {
+          type: "session.idle",
+          properties: { sessionID: "provider-session" },
+        } as unknown as Event,
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "auto-accept-edits",
+              });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(fixture.calls).toContain("permission.reply:once");
+    expect(events.some((event) => event.kind === "approval-request")).toBe(false);
+    expect(events.some((event) => event.kind === "file-change")).toBe(true);
+    expect(events.some((event) => event.kind === "failed")).toBe(false);
+  });
+
+  it("refuses a 2.x permission request that names no action", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "permission.v2.asked",
+          properties: { id: "perm-bare", sessionID: "provider-session" },
+        } as unknown as Event,
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+              });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(
+      events.some(
+        (event) =>
+          event.kind === "failed" &&
+          event.failure.category === "unsupported" &&
+          event.failure.message.includes("cannot be mapped"),
+      ),
+    ).toBe(true);
+    expect(fixture.calls.some((call) => call.startsWith("permission.reply:"))).toBe(false);
+  });
+
   it("maps a 2.x question.v2.asked event to a user input request and replies through the v2 route", async () => {
     const fixture = betaDriver({
       events: [
@@ -1850,19 +2027,7 @@ function evaluateV2Permission(
   rules: PermissionV2Ruleset,
   action: string,
 ): "allow" | "deny" | "ask" | undefined {
-  let effect: "allow" | "deny" | "ask" | undefined;
-  for (const rule of rules) {
-    const pattern = new RegExp(
-      `^${rule.action
-        .split("*")
-        .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/g, "\\\\$&"))
-        .join(".*")}$`,
-    );
-    if (pattern.test(action) && rule.resource === "*") {
-      effect = rule.effect;
-    }
-  }
-  return effect;
+  return betaPermissionEffect(rules, action);
 }
 function textEvent(id: string, delta: string): Event {
   return {

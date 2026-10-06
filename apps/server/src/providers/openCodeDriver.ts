@@ -113,6 +113,10 @@ interface SessionState {
   sourceId: string | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvals: Set<string>;
+  /** Action named by each pending approval, so a granted edit can release a later file change. */
+  readonly approvalActions: Map<string, string>;
+  /** Set when this session's posture or an approval has allowed an edit to run. */
+  grantedEdits: boolean;
   readonly questions: Map<
     string,
     {
@@ -1010,11 +1014,47 @@ function makeConnection(
       state.terminal = true;
       cancelPendingTools(state);
       state.approvals.clear();
+      state.approvalActions.clear();
       state.questions.clear();
       state.questionAnswers.clear();
       deactivate(state);
       void releaseManagedTools(state).catch(() => undefined);
     };
+    const betaEnforcement = (state: SessionState) =>
+      runtimeKind !== "beta"
+        ? undefined
+        : {
+            mode,
+            reply: (requestId: string, reply: "once" | "reject") => {
+              const active = client;
+              const source = state.sourceId;
+              if (active === undefined || source === undefined) {
+                if (state.terminal) return;
+                offer(
+                  unmappedBetaFailure(
+                    state,
+                    options.instanceId,
+                    clock,
+                    "OpenCode 2 permission reply failed.",
+                  ),
+                );
+                retireState(state);
+                return;
+              }
+              void active.replyPermission(source, requestId, reply).catch(() => {
+                if (state.terminal) return;
+                offer(
+                  unmappedBetaFailure(
+                    state,
+                    options.instanceId,
+                    clock,
+                    "OpenCode 2 permission reply failed.",
+                  ),
+                );
+                retireState(state);
+              });
+            },
+          };
     const emitInterrupted = (state: SessionState, message: string) => {
       if (state.terminal) return;
       retireState(state);
@@ -1206,7 +1246,7 @@ function makeConnection(
                       clock,
                       offer,
                       retireState,
-                      runtimeKind === "beta",
+                      betaEnforcement(state),
                     );
                   }
                 }
@@ -1446,7 +1486,7 @@ function makeConnection(
                   clock,
                   offer,
                   retireState,
-                  runtimeKind === "beta",
+                  betaEnforcement(state),
                 );
               }
               pendingBySource.delete(session.id);
@@ -1570,7 +1610,7 @@ function makeConnection(
                       clock,
                       offer,
                       retireState,
-                      runtimeKind === "beta",
+                      betaEnforcement(state),
                     );
                   }
                   pendingBySource.delete(session.id);
@@ -1710,7 +1750,18 @@ function makeConnection(
                           : "reject",
                       ),
                     ).pipe(
-                      Effect.tap(() => Effect.sync(() => state.approvals.delete(input.requestId))),
+                      Effect.tap(() =>
+                        Effect.sync(() => {
+                          if (
+                            input.approved &&
+                            state.approvalActions.get(input.requestId) === "edit"
+                          ) {
+                            state.grantedEdits = true;
+                          }
+                          state.approvalActions.delete(input.requestId);
+                          state.approvals.delete(input.requestId);
+                        }),
+                      ),
                     );
           }),
         ),
@@ -1805,6 +1856,8 @@ function newSessionState(
     sourceId: undefined,
     executionPolicy,
     approvals: new Set(),
+    approvalActions: new Map(),
+    grantedEdits: false,
     questions: new Map(),
     questionAnswers: new Map(),
     toolNames: new Set(tools.map((tool) => tool.name)),
@@ -1833,6 +1886,7 @@ function unmappedBetaFailure(
   state: SessionState,
   instanceId: ProviderInstanceId,
   clock: () => string,
+  message = "OpenCode 2 cannot map this provider event.",
 ): ProviderRuntimeEvent {
   return {
     kind: "failed",
@@ -1843,15 +1897,23 @@ function unmappedBetaFailure(
     occurredAt: clock() as UtcTimestamp,
     failure: {
       category: "unsupported",
-      message: "OpenCode 2 cannot map this provider event.",
+      message,
     },
   };
 }
 
-function failClosedBetaEvent(event: ProviderRuntimeEvent): ProviderRuntimeEvent {
+function failClosedBetaEvent(
+  event: ProviderRuntimeEvent,
+  state: SessionState,
+  mode: "chat" | "work" | "code",
+): ProviderRuntimeEvent {
   if (event.kind !== "file-change") {
     return event;
   }
+  const edit = betaPermissionEffect(betaAgentPermissionRules(state.executionPolicy, mode), "edit");
+  // An edit the posture allows, or one the user already approved, may be
+  // reported. Any other file change ran without a grant, so the turn fails.
+  if (edit === "allow" || state.grantedEdits) return event;
   return {
     kind: "failed",
     instanceId: event.instanceId,
@@ -1873,9 +1935,41 @@ function mapAndOffer(
   clock: () => string,
   offer: (event: ProviderRuntimeEvent) => void,
   retire: (state: SessionState) => void,
-  failClosed = false,
+  beta?: {
+    readonly mode: "chat" | "work" | "code";
+    readonly reply: (requestId: string, reply: "once" | "reject") => void;
+  },
 ): void {
   if (state.terminal) return;
+  if (beta !== undefined && event.type === "permission.v2.asked") {
+    const requestId = textProperty(event.properties, "id");
+    const action = textProperty(event.properties, "action");
+    const effect =
+      requestId === "" || action === ""
+        ? undefined
+        : betaPermissionEffect(betaAgentPermissionRules(state.executionPolicy, beta.mode), action);
+    if (effect === undefined) {
+      offer(
+        unmappedBetaFailure(
+          state,
+          instanceId,
+          clock,
+          "OpenCode 2 permission request cannot be mapped.",
+        ),
+      );
+      retire(state);
+      return;
+    }
+    if (effect === "deny") {
+      beta.reply(requestId, "reject");
+      return;
+    }
+    if (effect === "allow") {
+      if (action === "edit") state.grantedEdits = true;
+      beta.reply(requestId, "once");
+      return;
+    }
+  }
   let mapped: ReadonlyArray<ProviderRuntimeEvent>;
   try {
     mapped = mapOpenCodeEvent(
@@ -1890,7 +1984,7 @@ function mapAndOffer(
       event,
     );
   } catch (error) {
-    if (!failClosed) throw error;
+    if (!beta) throw error;
     offer(unmappedBetaFailure(state, instanceId, clock));
     retire(state);
     return;
@@ -1903,7 +1997,7 @@ function mapAndOffer(
       taskOccurrences.set(original.summary, occurrence + 1);
     }
     let normalized = stableTaskIdentity(state, original, occurrence);
-    if (failClosed) normalized = failClosedBetaEvent(normalized);
+    if (beta !== undefined) normalized = failClosedBetaEvent(normalized, state, beta.mode);
     // OpenCode settles usage once per model step. Consumers keep the latest
     // report as the logical turn's figure, so make each report cumulative
     // across the prompt's tool loop while keeping the same provider session.
@@ -1927,7 +2021,10 @@ function mapAndOffer(
       };
       normalized = { ...normalized, ...state.usageTotals };
     }
-    if (normalized.kind === "approval-request") state.approvals.add(normalized.requestId);
+    if (normalized.kind === "approval-request") {
+      state.approvals.add(normalized.requestId);
+      state.approvalActions.set(normalized.requestId, normalized.action);
+    }
     if (normalized.kind === "user-input-request") {
       const providerRequestId = normalized.requestId;
       const index = normalized.questionIndex ?? 1;
@@ -2012,11 +2109,11 @@ function splitModelId(value: string): { providerId: string; modelId: string } {
 
 /**
  * Maps Octant's approval posture onto the 2.x agent permission ruleset. The
- * 2.x ruleset uses `{action, resource, effect}` where the 1.x ruleset uses
- * `{permission, pattern, action}`. The mapping mirrors `permissionRules`:
- * Plan denies every write, approval-gated asks for everything, auto-accept
- * allows edits, and full access allows everything, with external directory
- * access denied in every posture and bash/task denied in Work mode.
+ * 2.x session create API does not accept a ruleset, so these rules are not
+ * sent. The host applies the last matching rule when a `permission.v2.asked`
+ * event arrives: deny is rejected without asking, allow is replied once
+ * without asking, and ask is surfaced. OpenCode applies the last matching
+ * rule; this function uses the same order.
  */
 export function betaAgentPermissionRules(
   policy: ProviderExecutionPolicy,
@@ -2055,6 +2152,37 @@ export function betaAgentPermissionRules(
     );
   }
   return rules;
+}
+
+/**
+ * Last matching 2.x rule for an action. An action that matches nothing is
+ * unmappable: the caller refuses the turn rather than guessing ask or allow.
+ */
+export function betaPermissionEffect(
+  rules: PermissionV2Ruleset,
+  action: string,
+): "allow" | "deny" | "ask" | undefined {
+  let effect: "allow" | "deny" | "ask" | undefined;
+  for (const rule of rules) {
+    if (rule.resource !== "*") continue;
+    if (!betaActionMatches(rule.action, action)) continue;
+    effect = rule.effect;
+  }
+  return effect;
+}
+
+function betaActionMatches(pattern: string, action: string): boolean {
+  const source = `^${pattern
+    .split("*")
+    .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&"))
+    .join(".*")}$`;
+  return new RegExp(source).test(action);
+}
+
+function textProperty(value: unknown, key: string): string {
+  if (typeof value !== "object" || value === null || !Object.hasOwn(value, key)) return "";
+  const field = Reflect.get(value, key);
+  return typeof field === "string" ? field.trim() : "";
 }
 
 export function normalizeOpenCodeProbe(
