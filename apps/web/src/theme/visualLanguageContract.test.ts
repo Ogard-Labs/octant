@@ -1,6 +1,11 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  CONTEXT_CATEGORY_ORDER,
+  PROVIDER_PART_ORDER,
+  contextCategoryTone,
+} from "../context/contextInspectorModel";
 
 const webRoot = join(process.cwd(), "src");
 const leftoverRadius = /border-radius:\s*(?:[5-9]|1[0-4])px\b/;
@@ -506,6 +511,189 @@ describe("the public-block visual language", () => {
     expect(runtime).toMatch(
       /\.settings-view__text-input\[type="color"\] \{[^}]*height: var\(--oct-settings-control-height, 28px\);/,
     );
+  });
+
+  describe("categorical colour in the context window", () => {
+    const css = readFileSync(join(webRoot, "context/context.css"), "utf8");
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((match) => ({
+      selector: (match[1] ?? "").replace(/\/\*[\s\S]*?\*\//g, "").trim(),
+      body: match[2] ?? "",
+    }));
+    const toneRule = (tone: number) =>
+      rules.find((rule) => rule.selector.endsWith(`[data-tone="${String(tone)}"]`));
+    const hues = ["blue", "orange", "purple", "teal", "green", "pink", "yellow"];
+
+    it("gives the parts of the window a hue in every style, from the palette roles", () => {
+      // The Default style is monochrome chrome; the parts of a context window
+      // are categorical data, which DESIGN.md allows to keep colour beside a
+      // name. Seven hues in two steps; red stays the ring's near-full warning.
+      hues.forEach((hue, index) => {
+        expect(toneRule(index + 1)?.body).toContain(`var(--octant-palette-${hue},`);
+        const shaded = toneRule(index + 8)?.body ?? "";
+        expect(shaded).toContain(`var(--octant-palette-${hue},`);
+        expect(shaded).toContain("var(--octant-text-primary)");
+      });
+      expect(toneRule(15)).toBeUndefined();
+      expect(css).not.toMatch(/data-tone[^{]*\{[^}]*--octant-palette-red/);
+    });
+
+    it("confines palette colour in that sheet to the window's tones, the ring and the limit bars", () => {
+      const withPalette = rules.filter((rule) => rule.body.includes("--octant-palette-"));
+
+      expect(withPalette.length).toBeGreaterThan(0);
+      for (const rule of withPalette) {
+        expect(rule.selector).toMatch(
+          /\[data-tone="\d+"\]|\.composer-context-meter\b|\.context-window-popover__limit/,
+        );
+      }
+    });
+
+    it("keeps free space and reserved room neutral", () => {
+      const neutral = rules.find(
+        (rule) =>
+          rule.selector.includes(".context-window-popover,") &&
+          rule.selector.includes(".context-entry-card"),
+      );
+
+      // A segment with no tone takes the neutral fill: ink over the panel.
+      expect(neutral?.body).toMatch(
+        /--context-window-tone:\s*color-mix\(\s*in oklab,\s*var\(--octant-text-primary\)[^;]*var\(--octant-floating\)\s*\)/,
+      );
+      expect(neutral?.body).not.toContain("--octant-palette-");
+      // Free space is the empty track, drawn as the track.
+      const freeSwatch = rules.find((rule) =>
+        rule.selector.includes('tr[data-kind="free"] .context-window-popover__swatch'),
+      );
+      expect(freeSwatch?.body).toContain("background: var(--context-window-track)");
+      expect(
+        rules.some(
+          (rule) =>
+            /data-kind="(?:free|reserved)"/.test(rule.selector) &&
+            rule.body.includes("--octant-palette-"),
+        ),
+      ).toBe(false);
+    });
+
+    it("keeps every tone legible on the popover and every pair of neighbours clearly apart, in both themes", () => {
+      // Seven hues cannot all be far apart in lightness while each holds 5:1
+      // against the panel, so neighbours are separated by hue: a perceptual
+      // distance in OKLab, on top of the one-pixel gap and the names beside
+      // every swatch.
+      const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+      const lightAt = styles.indexOf('html[data-octant-theme-mode="light"] {');
+      const sheets = { dark: styles.slice(0, lightAt), light: styles.slice(lightAt) };
+      const shade =
+        Number(/\[data-tone="8"\][^{]*\{[^}]*?\)\s*(\d+)%,/.exec(css)?.[1] ?? "NaN") / 100;
+      expect(shade).toBeGreaterThan(0);
+
+      const channel = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+      const rgb = (value: string) =>
+        [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16) / 255) as [number, number, number];
+      const oklab = ([r, g, b]: readonly [number, number, number]) => {
+        const [R, G, B] = [channel(r), channel(g), channel(b)] as const;
+        const l = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B);
+        const m = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B);
+        const s = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+        return [
+          0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+          1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+          0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+        ] as const;
+      };
+      const luminance = (value: readonly [number, number, number]) =>
+        0.2126 * channel(value[0]) + 0.7152 * channel(value[1]) + 0.0722 * channel(value[2]);
+      const ratio = (
+        a: readonly [number, number, number],
+        b: readonly [number, number, number],
+      ) => {
+        const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      // The shaded step mixes the hue toward the ink in OKLab, as color-mix does.
+      const shaded = (
+        hue: readonly [number, number, number],
+        ink: readonly [number, number, number],
+      ) => {
+        const [h, i] = [oklab(hue), oklab(ink)];
+        const [L, a, b] = h.map((v, n) => v * shade + (i[n] ?? 0) * (1 - shade)) as [
+          number,
+          number,
+          number,
+        ];
+        const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+        const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+        const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+        const lin = [
+          4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+          -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+          -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+        ];
+        return lin.map((c) =>
+          Math.min(1, Math.max(0, c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055)),
+        ) as [number, number, number];
+      };
+      const distance = (
+        a: readonly [number, number, number],
+        b: readonly [number, number, number],
+      ) => {
+        const [x, y] = [oklab(a), oklab(b)];
+        return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]);
+      };
+
+      const planned = [
+        ...CONTEXT_CATEGORY_ORDER.filter((key) => key !== "reserves"),
+        "observed-overhead",
+      ];
+      // A part Octant counted appears only when the runtime reported none, so
+      // the two never stand in one bar.
+      const reported = [
+        ...PROVIDER_PART_ORDER.filter((key) => key !== "reserved" && key !== "octant-tools"),
+        "other-provider",
+      ];
+      const counted = ["octant-tools", "other-provider"];
+
+      for (const [theme, sheet] of Object.entries(sheets)) {
+        const grab = (name: string) =>
+          new RegExp(`${name}:\\s*(#[0-9a-f]{6})`, "i").exec(sheet)?.[1] ?? "";
+        const floating = rgb(grab("--octant-floating"));
+        const ink = rgb(grab("--octant-text-primary"));
+        const tones = new Map<number, [number, number, number]>();
+        hues.forEach((hue, index) => {
+          const base = rgb(grab(`--octant-palette-${hue}`));
+          tones.set(index + 1, base);
+          tones.set(index + 8, shaded(base, ink));
+        });
+        const colour = (key: string) => {
+          const tone = contextCategoryTone(key);
+          expect(tone, `${key} has a tone`).toBeDefined();
+          return tones.get(tone as number) as [number, number, number];
+        };
+        for (const order of [planned, reported, counted]) {
+          order.forEach((key, index) => {
+            expect(
+              ratio(colour(key), floating),
+              `${theme} ${key} against the popover`,
+            ).toBeGreaterThanOrEqual(3);
+            const before = order[index - 1];
+            if (before !== undefined) {
+              expect(
+                distance(colour(key), colour(before)),
+                `${theme}: ${before} next to ${key}`,
+              ).toBeGreaterThanOrEqual(0.1);
+            }
+          });
+        }
+      }
+    });
+
+    it("leaves the context ring coloured, amber and then red when nearly full", () => {
+      expect(css).toMatch(
+        /\.composer-context-meter \{\s*--composer-context-meter-ink: var\(--octant-palette-orange/,
+      );
+      expect(css).toMatch(
+        /\.composer-context-meter\[data-fill="high"\] \{\s*--composer-context-meter-ink: var\(--octant-palette-red/,
+      );
+    });
   });
 
   it("keeps Usage on the open grammar instead of stat cards", () => {

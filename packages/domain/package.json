@@ -81,6 +81,7 @@
     "./replica-entry-policy": "./src/replicaEntryPolicy.ts",
     "./replica-membership-policy": "./src/replicaMembershipPolicy.ts",
     "./turn-metrics-policy": "./src/turnMetricsPolicy.ts",
+    "./live-turn-policy": "./src/liveTurnPolicy.ts",
     "./turn-metrics-display": "./src/turnMetricsDisplay.ts",
     "./local-usage-pricing": "./src/localUsagePricing.ts"
   },
