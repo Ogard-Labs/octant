@@ -1,0 +1,181 @@
+/* The quiet stats line under a thread's composer. Meta ink on the tray, the
+   same step as the context strip above it, no hue on any figure: the numbers
+   are read, not scanned for a colour. It wraps rather than scrolls so every
+   figure stays readable at phone width. */
+.thread-stats {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  padding: 0 var(--oct-space-2) var(--oct-space-2) var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-stats__line.thread-stats__line {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0 var(--oct-space-2);
+  min-width: 0;
+  height: auto;
+  min-height: 28px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: normal;
+}
+
+.thread-stats__line:hover,
+.thread-stats__line:focus-visible {
+  color: var(--oct-fg);
+}
+
+.thread-stats__item {
+  white-space: nowrap;
+}
+
+.thread-stats__item[data-hinted="true"] {
+  text-decoration: underline dotted color-mix(in oklab, currentcolor 40%, transparent);
+  text-underline-offset: 3px;
+}
+
+.thread-stats__hide {
+  flex: 0 0 auto;
+}
+
+.octant-dialog__popup.thread-stats-dialog {
+  --octant-dialog-width: 28rem;
+
+  max-height: calc(100vh - 48px);
+  padding: var(--oct-space-4);
+  overflow-y: auto;
+}
+
+.thread-stats-detail {
+  display: grid;
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
+.thread-stats-detail__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.thread-stats-detail__title {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.thread-stats-detail__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.thread-stats-detail__subject {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.thread-stats-detail__section {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding-top: var(--oct-space-3);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.thread-stats-detail__section h3 {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+}
+
+.thread-stats-detail__rows {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-stats-detail__rows > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--oct-space-3);
+  font-size: var(--oct-text-detail);
+}
+
+.thread-stats-detail__rows dt {
+  color: var(--oct-meta);
+}
+
+.thread-stats-detail__rows dd {
+  margin: 0;
+  color: var(--oct-fg);
+  text-align: right;
+}
+
+.thread-stats-detail__rows dd.thread-stats-detail__hint {
+  flex: 1 0 100%;
+  color: var(--oct-meta);
+  text-align: left;
+}
+
+.thread-stats-detail__hint {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.thread-stats-detail__totals {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  list-style: none;
+}
+
+.thread-stats-detail__totals .thread-stats-detail__hint {
+  display: block;
+}
+
+.thread-stats-detail__note {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* The popover entry beside the context meter: one switch and one way in. */
+.thread-stats-menu {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding-top: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.thread-stats-menu__switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}

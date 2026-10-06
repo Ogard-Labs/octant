@@ -324,6 +324,15 @@ Side-task offers stack above the chips as hairline cards: a target icon
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
 
+A thread's stats line sits under the follow-up composer, below the context strip
+and inside the same tray: one row of figures at the 12px meta step in the meta ink,
+separated by middle dots, with no hue on any number and no fill on the row. It wraps at
+narrow widths rather than scrolling, and a trailing quiet icon button hides it. A figure
+that is approximate carries a leading tilde and a dotted underline that explains it on
+hover; a figure the provider did not report is absent, never zero. The whole line is one
+button that opens the per-turn detail dialog, a plain definition list of tokens, timing,
+and cost with Previous and Next turn controls.
+
 Work follow-up composers use the same attached context strip as Code, showing
 the project and working folder instead of Git controls. Full paths require a
 matching project binding revision; missing metadata never borrows another root.

@@ -86,6 +86,7 @@ describe("sendAnthropicMessagesTurn", () => {
               { type: "text", text: "{}" },
               { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
             ],
+            cache_control: { type: "ephemeral" },
           },
         ],
       },
@@ -553,3 +554,92 @@ describe("sendAnthropicMessagesTurn", () => {
     expect(failure).toMatchObject({ category: "protocol" });
   });
 });
+
+/**
+ * The prompt cache only pays off if the bytes before a breakpoint never
+ * change. These check the layout the driver sends: a fixed breakpoint on the
+ * system block, one breakpoint that moves to the newest stable message, and
+ * nothing marked before it.
+ */
+describe("buildAnthropicMessagesBody cache layout", () => {
+  it("marks the system block and only the newest stable history message", () => {
+    const body = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "",
+      system: "stable instructions",
+      history: [
+        { role: "user", text: "first question" },
+        { role: "assistant", text: "first answer" },
+        { role: "user", text: "second question" },
+      ],
+    });
+
+    expect(body.system).toEqual([
+      { type: "text", text: "stable instructions", cache_control: { type: "ephemeral" } },
+    ]);
+    expect(body.messages).toEqual([
+      { role: "user", content: "first question" },
+      { role: "assistant", content: "first answer" },
+      {
+        role: "user",
+        content: [{ type: "text", text: "second question", cache_control: { type: "ephemeral" } }],
+      },
+    ]);
+    expect(countCacheBreakpoints(body)).toBe(2);
+    expect(countCacheBreakpoints(body)).toBeLessThanOrEqual(4);
+  });
+
+  it("moves the breakpoint to the newest message as the history grows", () => {
+    const earlier = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "",
+      history: [
+        { role: "user", text: "first question" },
+        { role: "assistant", text: "first answer" },
+      ],
+    });
+    const grown = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "",
+      history: [
+        { role: "user", text: "first question" },
+        { role: "assistant", text: "first answer" },
+        { role: "user", text: "second question" },
+      ],
+    });
+
+    // The newest message carries the breakpoint each time, never an earlier one.
+    expect(markedMessageIndexes(earlier)).toEqual([1]);
+    expect(markedMessageIndexes(grown)).toEqual([2]);
+  });
+
+  it("leaves the new prompt outside the cached prefix", () => {
+    const body = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "the new question",
+      system: "stable instructions",
+      history: [{ role: "user", text: "first question" }],
+    });
+
+    expect(markedMessageIndexes(body)).toEqual([0]);
+    expect(lastMessage(body)).toEqual({ role: "user", content: "the new question" });
+    expect(countCacheBreakpoints(body)).toBe(2);
+  });
+});
+
+function countCacheBreakpoints(value: unknown): number {
+  return (JSON.stringify(value).match(/"cache_control"/g) ?? []).length;
+}
+
+/** Which history messages carry a breakpoint, in order. */
+function markedMessageIndexes(body: Record<string, unknown>): number[] {
+  const messages: unknown[] = Array.isArray(body.messages) ? body.messages : [];
+  return messages.flatMap((message, index) =>
+    JSON.stringify(message).includes('"cache_control"') ? [index] : [],
+  );
+}
+
+function lastMessage(body: Record<string, unknown>): unknown {
+  const messages: unknown[] = Array.isArray(body.messages) ? body.messages : [];
+  return messages.at(-1);
+}

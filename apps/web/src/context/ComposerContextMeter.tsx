@@ -22,6 +22,7 @@ import {
   type ComposerContextUsageFallback,
 } from "./composerContextMeterScope";
 import { resetCountdownLabel } from "../lib/relativeTime";
+import { ThreadStatsMenu } from "../threadStats/ThreadStatsMenu";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantPopover } from "../ui/base/OctantPopover";
@@ -163,6 +164,7 @@ export function ComposerContextMeter() {
             windowModel={windowModel}
           />
         )}
+        <ThreadStatsMenu onOpenDetail={() => setOpen(false)} />
       </OctantPopover>
       <span aria-live="polite" className="sr-only">
         {liveLabel({
