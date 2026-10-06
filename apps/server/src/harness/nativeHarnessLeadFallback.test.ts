@@ -6,7 +6,7 @@ import {
   type ProviderFailure,
   type ProviderTurnInput,
 } from "@octant/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { NativeHarnessLeadFallbackService } from "./nativeHarnessLeadFallback";
 import type { NativeHarnessEndpoint } from "./nativeHarnessEndpointRegistry";
 import { NativeHarnessRouter } from "./nativeHarnessRouter";
@@ -219,6 +219,16 @@ describe("the lead's fallback", () => {
     service.turnStarted(scopeOf(projectB));
 
     expect(await ask(service)).toEqual({ status: "none", reason: "no-other-model" });
+  });
+
+  it("counts one failed request once even when several Projects share the slot", async () => {
+    const { service, router } = fixture({ host: configuration([lead, backup]) });
+    const reported = vi.spyOn(router, "reportFailure");
+    service.turnStarted(scopeOf(projectA));
+    service.turnStarted(scopeOf(projectB));
+
+    expect(await ask(service)).toMatchObject({ status: "switched" });
+    expect(reported).toHaveBeenCalledTimes(1);
   });
 
   it("stops tracking a turn once it ends", async () => {

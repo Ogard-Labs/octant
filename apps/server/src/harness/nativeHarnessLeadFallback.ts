@@ -103,19 +103,26 @@ export class NativeHarnessLeadFallbackService implements NativeHarnessLeadFallba
 
     const chosen = new Map<string, NativeHarnessSlotCandidate>();
     let refusal: NoFallback | undefined;
+    const reportedSlots = new Set<string>();
     for (const [key, group] of byProject) {
       const projectId = group[0]?.projectId;
       const before = this.#options.router.resolve({ job: "lead", projectId });
-      this.#options.router.reportFailure({
-        // A lead resolves without a parent to inherit, so only the type admits
-        // `inherited-parent`; its requested slot is the one that failed.
-        slotId: before.kind === "inherited-parent" ? before.requestedSlotId : before.slotId,
-        candidate: failed,
-        reason: routeFailureReason(input.failure),
-        ...(input.failure.retryAfterMs === undefined
-          ? {}
-          : { retryAfterMs: input.failure.retryAfterMs }),
-      });
+      // A lead resolves without a parent to inherit, so only the type admits
+      // `inherited-parent`; its requested slot is the one that failed.
+      const slotId = before.kind === "inherited-parent" ? before.requestedSlotId : before.slotId;
+      // Projects that share a slot share one failed request; counting it once
+      // per Project would open the slot's breaker early.
+      if (!reportedSlots.has(String(slotId))) {
+        reportedSlots.add(String(slotId));
+        this.#options.router.reportFailure({
+          slotId,
+          candidate: failed,
+          reason: routeFailureReason(input.failure),
+          ...(input.failure.retryAfterMs === undefined
+            ? {}
+            : { retryAfterMs: input.failure.retryAfterMs }),
+        });
+      }
       const decision = this.#options.router.resolve({ job: "lead", projectId });
       for (const scope of group) {
         try {
