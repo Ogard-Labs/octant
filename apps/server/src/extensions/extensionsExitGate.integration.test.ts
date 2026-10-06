@@ -613,7 +613,7 @@ async function sendSelectedSkillToGenericProvider(
   );
   runtimeRegistry.setObservedState({
     ...observed,
-    capabilities: { ...observed.capabilities, appManagedTools: "supported" },
+    verifiedToolModelIds: observed.models.map((model) => model.id),
   });
   await Effect.runPromise(
     Effect.scoped(
@@ -1485,7 +1485,7 @@ describe("extensions marketplace integrated exit gate", () => {
     );
     runtimeRegistry.setObservedState({
       ...observed,
-      capabilities: { ...observed.capabilities, appManagedTools: "supported" },
+      verifiedToolModelIds: observed.models.map((model) => model.id),
     });
     await Effect.runPromise(
       Effect.scoped(

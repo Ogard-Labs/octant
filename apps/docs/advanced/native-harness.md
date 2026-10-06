@@ -46,8 +46,9 @@ Models → Connection details**. Octant sends one request that asks the model to
 call a test tool. That request may be billed by your provider, once per click.
 A model that calls the tool is verified and gets Octant's tools; one that
 answers in text stays Chat only, and a failed request (a wrong key, a timeout)
-shows its error instead of a verdict. Verifying one model never turns tools on
-for the others on the same endpoint, and changing the endpoint's configuration
+shows its error instead of a verdict. Verifying one model, or that model using
+a tool in a thread, never turns tools on for the others on the same endpoint,
+and changing the endpoint's configuration
 asks you to verify again. Ollama has no Verify tools action yet.
 
 ## Conversations that survive a restart
