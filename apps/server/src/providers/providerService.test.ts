@@ -3298,6 +3298,47 @@ describe("ProviderService", () => {
       expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds).toEqual([]);
     });
 
+    it("keeps one verified model across a restart without verifying its sibling", async () => {
+      const models = ["model-a", "model-b"].map((id) =>
+        decodeProviderModel({
+          id,
+          displayName: id,
+          source: "discovered",
+          verification: "verified",
+          reasoning: "unavailable",
+          inputModalities: ["text"],
+          options: [],
+        }),
+      );
+      const fixture = serviceFixture({
+        instances: [httpProvider()],
+        withCatalogPersistence: true,
+        driver: toolDriver("supported") as never,
+        probeResult: observation({ models }),
+      });
+      fixture.runtime.setObservedState(observation({ models }));
+      await fixture.service.execute(windowId, {
+        kind: "verify-model-tools",
+        instanceId,
+        modelId: decodeProviderModelId("model-a"),
+      });
+
+      // A new process has an empty runtime and only the journal to go on.
+      const restarted = new ProviderRuntimeRegistry();
+      const afterRestart = new ProviderService({
+        persistence: fixture.persistence,
+        runtimeRegistry: restarted,
+        probe: async () => observation({ models }),
+        uuid: () => crypto.randomUUID(),
+        clock: () => now,
+      });
+      await afterRestart.probe(windowId, instanceId);
+
+      expect(restarted.observedState(instanceId)?.verifiedToolModelIds?.map(String)).toEqual([
+        "model-a",
+      ]);
+    });
+
     it("refuses a model the endpoint does not list and never calls the driver", async () => {
       const driver = toolDriver("supported");
       const fixture = serviceFixture({

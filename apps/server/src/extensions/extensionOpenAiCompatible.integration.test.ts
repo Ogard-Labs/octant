@@ -179,7 +179,7 @@ describe("structured extensions on the Generic OpenAI-compatible provider", () =
     );
     runtimeRegistry.setObservedState({
       ...observed,
-      capabilities: { ...observed.capabilities, appManagedTools: "supported" },
+      verifiedToolModelIds: observed.models.map((model) => model.id),
     });
 
     await Effect.runPromise(

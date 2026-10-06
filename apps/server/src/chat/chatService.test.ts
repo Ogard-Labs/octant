@@ -3601,7 +3601,7 @@ describe("ChatService", () => {
     );
     runtimeRegistry.setObservedState({
       ...observed,
-      capabilities: { ...observed.capabilities, appManagedTools: "supported" },
+      verifiedToolModelIds: observed.models.map((model) => model.id),
     });
     const snapshot = authoritativeExtensionSnapshot();
     const activation = new ExtensionActivationService({

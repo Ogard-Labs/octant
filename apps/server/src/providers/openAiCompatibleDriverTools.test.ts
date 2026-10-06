@@ -255,8 +255,10 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     const waiting = collected.find((e) => e.kind === "waiting");
     expect(waiting).toBeUndefined();
 
+    // The proof belongs to the model that made the call, not to the profile.
     const observed = runtimeRegistry.observedState(instanceId);
-    expect(observed?.capabilities.appManagedTools).toBe("supported");
+    expect(observed?.capabilities.appManagedTools).toBe("unsupported");
+    expect(observed?.verifiedToolModelIds?.map(String)).toEqual([String(modelId)]);
   });
 
   it("completes the turn after answerTool provides the tool result", async () => {
@@ -371,7 +373,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     );
   });
 
-  it("preserves appManagedTools capability after a follow-up plain completion", async () => {
+  it("keeps a model's tool proof after a follow-up plain completion", async () => {
     let callCount = 0;
     const fetch = routeFetch(() => {
       callCount += 1;
@@ -411,12 +413,14 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         }),
       ),
     );
-    // After the tool loop completes with a plain response, appManagedTools
-    // must remain "supported" (sticky), not downgraded to "unsupported".
+    // After the tool loop completes with a plain response, the model must stay
+    // verified rather than being downgraded, and the provider-level flag stays
+    // off so no other model gains tools.
     // parallelTools must not appear on ProviderCapabilities (only on ProviderModel).
     const observed = runtimeRegistry.observedState(instanceId);
     expect(observed).toBeDefined();
-    expect(observed?.capabilities.appManagedTools).toBe("supported");
+    expect(observed?.capabilities.appManagedTools).toBe("unsupported");
+    expect(observed?.verifiedToolModelIds?.map(String)).toEqual([String(modelId)]);
     const capabilities = (observed ?? { capabilities: {} }).capabilities as Record<string, unknown>;
     expect(capabilities.parallelTools).toBeUndefined();
     expect(callCount).toBe(2);
@@ -767,6 +771,40 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
     const observed = runtimeRegistry.observedState(instanceId)!;
     runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
 
+    expect((await sendWithOctantTool(driver, modelId))._tag).toBe("Right");
+    expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Left");
+  });
+
+  it("does not unlock a second model on the same endpoint when the first calls a tool in a turn", async () => {
+    const fetch = routeFetch(
+      () => responsesToolCallStream("call_abc", "octant_capability_echo", '{"echo":"hi"}'),
+      () => Response.json({ data: [{ id: "manual-model" }, { id: "other-model" }] }),
+    );
+    const { driver, runtimeRegistry } = makeDriver(fetch as CompatibleFetch);
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const events = yield* connection.subscribe;
+          yield* connection.send({
+            sessionId,
+            prompt: "echo hi",
+            attachments: [],
+            tools: [echoTool],
+            context: [],
+          });
+          yield* Stream.runCollect(events.pipe(Stream.takeUntil((e) => e.kind === "tool-request")));
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    expect(runtimeRegistry.observedState(instanceId)?.verifiedToolModelIds?.map(String)).toEqual([
+      String(modelId),
+    ]);
     expect((await sendWithOctantTool(driver, modelId))._tag).toBe("Right");
     expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Left");
   });
