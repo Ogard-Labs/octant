@@ -32,6 +32,8 @@ export interface NativeHarnessProviderOption {
      * verifies it; absent when the page cannot tell.
      */
     readonly toolsReady?: boolean;
+    /** Set up by hand on the provider, rather than only listed by its endpoint. */
+    readonly configured?: boolean;
   }>;
 }
 
@@ -244,9 +246,11 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
   const hasUnsetRow = Object.values(editedRows).some((rows) =>
     rows.some((row) => row.kind === "unset"),
   );
-  // A provider with no observed models cannot fill a slot, so it must not be
-  // the reason a button silently does nothing.
+  // A provider with no observed models cannot fill a slot. While one is being
+  // checked, or cannot list its models, the page still says it exists, so the
+  // way out is its connection check rather than "Connect a provider".
   const assignableProvider = props.providers.find((option) => option.models.length > 0);
+  const waitingProviders = props.providers.filter((option) => option.models.length === 0);
   const hasSavedRouting =
     draft.slots.some((slot) => slot.candidates.length > 0) || draft.jobSlots.length > 0;
 
@@ -295,15 +299,25 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                           : `${slot.candidates.length} model${slot.candidates.length === 1 ? "" : "s"}`}
                       </span>
                       {assignableProvider === undefined ? (
-                        props.onOpenProviders === undefined ? null : (
-                          <OctantButton
-                            onClick={props.onOpenProviders}
-                            size="sm"
-                            variant="secondary"
-                          >
-                            Connect a provider
-                          </OctantButton>
-                        )
+                        <>
+                          {waitingProviders.length === 0 ? null : (
+                            <span className="oct-meta">
+                              No models from{" "}
+                              {waitingProviders.map((option) => option.label).join(", ")} yet.
+                            </span>
+                          )}
+                          {props.onOpenProviders === undefined ? null : (
+                            <OctantButton
+                              onClick={props.onOpenProviders}
+                              size="sm"
+                              variant="secondary"
+                            >
+                              {waitingProviders.length === 0
+                                ? "Connect a provider"
+                                : "Open Providers & Models"}
+                            </OctantButton>
+                          )}
+                        </>
                       ) : (
                         <OctantButton
                           aria-label={
@@ -329,14 +343,34 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                       const provider = props.providers.find(
                         (option) => option.instanceId === providerId,
                       );
-                      const providerOptions = props.providers.map((option) => ({
-                        id: option.instanceId,
-                        label: option.label,
-                      }));
-                      const modelOptions = (provider?.models ?? []).map((model) => ({
-                        id: model.id,
-                        label: model.label,
-                      }));
+                      const providerOptions = props.providers
+                        .filter(
+                          (option) => option.models.length > 0 || option.instanceId === providerId,
+                        )
+                        .map((option) => ({ id: option.instanceId, label: option.label }));
+                      // An endpoint that lists every model it hosts (an Azure
+                      // resource lists hundreds that are not deployments) shows
+                      // the models the person configured first, under their
+                      // own heading, so a deployment is not buried.
+                      const separatesConfigured = (provider?.models ?? []).some(
+                        (model) => model.configured === true,
+                      );
+                      const modelOptions: Array<{ id: string; label: string; group?: string }> = [
+                        ...(provider?.models ?? [])
+                          .filter((model) => !separatesConfigured || model.configured === true)
+                          .map((model) => ({
+                            id: model.id,
+                            label: model.label,
+                            ...(separatesConfigured ? { group: "Configured models" } : {}),
+                          })),
+                        ...(provider?.models ?? [])
+                          .filter((model) => separatesConfigured && model.configured !== true)
+                          .map((model) => ({
+                            id: model.id,
+                            label: model.label,
+                            group: "Discovered on the endpoint",
+                          })),
+                      ];
                       // A saved choice stays readable when its provider or model is
                       // no longer observed, rather than looking unset.
                       if (row.kind === "chosen") {

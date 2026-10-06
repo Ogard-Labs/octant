@@ -214,6 +214,10 @@ export class ProviderService implements ProviderServiceApi {
   readonly #runtime: ProviderRuntimeRegistry;
   readonly #probeProvider: NonNullable<ProviderServiceOptions["probe"]>;
   readonly #instanceOperationTails = new Map<ProviderInstanceId, Promise<void>>();
+  readonly #probesInFlight = new Map<
+    ProviderInstanceId,
+    { readonly result: Promise<ProviderProbeResult>; readonly tail: Promise<void> }
+  >();
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #driverProvider: ProviderServiceOptions["driver"];
@@ -1195,7 +1199,33 @@ export class ProviderService implements ProviderServiceApi {
     return this.#probeConfiguredInstance(instanceId);
   }
 
+  /**
+   * Probes of one provider run one at a time, so every caller that asked while
+   * a slow endpoint was being checked used to wait for its own full round
+   * trip behind the rest: the web client's first check, the check after
+   * adding a provider, and a person's own click took 22, 39 and 67 seconds in
+   * turn on one slow Azure listing. A probe asked for while one is already
+   * running joins it, unless another operation (an enable or a configuration
+   * change) queued after it: that one must be checked afresh.
+   */
   #probeConfiguredInstance(instanceId: ProviderInstanceId): Promise<ProviderProbeResult> {
+    const running = this.#probesInFlight.get(instanceId);
+    if (running !== undefined && this.#instanceOperationTails.get(instanceId) === running.tail) {
+      return running.result;
+    }
+    const result = this.#queueProbe(instanceId);
+    const tail = this.#instanceOperationTails.get(instanceId);
+    if (tail === undefined) return result;
+    const entry = { result, tail };
+    this.#probesInFlight.set(instanceId, entry);
+    const forget = () => {
+      if (this.#probesInFlight.get(instanceId) === entry) this.#probesInFlight.delete(instanceId);
+    };
+    result.then(forget, forget);
+    return result;
+  }
+
+  #queueProbe(instanceId: ProviderInstanceId): Promise<ProviderProbeResult> {
     return this.#withInstanceOperation(instanceId, async () => {
       try {
         this.#assertReady();

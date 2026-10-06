@@ -1272,6 +1272,59 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("anthropic-secret");
   });
 
+  it("says before the form that a browser cannot add a provider that needs an API key", async () => {
+    const user = userEvent.setup();
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({ instance: foundryProvider(), credentialManagementAvailable: false })}
+      />,
+    );
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
+
+    const notice = screen.getByTestId("provider-keys-desktop-only");
+    expect(notice).toHaveTextContent("API keys are added from the Octant desktop app");
+    expect(notice).toHaveTextContent("Azure AI Foundry needs an API key");
+    // The notice comes before the form, not inside it after the person has filled it in.
+    const form = screen.getByRole("form", { name: "Add Azure AI Foundry provider" });
+    expect(notice.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(form).getByLabelText("API key")).toBeDisabled();
+  });
+
+  it("offers a keyless endpoint in a browser and leaves the notice out for providers that need no key", async () => {
+    const user = userEvent.setup();
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({ instance: foundryProvider(), credentialManagementAvailable: false })}
+      />,
+    );
+
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "OpenAI-compatible HTTP",
+    );
+    expect(screen.getByTestId("provider-keys-desktop-only")).toHaveTextContent(
+      "connect an endpoint that needs no key",
+    );
+
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "Ollama native HTTP",
+    );
+    expect(screen.queryByTestId("provider-keys-desktop-only")).not.toBeInTheDocument();
+  });
+
+  it("shows no desktop-only notice where keys can be stored", async () => {
+    const user = userEvent.setup();
+    renderExpanded(<ProviderSettingsView {...fixture({ instance: foundryProvider() })} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
+
+    expect(screen.queryByTestId("provider-keys-desktop-only")).not.toBeInTheDocument();
+  });
+
   it("creates an Azure AI Foundry provider with an api-key credential", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: foundryProvider() });

@@ -1264,6 +1264,15 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   `answerUserInput`, and `answerTool`, with optional current-turn `steer`. Every driver passes
   the shared conformance harness (chat, child-agent, and context-facts
   suites) before it is selectable.
+- **Probe scheduling.** Operations on one provider instance run one at a time.
+  A probe asked for while another probe of that instance is running joins it
+  and shares its result, unless an enable or configuration change queued after
+  it, which gets a fresh probe; so a slow endpoint costs one round trip however
+  many surfaces ask. The host's HTTP listener allows a request 255 seconds
+  (Bun's maximum) without bytes, because a probe or tool verification answers
+  only when the endpoint does; the endpoint's own deadlines bound the wait.
+  A direct-endpoint model list shows the models a person configured under their
+  own heading ahead of the ones the endpoint reports.
 - **Model configuration.** Model variants may carry normalized family and choice
   labels (for example a Fusion lead and sidekick). Choosing a label binds an
   already advertised model id; the renderer never constructs provider ids or
