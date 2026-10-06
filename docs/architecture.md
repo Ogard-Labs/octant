@@ -1003,7 +1003,24 @@ flowchart LR
   their durable evidence references. Work uses a bounded delta feed over its
   durable transcript. One post-commit Machine change feed invalidates mode
   navigation and Project/extension projections instead of independent polling
-  timers. Every process-local feed sends `snapshot-required` after gaps,
+  timers. A running turn's start time and latest step (a tool name and one
+  redacted, truncated argument, or a wait on approval or an answer) ride on the
+  same Chat, Work, and Code navigation rows as `executing`, optional and absent
+  together outside a live turn. They are held in memory by one process-local
+  live-turn registry the three turn runners feed from the normalized runtime
+  events, are never journaled (a restart interrupts every turn, so there is
+  nothing to rebuild), and are cleared when the turn ends. A provider reports
+  an argument only where it can (Codex shell commands and file paths today);
+  the others show the tool name alone. Redaction happens at the adapter and
+  again when the event is observed: a login-shell wrapper is unwrapped, the first line only, no
+  heredoc body, secret-shaped values and environment assignments replaced, every
+  absolute path reduced to its last segment, then a length cap; a file change
+  names its Project-relative path and never its contents. A step change is not a
+  journal event, so the registry publishes a coalesced notice to the Machine
+  change feed for the mode's navigation topic; the reads still follow the feed
+  and add no timer. Rows are already filtered by the caller's Project and
+  thread authority, so a remote client sees a step only for a thread it can list.
+  Every process-local feed sends `snapshot-required` after gaps,
   overflow, or host restart. The client transport bounds and prioritizes reads,
   coalesces identical work, cancels obsolete thread switches, renews local
   client context without replaying mutations, and windows long transcripts.

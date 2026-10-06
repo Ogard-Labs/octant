@@ -18,6 +18,7 @@ import type {
   ProviderSessionHandle,
 } from "@octant/provider-sdk/driver";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { countsTowardTurnEventBudget, makeIdleTimeout } from "../providers/turnBudget";
@@ -167,6 +168,8 @@ export interface CodeTurnRunnerInput {
   }) => Promise<void>;
   /** Told once when the turn is over, whatever its outcome, with what it cost and how it ran. */
   readonly onTurnEnded?: (turn: TurnEndSummary) => void;
+  /** Tells the navigation read what the running turn is doing, from its start to its end. */
+  readonly liveTurn?: LiveTurnTracker;
   /** The wall clock the turn is timed against. */
   readonly clock?: () => string;
 }
@@ -203,6 +206,7 @@ export class CodeTurnRunner {
       // Re-based when the prompt is sent, so the wait for a first token never
       // includes starting the provider's session.
       let timing = startTurnMetrics(turnStartedAt);
+      input.liveTurn?.begin(turnStartedAt);
       const endOfTurn = (stopReason: TurnStopReason) =>
         summarizeTurnEnd({
           metrics: timing,
@@ -212,6 +216,7 @@ export class CodeTurnRunner {
         });
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
+          input.liveTurn?.end();
           try {
             input.onTurnEnded?.(endOfTurn(stopReasonOf(outcome)));
           } catch {
@@ -354,6 +359,10 @@ export class CodeTurnRunner {
                 if (!isSanitizedEventValid(boundedEvent, sanitizedEvent, input.checkoutRoot)) {
                   return yield* fail("failed", "Provider event sanitization failed closed.");
                 }
+                // The sanitized copy: the checkout root and the turn's secrets
+                // are already out of it, so the step line starts from what the
+                // journal would be allowed to keep.
+                input.liveTurn?.observe(sanitizedEvent);
                 const normalized = withToolName(
                   toolNames,
                   yield* normalizeProviderEvent(input, sanitizedEvent),

@@ -104,6 +104,7 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ProviderContextBlock } from "@octant/contracts";
 import {
   CodeServiceError,
@@ -189,6 +190,8 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 }
 
 export interface CodeOperationRuntimeOptions {
+  /** Where a running turn's start time and latest step are kept for the navigation read. */
+  readonly liveTurns?: LiveTurnRegistry;
   readonly computerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
@@ -2260,6 +2263,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           onTurnEnded: (ended) => {
             endedTurn = ended;
           },
+          ...(this.#options.liveTurns === undefined
+            ? {}
+            : {
+                liveTurn: this.#options.liveTurns.tracker(
+                  String(active.thread.id),
+                  "code-navigation",
+                ),
+              }),
           ...(this.#options.nativeHarness === undefined
             ? {}
             : {
