@@ -2646,7 +2646,7 @@ function normalizedOperationEvent(
           MAX_PROVIDER_INPUT_PROMPT_BYTES,
           "",
         ) ?? "Provider input requested.",
-      options: [],
+      options: boundProviderInputOptions(event.options ?? []),
     };
   }
   if (
@@ -2788,6 +2788,21 @@ function normalizedOperationEvent(
 const FAILURE_MESSAGE_SUFFIX = "\n[Provider failure message truncated.]";
 const SUMMARY_SUFFIX = " [truncated]";
 const MAX_PROVIDER_INPUT_PROMPT_BYTES = 8 * 1024;
+// `CodeOperationEvent`'s `input-requested` accepts at most this many choices of
+// at most this many bytes each; a provider that offers more keeps its first.
+const MAX_PROVIDER_INPUT_OPTIONS = 32;
+const MAX_PROVIDER_INPUT_OPTION_BYTES = 1_024;
+
+/**
+ * What the person is offered to click on a provider's question. Blank labels
+ * are dropped rather than invented into something, and a question left with
+ * none stays a free-text question.
+ */
+function boundProviderInputOptions(options: ReadonlyArray<string>): ReadonlyArray<string> {
+  return options
+    .flatMap((label) => boundProviderText(label, MAX_PROVIDER_INPUT_OPTION_BYTES, "") ?? [])
+    .slice(0, MAX_PROVIDER_INPUT_OPTIONS);
+}
 
 /**
  * `CodeOperationFailure` accepts at most
