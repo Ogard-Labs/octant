@@ -36,6 +36,7 @@ function observer(
       settleTurn: () => {
         recorded.settled += 1;
       },
+      clearRetry: () => undefined,
       recordTurn: (_threadId: string, turn: unknown) => {
         recorded.turns.push(turn);
       },
