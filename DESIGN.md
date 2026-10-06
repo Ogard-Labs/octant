@@ -362,7 +362,7 @@ asked up front; it is derived from the chips and shown on the thread once it
 exists.
 
 Under the composer, Work and Code start screens offer a row of action tiles and
-then the card area, both on the composer's measure and ahead of Code's prompt
+then the card area (Chat's start screens carry the card area alone), both on the composer's measure and ahead of Code's prompt
 suggestions, so a running thread is never under the fold. The tiles are
 always a three-column grid, one column under 560px, so one or two tiles keep a
 tile's width instead of stretching across the row; a detail line wraps to a
