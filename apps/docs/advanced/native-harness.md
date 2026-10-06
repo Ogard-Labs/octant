@@ -22,10 +22,13 @@ the set to what it may reach:
 | Work | inside the bound folder | none      | yes                 | yes        |
 | Code | inside the checkout     | sandboxed | yes                 | yes        |
 
-Every call passes the same server authority check as any other tool. A read
-never needs an approval; an edit, a write, or a command follows the thread's
-access posture, and a thread that has taken in untrusted content asks again
-before writing. An edit needs a prior read of the same file and refuses when
+Every call passes the same server authority check as any other tool. A Chat
+thread holds that authority with or without a Project. A thread that can no
+longer act (archived, its folder or Project changed, or its provider turned
+off) has every tool call refused, and the model is told why so it can say so.
+A read never needs an approval; an edit, a write, or a command follows the
+thread's access posture, and a thread that has taken in untrusted content asks
+again before writing. An edit needs a prior read of the same file and refuses when
 the file changed since. A truncated result says how much was left out and
 where to continue.
 
