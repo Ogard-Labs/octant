@@ -4,7 +4,7 @@ import {
   type AgentRunClientCommandResult,
   type AgentRunParentSummaryClientEntry,
 } from "@octant/client-runtime";
-import type { AgentRunParentThreadId } from "@octant/contracts";
+import type { AgentObservedChild, AgentRunParentThreadId } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { samePollingData } from "../polling/samePollingData";
@@ -35,6 +35,8 @@ export interface ChildRunStatusOptions {
 export type ChildRunStatusReadState = "idle" | "loading" | "ready";
 
 export interface ChildRunStatusController {
+  readonly observations: ReadonlyArray<AgentObservedChild>;
+  readonly observationsTruncated: boolean;
   readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
   readonly summary: ChildRunStatusSummary;
   /** Whether the host has answered for the currently bound parent thread. */
@@ -54,6 +56,7 @@ export interface ChildRunStatusController {
 }
 
 const EMPTY_SUMMARY = buildChildRunStatusSummary([]);
+const NO_OBSERVATIONS: ReadonlyArray<AgentObservedChild> = [];
 const NO_ENTRIES: ReadonlyArray<AgentHierarchyInputEntry> = [];
 
 /**
@@ -65,6 +68,8 @@ const NO_ENTRIES: ReadonlyArray<AgentHierarchyInputEntry> = [];
  * `undefined` until the host has answered for that parent.
  */
 interface ParentThreadRead {
+  readonly observations?: ReadonlyArray<AgentObservedChild>;
+  readonly observationsTruncated?: boolean;
   readonly parentThreadId: AgentRunParentThreadId;
   readonly entries: ReadonlyArray<AgentHierarchyInputEntry> | undefined;
   readonly reconnecting: boolean;
@@ -122,9 +127,12 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
       ? read
       : undefined;
   const entries = current?.entries ?? NO_ENTRIES;
+  const observations = current?.observations ?? NO_OBSERVATIONS;
+  const observationsTruncated = current?.observationsTruncated === true;
   // Children that exist can finish or report at any second; a parent with
   // none can only gain one from a turn's tool, so it re-reads slowly.
-  const refreshMs = options.refreshMs ?? (entries.length > 0 ? 1_000 : 30_000);
+  const refreshMs =
+    options.refreshMs ?? (entries.length + observations.length > 0 ? 1_000 : 30_000);
   const status: ChildRunStatusReadState =
     client === undefined || parentThreadId === undefined
       ? "idle"
@@ -155,13 +163,20 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
             previous?.parentThreadId === parentThreadId &&
             previous.reconnecting === false &&
             previous.entries !== undefined &&
-            samePollingData(previous.entries, entries)
+            samePollingData(previous.entries, entries) &&
+            samePollingData(
+              previous.observations ?? NO_OBSERVATIONS,
+              summary.observations ?? NO_OBSERVATIONS,
+            ) &&
+            previous.observationsTruncated === (summary.observationsTruncated === true)
           ) {
             return previous;
           }
           return {
             parentThreadId,
             entries,
+            observations: summary.observations ?? NO_OBSERVATIONS,
+            observationsTruncated: summary.observationsTruncated === true,
             reconnecting: false,
           };
         });
@@ -269,6 +284,8 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
   );
 
   return {
+    observations,
+    observationsTruncated,
     entries,
     summary,
     status,
@@ -329,6 +346,8 @@ function toHierarchyEntry(entry: AgentRunParentSummaryClientEntry): AgentHierarc
     ...(entry.route === undefined ? {} : { route: entry.route }),
     ...(entry.recoveryReason === undefined ? {} : { recoveryReason: entry.recoveryReason }),
     ...(entry.result === undefined ? {} : { result: entry.result }),
+    ...(entry.resultPackets === undefined ? {} : { resultPackets: entry.resultPackets }),
+    ...(entry.resultsTruncated === undefined ? {} : { resultsTruncated: entry.resultsTruncated }),
     version: entry.version,
     updatedAt: entry.updatedAt,
   };

@@ -275,7 +275,7 @@ describe("Canvas board diagram layout revision contracts", () => {
         positions: [{ nodeId: "client", x: 100, y: 200 }],
         actor,
         expectedSequence: 3,
-        schemaVersion: 3,
+        schemaVersion: 5,
         issuedAt: "2026-08-01T21:00:00.000Z",
       }),
     ).toThrow();

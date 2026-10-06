@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { nativeHarnessSessionHeld, nativeHarnessStatusLabel } from "@octant/domain";
+import {
+  nativeHarnessSessionHeld,
+  nativeHarnessStatusLabel,
+  sessionStatsInputOf,
+  threadStatsLine,
+} from "@octant/domain";
 import * as Clipboard from "expo-clipboard";
 import { Pressable, StyleSheet, Text, TextInput, View, AppState } from "react-native";
 import {
@@ -93,6 +98,8 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
       void load();
     });
   };
+  // The same words the desktop composer and the terminal footer use, read-only.
+  const stats = threadStatsLine(sessionStatsInputOf(view));
   const lastRoute = view.routes.at(-1);
   const lastIntervention = view.interventions.at(-1);
 
@@ -131,6 +138,14 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
         {String(view.session.lead.modelId)} · {view.session.turnsRun} turns ·{" "}
         {view.session.cutovers} context cuts
       </Text>
+      {stats.length === 0 ? null : (
+        <Text
+          style={[mobileTypography.caption, { color: colors.textSecondary }]}
+          testID="mobile-native-harness-stats"
+        >
+          {stats}
+        </Text>
+      )}
       {view.session.detail === undefined ? null : (
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
           {view.session.detail}
@@ -201,7 +216,9 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
       )}
       {lastRoute === undefined ? null : (
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-          {lastRoute.job} → {String(lastRoute.slotId)}: {lastRoute.kind}
+          {lastRoute.job} →{" "}
+          {lastRoute.kind === "inherited-parent" ? "parent" : String(lastRoute.slotId)}:{" "}
+          {lastRoute.kind}
         </Text>
       )}
       {lastIntervention === undefined ? null : (

@@ -1,3 +1,4 @@
+import { ProviderChildActivityEvent } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
@@ -38,6 +39,7 @@ import {
   ProviderInstanceId,
   ProviderModelId,
   ProviderSessionId,
+  ProviderContextBreakdown,
   ProviderResumeCursor,
 } from "./providers";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
@@ -1045,6 +1047,8 @@ const ProviderTurnResult = Schema.Struct({
   operationId: CodeOperationId,
   state: Schema.Literal("running", "waiting", "completed", "interrupted", "failed"),
   evidence: Schema.optional(CodeEvidenceReference),
+  /** The journaled delivery actually covered, including a prior turn found on replay. */
+  delivery: Schema.optional(AgentRunResultDeliveryMark),
   /**
    * Why a turn was refused or failed, when the host can name it. A start that
    * is refused before the provider is reached carries the host's own sentence
@@ -1254,6 +1258,19 @@ const UsageEvent = Schema.Struct({
    */
   contextWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
   contextTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /**
+   * Where the runtime compacts the conversation by itself, in tokens of the
+   * window the last request filled. Present only when the runtime said
+   * compaction is on and will fire at that point; absent means the runtime
+   * said nothing, said it is off, or the host could not read the unit, and
+   * no reader may infer a figure from the model's window.
+   */
+  autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  /**
+   * What the window held after this report: the runtime's own categories, or
+   * the parts Octant counted when it reported none. Absent means neither.
+   */
+  contextBreakdown: Schema.optional(ProviderContextBreakdown),
 }).annotations(strict);
 /**
  * How much of a provider usage window this account has spent, as the provider
@@ -1268,6 +1285,7 @@ const ProviderLimitEvent = Schema.Struct({
   resetsAt: Schema.optional(UtcTimestamp),
 }).annotations(strict);
 const ChildActivityEvent = Schema.Struct({
+  observation: Schema.optional(ProviderChildActivityEvent),
   kind: Schema.Literal("child-activity"),
   childId: boundedNonEmptyText(255),
   state: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
@@ -1374,6 +1392,19 @@ export const CodeConversationTurnUsage = Schema.Struct({
   /** The window and its fill after this turn, when the provider reported them. */
   contextWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
   contextTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /**
+   * Where the runtime compacts the conversation by itself, in tokens of the
+   * window the last request filled. Present only when the runtime said
+   * compaction is on and will fire at that point; absent means the runtime
+   * said nothing, said it is off, or the host could not read the unit, and
+   * no reader may infer a figure from the model's window.
+   */
+  autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  /**
+   * What the window held after this report: the runtime's own categories, or
+   * the parts Octant counted when it reported none. Absent means neither.
+   */
+  contextBreakdown: Schema.optional(ProviderContextBreakdown),
 }).annotations(strict);
 export type CodeConversationTurnUsage = typeof CodeConversationTurnUsage.Type;
 

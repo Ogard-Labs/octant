@@ -68,6 +68,10 @@ export interface NativeHarnessCompositionOptions {
   /** Where each lead tool call is noted while its turn runs. */
   readonly activity?: Pick<NativeHarnessSessionStore, "noteToolCall" | "deliverSteering">;
   readonly approvals?: Pick<NativeHarnessApprovalStore, "ask">;
+  readonly childInteractions?: (
+    run: AgentRun,
+  ) => Pick<NativeHarnessToolPorts, "approvals" | "askUser">;
+  readonly isChildAuthorityCurrent: (run: AgentRun) => boolean;
   readonly recordExternalContentIngestion: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
@@ -312,24 +316,22 @@ export function createNativeHarnessComposition(
       const target = run.routingReceipt.selectedFallback ?? {
         providerInstanceId: run.routingReceipt.selectedProviderInstanceId,
       };
-      if (!options.isHarnessProvider(target.providerInstanceId)) return undefined;
       const mode = run.routingReceipt.mode;
       const runId = String(run.id);
       const projectId =
         run.workspaceReceipt.kind === "chat-virtual" ? undefined : run.workspaceReceipt.projectId;
-      if (projectId === undefined) return undefined;
       // A child's authority is the run's own clamped grant, not a thread's
       // posture: the run record is what admission decided, so it is what
       // every tool call is judged against.
       const granted: ToolActionAuthority = {
         hostId: options.hostId,
         mode,
-        projectId,
+        ...(projectId === undefined ? {} : { projectId }),
         providerInstanceId: target.providerInstanceId,
         extension: { kind: "core" },
       } as ToolActionAuthority;
       const service = new ToolCallAuthorityService({
-        resolveGrantedAuthority: () => granted,
+        resolveGrantedAuthority: () => (options.isChildAuthorityCurrent(run) ? granted : undefined),
         resolveLiveFacts: () => ({
           providerAppManagedTools: "supported",
           host: { computerUseEnabled: false },
@@ -344,6 +346,7 @@ export function createNativeHarnessComposition(
         authority: service,
         resolveAuthority: () => granted,
         ports: {
+          ...options.childInteractions?.(run),
           ...(authority.filesystem && mode !== "chat"
             ? { filesystem: new NativeHarnessFileSystem({ root: projectRoot }) }
             : {}),

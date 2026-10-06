@@ -19,6 +19,7 @@ import {
   OctantMenuItem,
   OctantMenuCheckboxItem,
   OctantMenuGroup,
+  OctantMenuGroupLabel,
   OctantMenuSeparator,
 } from "../ui/base/OctantMenu";
 
@@ -193,9 +194,9 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
               </OctantMenuGroup>
             ) : null}
             {props.profileName === undefined ? null : (
-              <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                Started under {props.profileName}
-              </p>
+              <OctantMenuGroup>
+                <OctantMenuGroupLabel>Started under {props.profileName}</OctantMenuGroupLabel>
+              </OctantMenuGroup>
             )}
           </OctantMenuPopup>
         </OctantMenuPositioner>

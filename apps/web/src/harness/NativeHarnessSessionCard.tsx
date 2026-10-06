@@ -4,9 +4,15 @@ import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
-import { nativeHarnessSessionHeld, nativeHarnessStatusLabel } from "@octant/domain";
+import {
+  nativeHarnessSessionHeld,
+  nativeHarnessStatusLabel,
+  sessionStatsInputOf,
+  threadStats,
+} from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import "./native-harness.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -23,6 +29,8 @@ export interface NativeHarnessSessionCardProps {
 function describeRoute(decision: NativeHarnessRouteDecision): string {
   const model = "candidate" in decision ? String(decision.candidate.modelId) : undefined;
   switch (decision.kind) {
+    case "inherited-parent":
+      return `${decision.job}: inherited parent model (${model})`;
     case "primary":
       return `${decision.job} → ${decision.slotId} (${model})`;
     case "failure-fallback":
@@ -161,12 +169,13 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
     return error === undefined ? null : <OctantAlert tone="warning">{error}</OctantAlert>;
   }
   if (view === null) return null;
+  const stats = threadStats(sessionStatsInputOf(view));
   const paused = nativeHarnessSessionHeld(view.session.status);
 
   return (
-    <section aria-label="Native harness" className="native-harness-card">
+    <section aria-label="Agent coordination" className="native-harness-card">
       <div className="native-harness-card__head">
-        <h3>Native harness</h3>
+        <h3>Agent coordination</h3>
         <span
           className={`native-harness-card__status native-harness-card__status--${view.session.status}`}
         >
@@ -191,13 +200,28 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
       )}
       {pendingApproval === undefined ? null : (
         <section aria-label="Approval requested" className="native-harness-question">
+          {pendingApproval.source === undefined ? null : (
+            <p className="native-harness-card__detail" title={String(pendingApproval.source.runId)}>
+              Child {String(pendingApproval.source.runId).slice(0, 8)} ·{" "}
+              {pendingApproval.source.providerName ?? "Provider"} · {pendingApproval.source.modelId}
+            </p>
+          )}
           <p className="native-harness-question__prompt">
-            <strong>{pendingApproval.toolName}</strong>{" "}
+            <strong>
+              {pendingApproval.toolName === "provider-action"
+                ? "Provider action"
+                : pendingApproval.toolName}
+            </strong>{" "}
             {pendingApproval.summary.replace(/^[a-z-]+: /, "")}
           </p>
           <p className="native-harness-card__detail">
-            Needs your say-so ({pendingApproval.approvalClass}).
+            {pendingApproval.source === undefined
+              ? `Needs your say-so (${pendingApproval.approvalClass}).`
+              : "Allow this request for this child."}
           </p>
+          {pendingApproval.detail === undefined ? null : (
+            <pre className="native-harness-question__detail">{pendingApproval.detail}</pre>
+          )}
           <div className="native-harness-chips">
             <OctantButton
               disabled={busy}
@@ -208,15 +232,17 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
             >
               Allow
             </OctantButton>
-            <OctantButton
-              disabled={busy}
-              onClick={() => void decideApproval("approve-always")}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Allow for this session
-            </OctantButton>
+            {pendingApproval.source === undefined ? (
+              <OctantButton
+                disabled={busy}
+                onClick={() => void decideApproval("approve-always")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Allow for this session
+              </OctantButton>
+            ) : null}
             <OctantButton
               disabled={busy}
               onClick={() => void decideApproval("deny")}
@@ -243,7 +269,11 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
       )}
       {pendingQuestion === undefined ? null : (
         <form
-          aria-label="Question from the lead"
+          aria-label={
+            pendingQuestion.source === undefined
+              ? "Question from the lead"
+              : "Question from a subagent"
+          }
           className="native-harness-question"
           noValidate
           onSubmit={(event) => {
@@ -252,6 +282,12 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
             if (trimmed.length > 0) void answerQuestion(trimmed);
           }}
         >
+          {pendingQuestion.source === undefined ? null : (
+            <p className="native-harness-card__detail" title={String(pendingQuestion.source.runId)}>
+              Child {String(pendingQuestion.source.runId).slice(0, 8)} ·{" "}
+              {pendingQuestion.source.providerName ?? "Provider"} · {pendingQuestion.source.modelId}
+            </p>
+          )}
           <p className="native-harness-question__prompt">{pendingQuestion.prompt}</p>
           {pendingQuestion.options.length === 0 ? null : (
             <div className="native-harness-chips">
@@ -295,6 +331,22 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
         <dd>{view.session.turnsRun}</dd>
         <dt>Context cuts</dt>
         <dd>{view.session.cutovers}</dd>
+        {stats.length === 0 ? null : (
+          <>
+            <dt>Usage</dt>
+            <dd className="native-harness-card__stats" data-testid="native-harness-stats">
+              {stats.map((stat) =>
+                stat.hint === undefined ? (
+                  <span key={stat.key}>{stat.text}</span>
+                ) : (
+                  <OctantTooltip key={stat.key} label={stat.hint} side="top">
+                    <span data-hinted="true">{stat.text}</span>
+                  </OctantTooltip>
+                ),
+              )}
+            </dd>
+          </>
+        )}
       </dl>
       {view.routes.length === 0 ? null : (
         <>

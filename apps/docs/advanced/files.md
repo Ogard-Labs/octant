@@ -95,8 +95,40 @@ last observed version sequence; creation starts at sequence 1. Raw HTML,
 JavaScript, CSS, and invented file or artifact references are not Canvas
 content.
 
-A created Canvas appears as a card in its thread with **Open Canvas**. Octant
-can also offer newly authored documents beside the conversation.
+A created Canvas appears in its thread at the end of the turn that made it, as
+a row you can click to open it. The row shows a live miniature of the Canvas
+and one line about what it holds, such as a plan's next task and how many
+tasks are done. With Settings › Appearance › Style set to Vivid, each Canvas
+takes a colour from what it holds. Octant can also offer newly authored documents
+beside the conversation.
+
+### Small Canvases inside the thread
+
+When you ask for something small, such as a chart, a few numbers, a short table,
+or a sequence or state diagram, the agent can ask for it to be shown in the thread
+(`"presentation": "inline"`). The Canvas then appears at the end of the turn
+that made it, drawn with the same blocks it has in the sidebar. It is still one
+Canvas: it keeps its versions, it appears in your library, and you can share or
+export it.
+
+- **Open in sidebar** (the panel icon) opens the same Canvas in the sidebar next to a Work or
+  Code thread. There you can comment, edit a board or plan, and see its
+  history. Chat has no sidebar, so in Chat the button says **Open Canvas** and
+  opens the Canvas in its own tab.
+- **Show as card** (the fold icon in its header) folds it to a single row.
+  **Show in thread** unfolds it. This window remembers your choice.
+- Hover a line or bar chart to read the value under the pointer. **View chart
+  data** lists every reading.
+- A tall Canvas is cut off at a fixed height and fades out. Its button opens
+  the whole Canvas in the sidebar, or in its own tab in Chat. Scrolling always
+  moves the thread, never the Canvas.
+
+Inside the thread a Canvas holds at most 12 blocks. A Canvas with a diagram
+board (the generic diagram you can drag), a plan, or a mockup always appears as
+a row that opens it in the sidebar, or in its own tab in Chat, because you work
+on those there. Sequence and state diagrams can be shown inline. If a Canvas grows
+past that, later or through your own edits, it turns back into a card. The
+agent is told when that happens.
 
 ### Diagrams as boards
 
@@ -116,6 +148,12 @@ such as an order is a state machine: states that may nest, labeled
 transitions, and an initial and a final state. Both use the same node and
 edge budgets as a board. Comments can sit on a participant, a message, a
 state, or a transition.
+
+A screen is a mockup block: a desktop, tablet, or phone frame and a tree of
+window, header, sidebar, list, list row, form field, button, toggle, tabs,
+card, image placeholder, and text. Nodes name a parent rather than nesting.
+The drawing is a wireframe. Its controls are not live: they cannot be focused
+and they do not submit. Ask `describe` for `mockup` to get a settings screen.
 
 The document fills the Canvas tab and the dock. Its header holds the version
 picker (choose an earlier version, or **Compare with** the previous one to see

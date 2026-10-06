@@ -1,4 +1,6 @@
 import type { WorkFileOpenRequest } from "../work/WorkFilesPanel";
+import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
+import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -34,10 +36,13 @@ export interface ThreadUtilityDockSubject {
 export interface ThreadUtilityDockContentProps {
   readonly agentRunClient?: AgentRunClient;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
-  /** A subagent the Agents tool should open on, asked for from the composer's tray. */
-  readonly requestedAgentRunId?: string;
-  /** Clears that request once the Agents tool has opened on it. */
-  readonly onAgentRunRequestHandled?: () => void;
+  /** A fresh request to show the Agents list or one child's detail. */
+  readonly requestedAgentView?: AgentRunViewRequest;
+  /** Clears that request when the reader returns from a child's detail. */
+  readonly onAgentViewRequestHandled?: () => void;
+  readonly requestedAgentReview?: AgentResultReviewRequest;
+  readonly onAgentReviewBack?: () => void;
+  readonly onReviewAgentChanges?: (request: AgentResultReviewRequest) => void;
   readonly nativeHarnessClient?: NativeHarnessClient;
   readonly appleProjectPath?: string;
   readonly appleToolchainClient?: AppleToolchainClient;

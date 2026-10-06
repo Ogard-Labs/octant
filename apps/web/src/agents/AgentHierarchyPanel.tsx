@@ -1,3 +1,5 @@
+import type { AgentObservedChild } from "@octant/contracts";
+import { ObservedChildRow } from "./ObservedChildActivity";
 import { useMemo } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -22,6 +24,8 @@ import "./agent-hierarchy.css";
  */
 export function AgentHierarchyPanel(props: {
   readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
+  readonly observations?: ReadonlyArray<AgentObservedChild>;
+  readonly observationsTruncated?: boolean;
   readonly creationPosture?: "off" | "ask" | "automatic";
   readonly reconnecting?: boolean;
   readonly onOpen?: (runId: string) => void;
@@ -50,12 +54,31 @@ export function AgentHierarchyPanel(props: {
         </p>
       ) : null}
 
-      {model.emptyReason === undefined ? null : (
+      {model.emptyReason === undefined || (props.observations?.length ?? 0) > 0 ? null : (
         <p className="agent-hierarchy__empty" role="status">
           {model.emptyReason}
         </p>
       )}
 
+      {(props.observations?.length ?? 0) > 0 ? (
+        <section aria-label="Observed children" className="agent-hierarchy__section">
+          <h3>Observed children · {props.observations?.length}</h3>
+          <ul className="agent-hierarchy__list">
+            {props.observations?.map((child) => (
+              <li key={child.observationId} className="agent-hierarchy__row">
+                <ObservedChildRow
+                  child={child}
+                  now={Date.now()}
+                  {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {props.observationsTruncated ? (
+        <p className="agent-hierarchy__banner">Earlier observed children are not retained.</p>
+      ) : null}
       <AgentHierarchySection label="Working" onOpen={props.onOpen} rows={model.working} />
       <AgentHierarchySection label="Finished" onOpen={props.onOpen} rows={model.finished} />
     </section>

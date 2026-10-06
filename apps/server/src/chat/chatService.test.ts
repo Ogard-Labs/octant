@@ -73,6 +73,12 @@ import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { Journal } from "../persistence/journal";
+import {
+  readAgentRunResultEvidence,
+  readAgentRunResultText,
+  writeAgentRunResultEvidence,
+  writeAgentRunResultText,
+} from "../persistence/agentRunContentStore";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { readDiagnosticsFailureIncident } from "../persistence/diagnosticsExportProjection";
 import {
@@ -98,6 +104,7 @@ import { makeOpenAiCompatibleDriver } from "../providers/openAiCompatibleDriver"
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { ResearchRouter } from "./research/researchRouter";
 import { ThreadWorkService } from "./threadWorkService";
+import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { ChatService, ChatServiceError } from "./chatService";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
 
@@ -207,6 +214,7 @@ function openFixture(options?: {
   }>;
   readonly chatEnabled?: { current: boolean };
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
+  readonly liveTurns?: import("../liveTurn/liveTurnRegistry").LiveTurnRegistry;
   readonly resolveSideChatSourceContext?: (input: {
     readonly sidecarThreadId: ChatThreadId;
     readonly windowId?: WindowId;
@@ -411,6 +419,7 @@ function openFixture(options?: {
         .all() as Array<{ readonly thread_json: string }>;
       return rows.map((row) => JSON.parse(row.thread_json));
     },
+    readChatNavigation: () => readChatNavigation(connection),
     readChatThreadView: (threadId: ChatThreadId) => readChatThreadView(connection, threadId),
     readChatContent: (contentId: string) => readChatContent(connection, contentId),
     searchChatThreads: (query: string) => searchChatThreads(connection, query),
@@ -585,6 +594,7 @@ function openFixture(options?: {
 
   const attachmentStore = new ChatAttachmentStore(dataDirectory);
   const service = new ChatService({
+    ...(options?.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
     ...(options?.beforeAttachmentPurge === undefined
       ? {}
       : { beforeAttachmentPurge: options.beforeAttachmentPurge }),
@@ -3566,7 +3576,7 @@ describe("ChatService", () => {
       requestBodies.push(JSON.parse(String(init?.body)) as unknown);
       generatingTurn += 1;
       return generatingTurn === 1
-        ? new Response(null, { status: 500 })
+        ? new Response(null, { status: 400 })
         : genericChatStream("generic replay completed");
     });
     const runtimeRegistry = new ProviderRuntimeRegistry();
@@ -4962,6 +4972,73 @@ describe("ChatService", () => {
     expect(
       fakeDriver.sentTurns[1]?.context?.some((block) => block.text === "Second question"),
     ).toBe(false);
+  });
+
+  it("shows a running answer's start time and latest tool step on navigation, and clears them when it ends", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const driver = {
+      acquire: () =>
+        Effect.sync(() => {
+          const queue = Effect.runSync(Queue.unbounded<never>());
+          return {
+            subscribe: Effect.succeed(Stream.fromQueue(queue)),
+            start: (input: { readonly sessionId: string }) =>
+              Effect.succeed({ sessionId: input.sessionId }),
+            send: (input: { readonly sessionId: string }) =>
+              Effect.gen(function* () {
+                const emit = (event: Record<string, unknown>) =>
+                  Queue.offer(queue, { sessionId: input.sessionId, ...event } as never);
+                yield* emit({
+                  kind: "tool-start",
+                  toolCallId: "call-1",
+                  toolName: "Command",
+                  argument: "bun run test",
+                });
+                yield* Effect.promise(() => gate);
+                yield* emit({ kind: "text-delta", text: "Done." });
+                yield* emit({ kind: "usage", inputTokens: 10, outputTokens: 5 });
+                yield* emit({ kind: "completed" });
+              }),
+            interrupt: () => Effect.void,
+            stop: () => Effect.void,
+            answerApproval: () => Effect.void,
+            answerUserInput: () => Effect.void,
+            answerTool: () => Effect.void,
+          };
+        }),
+    } as unknown as ProviderDriver;
+    const liveTurns = new LiveTurnRegistry();
+    const { service } = openFixture({ driver, liveTurns });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Running answer",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sending = service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Run the tests",
+    });
+
+    await until(() => service.navigation().threads[0]?.liveStep !== undefined);
+    expect(service.navigation().threads[0]).toMatchObject({
+      executing: true,
+      turnStartedAt: now,
+      liveStep: { kind: "tool", tool: "Command", argument: "bun run test" },
+    });
+
+    release();
+    await sending;
+    await until(() => service.navigation().threads[0]?.executing === false);
+    await until(() => liveTurns.read(String(created.thread.id)) === undefined);
+    const finished = service.navigation().threads[0];
+    expect(finished).not.toHaveProperty("turnStartedAt");
+    expect(finished).not.toHaveProperty("liveStep");
   });
 
   it("keeps an abandoned reply's prompt but not its text in the next turn's context", async () => {
@@ -8694,6 +8771,176 @@ describe("agent result delivery", () => {
       updatedAt: now,
       ...overrides,
     });
+
+  it.each(["deleting", "deleted"])(
+    "refuses late child content after ordinary Chat deletion reaches %s",
+    async (lifecycle) => {
+      const { service, persistence } = openFixture();
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Parent awaiting a child",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread");
+      const run = deliveryRunFor(created.thread.id);
+      const connection = persistence.connection;
+      const reference = `agent-run:${run.id}:result:1`;
+      const recordChildContent = () => {
+        writeAgentRunResultText(connection, {
+          run,
+          reference,
+          text: "Private child reply",
+          createdAt: now,
+        });
+        writeAgentRunResultEvidence(connection, {
+          run,
+          reference,
+          createdAt: now,
+          evidence: {
+            files: { status: "unavailable", items: [], reviewStatus: "unavailable" },
+            checks: {
+              status: "recorded",
+              items: [
+                {
+                  label: "Tool execution",
+                  outcome: "unknown",
+                  reference: "child-tool:1",
+                  source: "host-recorded",
+                  toolExecution: {
+                    toolName: "research",
+                    requestId: "request-1",
+                    isError: false,
+                    output: "Private tool output",
+                    truncated: false,
+                  },
+                },
+              ],
+            },
+          },
+        });
+      };
+      const resultIdentity = { runId: run.id, reference };
+      recordChildContent();
+      expect(readAgentRunResultEvidence(connection, resultIdentity)?.checks.status).toBe(
+        "recorded",
+      );
+      expect(readAgentRunResultText(connection, resultIdentity)).toBe("Private child reply");
+
+      if (lifecycle === "deleting") {
+        connection.exec(`
+          CREATE TRIGGER fail_deleted_lifecycle_event
+          BEFORE INSERT ON event_journal
+          WHEN NEW.event_name = 'chat.deleted@1'
+          BEGIN SELECT RAISE(ABORT, 'deterministic purge interruption'); END;
+        `);
+      }
+      const deletion = service.execute({
+        kind: "delete-chat-thread",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+      });
+      if (lifecycle === "deleting") {
+        await expect(deletion).rejects.toThrow();
+        connection.exec("DROP TRIGGER fail_deleted_lifecycle_event");
+      } else {
+        await expect(deletion).resolves.toMatchObject({ kind: "deleted" });
+      }
+      expect(
+        connection
+          .prepare("SELECT lifecycle FROM chat_thread_projection WHERE thread_id = ?")
+          .get(String(created.thread.id)),
+      ).toEqual({ lifecycle });
+      expect(
+        connection
+          .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
+          .get(String(created.thread.id)),
+      ).toBeUndefined();
+      expect(readAgentRunResultEvidence(connection, resultIdentity)).toBeUndefined();
+      expect(readAgentRunResultText(connection, resultIdentity)).toBeUndefined();
+
+      recordChildContent();
+      expect(readAgentRunResultEvidence(connection, resultIdentity)).toBeUndefined();
+      expect(readAgentRunResultText(connection, resultIdentity)).toBeUndefined();
+    },
+  );
+
+  it("validates all siblings and keeps old group replay separate from a child's next result generation", async () => {
+    const runs = new Map<string, AgentRun>();
+    const fixture = openFixture({
+      agentRuns: { getById: (id) => runs.get(String(id)), resultText: (id) => `Result for ${id}` },
+    });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Parent",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread");
+    const first = deliveryRunFor(created.thread.id);
+    const second = deliveryRunFor(created.thread.id, {
+      id: "d1a1b000-0000-4000-8000-000000000005",
+    });
+    const third = deliveryRunFor(created.thread.id, { id: "d1a1b000-0000-4000-8000-000000000006" });
+    for (const run of [first, second, third]) runs.set(String(run.id), run);
+    const command = {
+      kind: "deliver-chat-agent-result",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      runId: first.id,
+      runIds: [first.id, second.id],
+    };
+    for (const invalid of [
+      deliveryRunFor(String(third.id), { id: second.id }),
+      { ...second, lifecycleStatus: "running" as const },
+    ]) {
+      runs.set(String(second.id), invalid);
+      await expect(fixture.service.execute(command)).rejects.toMatchObject({
+        failure: { category: "invalid" },
+      });
+    }
+    runs.set(String(second.id), second);
+    const delivered = await fixture.service.execute(command);
+    expect(delivered).toMatchObject({
+      kind: "turn-created",
+      turn: { delivery: { kind: "agent-result", runIds: [first.id, second.id] } },
+    });
+    await until(
+      () =>
+        fixture.service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+    );
+    runs.set(String(first.id), {
+      ...first,
+      resultDelivery: { outcome: "delivered", settledAt: first.updatedAt },
+    });
+    const replayed = await fixture.service.execute({
+      ...command,
+      runId: second.id,
+      runIds: [second.id, third.id],
+    });
+    expect(replayed).toMatchObject({
+      kind: "turn-created",
+      turn: { delivery: { runIds: [first.id, second.id] } },
+    });
+    expect(fixture.service.read(created.thread.id).turns).toHaveLength(1);
+    const resumed = { ...first, generation: 2 };
+    runs.set(String(first.id), resumed);
+    await expect(fixture.service.execute(command)).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    const newDelivery = {
+      kind: "agent-result",
+      runId: first.id,
+      runGenerations: [{ runId: first.id, generation: 2 }],
+    };
+    const next = await fixture.service.execute({
+      kind: "deliver-chat-agent-result",
+      threadId: created.thread.id,
+      expectedVersion: fixture.service.read(created.thread.id).thread?.version,
+      runId: first.id,
+      runGenerations: newDelivery.runGenerations,
+    });
+    expect(next).toMatchObject({ kind: "turn-created", turn: { delivery: newDelivery } });
+    expect(fixture.service.read(created.thread.id).turns).toHaveLength(2);
+  });
 
   it("delivers a finished subagent run's result as a marked turn, once", async () => {
     const runs = new Map<string, AgentRun>();

@@ -937,6 +937,58 @@ CREATE INDEX idx_usage_record_host ON usage_record_projection(host_id);
 CREATE INDEX idx_usage_record_request_shape ON usage_record_projection(request_shape);
 `;
 
+const DELINK_USAGE_SUBJECT_SQL = `
+ALTER TABLE usage_record_projection
+  RENAME TO usage_record_projection_pre_delink;
+CREATE TABLE usage_record_projection (
+  reconciliation_id TEXT PRIMARY KEY CHECK(length(trim(reconciliation_id)) > 0),
+  subject_type TEXT NOT NULL CHECK(length(trim(subject_type)) > 0),
+  subject_id TEXT CHECK(subject_id IS NULL OR length(trim(subject_id)) > 0),
+  provider_instance_id TEXT NOT NULL CHECK(length(trim(provider_instance_id)) > 0),
+  model_id TEXT NOT NULL CHECK(length(trim(model_id)) > 0),
+  request_shape TEXT NOT NULL CHECK(length(trim(request_shape)) > 0),
+  quality TEXT NOT NULL CHECK(quality IN ('exact', 'estimated', 'reconciled', 'stale', 'unavailable')),
+  input_tokens INTEGER NOT NULL CHECK(input_tokens >= 0),
+  output_tokens INTEGER NOT NULL CHECK(output_tokens >= 0),
+  reasoning_tokens INTEGER CHECK(reasoning_tokens IS NULL OR reasoning_tokens >= 0),
+  cache_read_input_tokens INTEGER CHECK(cache_read_input_tokens IS NULL OR cache_read_input_tokens >= 0),
+  cache_write_input_tokens INTEGER CHECK(cache_write_input_tokens IS NULL OR cache_write_input_tokens >= 0),
+  provider_execution_duration_ms INTEGER CHECK(provider_execution_duration_ms IS NULL OR provider_execution_duration_ms >= 0),
+  planned_input_tokens INTEGER NOT NULL CHECK(planned_input_tokens >= 0),
+  variance_tokens INTEGER NOT NULL,
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  attribution_json TEXT NOT NULL CHECK(json_valid(attribution_json)),
+  observed_at TEXT NOT NULL CHECK(length(trim(observed_at)) > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+  host_id TEXT NOT NULL DEFAULT 'local' CHECK(length(trim(host_id)) > 0),
+  planning_available INTEGER NOT NULL DEFAULT 1 CHECK(planning_available IN (0, 1))
+) STRICT;
+INSERT INTO usage_record_projection (
+  reconciliation_id, subject_type, subject_id, provider_instance_id, model_id,
+  request_shape, quality, input_tokens, output_tokens, reasoning_tokens,
+  cache_read_input_tokens, cache_write_input_tokens, provider_execution_duration_ms,
+  planned_input_tokens, variance_tokens, schema_version, attribution_json,
+  observed_at, last_sequence, host_id, planning_available
+)
+SELECT
+  reconciliation_id, subject_type, subject_id, provider_instance_id, model_id,
+  request_shape, quality, input_tokens, output_tokens, reasoning_tokens,
+  cache_read_input_tokens, cache_write_input_tokens, provider_execution_duration_ms,
+  planned_input_tokens, variance_tokens, schema_version, attribution_json,
+  observed_at, last_sequence, host_id, planning_available
+FROM usage_record_projection_pre_delink;
+DROP TABLE usage_record_projection_pre_delink;
+CREATE INDEX idx_usage_record_provider ON usage_record_projection(provider_instance_id);
+CREATE INDEX idx_usage_record_model ON usage_record_projection(model_id);
+CREATE INDEX idx_usage_record_subject ON usage_record_projection(subject_type, subject_id);
+CREATE INDEX idx_usage_record_observed ON usage_record_projection(observed_at);
+CREATE INDEX idx_usage_record_quality ON usage_record_projection(quality);
+CREATE INDEX idx_usage_record_host ON usage_record_projection(host_id);
+CREATE INDEX idx_usage_record_request_shape ON usage_record_projection(request_shape);
+CREATE INDEX idx_usage_record_execution_duration
+  ON usage_record_projection(provider_execution_duration_ms);
+`;
+
 const USAGE_AUDIT_LOG_SQL = `
 CREATE TABLE usage_audit_log (
   audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1926,8 +1978,92 @@ ALTER TABLE code_runtime_projection
     sql: SPEND_TURN_PROJECTION_SQL,
   },
   { version: 67, name: "create_thread_message_queue", sql: THREAD_MESSAGE_QUEUE_SQL },
+  { version: 68, name: "delink_usage_subject", sql: DELINK_USAGE_SUBJECT_SQL },
   {
-    version: 68,
+    version: 69,
+    name: "preserve_managed_child_sessions",
+    sql: `
+      ALTER TABLE agent_run_content_store RENAME TO agent_run_content_before_sessions;
+      DROP INDEX agent_run_content_subject_idx;
+      CREATE TABLE agent_run_content_store (
+        content_id TEXT PRIMARY KEY CHECK(length(trim(content_id)) > 0),
+        run_id TEXT NOT NULL CHECK(length(trim(run_id)) > 0),
+        subject_type TEXT NOT NULL CHECK(length(trim(subject_type)) > 0),
+        subject_id TEXT NOT NULL CHECK(length(trim(subject_id)) > 0),
+        content_kind TEXT NOT NULL CHECK(content_kind IN ('admitted-context', 'result', 'managed-session', 'managed-conversation')),
+        body_text TEXT NOT NULL CHECK(length(body_text) > 0 AND length(body_text) <= 131072),
+        created_at TEXT NOT NULL
+      ) STRICT;
+      INSERT INTO agent_run_content_store SELECT * FROM agent_run_content_before_sessions;
+      DROP TABLE agent_run_content_before_sessions;
+      CREATE INDEX agent_run_content_subject_idx ON agent_run_content_store(subject_type, subject_id);
+    `,
+  },
+  {
+    version: 70,
+    name: "preserve_managed_child_provider_identities",
+    sql: `
+      ALTER TABLE agent_run_content_store RENAME TO agent_run_content_before_identities;
+      DROP INDEX agent_run_content_subject_idx;
+      CREATE TABLE agent_run_content_store (
+        content_id TEXT PRIMARY KEY CHECK(length(trim(content_id)) > 0),
+        run_id TEXT NOT NULL CHECK(length(trim(run_id)) > 0),
+        subject_type TEXT NOT NULL CHECK(length(trim(subject_type)) > 0),
+        subject_id TEXT NOT NULL CHECK(length(trim(subject_id)) > 0),
+        content_kind TEXT NOT NULL CHECK(content_kind IN ('admitted-context', 'result', 'managed-session', 'managed-conversation', 'managed-provider-identity')),
+        body_text TEXT NOT NULL CHECK(length(body_text) > 0 AND length(body_text) <= 131072),
+        created_at TEXT NOT NULL
+      ) STRICT;
+      INSERT INTO agent_run_content_store SELECT * FROM agent_run_content_before_identities;
+      DROP TABLE agent_run_content_before_identities;
+      CREATE INDEX agent_run_content_subject_idx
+        ON agent_run_content_store(subject_type, subject_id);
+    `,
+  },
+  {
+    version: 71,
+    name: "preserve_child_result_evidence",
+    sql: `
+      ALTER TABLE agent_run_content_store RENAME TO agent_run_content_before_evidence;
+      DROP INDEX agent_run_content_subject_idx;
+      CREATE TABLE agent_run_content_store (
+        content_id TEXT PRIMARY KEY CHECK(length(trim(content_id)) > 0),
+        run_id TEXT NOT NULL CHECK(length(trim(run_id)) > 0),
+        subject_type TEXT NOT NULL CHECK(length(trim(subject_type)) > 0),
+        subject_id TEXT NOT NULL CHECK(length(trim(subject_id)) > 0),
+        content_kind TEXT NOT NULL CHECK(content_kind IN ('admitted-context', 'result', 'managed-session', 'managed-conversation', 'managed-provider-identity', 'result-evidence')),
+        body_text TEXT NOT NULL CHECK(length(body_text) > 0 AND length(body_text) <= 131072),
+        created_at TEXT NOT NULL
+      ) STRICT;
+      INSERT INTO agent_run_content_store SELECT * FROM agent_run_content_before_evidence;
+      DROP TABLE agent_run_content_before_evidence;
+      CREATE INDEX agent_run_content_subject_idx
+        ON agent_run_content_store(subject_type, subject_id);
+    `,
+  },
+  {
+    version: 72,
+    name: "preserve_child_generation_reviews",
+    sql: `
+      ALTER TABLE agent_run_content_store RENAME TO agent_run_content_before_reviews;
+      DROP INDEX agent_run_content_subject_idx;
+      CREATE TABLE agent_run_content_store (
+        content_id TEXT PRIMARY KEY CHECK(length(trim(content_id)) > 0),
+        run_id TEXT NOT NULL CHECK(length(trim(run_id)) > 0),
+        subject_type TEXT NOT NULL CHECK(length(trim(subject_type)) > 0),
+        subject_id TEXT NOT NULL CHECK(length(trim(subject_id)) > 0),
+        content_kind TEXT NOT NULL CHECK(content_kind IN ('admitted-context', 'result', 'managed-session', 'managed-conversation', 'managed-provider-identity', 'result-evidence', 'result-review')),
+        body_text TEXT NOT NULL CHECK(length(body_text) > 0 AND length(body_text) <= 131072),
+        created_at TEXT NOT NULL
+      ) STRICT;
+      INSERT INTO agent_run_content_store SELECT * FROM agent_run_content_before_reviews;
+      DROP TABLE agent_run_content_before_reviews;
+      CREATE INDEX agent_run_content_subject_idx
+        ON agent_run_content_store(subject_type, subject_id);
+    `,
+  },
+  {
+    version: 73,
     name: "record_usage_cost",
     sql: `ALTER TABLE usage_record_projection
       ADD COLUMN cost_usd_micros INTEGER CHECK(cost_usd_micros IS NULL OR cost_usd_micros >= 0);

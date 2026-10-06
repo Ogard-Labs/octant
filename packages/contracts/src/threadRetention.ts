@@ -85,6 +85,8 @@ export const ThreadRetentionDeletedScope = Schema.Literal(
   "thread-canvases",
   "thread-sessions",
   "managed-worktrees",
+  "project-memory",
+  "project-canvases",
 );
 export type ThreadRetentionDeletedScope = typeof ThreadRetentionDeletedScope.Type;
 
@@ -101,6 +103,13 @@ export const ThreadRetentionRetainedScope = Schema.Literal(
 );
 export type ThreadRetentionRetainedScope = typeof ThreadRetentionRetainedScope.Type;
 
+/**
+ * Scopes a purge de-linked rather than kept whole: the aggregates stay for
+ * accounting while the purged thread's identity leaves them.
+ */
+export const ThreadRetentionDelinkedScope = Schema.Literal("usage-records");
+export type ThreadRetentionDelinkedScope = typeof ThreadRetentionDelinkedScope.Type;
+
 export const PurgedThreadRef = Schema.Struct({
   mode: OctantMode,
   threadId: ThreadRetentionThreadId,
@@ -114,6 +123,7 @@ export const ThreadPurgeReport = Schema.Struct({
   purged: Schema.Array(PurgedThreadRef).pipe(Schema.maxItems(16_384)),
   alreadyPurged: Schema.Array(PurgedThreadRef).pipe(Schema.maxItems(16_384)),
   retained: Schema.Array(ThreadRetentionRetainedScope),
+  delinked: Schema.Array(ThreadRetentionDelinkedScope),
   deleted: Schema.Array(ThreadRetentionDeletedScope),
   occurredAt: UtcTimestamp,
 }).annotations(strict);

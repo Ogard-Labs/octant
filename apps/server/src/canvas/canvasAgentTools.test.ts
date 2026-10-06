@@ -44,7 +44,7 @@ function tools(overrides: Record<string, unknown> = {}) {
   const port = {
     activeContext: vi.fn(() => ({ mode: "chat", projectId })),
     project: vi.fn(async () => ({ id: projectId, type: "chat", lifecycle: "active" })),
-    canvas: { create, revise },
+    canvas: { create, revise, get: vi.fn(() => ({ kind: "unavailable" })) },
     uuid: vi.fn(() => "55555555-5555-4555-8555-555555555555"),
     hostId: "66666666-6666-4666-8666-666666666666",
     ...overrides,
@@ -151,7 +151,14 @@ describe("createCanvasAgentTools", () => {
     expect(description).toContain('"write a plan" uses implementation-plan');
     expect(description).toContain('"review this PR" uses code-review');
     expect(description).toContain('"summarise research" uses research-brief');
-    expect(JSON.stringify(outcome.result)).not.toContain("mockup");
+    const recipes = (
+      outcome.result as {
+        recipes: ReadonlyArray<{ skeleton: ReadonlyArray<{ kind: string }> }>;
+      }
+    ).recipes;
+    expect(recipes.some((recipe) => recipe.skeleton.some((block) => block.kind === "mockup"))).toBe(
+      false,
+    );
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -242,6 +249,143 @@ describe("createCanvasAgentTools", () => {
       expect.anything(),
       expect.anything(),
       blocks,
+    );
+  });
+
+  it("lets an agent create a pie, a donut, stacked and grouped bars, and a bar and line chart from the examples describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["chart"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+      blockSchema?: { properties?: { chartType?: { enum?: ReadonlyArray<string> } } };
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.chartType)).toEqual([
+      "pie",
+      "donut",
+      "stacked-bar",
+      "grouped-bar",
+      "bar-line",
+    ]);
+    expect(result.blockSchema?.properties?.chartType?.enum).toEqual(
+      expect.arrayContaining(["pie", "donut", "stacked-bar", "grouped-bar", "bar-line"]),
+    );
+    expect(JSON.stringify(described.result)).not.toContain("heatmap");
+    expect(JSON.stringify(described.result)).not.toContain("sankey");
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks.every((block) => block.kind === "chart")).toBe(true);
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Quarterly mix",
+        blocks: examples,
+      }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Quarterly mix" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+
+    const refused = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Broken pie",
+        blocks: [
+          {
+            blockId: "two-pies",
+            schemaVersion: 1,
+            kind: "chart",
+            chartType: "pie",
+            series: [
+              { seriesId: "a", label: "A", points: [{ x: "Product", y: 1 }] },
+              { seriesId: "b", label: "B", points: [{ x: "Services", y: 1 }] },
+            ],
+          },
+        ],
+      }),
+    });
+    expect(refused.isError).toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets an agent create and then revise a settings screen mockup from the example describe returns", async () => {
+    const { create, revise, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["mockup"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const example = result.examples?.[0];
+    expect(example).toMatchObject({
+      kind: "mockup",
+      device: "desktop",
+      title: "Settings",
+    });
+    const block = decodeCanvasBlock(example);
+    expect(block.kind).toBe("mockup");
+    if (block.kind !== "mockup") throw new Error("Settings example is not a mockup.");
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Settings",
+        blocks: [example],
+      }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Settings" }),
+      expect.anything(),
+      expect.anything(),
+      [block],
+    );
+
+    const revisedBlock = {
+      ...example,
+      device: "phone",
+      nodes: [
+        ...block.nodes,
+        {
+          nodeId: "portrait",
+          component: "image-placeholder",
+          label: "Avatar",
+          parentId: "profile",
+        },
+      ],
+    };
+    const revised = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId: "canvas-1",
+        expectedSequence: 1,
+        title: "Settings",
+        blocks: [revisedBlock],
+      }),
+    });
+    expect(revised.isError).not.toBe(true);
+    expect(revise).toHaveBeenCalledWith(
+      expect.objectContaining({ canvasId: "canvas-1", expectedSequence: 1 }),
+      expect.anything(),
+      expect.anything(),
+      [expect.objectContaining({ kind: "mockup", device: "phone" })],
     );
   });
 
@@ -438,7 +582,7 @@ describe("createCanvasAgentTools", () => {
           throw new Error("A Work or Code Canvas must not follow the window's active mode.");
         }),
         project: vi.fn(async () => ({ id: projectId, type: mode, lifecycle: "active" })),
-        canvas: { create, revise },
+        canvas: { create, revise, get: vi.fn(() => ({ kind: "unavailable" })) },
         uuid: vi.fn(() => "55555555-5555-4555-8555-555555555555"),
         hostId: "66666666-6666-4666-8666-666666666666",
         resolveWorkspace,
@@ -660,7 +804,12 @@ describe("a managed child's Canvas tool", () => {
       project: vi.fn(async () => {
         throw new Error("A child Canvas must not ask the window for a Project.");
       }),
-      canvas: { create, revise, threadReferenceCards: vi.fn(() => []), get: vi.fn() },
+      canvas: {
+        create,
+        revise,
+        threadReferenceCards: vi.fn(() => []),
+        get: vi.fn(() => ({ kind: "unavailable" })),
+      },
       uuid: vi.fn(() => "55555555-5555-4555-8555-555555555555"),
       hostId: "66666666-6666-4666-8666-666666666666",
       resolveChildWorkspace,

@@ -5,6 +5,9 @@ import { relativeTimeLabel } from "../lib/relativeTime";
 import { Markdown } from "../markdown/Markdown";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { AgentRunResults } from "./AgentRunResults";
+import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
+import { FollowUpControl } from "./FollowUpControl";
 import type { AgentHierarchyRow } from "./buildAgentHierarchyModel";
 import {
   SubagentStatusIcon,
@@ -28,6 +31,7 @@ type RunCommand = (input: { runId: string; version: number }) => void;
 export function AgentRunDetail(props: {
   readonly row: AgentHierarchyRow;
   readonly onBack: () => void;
+  readonly onReviewChanges?: (request: AgentResultReviewRequest) => void;
   readonly conversation?: AgentRunConversationResponse;
   readonly conversationLoading?: boolean;
   readonly conversationReconnecting?: boolean;
@@ -37,6 +41,11 @@ export function AgentRunDetail(props: {
   readonly onSteer?: (input: { runId: string; version: number; message: string }) => void;
   readonly onRetry?: RunCommand;
   readonly onResume?: RunCommand;
+  readonly onFollowUp?: (input: {
+    readonly runId: string;
+    readonly version: number;
+    readonly message: string;
+  }) => Promise<string | undefined>;
   /** Arms or withdraws the opt-in to resume a usage-limited run at reset. */
   readonly onUsageResume?: (input: {
     runId: string;
@@ -45,16 +54,22 @@ export function AgentRunDetail(props: {
   }) => void;
 }) {
   const row = props.row;
+  const followUp = props.onFollowUp;
   const status = row.lifecycleStatus;
   const command = { runId: row.runId, version: row.version };
-  const canSteer = status === "running" || status === "waiting";
-  const canRetry = status === "failed" || status === "interrupted";
+  const managed = row.executionKind === "octant-managed";
+  const canSteer = managed && (status === "running" || status === "waiting");
+  const canRetry = managed && (status === "failed" || status === "interrupted");
   const canResume =
-    status === "waiting" ||
-    (status === "interrupted" && row.recoveryReason !== "restart-without-resumable-execution");
-  const usageResumeScheduled = row.usageResume?.status === "scheduled";
+    managed &&
+    (status === "waiting" ||
+      (status === "interrupted" && row.recoveryReason !== "restart-without-resumable-execution"));
+  const usageResumeScheduled = managed && row.usageResume?.status === "scheduled";
   const canArmUsageResume =
-    status === "waiting" && row.usageLimit?.resetsAt !== undefined && !usageResumeScheduled;
+    managed &&
+    status === "waiting" &&
+    row.usageLimit?.resetsAt !== undefined &&
+    !usageResumeScheduled;
   const active = row.bucket === "active";
   const facts = [subagentRoleWord(row.role), row.model, relativeTimeLabel(row.updatedAt)].filter(
     (part): part is string => part !== undefined,
@@ -109,6 +124,13 @@ export function AgentRunDetail(props: {
           <span className="agent-run-detail__label">Brief</span>
           <p>{row.task}</p>
         </div>
+        <AgentRunResults
+          packets={row.resultPackets}
+          truncated={row.resultsTruncated === true}
+          {...(props.onReviewChanges === undefined
+            ? {}
+            : { onReviewChanges: props.onReviewChanges })}
+        />
         <AgentRunReply
           active={active}
           row={row}
@@ -143,6 +165,14 @@ export function AgentRunDetail(props: {
             Retry
           </OctantButton>
         ) : null}
+        {status === "completed" &&
+        row.executionKind === "octant-managed" &&
+        followUp !== undefined ? (
+          <FollowUpControl
+            key={row.runId}
+            onFollowUp={(message) => followUp({ ...command, message })}
+          />
+        ) : null}
         {canResume ? (
           <OctantButton
             onClick={() => props.onResume?.(command)}
@@ -174,7 +204,7 @@ export function AgentRunDetail(props: {
             Resume at reset
           </OctantButton>
         ) : null}
-        {active ? (
+        {active && managed ? (
           <OctantButton
             aria-label="Cancel this subagent"
             onClick={() => props.onCancel?.({ runId: row.runId })}
@@ -191,12 +221,11 @@ export function AgentRunDetail(props: {
 }
 
 /**
- * What the subagent said. The live conversation is the host's bounded,
- * process-local read, so it can be unavailable (a provider-native run), stale,
- * or simply gone once the process that held it ends; the retained final reply
- * in the summary outlives it. When the live read has nothing, the retained
- * reply stands in as the answer, and when neither exists the page says so
- * rather than showing an empty column.
+ * What the subagent said. Managed conversation history is bounded and saved;
+ * after restart it is stale until execution reconnects. Provider-native runs
+ * may expose no conversation, and purged history cannot be restored. When the
+ * conversation has nothing, the retained final reply stands in as the answer;
+ * when neither exists the page explains what is missing.
  */
 function AgentRunReply(props: {
   readonly row: AgentHierarchyRow;

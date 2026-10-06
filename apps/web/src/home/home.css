@@ -1,0 +1,235 @@
+/* The card area under a start screen's composer. The composer stays the main
+   thing on the screen: the cards sit on its measure, in the shared card recipe
+   (hairline ring, no shadow), in muted ink with no hue of their own. */
+
+.home-dashboard {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+}
+
+.home-dashboard__bar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.home-dashboard__grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--oct-space-3);
+}
+
+/* A lone card keeps the row instead of leaving half of it empty. */
+.home-dashboard__grid > .home-card:only-child {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 560px) {
+  .home-dashboard__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.home-card.home-card {
+  min-width: 0;
+  gap: var(--oct-space-2);
+  padding-block: var(--oct-space-3);
+}
+
+.home-card__header.home-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding-inline: var(--oct-space-3);
+}
+
+.home-card__icon {
+  flex: 0 0 auto;
+  color: var(--oct-fg-2);
+}
+
+.home-card__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-card__count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-card__body.home-card__body {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding-inline: var(--oct-space-2);
+}
+
+.home-card__quiet {
+  margin: 0;
+  padding-inline: var(--oct-space-1);
+}
+
+/* ── Customize ─────────────────────────────────────────────────────────── */
+
+.home-customize.home-customize {
+  display: grid;
+  width: min(340px, calc(100vw - 32px));
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+}
+
+.home-customize__heading {
+  padding-inline: var(--oct-space-1);
+}
+
+.home-customize__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-customize__row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1);
+  border-top: 1px solid transparent;
+  border-radius: var(--oct-radius-sm);
+}
+
+.home-customize__row[data-dragging="true"] {
+  opacity: 0.5;
+}
+
+.home-customize__row[data-drop-target="true"] {
+  border-top-color: var(--octant-border-strong);
+}
+
+.home-customize__grip {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--oct-meta);
+  cursor: grab;
+}
+
+.home-customize__icon {
+  flex: 0 0 auto;
+  color: var(--oct-fg-2);
+}
+
+.home-customize__name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-customize__move {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0;
+}
+
+.home-customize__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--oct-space-1);
+}
+
+/* ── Working now ──────────────────────────────────────────────────────── */
+
+.working-now__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.working-now__list > li {
+  display: grid;
+  min-width: 0;
+}
+
+.working-now__row.working-now__row {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  text-align: start;
+  white-space: normal;
+}
+
+.working-now__face {
+  display: grid;
+  box-sizing: border-box;
+  gap: 2px;
+  padding: var(--oct-space-2) var(--oct-space-1);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+}
+
+.working-now__row:hover:not(:disabled) .working-now__face,
+.working-now__row:focus-visible .working-now__face {
+  background: color-mix(in oklab, var(--oct-fg) 5%, transparent);
+}
+
+.working-now__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.working-now__provider {
+  flex: 0 0 auto;
+}
+
+.working-now__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.working-now__time {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.working-now__line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+}
+
+.working-now__step {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.working-now__host {
+  max-width: 40%;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.working-now__more.working-now__more {
+  justify-self: start;
+  margin: var(--oct-space-1) var(--oct-space-1) 0;
+}

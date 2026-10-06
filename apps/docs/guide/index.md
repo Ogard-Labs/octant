@@ -23,6 +23,7 @@ Welcome to the Octant guide. Use these pages to install the app, configure provi
 - [Shared Memory](/guide/memory) — persist decisions, facts, and context across threads
 - [Promotions](/guide/promotions) — escalate Work work to a linked Code thread
 - [Sync artifacts across your computers](/guide/sync-artifacts) — what leaves this computer, where it goes, and how to turn sync off
+- [Export a Canvas or artifact to a folder](/guide/export) — write a readable Markdown or HTML copy into a folder you choose
 
 ## Concepts
 
@@ -41,6 +42,25 @@ Same-authority threads can be pinned or dropped
 into split panes; the active pane is marked, and the right dock follows that
 pane's thread and Project. Work and Code have server-derived thread boards;
 Chat has no board.
+
+### Home cards
+
+Under the composer on a new Work or Code task, a few cards show what is
+happening now. **Working now** lists what is running across your Projects:
+each row has the provider mark, the thread's title, a line saying what it is
+doing, and a time. A command or tool shows as it runs, such as `Command: bun run
+test`, or the row says it is waiting for your approval or an answer. The time is
+how long the turn has been running. Paths and anything that looks like a secret
+are removed from the line before it leaves the host. When the window
+is showing another computer's work, the row names that computer. Up to five rows
+show, then **+N more** opens Running. Choose a row to open its thread. When
+nothing is running, the card says so in one line.
+
+**Customize**, on the right under the composer, turns each card on or off and
+reorders them: drag a card by its handle, or use the up and down buttons from the
+keyboard. **Reset to default** puts them back. Your choices are kept on this
+device. A card whose connection is missing is not shown at all, and the cards
+appear just after the composer, so the screen is ready to type in first.
 
 ### Suggested follow-ups
 

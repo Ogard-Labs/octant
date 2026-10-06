@@ -168,8 +168,13 @@ earlier beta build, which discovery still accepts as a fallback and shows as
 **OpenCode 2 preview**. When both names are installed, discovery prefers
 `opencode`. Which routes run is selected by the installed binary's version,
 not by that name: a 1.x binary keeps the legacy session API, and a 2.x binary
-lists providers and models from its HTTP catalogue. OpenCode 2 is listing
-only, turns not yet supported. Octant never falls back to an unconfined
+lists providers and models from its HTTP catalogue and can run a turn where
+the process jail already enforces the permission boundary. Chat turns run.
+Work and Code writes stay refused until session permission rules can be
+enforced. OpenCode 2 resolves a project inside a Git work tree by starting
+Git, which the Chat and Plan jail does not allow, so a runtime whose confined
+server cannot answer for a work tree is shown as **Incompatible**: its models
+are listed and no turn is offered. Octant never falls back to an unconfined
 session or treats the 2.x version as the legacy runtime.
 
 ### API endpoints
@@ -309,3 +314,32 @@ intended, not a bug: move the keys into a profile or use the bearer token.
 - [Context budgets and limits](/advanced/context-budgets) to understand how turns fit provider limits
 - [Subagents](/advanced/subagents) for child runs that inherit provider settings
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries
+
+## Devin Fusion settings
+
+With an eligible paid Devin account and a current Devin CLI, check the Devin ACP
+connection in **Settings → Providers & Models**. Discovery reads the options for
+each model, so a large catalog can take tens of seconds to finish checking.
+Turn preparation also refreshes discovery and can take a similar amount of time.
+If Devin explicitly refuses an advertised model as unavailable, Octant omits it
+and keeps the other usable models. Authentication and connection failures still
+fail the connection check.
+
+Choose a Fusion pairing in the composer model picker. Its **Lead** and
+**Sidekick** controls select available pairings; **Thinking** sets the lead's
+effort. **Speed → Fast** enables Fast Mode where that pairing supports it;
+**Standard** disables it, and **Default** leaves the choice to Devin. Models
+without a fast variant do not show a speed control. These settings are available
+in Chat, Work, and Code and are applied when a thread starts or resumes. New
+threads remember supported choices per provider and pairing; existing threads
+keep their saved settings. Changing lead or sidekick carries any explicit effort
+or speed choice that the new pairing also supports.
+Model settings pause while a pairing change is being checked, then become editable
+again when the change is confirmed or refused.
+
+Octant refuses a setting that Devin no longer offers rather than silently using
+a different one. Check the connection again to refresh the available choices.
+Fusion model selection does not change Octant's access or approval policy.
+
+See [Devin's Fusion documentation](https://docs.devin.ai/cli/fusion) for account
+eligibility and model pricing.

@@ -1913,6 +1913,38 @@ describe("provider registry contracts", () => {
     expect(() => decodeProviderModel({ ...model, inputModalities: [] })).toThrow();
   });
 
+  it("carries normalized model configuration choices without provider payloads or duplicate axes", () => {
+    const model = {
+      id: "paired-model",
+      displayName: "Paired model",
+      source: "discovered",
+      verification: "verified",
+      reasoning: "supported",
+      inputModalities: ["text"],
+      options: [],
+      configuration: {
+        family: "Fusion",
+        choices: [
+          { id: "lead", displayName: "Lead", value: "Frontier" },
+          { id: "sidekick", displayName: "Sidekick", value: "Executor" },
+        ],
+      },
+    };
+    expect(decodeProviderModel(model)).toEqual(model);
+    expect(() =>
+      decodeProviderModel({ ...model, configuration: { ...model.configuration, raw: {} } }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderModel({
+        ...model,
+        configuration: {
+          family: "Fusion",
+          choices: [model.configuration.choices[0], model.configuration.choices[0]],
+        },
+      }),
+    ).toThrow();
+  });
+
   it("keeps image input a driver-reported tri-state that defaults to absent", () => {
     const model = {
       id: "image-capable-model",
@@ -2223,12 +2255,26 @@ describe("provider runtime contracts", () => {
     { kind: "tool-failure", toolCallId: "tool-1", message: "Denied" },
     { kind: "usage", inputTokens: 10, outputTokens: 4 },
     {
+      kind: "usage",
+      inputTokens: 10,
+      outputTokens: 4,
+      contextTokens: 120_000,
+      autoCompactThreshold: 167_000,
+    },
+    {
+      kind: "usage",
+      inputTokens: 10,
+      outputTokens: 4,
+      requestStartedAt: "2026-07-23T10:00:00.000Z",
+    },
+    {
       kind: "rate-limit-bucket",
       bucket: "requests",
       limit: 1000,
       remaining: 999,
       resetsAt: "2026-07-15T10:01:00.000Z",
     },
+    { kind: "retrying", attempt: 2, maxAttempts: 5, delayMs: 4000, reason: "unavailable" },
     { kind: "file-change", path: "src/index.ts", change: "modified" },
     { kind: "diff", diff: "@@ -1 +1 @@" },
     { kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "Working" },
@@ -2297,6 +2343,76 @@ describe("provider runtime contracts", () => {
     ).toThrow();
   });
 
+  it.each([0, -1, 0.835, Number.NaN])(
+    "refuses a usage event whose compaction point is %s tokens",
+    (autoCompactThreshold) => {
+      expect(() =>
+        decodeProviderRuntimeEvent({
+          ...common,
+          kind: "usage",
+          inputTokens: 10,
+          outputTokens: 4,
+          autoCompactThreshold,
+        }),
+      ).toThrow();
+    },
+  );
+
+  it("carries what fills the window on a usage event, with how exact each part is", () => {
+    const event = {
+      ...common,
+      kind: "usage",
+      inputTokens: 10,
+      outputTokens: 4,
+      contextTokens: 36_000,
+      contextBreakdown: {
+        parts: [
+          { kind: "system-prompt", tokens: 142, accuracy: "provider-reported" },
+          { kind: "mcp-tools", tokens: 900, accuracy: "provider-reported", count: 12 },
+          { kind: "octant-tools", tokens: 410, accuracy: "conservative-heuristic", count: 5 },
+        ],
+        deferred: [{ kind: "system-tools", count: 14 }, { kind: "mcp-tools" }],
+      },
+    } as const;
+    expect(decodeProviderRuntimeEvent(event)).toMatchObject({
+      contextBreakdown: event.contextBreakdown,
+    });
+  });
+
+  it.each([
+    ["a kind no surface names", { kind: "dreams", tokens: 1, accuracy: "provider-reported" }],
+    ["a fractional token count", { kind: "skills", tokens: 1.5, accuracy: "provider-reported" }],
+    ["a negative token count", { kind: "skills", tokens: -1, accuracy: "provider-reported" }],
+    ["an accuracy nobody defined", { kind: "skills", tokens: 1, accuracy: "guess" }],
+    ["a part without its accuracy", { kind: "skills", tokens: 1 }],
+    [
+      "a field the contract does not know",
+      { kind: "skills", tokens: 1, accuracy: "provider-reported", path: "/x" },
+    ],
+  ])("refuses a context breakdown with %s", (_name, part) => {
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...common,
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 4,
+        contextBreakdown: { parts: [part] },
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a deferred part that claims a share of the window", () => {
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...common,
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 4,
+        contextBreakdown: { parts: [], deferred: [{ kind: "mcp-tools", count: 3, tokens: 900 }] },
+      }),
+    ).toThrow();
+  });
+
   it("refuses a rate-limit bucket whose remaining count exceeds its limit", () => {
     expect(() =>
       decodeProviderRuntimeEvent({
@@ -2305,6 +2421,19 @@ describe("provider runtime contracts", () => {
         bucket: "tokens",
         limit: 10,
         remaining: 11,
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a retry notice for an attempt past the last one", () => {
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...common,
+        kind: "retrying",
+        attempt: 6,
+        maxAttempts: 5,
+        delayMs: 500,
+        reason: "unavailable",
       }),
     ).toThrow();
   });

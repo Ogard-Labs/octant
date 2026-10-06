@@ -12,6 +12,7 @@ import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite } from "./persistence/sqlitePort";
 import { USAGE_PROJECTION_SCHEMA_VERSION } from "./persistence/usagePersistenceSchema";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
+import { TurnMetricsStore } from "./metrics/turnMetricsStore";
 import type { UsageQueryResponse } from "@octant/contracts/usage-rpc";
 import type { WindowWorkspace } from "@octant/contracts";
 
@@ -62,15 +63,22 @@ function setup(projectScope: UsageProjectScope = { kind: "unfiled" }) {
     now: nowMs,
   });
 
+  const turnMetrics = new TurnMetricsStore({
+    journal,
+    uuid: () => crypto.randomUUID(),
+    actor: { kind: "system", actorId: ids.actor } as never,
+    clock: () => now,
+  });
   const handler = createUsageRouteHandler({
     connection,
     windowAuthorityStore,
     readWindowProjectScope: () => projectScope,
     now: () => nowMs,
     clock: () => now,
+    turnMetrics,
   });
 
-  return { connection, journal, handler, capability };
+  return { connection, journal, handler, capability, turnMetrics };
 }
 
 function seedUsageData(journal: Journal) {
@@ -566,7 +574,9 @@ describe("usage route Project scope", () => {
 
     // An empty request reads the window's own Project, never the host ledger.
     expect(body.records).toHaveLength(1);
-    expect(body.records[0]?.subject.aggregateId).toBe(ids.threadA);
+    const first = body.records[0];
+    expect(first?.subject).toHaveProperty("aggregateId");
+    expect((first?.subject as { readonly aggregateId: string }).aggregateId).toBe(ids.threadA);
     expect(body.totals.totalRequests).toBe(1);
     // Neither the other Project's thread nor an unfiled thread is this
     // Project's row, in the records or in any aggregate.
@@ -694,7 +704,12 @@ describe("usage route scope for a window bound to no Project", () => {
       const body = (await response!.json()) as UsageQueryResponse;
 
       expect(body.records).toHaveLength(1);
-      expect(body.records[0]?.subject.aggregateId).toBe(ids.unfiledThread);
+      const record = body.records[0];
+      expect(record?.subject).toMatchObject({ aggregateType: "chat-thread" });
+      expect(record?.subject).toHaveProperty("aggregateId");
+      expect((record?.subject as { readonly aggregateId: string }).aggregateId).toBe(
+        ids.unfiledThread,
+      );
       expect(text).not.toContain(ids.projectA);
       expect(text).not.toContain(ids.projectB);
       expect(text).not.toContain(ids.threadA);
@@ -819,5 +834,105 @@ describe("usage retention routes", () => {
       }),
     );
     expect(response!.status).toBe(400);
+  });
+});
+
+describe("usage route turn metrics", () => {
+  const turn = (overrides: Record<string, unknown> = {}) =>
+    ({
+      threadId: ids.threadA,
+      mode: "code",
+      projectId: ids.projectA,
+      providerInstanceId: ids.provider,
+      modelId: "model-1",
+      stopReason: "end-of-turn",
+      usage: { inputTokens: 1_000, outputTokens: 100, cacheReadInputTokens: 900 },
+      metrics: {
+        precision: "exact",
+        wallMs: 10_000,
+        timeToFirstTokenMs: 1_000,
+        decodeOutputTokens: 100,
+        decodeMs: 2_000,
+        toolMs: 0,
+        modelCalls: 1,
+      },
+      startedAt: "2026-07-24T11:59:00.000Z",
+      endedAt: "2026-07-24T11:59:10.000Z",
+      ...overrides,
+    }) as never;
+
+  const query = async (setupResult: ReturnType<typeof setup>, filter?: Record<string, unknown>) => {
+    const response = await setupResult.handler(
+      makeRequest("/api/usage/query", {
+        body: filter === undefined ? {} : { filter },
+        capability: setupResult.capability,
+      }),
+    );
+    expect(response?.status).toBe(200);
+    return {
+      text: await response!.clone().text(),
+      body: (await response!.json()) as UsageQueryResponse,
+    };
+  };
+
+  it("returns every provider's turns beside the ledger, for the Projects the window is in", async () => {
+    const fixture = setup({ kind: "projects", projectIds: [ids.projectA] });
+    fixture.turnMetrics.record(turn());
+    fixture.turnMetrics.record(
+      turn({ threadId: ids.threadB, projectId: ids.projectB, modelId: "model-2" }),
+    );
+
+    const { body, text } = await query(fixture);
+
+    expect(body.turnMetrics?.turnCount).toBe(1);
+    expect(body.turnMetrics?.usage).toEqual({
+      inputTokens: 1_000,
+      outputTokens: 100,
+      cacheReadInputTokens: 900,
+    });
+    expect(body.turnMetrics?.metrics).toMatchObject({ precision: "exact", measuredTurns: 1 });
+    expect(text).not.toContain(ids.threadB);
+    expect(text).not.toContain(ids.projectB);
+    expect(text).not.toContain("model-2");
+  });
+
+  it("narrows the turns to one thread", async () => {
+    const fixture = setup({ kind: "projects", projectIds: [ids.projectA] });
+    fixture.turnMetrics.record(turn());
+    fixture.turnMetrics.record(turn({ threadId: ids.unfiledThread }));
+
+    const { body } = await query(fixture, { subjectAggregateId: ids.threadA });
+
+    expect(body.turnMetrics?.turnCount).toBe(1);
+    expect(body.turnMetrics?.turns[0]?.threadId).toBe(ids.threadA);
+  });
+
+  it("gives an unfiled window only the turns no Project owns", async () => {
+    const fixture = setup({ kind: "unfiled" });
+    fixture.turnMetrics.record(turn());
+    const { projectId: _projectId, ...unfiled } = turn({ mode: "chat" }) as Record<string, unknown>;
+    fixture.turnMetrics.record(unfiled as never);
+
+    const { body } = await query(fixture);
+
+    expect(body.turnMetrics?.turnCount).toBe(1);
+    expect(body.turnMetrics?.turns[0]?.mode).toBe("chat");
+  });
+
+  it("leaves turns out when the query filters on a ledger-only dimension", async () => {
+    const fixture = setup({ kind: "projects", projectIds: [ids.projectA] });
+    fixture.turnMetrics.record(turn());
+
+    const { body } = await query(fixture, { requestShape: "chat-turn" });
+
+    expect(body.turnMetrics).toBeUndefined();
+  });
+
+  it("leaves the field out when nothing matches rather than answering zeros", async () => {
+    const fixture = setup({ kind: "projects", projectIds: [ids.projectA] });
+
+    const { body } = await query(fixture);
+
+    expect(body.turnMetrics).toBeUndefined();
   });
 });

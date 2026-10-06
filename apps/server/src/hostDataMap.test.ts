@@ -45,6 +45,29 @@ describe("composeHostDataMap", () => {
       name: "Computer use driver",
       location: { kind: "known", path: `${dataDirectory}/computer-use` },
     });
+    // Every directory the confirmed purge sweep reaches outside the journal
+    // must be visible in the map, so the map cannot under-state erasure.
+    expect(decoded.host.caches).toContainEqual({
+      name: "Chat attachments",
+      location: { kind: "known", path: `${dataDirectory}/chat/threads` },
+    });
+    for (const relative of [
+      "code-threads",
+      "generated-images",
+      "agent-messages",
+      "agent-run-scratch",
+      "agent-run-workspace-receipts",
+      "managed-worktree-receipts",
+    ]) {
+      expect(decoded.host.caches.some((entry) => entry.location.kind === "known")).toBe(true);
+      expect(
+        decoded.host.caches.some(
+          (entry) =>
+            entry.location.kind === "known" &&
+            entry.location.path === `${dataDirectory}/${relative}`,
+        ),
+      ).toBe(true);
+    }
     expect(decoded.host.credentials).toEqual({
       kind: "known",
       backend: "keychain",

@@ -41,6 +41,7 @@ import {
 } from "./workTurnService";
 import { WorkProjectStatusFiles } from "./workProjectStatusFiles";
 import type { WorkTurnRuntimePort } from "./workTurnRuntime";
+import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 
 const attachmentRoots: string[] = [];
@@ -565,6 +566,42 @@ describe("WorkTurnService", () => {
     expect(run).not.toHaveBeenCalled();
     expect(turnStarted).not.toHaveBeenCalled();
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("hands what a Work turn cost and how it ran to the harness when it completes and when it ends", async () => {
+    const summary: TurnEndSummary = {
+      stopReason: "end-of-turn",
+      startedAt: "2026-07-29T11:59:00.000Z",
+      endedAt: "2026-07-29T11:59:30.000Z",
+      usage: { inputTokens: 900, outputTokens: 50, cacheReadInputTokens: 700 },
+      metrics: {
+        precision: "approximate",
+        wallMs: 30_000,
+        timeToFirstTokenMs: 2_000,
+        decodeOutputTokens: 50,
+        decodeMs: 5_000,
+        toolMs: 5_000,
+        modelCalls: 1,
+      },
+    };
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async (input) => {
+      input.onTurnEnded?.(summary);
+      return { kind: "completed", response: "Provider reply" };
+    });
+    const turnCompleted = vi.fn(async () => undefined);
+    const turnEnded = vi.fn();
+    const fixture = serviceFixture({
+      turnRuntime: { run },
+      nativeHarness: { contextFor: () => [], turnStarted: vi.fn(), turnCompleted, turnEnded },
+    });
+
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+
+    expect(turnCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "work", text: "Provider reply", turn: summary }),
+    );
+    expect(turnEnded).toHaveBeenCalledWith(expect.objectContaining({ mode: "work" }), summary);
   });
 
   it("refuses a saved reasoning level that the model no longer declares before launching", async () => {
@@ -1381,6 +1418,18 @@ describe("WorkTurnService", () => {
       turnRuntime: {
         run: async (input) => {
           input.onDelta?.("Partial");
+          const report = decodeProviderRuntimeEvent({
+            kind: "child-agent-activity",
+            instanceId: ids.provider,
+            sessionId: input.providerSessionId,
+            sequence: 1,
+            correlationId: String(ids.request),
+            occurredAt: now,
+            childAgentId: "observed-child",
+            status: "running",
+            summary: "Reading",
+          });
+          if (report.kind === "child-agent-activity") input.onChildActivity?.(report);
           input.onTasks?.([{ taskId: "task-1", state: "running", summary: "Watch CI" }]);
           await gate.promise;
           input.onTasks?.([
@@ -1421,6 +1470,9 @@ describe("WorkTurnService", () => {
       { taskId: "task-2", state: "pending", summary: "Commit the evidence" },
     ]);
     const transcript = await fixture.service.transcript(ids.window, ids.thread);
+    expect(transcript.turns[0]?.childObservations?.children).toMatchObject([
+      { childAgentId: "observed-child", historyStatus: "partial" },
+    ]);
     const settledTurn = transcript.turns.at(-1);
     expect(settledTurn?.tasks).toEqual([
       { taskId: "task-1", state: "completed", summary: "Watch CI" },
@@ -1601,6 +1653,82 @@ describe("WorkTurnService", () => {
         { kind: "assistant-message", text: "Provider reply" },
       ],
     });
+  });
+
+  it("validates every batch member and replays only the prior group before delivering a new generation", async () => {
+    const first = workRunFor(ids.thread);
+    const second = workRunFor(ids.thread, { id: "d4a1b000-0000-4000-8000-000000000005" });
+    const third = workRunFor(ids.thread, { id: "d4a1b000-0000-4000-8000-000000000006" });
+    const runs = new Map([first, second, third].map((run) => [run.id, run]));
+    const fixture = serviceFixture({ agentRuns: { getById: (id) => runs.get(id) } });
+    const delivery = { kind: "agent-result", runId: first.id, runIds: [first.id, second.id] };
+    for (const invalid of [
+      workRunFor(String(third.id), { id: second.id }),
+      { ...second, lifecycleStatus: "running" as const },
+    ]) {
+      runs.set(second.id, invalid);
+      await expect(
+        fixture.service.startFirstTurn(ids.window, { ...startCommand(), delivery }),
+      ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    }
+    runs.set(second.id, second);
+    const original = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      delivery,
+    });
+    expect(original).toMatchObject({ kind: "accepted", turn: { delivery } });
+    await fixture.waitForIdle();
+    runs.set(first.id, {
+      ...first,
+      resultDelivery: { outcome: "delivered", settledAt: first.updatedAt },
+    });
+    const next = {
+      ...startCommand(),
+      requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      turnId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    };
+    const replay = await fixture.service.startFirstTurn(ids.window, {
+      ...next,
+      delivery: { kind: "agent-result", runId: second.id, runIds: [second.id, third.id] },
+    });
+    expect(replay).toMatchObject({ kind: "accepted", turn: { turnId: ids.turn, delivery } });
+    expect(fixture.projection.listForThread(ids.thread)).toHaveLength(1);
+    const resumed = { ...first, generation: 2 };
+    runs.set(first.id, resumed);
+    const newDelivery = {
+      kind: "agent-result",
+      runId: first.id,
+      runGenerations: [{ runId: first.id, generation: 2 }],
+    };
+    await expect(
+      fixture.service.startFirstTurn(ids.window, { ...next, delivery: newDelivery }),
+    ).resolves.toMatchObject({ kind: "accepted", turn: { delivery: newDelivery } });
+    expect(fixture.projection.listForThread(ids.thread)).toHaveLength(2);
+    await expect(
+      fixture.service.startFirstTurn(ids.window, { ...startCommand(), delivery }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
+  it("defers fresh child results while the Work parent has an active turn", async () => {
+    const run = workRunFor(ids.thread);
+    const pending = deferred<{ readonly kind: "completed"; readonly response: string }>();
+    const fixture = serviceFixture({
+      agentRuns: { getById: () => run },
+      turnRuntime: { run: () => pending.promise },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    try {
+      await expect(
+        fixture.service.startFirstTurn(ids.window, {
+          ...startCommand(),
+          requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          turnId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          delivery: { kind: "agent-result", runId: run.id },
+        }),
+      ).rejects.toMatchObject({ failure: { category: "stale" } });
+    } finally {
+      pending.resolve({ kind: "completed", response: "done" });
+    }
   });
 
   it("refuses a turn that claims to deliver a subagent result the journal does not back", async () => {

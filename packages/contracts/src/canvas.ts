@@ -24,7 +24,10 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 // Canvas wire contracts are deliberately versioned independently from event
 // envelopes. A decoder must reject a future version until its renderer and
-// policy have been reviewed together.
+// policy have been reviewed together. The current schema version is declared
+// in `canvasIdentity.ts`: version 3 added the mockup block and version 4 the
+// thread presentation, which the definition filters below admit only under
+// those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -51,6 +54,9 @@ export const CANVAS_MAX_PLAN_PHASES = 32;
 export const CANVAS_MAX_PLAN_TASKS = 256;
 export const CANVAS_MAX_PLAN_TASK_DEPENDENCIES = 16;
 export const CANVAS_MAX_PLAN_TASK_SOURCES = 8;
+export const CANVAS_MAX_MOCKUP_DEPTH = 6;
+export const CANVAS_MAX_MOCKUP_NODES = 64;
+export const CANVAS_MAX_MOCKUP_TEXT_LENGTH = 120;
 
 // Descriptive aliases keep budget names discoverable without creating a
 // second source of truth.
@@ -221,6 +227,7 @@ export const CanvasBlockKind = Schema.Literal(
   "evidence-reference",
   "image",
   "plan",
+  "mockup",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -346,7 +353,18 @@ export const CanvasTableBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasTableBlock = typeof CanvasTableBlock.Type;
 
-export const CanvasChartType = Schema.Literal("line", "bar", "area", "scatter", "distribution");
+export const CanvasChartType = Schema.Literal(
+  "line",
+  "bar",
+  "area",
+  "scatter",
+  "distribution",
+  "pie",
+  "donut",
+  "stacked-bar",
+  "grouped-bar",
+  "bar-line",
+);
 export type CanvasChartType = typeof CanvasChartType.Type;
 
 export const CanvasChartPoint = Schema.Struct({
@@ -355,19 +373,127 @@ export const CanvasChartPoint = Schema.Struct({
 }).annotations(strict);
 export type CanvasChartPoint = typeof CanvasChartPoint.Type;
 
+/** Which mark a series draws on a bar-and-line chart. Other chart types omit it. */
+export const CanvasChartMark = Schema.Literal("bar", "line");
+export type CanvasChartMark = typeof CanvasChartMark.Type;
+
 export const CanvasChartSeries = Schema.Struct({
   seriesId: boundedToken("CanvasSeriesId"),
   label: CanvasLabel,
   points: Schema.NonEmptyArray(CanvasChartPoint).pipe(Schema.maxItems(CANVAS_MAX_CHART_POINTS)),
+  mark: Schema.optional(CanvasChartMark),
 }).annotations(strict);
 export type CanvasChartSeries = typeof CanvasChartSeries.Type;
+
+/**
+ * Why a chart's series do not match its type, or undefined when they do.
+ *
+ * A pie or donut is one series of labeled, non-negative slices. Stacked and
+ * grouped bars, and a bar-and-line chart, compare series across one shared
+ * category order. Only a bar-and-line chart names each series as a bar or a line.
+ */
+export function canvasChartSeriesIssue(block: {
+  readonly chartType: string;
+  readonly series: ReadonlyArray<{
+    readonly points: ReadonlyArray<{ readonly x: number | string; readonly y: number }>;
+    readonly mark?: CanvasChartMark | undefined;
+  }>;
+}): string | undefined {
+  const marked = block.series.some((item) => item.mark !== undefined);
+  if (block.chartType !== "bar-line" && marked) {
+    return "Only a bar and line chart names a mark on its series.";
+  }
+  if (block.chartType === "pie" || block.chartType === "donut") {
+    return partToWholeIssue(block.series);
+  }
+  if (
+    block.chartType === "stacked-bar" ||
+    block.chartType === "grouped-bar" ||
+    block.chartType === "bar-line"
+  ) {
+    return alignedSeriesIssue(block.chartType, block.series);
+  }
+  return undefined;
+}
+
+function categoryKey(x: number | string): string {
+  return typeof x === "number" ? `n:${String(x)}` : `s:${x}`;
+}
+
+function partToWholeIssue(
+  series: ReadonlyArray<{
+    readonly points: ReadonlyArray<{ readonly x: number | string; readonly y: number }>;
+  }>,
+): string | undefined {
+  const only = series[0];
+  if (series.length !== 1 || only === undefined) {
+    return "A pie or donut chart needs one series of labeled slices.";
+  }
+  const labels = new Set<string>();
+  for (const point of only.points) {
+    if (typeof point.x !== "string" || point.x.trim() === "") {
+      return "A pie or donut slice needs a label.";
+    }
+    if (!Number.isFinite(point.y) || point.y < 0) {
+      return "A pie or donut slice needs a value that is not negative.";
+    }
+    if (labels.has(point.x)) return "A pie or donut chart lists each slice once.";
+    labels.add(point.x);
+  }
+  return undefined;
+}
+
+function alignedSeriesIssue(
+  chartType: string,
+  series: ReadonlyArray<{
+    readonly points: ReadonlyArray<{ readonly x: number | string; readonly y: number }>;
+    readonly mark?: CanvasChartMark | undefined;
+  }>,
+): string | undefined {
+  if (series.length < 2) {
+    return "This chart needs at least two series that share categories.";
+  }
+  if (chartType === "bar-line") {
+    if (series.some((item) => item.mark === undefined)) {
+      return "A bar and line chart names each series as a bar or a line.";
+    }
+    const marks = new Set(series.map((item) => item.mark));
+    if (!marks.has("bar") || !marks.has("line")) {
+      return "A bar and line chart needs at least one bar series and one line series.";
+    }
+  }
+  const first = series[0];
+  if (first === undefined) return "This chart needs at least two series that share categories.";
+  const keys = first.points.map((point) => categoryKey(point.x));
+  if (new Set(keys).size !== keys.length) return "Each series lists a category once.";
+  for (const item of series) {
+    const itemKeys = item.points.map((point) => categoryKey(point.x));
+    if (itemKeys.length !== keys.length || itemKeys.some((key, index) => key !== keys[index])) {
+      return "Every series lists the same categories in the same order.";
+    }
+    if (chartType === "stacked-bar") {
+      for (const point of item.points) {
+        if (!Number.isFinite(point.y) || point.y < 0) {
+          return "A stacked bar value is not negative.";
+        }
+      }
+    }
+  }
+  return undefined;
+}
 
 export const CanvasChartBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("chart"),
   chartType: CanvasChartType,
   series: Schema.Array(CanvasChartSeries).pipe(Schema.maxItems(CANVAS_MAX_SERIES)),
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((block) => canvasChartSeriesIssue(block) === undefined, {
+      message: () => "Chart series do not match the chart type.",
+    }),
+  );
 export type CanvasChartBlock = typeof CanvasChartBlock.Type;
 
 export const CanvasTimelineItem = Schema.Struct({
@@ -664,6 +790,52 @@ export const CanvasPlanTask = Schema.Struct({
 }).annotations(strict);
 export type CanvasPlanTask = typeof CanvasPlanTask.Type;
 
+export const CanvasMockupComponent = Schema.Literal(
+  "window",
+  "header",
+  "sidebar",
+  "list",
+  "list-row",
+  "form-field",
+  "button",
+  "toggle",
+  "tabs",
+  "card",
+  "image-placeholder",
+  "text",
+);
+export type CanvasMockupComponent = typeof CanvasMockupComponent.Type;
+
+export const CanvasMockupDevice = Schema.Literal("desktop", "tablet", "phone");
+export type CanvasMockupDevice = typeof CanvasMockupDevice.Type;
+
+const CanvasMockupText = boundedNonEmptyText(CANVAS_MAX_MOCKUP_TEXT_LENGTH);
+const CanvasMockupNodeId = boundedToken("CanvasMockupNodeId");
+
+/**
+ * One drawn part of a screen. The tree is a parent chain, not nested objects:
+ * a nested screen lands past the Canvas depth budget before a settings screen
+ * can name its rows.
+ */
+export const CanvasMockupNode = Schema.Struct({
+  nodeId: CanvasMockupNodeId,
+  component: CanvasMockupComponent,
+  label: CanvasMockupText,
+  parentId: Schema.optional(CanvasMockupNodeId),
+  /** Drawn state of a toggle. The control is not live. */
+  on: Schema.optional(Schema.Boolean),
+}).annotations(strict);
+export type CanvasMockupNode = typeof CanvasMockupNode.Type;
+
+export const CanvasMockupBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("mockup"),
+  device: CanvasMockupDevice,
+  title: CanvasMockupText,
+  nodes: Schema.Array(CanvasMockupNode).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_NODES)),
+}).annotations(strict);
+export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
+
 export const CanvasPlanBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("plan"),
@@ -748,6 +920,7 @@ export const CanvasBlock = Schema.Union(
   CanvasBrowserReferenceBlock,
   CanvasEvidenceReferenceBlock,
   CanvasImageBlock,
+  CanvasMockupBlock,
   CanvasPlanBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
@@ -756,11 +929,18 @@ export const CanvasBlock = Schema.Union(
 );
 export type CanvasBlock = typeof CanvasBlock.Type;
 
+// Where the originating thread shows a Canvas. `inline` draws the document in
+// the conversation; `sidebar` shows a card that opens it beside the thread.
+// Either way the Canvas is one journaled object: the hint never copies it.
+export const CanvasPresentation = Schema.Literal("inline", "sidebar");
+export type CanvasPresentation = typeof CanvasPresentation.Type;
+
 export const CanvasDefinition = Schema.Struct({
   schemaVersion: CanvasSchemaVersion,
   title: boundedNonEmptyText(256),
   provenance: CanvasProvenance,
   sourceManifest: CanvasSourceManifest,
+  presentation: Schema.optional(CanvasPresentation),
   blocks: Schema.Array(CanvasBlock)
     .pipe(Schema.maxItems(CANVAS_MAX_BLOCKS))
     .pipe(
@@ -769,7 +949,27 @@ export const CanvasDefinition = Schema.Struct({
         { message: () => `Canvas image blocks exceed ${CANVAS_MAX_IMAGES}.` },
       ),
     ),
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    // Version-gated blocks: a mockup is declared only under version 3. An older
+    // runtime that never learned the kind must see a mockup-carrying document as
+    // a declared future version, not as a v2 document that failed to decode.
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= 3 ||
+        !definition.blocks.some((block) => block.kind === "mockup"),
+      {
+        message: () => "Mockup blocks require Canvas schema version 3.",
+      },
+    ),
+    Schema.filter(
+      (definition) => definition.schemaVersion >= 4 || definition.presentation === undefined,
+      {
+        message: () => "A thread presentation requires Canvas schema version 4.",
+      },
+    ),
+  );
 export type CanvasDefinition = typeof CanvasDefinition.Type;
 
 export const CanvasVersion = Schema.Struct({
@@ -799,6 +999,7 @@ export const decodeCanvasBlockKind = Schema.decodeUnknownSync(CanvasBlockKind);
 export const decodeCanvasBlock = Schema.decodeUnknownSync(CanvasBlock);
 export const decodeCanvasDefinition = Schema.decodeUnknownSync(CanvasDefinition);
 export const decodeCanvasVersion = Schema.decodeUnknownSync(CanvasVersion);
+export const decodeCanvasPresentation = Schema.decodeUnknownSync(CanvasPresentation);
 export const decodeCanvasDiagramLayoutKind = Schema.decodeUnknownSync(CanvasDiagramLayoutKind);
 export const decodeCanvasPlanTaskId = Schema.decodeUnknownSync(CanvasPlanTaskId);
 

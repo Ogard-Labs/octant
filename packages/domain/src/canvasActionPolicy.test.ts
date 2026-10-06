@@ -77,7 +77,7 @@ describe("admitCanvasActionBlock", () => {
 
   it("denies an unsupported block schema version", () => {
     expect(
-      admitCanvasActionBlock(block({ command: "canvas.request-refresh" }, { schemaVersion: 3 })),
+      admitCanvasActionBlock(block({ command: "canvas.request-refresh" }, { schemaVersion: 5 })),
     ).toMatchObject({ kind: "denied", denialCode: "unsupported-schema" });
   });
 

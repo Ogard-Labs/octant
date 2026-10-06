@@ -170,9 +170,23 @@ one thread you can already open. The JSON bundle (`octant.thread-bundle/1`)
 carries transcript, evidence, and provenance, and names the instant it was
 cut. Secrets, raw provider payloads, resume cursors, and filesystem paths
 are unrepresentable. Attachment bytes and other bulk content outside the
-journal are listed as omissions rather than inlined. A paired device may
-export only a thread it can already read. This is not a host-wide dump;
-Chat Markdown remains a convenience copy, not the authoritative export.
+journal are listed as omissions rather than inlined. A paired device may export
+only a thread it can already read. Chat Markdown remains a convenience
+copy, not the authoritative export.
+
+**Export this host.** **Export my data** is the host-wide cut
+(`octant.host-export/1`): one local-owner read of every thread the host
+can project — across Chat, Work, and Code — plus Projects, memory,
+Canvases, settings, usage rows, and the retention state including purge
+tombstones, streamed as line-delimited JSON. It is local-owner-only: a
+remote or paired device principal is refused before any export data is read.
+The same unrepresentable rules as the thread bundle apply — no credentials,
+no filesystem paths, no raw provider payloads. Some non-thread records that
+carry a forbidden key are left out of the bundle; the export's omissions page
+adds a generic entry naming that class of omission without identifying the
+records or giving their count. A forbidden key inside a thread record or an
+emitted page instead causes the whole export to be refused, and if the walk
+cannot finish, nothing is saved.
 
 **Retain and purge.** Retention windows are per host, Project, or thread.
 The narrower scope wins. The host default is forever. Setting a window
@@ -180,11 +194,19 @@ never deletes anything, and there is no unattended timer. A confirmed
 purge (`confirm: true`) is required. For each named thread it deletes
 purgeable bulk content, removes derived projection rows, physically
 deletes that thread's own journal events so a rebuild cannot resurrect the
-transcript or title, then appends a tombstone. Usage attribution, canvas
-documents, memory, credentials, Projects, and other threads stay unless a
-later request names them. SQLite free pages may keep bytes until a vacuum
+transcript or title, then appends a tombstone. Usage rows keep their token
+and cost aggregates for accounting but the thread's id leaves them, so a
+purged thread is no longer named anywhere in usage attribution. That
+usage appears as erased threads in Usage and in the host export. Canvas
+documents, credentials, Projects, and other threads stay unless a later
+request names them. Project memory belongs to the Project: it survives a
+thread purge with its provenance de-linked, it is included in the host
+export, and a Project-scoped purge erases the Project's memory and Canvases
+and reports those scopes. SQLite free pages may keep bytes until a vacuum
 or store rebuild; that residual is reported, not hidden. A remote
-principal cannot set a window or purge.
+principal cannot set a window or purge. A later host export carries no
+content trace of a purged thread; the purge outcome names exactly which
+scopes it deleted and which it retained.
 
 **Remove local data.** Reset, remove-all, and delete-remote-host are
 explicit, reported per scope, and never implicit. Keychain cleanup is

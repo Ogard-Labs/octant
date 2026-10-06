@@ -65,7 +65,7 @@ export function buildChildRunStatusSummary(
     const nonTerminal = NON_TERMINAL.has(status);
     if (nonTerminal) {
       active += 1;
-      stoppableRunIds.push(entry.runId);
+      if (entry.executionKind === "octant-managed") stoppableRunIds.push(entry.runId);
     } else if (entry.resultAcknowledgement.required && !entry.resultAcknowledgement.acknowledged) {
       unacknowledgedResults += 1;
     }

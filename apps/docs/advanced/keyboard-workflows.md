@@ -33,8 +33,7 @@ into.
 
 Sidebar **Search** opens a current-mode thread overlay. It filters titles
 among the threads the host has already listed for this window — live and
-archived — and never mixes Chat, Work, and Code. Project names, Recents,
-and Unfiled print as folder words on a hit, not as filters. Up, Down,
+archived — and never mixes Chat, Work, and Code. Project names and No project print as folder words on a hit, not as filters. Up, Down,
 Home, and End move, Enter opens, and Escape dismisses.
 
 The palette command **Search Chat threads**, **Search Work threads**, or
@@ -176,3 +175,17 @@ Keyboard shortcuts; they are not waiting on that registry.
   workbench command
 - [Recovery and troubleshooting](/advanced/recovery) for Zen recovery
 - [Remote access](/advanced/remote-access) for the same keyboard workflows on a remote client
+
+## Context menus
+
+Right-click a thread, transcript turn, link, terminal pane, or workspace header
+for its available actions. In the desktop app these menus, More, the account menu, and ordinary dropdown
+menus use the operating
+system's menu presentation, including submenus and disabled actions. Press
+Escape to dismiss a menu. Text fields offer the standard editing menu, and
+selected text offers Copy. Code editor and diff right-click menus provide native
+editing/find actions; read-only editors disable changes. The browser client uses accessible in-page menus;
+plain select fields and the Project/thread filter menu also use native choices
+on desktop. Activity › Custom range opens a date-range dialog on both clients.
+Searchable pickers, forms, and content popovers remain in-page controls. Native menus dismiss after each selection, including checked
+choices; open them again to make another selection.

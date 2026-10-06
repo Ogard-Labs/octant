@@ -995,6 +995,20 @@ export const ProviderModelOptionValues = Schema.Record({
   );
 export type ProviderModelOptionValues = typeof ProviderModelOptionValues.Type;
 
+/** Display choices identify advertised variants; selecting one still binds its real model id. */
+const ProviderModelConfiguration = Schema.Struct({
+  family: Schema.NonEmptyTrimmedString,
+  choices: Schema.NonEmptyArray(
+    Schema.Struct({
+      id: Schema.NonEmptyTrimmedString,
+      displayName: Schema.NonEmptyTrimmedString,
+      value: Schema.NonEmptyTrimmedString,
+    }).annotations(strict),
+  ).pipe(
+    Schema.filter((choices) => new Set(choices.map((choice) => choice.id)).size === choices.length),
+  ),
+}).annotations(strict);
+
 const ProviderModelFields = {
   id: ProviderModelId,
   displayName: Schema.NonEmptyTrimmedString,
@@ -1009,6 +1023,7 @@ const ProviderModelFields = {
   inputModalities: UniqueInputModalities,
   imageInput: Schema.optional(ImageInputCapability),
   options: Schema.Array(ProviderModelOption),
+  configuration: Schema.optional(ProviderModelConfiguration),
   capabilityEvidence: Schema.optional(Schema.Array(CapabilityEvidence)),
   /** User-maintained residency/privacy labels; absent means untagged. */
   dataTags: Schema.optional(ProviderDataTags),
@@ -1721,6 +1736,68 @@ export const ProviderFailure = Schema.Struct({
 }).annotations(strict);
 export type ProviderFailure = typeof ProviderFailure.Type;
 
+/**
+ * What fills a provider-run window, by kind. A kind is the provider's own
+ * category where it reports one, or something Octant itself puts in the
+ * window and can count (`octant-tools`). The set is closed so a surface can
+ * give each kind one name and one colour.
+ */
+export const ProviderContextPartKind = Schema.Literal(
+  "system-prompt",
+  "system-tools",
+  "octant-tools",
+  "mcp-tools",
+  "memory-files",
+  "skills",
+  "agents",
+  "messages",
+  "reserved",
+);
+export type ProviderContextPartKind = typeof ProviderContextPartKind.Type;
+
+/**
+ * One part of the window with the honesty of its number. `provider-reported`
+ * is the runtime's own count; the other accuracies are Octant's estimate and
+ * must be shown as one. `count` is how many things the part holds (tools,
+ * files, agents), where that is known.
+ */
+export const ProviderContextPart = Schema.Struct({
+  kind: ProviderContextPartKind,
+  tokens: Schema.Int.pipe(Schema.nonNegative()),
+  accuracy: Schema.Literal(
+    "provider-reported",
+    "exact-tokenizer",
+    "model-family-estimate",
+    "conservative-heuristic",
+  ),
+  count: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+}).annotations(strict);
+export type ProviderContextPart = typeof ProviderContextPart.Type;
+
+/**
+ * Tools the runtime knows about but has not loaded into the window. They hold
+ * no share of it, so only how many there are, where known, is carried.
+ */
+export const ProviderDeferredContextPart = Schema.Struct({
+  kind: Schema.Literal("system-tools", "mcp-tools"),
+  /** Absent when the runtime named the group but not how many it holds. */
+  count: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+}).annotations(strict);
+export type ProviderDeferredContextPart = typeof ProviderDeferredContextPart.Type;
+
+/**
+ * The parts of a provider-run window, as of the report that carries it. A
+ * runtime that reports categories supplies them as `provider-reported`; for
+ * one that does not, Octant supplies only what it can count itself. The parts
+ * never claim the whole window: whatever the occupancy holds beyond them is
+ * the reader's remainder, not a part.
+ */
+export const ProviderContextBreakdown = Schema.Struct({
+  parts: Schema.Array(ProviderContextPart).pipe(Schema.maxItems(16)),
+  deferred: Schema.optional(Schema.Array(ProviderDeferredContextPart).pipe(Schema.maxItems(4))),
+}).annotations(strict);
+export type ProviderContextBreakdown = typeof ProviderContextBreakdown.Type;
+
 const ProviderRuntimeEventFields = {
   instanceId: ProviderInstanceId,
   sessionId: ProviderSessionId,
@@ -1728,6 +1805,61 @@ const ProviderRuntimeEventFields = {
   correlationId: CorrelationId,
   occurredAt: UtcTimestamp,
 } as const;
+
+/** A provider report is observation only; it carries no execution authority. */
+export const ProviderChildActivityEvent = Schema.Struct({
+  ...ProviderRuntimeEventFields,
+  kind: Schema.Literal("child-agent-activity"),
+  childAgentId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  parentChildAgentId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
+  modelId: Schema.optional(ProviderModelId),
+  task: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  status: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
+  summary: Schema.NonEmptyTrimmedString,
+}).annotations(strict);
+export type ProviderChildActivityEvent = typeof ProviderChildActivityEvent.Type;
+
+export const MAX_PROVIDER_CHILD_OBSERVATIONS = 16;
+export const MAX_PROVIDER_CHILD_HISTORY = 8;
+export const ProviderChildObservation = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  sessionId: ProviderSessionId,
+  childAgentId: ProviderChildActivityEvent.fields.childAgentId,
+  parentChildAgentId: ProviderChildActivityEvent.fields.parentChildAgentId,
+  modelId: Schema.optional(ProviderModelId),
+  task: ProviderChildActivityEvent.fields.task,
+  lifecycleStatus: Schema.Literal(
+    "starting",
+    "running",
+    "waiting",
+    "completed",
+    "failed",
+    "unknown",
+  ),
+  latestSummary: Schema.String.pipe(Schema.maxLength(512)),
+  firstObservedAt: UtcTimestamp,
+  updatedAt: UtcTimestamp,
+  historyStatus: Schema.Literal("partial", "truncated", "conflicted"),
+  history: Schema.Array(
+    Schema.Struct({
+      sequence: Schema.Int.pipe(Schema.positive()),
+      occurredAt: UtcTimestamp,
+      status: ProviderChildActivityEvent.fields.status,
+      summary: Schema.String.pipe(Schema.maxLength(512)),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(MAX_PROVIDER_CHILD_HISTORY)),
+}).annotations(strict);
+export type ProviderChildObservation = typeof ProviderChildObservation.Type;
+export const ProviderChildObservationState = Schema.Struct({
+  children: Schema.Array(ProviderChildObservation).pipe(
+    Schema.maxItems(MAX_PROVIDER_CHILD_OBSERVATIONS),
+  ),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type ProviderChildObservationState = typeof ProviderChildObservationState.Type;
+export const decodeProviderChildObservationState = Schema.decodeUnknownSync(
+  ProviderChildObservationState,
+);
 
 export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
@@ -1745,6 +1877,15 @@ export const ProviderRuntimeEvent = Schema.Union(
     kind: Schema.Literal("tool-start"),
     toolCallId: Schema.NonEmptyTrimmedString,
     toolName: Schema.NonEmptyTrimmedString,
+    /**
+     * What the tool was asked to do: the first line of the command a shell
+     * tool runs, the checkout-relative path a file tool edits. The adapter
+     * reduces it to one redacted, bounded line before it crosses, so a raw
+     * command or path never rides on a normalized event, and a consumer still
+     * redacts before showing it. Optional because many providers report none;
+     * never file contents.
+     */
+    argument: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -1774,6 +1915,14 @@ export const ProviderRuntimeEvent = Schema.Union(
     cacheWriteInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
     providerExecutionDurationMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
     /**
+     * When the one model request this report covers was sent. Present only on
+     * a report for exactly one request, which is what lets its timing be exact
+     * with the tool time between requests left out. A report without it covers
+     * the whole turn: a later one replaces an earlier one, and the turn's
+     * speed is approximate whenever tools ran inside it.
+     */
+    requestStartedAt: Schema.optional(UtcTimestamp),
+    /**
      * What the provider says this turn cost, in US dollars. Only ever the
      * provider's own figure: Octant holds no price list and never multiplies
      * tokens by a rate it guessed, so a provider that reports no cost leaves
@@ -1788,6 +1937,19 @@ export const ProviderRuntimeEvent = Schema.Union(
      */
     contextWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
     contextTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+    /**
+     * Where the runtime compacts the conversation by itself, in tokens of the
+     * window the last request filled. Present only when the runtime said
+     * compaction is on and will fire at that point; absent means the runtime
+     * said nothing, said it is off, or the host could not read the unit, and
+     * no reader may infer a figure from the model's window.
+     */
+    autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+    /**
+     * What the window held after this report, when the runtime reported its
+     * make-up or Octant could count what it adds. Absent means neither.
+     */
+    contextBreakdown: Schema.optional(ProviderContextBreakdown),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -1837,6 +1999,22 @@ export const ProviderRuntimeEvent = Schema.Union(
   })
     .annotations(strict)
     .pipe(Schema.filter((event) => event.remaining <= event.limit)),
+  /**
+   * A direct endpoint failed in a way that usually passes and the request is
+   * going out again once `delayMs` has elapsed. It is sent before the wait, so
+   * a surface can say "retrying 2/5 in 4 s" while the turn is quiet. `attempt`
+   * is the attempt about to start, counted from 1; the turn is still running.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("retrying"),
+    attempt: Schema.Int.pipe(Schema.between(2, 16)),
+    maxAttempts: Schema.Int.pipe(Schema.between(2, 16)),
+    delayMs: Schema.Int.pipe(Schema.between(0, 3_600_000)),
+    reason: Schema.Literal("rate-limited", "unavailable", "stream-interrupted", "empty-completion"),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter((event) => event.attempt <= event.maxAttempts)),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("task-progress"),
@@ -1844,13 +2022,7 @@ export const ProviderRuntimeEvent = Schema.Union(
     status: Schema.Literal("pending", "in-progress", "completed", "failed"),
     summary: Schema.NonEmptyTrimmedString,
   }).annotations(strict),
-  Schema.Struct({
-    ...ProviderRuntimeEventFields,
-    kind: Schema.Literal("child-agent-activity"),
-    childAgentId: Schema.NonEmptyTrimmedString,
-    status: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
-    summary: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+  ProviderChildActivityEvent,
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("approval-request"),

@@ -7,7 +7,7 @@ import {
   type ProviderObservedState,
 } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
-import { fireEvent, render, renderHook, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useDraftModelOptions } from "./useDraftModelOptions";
@@ -67,6 +67,113 @@ describe("ComposerModelPicker", () => {
     expect(readRememberedModelOptions(source, selection)).toEqual({});
     next.unmount();
   });
+
+  it("selects advertised lead and sidekick pairings and remembers speed beside effort", async () => {
+    const configured = fusionGroups();
+    const onSelect = vi.fn();
+    const onModelOptionChange = vi.fn();
+    const user = userEvent.setup();
+    const view = render(
+      <ComposerModelPicker
+        groups={configured}
+        selectedProviderInstanceId={providerA}
+        selectedModelId={decodeProviderModelId("pair-a")}
+        onSelect={onSelect}
+        onModelOptionChange={onModelOptionChange}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("combobox", { name: "Lead" }));
+    await user.click(await screen.findByRole("option", { name: "Frontier B" }));
+    expect(onSelect).toHaveBeenLastCalledWith({ providerInstanceId: providerA, modelId: "pair-b" });
+    await user.click(screen.getByRole("combobox", { name: "Sidekick" }));
+    await user.click(await screen.findByRole("option", { name: "Luna High" }));
+    expect(onSelect).toHaveBeenLastCalledWith({ providerInstanceId: providerA, modelId: "pair-c" });
+    await user.click(screen.getByRole("combobox", { name: "Speed" }));
+    await user.click(await screen.findByRole("option", { name: "Fast" }));
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("speed", "fast");
+    expect(
+      readRememberedModelOptions(configured, {
+        providerInstanceId: providerA,
+        modelId: decodeProviderModelId("pair-a"),
+      }),
+    ).toEqual({ speed: "fast" });
+    view.rerender(
+      <ComposerModelPicker
+        groups={configured}
+        selectedProviderInstanceId={providerA}
+        selectedModelId={decodeProviderModelId("pair-a")}
+        modelOptionValues={{ speed: "fast", thought_level: "high" }}
+        onSelect={onSelect}
+        onModelOptionChange={onModelOptionChange}
+      />,
+    );
+    await user.click(screen.getByRole("combobox", { name: "Lead" }));
+    await user.click(await screen.findByRole("option", { name: "Frontier B" }));
+    expect(onSelect).toHaveBeenLastCalledWith({
+      providerInstanceId: providerA,
+      modelId: "pair-b",
+      modelOptionValues: { thought_level: "high", speed: "fast" },
+    });
+    expect(
+      readRememberedModelOptions(configured, {
+        providerInstanceId: providerA,
+        modelId: decodeProviderModelId("pair-b"),
+      }),
+    ).toEqual({ thought_level: "high", speed: "fast" });
+    await user.click(screen.getByRole("combobox", { name: "Speed" }));
+    await user.click(await screen.findByRole("option", { name: "Default" }));
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("speed", undefined);
+  });
+
+  it.each(["confirmed", "refused"] as const)(
+    "waits for a pairing change to be %s before accepting another setting",
+    async (outcome) => {
+      const configured = fusionGroups();
+      let confirm = () => {};
+      let refuse = () => {};
+      const pending = new Promise<void>((resolve, reject) => {
+        confirm = resolve;
+        refuse = () => reject(new Error("Provider refused the change"));
+      });
+      const onSelect = vi.fn(() => pending);
+      const onModelOptionChange = vi.fn();
+      const picker = (modelId: string) => (
+        <ComposerModelPicker
+          groups={configured}
+          selectedProviderInstanceId={providerA}
+          selectedModelId={decodeProviderModelId(modelId)}
+          onSelect={onSelect}
+          onModelOptionChange={onModelOptionChange}
+        />
+      );
+      const user = userEvent.setup();
+      const view = render(picker("pair-a"));
+      await user.click(screen.getByRole("button", { name: "Provider and model" }));
+      await user.click(screen.getByRole("combobox", { name: "Lead" }));
+      await user.click(await screen.findByRole("option", { name: "Frontier B" }));
+      expect(screen.getByRole("combobox", { name: "Lead" })).toBeDisabled();
+      expect(screen.getByRole("combobox", { name: "Sidekick" })).toBeDisabled();
+      expect(screen.getByRole("combobox", { name: "Speed" })).toBeDisabled();
+      fireEvent.keyDown(screen.getByRole("slider"), { key: "End" });
+      expect(onModelOptionChange).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("combobox", { name: "Sidekick" }));
+      expect(onSelect).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        if (outcome === "confirmed") {
+          view.rerender(picker("pair-b"));
+          confirm();
+        } else refuse();
+      });
+      expect(screen.getByRole("combobox", { name: "Sidekick" })).toBeEnabled();
+      await user.click(screen.getByRole("combobox", { name: "Sidekick" }));
+      await user.click(await screen.findByRole("option", { name: "Luna High" }));
+      expect(onSelect).toHaveBeenLastCalledWith({
+        providerInstanceId: providerA,
+        modelId: outcome === "confirmed" ? "pair-d" : "pair-c",
+      });
+    },
+  );
 
   it("recovers from malformed preferences without blocking model selection", () => {
     localStorage.setItem("octant.models.last-choice.v1", "{broken");
@@ -810,4 +917,48 @@ function endpointInstance(
     createdAt: "2026-07-14T10:00:00.000Z" as never,
     updatedAt: "2026-07-14T10:00:00.000Z" as never,
   } as ProviderInstance;
+}
+
+function fusionGroups() {
+  const source = groups();
+  const first = source[0];
+  const entry = first?.sections[0]?.models[0];
+  if (first === undefined || entry === undefined) throw new Error("Expected picker fixture");
+  const pairings = [
+    { id: "pair-a", lead: "Frontier A", sidekick: "SWE Medium" },
+    { id: "pair-b", lead: "Frontier B", sidekick: "SWE Medium" },
+    { id: "pair-c", lead: "Frontier A", sidekick: "Luna High" },
+    { id: "pair-d", lead: "Frontier B", sidekick: "Luna High" },
+  ].map((pair) => ({
+    ...entry,
+    model: {
+      ...entry.model,
+      id: decodeProviderModelId(pair.id),
+      displayName: `Fusion (${pair.lead} + ${pair.sidekick})`,
+      configuration: {
+        family: "Fusion",
+        choices: [
+          { id: "lead", displayName: "Lead", value: pair.lead },
+          { id: "sidekick", displayName: "Sidekick", value: pair.sidekick },
+        ] as const,
+      },
+      options: [
+        {
+          id: "thought_level",
+          displayName: "Thinking",
+          kind: "selection" as const,
+          values: ["low", "high"] as const,
+        },
+        {
+          id: "speed",
+          displayName: "Speed",
+          kind: "selection" as const,
+          values: ["standard", "fast"] as const,
+        },
+      ],
+    },
+  }));
+  return [
+    { ...first, sections: first.sections.map((section) => ({ ...section, models: pairings })) },
+  ];
 }

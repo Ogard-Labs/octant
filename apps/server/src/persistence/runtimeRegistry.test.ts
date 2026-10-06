@@ -705,6 +705,33 @@ describe("createPhase1RuntimeRegistries", () => {
     ).toThrow(EventPayloadInvalid);
   });
 
+  it("keeps a hidden thread stats line hidden when settings are replayed", () => {
+    const registry = createPhase1RuntimeRegistries().events;
+    const settings = {
+      ...decodePersistedShellSettings(legacySettingsPayload().settings),
+      showThreadStats: false,
+    };
+
+    expect(registry.decodePersisted("shell.settings-replaced", 1, { settings })).toEqual({
+      settings,
+    });
+  });
+
+  it("keeps the start-screen card choices when settings are replayed", () => {
+    const registry = createPhase1RuntimeRegistries().events;
+    const settings = {
+      ...decodePersistedShellSettings(legacySettingsPayload().settings),
+      homeCards: {
+        order: ["pull-requests", "working-now"],
+        visibility: [{ id: "ci-failures", visible: false }],
+      },
+    };
+
+    expect(registry.decodePersisted("shell.settings-replaced", 1, { settings })).toEqual({
+      settings,
+    });
+  });
+
   it("upcasts exact legacy shell settings events and preserves current authored values", () => {
     const registry = createPhase1RuntimeRegistries().events;
     const legacyPayload = legacySettingsPayload();
@@ -741,6 +768,8 @@ describe("createPhase1RuntimeRegistries", () => {
           transcriptTextSize: "medium",
           transcriptWidth: "narrow",
           showThreadProviderIcons: true,
+          showThreadStats: true,
+          homeCards: { order: [], visibility: [] },
           sidebarRowProperties: {
             projects: {
               project: false,
@@ -975,6 +1004,8 @@ function validSettingsPayload() {
       transcriptTextSize: "medium",
       transcriptWidth: "narrow",
       showThreadProviderIcons: true,
+      showThreadStats: true,
+      homeCards: { order: [], visibility: [] },
       sidebarRowProperties: {
         projects: {
           project: false,

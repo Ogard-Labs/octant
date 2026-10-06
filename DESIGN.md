@@ -42,7 +42,8 @@ asks for it (Settings › Appearance › Style):
   for discrete objects, and selection fills. In the Default style the chrome is
   monochrome; colour names identity (a Project, a provider, a count tile under
   Vivid) and never stands in for status, which keeps its own warning, failure,
-  and diff roles.
+  and diff roles. Categorical data is the other exception: the context ring and
+  the parts of the context window keep their hues in every style.
 - Controls are familiar, compact, keyboard reachable, and honest about
   loading, stale, unavailable, permission, and error states.
 
@@ -128,7 +129,9 @@ greys and the same hairline carry the hierarchy on a white or graphite ground.
 Settings › Appearance › Style chooses how much of that palette the chrome
 uses. **Default** is the monochrome described above. **Vivid** lets the
 places that name something carry colour: the welcome greeting, the sidebar's
-count tiles, board column marks, and a Project's accent. Vivid draws every
+count tiles, board column marks, a Project's accent, and a thread's Canvases,
+which take the hue of what they hold (a plan purple, a chart or figures
+amber, a diagram teal, a mockup pink, a table or document blue). Vivid draws every
 hue from the preset's palette roles (`--octant-palette-*`, read through the
 `--oct-vivid-*` aliases in `styles/vivid.css`), so it follows the light or
 dark theme and any tinted preset, and it never recolours a warning, a
@@ -276,19 +279,42 @@ names the state and claims no elapsed time. See
 
 ### Welcome and composer
 
-A thread's working subagents sit in their own card tucked behind the composer's
-top edge — narrower than the composer by one inset on each side, its lower edge
-hidden under the composer, rising from behind it on arrival — so they read as
-work beside the message rather than part of it. Only running subagents show
-there; finished ones, reviewed or not, are listed in Environment and Agents, so
-a thread that delegates a lot never grows a tall card. The head ("Subagents ·
-N working") folds the card to a one-line tab and the fold is remembered per
-viewer; open, the rows are 24px and scroll past three. A row (status icon, the
-task on one line, "Working · 12s") opens that subagent in the Agents tool, and
-Stop appears on hover or focus. Stopping one named subagent acts at once; Stop
-all asks first and names how many it reaches. There is no strip above the
-transcript. A cross-context notice takes the same place behind the composer and wins while
-it shows.
+A thread's subagents sit in an inset card attached above the composer's message
+surface. The card participates in normal layout so expansion cannot cover the
+preceding task list or transcript. Cross-context notices share the same flow;
+they never hide failed children or results needing review. The card starts
+collapsed and remembers the viewer's fold choice. Its head names the total,
+prioritizing failed, waiting, review-needed and unknown states over redundant
+activity counts. A truncated list identifies its count as listed children.
+Task-plan completion is never counted as child completion. View all opens the
+full Agents list even when every child has finished. Expansion previews at most
+three active or unresolved children; longer history stays in Environment and
+Agents. Compact rows show task, semantic status, recorded model and available
+activity. Age is explicitly time since the last update or first observation,
+never inferred execution duration. Raw identifiers and workspace paths belong
+in details. Rows open the child in Agents. Only managed active children offer
+Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
+narrow widths, disclosures work with the keyboard and retain visible focus,
+and expanded lists have bounded height.
+
+Provider-observed children remain separate from managed runs. Their detail shows
+reported activity, observation timing, available lineage and explicit partial,
+truncated or conflicting history. An unknown model stays unknown. Observations
+have no managed conversation, execution controls, workspace authority or result
+acknowledgement.
+
+Managed result previews identify their execution generation and recorded model.
+The result detail leads with the reported summary, files, checks and blockers;
+exact run, parent, provider and workspace attribution is available in a separate
+disclosure. Earlier generations keep their own attribution and evidence. Missing
+or truncated results stay explicit. Provider-reported files remain unverified;
+recorded tool output is inspectable without claiming that tool completion means
+a check passed. A recorded Code generation offers Review changes and links its
+captured paths into the existing Review surface. The saved comparison identifies
+the child, generation, workspace and capture time; its partial and binary content
+states stay explicit. It offers no staging, discard or parent-checkout editor
+controls. Unavailable capture stays unavailable. Evidence references are disclosed
+on request rather than presented as unsupported navigation links.
 
 A reply's suggested follow-ups sit as outline chips at the top of the
 thread composer, inside its surface, with a quiet "Next" label and a dismiss
@@ -298,6 +324,15 @@ Side-task offers stack above the chips as hairline cards: a target icon
 (branch for a worktree, new-message otherwise), the title, a dismiss control,
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
+
+A thread's stats line sits under the follow-up composer, below the context strip
+and inside the same tray: one row of figures at the 12px meta step in the meta ink,
+separated by middle dots, with no hue on any number and no fill on the row. It wraps at
+narrow widths rather than scrolling, and a trailing quiet icon button hides it. A figure
+that is approximate carries a leading tilde and a dotted underline that explains it on
+hover; a figure the provider did not report is absent, never zero. The whole line is one
+button that opens the per-turn detail dialog, a plain definition list of tokens, timing,
+and cost with Previous and Next turn controls.
 
 Work follow-up composers use the same attached context strip as Code, showing
 the project and working folder instead of Git controls. Full paths require a
@@ -327,8 +362,8 @@ asked up front; it is derived from the chips and shown on the thread once it
 exists.
 
 Under the composer, Work and Code start screens offer a row of action tiles and
-then a Running now strip, both on the composer's measure and ahead of Code's
-prompt suggestions, so a running thread is never under the fold. The tiles are
+then the card area, both on the composer's measure and ahead of Code's prompt
+suggestions, so a running thread is never under the fold. The tiles are
 always a three-column grid, one column under 560px, so one or two tiles keep a
 tile's width instead of stretching across the row; a detail line wraps to a
 second line before it is cut. A tile is a card
@@ -339,17 +374,31 @@ and **Review N changes** (Finished threads that wait for you) when N is above
 zero, where N counts unread threads that are not running or rested, the
 sidebar's To review rule. Open terminal starts a Project terminal and pins it in
 Zen, the only place one lives. Work offers the same tiles without a terminal,
-because Work has no shell. Review opens the Inbox. Running now is a section
-label with an Open board link and up to four cards, one per executing thread:
-provider mark, title, a small spinner, how long ago the thread last moved, a
-Project chip, in Code a mono branch chip, and the host's latest activity line
-in a mono well. The host keeps no turn start time on the board or in
-navigation, so a card says "Active 4m ago" rather than an elapsed time, and a
-fact the host does not report is left out rather than invented. Running
-threads show here instead of in Continue, so one thread is not listed twice.
-Each part leaves when it has nothing to show. Under the Vivid style the tiles'
+because Work has no shell. Review opens the Inbox. The tiles leave when they
+have nothing to show.
+
+The card area is a ghost **Customize** button right-aligned under the tiles
+(icon at the 14px step and the label), then a grid of cards, two columns and one
+under 560px. A card uses the card recipe (`OctantCard`: hairline ring, no
+shadow, the card fill) at a compact 12px rhythm. Its header is an icon at the
+16px step in secondary ink, the title as a section label, and a count as
+tabular meta text; its body is rows or one quiet line in the detail step. No
+card has a hue of its own: the default theme stays monochrome, and a state is
+carried by wording and weight. A row is a bare card-shaped button whose face
+fills at 5% ink on hover and focus, the provider mark and a row label on its
+first line, and a mono meta line for what is happening. The Customize panel is a
+popover at most 340px wide: one row per card with a drag grip, the icon, the
+title, up and down icon buttons, and a switch, then **Reset to default**; a
+dragged row marks its drop target with a hairline above it. **Working now**
+lists up to five rows of threads and agent runs in progress, each with the
+provider mark, the title, a time, and a one-line step; it says "Nothing is
+running right now." when empty. A running tool is shown in mono
+(`Command: bun run test`); a turn waiting on the person is plain prose. A turn's
+time says "Running 12m" from the start time the host reports, and "Active 4m
+ago" only for a host that reports none; a fact the host does not report is left
+out rather than invented. Under the Vivid style the tiles'
 icon squares take the blue, orange, and purple palette hues. Code's five prompt
-suggestions are one compact row of label-only chips under Running now, and
+suggestions are one compact row of label-only chips under the cards, and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
 button: hairline, resting fill, hover and focus fill); the prompt rides as the
 chip's tooltip and description and fills the composer when chosen, nothing more.
@@ -378,8 +427,16 @@ High") and reset above, and Faster and Smarter at the track's two ends. The fill
 is a dot grain that grows denser, brighter, and more purple, with a soft glow,
 the higher the level; a chosen level shows at once and never snaps back while
 it saves. Explicit model and reasoning choices are remembered
-locally for new threads; reasoning is keyed by provider/model and restored only while
-supported. Existing thread selections remain authoritative.
+locally for new threads; model settings are keyed by provider/model and restored only
+while supported. Existing thread selections remain authoritative. The same picker
+shows every declared model setting in Chat, Work, and Code. Paired model families
+show Lead and Sidekick selectors drawn from available catalog entries; choosing
+one preserves the other choice and carries still-supported explicit effort and
+speed settings. Devin's Speed selector offers Standard and Fast where the CLI
+supports Fast Mode, plus Default to use the provider's choice. The settings area
+scrolls within the bounded popup at narrow or short viewport sizes.
+Model choices and settings wait for an asynchronous model change to finish before
+accepting another edit, so the next configuration choice uses the confirmed pairing.
 
 The screen sits on the application ground (0091, 0129), set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, or the
@@ -467,6 +524,20 @@ shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 `ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
 menus now use the shared `OctantContextMenu` adapter; do not add a new direct
 primitive import.
+
+Desktop context menus and ordinary dropdown menus (including More, the account
+menu, action menus, plain select fields, Project/thread filters, and checkbox/radio choices) use Electron's native OS menus through that adapter.
+The OS owns their font, material, spacing, highlighting, submenu behavior,
+accessibility, and light/dark appearance; renderer theme tokens do not repaint
+native menus. The account menu opens above its footer control and More beside
+its sidebar row. Activity › Custom range opens a date-range dialog.
+The existing action composition supplies labels, grouping,
+disabled and checked states, and nested actions. Native menus dismiss after
+a selection, including checkbox/radio changes; reopening reads the current state. Ordinary editable text and text selections
+receive the platform editing/copy menu. The Code editor and both diff sides
+use native editing/find actions that run through the existing editor commands. Browser clients retain the accessible
+Base UI menus. Searchable pickers and popovers with embedded controls remain
+renderer surfaces.
 
 ### Turn header
 
@@ -669,7 +740,12 @@ fresh install reads Small and Narrow, so a question, its reply, and the
 composer under them all read at 13px, never under the chrome around them. The column uses
 `width: min(100% - 40px, measure)` with automatic horizontal margins. Welcome composers share a 768px maximum so
 Chat, Work, and Code start from the same prompt geometry independently of the
-reading-width preference. Canvas documents use a 62ch measure.
+reading-width preference. Canvas documents use a 62ch measure. A mockup is a
+wireframe of one screen, in a desktop, tablet, or phone frame. It draws only
+the closed catalog — window, header, sidebar, list, list row, form field,
+button, toggle, tabs, card, image placeholder, and text — and those controls
+are inert. In the Default style the wireframe uses neutral ink, hairline, and
+surface, never a hue.
 
 ## Spacing, shapes, and depth
 
@@ -890,8 +966,10 @@ occupy the main workspace in turn, following the
 [workspace navigation rule](docs/design/workspace.md#navigation-and-projects).
 The directory provides search and All, Chat, Work, and Code filters. Project
 detail is thread-first, with memory, provider access, and canvases in compact
-expandable rows below the primary work. The thread list is named Chats for threads filed in no
-Project; Work and Code call it Recents. Rows are hairline rails, never cards;
+expandable rows below the primary work. Threads without a listed Project appear once in **No project**, a collapsible
+folder row in the Project tree with the same nested-thread layout as Projects.
+It has no horizontal divider or separate section heading and is absent when empty.
+It is a navigation group, not a persisted Project. Rows are hairline rails, never cards;
 provider marks are fixed-size inline and can be hidden without changing row
 height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the
@@ -1174,18 +1252,64 @@ provider's limits as a name, a reset countdown or weekday, a share, and a thin
 bar each, and a footer action to the fuller surface (the context inspector, or
 Usage for a provider the host does not plan). The breakdown lists only the
 parts the data attributes: planned threads show their manifest categories,
-overhead, reserve, and free space; a provider-reported window shows used and
-free, with the thread's input and output totals kept apart because they are
-sums over turns, not parts of the window. Categories are told apart by palette
-hues (the largest share in blue) and each swatch is named; limit bars fill in
-blue. A limit near its cap is marked on its row and in its bar's value text,
+overhead, reserve, and free space; a provider-run window shows the parts its
+runtime reported (system prompt, system and MCP tools, memory files, skills,
+agents, messages), or, for a runtime that reported none, the parts Octant can
+count itself (Octant tools), and in either case one `Other (provider)` remainder
+so the parts add up to what the window holds. With no parts it shows used and
+free. The thread's input and output totals stay apart because they are sums over
+turns, not parts of the window. A part Octant counted is marked `Estimated`,
+with its accuracy (the existing exact tokenizer, model-family estimate and
+conservative estimate labels) in the part's tooltip and in a line under the key;
+the remainder after an estimate is marked the same way. Counts (tools, MCP, memory
+files, skills, agents) use the harness breakdown's row style; tools the runtime
+knows but has not loaded read `N deferred` and take no share of the bar.
+
+Categorical colour (the maintainer's decision, 2026-10-06): the parts of a
+context window are categorical data, so they carry hue in every style, Default
+included, beside the context ring as the second colour exception in that
+style. Each category has one tone, taken from the palette roles in seven hues
+and a second, darker step of each (the same hue mixed toward the ink, which only
+raises contrast against the panel in either theme), and keeps it wherever it
+appears: the popover's bar and key, and the swatch on the context inspector's
+entries. Categories are listed in one fixed order (the contract's category order
+for a planned thread, a fixed part order for a provider-run window) and the
+tones are chosen against that order, so neighbours differ clearly. A category
+that is the same thing in both kinds of window (conversation and messages, MCP
+and MCP tools, Octant tools and system tools, provider framing and system
+prompt, what nothing accounts for) shares one tone. Neighbour contrast is
+measured, not judged by eye: every tone holds at least 5.2:1 against the popover
+in light and dark, and the worst neighbouring pair is 0.134 apart in OKLab.
+Adjacent lightness ratios stay under 2:1, because seven hues that each clear 5:1
+cannot also sit 3:1 from one another; the one-pixel gap and the name beside every
+swatch carry the rest. `visualLanguageContract.test.ts` computes both numbers
+from the stylesheet. Red is left to the ring's near-full warning. **Free space and Reserved stay
+neutral**: no hue, the panel's ink mixed into its ground, with Free space drawn
+as the bar's empty track. Every part is named beside its swatch and carries its
+tokens and share, so hue never stands alone. The exception is scoped to these
+segments in `visualLanguageContract.test.ts`: in `context.css` palette colour
+may appear only on the tone rules, the ring and the limit bars. Limit bars fill
+in blue. A limit near its cap is marked on its row and in its bar's value text,
 never by ink alone. Unknown or stale data is labeled as such and never rendered as zero.
+Where a provider runtime compacts the session by itself and has said where, one
+secondary line under the window bar reads `N until auto-compact` in the bar's
+compact token format (the room between that point and the latest request's
+fill, or `At the auto-compact threshold` once none is left). The line is
+shown only for automatic compaction with a reported point, never derived from the
+window, and it leaves the ring and the bar's colours alone.
 
 The task visualizer is a compact composer-adjacent chip backed by the thread's
 journaled plan. It appears only when a real plan exists, shows proposed review
 or `Step n / total`, and opens a popover with title, step states, evidence, and
 start/finish/reopen/drop actions when approved. It must not invent progress from
 assistant prose or display an empty plan form.
+
+The provider's recorded task list is a separate, initially collapsed group. Its
+header keeps completed/total progress and failed or waiting counts visible while
+folded. An unfinished list after a settled turn says Incomplete; it does not
+claim that the agent is still running. Expansion shows the recorded ordered
+steps in a bounded, scrollable list. Neither this list nor the journaled plan
+borrows progress, completion, or authority from the subagent group.
 
 Responsive breakpoints are 560px, 720px, and 920px. Below 920px the right dock
 is removed rather than squeezing the transcript unreadably. Below 720px split

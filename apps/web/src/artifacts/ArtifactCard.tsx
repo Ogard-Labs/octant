@@ -7,6 +7,7 @@ export interface ArtifactCardProps {
   readonly entry: ArtifactLibraryEntry;
   readonly observedAt: string;
   readonly onOpen: (entry: ArtifactLibraryEntry) => void;
+  readonly onExport?: (entry: ArtifactLibraryEntry) => void;
 }
 
 const KIND_LABEL: Record<ArtifactLibraryEntry["kind"], string> = {
@@ -73,6 +74,17 @@ export function ArtifactCard(props: ArtifactCardProps) {
           </span>
         </span>
       </OctantButton>
+      {props.onExport === undefined ? null : (
+        <OctantButton
+          className="artifact-card__export"
+          onClick={() => props.onExport?.(entry)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Export…
+        </OctantButton>
+      )}
     </li>
   );
 }

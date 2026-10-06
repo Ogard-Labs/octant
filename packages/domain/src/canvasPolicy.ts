@@ -4,10 +4,14 @@ import {
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_DEPTH,
   CANVAS_MAX_IMAGES,
+  CANVAS_MAX_MOCKUP_DEPTH,
+  CANVAS_MAX_MOCKUP_NODES,
+  CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_PAYLOAD_BYTES,
   CANVAS_MAX_SERIES,
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
+  CANVAS_SCHEMA_VERSION,
   CanvasBlock,
   CanvasDefinition,
   CanvasVersion,
@@ -17,6 +21,11 @@ import {
 } from "@octant/contracts/canvas";
 
 const encoder = new TextEncoder();
+
+// Versions this runtime decodes: every historical version plus the current
+// one. A document declaring anything else is refused as a future version,
+// before its blocks are read, so a newer contract never reaches a renderer.
+const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, CANVAS_SCHEMA_VERSION];
 
 export type CanvasPolicyRejectionCode =
   | "invalid-schema"
@@ -48,7 +57,12 @@ export type CanvasPolicyRejectionCode =
   | "dangling-plan-dependency"
   | "plan-dependency-cycle"
   | "dangling-diagram-ref"
-  | "state-nesting-cycle";
+  | "state-nesting-cycle"
+  | "mockup-depth-exceeded"
+  | "mockup-node-budget-exceeded"
+  | "mockup-text-budget-exceeded"
+  | "dangling-mockup-parent"
+  | "mockup-nesting-cycle";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -230,10 +244,53 @@ function calculateBudgetUsage(
   };
 }
 
+/**
+ * A document a newer runtime declared with a version this runtime has never
+ * seen — either a future schema version or a version-gated field (a mockup
+ * block from version 3, a thread presentation from version 4) inside a
+ * document that declares an older version — must fail closed as an
+ * unsupported schema version, before any content is read, rather than
+ * collapsing into a generic "corrupt" decode failure. Works on both a
+ * definition (`blocks` at the top level) and a version envelope (blocks under
+ * `definition`).
+ */
+function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | undefined {
+  if (typeof input !== "object" || input === null) return undefined;
+  const envelope = input as {
+    schemaVersion?: unknown;
+    blocks?: unknown;
+    presentation?: unknown;
+    definition?: { blocks?: unknown; presentation?: unknown };
+  };
+  const declared = envelope.schemaVersion;
+  if (typeof declared !== "number") return undefined;
+  if (!SUPPORTED_CANVAS_SCHEMA_VERSIONS.includes(declared)) return "unsupported-schema-version";
+  if (declared === CANVAS_SCHEMA_VERSION) return undefined;
+  const presentation = envelope.presentation ?? envelope.definition?.presentation;
+  if (declared < 4 && presentation !== undefined) return "unsupported-schema-version";
+  if (declared >= 3) return undefined;
+  const blocks = Array.isArray(envelope.blocks)
+    ? envelope.blocks
+    : Array.isArray(envelope.definition?.blocks)
+      ? envelope.definition?.blocks
+      : undefined;
+  if (
+    blocks?.some(
+      (block) =>
+        typeof block === "object" &&
+        block !== null &&
+        (block as { kind?: unknown }).kind === "mockup",
+    )
+  ) {
+    return "unsupported-schema-version";
+  }
+  return undefined;
+}
+
 function decodeDefinitionOrReject(input: unknown): CanvasDefinition {
   try {
     const definition = decodeCanvasDefinition(input);
-    if (definition.schemaVersion !== 1 && definition.schemaVersion !== 2) {
+    if (!SUPPORTED_CANVAS_SCHEMA_VERSIONS.includes(definition.schemaVersion)) {
       return reject(
         "unsupported-schema-version",
         `Canvas schema version ${String(definition.schemaVersion)} is unsupported.`,
@@ -242,19 +299,13 @@ function decodeDefinitionOrReject(input: unknown): CanvasDefinition {
     return definition;
   } catch (error) {
     if (error instanceof CanvasPolicyRejected) throw error;
+    const schemaRejection = declaredSchemaRejection(input);
+    if (schemaRejection !== undefined) {
+      return reject(schemaRejection, "Canvas schema version is unsupported.");
+    }
     const structuralBudget = inferStructuralBudgetCode(input);
     if (structuralBudget !== undefined) {
       return reject(structuralBudget, "Canvas structural budget is exceeded.");
-    }
-    if (
-      typeof input === "object" &&
-      input !== null &&
-      "schemaVersion" in input &&
-      typeof (input as { schemaVersion?: unknown }).schemaVersion === "number" &&
-      (input as { schemaVersion?: unknown }).schemaVersion !== 1 &&
-      (input as { schemaVersion?: unknown }).schemaVersion !== 2
-    ) {
-      return reject("unsupported-schema-version", "Canvas schema version is unsupported.");
     }
     return reject("invalid-schema", "Canvas definition failed strict schema validation.");
   }
@@ -283,6 +334,7 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       messages?: unknown;
       states?: unknown;
       transitions?: unknown;
+      title?: unknown;
     };
     if (block.kind === "image") imageCount += 1;
     if (
@@ -315,6 +367,23 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       }
       if (Array.isArray(edges) && edges.length > CANVAS_MAX_DIAGRAM_EDGES) {
         return "edge-budget-exceeded";
+      }
+    }
+    if (block.kind === "mockup") {
+      if (typeof block.title === "string" && block.title.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
+        return "mockup-text-budget-exceeded";
+      }
+      if (Array.isArray(block.nodes) && block.nodes.length > CANVAS_MAX_MOCKUP_NODES) {
+        return "mockup-node-budget-exceeded";
+      }
+      if (Array.isArray(block.nodes)) {
+        for (const node of block.nodes) {
+          if (typeof node !== "object" || node === null) continue;
+          const label = (node as { label?: unknown }).label;
+          if (typeof label === "string" && label.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
+            return "mockup-text-budget-exceeded";
+          }
+        }
       }
     }
   }
@@ -414,6 +483,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
 
     if (block.kind === "sequence") validateSequence(block);
     if (block.kind === "state") validateState(block);
+    if (block.kind === "mockup") validateMockup(block);
   }
 }
 
@@ -562,6 +632,67 @@ function validateState(block: Extract<CanvasBlock, { readonly kind: "state" }>):
 }
 
 /**
+ * A mockup's nodes name their parent. A chain longer than the depth limit, a
+ * parent the block does not hold, or a cycle would draw a screen inside itself.
+ */
+function validateMockup(block: Extract<CanvasBlock, { readonly kind: "mockup" }>): void {
+  if (block.title.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
+    reject(
+      "mockup-text-budget-exceeded",
+      `Canvas mockup ${block.blockId} has a title longer than ${CANVAS_MAX_MOCKUP_TEXT_LENGTH} characters.`,
+    );
+  }
+  if (block.nodes.length > CANVAS_MAX_MOCKUP_NODES) {
+    reject(
+      "mockup-node-budget-exceeded",
+      `Canvas mockup ${block.blockId} has more than ${CANVAS_MAX_MOCKUP_NODES} nodes.`,
+    );
+  }
+  const nodes = new Map<string, string | undefined>();
+  for (const node of block.nodes) {
+    const id = String(node.nodeId);
+    if (nodes.has(id)) {
+      reject("duplicate-node-id", `Canvas mockup ${block.blockId} has duplicate nodes.`);
+    }
+    if (node.label.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
+      reject(
+        "mockup-text-budget-exceeded",
+        `Canvas mockup ${block.blockId} has text longer than ${CANVAS_MAX_MOCKUP_TEXT_LENGTH} characters.`,
+      );
+    }
+    nodes.set(id, node.parentId === undefined ? undefined : String(node.parentId));
+  }
+  for (const [id, parentId] of nodes) {
+    if (parentId !== undefined && !nodes.has(parentId)) {
+      reject(
+        "dangling-mockup-parent",
+        `Canvas mockup ${block.blockId} nests a node it does not hold.`,
+      );
+    }
+    const seen = new Set<string>([id]);
+    let current = parentId;
+    let depth = 1;
+    while (current !== undefined) {
+      if (seen.has(current)) {
+        reject(
+          "mockup-nesting-cycle",
+          `Canvas mockup ${block.blockId} nests a node inside itself.`,
+        );
+      }
+      seen.add(current);
+      depth += 1;
+      if (depth > CANVAS_MAX_MOCKUP_DEPTH) {
+        reject(
+          "mockup-depth-exceeded",
+          `Canvas mockup ${block.blockId} nests nodes deeper than ${CANVAS_MAX_MOCKUP_DEPTH}.`,
+        );
+      }
+      current = nodes.get(current);
+    }
+  }
+}
+
+/**
  * A plan's phases and tasks are referenced by id: tasks name their phase and
  * the tasks they wait on. Every reference must resolve inside the block, and
  * dependencies must not loop, or the checklist, the kanban, and the
@@ -688,6 +819,10 @@ export function validateCanvasVersion(input: unknown): CanvasVersion {
     version = decodeCanvasVersion(input);
   } catch (error) {
     if (error instanceof CanvasPolicyRejected) throw error;
+    const schemaRejection = declaredSchemaRejection(input);
+    if (schemaRejection !== undefined) {
+      return reject(schemaRejection, "Canvas schema version is unsupported.");
+    }
     return reject("invalid-schema", "Canvas version failed strict schema validation.");
   }
   if (version.schemaVersion !== version.definition.schemaVersion) {

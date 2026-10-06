@@ -10,7 +10,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
-} from "../shadcn/context-menu";
+} from "./NativeContextMenu";
 import { cn } from "../shadcn/utils";
 import type { OctantMenuItem } from "./OctantMenu";
 

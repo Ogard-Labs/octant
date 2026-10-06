@@ -5,6 +5,11 @@ import { CredentialStoreFailure, type CredentialStore } from "./credentialStore"
 
 const GRANT_KIND = "host-oauth-grant";
 const CALLBACK_PATH = "/oauth/callback";
+const OPENROUTER_DIALECT = "openrouter-pkce";
+// OpenRouter exchanges the code for a long-lived user-controlled API key.
+// There is no refresh token; the stored refresh field repeats the key and a
+// failed refresh sends the user back to sign-in. The key never expires, so
+// the grant stores no expiry at all rather than a manufactured one.
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1_000;
 const DEFAULT_DEVICE_INTERVAL_MS = 5_000;
@@ -18,9 +23,15 @@ const USER_CODE_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
 
 export type HostOAuthFlow = "authorization-code-pkce" | "device-code";
 
+/** Vendor wire dialect for OpenRouter's PKCE key exchange. */
+export type HostOAuthDialect = "openrouter-pkce";
+
 export interface HostOAuthDescriptor {
   readonly descriptorId: string;
-  readonly clientId: string;
+  /** Absent only for a dialect that sends no `client_id`. */
+  readonly clientId?: string;
+  /** A vendor wire dialect. Absent means the standard OAuth runner path. */
+  readonly dialect?: HostOAuthDialect;
   readonly flow: HostOAuthFlow;
   readonly authorizationEndpoint?: string;
   readonly tokenEndpoint: string;
@@ -88,7 +99,8 @@ export type HostOAuthAccessResult =
       readonly kind: "granted";
       readonly accessToken: string;
       readonly tokenType: string;
-      readonly expiresAt: string;
+      /** Absent when the stored credential does not expire. */
+      readonly expiresAt?: string;
     }
   | { readonly kind: "sign-in-again"; readonly reason: HostOAuthSignInAgainReason }
   | { readonly kind: "unavailable" };
@@ -111,11 +123,18 @@ interface StoredGrant {
   readonly accessToken: string;
   readonly refreshToken: string;
   readonly tokenType: string;
-  readonly expiresAt: number;
+  /**
+   * Epoch millis of expiry. Absent means the credential never expires:
+   * OpenRouter's issued API key stays valid until the user revokes it, and a
+   * manufactured far-future expiry would silently break resolution when it
+   * eventually passes.
+   */
+  readonly expiresAt?: number;
   readonly scope: string;
   readonly clientId: string;
   readonly tokenEndpoint: string;
   readonly generation: number;
+  readonly dialect?: string;
 }
 
 interface Attempt {
@@ -152,6 +171,7 @@ export async function exchangeAuthorizationCode(input: {
   readonly challenge: string;
   readonly fetch: typeof fetch;
   readonly now: () => number;
+  readonly dialect?: HostOAuthDialect;
 }): Promise<
   | { readonly kind: "tokens"; readonly grant: StoredGrant }
   | {
@@ -162,6 +182,14 @@ export async function exchangeAuthorizationCode(input: {
 > {
   if (!codeVerifierMatchesChallenge(input.verifier, input.challenge)) {
     return { kind: "refused", reason: "verifier-mismatch" };
+  }
+  if (input.dialect === OPENROUTER_DIALECT) {
+    return exchangeOpenRouterKey({
+      fetch: input.fetch,
+      tokenEndpoint: input.tokenEndpoint,
+      code: input.code,
+      verifier: input.verifier,
+    });
   }
   const exchanged = await requestTokens({
     fetch: input.fetch,
@@ -187,6 +215,78 @@ export async function exchangeAuthorizationCode(input: {
     return { kind: "refused", reason: exchanged.reason };
   }
   return { kind: "refused", reason: "exchange-refused" };
+}
+
+/**
+ * OpenRouter's /auth page accepts the OAuth `state` parameter and echoes it
+ * back on the callback, so the dialect sends one and the callback validates
+ * it like the standard PKCE path. The code exchange takes a JSON body, not a
+ * form. The exchange returns a user-controlled API key; there is no refresh
+ * token and no expiry, so the key is stored without an expiry (a non-expiring
+ * credential) and the refresh slot repeats the key (a refresh attempt on a
+ * revoked key fails and sends the user back to sign-in).
+ */
+function openRouterAuthorizationRequest(
+  endpoint: string,
+  input: { readonly redirectUri: string; readonly challenge: string; readonly state: string },
+): string {
+  const url = new URL(endpoint);
+  url.searchParams.set("callback_url", input.redirectUri);
+  url.searchParams.set("code_challenge", input.challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("state", input.state);
+  return url.toString();
+}
+
+async function exchangeOpenRouterKey(input: {
+  readonly fetch: typeof fetch;
+  readonly tokenEndpoint: string;
+  readonly code: string;
+  readonly verifier: string;
+}): Promise<
+  | { readonly kind: "tokens"; readonly grant: StoredGrant }
+  | { readonly kind: "refused"; readonly reason: "exchange-refused" | "unavailable" }
+  | { readonly kind: "transient" }
+> {
+  let response: Response;
+  try {
+    response = await input.fetch(input.tokenEndpoint, {
+      method: "POST",
+      redirect: "error",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        code: input.code,
+        code_verifier: input.verifier,
+        code_challenge_method: "S256",
+      }),
+    });
+  } catch {
+    return { kind: "refused", reason: "unavailable" };
+  }
+  if (response.status === 429 || response.status >= 500) return { kind: "transient" };
+  const body = await readResponseJson(response);
+  const key = body === undefined ? undefined : stringField(body, "key");
+  if (!response.ok || key === undefined || key.length > MAX_TOKEN_CHARS) {
+    return { kind: "refused", reason: "exchange-refused" };
+  }
+  return {
+    kind: "tokens",
+    grant: {
+      kind: GRANT_KIND,
+      version: 1,
+      accessToken: key,
+      refreshToken: key,
+      tokenType: "Bearer",
+      // The issued key has no expiry. Store no expiry rather than a
+      // manufactured far-future one: a fake date would eventually pass and
+      // break resolution for a key that is still valid.
+      scope: "",
+      clientId: "",
+      tokenEndpoint: input.tokenEndpoint,
+      generation: 1,
+      dialect: OPENROUTER_DIALECT,
+    },
+  };
 }
 
 export function createHostOAuthRuntime(options: {
@@ -280,13 +380,20 @@ export function createHostOAuthRuntime(options: {
         return { kind: "refused", reason: "unavailable" };
       }
       redirectUri = `http://127.0.0.1:${address.port}${CALLBACK_PATH}`;
-      const authorizationUrl = authorizationRequest(authorizationEndpoint, {
-        clientId: descriptor.clientId,
-        redirectUri,
-        scope: descriptor.scopes.join(" "),
-        state,
-        challenge,
-      });
+      const authorizationUrl =
+        descriptor.dialect === OPENROUTER_DIALECT
+          ? openRouterAuthorizationRequest(authorizationEndpoint, {
+              redirectUri,
+              challenge,
+              state,
+            })
+          : authorizationRequest(authorizationEndpoint, {
+              clientId: descriptor.clientId ?? "",
+              redirectUri,
+              scope: descriptor.scopes.join(" "),
+              state,
+              challenge,
+            });
       const awaiting: HostOAuthBeginResult = {
         kind: "awaiting-consent",
         attemptId,
@@ -343,6 +450,8 @@ export function createHostOAuthRuntime(options: {
     session.attempt.closed = true;
     const query = url.search.length > 4_096 ? "" : url.search;
     const params = new URLSearchParams(query);
+    // Every flow — the standard PKCE path and the dialects — sends a CSRF
+    // `state` and must see it echoed back before the code is exchanged.
     const presented = params.get("state") ?? "";
     if (!statesEqual(session.state, presented)) {
       publish(
@@ -376,13 +485,14 @@ export function createHostOAuthRuntime(options: {
     }
     const exchanged = await exchangeAuthorizationCode({
       tokenEndpoint: session.descriptor.tokenEndpoint,
-      clientId: session.descriptor.clientId,
+      clientId: session.descriptor.clientId ?? "",
       code,
       redirectUri: session.redirectUri,
       verifier: session.verifier,
       challenge: session.challenge,
       fetch: fetchImpl,
       now,
+      ...(session.descriptor.dialect === undefined ? {} : { dialect: session.descriptor.dialect }),
     });
     if (exchanged.kind === "tokens") {
       const credentialRef = randomUUID();
@@ -422,7 +532,7 @@ export function createHostOAuthRuntime(options: {
     const deviceEndpoint = descriptor.deviceAuthorizationEndpoint;
     if (deviceEndpoint === undefined) return { kind: "refused", reason: "invalid" };
     const issued = await postForm(fetchImpl, deviceEndpoint, {
-      client_id: descriptor.clientId,
+      client_id: descriptor.clientId ?? "",
       scope: descriptor.scopes.join(" "),
     });
     if (issued.kind !== "json") return { kind: "refused", reason: "unavailable" };
@@ -505,9 +615,9 @@ export function createHostOAuthRuntime(options: {
         form: {
           grant_type: DEVICE_GRANT,
           device_code: session.deviceCode,
-          client_id: session.descriptor.clientId,
+          client_id: session.descriptor.clientId ?? "",
         },
-        clientId: session.descriptor.clientId,
+        clientId: session.descriptor.clientId ?? "",
         tokenEndpoint: session.descriptor.tokenEndpoint,
         previousRefresh: undefined,
         generation: 0,
@@ -562,6 +672,9 @@ export function createHostOAuthRuntime(options: {
       return { kind: "unavailable" };
     }
     const generation = current.generation;
+    // A dialect grant whose credential never rotates (an OpenRouter key)
+    // needs no token exchange: while the grant is stored, it is valid.
+    if (current.dialect === OPENROUTER_DIALECT) return { kind: "refreshed" };
     const exchanged = await requestTokens({
       fetch: fetchImpl,
       now,
@@ -621,7 +734,9 @@ export function createHostOAuthRuntime(options: {
           kind: "granted",
           accessToken: grant.accessToken,
           tokenType: grant.tokenType,
-          expiresAt: new Date(grant.expiresAt).toISOString(),
+          ...(grant.expiresAt === undefined
+            ? {}
+            : { expiresAt: new Date(grant.expiresAt).toISOString() }),
         };
       } catch (error) {
         if (error instanceof CredentialStoreFailure && error.category === "missing") {
@@ -716,7 +831,7 @@ async function accessRoute(
       kind: "granted",
       accessToken: granted.accessToken,
       tokenType: granted.tokenType,
-      expiresAt: granted.expiresAt,
+      ...(granted.expiresAt === undefined ? {} : { expiresAt: granted.expiresAt }),
     },
     { headers: { "cache-control": "no-store" } },
   );
@@ -889,15 +1004,17 @@ function decodeGrant(raw: string): StoredGrant {
   const clientId = parsed.clientId;
   const tokenEndpoint = parsed.tokenEndpoint;
   const generation = parsed.generation;
+  const dialect = parsed.dialect;
   if (
     typeof accessToken !== "string" ||
     typeof refreshToken !== "string" ||
     typeof tokenType !== "string" ||
-    typeof expiresAt !== "number" ||
+    (expiresAt !== undefined && typeof expiresAt !== "number") ||
     typeof scope !== "string" ||
     typeof clientId !== "string" ||
     typeof tokenEndpoint !== "string" ||
-    typeof generation !== "number"
+    typeof generation !== "number" ||
+    (dialect !== undefined && typeof dialect !== "string")
   ) {
     throw new CredentialStoreFailure("invalid");
   }
@@ -907,21 +1024,35 @@ function decodeGrant(raw: string): StoredGrant {
     accessToken,
     refreshToken,
     tokenType,
-    expiresAt,
+    ...(expiresAt === undefined ? {} : { expiresAt }),
     scope,
     clientId,
     tokenEndpoint,
     generation,
+    ...(dialect === undefined ? {} : { dialect }),
   };
 }
 
 function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescriptor | undefined {
   if (!safeId(descriptor.descriptorId) || !safeId(descriptor.termsId)) return undefined;
-  if (!safeClientId(descriptor.clientId)) return undefined;
+  const dialect = descriptor.dialect;
+  if (dialect !== undefined && dialect !== OPENROUTER_DIALECT) return undefined;
+  // A dialect entry declares its own wire shape (OpenRouter: no client
+  // registration, no scopes). Every other flow needs a client identity and
+  // at least one scope.
+  if (dialect === undefined) {
+    if (typeof descriptor.clientId !== "string" || !safeClientId(descriptor.clientId)) {
+      return undefined;
+    }
+    if (descriptor.scopes.length === 0) return undefined;
+  }
   if (descriptor.flow !== "authorization-code-pkce" && descriptor.flow !== "device-code")
     return undefined;
+  // The OpenRouter dialect exists precisely because its wire shape is not
+  // OAuth; a device-code grant cannot pair with it.
+  if (dialect !== undefined && descriptor.flow !== "authorization-code-pkce") return undefined;
   if (!allowedEndpoint(descriptor.tokenEndpoint)) return undefined;
-  if (descriptor.scopes.length === 0 || descriptor.scopes.length > 16) return undefined;
+  if (descriptor.scopes.length > 16) return undefined;
   if (!descriptor.scopes.every((scope) => /^[A-Za-z0-9._:-]{1,128}$/.test(scope))) return undefined;
   if (descriptor.flow === "authorization-code-pkce") {
     if (
@@ -952,7 +1083,7 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
   if (
     (flow !== "authorization-code-pkce" && flow !== "device-code") ||
     typeof descriptorId !== "string" ||
-    typeof clientId !== "string" ||
+    (clientId !== undefined && typeof clientId !== "string") ||
     typeof tokenEndpoint !== "string" ||
     typeof termsId !== "string" ||
     !Array.isArray(scopes) ||
@@ -962,9 +1093,12 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
   }
   const authorizationEndpoint = value.authorizationEndpoint;
   const deviceAuthorizationEndpoint = value.deviceAuthorizationEndpoint;
+  const dialect = value.dialect;
+  if (dialect !== undefined && dialect !== OPENROUTER_DIALECT) return undefined;
   return validateDescriptor({
     descriptorId,
-    clientId,
+    ...(typeof clientId === "string" ? { clientId } : {}),
+    ...(dialect === undefined ? {} : { dialect }),
     flow,
     tokenEndpoint,
     termsId,

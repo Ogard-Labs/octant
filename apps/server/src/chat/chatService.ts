@@ -158,7 +158,11 @@ import {
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
 import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
-import { agentResultDeliveryPrompt } from "../agentRun/agentResultDeliveryPrompt";
+import { agentResultDeliveryBatchPrompt } from "../agentRun/agentResultDeliveryPrompt";
+import {
+  coveredAgentResultDeliveryMembers,
+  validateAgentResultDelivery,
+} from "../agentRun/agentResultDeliveryBatch";
 import { Schema } from "effect";
 import { Effect } from "effect";
 import {
@@ -202,6 +206,8 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
+import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 import { SearxngEndpointRejected, validateSearxngEndpoint } from "./research/searxngEndpoint";
 import {
@@ -498,6 +504,8 @@ interface PreparedChatContent {
 }
 
 export interface ChatServiceOptions {
+  /** Where a running turn's start time and latest step are kept for the navigation read. */
+  readonly liveTurns?: LiveTurnRegistry;
   readonly attachmentStore?: ChatAttachmentStore;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly persistence: PersistenceService;
@@ -567,13 +575,13 @@ export interface ChatServiceOptions {
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
-    /** Every turn's end, whatever its outcome. */
-    readonly turnEnded?: (scope: NativeHarnessTurnScope) => void;
+    /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
+    readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
         readonly toolCalls: number;
-        readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
+        readonly turn?: TurnEndSummary;
         readonly contextSubject?: ContextSubjectRef;
       },
     ) => Promise<void>;
@@ -768,6 +776,7 @@ export class ChatService {
   readonly #beforeAttachmentPurge: ChatServiceOptions["beforeAttachmentPurge"];
   readonly #scratchStore: ChatScratchStore;
   readonly #turnRunner: ChatTurnRunner;
+  readonly #liveTurns?: LiveTurnRegistry;
   readonly #researchRouter: ResearchRouter;
   readonly #contextMaintenanceTimeoutMs?: number;
   readonly #contextMaintenanceShutdownTimeoutMs?: number;
@@ -823,6 +832,7 @@ export class ChatService {
       options.attachmentStore ?? new ChatAttachmentStore(options.dataDirectory);
     this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
+    if (options.liveTurns !== undefined) this.#liveTurns = options.liveTurns;
     this.#researchRouter = options.researchRouter;
     if (options.providerRuntimeRegistry !== undefined) {
       this.#providerRuntimeRegistry = options.providerRuntimeRegistry;
@@ -1099,7 +1109,13 @@ export class ChatService {
       threads: this.#persistence
         .readChatNavigation()
         .filter((thread) => !hidden.has(String(thread.id)))
-        .slice(0, MAX_CHAT_NAVIGATION_THREADS),
+        .slice(0, MAX_CHAT_NAVIGATION_THREADS)
+        .map((thread) => {
+          // Only a row projected as executing speaks for a live turn; a stale
+          // registry entry can never make an idle row look busy.
+          const live = thread.executing ? this.#liveTurns?.read(String(thread.id)) : undefined;
+          return live === undefined ? thread : { ...thread, ...live };
+        }),
     };
   }
 
@@ -2268,42 +2284,51 @@ export class ChatService {
           }),
         );
       }
-      const run = this.#agentRuns.getById(command.runId);
-      if (run === undefined || String(run.parentThreadId) !== String(command.threadId)) {
+      const requested = command;
+      const validation = validateAgentResultDelivery({
+        delivery: requested,
+        threadId: String(thread.id),
+        mode: "chat",
+        getById: (id) => this.#agentRuns?.getById(id),
+      });
+      if (validation.kind === "invalid")
         throw new ChatServiceError(
-          decodeChatFailure({
-            category: "invalid",
-            message: "The named subagent run does not belong to this Chat thread.",
-          }),
+          decodeChatFailure({ category: "invalid", message: validation.detail }),
         );
-      }
+      const view = this.#persistence.readChatThreadView(thread.id);
+      const existing = view?.turns.find(
+        (turn) =>
+          turn.delivery !== undefined &&
+          coveredAgentResultDeliveryMembers(requested, [turn.delivery]).length > 0,
+      );
+      const covered = new Set(
+        coveredAgentResultDeliveryMembers(
+          requested,
+          (view?.turns ?? []).flatMap((turn) =>
+            turn.delivery === undefined ? [] : [turn.delivery],
+          ),
+        ).map((member) => String(member.runId)),
+      );
       if (
-        run.lifecycleStatus !== "completed" &&
-        run.lifecycleStatus !== "failed" &&
-        run.lifecycleStatus !== "cancelled"
-      ) {
+        validation.runs.some(
+          (run) => run.resultDelivery !== undefined && !covered.has(String(run.id)),
+        )
+      )
         throw new ChatServiceError(
           decodeChatFailure({
             category: "invalid",
-            message: "The named subagent run has not finished.",
+            message: "A named subagent run's result delivery already settled.",
           }),
         );
-      }
+      if (existing !== undefined) return { kind: "existing" as const, turn: existing };
       this.#admitHarnessTurn(thread);
       this.#assertExpectedThreadVersion(thread, command.expectedVersion);
       const timestamp = decodeTimestamp(this.#clock());
-      const prompt = agentResultDeliveryPrompt(run, this.#agentRuns?.resultText(run.id));
+      const prompt = agentResultDeliveryBatchPrompt(validation.runs, (id) =>
+        this.#agentRuns?.resultText(id),
+      );
       const userMessage = this.#prepareContent(thread.id, "user", prompt);
       const userMessageRef = userMessage.reference;
-      const view = this.#persistence.readChatThreadView(thread.id);
-      const existing = view?.turns.find(
-        (candidate) =>
-          candidate.delivery !== undefined &&
-          String(candidate.delivery.runId) === String(command.runId),
-      );
-      if (existing !== undefined) {
-        return { kind: "existing" as const, turn: existing };
-      }
       this.#assertNoActiveTurn(view, thread.id);
       const sequence = (view?.turns.length ?? 0) + 1;
       const turnId = this.#uuid() as ChatTurn["id"];
@@ -2331,6 +2356,23 @@ export class ChatService {
         executionContext,
         undefined,
       );
+      const beforeAdmission = validateAgentResultDelivery({
+        delivery: requested,
+        threadId: String(thread.id),
+        mode: "chat",
+        getById: (id) => this.#agentRuns?.getById(id),
+      });
+      if (
+        beforeAdmission.kind === "invalid" ||
+        beforeAdmission.runs.some((run) => run.resultDelivery !== undefined)
+      ) {
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "stale",
+            message: "A child result changed while preparing its delivery.",
+          }),
+        );
+      }
       const turn = beginChatTurn(prepared.executionThread, {
         turnId,
         attemptId: this.#uuid() as ChatAttempt["id"],
@@ -2341,7 +2383,14 @@ export class ChatService {
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
         userMessageRef,
-        delivery: { kind: "agent-result", runId: run.id },
+        delivery: {
+          kind: "agent-result",
+          runId: command.runId,
+          ...(command.runIds === undefined ? {} : { runIds: command.runIds }),
+          ...(command.runGenerations === undefined
+            ? {}
+            : { runGenerations: command.runGenerations }),
+        },
         sequence,
         expectedVersion: command.expectedVersion,
         createdAt: timestamp,
@@ -4938,6 +4987,7 @@ export class ChatService {
         ...(input.thread.projectId === undefined ? {} : { projectId: input.thread.projectId }),
       };
       this.#nativeHarness?.turnStarted(harnessScope);
+      let endedTurn: TurnEndSummary | undefined;
       try {
         await Effect.runPromise(
           Effect.scoped(
@@ -4949,6 +4999,14 @@ export class ChatService {
                 ...(this.#nativeHarness?.contextFor(harnessScope) ?? []),
                 ...input.prepared.context.providerContext,
               ],
+              onTurnEnded: (ended) => {
+                endedTurn = ended;
+              },
+              ...(this.#liveTurns === undefined
+                ? {}
+                : {
+                    liveTurn: this.#liveTurns.tracker(String(input.thread.id), "chat-navigation"),
+                  }),
               ...(this.#nativeHarness === undefined
                 ? {}
                 : {
@@ -5066,7 +5124,7 @@ export class ChatService {
           ),
         );
       } finally {
-        this.#nativeHarness?.turnEnded?.(harnessScope);
+        this.#nativeHarness?.turnEnded?.(harnessScope, endedTurn);
       }
     } catch (error) {
       // A deliberate refusal throws a ChatServiceError with the category the

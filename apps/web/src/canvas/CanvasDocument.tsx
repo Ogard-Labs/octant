@@ -29,6 +29,11 @@ export interface CanvasDocumentProps {
    * including those on its rows or nodes.
    */
   readonly comments?: CanvasDocumentComments;
+  /**
+   * `thread` draws the document inside a conversation, where the frame around
+   * it already names the Canvas, so the document drops its own title.
+   */
+  readonly placement?: "document" | "thread";
 }
 
 export interface CanvasDocumentComments {
@@ -47,6 +52,8 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
       return "Sequence";
     case "state":
       return "State machine";
+    case "mockup":
+      return block.title;
     case "plan":
       return block.title;
     case "callout":
@@ -62,6 +69,7 @@ export function CanvasDocument({
   layoutRuntime,
   planRuntime,
   comments,
+  placement = "document",
 }: CanvasDocumentProps) {
   // Action blocks are collected out of the inline flow into one panel so the
   // document reads as content and every offered action sits under a single
@@ -72,27 +80,42 @@ export function CanvasDocument({
   const content = definition.blocks.filter((block) => block.kind !== "action");
 
   return (
-    <article className="canvas-view" aria-label={definition.title}>
-      <header className="canvas-view__header">
-        <h1>{definition.title}</h1>
-      </header>
+    <article
+      className={placement === "thread" ? "canvas-view canvas-view--thread" : "canvas-view"}
+      aria-label={definition.title}
+    >
+      {placement === "thread" ? null : (
+        <header className="canvas-view__header">
+          <h1>{definition.title}</h1>
+        </header>
+      )}
       <div className="canvas-view__body">
-        {content.map((block) => (
-          <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
-            <CanvasBlockRenderer
-              block={block}
-              {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
-              {...(planRuntime === undefined ? {} : { planRuntime })}
-            />
-            {comments === undefined ? null : (
-              <CommentMarker
-                count={comments.openCounts.get(String(block.blockId)) ?? 0}
-                label={canvasBlockLabel(block)}
-                onOpen={() => comments.onOpen(String(block.blockId))}
+        {runsOfMetrics(content).map((run) => {
+          const sections = run.map((block) => (
+            <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
+              <CanvasBlockRenderer
+                block={block}
+                {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+                {...(planRuntime === undefined ? {} : { planRuntime })}
               />
-            )}
-          </section>
-        ))}
+              {comments === undefined ? null : (
+                <CommentMarker
+                  count={comments.openCounts.get(String(block.blockId)) ?? 0}
+                  label={canvasBlockLabel(block)}
+                  onOpen={() => comments.onOpen(String(block.blockId))}
+                />
+              )}
+            </section>
+          ));
+          const first = run[0];
+          return first?.kind === "metric" ? (
+            <div className="canvas-metrics" key={`metrics-${first.blockId}`}>
+              {sections}
+            </div>
+          ) : (
+            sections
+          );
+        })}
       </div>
       {actionRuntime !== undefined && actions.length > 0 ? (
         <CanvasActionPanel
@@ -104,6 +127,22 @@ export function CanvasDocument({
       ) : null}
     </article>
   );
+}
+
+/**
+ * The document's blocks in order, with each run of consecutive metrics
+ * gathered so they sit side by side as tiles instead of one number per line.
+ */
+function runsOfMetrics(
+  blocks: ReadonlyArray<CanvasDefinition["blocks"][number]>,
+): ReadonlyArray<ReadonlyArray<CanvasDefinition["blocks"][number]>> {
+  const runs: Array<Array<CanvasDefinition["blocks"][number]>> = [];
+  for (const block of blocks) {
+    const last = runs.at(-1);
+    if (block.kind === "metric" && last?.[0]?.kind === "metric") last.push(block);
+    else runs.push([block]);
+  }
+  return runs;
 }
 
 function CommentMarker(props: {

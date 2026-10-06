@@ -22,6 +22,7 @@ import {
   clampAgentRunAuthorityAgainstLiveGrant,
   createAgentRunFromRequest,
   effectiveAgentRunExecutionTarget,
+  evaluateAgentRunCommand,
   validateAgentRunPoolRoute,
   validateFallbackSelection,
 } from "./agentRunPolicy";
@@ -751,5 +752,192 @@ describe("agentRun pool routing policy", () => {
         now: now as never,
       }),
     ).toThrow(AgentRunPolicyRejected);
+  });
+});
+
+describe("completed child follow-ups", () => {
+  it("starts a new result generation only for an explicit completed-child follow-up", () => {
+    const completed = baseRun({
+      lifecycleStatus: "completed",
+      result: completedResult,
+      resultDelivery: { outcome: "delivered", settledAt: now as never },
+      resultAcknowledgement: { required: true, acknowledged: true, acknowledgedAt: now as never },
+    });
+    const command = {
+      kind: "resume-agent-run" as const,
+      runId: completed.id,
+      expectedVersion: completed.version,
+    };
+    expect(() => evaluateAgentRunCommand(completed, command, now as never)).toThrow();
+    const next = evaluateAgentRunCommand(
+      completed,
+      { ...command, message: "Expand the answer." },
+      now as never,
+    );
+    expect(next).toMatchObject({
+      id: completed.id,
+      generation: 2,
+      lifecycleStatus: "starting",
+      version: 2,
+      resultAcknowledgement: { required: false, acknowledged: false },
+    });
+    expect(next.result).toBeUndefined();
+    expect(next.resultDelivery).toBeUndefined();
+    expect(completed.result).toEqual(completedResult);
+    expect(() =>
+      evaluateAgentRunCommand(
+        { ...completed, lifecycleStatus: "cancelled" },
+        { ...command, message: "Continue" },
+        now as never,
+      ),
+    ).toThrow();
+    expect(() =>
+      evaluateAgentRunCommand(completed, { ...command, kind: "start-agent-run" }, now as never),
+    ).toThrow();
+  });
+
+  it("keeps an undelivered completed result until the parent receives or collects it", () => {
+    for (const outcome of [undefined, "failed", "invalidated"] as const) {
+      const completed = baseRun({
+        lifecycleStatus: "completed",
+        result: completedResult,
+        ...(outcome === undefined ? {} : { resultDelivery: { outcome, settledAt: now as never } }),
+      });
+      const before = structuredClone(completed);
+      expect(() =>
+        evaluateAgentRunCommand(
+          completed,
+          {
+            kind: "resume-agent-run",
+            runId: completed.id,
+            expectedVersion: completed.version,
+            message: "Continue",
+          },
+          now as never,
+        ),
+      ).toThrow(
+        "Collect the current result or wait for delivery to the parent before following up.",
+      );
+      expect(completed).toEqual(before);
+    }
+    for (const outcome of ["delivered", "consumed"] as const) {
+      const completed = baseRun({ lifecycleStatus: "completed", result: completedResult });
+      const settled = evaluateAgentRunCommand(
+        completed,
+        {
+          kind: "settle-agent-run-result-delivery",
+          runId: completed.id,
+          expectedVersion: completed.version,
+          outcome,
+          generation: 1,
+        },
+        now as never,
+      );
+      expect(
+        evaluateAgentRunCommand(
+          settled,
+          {
+            kind: "resume-agent-run",
+            runId: settled.id,
+            expectedVersion: settled.version,
+            message: "Continue",
+          },
+          now as never,
+        ),
+      ).toMatchObject({ generation: 2, lifecycleStatus: "starting" });
+    }
+  });
+
+  it("only replaces an unsuccessful delivery with explicit consumption of the current generation", () => {
+    for (const previousOutcome of ["failed", "invalidated", "delivered", "consumed"] as const) {
+      const completed = baseRun({
+        generation: 2,
+        lifecycleStatus: "completed",
+        result: completedResult,
+        resultDelivery: { outcome: previousOutcome, settledAt: now as never },
+      });
+      const before = structuredClone(completed);
+      for (const outcome of ["failed", "invalidated", "delivered", "consumed"] as const) {
+        const command = {
+          kind: "settle-agent-run-result-delivery" as const,
+          runId: completed.id,
+          expectedVersion: completed.version,
+          generation: 2,
+          outcome,
+        };
+        if (
+          outcome === "consumed" &&
+          (previousOutcome === "failed" || previousOutcome === "invalidated")
+        ) {
+          const consumed = evaluateAgentRunCommand(completed, command, now as never);
+          expect(consumed).toMatchObject({
+            generation: 2,
+            version: completed.version + 1,
+            resultDelivery: { outcome: "consumed" },
+          });
+          expect(() =>
+            evaluateAgentRunCommand(
+              consumed,
+              {
+                ...command,
+                expectedVersion: consumed.version,
+              },
+              now as never,
+            ),
+          ).toThrow("already settled");
+        } else {
+          expect(() => evaluateAgentRunCommand(completed, command, now as never)).toThrow(
+            "already settled",
+          );
+        }
+      }
+      for (const generation of [undefined, 1]) {
+        expect(() =>
+          evaluateAgentRunCommand(
+            completed,
+            {
+              kind: "settle-agent-run-result-delivery",
+              runId: completed.id,
+              expectedVersion: completed.version,
+              ...(generation === undefined ? {} : { generation }),
+              outcome: "consumed",
+            },
+            now as never,
+          ),
+        ).toThrow("different child result generation");
+      }
+      expect(completed).toEqual(before);
+    }
+  });
+
+  it("keeps each result identity distinct and refuses settlement for a previous generation", () => {
+    const current = baseRun({ generation: 2, lifecycleStatus: "running" });
+    expect(() =>
+      applyAgentRunLifecycleTransition(current, "completed", now as never, {
+        expectedVersion: current.version,
+        result: completedResult,
+        resultText: "new reply",
+      }),
+    ).toThrow();
+    const completed = applyAgentRunLifecycleTransition(current, "completed", now as never, {
+      expectedVersion: current.version,
+      result: { reference: agentRunResultReference(current.id, 2), truncated: false },
+      resultText: "new reply",
+    });
+    expect(completed.result?.reference).not.toBe(completedResult.reference);
+    const command = {
+      kind: "settle-agent-run-result-delivery" as const,
+      runId: completed.id,
+      expectedVersion: completed.version,
+      outcome: "delivered" as const,
+    };
+    expect(() => evaluateAgentRunCommand(completed, command, now as never)).toThrow();
+    expect(() =>
+      evaluateAgentRunCommand(completed, { ...command, generation: 1 }, now as never),
+    ).toThrow();
+    expect(
+      evaluateAgentRunCommand(completed, { ...command, generation: 2 }, now as never).resultDelivery
+        ?.outcome,
+    ).toBe("delivered");
   });
 });

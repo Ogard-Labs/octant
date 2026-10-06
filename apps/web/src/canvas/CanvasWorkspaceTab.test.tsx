@@ -440,6 +440,33 @@ describe("CanvasWorkspaceTab", () => {
     expect(reviseDiagramLayout).not.toHaveBeenCalled();
   });
 
+  it("keeps Export disabled with an explanation while no destination is admitted", async () => {
+    const prepareExport = vi.fn();
+    const client = createCanvasClient(readyVersion, undefined, {
+      exportOffers: vi.fn(async () => ({
+        canvasId: quarterlyCanvasId,
+        versionId: quarterlyInventoryEntry.currentVersionId,
+        sequence: quarterlyInventoryEntry.currentSequence,
+        targets: [],
+      })),
+      prepareExport,
+    } as unknown as Partial<CanvasClient>);
+
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Signed Q3 report" })).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "More Canvas actions" }));
+    const exportItem = await screen.findByRole("menuitem", { name: /Export/ });
+    expect(exportItem).toHaveAttribute("aria-disabled", "true");
+    expect(exportItem).toHaveTextContent(/No export destination is installed/);
+    await user.click(exportItem);
+    expect(screen.queryByRole("dialog", { name: "Export canvas" })).toBeNull();
+    expect(prepareExport).not.toHaveBeenCalled();
+  });
+
   it("offers no refresh control when the host transport cannot refresh", async () => {
     render(<CanvasWorkspaceTab tab={canvasTab} client={createCanvasClient(readyVersion)} />);
 
@@ -766,5 +793,112 @@ describe("CanvasWorkspaceTab", () => {
     expect(changes).toHaveTextContent("ChangedQ3 Overview");
     expect(changes).toHaveTextContent("Addedrich text");
     expect(changes).toHaveTextContent("Removeddivider");
+  });
+
+  it("refetches export offers after a revision advances the canvas", async () => {
+    const exportOffers = vi.fn(async () => ({
+      schemaVersion: 1 as const,
+      canvasId: quarterlyCanvasId,
+      versionId: quarterlyInventoryEntry.currentVersionId,
+      targets: [],
+    }));
+    const revise = vi.fn(async () => ({ kind: "accepted" as const }));
+    const client = createCanvasClient(readyVersion, undefined, {
+      exportOffers,
+      revise,
+    } as unknown as Partial<CanvasClient>);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    await screen.findByRole("heading", { name: "Signed Q3 report" });
+    await waitFor(() => expect(exportOffers).toHaveBeenCalledTimes(1));
+
+    await openCanvasTool("Refine…");
+    fireEvent.change(screen.getByRole("textbox", { name: "Revision prompt" }), {
+      target: { value: "Tighten the summary" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Revise" }));
+    await waitFor(() => expect(exportOffers).toHaveBeenCalledTimes(2));
+  });
+  it("resets an open export review when the canvas advances to a new version", async () => {
+    const nextVersionId = "99999999-9999-4999-8999-999999999999";
+    const offerFor = (versionId: string, sequence: number) => ({
+      schemaVersion: 1 as const,
+      kind: "canvas-export-offers" as const,
+      canvasId: quarterlyCanvasId,
+      versionId,
+      sequence,
+      targets: [
+        {
+          targetId: "reading-copy",
+          label: "Reading copy",
+          formats: ["markdown"],
+          status: "ready",
+        },
+      ],
+    });
+    const exportOffers = vi
+      .fn()
+      .mockResolvedValueOnce(
+        offerFor(quarterlyInventoryEntry.currentVersionId, quarterlyInventoryEntry.currentSequence),
+      )
+      .mockResolvedValue(offerFor(nextVersionId, quarterlyInventoryEntry.currentSequence + 1));
+    let finishRevise: (() => void) | undefined;
+    const revise = vi.fn(
+      () =>
+        new Promise<{ kind: "accepted" }>((resolve) => {
+          finishRevise = () => resolve({ kind: "accepted" });
+        }),
+    );
+    const prepareExport = vi.fn(async () => ({
+      kind: "approval" as const,
+      card: {
+        schemaVersion: 1,
+        kind: "canvas-export-approval",
+        approvalId: "44444444-4444-4444-8444-444444444444",
+        canvasId: quarterlyCanvasId,
+        versionId: quarterlyInventoryEntry.currentVersionId,
+        sequence: quarterlyInventoryEntry.currentSequence,
+        targetId: "reading-copy",
+        destinationLabel: "Reading copy",
+        format: "markdown",
+        title: "Signed Q3 report",
+        payload: "# Signed Q3 report\n",
+        payloadDigest: skillDigest,
+        byteLength: 20,
+        expiresAt: "2026-08-01T21:05:00.000Z",
+      },
+    }));
+    const client = createCanvasClient(readyVersion, undefined, {
+      exportOffers,
+      prepareExport,
+      decideExport: vi.fn(),
+      revise,
+    } as unknown as Partial<CanvasClient>);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    await screen.findByRole("heading", { name: "Signed Q3 report" });
+    await waitFor(() => expect(exportOffers).toHaveBeenCalledTimes(1));
+
+    await openCanvasTool("Refine…");
+    fireEvent.change(screen.getByRole("textbox", { name: "Revision prompt" }), {
+      target: { value: "Tighten the summary" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Revise" }));
+    await waitFor(() => expect(revise).toHaveBeenCalledTimes(1));
+
+    // The revision keeps running after the dialog closes, so it can land while
+    // the person is already reviewing an export of the older version.
+    const user = userEvent.setup();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Refine canvas" })).toBeNull());
+    await openCanvasTool("Export…");
+    await user.click(await screen.findByRole("button", { name: "Review export" }));
+    expect(await screen.findByText("Export to Reading copy")).toBeInTheDocument();
+
+    await act(async () => {
+      finishRevise?.();
+    });
+    await waitFor(() => expect(exportOffers).toHaveBeenCalledTimes(2));
+
+    expect(await screen.findByRole("button", { name: "Review export" })).toBeInTheDocument();
+    expect(screen.queryByText("Export to Reading copy")).toBeNull();
   });
 });

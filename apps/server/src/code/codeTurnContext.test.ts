@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeCodeThread } from "@octant/contracts";
-import { composeCodeProfileContext } from "./codeTurnContext";
+import { composeCodeProfileContext, estimateOctantToolsPart } from "./codeTurnContext";
 
 const now = "2026-07-21T10:00:00.000Z";
 const thread = decodeCodeThread({
@@ -104,5 +104,41 @@ describe("composeCodeProfileContext", () => {
       }),
     ]);
     expect(composed.blocks).toEqual([{ kind: "instructions", text: "Review diffs in isolation." }]);
+  });
+});
+
+describe("estimateOctantToolsPart", () => {
+  const tool = (name: string, description?: string) => ({
+    name,
+    ...(description === undefined ? {} : { description }),
+    inputSchema: { type: "object" },
+  });
+
+  it("counts the registered definitions as a conservative estimate, never as the provider's figure", () => {
+    const definitions = [tool("octant_a", "Read a file."), tool("octant_b")];
+
+    const part = estimateOctantToolsPart(definitions)?.parts[0];
+
+    expect(part).toEqual({
+      kind: "octant-tools",
+      tokens: definitions.reduce(
+        (sum, definition) => sum + Math.max(16, Math.ceil(JSON.stringify(definition).length / 4)),
+        0,
+      ),
+      accuracy: "conservative-heuristic",
+      count: 2,
+    });
+  });
+
+  it("counts a long definition by its size and a tiny one at the floor", () => {
+    const long = estimateOctantToolsPart([tool("octant_long", "x".repeat(4_000))])?.parts[0];
+    const tiny = estimateOctantToolsPart([tool("t")])?.parts[0];
+
+    expect(long?.tokens).toBeGreaterThan(1_000);
+    expect(tiny?.tokens).toBe(16);
+  });
+
+  it("names nothing when Octant registered no tools", () => {
+    expect(estimateOctantToolsPart([])).toBeUndefined();
   });
 });

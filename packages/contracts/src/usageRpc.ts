@@ -4,6 +4,7 @@ import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ContextEntryCategory } from "./context";
 import { OctantMode } from "./modes";
 import { HostId } from "./host";
+import { TurnMetricsSummary } from "./turnMetrics";
 import { UsageQuality, UsageRecord } from "./usage";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -122,7 +123,7 @@ export type UsageCumulativePoint = typeof UsageCumulativePoint.Type;
 
 export const UsageTopConsumer = Schema.Struct({
   subjectType: Schema.NonEmptyTrimmedString,
-  subjectId: Schema.String,
+  subjectId: Schema.NullOr(Schema.String),
   inputTokens: NonNegativeInt,
   outputTokens: NonNegativeInt,
   requestCount: NonNegativeInt,
@@ -140,6 +141,12 @@ export const UsageQueryResponse = Schema.Struct({
   topConsumers: Schema.Array(UsageTopConsumer),
   hasMore: Schema.Boolean,
   queryAt: UtcTimestamp,
+  /**
+   * Turns of every provider with their full usage and speed, within the same
+   * Project scope as `records`. Absent when the query names a filter turns do
+   * not carry, because an unfiltered figure would answer a different question.
+   */
+  turnMetrics: Schema.optional(TurnMetricsSummary),
   /** Host-process observations since this host started; empty when none have been observed. */
   latencyStats: Schema.optionalWith(UsageLatencyStats, {
     default: () => ({ measurements: [] }),

@@ -86,6 +86,7 @@ describe("sendAnthropicMessagesTurn", () => {
               { type: "text", text: "{}" },
               { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
             ],
+            cache_control: { type: "ephemeral" },
           },
         ],
       },
@@ -419,4 +420,226 @@ describe("sendAnthropicMessagesTurn", () => {
 
     expect(decodeProviderFailure(error)).toMatchObject({ category: "rate-limited" });
   });
+
+  function usageStream(
+    start: Record<string, unknown>,
+    delta: Record<string, unknown>,
+  ): AnthropicCompatibleFetch {
+    return fixture(
+      sse([
+        {
+          type: "message_start",
+          message: {
+            id: "msg",
+            type: "message",
+            role: "assistant",
+            content: [],
+            model: "fixture-model",
+            stop_reason: null,
+            usage: start,
+          },
+        },
+        { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: delta },
+        { type: "message_stop" },
+      ]),
+    );
+  }
+
+  function turn(fetch: AnthropicCompatibleFetch) {
+    return sendAnthropicMessagesTurn({
+      endpoint: makeEndpoint(fetch),
+      modelId: "fixture-model",
+      history: [],
+      prompt: "hi",
+    });
+  }
+
+  function usageOf(fetch: AnthropicCompatibleFetch) {
+    return Effect.runPromise(turn(fetch));
+  }
+
+  it("counts cache reads and writes as input and reports them as their own buckets", async () => {
+    const result = await usageOf(
+      usageStream(
+        {
+          input_tokens: 12,
+          output_tokens: 1,
+          cache_read_input_tokens: 800,
+          cache_creation_input_tokens: 150,
+          cache_creation: { ephemeral_5m_input_tokens: 150, ephemeral_1h_input_tokens: 0 },
+          service_tier: "standard",
+        },
+        { output_tokens: 20 },
+      ),
+    );
+
+    const expected = {
+      inputTokens: 962,
+      outputTokens: 20,
+      cacheReadInputTokens: 800,
+      cacheWriteInputTokens: 150,
+    };
+    expect(result.usage).toEqual(expected);
+    expect(result.events.at(-1)).toMatchObject({ kind: "usage", ...expected });
+  });
+
+  it("keeps the opening cache figures when the closing usage reports only output", async () => {
+    const result = await usageOf(
+      usageStream(
+        { input_tokens: 5, output_tokens: 0, cache_read_input_tokens: 95 },
+        { output_tokens: 7 },
+      ),
+    );
+
+    expect(result.usage).toEqual({ inputTokens: 100, outputTokens: 7, cacheReadInputTokens: 95 });
+  });
+
+  it("takes the closing cumulative cache figures when the endpoint restates them", async () => {
+    const result = await usageOf(
+      usageStream(
+        { input_tokens: 5, output_tokens: 0, cache_read_input_tokens: 0 },
+        {
+          input_tokens: 6,
+          output_tokens: 7,
+          cache_read_input_tokens: 90,
+          cache_creation_input_tokens: 4,
+        },
+      ),
+    );
+
+    expect(result.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 7,
+      cacheReadInputTokens: 90,
+      cacheWriteInputTokens: 4,
+    });
+  });
+
+  it("reports zero cache reads for an uncached response and nothing when the endpoint reports none", async () => {
+    const uncached = await usageOf(
+      usageStream(
+        {
+          input_tokens: 9,
+          output_tokens: 0,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+        { output_tokens: 1 },
+      ),
+    );
+    const silent = await usageOf(
+      usageStream({ input_tokens: 9, output_tokens: 0 }, { output_tokens: 1 }),
+    );
+
+    expect(uncached.usage).toEqual({
+      inputTokens: 9,
+      outputTokens: 1,
+      cacheReadInputTokens: 0,
+      cacheWriteInputTokens: 0,
+    });
+    expect(silent.usage).toEqual({ inputTokens: 9, outputTokens: 1 });
+  });
+
+  it.each([
+    ["a string cache read", { input_tokens: 1, output_tokens: 0, cache_read_input_tokens: "8" }],
+    [
+      "a negative cache write",
+      { input_tokens: 1, output_tokens: 0, cache_creation_input_tokens: -1 },
+    ],
+  ])("still rejects %s in the opening usage", async (_name, start) => {
+    const failure = await Effect.runPromise(
+      Effect.flip(turn(usageStream(start, { output_tokens: 1 }))),
+    );
+
+    expect(failure).toMatchObject({ category: "protocol" });
+  });
 });
+
+/**
+ * The prompt cache only pays off if the bytes before a breakpoint never
+ * change. These check the layout the driver sends: a fixed breakpoint on the
+ * system block, one breakpoint that moves to the newest stable message, and
+ * nothing marked before it.
+ */
+describe("buildAnthropicMessagesBody cache layout", () => {
+  it("marks the system block and only the newest stable history message", () => {
+    const body = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "",
+      system: "stable instructions",
+      history: [
+        { role: "user", text: "first question" },
+        { role: "assistant", text: "first answer" },
+        { role: "user", text: "second question" },
+      ],
+    });
+
+    expect(body.system).toEqual([
+      { type: "text", text: "stable instructions", cache_control: { type: "ephemeral" } },
+    ]);
+    expect(body.messages).toEqual([
+      { role: "user", content: "first question" },
+      { role: "assistant", content: "first answer" },
+      {
+        role: "user",
+        content: [{ type: "text", text: "second question", cache_control: { type: "ephemeral" } }],
+      },
+    ]);
+    expect(countCacheBreakpoints(body)).toBe(2);
+    expect(countCacheBreakpoints(body)).toBeLessThanOrEqual(4);
+  });
+
+  it("moves the breakpoint to the newest message as the history grows", () => {
+    const earlier = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "",
+      history: [
+        { role: "user", text: "first question" },
+        { role: "assistant", text: "first answer" },
+      ],
+    });
+    const grown = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "",
+      history: [
+        { role: "user", text: "first question" },
+        { role: "assistant", text: "first answer" },
+        { role: "user", text: "second question" },
+      ],
+    });
+
+    // The newest message carries the breakpoint each time, never an earlier one.
+    expect(markedMessageIndexes(earlier)).toEqual([1]);
+    expect(markedMessageIndexes(grown)).toEqual([2]);
+  });
+
+  it("leaves the new prompt outside the cached prefix", () => {
+    const body = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "the new question",
+      system: "stable instructions",
+      history: [{ role: "user", text: "first question" }],
+    });
+
+    expect(markedMessageIndexes(body)).toEqual([0]);
+    expect(lastMessage(body)).toEqual({ role: "user", content: "the new question" });
+    expect(countCacheBreakpoints(body)).toBe(2);
+  });
+});
+
+function countCacheBreakpoints(value: unknown): number {
+  return (JSON.stringify(value).match(/"cache_control"/g) ?? []).length;
+}
+
+/** Which history messages carry a breakpoint, in order. */
+function markedMessageIndexes(body: Record<string, unknown>): number[] {
+  const messages: unknown[] = Array.isArray(body.messages) ? body.messages : [];
+  return messages.flatMap((message, index) =>
+    JSON.stringify(message).includes('"cache_control"') ? [index] : [],
+  );
+}
+
+function lastMessage(body: Record<string, unknown>): unknown {
+  const messages: unknown[] = Array.isArray(body.messages) ? body.messages : [];
+  return messages.at(-1);
+}

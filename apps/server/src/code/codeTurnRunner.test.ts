@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect, Fiber, Queue, Stream } from "effect";
 import type { ProviderConnection } from "@octant/provider-sdk/driver";
+import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import type { WindowId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -28,6 +29,7 @@ import {
 } from "./codeTurnRunner";
 import { liveCodeTestSourcePort } from "./codeDirectoryPort";
 import { createCodeAcpClientTools } from "./codeAcpClientTools";
+import type { TurnEndSummary } from "../metrics/turnEnd";
 
 const now = "2026-07-21T00:00:00.000Z";
 const providerInstanceId = decodeProviderInstanceId("87000000-0000-4000-8000-000000000001");
@@ -631,6 +633,80 @@ describe("CodeTurnRunner", () => {
     expect(JSON.stringify(observed)).not.toContain(checkoutRoot);
   });
 
+  describe("what fills the window", () => {
+    const tools = {
+      definitions: [
+        { name: "octant_a", description: "First", inputSchema: { type: "object" } },
+        { name: "octant_b", inputSchema: { type: "object" } },
+      ],
+      execute: vi.fn(),
+    };
+    async function usageOf(
+      usageEvent: ProviderRuntimeEvent,
+      overrides: Partial<CodeTurnRunnerInput> = {},
+    ) {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.fromIterable([usageEvent, event({ kind: "completed" })])),
+      });
+      const observed: CodeTurnEvent[] = [];
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistEvent: (next) => Effect.sync(() => observed.push(next)),
+              ...overrides,
+            }),
+          ),
+        ),
+      );
+      return observed.find((entry) => entry.category === "usage");
+    }
+
+    it("counts the tool definitions Octant registered when the runtime reported no categories", async () => {
+      const usage = await usageOf(
+        event({ kind: "usage", inputTokens: 10, outputTokens: 20, contextTokens: 5_000 }),
+        { appManagedTools: tools },
+      );
+
+      expect(usage?.contextBreakdown).toEqual({
+        parts: [
+          {
+            kind: "octant-tools",
+            tokens: expect.any(Number),
+            accuracy: "conservative-heuristic",
+            count: 2,
+          },
+        ],
+      });
+      expect(usage?.contextBreakdown?.parts[0]?.tokens).toBeGreaterThanOrEqual(32);
+    });
+
+    it("keeps the runtime's own categories and adds no estimate of its own", async () => {
+      const reported = {
+        parts: [{ kind: "messages", tokens: 900, accuracy: "provider-reported" }],
+      } as const;
+      const usage = await usageOf(
+        event({
+          kind: "usage",
+          inputTokens: 10,
+          outputTokens: 20,
+          contextTokens: 5_000,
+          contextBreakdown: reported,
+        }),
+        { appManagedTools: tools },
+      );
+
+      expect(usage?.contextBreakdown).toEqual(reported);
+    });
+
+    it("reports no breakdown when the runtime gave none and Octant added nothing", async () => {
+      const usage = await usageOf(event({ kind: "usage", inputTokens: 10, outputTokens: 20 }));
+
+      expect(usage).not.toHaveProperty("contextBreakdown");
+    });
+  });
+
   it("journals a bounded managed-tool error code when execution fails", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(
@@ -792,6 +868,54 @@ describe("CodeTurnRunner", () => {
     }
   });
 
+  it("completes a turn with an oversized child report and retains explicitly truncated history", async () => {
+    const summary = "x".repeat(70_000);
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "child-agent-activity",
+            childAgentId: "child-1",
+            status: "running",
+            summary,
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    const outcomes: CodeTurnOutcome[] = [];
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(exit._tag).toBe("Success");
+    expect(outcomes).toEqual(["completed"]);
+    expect(observed.map((entry) => entry.category)).toEqual(["child-activity", "completion"]);
+    const childEvent = observed.find((entry) => entry.category === "child-activity");
+    const observation = childEvent?.childObservation;
+    if (observation === undefined) throw new Error("Expected child observation");
+    expect(Buffer.byteLength(JSON.stringify(childEvent), "utf8")).toBeLessThanOrEqual(
+      MAX_CODE_TURN_EVENT_BYTES,
+    );
+    expect(Buffer.byteLength(observation.summary, "utf8")).toBeLessThanOrEqual(8 * 1024);
+    expect(recordProviderChildObservation(undefined, observation).children).toMatchObject([
+      {
+        childAgentId: "child-1",
+        historyStatus: "truncated",
+        history: [{ status: "running", summary: summary.slice(0, 512) }],
+      },
+    ]);
+  });
+
   it("normalizes interactive and progress events under the immutable thread authority", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(
@@ -847,6 +971,13 @@ describe("CodeTurnRunner", () => {
       ),
     );
 
+    expect(
+      observed.find((entry) => entry.category === "child-activity")?.childObservation,
+    ).toMatchObject({
+      kind: "child-agent-activity",
+      childAgentId: "child-1",
+      instanceId: authorityThread.providerInstanceId,
+    });
     expect(observed.map((entry) => entry.category)).toEqual([
       "tool",
       "approval",
@@ -1216,6 +1347,189 @@ describe("CodeTurnRunner", () => {
     expect(exit._tag).toBe("Failure");
     expect(outcomes).toEqual(["waiting"]);
     expect(connection.stop).toHaveBeenCalledWith(sessionId);
+  });
+
+  describe("what a turn leaves behind for its observers", () => {
+    const at = (ms: number) => new Date(Date.parse(now) + ms).toISOString();
+    /** Reads the clock at each moment the runner asks, in order. */
+    const scriptedClock = (moments: ReadonlyArray<number>) => {
+      let next = 0;
+      return () => at(moments[Math.min(next++, moments.length - 1)] ?? 0);
+    };
+    const usage = (ms: number) =>
+      event({
+        kind: "usage",
+        occurredAt: at(ms),
+        inputTokens: 1_000,
+        outputTokens: 120,
+        cacheReadInputTokens: 800,
+        reasoningTokens: 10,
+      });
+
+    it("tells the live-turn tracker only what survived sanitization, and ends it with the turn", async () => {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.make(
+            event({
+              kind: "tool-start",
+              toolCallId: "call-1",
+              toolName: "Command",
+              argument: "deploy --key hunter2-live",
+            }),
+            event({ kind: "completed", occurredAt: at(8_000) }),
+          ),
+        ),
+      });
+      const seen: string[] = [];
+
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              clock: scriptedClock([0, 500, 8_000, 8_000]),
+              sanitizeProviderEvent: ({ event: providerEvent }) =>
+                Effect.succeed(
+                  JSON.parse(
+                    JSON.stringify(providerEvent).replaceAll("hunter2-live", "[REDACTED]"),
+                  ) as ProviderRuntimeEvent,
+                ),
+              liveTurn: {
+                begin: (startedAt) => seen.push(`begin ${startedAt}`),
+                observe: (observed) => seen.push(JSON.stringify(observed)),
+                end: () => seen.push("end"),
+              },
+            }),
+          ),
+        ),
+      );
+
+      expect(seen[0]).toBe(`begin ${at(0)}`);
+      expect(seen.at(-1)).toBe("end");
+      expect(seen.join("\n")).toContain("deploy --key [REDACTED]");
+      expect(seen.join("\n")).not.toContain("hunter2-live");
+    });
+
+    it("hands a completed turn's full usage, real start and speed to the observer", async () => {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.make(
+            event({ kind: "text-delta", text: "Working", occurredAt: at(2_000) }),
+            usage(8_000),
+            event({ kind: "completed", occurredAt: at(8_000) }),
+          ),
+        ),
+      });
+      const completed: Array<{ readonly turn: TurnEndSummary }> = [];
+      const ended: TurnEndSummary[] = [];
+
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              // Turn start, prompt sent, the completed event, the turn's end.
+              clock: scriptedClock([0, 500, 8_000, 8_000]),
+              onTurnCompleted: async (turn) => {
+                completed.push(turn);
+              },
+              onTurnEnded: (turn) => ended.push(turn),
+            }),
+          ),
+        ),
+      );
+
+      expect(completed).toHaveLength(1);
+      expect(completed[0]?.turn).toEqual({
+        stopReason: "end-of-turn",
+        startedAt: at(0),
+        endedAt: at(8_000),
+        usage: {
+          inputTokens: 1_000,
+          outputTokens: 120,
+          cacheReadInputTokens: 800,
+          reasoningTokens: 10,
+        },
+        metrics: {
+          precision: "exact",
+          wallMs: 7_500,
+          timeToFirstTokenMs: 1_500,
+          decodeOutputTokens: 120,
+          decodeMs: 6_000,
+          toolMs: 0,
+          modelCalls: 1,
+        },
+      });
+      expect(ended).toEqual([completed[0]?.turn]);
+    });
+
+    it("says a cancelled turn was cancelled and keeps what it had cost", async () => {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.make(
+            event({ kind: "text-delta", text: "Working", occurredAt: at(1_000) }),
+            usage(3_000),
+            event({ kind: "interrupted", message: "Stopped.", occurredAt: at(3_000) }),
+          ),
+        ),
+      });
+      const ended: TurnEndSummary[] = [];
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              clock: scriptedClock([0, 0, 3_000]),
+              onTurnEnded: (turn) => ended.push(turn),
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(ended).toHaveLength(1);
+      expect(ended[0]).toMatchObject({
+        stopReason: "cancelled",
+        usage: { inputTokens: 1_000, outputTokens: 120 },
+        metrics: { precision: "exact", decodeMs: 2_000 },
+      });
+    });
+
+    it("says a failed turn failed, and reports no speed when the provider streamed nothing", async () => {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.make(
+            event({
+              kind: "failed",
+              failure: { category: "provider-failed", message: "Provider stopped." },
+            }),
+          ),
+        ),
+      });
+      const ended: TurnEndSummary[] = [];
+
+      await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              clock: scriptedClock([0, 0, 1_000]),
+              onTurnEnded: (turn) => ended.push(turn),
+            }),
+          ),
+        ),
+      );
+
+      expect(ended).toEqual([
+        {
+          stopReason: "failed",
+          startedAt: at(0),
+          endedAt: at(1_000),
+          metrics: { precision: "unavailable", wallMs: 1_000 },
+        },
+      ]);
+    });
   });
 });
 

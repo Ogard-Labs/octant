@@ -1,3 +1,8 @@
+import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
+import {
+  coveredAgentResultDeliveryMembers,
+  validateAgentResultDelivery,
+} from "../agentRun/agentResultDeliveryBatch";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import { observeWorkContext } from "./workContextInspection";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
@@ -30,6 +35,7 @@ import {
   type WorkTurnLookupResult,
   type WorkTurnRequestId,
   type WorkTurnState,
+  type StartWorkThreadTurnCommand,
   type AgentRun,
   type AgentRunId,
   type WorkTurnStreamFrame,
@@ -55,6 +61,8 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
+import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
   decideWorkTurnAuthority,
   assertProviderAllowedByProjectPolicy,
@@ -238,10 +246,14 @@ export interface WorkTurnServiceDependencies {
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
-    /** Every turn's end, whatever its outcome. */
-    readonly turnEnded?: (scope: NativeHarnessTurnScope) => void;
+    /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
+    readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
     readonly turnCompleted: (
-      input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
+      input: NativeHarnessTurnScope & {
+        readonly text: string;
+        readonly toolCalls: number;
+        readonly turn?: TurnEndSummary;
+      },
     ) => Promise<void>;
   };
   /**
@@ -295,6 +307,8 @@ export interface WorkTurnServiceDependencies {
    * waiting on the turn (the goal loop) reads its figures from here.
    */
   readonly usageStore?: WorkTurnUsageStore;
+  /** Where a running turn's start time and latest step are kept for the navigation read. */
+  readonly liveTurns?: LiveTurnRegistry;
   /**
    * Read access to journaled subagent runs. A turn that claims to carry a
    * finished run's result is verified here — parent thread, terminal
@@ -352,6 +366,7 @@ export class WorkTurnService {
   readonly #safeInputBudgetTokens: number;
   readonly #liveUpdates: WorkTurnLiveStore;
   readonly #usageStore: WorkTurnUsageStore | undefined;
+  readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #agentRuns: WorkTurnServiceDependencies["agentRuns"];
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
@@ -397,7 +412,50 @@ export class WorkTurnService {
     this.#safeInputBudgetTokens = dependencies.safeInputBudgetTokens ?? WORK_TURN_SAFE_INPUT_TOKENS;
     this.#liveUpdates = dependencies.liveUpdates ?? new WorkTurnLiveStore();
     this.#usageStore = dependencies.usageStore;
+    this.#liveTurns = dependencies.liveTurns;
     this.#agentRuns = dependencies.agentRuns;
+  }
+
+  #agentResultDelivery(command: StartWorkThreadTurnCommand): WorkTurnLookupResult | undefined {
+    if (command.delivery === undefined) return undefined;
+    const requested = command.delivery;
+    const validation = validateAgentResultDelivery({
+      delivery: requested,
+      threadId: String(command.threadId),
+      mode: "work",
+      getById: (id) => this.#agentRuns?.getById(id),
+    });
+    if (validation.kind === "invalid") throw this.#failure("invalid", validation.detail);
+    const existing = this.#projection.lookup(command.requestId);
+    if (existing !== undefined) return this.#lookupMatching(command, existing);
+    const turns = this.#projection.listForThread(command.threadId);
+    const covered = new Set(
+      coveredAgentResultDeliveryMembers(
+        requested,
+        turns.flatMap((turn) => (turn.delivery === undefined ? [] : [turn.delivery])),
+      ).map((member) => String(member.runId)),
+    );
+    if (
+      validation.runs.some(
+        (run) => run.resultDelivery !== undefined && !covered.has(String(run.id)),
+      )
+    )
+      throw this.#failure("invalid", "A named subagent run's result delivery already settled.");
+    const delivered = turns.find(
+      (turn) =>
+        turn.delivery !== undefined &&
+        coveredAgentResultDeliveryMembers(requested, [turn.delivery]).length > 0,
+    );
+    if (delivered !== undefined)
+      return decodeWorkTurnLookupResult({ kind: "accepted", turn: delivered });
+    if (
+      turns.some(
+        (turn) =>
+          turn.status === "accepted" || turn.status === "running" || turn.status === "waiting",
+      )
+    )
+      throw this.#failure("stale", "The Work parent already has an active turn.");
+    return undefined;
   }
 
   async startFirstTurn(
@@ -423,7 +481,7 @@ export class WorkTurnService {
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
     const existing = this.#projection.lookup(command.requestId);
-    if (existing !== undefined) {
+    if (existing !== undefined && command.delivery === undefined) {
       return this.#lookupMatching(command, existing);
     }
 
@@ -527,6 +585,9 @@ export class WorkTurnService {
     if (project?.type !== "work") {
       throw this.#failure("unauthorized", "Work Project is unavailable for this turn.");
     }
+
+    const delivered = this.#agentResultDelivery(command);
+    if (delivered !== undefined) return delivered;
 
     let projectRoot: string;
     try {
@@ -706,30 +767,9 @@ export class WorkTurnService {
       throw this.#failure("invalid", planned.message);
     }
 
-    if (command.delivery !== undefined) {
-      // A turn that claims to deliver a finished subagent run's result is
-      // verified against the journaled run before it can journal anything:
-      // the run must belong to this thread, have finished for good, and
-      // still owe its delivery — otherwise the mark is a caller's story the
-      // journal does not back.
-      const run = this.#agentRuns?.getById(command.delivery.runId);
-      if (run === undefined || String(run.parentThreadId) !== String(command.threadId)) {
-        throw this.#failure(
-          "invalid",
-          "The named subagent run does not belong to this Work thread.",
-        );
-      }
-      if (
-        run.lifecycleStatus !== "completed" &&
-        run.lifecycleStatus !== "failed" &&
-        run.lifecycleStatus !== "cancelled"
-      ) {
-        throw this.#failure("invalid", "The named subagent run has not finished.");
-      }
-      if (run.resultDelivery !== undefined) {
-        throw this.#failure("invalid", "The named subagent run's result delivery already settled.");
-      }
-    }
+    // Preparation awaits filesystem and provider context; recheck the journal before admission.
+    const afterPreparation = this.#agentResultDelivery(command);
+    if (afterPreparation !== undefined) return afterPreparation;
 
     // Context and attachment reads can outlive the host's queue admission.
     if (options?.admissionCurrent?.() === false) {
@@ -1101,6 +1141,7 @@ export class WorkTurnService {
             projectId: input.thread.projectId,
           };
     if (harnessScope !== undefined) this.#nativeHarness?.turnStarted(harnessScope);
+    let endedTurn: TurnEndSummary | undefined;
     try {
       let usageReported = false;
       if (input.access !== undefined) {
@@ -1159,6 +1200,14 @@ export class WorkTurnService {
         ...(this.#onRequestSettled === undefined
           ? {}
           : { onRequestSettled: this.#onRequestSettled }),
+        onTurnEnded: (ended) => {
+          endedTurn = ended;
+        },
+        ...(this.#liveTurns === undefined
+          ? {}
+          : {
+              liveTurn: this.#liveTurns.tracker(String(input.command.threadId), "work-navigation"),
+            }),
         onUsage: (usage) => {
           const projected = this.#projection.lookup(input.command.requestId);
           if (
@@ -1204,6 +1253,22 @@ export class WorkTurnService {
             // a failed outcome.
           }
         },
+        onChildActivity: (event) => {
+          if (input.signal.aborted) return;
+          const current = this.#projection.lookup(input.command.requestId);
+          if (
+            current === undefined ||
+            current.providerSessionId !== event.sessionId ||
+            current.authority.providerInstanceId !== event.instanceId
+          )
+            return;
+          const childObservations = recordProviderChildObservation(
+            current.childObservations,
+            event,
+          );
+          if (childObservations === current.childObservations) return;
+          this.#persistUpdate(current, { status: "running", childObservations });
+        },
         onTasks: (tasks) => {
           if (input.signal.aborted) return;
           this.#liveTasks.set(String(input.command.requestId), tasks);
@@ -1238,7 +1303,12 @@ export class WorkTurnService {
         this.#nativeHarness !== undefined
       ) {
         await this.#nativeHarness
-          .turnCompleted({ ...harnessScope, text: outcome.response, toolCalls: 0 })
+          .turnCompleted({
+            ...harnessScope,
+            text: outcome.response,
+            toolCalls: 0,
+            ...(endedTurn === undefined ? {} : { turn: endedTurn }),
+          })
           .catch(() => undefined);
       }
       const live = this.#liveResponses.get(String(input.command.requestId));
@@ -1277,7 +1347,7 @@ export class WorkTurnService {
       if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
     } finally {
       // A completed turn closed itself above; this closes one that did not.
-      if (harnessScope !== undefined) this.#nativeHarness?.turnEnded?.(harnessScope);
+      if (harnessScope !== undefined) this.#nativeHarness?.turnEnded?.(harnessScope, endedTurn);
     }
   }
 
@@ -1560,6 +1630,7 @@ export class WorkTurnService {
       readonly wroteFiles?: WorkTurnWrittenFiles;
       readonly failure?: WorkTurnState["failure"];
       readonly tasks?: ThreadTaskProgressList;
+      readonly childObservations?: WorkTurnState["childObservations"];
     },
   ): void {
     const latest = this.#projection.lookup(turn.requestId) ?? turn;
@@ -1592,6 +1663,9 @@ export class WorkTurnService {
         ...(update.wroteFiles === undefined ? {} : { wroteFiles: update.wroteFiles }),
         ...(update.failure === undefined ? {} : { failure: update.failure }),
         ...(tasks === undefined ? {} : { tasks }),
+        ...(update.childObservations === undefined
+          ? {}
+          : { childObservations: update.childObservations }),
         updatedAt,
       });
     } catch {
@@ -1642,6 +1716,7 @@ export class WorkTurnService {
       String(existing.threadId) !== String(command.threadId) ||
       String(existing.turnId) !== String(command.turnId) ||
       existing.prompt !== command.prompt ||
+      JSON.stringify(existing.delivery ?? null) !== JSON.stringify(command.delivery ?? null) ||
       JSON.stringify(existing.extensionSelections ?? []) !==
         JSON.stringify(command.extensionSelections ?? []) ||
       !sameAttachmentIds(existing.attachments, command.attachmentIds)

@@ -80,7 +80,53 @@ they cannot recover runtime occupancy retroactively. Code turns without context
 values need a new provider usage report before a context percentage can appear. A thread that
 has no plan yet is checked again when its turns advance; reopening the app is
 not required to pick up its first plan.
+For Claude Code threads, the popover also says how much room is left before
+the runtime compacts the session by itself, for example **152.8K until
+auto-compact**. That figure is the runtime's own compaction point, which
+Claude Code states when the session opens, less what the latest request put in
+the window. It appears only while the runtime says compaction is on and has
+given a point, so a thread whose runtime says nothing, such as one on Codex CLI,
+shows no line rather than a guess. The popover does not compact the session;
+Claude Code does that itself when the session reaches the point.
 Opening the popover does not make a further provider or network call.
+
+### What fills the window
+
+Open the chevron beside the figure to see what the window holds. Each part has
+one colour wherever it appears: the popover's bar and key, and the entries in
+the context inspector. Free space and Reserved are always grey. Parts are
+listed in a fixed order and the colours are chosen so that neighbouring parts
+look clearly different in both the light and the dark theme. The colour never
+carries the meaning alone: every part is named beside its swatch, with its
+tokens and share. The ring itself stays amber, and turns red when the window is
+nearly full.
+
+What the breakdown can say depends on the runtime:
+
+- **Claude Code** reports its own categories after each turn: system prompt,
+  system tools, MCP tools, memory files, skills, agents, messages, and the room
+  it keeps in reserve. They are shown as the provider's figures. Tools it knows
+  of but has not loaded are counted as **deferred** and take no share of the
+  bar. Memory file paths and skill names are never kept, only how many there
+  are.
+- **Codex CLI, OpenCode, Pi and ACP agents** report one occupancy figure and no
+  categories. Where Octant registered tools with the session, it counts their
+  definitions itself and shows them as **Octant tools**, marked **Estimated**
+  (a conservative estimate: four characters to a token). Everything else the
+  provider reported is shown as **Other (provider)**, also marked Estimated,
+  because what is left of a figure after an estimate is not exact. A runtime
+  that gives no window size shows no share at all.
+- A planned thread (Octant Harness, Chat, Work) shows the categories Octant
+  itself attributed, as before.
+
+The parts and Other (provider) always add up to what the window holds. If the
+runtime's breakdown is a little larger than the last request's fill, because it
+was taken after the reply, the window is shown as the larger figure. While a
+turn is still running, the breakdown is from the last turn that reported one
+and the difference lands in Other (provider).
+
+### Inspecting the plan
+
 Inspect context opens the composition list so you can pin, exclude, or
 rebuild the next-turn plan. A thread that has not been planned yet is an
 empty answer, not a failed connection. Switching the active pane closes a popover or

@@ -3,18 +3,24 @@ import {
   decodeCodeRelativePath,
   type CodeThread,
   type PermissionPersistence,
+  type ProviderContextBreakdown,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderUsageLimit,
+  type TurnStopReason,
 } from "@octant/contracts";
+import { observeTurnMetrics, startTurnMetrics } from "@octant/domain";
 import { Effect, Fiber, Scope, Stream } from "effect";
 import type {
   ProviderAcquireInput,
   ProviderConnection,
   ProviderSessionHandle,
 } from "@octant/provider-sdk/driver";
+import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
+import { estimateOctantToolsPart } from "./codeTurnContext";
+import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { countsTowardTurnEventBudget, makeIdleTimeout } from "../providers/turnBudget";
@@ -82,12 +88,14 @@ export type CodeTurnEventCategory =
   | "citation"
   | "research"
   | "completion"
+  | "retry"
   | "waiting"
   | "interruption"
   | "failure";
 
 export interface CodeTurnEvent {
   readonly category: CodeTurnEventCategory;
+  readonly childObservation?: Extract<ProviderRuntimeEvent, { kind: "child-agent-activity" }>;
   readonly providerKind: ProviderRuntimeEvent["kind"];
   readonly instanceId: ProviderInstanceId;
   readonly sessionId: ProviderRuntimeEvent["sessionId"];
@@ -108,6 +116,8 @@ export interface CodeTurnEvent {
   readonly costUsd?: number;
   readonly contextWindow?: number;
   readonly contextTokens?: number;
+  readonly autoCompactThreshold?: number;
+  readonly contextBreakdown?: ProviderContextBreakdown;
   readonly utilization?: number;
   readonly resetsAt?: string;
   readonly providerClaimIsMutationProof?: false;
@@ -153,11 +163,18 @@ export interface CodeTurnRunnerInput {
     failure?: CodeTurnFailure,
   ) => Effect.Effect<void, CodeTurnFailure>;
   readonly signal?: AbortSignal;
-  /** Observes a completed reply with its full text and the tool calls it made. */
+  /** Observes a completed reply with its full text, the tool calls it made, and how the turn ran. */
   readonly onTurnCompleted?: (input: {
     readonly text: string;
     readonly toolCalls: number;
+    readonly turn: TurnEndSummary;
   }) => Promise<void>;
+  /** Told once when the turn is over, whatever its outcome, with what it cost and how it ran. */
+  readonly onTurnEnded?: (turn: TurnEndSummary) => void;
+  /** Tells the navigation read what the running turn is doing, from its start to its end. */
+  readonly liveTurn?: LiveTurnTracker;
+  /** The wall clock the turn is timed against. */
+  readonly clock?: () => string;
 }
 
 export interface CodeTurnRunnerOptions {
@@ -187,6 +204,29 @@ export class CodeTurnRunner {
         }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
       );
       let outcome: CodeTurnOutcome | undefined;
+      const clock = input.clock ?? (() => new Date().toISOString());
+      const turnStartedAt = clock();
+      // Re-based when the prompt is sent, so the wait for a first token never
+      // includes starting the provider's session.
+      let timing = startTurnMetrics(turnStartedAt);
+      input.liveTurn?.begin(turnStartedAt);
+      const endOfTurn = (stopReason: TurnStopReason) =>
+        summarizeTurnEnd({
+          metrics: timing,
+          stopReason,
+          startedAt: turnStartedAt,
+          endedAt: clock(),
+        });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          input.liveTurn?.end();
+          try {
+            input.onTurnEnded?.(endOfTurn(stopReasonOf(outcome)));
+          } catch {
+            // Measuring a turn never decides how it ends.
+          }
+        }),
+      );
       let handledEvents = 0;
       let unresolvedReconciliation = false;
       const toolNames = new Map<string, string>();
@@ -288,11 +328,16 @@ export class CodeTurnRunner {
         connection,
         consume: (runtimeEvents) =>
           runtimeEvents.pipe(
-            Stream.filter((event) => event.sessionId === input.sessionId),
+            Stream.filter(
+              (event) =>
+                event.sessionId === input.sessionId &&
+                event.instanceId === input.thread.providerInstanceId,
+            ),
             Stream.takeUntil(isTerminalProviderEvent),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 yield* idle.touch;
+                timing = observeTurnMetrics(timing, event);
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > maxEvents) {
                   yield* connection
@@ -317,6 +362,10 @@ export class CodeTurnRunner {
                 if (!isSanitizedEventValid(boundedEvent, sanitizedEvent, input.checkoutRoot)) {
                   return yield* fail("failed", "Provider event sanitization failed closed.");
                 }
+                // The sanitized copy: the checkout root and the turn's secrets
+                // are already out of it, so the step line starts from what the
+                // journal would be allowed to keep.
+                input.liveTurn?.observe(sanitizedEvent);
                 const normalized = withToolName(
                   toolNames,
                   yield* normalizeProviderEvent(input, sanitizedEvent),
@@ -351,6 +400,7 @@ export class CodeTurnRunner {
                       input.onTurnCompleted!({
                         text: responseText,
                         toolCalls: answeredToolRequestIds.size,
+                        turn: endOfTurn("end-of-turn"),
                       }).catch(() => undefined),
                     );
                   }
@@ -453,6 +503,7 @@ export class CodeTurnRunner {
             yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
             return yield* fail("interrupted", "Code turn was cancelled before provider send.");
           }
+          timing = startTurnMetrics(clock());
           yield* connection
             .send({
               sessionId: input.sessionId,
@@ -503,6 +554,20 @@ export class CodeTurnRunner {
       );
       if (providerCompleted) yield* persistOutcome("completed");
     });
+  }
+}
+
+function stopReasonOf(outcome: CodeTurnOutcome | undefined): TurnStopReason {
+  switch (outcome) {
+    case "completed":
+      return "end-of-turn";
+    case "interrupted":
+      return "cancelled";
+    case "waiting":
+      return "waiting";
+    case "failed":
+    case undefined:
+      return "failed";
   }
 }
 
@@ -630,6 +695,7 @@ function normalizeProviderEvent(
       return Effect.succeed({
         ...base,
         category: "child-activity",
+        childObservation: { ...event, summary: text(event.summary) },
         requestId: text(event.childAgentId),
         status: event.status,
         text: text(event.summary),
@@ -666,7 +732,11 @@ function normalizeProviderEvent(
         text: text(event.inputJson),
         status: "app-managed-request",
       });
-    case "usage":
+    case "usage": {
+      // The runtime's own categories win. Octant counts what it adds only for
+      // a runtime that reported none, so a part is never counted twice.
+      const contextBreakdown =
+        event.contextBreakdown ?? estimateOctantToolsPart(input.appManagedTools?.definitions ?? []);
       return Effect.succeed({
         ...base,
         category: "usage",
@@ -682,7 +752,12 @@ function normalizeProviderEvent(
 
         ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
         ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
+        ...(event.autoCompactThreshold === undefined
+          ? {}
+          : { autoCompactThreshold: event.autoCompactThreshold }),
+        ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
       });
+    }
     case "rate-limit-window":
       return Effect.succeed({
         ...base,
@@ -726,6 +801,15 @@ function normalizeProviderEvent(
         requestId: text(event.researchId),
         status: "completed",
         text: String(event.sourceCount),
+      });
+    case "retrying":
+      return Effect.succeed({
+        ...base,
+        category: "retry",
+        status: event.reason,
+        text: text(
+          `Retrying ${event.attempt}/${event.maxAttempts} in ${Math.max(1, Math.round(event.delayMs / 1000))} s.`,
+        ),
       });
     case "waiting":
       return Effect.succeed({ ...base, category: "waiting", text: text(event.message) });

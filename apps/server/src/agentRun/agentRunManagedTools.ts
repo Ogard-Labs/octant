@@ -1,51 +1,44 @@
 import {
   AGENT_RUN_TERMINAL_STATUSES,
-  decodeAgentRunControlRequest,
-  decodeProviderInstanceId,
-  decodeProviderModelId,
+  MAX_AGENT_RUN_DEPENDENCIES,
   type AgentRun,
-  type AgentRunControlRequest,
   type AgentRunId,
   type AgentRunLifecycleStatus,
   type AgentRunRole,
   type OctantMode,
 } from "@octant/contracts";
-import { allowedAgentRunRolesForMode } from "@octant/domain/agent-run-control-policy";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { AgentRunControlAdmissionDependencies } from "./agentRunControlAdmission";
 import {
-  admitAgentRunControlRequest,
-  type AgentRunControlAdmissionDependencies,
-} from "./agentRunControlAdmission";
-import type {
-  AgentRunControlParentFacts,
-  AgentRunParentRouteFacts,
-} from "./agentRunControlService";
+  agentRunDelegationCapabilities,
+  followUpAgentRunDelegation,
+  boundedAgentRunChildren,
+  collectAgentRunResult,
+  startAgentRunDelegation,
+  type AgentRunDelegationRouting,
+  type AgentsToolTarget,
+} from "./agentRunDelegation";
 import type { AgentRunOrchestrationService } from "./agentRunOrchestrationService";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
 
-/**
- * One provider instance+model the calling thread may target for a child run.
- * The host computes eligibility; the tool only reports what was handed in.
- */
-export interface AgentsToolTarget {
-  readonly providerInstanceId: string;
-  readonly displayName: string;
-  readonly driverKind: string;
-  readonly modelIds: ReadonlyArray<string>;
-}
+export type { AgentsToolTarget } from "./agentRunDelegation";
 
 export interface AgentsManagedToolsOptions {
   readonly admission: AgentRunControlAdmissionDependencies;
-  readonly orchestration: Pick<AgentRunOrchestrationService, "start" | "cancelLeafFirst">;
+  readonly orchestration: Pick<AgentRunOrchestrationService, "start" | "cancelLeafFirst"> &
+    Partial<Pick<AgentRunOrchestrationService, "resume">>;
   readonly persistence: Pick<
     AgentRunPersistenceService,
     "parentSummary" | "getById" | "resultText"
-  >;
+  > &
+    Partial<Pick<AgentRunPersistenceService, "applyCommand">>;
   readonly mode: OctantMode;
   readonly windowId: string;
   readonly parentThreadId: string;
   readonly listTargets: () => ReadonlyArray<AgentsToolTarget>;
   readonly isTainted: () => boolean;
+  readonly isPaused?: () => boolean;
+  readonly routing?: AgentRunDelegationRouting;
   /**
    * The host's cancellation authority for this run on this window, in addition
    * to the occurrence-bound parent check the tool always applies first.
@@ -60,13 +53,13 @@ const AGENTS_TOOL_NAME = "octant_agents";
 const AGENTS_TOOL_DEFINITION = {
   name: AGENTS_TOOL_NAME,
   description:
-    "Delegate part of this task to a child agent run the host owns and supervises. Use capabilities to see which provider models you may target and the current creation posture. delegate creates one child with a bounded task; it runs asynchronously and appears in the Agents surface. status lists this thread's children; wait blocks briefly for one child's terminal state and returns its result when completed; cancel stops one of this thread's children. Child refs from another parent cannot be used here. A delegation can be refused when subagents are off in Settings or need the person's confirmation.",
+    "Delegate part of this task to a child agent run the host owns and supervises. Use capabilities to see which provider models you may target and the current creation posture. delegate creates one child with a bounded task; it runs asynchronously and appears in the Agents surface. status inspects this thread's children without consuming their replies; wait blocks briefly for one child's terminal state and returns its result when completed; cancel stops one of this thread's children. follow-up continues a completed child in its saved session using runId, expectedVersion from status/wait, and an explicit message (at most 4096 characters); unsupported continuity is refused. Child refs from another parent cannot be used here. Use after to wait for existing siblings and receive their results. Omit providerInstanceId and modelId to use the configured role slot. Delegation is refused when subagents are off in Settings or the parent is paused.",
   inputSchema: {
     type: "object",
     properties: {
       operation: {
         type: "string",
-        enum: ["capabilities", "delegate", "status", "wait", "cancel"],
+        enum: ["capabilities", "delegate", "status", "wait", "cancel", "follow-up"],
       },
       task: {
         type: "string",
@@ -82,12 +75,25 @@ const AGENTS_TOOL_DEFINITION = {
         type: "string",
         maxLength: 128,
         description:
-          "Delegation target from capabilities. Requires modelId; omit both to use this thread's own provider and model.",
+          "Delegation target from capabilities. Requires modelId; omit both to resolve the configured role slot.",
       },
       modelId: {
         type: "string",
         maxLength: 128,
         description: "Model on the target provider instance. Requires providerInstanceId.",
+      },
+      reasoning: {
+        type: "string",
+        maxLength: 128,
+        description: "Supported reasoning value from capabilities for the selected model.",
+      },
+      after: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        maxItems: MAX_AGENT_RUN_DEPENDENCIES,
+        uniqueItems: true,
+        description: "Existing sibling run IDs whose successful results this child needs.",
       },
       includeParentContext: {
         type: "boolean",
@@ -97,6 +103,17 @@ const AGENTS_TOOL_DEFINITION = {
         type: "string",
         maxLength: 128,
         description: "Child run id for wait/cancel, or to narrow status.",
+      },
+      expectedVersion: {
+        type: "integer",
+        minimum: 1,
+        description: "Current child version from status or wait; required for follow-up.",
+      },
+      message: {
+        type: "string",
+        minLength: 1,
+        maxLength: 4096,
+        description: "Explicit message for the completed child; required for follow-up.",
       },
       timeoutMs: {
         type: "integer",
@@ -116,16 +133,23 @@ type AgentsToolFailure =
   | "invalid-agents-input"
   | "delegate-tainted"
   | "delegate-target-unavailable"
+  | "result-too-large"
+  | "result-unavailable"
+  | "result-delivery-unavailable"
   | "run-not-found"
   | "cancel-unauthorized";
 
 interface AgentsToolInput {
-  readonly operation: "capabilities" | "delegate" | "status" | "wait" | "cancel";
+  readonly operation: "capabilities" | "delegate" | "status" | "wait" | "cancel" | "follow-up";
   readonly task?: string;
+  readonly expectedVersion?: number;
+  readonly message?: string;
   readonly role?: AgentRunRole;
   readonly providerInstanceId?: string;
   readonly modelId?: string;
   readonly includeParentContext?: boolean;
+  readonly reasoning?: string;
+  readonly after?: ReadonlyArray<string>;
   readonly runId?: string;
   readonly timeoutMs?: number;
 }
@@ -169,7 +193,8 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
     operation !== "delegate" &&
     operation !== "status" &&
     operation !== "wait" &&
-    operation !== "cancel"
+    operation !== "cancel" &&
+    operation !== "follow-up"
   )
     return undefined;
   const task = record.task;
@@ -182,11 +207,34 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
   if (providerInstanceId !== undefined && typeof providerInstanceId !== "string") return undefined;
   const modelId = record.modelId;
   if (modelId !== undefined && typeof modelId !== "string") return undefined;
+  const reasoning = record.reasoning;
+  if (reasoning !== undefined && typeof reasoning !== "string") return undefined;
+  const after = record.after;
+  if (
+    after !== undefined &&
+    (!Array.isArray(after) || !after.every((id): id is string => typeof id === "string"))
+  )
+    return undefined;
   const includeParentContext = record.includeParentContext;
   if (includeParentContext !== undefined && typeof includeParentContext !== "boolean")
     return undefined;
   const runId = record.runId;
   if (runId !== undefined && typeof runId !== "string") return undefined;
+  const expectedVersion = record.expectedVersion;
+  const message = record.message;
+  if (
+    operation === "follow-up" &&
+    (typeof runId !== "string" ||
+      typeof expectedVersion !== "number" ||
+      !Number.isSafeInteger(expectedVersion) ||
+      expectedVersion < 1 ||
+      typeof message !== "string" ||
+      message.trim().length === 0 ||
+      message.length > 4096)
+  )
+    return undefined;
+  if (expectedVersion !== undefined && typeof expectedVersion !== "number") return undefined;
+  if (message !== undefined && typeof message !== "string") return undefined;
   const timeoutMs = record.timeoutMs;
   if (timeoutMs !== undefined && (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs)))
     return undefined;
@@ -197,7 +245,11 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
     ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
     ...(modelId === undefined ? {} : { modelId }),
     ...(includeParentContext === undefined ? {} : { includeParentContext }),
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(after === undefined ? {} : { after }),
     ...(runId === undefined ? {} : { runId }),
+    ...(expectedVersion === undefined ? {} : { expectedVersion }),
+    ...(message === undefined ? {} : { message }),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   };
 }
@@ -252,146 +304,67 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
       if (input === undefined) return failure("invalid-agents-input");
 
       if (input.operation === "capabilities") {
-        return answer({
-          status: "ok",
-          posture: options.admission.settings.current().creationPosture,
-          delegationBlocked: options.isTainted(),
-          roles: [...allowedAgentRunRolesForMode(options.mode)],
-          targets: options.listTargets().map((target) => ({
-            providerInstanceId: target.providerInstanceId,
-            displayName: target.displayName,
-            driverKind: target.driverKind,
-            modelIds: [...target.modelIds],
-          })),
-        });
+        return answer({ status: "ok", ...agentRunDelegationCapabilities(options) });
       }
 
       if (input.operation === "status") {
         const children = options.persistence
           .parentSummary(options.parentThreadId as AgentRun["parentThreadId"])
           .filter((entry) => input.runId === undefined || String(entry.runId) === input.runId);
-        return answer({
-          status: "ok",
-          children: children.map((entry) => ({
-            runId: String(entry.runId),
-            role: entry.role,
-            task: entry.task,
-            lifecycleStatus: entry.lifecycleStatus,
-            resultAvailable: entry.result !== undefined,
-            ...(entry.resultText === undefined ? {} : { resultText: entry.resultText }),
-            // A child parked on a provider limit is a blocked dependency the
-            // parent must plan around, not a pending result to keep polling.
-            ...(entry.usageLimit === undefined ? {} : { usageLimit: entry.usageLimit }),
-            ...(entry.usageResume === undefined
-              ? {}
-              : { usageResume: { status: entry.usageResume.status } }),
-          })),
-        });
+        return answer(
+          boundedAgentRunChildren(
+            children.map((entry) => {
+              const run = options.persistence.getById(entry.runId);
+              return {
+                runId: String(entry.runId),
+                role: entry.role,
+                task: entry.task,
+                lifecycleStatus: entry.lifecycleStatus,
+                resultAvailable: entry.result !== undefined,
+                ...(run === undefined
+                  ? {}
+                  : { version: run.version, generation: run.generation ?? 1 }),
+                ...(run?.dependsOn === undefined ? {} : { after: run.dependsOn.map(String) }),
+                ...(run?.routingReceipt?.rawReasoning === undefined
+                  ? {}
+                  : { reasoning: run.routingReceipt.rawReasoning }),
+                route: entry.route,
+                ...(entry.usageLimit === undefined ? {} : { usageLimit: entry.usageLimit }),
+                ...(entry.usageResume === undefined
+                  ? {}
+                  : { usageResume: { status: entry.usageResume.status } }),
+              };
+            }),
+            { status: "ok" },
+          ),
+        );
       }
 
       if (input.operation === "delegate") {
         if (input.task === undefined) return failure("invalid-agents-input");
-        // The settings store never reports Ask (it reads a stored Ask as Off),
-        // so anything but Automatic is a person having turned subagents off.
-        if (options.admission.settings.current().creationPosture !== "automatic") {
-          return answer({
-            status: "refused",
-            reason: "creation-posture-off",
-            message: "Subagents are turned off in Settings → Octant Harness → Helper agents.",
-          });
-        }
-        // A thread carrying untrusted content may not widen its reach into a
-        // fresh child authority; finer-grained taint scoping is a follow-up.
-        if (options.isTainted()) return failure("delegate-tainted");
-        const role = input.role ?? allowedAgentRunRolesForMode(options.mode)[0];
-        let controlRequest: AgentRunControlRequest;
-        try {
-          controlRequest = decodeAgentRunControlRequest({
-            requestId: options.uuid(),
-            parentThreadId: options.parentThreadId,
-            role,
-            task: input.task,
-            ...(input.includeParentContext === true ? { includeParentContext: true } : {}),
-          });
-        } catch {
+        const result = await startAgentRunDelegation(options, { ...input, task: input.task });
+        if (
+          result.status === "refused" &&
+          (result.reason === "delegate-tainted" || result.reason === "delegate-target-unavailable")
+        )
+          return failure(result.reason);
+        return answer(result);
+      }
+
+      if (input.operation === "follow-up") {
+        if (
+          input.runId === undefined ||
+          input.expectedVersion === undefined ||
+          input.message === undefined
+        )
           return failure("invalid-agents-input");
-        }
-        let routeOverride:
-          | ((parent: AgentRunControlParentFacts) => AgentRunParentRouteFacts)
-          | undefined;
-        if (input.providerInstanceId !== undefined || input.modelId !== undefined) {
-          const requestedProvider = input.providerInstanceId;
-          const requestedModel = input.modelId;
-          if (requestedProvider === undefined || requestedModel === undefined)
-            return failure("delegate-target-unavailable");
-          const target = options
-            .listTargets()
-            .find(
-              (candidate) =>
-                candidate.providerInstanceId === requestedProvider &&
-                candidate.modelIds.includes(requestedModel),
-            );
-          if (target === undefined) return failure("delegate-target-unavailable");
-          let providerInstanceId;
-          let modelId;
-          try {
-            providerInstanceId = decodeProviderInstanceId(requestedProvider);
-            modelId = decodeProviderModelId(requestedModel);
-          } catch {
-            return failure("delegate-target-unavailable");
-          }
-          routeOverride = (parent: AgentRunControlParentFacts) => ({
-            providerInstanceId,
-            modelId,
-            ...(parent.parentRoute.projectId === undefined
-              ? {}
-              : { projectId: parent.parentRoute.projectId }),
-          });
-        }
-        const admission = await admitAgentRunControlRequest(options.admission, {
-          controlRequest,
-          windowId: options.windowId,
-          confirmed: false,
-          ...(routeOverride === undefined ? {} : { routeOverride }),
-        });
-        if (admission.kind === "refused") {
-          return answer({ status: "refused", reason: admission.reason });
-        }
-        if (admission.kind === "invalid") {
-          return answer({ status: "refused", reason: "invalid", message: admission.message });
-        }
-        const accepted =
-          "kind" in admission.result
-            ? admission.result
-            : ({ kind: "run-accepted", run: admission.result } as const);
-        if (accepted.kind === "run-command-failed") {
-          return answer({
-            status: "refused",
-            reason: accepted.reason,
-            message: accepted.message,
-          });
-        }
-        const run = accepted.run;
-        if (run.lifecycleStatus === "queued" && run.recoveryReason === undefined) {
-          const started = options.orchestration.start(run.id, run.version, admission.liveAuthority);
-          if (started.kind === "run-command-failed") {
-            return answer({
-              status: "refused",
-              reason: started.reason,
-              message: started.message,
-            });
-          }
-          return answer({
-            status: "accepted",
-            runId: String(run.id),
-            lifecycleStatus: started.run.lifecycleStatus,
-          });
-        }
-        return answer({
-          status: "accepted",
-          runId: String(run.id),
-          lifecycleStatus: run.lifecycleStatus,
-        });
+        return answer(
+          await followUpAgentRunDelegation(options, {
+            runId: input.runId,
+            expectedVersion: input.expectedVersion,
+            message: input.message,
+          }),
+        );
       }
 
       if (input.operation === "wait") {
@@ -404,16 +377,17 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
           if (isTerminal(run.lifecycleStatus)) {
             if (run.lifecycleStatus === "completed" && run.result !== undefined) {
               const text = options.persistence.resultText(run.id);
-              return answer({
-                status: "completed",
-                runId: String(run.id),
-                ...(text === undefined ? {} : { text }),
-                truncated: run.result.truncated,
-              });
+              if (text === undefined) return failure("result-unavailable");
+              const collected = collectAgentRunResult(options.persistence, run, text);
+              return collected.status === "refused"
+                ? failure(collected.reason, collected.message)
+                : answer(collected);
             }
             return answer({
               status: run.lifecycleStatus,
               runId: String(run.id),
+              version: run.version,
+              generation: run.generation ?? 1,
             });
           }
           // A run parked on a disclosed provider limit cannot progress before

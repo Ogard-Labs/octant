@@ -72,6 +72,13 @@
   background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
 }
 
+.native-harness-question__detail {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
 .native-harness-card__head h3,
 .native-harness-card h4 {
   flex: 1;
@@ -117,6 +124,18 @@
 
 .native-harness-card__facts dd {
   margin: 0;
+}
+
+.native-harness-card__facts dd.native-harness-card__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.native-harness-card__stats [data-hinted="true"] {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 
 .native-harness-card__list {

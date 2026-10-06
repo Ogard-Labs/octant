@@ -95,6 +95,7 @@ import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
+import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { useWorkResearchController } from "../work/useWorkResearchController";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
@@ -123,6 +124,8 @@ import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
 import type { DraftRecentThread } from "./DraftThreadWorkspace";
 import type { OctantMode } from "@octant/contracts/modes";
 import { AgentModeWelcome } from "./AgentModeWelcome";
+import { HomeStart } from "./HomeStart";
+import { HomeDashboard } from "../home/HomeDashboard";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
@@ -145,6 +148,7 @@ type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
 export interface WorkspaceViewProps {
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly agentRunClient?: AgentRunClient;
+  readonly nativeHarnessClient?: NativeHarnessClient;
   /** Opens the Agents tool; with a run id, on that subagent's page. */
   readonly onOpenSubagent?: (runId?: string) => void;
   readonly chatClient: ChatClient;
@@ -382,6 +386,8 @@ export interface WorkspaceViewProps {
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly onOpenCanvas?: (entry: CanvasInventoryEntry) => void;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
+  /** Opens the dock's Canvas tool on this Canvas, beside the thread that wrote it. */
+  readonly onOpenCanvasInSidebar?: (card: CanvasThreadReferenceCard) => void;
   readonly onCanvasReferencesObserved?: (
     mode: OctantMode,
     threadId: string,
@@ -777,6 +783,9 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
   return (
     <ThreadSubagentsTray
       client={props.agentRunClient}
+      {...(props.nativeHarnessClient === undefined
+        ? {}
+        : { interactionsClient: props.nativeHarnessClient })}
       {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
       threadId={String(surface.threadId)}
     />
@@ -1018,6 +1027,9 @@ function renderCodeTab(
         {...(props.onOpenCanvasReference === undefined
           ? {}
           : { onOpenCanvas: props.onOpenCanvasReference })}
+        {...(props.onOpenCanvasInSidebar === undefined
+          ? {}
+          : { onOpenCanvasInSidebar: props.onOpenCanvasInSidebar })}
         {...(props.onCanvasReferencesObserved === undefined
           ? {}
           : {
@@ -1606,6 +1618,9 @@ function renderNonCodeTab(
                 {...(props.onOpenCanvasReference === undefined
                   ? {}
                   : { onOpenCanvas: props.onOpenCanvasReference })}
+                {...(props.onOpenCanvasInSidebar === undefined
+                  ? {}
+                  : { onOpenCanvasInSidebar: props.onOpenCanvasInSidebar })}
                 {...(props.onWorkThreadUpdated === undefined
                   ? {}
                   : { onThreadUpdated: props.onWorkThreadUpdated })}
@@ -1967,9 +1982,26 @@ function renderNonCodeTab(
   }
   if (tab.mode === "chat") {
     const recentThreads = draftRecentThreads("chat", props);
+    const home = props.homeStart;
     return (
       <ChatWelcome
         greetingName={props.greetingName}
+        {...(home?.cards === undefined
+          ? {}
+          : {
+              homeStart: (
+                <HomeStart
+                  actions={[]}
+                  dashboard={
+                    <HomeDashboard
+                      cards={home.cards}
+                      customization={home.cardCustomization}
+                      onCustomizationChange={home.onCardCustomizationChange}
+                    />
+                  }
+                />
+              ),
+            })}
         {...(recentThreads.length === 0 ? {} : { recentThreads })}
         {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
         {...(props.selectedCreateHostId === undefined

@@ -112,6 +112,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "transcript conversation composer width narrow medium wide centered",
         },
         {
+          id: settingId("thread-stats"),
+          label: "Stats line under the composer",
+          scope: "app",
+          keywords:
+            "thread stats line tokens cache hit speed tok/s first token latency cost usage composer show hide",
+        },
+        {
           id: settingId("app-background"),
           label: "Background",
           scope: "app",

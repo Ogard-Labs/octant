@@ -49,7 +49,8 @@ export async function purgeThreadArtifacts(input: ThreadArtifactPurgeInput): Pro
   await removeOwnedWorktrees(input);
 }
 
-async function removeMirrorFiles(
+/** Deletes the files each Canvas mirrored, as its journaled receipts name them. */
+export async function removeMirrorFiles(
   connection: SqliteConnection,
   canvasIds: ReadonlyArray<string>,
 ): Promise<void> {

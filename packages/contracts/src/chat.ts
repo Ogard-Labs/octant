@@ -1,8 +1,15 @@
+import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
-import { AgentRunId, AgentRunResultDeliveryMark } from "./agentRun";
+import {
+  AgentRunId,
+  AgentRunResultDeliveryMark,
+  AgentRunResultDeliveryRunIds,
+  AgentRunResultDeliveryGenerations,
+} from "./agentRun";
 import { ContextManifestId } from "./context";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
+import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { ExtensionSelection } from "./extensions";
 import { HostId } from "./host";
 import { MultiModelPool, MultiModelRouteDecisionReceipt } from "./multiModelPool";
@@ -261,6 +268,7 @@ export const ChatAttempt = Schema.Struct({
    * matrix states instead of this field implying.
    */
   tasks: Schema.optional(ThreadTaskProgressList),
+  childObservations: Schema.optional(ProviderChildObservationState),
   /**
    * A question the provider asked mid-turn and is blocked on, journaled so the
    * transcript can show it again after a reload. Present only while the turn
@@ -682,7 +690,25 @@ export const DeliverChatAgentResultCommand = Schema.Struct({
   kind: Schema.Literal("deliver-chat-agent-result"),
   ...ChatThreadCommandFields,
   runId: AgentRunId,
-}).annotations(strict);
+  runIds: Schema.optional(AgentRunResultDeliveryRunIds),
+  runGenerations: Schema.optional(AgentRunResultDeliveryGenerations),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((command) => {
+      const ids = command.runIds ?? [command.runId];
+      return (
+        ids.some((id) => String(id) === String(command.runId)) &&
+        (command.runGenerations === undefined ||
+          (command.runGenerations.length === ids.length &&
+            new Set(command.runGenerations.map((member) => String(member.runId))).size ===
+              ids.length &&
+            command.runGenerations.every((member) =>
+              ids.some((id) => String(id) === String(member.runId)),
+            )))
+      );
+    }),
+  );
 
 export const UpdateChatSettingsCommand = Schema.Struct({
   kind: Schema.Literal("update-chat-settings"),
@@ -980,6 +1006,8 @@ export const ChatNavigationThread = Schema.Struct({
   lastSequence: GlobalSequence,
   followUpOpen: Schema.Boolean,
   executing: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /** The latest turn's start and latest step while it runs; absent otherwise. */
+  ...ThreadLiveTurnFields,
   /** Completed and snoozed rest, so the sidebar can file the row; absent on an older host. */
   ...ThreadRestFields,
 }).annotations(strict);

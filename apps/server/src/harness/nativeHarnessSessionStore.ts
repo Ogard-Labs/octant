@@ -25,7 +25,6 @@ import {
   type NativeHarnessSessionView,
   type NativeHarnessSlotCandidate,
   type NativeHarnessToolCall,
-  type NativeHarnessTurnUsage,
   MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN,
   MAX_NATIVE_HARNESS_STEERING_NOTES,
   decodeNativeHarnessApproval,
@@ -38,6 +37,7 @@ import {
   type OctantMode,
   type ProjectId,
 } from "@octant/contracts";
+import { addTurnToSessionMetrics, addTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 
@@ -206,7 +206,7 @@ export class NativeHarnessSessionStore {
     this.#turnsInFlight.delete(threadId);
     this.#setSession(record, {
       ...record.session,
-      usage: addUsage(record.session.usage, turn.usage),
+      ...sessionTotals(record.session, turn),
       turnsRun: record.session.turnsRun + 1,
       status: record.session.status === "running" ? "idle" : record.session.status,
       updatedAt: decodeUtcTimestamp(this.#clock()),
@@ -546,6 +546,18 @@ export class NativeHarnessSessionStore {
    */
   #requireRecoveryAfterRestart(): void {
     for (const [threadId, record] of this.#records) {
+      // Child sessions cannot keep a pending transport request across a host
+      // restart. A late answer must never be delivered to their next session.
+      for (const approval of record.approvals.filter(
+        (entry) => entry.source !== undefined && entry.status === "pending",
+      )) {
+        this.settleApproval(threadId, approval.id, { status: "expired" });
+      }
+      for (const question of record.questions.filter(
+        (entry) => entry.source !== undefined && entry.status === "pending",
+      )) {
+        this.settleQuestion(threadId, question.id, { status: "expired" });
+      }
       const cutOff = this.#turnsInFlight.has(threadId);
       const waiting =
         record.approvals.some((entry) => entry.status === "pending") ||
@@ -641,7 +653,7 @@ export class NativeHarnessSessionStore {
       // finished must survive the restart, not be cleared by the replay.
       record.session = {
         ...record.session,
-        usage: addUsage(record.session.usage, turn.usage),
+        ...sessionTotals(record.session, turn),
         turnsRun: record.session.turnsRun + 1,
       };
     } else if (eventName === names.contextReduced) {
@@ -707,15 +719,20 @@ function push<T>(list: T[], entry: T): void {
     list.splice(0, list.length - MAX_NATIVE_HARNESS_VIEW_ENTRIES);
 }
 
-/** Running totals that outlive the bounded turn list. */
-function addUsage(
-  total: NativeHarnessTurnUsage | undefined,
-  turn: NativeHarnessTurnUsage,
-): NativeHarnessTurnUsage {
-  const cost = (total?.costUsd ?? 0) + (turn.costUsd ?? 0);
+/**
+ * What a turn adds to the session's running totals, which outlive the bounded
+ * turn list: full usage, and timing when the turn's record kept it.
+ */
+function sessionTotals(
+  session: NativeHarnessSession,
+  turn: NativeHarnessTurnRecord,
+): Pick<NativeHarnessSession, "usage" | "metrics"> {
+  const metrics =
+    turn.metrics === undefined
+      ? session.metrics
+      : addTurnToSessionMetrics(session.metrics, turn.metrics);
   return {
-    inputTokens: (total?.inputTokens ?? 0) + turn.inputTokens,
-    outputTokens: (total?.outputTokens ?? 0) + turn.outputTokens,
-    ...(total?.costUsd === undefined && turn.costUsd === undefined ? {} : { costUsd: cost }),
+    usage: addTurnUsage(session.usage, turn.usage),
+    ...(metrics === undefined ? {} : { metrics }),
   };
 }

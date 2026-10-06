@@ -33,10 +33,13 @@ export interface SubscriptionOAuthHost {
     | { readonly kind: "transient" }
     | { readonly kind: "unavailable" }
   >;
-  readonly access: (
-    credentialRef: string,
-  ) => Promise<
-    | { readonly kind: "granted"; readonly accessToken: string; readonly expiresAt: string }
+  readonly access: (credentialRef: string) => Promise<
+    | {
+        readonly kind: "granted";
+        readonly accessToken: string;
+        /** Absent means the credential does not expire (e.g. an OpenRouter key). */
+        readonly expiresAt?: string;
+      }
     | { readonly kind: "sign-in-again"; readonly reason: SubscriptionOAuthSignInAgainReason }
     | { readonly kind: "unavailable" }
   >;
@@ -87,12 +90,20 @@ export function readSubscriptionOAuthCredential(
  * Resolve one request's bearer. The token is the return value only — callers
  * must not retain it after the request. Refresh runs through the host when
  * the stored access token is missing or near expiry.
+ *
+ * `endpoint` revalidates the sign-in's endpoint binding at resolve time: an
+ * offer is signed for one allowed endpoint, and the instance's current base
+ * URL must still match its canonical origin. The instance's base URL can
+ * change after sign-in, so the binding that begin and poll checked has to be
+ * re-checked before any bearer is handed to the caller; a mismatch fails
+ * closed as incompatible without contacting the host.
  */
 export async function resolveSubscriptionOAuthBearer(input: {
   readonly credential: SubscriptionOAuthCredential | undefined;
   readonly expectedDescriptorId: string | undefined;
   readonly host: SubscriptionOAuthHost | undefined;
   readonly now: () => number;
+  readonly endpoint?: { readonly baseUrl: string; readonly allowedEndpoint: string } | undefined;
 }): Promise<SubscriptionOAuthResolution> {
   if (input.credential === undefined) return { kind: "unauthenticated", reason: "missing" };
   if (
@@ -101,8 +112,28 @@ export async function resolveSubscriptionOAuthBearer(input: {
   ) {
     return { kind: "incompatible" };
   }
+  if (input.endpoint !== undefined && !originsMatch(input.endpoint)) {
+    return { kind: "incompatible" };
+  }
   if (input.host === undefined) return { kind: "unavailable" };
   return accessOrRefresh(input.host, input.credential.credentialRef, input.now, false);
+}
+
+function originsMatch(endpoint: {
+  readonly baseUrl: string;
+  readonly allowedEndpoint: string;
+}): boolean {
+  const current = canonicalOrigin(endpoint.baseUrl);
+  const allowed = canonicalOrigin(endpoint.allowedEndpoint);
+  return current !== undefined && allowed !== undefined && current === allowed;
+}
+
+function canonicalOrigin(value: string): string | undefined {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return undefined;
+  }
 }
 
 export function subscriptionOAuthReadiness(
@@ -154,7 +185,11 @@ function unauthenticated(reason: SubscriptionOAuthSignInAgainReason): Subscripti
   return { kind: "unauthenticated", reason: "expired" };
 }
 
-function usable(expiresAt: string, now: number): boolean {
+function usable(expiresAt: string | undefined, now: number): boolean {
+  // A grant with no expiry is a non-expiring credential (an OpenRouter API
+  // key stays valid until revoked). Treat the absence of an expiry as usable
+  // instead of parsing an undefined date.
+  if (expiresAt === undefined) return true;
   const expiry = Date.parse(expiresAt);
   return Number.isFinite(expiry) && expiry - EXPIRY_SKEW_MS > now;
 }

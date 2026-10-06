@@ -178,6 +178,122 @@ describe("Canvas share contracts", () => {
     expect(decodeCanvasStaticExportReceipt(receipt)).toEqual(receipt);
   });
 
+  it("round-trips sequence, state, and mockup blocks in a static export document", () => {
+    const blocks = [
+      {
+        blockId: "login",
+        schemaVersion: 1,
+        kind: "sequence",
+        participants: [
+          { participantId: "person", label: "Person" },
+          { participantId: "auth", label: "Auth" },
+        ],
+        messages: [{ messageId: "submit", from: "person", to: "auth", label: "Submit" }],
+      },
+      {
+        blockId: "order",
+        schemaVersion: 1,
+        kind: "state",
+        states: [
+          { stateId: "start", label: "Start", role: "initial" },
+          { stateId: "placed", label: "Placed" },
+        ],
+        transitions: [{ transitionId: "place", source: "start", target: "placed", label: "place" }],
+      },
+      {
+        blockId: "settings",
+        schemaVersion: 1,
+        kind: "mockup",
+        device: "phone",
+        title: "Settings",
+        nodes: [
+          { nodeId: "window", component: "window", label: "Settings" },
+          { nodeId: "wifi", component: "toggle", label: "Wi-Fi", parentId: "window", on: true },
+        ],
+      },
+    ];
+    const exported = { ...document, schemaVersion: 2, blocks };
+    expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+    // A v1 share document carrying a mockup is a rolled-back runtime's failure
+    // mode: the decode refuses it instead of dropping the block.
+    expect(() => decodeCanvasStaticExportDocument({ ...document, blocks })).toThrow();
+  });
+
+  it("round-trips pie, donut, stacked-bar, grouped-bar, and bar-line charts in a static export document", () => {
+    const quarters = (id: string, values: ReadonlyArray<number>, mark?: "bar" | "line") => ({
+      seriesId: id,
+      label: id,
+      points: [
+        { x: "Q1", y: values[0] ?? 0 },
+        { x: "Q2", y: values[1] ?? 0 },
+        { x: "Q3", y: values[2] ?? 0 },
+      ],
+      ...(mark === undefined ? {} : { mark }),
+    });
+    const charts = [
+      {
+        blockId: "pie-1",
+        schemaVersion: 1,
+        kind: "chart",
+        chartType: "pie",
+        series: [
+          {
+            seriesId: "share",
+            label: "Share",
+            points: [
+              { x: "Product", y: 42 },
+              { x: "Services", y: 28 },
+            ],
+          },
+        ],
+      },
+      {
+        blockId: "donut-1",
+        schemaVersion: 1,
+        kind: "chart",
+        chartType: "donut",
+        series: [
+          {
+            seriesId: "cost",
+            label: "Cost",
+            points: [
+              { x: "Compute", y: 12 },
+              { x: "Storage", y: 4 },
+            ],
+          },
+        ],
+      },
+      {
+        blockId: "stacked-1",
+        schemaVersion: 1,
+        kind: "chart",
+        chartType: "stacked-bar",
+        series: [quarters("product", [10, 14, 12]), quarters("services", [6, 8, 9])],
+      },
+      {
+        blockId: "grouped-1",
+        schemaVersion: 1,
+        kind: "chart",
+        chartType: "grouped-bar",
+        series: [quarters("product", [10, 14, 12]), quarters("services", [6, 8, 9])],
+      },
+      {
+        blockId: "combo-1",
+        schemaVersion: 1,
+        kind: "chart",
+        chartType: "bar-line",
+        series: [
+          quarters("revenue", [40, 52, 48], "bar"),
+          quarters("margin", [12, 15, 11], "line"),
+        ],
+      },
+    ] as const;
+    for (const block of charts) {
+      const exported = { ...document, blocks: [block] };
+      expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+    }
+  });
+
   it("rejects secret-bearing export text and credential query URLs at decode time", () => {
     expect(() =>
       decodeCanvasStaticExportDocument({

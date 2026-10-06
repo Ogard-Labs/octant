@@ -73,29 +73,11 @@ interface StreamState {
   completedToolCalls: ProtocolToolCall[];
 }
 
-const CHUNK_KEYS = [
-  "id",
-  "object",
-  "created",
-  "model",
-  "system_fingerprint",
-  "service_tier",
-  "choices",
-  "usage",
-];
-const CHOICE_KEYS = ["index", "delta", "finish_reason", "logprobs"];
-const DELTA_KEYS = ["role", "content", "refusal", "tool_calls", "function_call"];
-const RESPONSE_KEYS = [
-  "id",
-  "object",
-  "created",
-  "model",
-  "system_fingerprint",
-  "service_tier",
-  "choices",
-  "usage",
-];
-const MESSAGE_KEYS = ["role", "content", "refusal", "tool_calls", "function_call"];
+// Chunks, choices, deltas, and messages are read by the keys this protocol
+// uses and ignore the rest: endpoints add fields of their own (a reasoning
+// trace, native finish reasons, vendor metadata), and rejecting a whole turn
+// for an unknown key would throw away a good answer. A known key with the
+// wrong type still fails.
 
 export function sendChatCompletionsTurn(
   input: ChatCompletionsTurnInput,
@@ -226,7 +208,7 @@ function normalizeChunk(
   state: StreamState,
   onEvent: ChatCompletionsTurnInput["onEvent"],
 ): void {
-  if (!hasAllowedKeys(value, CHUNK_KEYS) || value.object !== "chat.completion.chunk") {
+  if (!isRecord(value) || value.object !== "chat.completion.chunk") {
     throw protocol("The provider stream contained an invalid Chat Completions event.");
   }
   if (!isNonEmptyString(value.id) || !Array.isArray(value.choices)) {
@@ -255,9 +237,9 @@ function normalizeChunk(
   }
   const choice = value.choices[0];
   if (
-    !hasAllowedKeys(choice, CHOICE_KEYS) ||
+    !isRecord(choice) ||
     choice.index !== 0 ||
-    !hasAllowedKeys(choice.delta, DELTA_KEYS) ||
+    !isRecord(choice.delta) ||
     !(choice.finish_reason === null || typeof choice.finish_reason === "string")
   ) {
     throw protocol("The provider stream contained an invalid choice.");
@@ -430,7 +412,7 @@ async function normalizeNonStreaming(
     throw protocol("The provider returned an invalid Chat Completions response.");
   }
   if (
-    !hasAllowedKeys(value, RESPONSE_KEYS) ||
+    !isRecord(value) ||
     value.object !== "chat.completion" ||
     !isNonEmptyString(value.id) ||
     !Array.isArray(value.choices) ||
@@ -440,9 +422,9 @@ async function normalizeNonStreaming(
   }
   const choice = value.choices[0];
   if (
-    !hasAllowedKeys(choice, ["index", "message", "finish_reason", "logprobs"]) ||
+    !isRecord(choice) ||
     choice.index !== 0 ||
-    !hasAllowedKeys(choice.message, MESSAGE_KEYS) ||
+    !isRecord(choice.message) ||
     choice.message.role !== "assistant" ||
     typeof choice.finish_reason !== "string"
   ) {
@@ -599,18 +581,58 @@ async function isStrictStreamUnsupported(response: Response): Promise<boolean> {
 }
 
 function readUsage(value: unknown): ProtocolUsage {
-  if (!hasExactKeys(value, ["prompt_tokens", "completion_tokens", "total_tokens"])) {
-    throw protocol("The provider returned invalid usage data.");
-  }
+  if (!isRecord(value)) throw invalidUsage();
   if (
     !isTokenCount(value.prompt_tokens) ||
     !isTokenCount(value.completion_tokens) ||
     !isTokenCount(value.total_tokens) ||
     value.total_tokens !== value.prompt_tokens + value.completion_tokens
   ) {
-    throw protocol("The provider returned invalid usage data.");
+    throw invalidUsage();
   }
-  return { inputTokens: value.prompt_tokens, outputTokens: value.completion_tokens };
+  const promptDetails = readDetails(value.prompt_tokens_details);
+  const completionDetails = readDetails(value.completion_tokens_details);
+  // Some endpoints report cache hits as top-level hit and miss counters
+  // instead of a details object; the details object wins when both appear.
+  // Both are validated before precedence so a malformed counter never hides
+  // behind a valid one.
+  const detailCacheRead = readOptionalCount(promptDetails, "cached_tokens");
+  const topLevelCacheRead = readOptionalCount(value, "prompt_cache_hit_tokens");
+  const cacheRead = detailCacheRead ?? topLevelCacheRead;
+  const cacheWrite = readOptionalCount(promptDetails, "cache_write_tokens");
+  const reasoning = readOptionalCount(completionDetails, "reasoning_tokens");
+  readOptionalCount(value, "prompt_cache_miss_tokens");
+  if (
+    (cacheRead ?? 0) + (cacheWrite ?? 0) > value.prompt_tokens ||
+    (reasoning ?? 0) > value.completion_tokens
+  ) {
+    throw invalidUsage();
+  }
+  return {
+    inputTokens: value.prompt_tokens,
+    outputTokens: value.completion_tokens,
+    ...(cacheRead === undefined ? {} : { cacheReadInputTokens: cacheRead }),
+    ...(cacheWrite === undefined ? {} : { cacheWriteInputTokens: cacheWrite }),
+    ...(reasoning === undefined ? {} : { reasoningTokens: reasoning }),
+  };
+}
+
+/** A detail object the endpoint may leave out or null; any other type is invalid usage. */
+function readDetails(value: unknown): Record<string, unknown> {
+  if (value === undefined || value === null) return {};
+  if (!isRecord(value)) throw invalidUsage();
+  return value;
+}
+
+function readOptionalCount(details: Record<string, unknown>, key: string): number | undefined {
+  const value = details[key];
+  if (value === undefined || value === null) return undefined;
+  if (!isTokenCount(value)) throw invalidUsage();
+  return value;
+}
+
+function invalidUsage(): ProviderFailure {
+  return protocol("The provider returned invalid usage data.");
 }
 
 function parseJson(data: string): unknown {
@@ -721,13 +743,6 @@ function isBoundedToolCallArguments(
   } finally {
     active.delete(value as object);
   }
-}
-
-function hasAllowedKeys(
-  value: unknown,
-  allowed: readonly string[],
-): value is Record<string, unknown> {
-  return isRecord(value) && Object.keys(value).every((key) => allowed.includes(key));
 }
 
 function hasExactKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {

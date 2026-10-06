@@ -3,6 +3,7 @@ import {
   MAX_AGENT_RUN_CONVERSATION_ENTRIES,
   MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS,
   type AgentRunConversationEntry,
+  type ProviderChildActivityEvent,
   type AgentRunConversationReadStatus,
   type AgentRunId,
   type UtcTimestamp,
@@ -15,6 +16,12 @@ export interface AgentRunLiveConversationSnapshot {
   readonly entries: ReadonlyArray<AgentRunConversationEntry>;
   readonly truncated: boolean;
   readonly staleReason?: string;
+}
+
+export interface AgentRunLiveConversationPersistence {
+  readonly read: (runId: AgentRunId) => AgentRunLiveConversationSnapshot | undefined;
+  readonly write: (runId: AgentRunId, snapshot: AgentRunLiveConversationSnapshot) => void;
+  readonly clear: (runId: AgentRunId) => void;
 }
 
 interface ConversationState {
@@ -40,37 +47,98 @@ const MAX_SUBSCRIBERS_PER_RUN = 8;
 const MAX_PENDING_SUBSCRIBER_UPDATES = 32;
 
 /**
- * Process-local live child transcript. It is deliberately not a projection or
- * journal: provider output is transient, purgeable, and never authoritative.
- * The persisted AgentRun result remains the only durable completion record.
+ * Bounded child display history with optional purgeable persistence. Live
+ * subscription state remains process-local; persisted output never proves
+ * execution is live or replaces the journaled AgentRun completion record.
  */
 export class AgentRunLiveConversationStore {
   readonly #runs = new Map<AgentRunId, ConversationState>();
   readonly #subscribers = new Map<AgentRunId, Set<ConversationSubscriber>>();
   #closed = false;
+  readonly #persistence: AgentRunLiveConversationPersistence | undefined;
 
-  begin(runId: AgentRunId): void {
+  constructor(options?: { readonly persistence?: AgentRunLiveConversationPersistence }) {
+    this.#persistence = options?.persistence;
+  }
+
+  begin(runId: AgentRunId, options?: { readonly resume?: boolean }): void {
     if (this.#closed) return;
+    if (options?.resume === true) {
+      const previous = this.#state(runId);
+      if (previous !== undefined) {
+        previous.status = "live";
+        delete previous.staleReason;
+        this.#persist(runId);
+        return;
+      }
+    }
     this.clear(runId);
     this.#runs.set(runId, {
       status: "live",
       entries: [],
       nextSequence: 1,
-      bytes: 0,
+      bytes: 2,
       truncated: false,
     });
+    this.#persist(runId);
   }
 
   appendText(runId: AgentRunId, text: string, occurredAt: UtcTimestamp): void {
+    this.#append(runId, text, occurredAt, "assistant");
+  }
+
+  appendStatus(runId: AgentRunId, text: string, occurredAt: UtcTimestamp): void {
+    this.#append(runId, text, occurredAt, "status");
+  }
+
+  appendChildActivity(
+    runId: AgentRunId,
+    event: ProviderChildActivityEvent,
+    generation: number,
+  ): void {
+    const state = this.#state(runId);
+    if (state === undefined || state.status !== "live" || this.#closed) return;
+    const boundedEvent = { ...event, summary: event.summary.slice(0, 512) };
+    if (boundedEvent.summary.length < event.summary.length) state.truncated = true;
+    if (
+      state.entries.some(
+        (entry) =>
+          entry.childActivity?.instanceId === event.instanceId &&
+          entry.childActivity.sessionId === event.sessionId &&
+          entry.childActivity.sequence === event.sequence &&
+          JSON.stringify(entry.childActivity) === JSON.stringify(boundedEvent),
+      )
+    )
+      return;
+    const entry: AgentRunConversationEntry = {
+      sequence: state.nextSequence++,
+      kind: "status",
+      text: event.summary.slice(0, 512),
+      occurredAt: event.occurredAt,
+      generation,
+      childActivity: boundedEvent,
+    };
+    state.entries.push(entry);
+    state.bytes += entryBytes(entry);
+    this.#trim(state);
+    this.#publish(runId);
+  }
+
+  #append(
+    runId: AgentRunId,
+    text: string,
+    occurredAt: UtcTimestamp,
+    kind: AgentRunConversationEntry["kind"],
+  ): void {
     if (this.#closed) return;
-    const state = this.#runs.get(runId);
+    const state = this.#state(runId);
     if (state === undefined || state.status !== "live") return;
     const bounded = takeUtf8Prefix(text, MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS);
     if (bounded.trim().length === 0) return;
     if (bounded.length < text.length) state.truncated = true;
     const entry: AgentRunConversationEntry = {
       sequence: state.nextSequence,
-      kind: "assistant",
+      kind,
       text: bounded,
       occurredAt,
     };
@@ -82,7 +150,7 @@ export class AgentRunLiveConversationStore {
   }
 
   complete(runId: AgentRunId): void {
-    const state = this.#runs.get(runId);
+    const state = this.#state(runId);
     if (state?.status === "live") {
       state.status = "complete";
       this.#publish(runId);
@@ -90,16 +158,17 @@ export class AgentRunLiveConversationStore {
   }
 
   markStale(runId: AgentRunId, reason: string): void {
-    const state = this.#runs.get(runId);
+    const state = this.#state(runId);
     if (state === undefined) {
       this.#runs.set(runId, {
         status: "stale",
         entries: [],
         nextSequence: 1,
-        bytes: 0,
+        bytes: 2,
         truncated: false,
         staleReason: boundReason(reason),
       });
+      this.#persist(runId);
       return;
     }
     state.status = "stale";
@@ -111,7 +180,7 @@ export class AgentRunLiveConversationStore {
     readonly runId: AgentRunId;
     readonly afterSequence?: number;
   }): AgentRunLiveConversationSnapshot | undefined {
-    const state = this.#runs.get(input.runId);
+    const state = this.#state(input.runId);
     if (state === undefined) return undefined;
     const entries =
       input.afterSequence === undefined
@@ -130,6 +199,7 @@ export class AgentRunLiveConversationStore {
 
   clear(runId: AgentRunId): void {
     this.#runs.delete(runId);
+    this.#persistence?.clear(runId);
     const subscribers = this.#subscribers.get(runId);
     if (subscribers === undefined) return;
     for (const subscriber of subscribers) {
@@ -172,7 +242,7 @@ export class AgentRunLiveConversationStore {
     readonly signal: AbortSignal;
   }): AsyncGenerator<AgentRunLiveConversationSnapshot> {
     if (this.#closed) return;
-    const state = this.#runs.get(input.runId);
+    const state = this.#state(input.runId);
     if (state === undefined || input.signal.aborted) return;
     const subscribers = this.#subscribers.get(input.runId) ?? new Set();
     if (subscribers.size >= MAX_SUBSCRIBERS_PER_RUN) {
@@ -225,6 +295,34 @@ export class AgentRunLiveConversationStore {
     }
   }
 
+  #state(runId: AgentRunId): ConversationState | undefined {
+    const cached = this.#runs.get(runId);
+    if (cached !== undefined) return cached;
+    const stored = this.#persistence?.read(runId);
+    if (stored === undefined) return undefined;
+    const state: ConversationState = {
+      status: stored.status === "complete" ? "complete" : "stale",
+      entries: [...stored.entries],
+      nextSequence: (stored.entries.at(-1)?.sequence ?? 0) + 1,
+      bytes: stored.entries.reduce((bytes, entry) => bytes + entryBytes(entry), 2),
+      truncated: stored.truncated,
+      ...(stored.status === "complete"
+        ? {}
+        : {
+            staleReason:
+              stored.staleReason ??
+              "The host restarted. This saved conversation does not confirm a live session.",
+          }),
+    };
+    this.#runs.set(runId, state);
+    return state;
+  }
+
+  #persist(runId: AgentRunId): void {
+    const snapshot = this.read({ runId });
+    if (snapshot !== undefined) this.#persistence?.write(runId, snapshot);
+  }
+
   #trim(state: ConversationState): void {
     while (
       state.entries.length > MAX_AGENT_RUN_CONVERSATION_ENTRIES ||
@@ -238,6 +336,7 @@ export class AgentRunLiveConversationStore {
   }
 
   #publish(runId: AgentRunId): void {
+    this.#persist(runId);
     const subscribers = this.#subscribers.get(runId);
     if (subscribers === undefined || subscribers.size === 0) return;
     for (const subscriber of subscribers) {
@@ -271,7 +370,7 @@ export class AgentRunLiveConversationStore {
 }
 
 function entryBytes(entry: AgentRunConversationEntry): number {
-  return encoder.encode(JSON.stringify(entry)).byteLength;
+  return encoder.encode(JSON.stringify(entry)).byteLength + 1;
 }
 
 function takeUtf8Prefix(value: string, maxCharacters: number): string {

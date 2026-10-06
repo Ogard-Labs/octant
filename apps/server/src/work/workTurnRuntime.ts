@@ -1,3 +1,5 @@
+import type { ProviderChildActivityEvent, TurnStopReason } from "@octant/contracts";
+import { observeTurnMetrics, startTurnMetrics } from "@octant/domain";
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
   MAX_PROVIDER_CONTEXT_BLOCKS,
@@ -19,6 +21,8 @@ import {
 } from "@octant/contracts";
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
 import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
+import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { normalizedProviderCallbackId } from "./workRequestRuntime";
@@ -60,11 +64,27 @@ export interface WorkTurnRuntimePort {
     readonly onDelta?: (response: string) => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
+    readonly onChildActivity?: (event: ProviderChildActivityEvent) => void;
     readonly onRequestSettled?: (
       input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
       release: () => void,
     ) => () => void;
+    /** Told once when the turn is over, whatever its outcome, with what it cost and how it ran. */
+    readonly onTurnEnded?: (turn: TurnEndSummary) => void;
+    /** Tells the navigation read what the running turn is doing, from its start to its end. */
+    readonly liveTurn?: LiveTurnTracker;
+    /** The wall clock the turn is timed against. */
+    readonly clock?: () => string;
   }): Promise<WorkTurnRuntimeOutcome>;
+}
+
+type WorkTurnRunInput = Parameters<WorkTurnRuntimePort["run"]>[0];
+
+/** What a turn tells its meter as the provider's events arrive. */
+interface WorkTurnMeter {
+  readonly observe: (event: ProviderRuntimeEvent) => void;
+  /** The prompt is about to be sent; the wait for a first token starts here. */
+  readonly sent: () => void;
 }
 
 export interface WorkTurnRuntimeOptions {
@@ -84,35 +104,49 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   }
 
-  async run(input: {
-    readonly command: StartWorkThreadTurnCommand;
-    readonly providerSessionId: ProviderSessionId;
-    readonly resumeCursor?: ProviderResumeCursor;
-    readonly onSessionReady?: (handle: ProviderSessionHandle) => void;
-    readonly projectRoot: string;
-    readonly driver: ProviderDriver;
-    readonly signal: AbortSignal;
-    readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
-    readonly context?: ReadonlyArray<ProviderContextBlock>;
-    readonly modelOptionValues?: ProviderModelOptionValues;
-    /** The thread's access; absent reads as ask-first, which Work always was. */
-    readonly access?: WorkAccess;
-    readonly appManagedTools?: AppManagedToolSet;
-    readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
-    readonly onDelta?: (response: string) => void;
-    /** The provider's restated task list, whole, whenever it moves. */
-    readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
-    readonly onRequestSettled?: (
-      input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
-      release: () => void,
-    ) => () => void;
-  }): Promise<WorkTurnRuntimeOutcome> {
+  async run(input: WorkTurnRunInput): Promise<WorkTurnRuntimeOutcome> {
+    const clock = input.clock ?? (() => new Date().toISOString());
+    const startedAt = clock();
+    // Re-based when the prompt is sent, so the wait for a first token never
+    // includes starting the provider's session.
+    let timing = startTurnMetrics(startedAt);
+    input.liveTurn?.begin(startedAt);
+    let outcome: WorkTurnRuntimeOutcome;
+    try {
+      outcome = await this.#runTurn(input, {
+        observe: (event) => {
+          timing = observeTurnMetrics(timing, event);
+          input.liveTurn?.observe(event);
+        },
+        sent: () => {
+          timing = startTurnMetrics(clock());
+        },
+      });
+    } finally {
+      input.liveTurn?.end();
+    }
+    try {
+      input.onTurnEnded?.(
+        summarizeTurnEnd({
+          metrics: timing,
+          stopReason: stopReasonOf(outcome),
+          startedAt,
+          endedAt: clock(),
+        }),
+      );
+    } catch {
+      // Measuring a turn never decides how it ends.
+    }
+    return outcome;
+  }
+
+  async #runTurn(input: WorkTurnRunInput, meter: WorkTurnMeter): Promise<WorkTurnRuntimeOutcome> {
     try {
       if (input.signal.aborted) return { kind: "cancelled" };
       const cleanupTimeoutMs = Math.max(1, Math.min(this.#timeoutMs, 1_000));
       const idle = await Effect.runPromise(makeIdleTimeout(this.#timeoutMs));
       const execution = Effect.scoped(
-        this.#execute(input, idle).pipe(
+        this.#execute(input, idle, meter).pipe(
           Effect.catchAll((error) => Effect.succeed<WorkTurnRuntimeOutcome>(failureOutcome(error))),
         ),
       ).pipe(Effect.map((outcome): LifecycleResult => ({ kind: "outcome", outcome })));
@@ -140,32 +174,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
   }
 
   #execute(
-    input: {
-      readonly command: StartWorkThreadTurnCommand;
-      readonly providerSessionId: ProviderSessionId;
-      readonly resumeCursor?: ProviderResumeCursor;
-      readonly onSessionReady?: (handle: ProviderSessionHandle) => void;
-      readonly projectRoot: string;
-      readonly driver: ProviderDriver;
-      readonly signal: AbortSignal;
-      readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
-      readonly context?: ReadonlyArray<ProviderContextBlock>;
-      readonly modelOptionValues?: ProviderModelOptionValues;
-      readonly access?: WorkAccess;
-      readonly appManagedTools?: AppManagedToolSet;
-      readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
-      readonly onDelta?: (response: string) => void;
-      /** The provider's restated task list, whole, whenever it moves. */
-      readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
-      readonly onRequestSettled?: (
-        input: {
-          readonly providerSessionId: ProviderSessionId;
-          readonly providerCallbackId: string;
-        },
-        release: () => void,
-      ) => () => void;
-    },
+    input: WorkTurnRunInput,
     idle: IdleTimeout,
+    meter: WorkTurnMeter,
   ): Effect.Effect<WorkTurnRuntimeOutcome, ProviderFailure, Scope.Scope> {
     const cleanupTimeoutMs = Math.max(1, Math.min(this.#timeoutMs, 1_000));
     return Effect.gen(function* () {
@@ -251,12 +262,18 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           runtimeEvents.pipe(
             Stream.filter((event) => event.sessionId === input.providerSessionId),
             Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > MAX_EVENTS),
-            Stream.tap(() => idle.touch),
+            Stream.tap((event) =>
+              Effect.zipRight(
+                idle.touch,
+                Effect.sync(() => meter.observe(event)),
+              ),
+            ),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > MAX_EVENTS) return;
                 if (event.kind === "usage") input.onUsage?.(event);
+                if (event.kind === "child-agent-activity") input.onChildActivity?.(event);
                 if (event.kind === "text-delta") {
                   response = appendBoundedResponse(response, event.text);
                   input.onDelta?.(response);
@@ -350,13 +367,17 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               }),
             ),
           ),
-        send: connection.send({
-          sessionId: input.providerSessionId,
-          prompt: input.command.prompt,
-          context: [...(input.context ?? [])],
-          attachments: [...(input.attachments ?? [])],
-          tools: [...(input.appManagedTools?.definitions ?? [])],
-        }),
+        send: Effect.sync(() => meter.sent()).pipe(
+          Effect.zipRight(
+            connection.send({
+              sessionId: input.providerSessionId,
+              prompt: input.command.prompt,
+              context: [...(input.context ?? [])],
+              attachments: [...(input.attachments ?? [])],
+              tools: [...(input.appManagedTools?.definitions ?? [])],
+            }),
+          ),
+        ),
       });
       yield* Fiber.join(events);
       for (const requestId of pendingRequestHolds.keys()) {
@@ -407,6 +428,19 @@ function boundedCleanup<E, R>(
     ),
     Effect.sleep(timeoutMs).pipe(Effect.interruptible),
   );
+}
+
+function stopReasonOf(outcome: WorkTurnRuntimeOutcome): TurnStopReason {
+  switch (outcome.kind) {
+    case "completed":
+      return "end-of-turn";
+    case "cancelled":
+      return "cancelled";
+    case "waiting":
+      return "waiting";
+    case "failed":
+      return "failed";
+  }
 }
 
 function isTerminalEvent(event: ProviderRuntimeEvent): boolean {

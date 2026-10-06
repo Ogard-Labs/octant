@@ -115,7 +115,7 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     const projects = screen.getByRole("navigation", { name: "Projects" });
     expect(within(projects).getByRole("button", { name: /Planning/i })).toBeVisible();
     expect(within(projects).getByRole("button", { name: /Notes/i })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Unfiled" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Collapse No project" })).toBeVisible();
     expect(screen.getByRole("button", { name: /Loose chat/i })).toHaveAttribute(
       "aria-current",
       "page",
@@ -181,9 +181,8 @@ describe("ProjectSidebarSection chat thread nesting", () => {
         unfiledLabel="Chats"
       />,
     );
-    const headings = screen.getAllByRole("heading").map((heading) => heading.textContent);
-    expect(headings.indexOf("Projects")).toBeLessThan(headings.indexOf("Chats"));
-    expect(screen.queryByRole("heading", { name: "Unfiled" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Collapse Chats" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Collapse No project" })).toBeNull();
     const chats = screen.getByRole("region", { name: "Chats" });
     expect(within(chats).getByRole("button", { name: /Loose chat/ })).toBeVisible();
     expect(within(chats).getByRole("img", { name: "New activity" })).toBeVisible();
@@ -324,14 +323,14 @@ describe("ProjectSidebarSection chat thread nesting", () => {
 
     expect(screen.queryByRole("tab", { name: "Recents" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "All" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Unfiled" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Collapse No project" })).not.toBeInTheDocument();
     const duplicateTitles = screen.getAllByRole("button", {
       name: /Duplicate title/,
     });
     expect(duplicateTitles).toHaveLength(2);
     await user.click(duplicateTitles[1]!);
     expect(onSelectThread).toHaveBeenCalledWith("host-b:code:00000000-0000-4000-8000-000000000901");
-    expect(screen.getByRole("heading", { name: "Unfiled" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Collapse No project" })).toBeVisible();
   });
 
   it("nests a Code Project's threads under the checkout each one runs in", () => {
@@ -538,6 +537,68 @@ describe("ProjectSidebarSection archive", () => {
 });
 
 describe("ProjectSidebarSection threads filed in no Project", () => {
+  it("groups each thread once and lets No project collapse and reveal search matches", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    const props = {
+      archivedProjects: [],
+      availabilityByProject: new Map(),
+      onArchive: vi.fn(),
+      onMove: vi.fn(),
+      onProjectOpen: vi.fn(),
+      onReorder: vi.fn(),
+      onRestore: vi.fn(),
+      onSelectThread: vi.fn(),
+      projects: [chatProjectA],
+      threads: [
+        { projectId: String(chatProjectA.id), threadId: "filed", title: "Project thread" },
+        { threadId: "loose", title: "Loose thread" },
+      ],
+    };
+    const { rerender } = render(<ProjectSidebarSection {...props} />);
+    expect(screen.getAllByRole("button", { name: /Project thread/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /Loose thread/ })).toHaveLength(1);
+    const group = screen.getByRole("region", { name: "No project" });
+    expect(within(group).queryByRole("button", { name: /Project thread/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Collapse No project" }));
+    expect(screen.queryByRole("button", { name: /Loose thread/ })).toBeNull();
+    rerender(<ProjectSidebarSection {...props} searchQuery="Loose" />);
+    expect(screen.getByRole("button", { name: /Loose thread/ })).toBeVisible();
+    rerender(<ProjectSidebarSection {...props} />);
+    expect(screen.queryByRole("button", { name: /Loose thread/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Expand No project" }));
+    expect(screen.getByRole("button", { name: /Loose thread/ })).toBeVisible();
+    rerender(
+      <ProjectSidebarSection
+        {...props}
+        threads={props.threads.filter((thread) => thread.projectId !== undefined)}
+      />,
+    );
+    expect(screen.queryByRole("region", { name: "No project" })).toBeNull();
+  });
+
+  it("keeps the status rollup when No project is collapsed", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projects={[]}
+        threads={[{ threadId: "loose", title: "Loose thread", activity: "working" }]}
+      />,
+    );
+    expect(screen.queryByRole("img", { name: "No project: Working" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Collapse No project" }));
+    expect(screen.getByRole("img", { name: "No project: Working" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Loose thread/ })).toBeNull();
+  });
+
   it("keeps a Chat started without a Project under Recents in the All Projects view", () => {
     window.localStorage.clear();
     render(
@@ -658,7 +719,7 @@ describe("ProjectSidebarSection activity view", () => {
         within(priority).getByRole("img", { name: "Needs attention · Follow-up" }),
       ).toBeVisible();
       expect(screen.getByRole("button", { name: /Estimate app rebrand effort/ })).toHaveTextContent(
-        "Unfiled",
+        "No project",
       );
 
       await user.click(screen.getByRole("button", { name: /Update AuroraDocs logos/ }));
@@ -1177,6 +1238,8 @@ describe("ProjectSidebarSection code project views", () => {
     trigger.focus();
     await user.keyboard("{ArrowDown}");
     await user.click(await screen.findByRole("menuitem", { name: "Activity" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Custom range" }));
+    expect(await screen.findByRole("dialog", { name: "Custom activity range" })).toBeVisible();
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Start date must be on or before end date.",
     );
@@ -1484,8 +1547,8 @@ describe("ProjectSidebarSection Code and Work recents", () => {
     expect(add.compareDocumentPosition(screen.getByRole("heading", { name: "Projects" }))).toBe(
       Node.DOCUMENT_POSITION_PRECEDING,
     );
-    expect(screen.getByRole("heading", { name: "Recents" })).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse Recents" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Collapse No project" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /hei/i })).toBeVisible();
     await user.click(add);
     expect(onAddProject).toHaveBeenCalledOnce();
@@ -1570,7 +1633,7 @@ describe("ProjectSidebarSection search", () => {
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Loose chat/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Collapse Test" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse No project" })).not.toBeInTheDocument();
   });
 
   it("keeps a Project's threads when the query matches the Project name", () => {
@@ -1579,13 +1642,13 @@ describe("ProjectSidebarSection search", () => {
     expect(screen.getByRole("button", { name: /Notes/i })).toBeVisible();
     expect(screen.getByRole("button", { name: "Collapse Research" })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse No project" })).not.toBeInTheDocument();
   });
 
-  it("keeps Unfiled attribution when the query matches that folder word", () => {
-    render(<ProjectSidebarSection {...sharedProps} searchQuery="unfiled" />);
+  it("keeps No project attribution when the query matches that folder word", () => {
+    render(<ProjectSidebarSection {...sharedProps} searchQuery="no project" />);
 
-    expect(screen.getByRole("heading", { name: "Unfiled" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Collapse No project" })).toBeVisible();
     expect(screen.getByRole("button", { name: /Loose chat/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Notes/i })).not.toBeInTheDocument();
@@ -1607,9 +1670,9 @@ describe("ProjectSidebarSection search", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Recents" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Collapse Recents" })).toBeVisible();
     expect(screen.getByRole("button", { name: /hei/i })).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse No project" })).not.toBeInTheDocument();
   });
 
   it("shows matches inside a collapsed Project and restores the collapse when search clears", async () => {
@@ -1626,7 +1689,7 @@ describe("ProjectSidebarSection search", () => {
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand Test" })).toBeVisible();
     expect(screen.getByRole("button", { name: /Notes/i })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Unfiled" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Collapse No project" })).toBeVisible();
   });
 
   it("explains that filters hid every thread rather than implying deletion", () => {
@@ -1636,7 +1699,7 @@ describe("ProjectSidebarSection search", () => {
     expect(empty).toHaveTextContent(/nothing was deleted/i);
     expect(empty).toHaveTextContent(/clear search or filters/i);
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse No project" })).not.toBeInTheDocument();
   });
 
   it("explains that an environment-only filter hid every thread rather than implying deletion", () => {

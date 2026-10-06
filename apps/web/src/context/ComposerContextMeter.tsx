@@ -12,16 +12,22 @@ import { isApplePlatform } from "../platform";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { ContextInspector } from "./ContextInspector";
 import {
+  autoCompactRoom,
   contextHealthLabel,
   contextWindowModel,
+  contextAccuracyLabel,
   contextWindowUsedSourceLabel,
+  providerWindowModel,
   type ContextWindowSegment,
+  type ProviderWindowCount,
+  type ProviderWindowModel,
 } from "./contextInspectorModel";
 import {
   useComposerContextMeterScope,
   type ComposerContextUsageFallback,
 } from "./composerContextMeterScope";
 import { resetCountdownLabel } from "../lib/relativeTime";
+import { ThreadStatsMenu } from "../threadStats/ThreadStatsMenu";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantPopover } from "../ui/base/OctantPopover";
@@ -163,6 +169,7 @@ export function ComposerContextMeter() {
             windowModel={windowModel}
           />
         )}
+        <ThreadStatsMenu onOpenDetail={() => setOpen(false)} />
       </OctantPopover>
       <span aria-live="polite" className="sr-only">
         {liveLabel({
@@ -283,62 +290,44 @@ export function composerContextOccupancy(input: {
   };
 }
 
+/**
+ * What a provider that is not planned by the host reports about its window: one
+ * occupancy figure, and from some runtimes the parts of it. The thread's input
+ * and output totals are sums over turns, not parts of that occupancy, so they
+ * are never segments of it. The window's parts, and what holds the rest, come
+ * from `providerWindowModel`, which also settles what the window holds when a
+ * breakdown and the occupancy disagree, so the ring, the figure and the bar
+ * always read the same number.
+ */
 function reportedWindow(fallback: ComposerContextUsageFallback):
   | {
       readonly percent: number;
       readonly label: string;
       readonly total: string;
       readonly declared: boolean;
+      readonly model: ProviderWindowModel;
       readonly usedTokens: number;
       readonly windowTokens: number;
     }
   | undefined {
   const window = fallback.contextWindow ?? fallback.modelContextWindow;
   if (window === undefined || fallback.contextTokens === undefined) return undefined;
-  const percent = Math.max(0, Math.min(100, (fallback.contextTokens / window) * 100));
+  const model = providerWindowModel({
+    breakdown: fallback.contextBreakdown,
+    usedTokens: fallback.contextTokens,
+    windowTokens: window,
+  });
+  const percent = Math.max(0, Math.min(100, (model.usedTokens / window) * 100));
   const share = `(${String(Math.round(percent))}%)`;
   return {
     percent,
     declared: fallback.contextWindow === undefined,
-    label: `${compactTokens(fallback.contextTokens)} of ${compactTokens(window)} ${share}`,
-    total: `${compactTokens(fallback.contextTokens)} / ${compactTokens(window)} ${share}`,
-    usedTokens: fallback.contextTokens,
+    label: `${compactTokens(model.usedTokens)} of ${compactTokens(window)} ${share}`,
+    total: `${compactTokens(model.usedTokens)} / ${compactTokens(window)} ${share}`,
+    model,
+    usedTokens: model.usedTokens,
     windowTokens: window,
   };
-}
-
-/**
- * What a provider that is not planned by the host actually reports about its
- * window: one occupancy figure. The thread's input and output totals are sums
- * over turns, not parts of that occupancy, so they are not segments of it —
- * the breakdown is the reported use and the room left, and nothing more.
- */
-function reportedSegments(
-  reported: NonNullable<ReturnType<typeof reportedWindow>>,
-): ReadonlyArray<ContextWindowSegment> {
-  const free = Math.max(0, reported.windowTokens - reported.usedTokens);
-  // Each share is rounded once, when it is shown. Rounding here as well made
-  // 85.5% and 14.5% read as 86% and 15%: a window a point over full.
-  const share = (tokens: number) =>
-    Math.max(0, Math.min(100, (tokens / reported.windowTokens) * 100));
-  return [
-    {
-      key: "used",
-      kind: "content",
-      label: "Used",
-      percent: share(reported.usedTokens),
-      tokens: reported.usedTokens,
-      tone: 1,
-    },
-    {
-      key: "free",
-      kind: "free",
-      label: "Free space",
-      percent: share(free),
-      tokens: free,
-      tone: 8,
-    },
-  ];
 }
 
 /**
@@ -390,6 +379,7 @@ function ContextUsageFallback(props: {
 }) {
   const { fallback } = props;
   const reported = reportedWindow(fallback);
+  const room = fallbackAutoCompactRoom(fallback, reported?.usedTokens ?? fallback.contextTokens);
   const [expanded, setExpanded] = useState(false);
   const breakdownId = useId();
   const totals = <ThreadTotals fallback={fallback} />;
@@ -411,6 +401,7 @@ function ContextUsageFallback(props: {
               ? "No usage has been reported for this thread."
               : "This provider reports what a turn spent, but not a context-window maximum, so there is no share of a window to show."}
           </p>
+          <AutoCompactRoom room={room} />
           {totals}
         </>
       ) : (
@@ -425,8 +416,9 @@ function ContextUsageFallback(props: {
           <SegmentBar
             label={`Context window used, ${reported.label}`}
             percent={reported.percent}
-            segments={reportedSegments(reported)}
+            segments={reported.model.segments}
           />
+          <AutoCompactRoom room={room} />
           {/* A window the provider did not name is a caveat on the figure
               itself, so it stays in view; the ordinary provenance line waits
               in the breakdown with the rest of the detail. */}
@@ -438,12 +430,13 @@ function ContextUsageFallback(props: {
           ) : null}
           {expanded ? (
             <div className="context-window-popover__details" id={breakdownId}>
-              <SegmentLegend segments={reportedSegments(reported)} />
-              {reported.declared ? null : (
+              <SegmentLegend segments={reported.model.segments} />
+              {reportedSourceNote(reported.model, reported.declared) === undefined ? null : (
                 <p className="context-window-popover__source">
-                  Reported by the provider with its last turn.
+                  {reportedSourceNote(reported.model, reported.declared)}
                 </p>
               )}
+              <ProviderCounts counts={reported.model.counts} />
               {totals}
             </div>
           ) : null}
@@ -469,6 +462,83 @@ function ContextUsageFallback(props: {
         <FooterAction label="View usage" onClick={props.onOpenUsage} />
       )}
     </>
+  );
+}
+
+/**
+ * Where the figures in the breakdown come from. A part the runtime reported is
+ * the provider's own count; a part Octant counted is named as the estimate it
+ * is, with how it was estimated, and the remainder is said to be what is left of
+ * the reported total. A window the provider did not name already carries its
+ * own caveat, so only the estimate note remains for it.
+ */
+function reportedSourceNote(model: ProviderWindowModel, declared: boolean): string | undefined {
+  const estimate =
+    model.estimatedAccuracies.length === 0
+      ? undefined
+      : `Parts marked Estimated are Octant's own count (${model.estimatedAccuracies
+          .map((accuracy) => contextAccuracyLabel(accuracy).toLowerCase())
+          .join(", ")}). The provider reported the total, and Other (provider) is the rest of it.`;
+  if (declared) return estimate;
+  return estimate ?? "Reported by the provider with its last turn.";
+}
+
+/**
+ * How many tools, MCP tools, memory files, skills and agents the window holds,
+ * where the runtime or Octant knows. Deferred tools are known but not loaded, so
+ * they are counted here and take no share of the bar.
+ */
+function ProviderCounts(props: { readonly counts: ReadonlyArray<ProviderWindowCount> }) {
+  if (props.counts.length === 0) return null;
+  return (
+    <div className="context-window-popover__capabilities">
+      {props.counts.map((count) => (
+        <p key={count.key}>
+          <span>{count.label}</span>
+          <span>
+            {[
+              count.loaded === undefined ? undefined : `${String(count.loaded)} loaded`,
+              count.deferred === undefined
+                ? undefined
+                : count.deferred.count === undefined
+                  ? "some deferred"
+                  : `${String(count.deferred.count)} deferred`,
+            ]
+              .filter((part) => part !== undefined)
+              .join(" · ")}
+          </span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The room a runtime that compacts its own session has left. The report's
+ * threshold is what makes this thread's compaction automatic: a runtime that
+ * names none leaves the kind unknown, and the line stays out. The room is
+ * measured from what the window holds as the popover shows it, so the line and
+ * the figure above it never disagree.
+ */
+function fallbackAutoCompactRoom(
+  fallback: ComposerContextUsageFallback,
+  usedTokens: number | undefined,
+) {
+  return autoCompactRoom({
+    compaction: fallback.autoCompactThreshold === undefined ? "unknown" : "automatic",
+    thresholdTokens: fallback.autoCompactThreshold,
+    usedTokens,
+  });
+}
+
+function AutoCompactRoom(props: { readonly room: ReturnType<typeof autoCompactRoom> }) {
+  if (props.room === undefined) return null;
+  return (
+    <p className="context-window-popover__source" data-auto-compact="">
+      {props.room.tokens === 0
+        ? "At the auto-compact threshold"
+        : `${compactTokens(props.room.tokens)} until auto-compact`}
+    </p>
   );
 }
 
@@ -665,8 +735,9 @@ function SegmentBar(props: {
 }
 
 /**
- * The bar's key. Each swatch carries its category's name beside it, so the
- * neutral ramp only has to tell adjacent segments apart, never name them.
+ * The bar's key. Each swatch carries its category's name beside it, so hue only
+ * has to tell adjacent segments apart, never name them. An estimated figure
+ * says so in words on its row.
  */
 function SegmentLegend(props: { readonly segments: ReadonlyArray<ContextWindowSegment> }) {
   return (
@@ -685,7 +756,14 @@ function SegmentLegend(props: { readonly segments: ReadonlyArray<ContextWindowSe
               <span aria-hidden="true" className="context-window-popover__swatch" />
               <span>{segment.label}</span>
               {segment.estimated === true ? (
-                <span className="context-window-popover__qualifier">Estimated</span>
+                <span
+                  className="context-window-popover__qualifier"
+                  {...(segment.accuracy === undefined
+                    ? {}
+                    : { title: contextAccuracyLabel(segment.accuracy) })}
+                >
+                  Estimated
+                </span>
               ) : null}
             </th>
             <td>{segment.tokens === undefined ? "Unknown" : compactTokens(segment.tokens)}</td>

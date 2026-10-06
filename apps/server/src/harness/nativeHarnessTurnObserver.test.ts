@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { TurnEndSummary } from "../metrics/turnEnd";
 import { NativeHarnessTurnObserver, parseVerdict } from "./nativeHarnessTurnObserver";
 
 const providerInstanceId = "00000000-0000-4000-8000-000000000001" as never;
@@ -14,9 +15,10 @@ function observer(
   session?: { status: string; detail?: string },
   goal?: Record<string, unknown>,
 ) {
-  const recorded: { turns: unknown[]; interventions: unknown[] } = {
+  const recorded: { turns: unknown[]; interventions: unknown[]; settled: number } = {
     turns: [],
     interventions: [],
+    settled: 0,
   };
   let counter = 0;
   const subject = new NativeHarnessTurnObserver({
@@ -31,6 +33,9 @@ function observer(
           turnsRun: recorded.turns.length,
         }) as never,
       markRunning: () => undefined,
+      settleTurn: () => {
+        recorded.settled += 1;
+      },
       recordTurn: (_threadId: string, turn: unknown) => {
         recorded.turns.push(turn);
       },
@@ -122,6 +127,95 @@ describe("native harness turn observer", () => {
       stopReason: "end-of-turn",
     });
     expect(recorded.interventions).toEqual([]);
+  });
+
+  describe("the turn record a harness turn leaves", () => {
+    const summary = (overrides: Partial<TurnEndSummary> = {}): TurnEndSummary => ({
+      stopReason: "end-of-turn",
+      startedAt: "2026-09-05T11:59:00.000Z",
+      endedAt: "2026-09-05T11:59:40.000Z",
+      usage: {
+        inputTokens: 52_000,
+        outputTokens: 1_900,
+        cacheReadInputTokens: 48_000,
+        cacheWriteInputTokens: 1_000,
+        reasoningTokens: 300,
+        costUsd: 0.12,
+      },
+      metrics: {
+        precision: "exact",
+        wallMs: 40_000,
+        timeToFirstTokenMs: 900,
+        decodeOutputTokens: 1_900,
+        decodeMs: 31_000,
+        toolMs: 6_000,
+        modelCalls: 3,
+      },
+      ...overrides,
+    });
+
+    it("carries the turn's full usage, its real start and its speed instead of zeros", async () => {
+      const { subject, recorded } = observer();
+
+      await subject.turnCompleted({ ...scope, text: "Done.", toolCalls: 3, turn: summary() });
+
+      expect(recorded.turns).toEqual([
+        expect.objectContaining({
+          stopReason: "end-of-turn",
+          usage: {
+            inputTokens: 52_000,
+            outputTokens: 1_900,
+            cacheReadInputTokens: 48_000,
+            cacheWriteInputTokens: 1_000,
+            reasoningTokens: 300,
+            costUsd: 0.12,
+          },
+          metrics: expect.objectContaining({ precision: "exact", decodeMs: 31_000 }),
+          startedAt: "2026-09-05T11:59:00.000Z",
+          endedAt: "2026-09-05T11:59:40.000Z",
+        }),
+      ]);
+    });
+
+    it("records a turn that failed with the reason it stopped and what it had cost", async () => {
+      const { subject, recorded } = observer();
+
+      subject.turnEnded(scope, summary({ stopReason: "failed" }));
+
+      expect(recorded.turns).toEqual([
+        expect.objectContaining({
+          stopReason: "provider-failure",
+          usage: expect.objectContaining({ inputTokens: 52_000, outputTokens: 1_900 }),
+        }),
+      ]);
+      expect(recorded.settled).toBe(1);
+    });
+
+    it("records a turn a person stopped as a user interrupt", async () => {
+      const { subject, recorded } = observer();
+
+      subject.turnEnded(scope, summary({ stopReason: "cancelled" }));
+
+      expect(recorded.turns).toEqual([expect.objectContaining({ stopReason: "user-interrupt" })]);
+    });
+
+    it("does not record a completed turn a second time when it ends", async () => {
+      const { subject, recorded } = observer();
+      await subject.turnCompleted({ ...scope, text: "Done.", toolCalls: 0, turn: summary() });
+
+      subject.turnEnded(scope, summary());
+
+      expect(recorded.turns).toHaveLength(1);
+      expect(recorded.settled).toBe(1);
+    });
+
+    it("records nothing for a provider the harness does not drive", async () => {
+      const { subject, recorded } = observer(false);
+
+      subject.turnEnded(scope, summary({ stopReason: "failed" }));
+
+      expect(recorded.turns).toEqual([]);
+    });
   });
 
   it("reads the advisor's verdict from wherever it put the JSON, and refuses an empty redirect", () => {

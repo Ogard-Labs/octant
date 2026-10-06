@@ -1,3 +1,4 @@
+import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 
 export interface MenuBarTask {
@@ -342,6 +343,7 @@ export function remoteAccessAdministrationOf(
 }
 
 export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBridge> {
+  readonly popupNativeMenu?: (request: NativeMenuRequest) => Promise<NativeMenuOutcome>;
   readonly getComputerUseStatus?: () => Promise<unknown>;
   readonly requestComputerUsePermissions?: () => Promise<unknown>;
   readonly openComputerUsePermissionSettings?: () => Promise<void>;

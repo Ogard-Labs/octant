@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { decodeAgentRunCanvasSnapshotResult, decodeAgentRunCenterSummary } from "@octant/contracts";
@@ -57,6 +57,136 @@ function createClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
 }
 
 describe("AgentsCenter", () => {
+  it("follows up a completed managed child with its existing identity and version", async () => {
+    const user = userEvent.setup();
+    const item = { ...summary, lifecycleStatus: "completed" as const };
+    const resume = vi.fn<AgentRunClient["resume"]>().mockResolvedValue({ kind: "run-updated" });
+    render(
+      <AgentsCenter
+        client={createClient({ center: vi.fn(async () => ({ items: [item] })), resume })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: summary.task }));
+    await user.click(screen.getByRole("button", { name: "Follow up" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Follow-up message" }),
+      "  Check recovery too.  ",
+    );
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(resume).toHaveBeenCalledExactlyOnceWith({
+      runId: summary.runId,
+      expectedVersion: 2,
+      message: "Check recovery too.",
+    });
+  });
+
+  it.each([
+    { lifecycleStatus: "cancelled", executionKind: "octant-managed" },
+    { lifecycleStatus: "completed", executionKind: "provider-native" },
+  ])("does not offer a follow-up for $lifecycleStatus $executionKind children", async (state) => {
+    const user = userEvent.setup();
+    const item = decodeAgentRunCenterSummary({ ...summary, ...state });
+    render(
+      <AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [item] })) })} />,
+    );
+    await user.click(await screen.findByRole("button", { name: summary.task }));
+    expect(screen.queryByRole("button", { name: "Follow up" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Follow-up message" })).not.toBeInTheDocument();
+  });
+
+  it("prevents duplicate follow-ups and keeps the draft when the host refuses", async () => {
+    const user = userEvent.setup();
+    let finish: ((result: Awaited<ReturnType<AgentRunClient["resume"]>>) => void) | undefined;
+    const resume = vi.fn<AgentRunClient["resume"]>(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const item = { ...summary, lifecycleStatus: "completed" as const };
+    render(
+      <AgentsCenter
+        client={createClient({ center: vi.fn(async () => ({ items: [item] })), resume })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: summary.task }));
+    await user.click(screen.getByRole("button", { name: "Follow up" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Follow-up message" }),
+      "  Keep my draft.  ",
+    );
+    await user.dblClick(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+    await act(async () =>
+      finish?.({
+        kind: "run-command-failed",
+        message: "This follow-up exceeds the current spend ceiling.",
+      }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This follow-up exceeds the current spend ceiling.",
+    );
+    expect(screen.getByRole("textbox", { name: "Follow-up message" })).toHaveValue(
+      "  Keep my draft.  ",
+    );
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
+  });
+
+  it("keeps a new child's draft separate from the previous child's pending request", async () => {
+    const user = userEvent.setup();
+    let finish: ((result: Awaited<ReturnType<AgentRunClient["resume"]>>) => void) | undefined;
+    const resume = vi.fn<AgentRunClient["resume"]>(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const first = { ...summary, lifecycleStatus: "completed" as const };
+    const second = decodeAgentRunCenterSummary({
+      ...first,
+      runId: "55555555-5555-4555-8555-555555555555",
+      task: "Second child",
+    });
+    render(
+      <AgentsCenter
+        client={createClient({ center: vi.fn(async () => ({ items: [first, second] })), resume })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: summary.task }));
+    await user.click(screen.getByRole("button", { name: "Follow up" }));
+    await user.type(screen.getByRole("textbox", { name: "Follow-up message" }), "First draft");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Second child" }));
+    await user.click(screen.getByRole("button", { name: "Follow up" }));
+    expect(screen.getByRole("textbox", { name: "Follow-up message" })).toHaveValue("");
+    await user.type(screen.getByRole("textbox", { name: "Follow-up message" }), "Second draft");
+    await act(async () =>
+      finish?.({ kind: "run-command-failed", message: "First child refused." }),
+    );
+    expect(screen.getByRole("textbox", { name: "Follow-up message" })).toHaveValue("Second draft");
+    expect(screen.queryByText("First child refused.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
+  });
+
+  it.each(["waiting", "interrupted"])(
+    "resumes a %s child without a follow-up message",
+    async (lifecycleStatus) => {
+      const user = userEvent.setup();
+      const resume = vi.fn<AgentRunClient["resume"]>().mockResolvedValue({ kind: "run-updated" });
+      const item = decodeAgentRunCenterSummary({ ...summary, lifecycleStatus });
+      render(
+        <AgentsCenter
+          client={createClient({ center: vi.fn(async () => ({ items: [item] })), resume })}
+        />,
+      );
+      await user.click(await screen.findByRole("button", { name: summary.task }));
+      expect(screen.queryByRole("button", { name: "Follow up" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Resume" }));
+      expect(resume).toHaveBeenCalledExactlyOnceWith({ runId: summary.runId, expectedVersion: 2 });
+    },
+  );
+
   it("offers resume after a recoverable provider process death", async () => {
     const item = {
       ...summary,

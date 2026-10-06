@@ -41,6 +41,8 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 export interface ChatTranscriptProps {
   /** The decoded, authoritative transcript projection. */
   readonly view: ChatThreadView;
+  /** What the thread places after a turn, such as a Canvas that turn wrote. */
+  readonly afterTurn?: (turn: ChatThreadView["turns"][number]) => ReactNode;
   /** Connection state is separate from a durable attempt outcome. */
   readonly connectionStatus?: "connected" | "disconnected";
   /**
@@ -316,6 +318,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       gap={20}
       itemKey={(turn) => String(turn.id)}
       items={turns}
+      {...(props.afterTurn === undefined ? {} : { afterItem: props.afterTurn })}
       itemTag="li"
       key={String(props.view.thread.id)}
       lead={lead}

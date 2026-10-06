@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   decodeAgentRunWorkspaceReceiptId,
@@ -14,6 +15,10 @@ const RECEIPT_VERSION = 1;
 export interface StoredAgentRunWorkspaceReceipt extends AgentRunIssuedWorkspaceGrant {
   readonly windowId: string;
   readonly issuedAt: string;
+  readonly requestId?: string;
+  readonly repositoryId?: string;
+  readonly startingRevision?: string;
+  readonly parentCheckoutRoot?: string;
 }
 
 export interface AgentRunWorkspaceReceiptStoreOptions {
@@ -47,6 +52,10 @@ function decodeStored(value: unknown): StoredAgentRunWorkspaceReceipt | undefine
   const checkoutRoot = optionalString("checkoutRoot");
   const worktreeRoot = optionalString("worktreeRoot");
   const worktreeState = optionalString("worktreeState");
+  const requestId = optionalString("requestId");
+  const repositoryId = optionalString("repositoryId");
+  const startingRevision = optionalString("startingRevision");
+  const parentCheckoutRoot = optionalString("parentCheckoutRoot");
   return {
     receiptId: value.receiptId,
     parentThreadId: value.parentThreadId,
@@ -62,6 +71,10 @@ function decodeStored(value: unknown): StoredAgentRunWorkspaceReceipt | undefine
     ...(checkoutRoot === undefined ? {} : { checkoutRoot }),
     ...(worktreeRoot === undefined ? {} : { worktreeRoot }),
     ...(worktreeState === undefined ? {} : { worktreeState }),
+    ...(requestId === undefined ? {} : { requestId }),
+    ...(repositoryId === undefined ? {} : { repositoryId }),
+    ...(startingRevision === undefined ? {} : { startingRevision }),
+    ...(parentCheckoutRoot === undefined ? {} : { parentCheckoutRoot }),
   };
 }
 
@@ -109,6 +122,12 @@ export class AgentRunWorkspaceReceiptStore {
       ...(input.checkoutRoot === undefined ? {} : { checkoutRoot: input.checkoutRoot }),
       ...(input.worktreeRoot === undefined ? {} : { worktreeRoot: input.worktreeRoot }),
       ...(input.worktreeState === undefined ? {} : { worktreeState: input.worktreeState }),
+      ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
+      ...(input.repositoryId === undefined ? {} : { repositoryId: input.repositoryId }),
+      ...(input.startingRevision === undefined ? {} : { startingRevision: input.startingRevision }),
+      ...(input.parentCheckoutRoot === undefined
+        ? {}
+        : { parentCheckoutRoot: input.parentCheckoutRoot }),
     };
     await this.#write(stored);
     return stored;
@@ -135,6 +154,7 @@ export class AgentRunWorkspaceReceiptStore {
   }
 
   async findReusable(input: {
+    readonly requestId?: string;
     readonly parentThreadId: string;
     readonly mode: OctantMode;
     readonly windowId: string;
@@ -157,6 +177,11 @@ export class AgentRunWorkspaceReceiptStore {
       ) {
         continue;
       }
+      if (
+        input.mode === "code" &&
+        (input.requestId === undefined || receipt.requestId !== input.requestId)
+      )
+        continue;
       return receipt;
     }
     return undefined;
@@ -174,7 +199,18 @@ export class AgentRunWorkspaceReceiptStore {
   async #write(receipt: StoredAgentRunWorkspaceReceipt): Promise<void> {
     await mkdir(this.#root, { recursive: true, mode: 0o700 });
     const payload = JSON.stringify({ version: RECEIPT_VERSION, ...receipt });
-    await writeFile(this.#path(receipt.receiptId), payload, { encoding: "utf8", mode: 0o600 });
+    // A replayed request confirms and admits the same receipt that its first
+    // attempt is still saving. Writing in place truncates the file first, so a
+    // concurrent load read it as empty, treated the grant as missing, and
+    // refused a workspace that existed. Rename publishes the whole file at once.
+    const temporaryPath = join(this.#root, `.${receipt.receiptId}.${randomUUID()}.tmp`);
+    try {
+      await writeFile(temporaryPath, payload, { encoding: "utf8", mode: 0o600 });
+      await rename(temporaryPath, this.#path(receipt.receiptId));
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => undefined);
+      throw error;
+    }
   }
 
   async forgetExpired(now: number): Promise<void> {

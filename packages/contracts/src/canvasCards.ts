@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { AgentRunAuthority } from "./agentRun";
-import { CanvasId, CanvasSourceManifest, CanvasVersionId } from "./canvas";
+import { CanvasId, CanvasPresentation, CanvasSourceManifest, CanvasVersionId } from "./canvas";
 import { ChatThreadId } from "./chat";
 import { CodeCheckoutId, CodeRepositoryId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
@@ -197,6 +197,13 @@ export const CanvasThreadReferenceCard = Schema.Struct({
     Schema.nonNegative(),
     Schema.lessThanOrEqualTo(CANVAS_CARD_MAX_ACTIONS),
   ),
+  /**
+   * Where the thread shows this Canvas now, after the host's inline bound. A
+   * host that predates the hint sends none, and the thread shows a card.
+   */
+  presentation: Schema.optional(CanvasPresentation),
+  /** When the Canvas's first version was written, so a thread can place it in the turn that made it. */
+  canvasCreatedAt: Schema.optional(UtcTimestamp),
 }).annotations(strict);
 export type CanvasThreadReferenceCard = typeof CanvasThreadReferenceCard.Type;
 

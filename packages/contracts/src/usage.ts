@@ -30,9 +30,22 @@ export type UsageAttributionEntry = typeof UsageAttributionEntry.Type;
 
 const StableRequestShape = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
 
+/**
+ * A usage row's subject after the thread it names was purged: the aggregate
+ * kind stays for honest accounting shape, the thread identity is gone.
+ */
+export const DeLinkedUsageSubject = Schema.Struct({
+  aggregateType: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)),
+  deLinked: Schema.Literal(true),
+}).annotations(strict);
+export type DeLinkedUsageSubject = typeof DeLinkedUsageSubject.Type;
+
+export const UsageSubject = Schema.Union(AggregateReference, DeLinkedUsageSubject);
+export type UsageSubject = typeof UsageSubject.Type;
+
 export const UsageRecord = Schema.Struct({
   reconciliationId: UsageReconciliationId,
-  subject: AggregateReference,
+  subject: UsageSubject,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   requestShape: StableRequestShape,

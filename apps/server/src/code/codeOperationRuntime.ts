@@ -103,6 +103,8 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
+import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ProviderContextBlock } from "@octant/contracts";
 import {
   CodeServiceError,
@@ -188,6 +190,8 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 }
 
 export interface CodeOperationRuntimeOptions {
+  /** Where a running turn's start time and latest step are kept for the navigation read. */
+  readonly liveTurns?: LiveTurnRegistry;
   readonly computerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
@@ -353,10 +357,14 @@ export interface CodeOperationRuntimeOptions {
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
-    /** Every turn's end, whatever its outcome. */
-    readonly turnEnded?: (scope: NativeHarnessTurnScope) => void;
+    /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
+    readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
     readonly turnCompleted: (
-      input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
+      input: NativeHarnessTurnScope & {
+        readonly text: string;
+        readonly toolCalls: number;
+        readonly turn?: TurnEndSummary;
+      },
     ) => Promise<void>;
     /** Settles a harness question the person answered through the Code question surface. */
     readonly answerQuestion?: (threadId: string, questionId: string, answer: string) => void;
@@ -2208,6 +2216,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     };
     const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
     this.#options.nativeHarness?.turnStarted(harnessScope);
+    let endedTurn: TurnEndSummary | undefined;
     const browserSelected = active.extensionSelections?.some(isBrowserUseSelection) === true;
     const fullContext = [
       ...harnessContext,
@@ -2251,6 +2260,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           checkoutRoot: active.checkoutRoot,
           prompt,
           ...(fullContext.length === 0 ? {} : { context: fullContext }),
+          onTurnEnded: (ended) => {
+            endedTurn = ended;
+          },
+          ...(this.#options.liveTurns === undefined
+            ? {}
+            : {
+                liveTurn: this.#options.liveTurns.tracker(
+                  String(active.thread.id),
+                  "code-navigation",
+                ),
+              }),
           ...(this.#options.nativeHarness === undefined
             ? {}
             : {
@@ -2384,7 +2404,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }
       })
       .finally(() => {
-        this.#options.nativeHarness?.turnEnded?.(harnessScope);
+        this.#options.nativeHarness?.turnEnded?.(harnessScope, endedTurn);
         if (this.#active.get(String(active.thread.id)) === active)
           this.#active.delete(String(active.thread.id));
       });
@@ -2680,6 +2700,10 @@ function normalizedOperationEvent(
 
       ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
       ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
+      ...(event.autoCompactThreshold === undefined
+        ? {}
+        : { autoCompactThreshold: event.autoCompactThreshold }),
+      ...(event.contextBreakdown === undefined ? {} : { contextBreakdown: event.contextBreakdown }),
     };
   if (event.category === "provider-limit" && event.text !== undefined)
     return {
@@ -2702,6 +2726,7 @@ function normalizedOperationEvent(
   if (event.category === "child-activity")
     return {
       kind: "child-activity",
+      ...(event.childObservation === undefined ? {} : { observation: event.childObservation }),
       childId: event.requestId ?? "provider-child",
       state: (event.status ?? "waiting") as never,
       summary:

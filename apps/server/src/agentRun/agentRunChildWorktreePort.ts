@@ -1,15 +1,25 @@
 import { createHash } from "node:crypto";
 import {
   decodeBindingRevisionId,
+  decodeCodeCheckoutId,
   decodeCodeRepositoryId,
   decodeCodeThreadId,
   decodeProjectId,
   decodeWindowId,
+  type AgentRunWorkspaceReceipt,
   type CodeCheckoutIdentity,
+  type CodeThreadId,
 } from "@octant/contracts";
 import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
-import type { ManagedWorktreeReceipt } from "../code/managedWorktreeReceiptStore";
-import type { ManagedWorktreeService } from "../code/managedWorktreeService";
+import type {
+  ManagedWorktreeReceipt,
+  ManagedWorktreeReceiptLookup,
+} from "../code/managedWorktreeReceiptStore";
+import {
+  managedTargetPath,
+  type ManagedWorktreeRepositoryPort,
+  type ManagedWorktreeService,
+} from "../code/managedWorktreeService";
 import type {
   AgentRunChildWorktreePort,
   AgentRunChildWorktreePrepareInput,
@@ -17,13 +27,6 @@ import type {
   AgentRunCodeWorkspaceContext,
 } from "./agentRunWorkspaceService";
 
-/**
- * Stable, isolated child worktree identity for one parent Code thread.
- *
- * Distinct from the parent thread id so a parent that already occupies a
- * managed worktree cannot collide with its children, and stable so prepare
- * can reuse the same worktree.
- */
 export async function resolveAgentRunCodeWorkspaceContext(input: {
   readonly thread: {
     readonly projectId: string;
@@ -65,17 +68,80 @@ export async function resolveAgentRunCodeWorkspaceContext(input: {
   };
 }
 
-export function deriveAgentRunChildWorktreeThreadId(parentThreadId: string): string {
-  const digest = createHash("sha256")
-    .update("octant.agent-run-child-worktree.v1\0")
-    .update(parentThreadId)
-    .digest("hex")
-    .slice(0, 32);
+/** The absent request id is only for looking up legacy, parent-owned runs. */
+export function deriveAgentRunChildWorktreeThreadId(
+  parentThreadId: string,
+  requestId?: string,
+): string {
+  const hash = createHash("sha256")
+    .update(
+      requestId === undefined
+        ? "octant.agent-run-child-worktree.v1\0"
+        : "octant.agent-run-child-worktree.v2\0",
+    )
+    .update(parentThreadId);
+  if (requestId !== undefined) hash.update("\0").update(requestId);
+  const digest = hash.digest("hex").slice(0, 32);
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20)}`;
 }
 
-function childBranchIntent(parentThreadId: string): string {
-  return `octant/agent-run/${parentThreadId.replaceAll("-", "").slice(0, 12)}`;
+export function resolveAgentRunChildWorktreeThreadId(input: {
+  readonly parentThreadId: string;
+  readonly requestId: string;
+  readonly repositoryId: string;
+  readonly workspace: AgentRunWorkspaceReceipt;
+}): CodeThreadId | undefined {
+  const workspace = input.workspace;
+  if (workspace.kind !== "code-worktree" || !workspace.verified) return undefined;
+  // Legacy runs also have request ids. Only the recorded workspace distinguishes
+  // their parent-owned checkout from the checkout allocated for one request.
+  for (const requestId of [input.requestId, undefined]) {
+    const childThreadId = deriveAgentRunChildWorktreeThreadId(input.parentThreadId, requestId);
+    if (
+      workspace.worktreeRoot ===
+      managedTargetPath(workspace.checkoutRoot, input.repositoryId, childThreadId)
+    ) {
+      return decodeCodeThreadId(childThreadId);
+    }
+  }
+  return undefined;
+}
+
+function childBranchIntent(childThreadId: string): string {
+  return `octant/agent-run/${childThreadId.replaceAll("-", "")}`;
+}
+
+/**
+ * The identity every managed-worktree receipt for one child is looked up by.
+ *
+ * Allocation, execution verification, and the Canvas binding all find the same
+ * receipt through this, so a child's workspace has one definition that cannot
+ * drift between them.
+ */
+export function agentRunChildWorktreeLookup(input: {
+  readonly repositoryId: string;
+  readonly repositoryRoot: string;
+  readonly childThreadId: string;
+}): ManagedWorktreeReceiptLookup {
+  const branchIntent = childBranchIntent(input.childThreadId);
+  return {
+    repositoryId: input.repositoryId,
+    threadId: input.childThreadId,
+    checkoutId: String(
+      deriveManagedWorktreeCheckoutId({
+        repositoryId: input.repositoryId,
+        threadId: input.childThreadId,
+      }),
+    ),
+    canonicalRepositoryPath: input.repositoryRoot,
+    canonicalWorktreePath: managedTargetPath(
+      input.repositoryRoot,
+      input.repositoryId,
+      input.childThreadId,
+    ),
+    branchIntent,
+    refIntent: `refs/heads/${branchIntent}`,
+  };
 }
 
 function isolated(receipt: ManagedWorktreeReceipt, parentCheckoutRoot: string): boolean {
@@ -101,6 +167,11 @@ function toPrepared(receipt: ManagedWorktreeReceipt): AgentRunChildWorktreePrepa
  */
 export function createAgentRunChildWorktreePort(input: {
   readonly service: ManagedWorktreeService;
+  readonly repository: ManagedWorktreeRepositoryPort;
+  readonly observeExecutionIdentity: (
+    root: string,
+    signal: AbortSignal,
+  ) => Promise<{ readonly identity: string; readonly branch: string } | undefined>;
   readonly loadReceipt: (receiptId: string) => Promise<ManagedWorktreeReceipt | undefined>;
   readonly findActive: (lookup: {
     readonly repositoryId: string;
@@ -111,17 +182,132 @@ export function createAgentRunChildWorktreePort(input: {
     readonly branchIntent: string;
     readonly refIntent: string;
   }) => Promise<ManagedWorktreeReceipt | undefined>;
-}): AgentRunChildWorktreePort {
+}): AgentRunChildWorktreePort & {
+  readonly verifyExecution: (request: {
+    readonly requestId: string;
+    readonly parentThreadId: string;
+    readonly repositoryId: string;
+    readonly repositoryRoot: string;
+    readonly parentCheckoutRoot: string;
+    readonly worktreeRoot: string;
+    readonly signal: AbortSignal;
+  }) => Promise<
+    | { readonly status: "verified"; readonly identity: string }
+    | { readonly status: "refused"; readonly reason: string }
+  >;
+} {
+  async function available(receipt: ManagedWorktreeReceipt): Promise<boolean> {
+    const observation = await input.repository
+      .observe(receipt.canonicalRepositoryPath, new AbortController().signal)
+      .catch(() => undefined);
+    if (observation === undefined) return false;
+    if (
+      observation.status !== "available" ||
+      observation.repositoryId !== receipt.repositoryId ||
+      observation.repositoryRoot !== receipt.canonicalRepositoryPath
+    )
+      return false;
+    const targets = observation.worktrees.filter(
+      (worktree) =>
+        worktree.status === "present" && worktree.canonicalPath === receipt.canonicalWorktreePath,
+    );
+    const target = targets.length === 1 ? targets[0] : undefined;
+    return (
+      target !== undefined &&
+      !target.detached &&
+      target.locked === undefined &&
+      target.prunable === undefined &&
+      target.branch === receipt.refIntent &&
+      target.head === receipt.expectedHead
+    );
+  }
   return {
+    verifyExecution: async (request) => {
+      const refused = {
+        status: "refused",
+        reason:
+          "The child's registered workspace is unavailable or no longer owned by this run. Restore the original workspace or delegate a new child.",
+      } as const;
+      try {
+        const childThreadId = deriveAgentRunChildWorktreeThreadId(
+          request.parentThreadId,
+          request.requestId,
+        );
+        const lookup = agentRunChildWorktreeLookup({
+          repositoryId: request.repositoryId,
+          repositoryRoot: request.repositoryRoot,
+          childThreadId,
+        });
+        const expectedPath = lookup.canonicalWorktreePath;
+        if (
+          request.worktreeRoot !== expectedPath ||
+          request.worktreeRoot === request.parentCheckoutRoot ||
+          request.worktreeRoot === request.repositoryRoot
+        )
+          return refused;
+        const receipt = await input.findActive(lookup);
+        if (receipt?.state !== "ready") return refused;
+        const observation = await input.repository.observe(request.repositoryRoot, request.signal);
+        const child = await input.repository.observe(expectedPath, request.signal);
+        if (
+          observation.status !== "available" ||
+          child.status !== "available" ||
+          observation.repositoryRoot !== request.repositoryRoot ||
+          child.repositoryRoot !== expectedPath ||
+          observation.repositoryId !== request.repositoryId ||
+          child.repositoryId !== request.repositoryId ||
+          child.commonDirectory !== observation.commonDirectory
+        )
+          return refused;
+        const targets = observation.worktrees.filter(
+          (worktree) => worktree.status === "present" && worktree.canonicalPath === expectedPath,
+        );
+        const target = targets.length === 1 ? targets[0] : undefined;
+        if (
+          target === undefined ||
+          target.detached ||
+          target.locked !== undefined ||
+          target.prunable !== undefined ||
+          target.branch !== receipt.refIntent ||
+          child.checkout.branch !== receipt.refIntent ||
+          child.checkout.detached ||
+          child.checkout.locked !== undefined ||
+          child.checkout.prunable !== undefined
+        )
+          return refused;
+        const physical = await input.observeExecutionIdentity(expectedPath, request.signal);
+        if (
+          physical === undefined ||
+          physical.branch !== receipt.refIntent ||
+          request.signal.aborted
+        )
+          return refused;
+        return {
+          status: "verified",
+          identity: createHash("sha256")
+            .update(
+              JSON.stringify([
+                receipt.receiptId,
+                request.repositoryId,
+                childThreadId,
+                physical.identity,
+              ]),
+            )
+            .digest("hex"),
+        };
+      } catch {
+        return refused;
+      }
+    },
     prepare: async (request: AgentRunChildWorktreePrepareInput) => {
       const childThreadId = decodeCodeThreadId(
-        deriveAgentRunChildWorktreeThreadId(request.parentThreadId),
+        deriveAgentRunChildWorktreeThreadId(request.parentThreadId, request.requestId),
       );
-      const checkoutId = deriveManagedWorktreeCheckoutId({
+      const lookup = agentRunChildWorktreeLookup({
         repositoryId: request.repositoryId,
-        threadId: String(childThreadId),
+        repositoryRoot: request.repositoryRoot,
+        childThreadId: String(childThreadId),
       });
-      const branchIntent = request.branchIntent || childBranchIntent(request.parentThreadId);
       const creationInput = {
         authenticatedWindowId: decodeWindowId(request.windowId),
         projectId: decodeProjectId(request.projectId),
@@ -129,36 +315,38 @@ export function createAgentRunChildWorktreePort(input: {
         repositoryId: decodeCodeRepositoryId(request.repositoryId),
         repositoryRoot: request.repositoryRoot,
         threadId: childThreadId,
-        checkoutId,
-        branchIntent,
+        checkoutId: decodeCodeCheckoutId(lookup.checkoutId),
+        branchIntent: lookup.branchIntent,
         startPoint: request.startPoint,
         sourceBranch: request.sourceBranch,
         sourceMode: request.sourceMode,
         ...(request.remoteName === undefined ? {} : { remoteName: request.remoteName }),
         ...(request.fetchedAt === undefined ? {} : { fetchedAt: request.fetchedAt }),
       };
-      const signal = new AbortController().signal;
-      const plan = await input.service.planCreation(creationInput, signal);
-      if (plan.status !== "planned") {
-        if (plan.status === "refused") return { status: "refused", reason: "unavailable" };
+      let existing: ManagedWorktreeReceipt | undefined;
+      try {
+        existing = await input.findActive(lookup);
+      } catch {
         return { status: "refused", reason: "unavailable" };
       }
-      const lookup = {
-        repositoryId: request.repositoryId,
-        threadId: String(childThreadId),
-        checkoutId: String(checkoutId),
-        canonicalRepositoryPath: request.repositoryRoot,
-        canonicalWorktreePath: plan.targetPath,
-        branchIntent,
-        refIntent: `refs/heads/${branchIntent}`,
-      };
-      const existing = await input.findActive(lookup);
-      if (existing !== undefined && existing.state !== "removed") {
+      if (existing !== undefined) {
+        if (
+          !Object.entries(lookup).every(
+            ([key, value]) => existing[key as keyof typeof lookup] === value,
+          ) ||
+          existing.expectedHead !== request.startPoint
+        )
+          return { status: "refused", reason: "stale" };
         if (!isolated(existing, request.parentCheckoutRoot)) {
           return { status: "refused", reason: "parent-checkout" };
         }
+        if (existing.state !== "ready" || !(await available(existing)))
+          return { status: "refused", reason: "unavailable" };
         return toPrepared(existing);
       }
+      const signal = new AbortController().signal;
+      const plan = await input.service.planCreation(creationInput, signal);
+      if (plan.status !== "planned") return { status: "refused", reason: "unavailable" };
       const created = await input.service.create(
         { ...creationInput, grantId: plan.grant.grantId },
         signal,
@@ -178,11 +366,36 @@ export function createAgentRunChildWorktreePort(input: {
       } catch {
         return { status: "refused", reason: "unavailable" };
       }
-      if (receipt === undefined) return { status: "refused", reason: "unavailable" };
+      if (receipt === undefined || receipt.receiptId !== request.worktreeReceiptId)
+        return { status: "refused", reason: "unavailable" };
+      const childThreadId = deriveAgentRunChildWorktreeThreadId(
+        request.parentThreadId,
+        request.requestId,
+      );
+      if (receipt.threadId !== childThreadId)
+        return { status: "refused", reason: "foreign-thread" };
+      if (
+        receipt.repositoryId !== request.repositoryId ||
+        receipt.canonicalRepositoryPath !== request.repositoryRoot ||
+        receipt.expectedHead !== request.startingRevision ||
+        receipt.checkoutId !==
+          String(
+            deriveManagedWorktreeCheckoutId({
+              repositoryId: request.repositoryId,
+              threadId: childThreadId,
+            }),
+          ) ||
+        receipt.branchIntent !== childBranchIntent(childThreadId) ||
+        receipt.refIntent !== `refs/heads/${childBranchIntent(childThreadId)}` ||
+        receipt.canonicalWorktreePath !==
+          managedTargetPath(request.repositoryRoot, request.repositoryId, childThreadId)
+      )
+        return { status: "refused", reason: "stale" };
       if (receipt.state !== "ready") return { status: "refused", reason: "unconfirmed" };
       if (!isolated(receipt, request.parentCheckoutRoot)) {
         return { status: "refused", reason: "parent-checkout" };
       }
+      if (!(await available(receipt))) return { status: "refused", reason: "unavailable" };
       return {
         status: "confirmed",
         worktreeReceiptId: receipt.receiptId,

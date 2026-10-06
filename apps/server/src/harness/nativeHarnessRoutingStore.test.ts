@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import { EventActor, decodeNativeHarnessSlotCandidate, decodeProjectId } from "@octant/contracts";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
@@ -452,6 +452,64 @@ describe("native harness session store", () => {
     // The class is remembered: no third approval is journaled.
     await expect(ask()).resolves.toBe("approved");
     expect(sessions.read(threadId)?.approvals).toHaveLength(2);
+  });
+
+  it("keeps a child's approval local to one request and expires unanswered child interactions on restart", async () => {
+    vi.useFakeTimers();
+    const threadId = "00000000-0000-4000-8000-000000000024";
+    const uuid = uuidFactory();
+    const journal = journalFor(openConnection());
+    const sessions = new NativeHarnessSessionStore({ journal, uuid, actor, clock: () => now });
+    const approvals = new NativeHarnessApprovalStore({ sessions, uuid, clock: () => now });
+    const source = {
+      runId: "00000000-0000-4000-8000-000000000090" as never,
+      providerInstanceId: candidate("big").providerInstanceId as never,
+      modelId: "big" as never,
+    };
+    const controller = new AbortController();
+    const ask = () =>
+      approvals.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        toolName: "provider-action",
+        summary: "Run the child command",
+        approvalClass: "provider-action",
+        source,
+        signal: controller.signal,
+      });
+    const first = ask();
+    const pending = sessions.read(threadId)?.approvals?.[0];
+    expect(pending).toMatchObject({ source, status: "pending" });
+    expect(approvals.decide(threadId, String(pending?.id), "approve-always")).toBe("decided");
+    await expect(first).resolves.toBe("approved");
+    expect(sessions.read(threadId)?.approvals?.[0]?.remembered).not.toBe(true);
+    void ask();
+    expect(sessions.read(threadId)?.approvals).toHaveLength(2);
+    const questions = new NativeHarnessQuestionStore({ sessions, uuid, clock: () => now });
+    void questions.ask({
+      threadId,
+      mode: "code",
+      lead: candidate("big") as never,
+      prompt: "Choose a target",
+      options: [],
+      source,
+      signal: controller.signal,
+    });
+    const restored = new NativeHarnessSessionStore({ journal, uuid, actor, clock: () => now });
+    expect(restored.read(threadId)?.approvals?.[1]?.status).toBe("expired");
+    expect(restored.read(threadId)?.questions[0]?.status).toBe("expired");
+    const afterRestart = new NativeHarnessApprovalStore({
+      sessions: restored,
+      uuid,
+      clock: () => now,
+    });
+    expect(
+      afterRestart.decide(threadId, String(restored.read(threadId)?.approvals?.[1]?.id), "approve"),
+    ).toBe("already-settled");
+    // The old process no longer exists after a restart; its waiters never run.
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   it("queues a steering note, delivers it once to the next tool step, and drops it when the turn ends", () => {

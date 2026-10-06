@@ -1,4 +1,4 @@
-import { decodeWindowId, type ProviderInstanceId } from "@octant/contracts";
+import { decodeProviderInstance, decodeWindowId, type ProviderInstanceId } from "@octant/contracts";
 import type { HostOAuthDescriptor, SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { encodeSubscriptionOAuthCredential } from "@octant/provider-sdk/subscription-oauth";
 import { describe, expect, it, vi } from "vitest";
@@ -24,7 +24,28 @@ const offer: SubscriptionOAuthOffer = {
   accountLabel: "Fixture account",
   termsSummary: "Acknowledge the terms before this sign-in continues.",
   driverKinds: ["openai-compatible"],
+  allowedEndpoint: "https://example.com",
 };
+
+function instanceAt(baseUrl: string) {
+  return decodeProviderInstance({
+    id: "00000000-0000-4000-8000-000000000901",
+    displayName: "Fixture endpoint",
+    driverKind: "openai-compatible",
+    configuration: {
+      kind: "openai-compatible-http",
+      baseUrl,
+      authentication: "bearer",
+      protocol: "auto",
+      manualModelIds: [],
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: "2026-08-28T10:00:00.000Z",
+    updatedAt: "2026-08-28T10:00:00.000Z",
+  });
+}
 
 describe("provider OAuth routes", () => {
   it("does not reflect a foreign Origin into CORS", async () => {
@@ -89,9 +110,83 @@ describe("provider OAuth routes", () => {
     const response = await route(command("status"));
     expect(await response?.json()).toEqual({ kind: "refused", reason: "unavailable" });
   });
+
+  it("refuses to begin a sign-in for an instance whose endpoint does not match the offer", async () => {
+    const begin = vi.fn(async () => ({ kind: "refused", reason: "invalid" }) as const);
+    const route = fixture({
+      begin,
+      readInstance: () => instanceAt("https://attacker.example/v1"),
+    });
+    const response = await route(command("begin"));
+    expect(await response?.json()).toEqual({ kind: "refused", reason: "endpoint-mismatch" });
+    expect(begin).not.toHaveBeenCalled();
+  });
+
+  it("begins a sign-in when the instance endpoint matches the offer origin", async () => {
+    const begin = vi.fn(async () => ({ kind: "refused", reason: "invalid" }) as const);
+    // Path and trailing-slash differences do not break the canonical origin match.
+    const route = fixture({
+      begin,
+      readInstance: () => instanceAt("https://example.com/v1/"),
+    });
+    const response = await route(command("begin"));
+    expect(begin).toHaveBeenCalled();
+    expect(await response?.json()).toEqual({ kind: "refused", reason: "invalid" });
+  });
+
+  it("refuses to store a credential pointer when the endpoint no longer matches on poll", async () => {
+    const credentials = {
+      has: vi.fn(async () => false),
+      resolve: vi.fn(async () => {
+        throw new Error("missing");
+      }),
+      set: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    };
+    const route = fixture({
+      credentials,
+      status: async () => ({
+        kind: "signed-in",
+        attemptId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        descriptorId: descriptor.descriptorId,
+        credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      }),
+      readInstance: () => instanceAt("https://attacker.example/v1"),
+    });
+    const response = await route(command("poll"));
+    expect(await response?.json()).toEqual({ kind: "refused", reason: "endpoint-mismatch" });
+    expect(credentials.set).not.toHaveBeenCalled();
+  });
+
+  it("stores the credential pointer when the poll endpoint matches the offer", async () => {
+    const credentials = {
+      has: vi.fn(async () => false),
+      resolve: vi.fn(async () => {
+        throw new Error("missing");
+      }),
+      set: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    };
+    const route = fixture({
+      credentials,
+      status: async () => ({
+        kind: "signed-in",
+        attemptId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        descriptorId: descriptor.descriptorId,
+        credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      }),
+      readInstance: () => instanceAt("https://example.com/v1"),
+    });
+    const response = await route(command("poll"));
+    expect(await response?.json()).toEqual({ kind: "signed-in", accountLabel: "Fixture account" });
+    expect(credentials.set).toHaveBeenCalled();
+  });
 });
 
-function command(kind: "status" | "sign-out", options: { readonly origin?: string } = {}) {
+function command(
+  kind: "status" | "sign-out" | "begin" | "poll",
+  options: { readonly origin?: string } = {},
+) {
   return new Request("http://127.0.0.1/api/providers/oauth", {
     method: "POST",
     headers: {
@@ -99,7 +194,12 @@ function command(kind: "status" | "sign-out", options: { readonly origin?: strin
       "x-octant-window-capability": capability,
       ...(options.origin === undefined ? {} : { origin: options.origin }),
     },
-    body: JSON.stringify({ kind, instanceId, descriptorId: "fixture-oauth" }),
+    body: JSON.stringify({
+      kind,
+      instanceId,
+      descriptorId: "fixture-oauth",
+      ...(kind === "poll" ? { attemptId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } : {}),
+    }),
   });
 }
 
@@ -108,6 +208,9 @@ function fixture(
     readonly credentials?: ProviderCredentialStore;
     readonly refresh?: HostOAuthService["refresh"];
     readonly signOut?: HostOAuthService["signOut"];
+    readonly begin?: HostOAuthService["begin"];
+    readonly status?: HostOAuthService["status"];
+    readonly readInstance?: (id: ProviderInstanceId) => ReturnType<typeof instanceAt>;
   } = {},
 ) {
   const store = new WindowAuthorityStore();
@@ -119,8 +222,8 @@ function fixture(
     }),
     acknowledgeTerms: () => ({ kind: "refused", reason: "invalid" }),
     restoreAcknowledgment: () => undefined,
-    begin: async () => ({ kind: "refused", reason: "invalid" }),
-    status: async () => ({ kind: "unknown" }),
+    begin: overrides.begin ?? (async () => ({ kind: "refused", reason: "invalid" })),
+    status: overrides.status ?? (async () => ({ kind: "unknown" })),
     refresh: overrides.refresh ?? (async () => ({ kind: "refreshed" })),
     signOut:
       overrides.signOut ??
@@ -134,5 +237,6 @@ function fixture(
     now: () => 1,
     offers: [offer],
     ...(overrides.credentials === undefined ? {} : { credentials: overrides.credentials }),
+    ...(overrides.readInstance === undefined ? {} : { readInstance: overrides.readInstance }),
   });
 }

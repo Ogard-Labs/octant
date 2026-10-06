@@ -25,6 +25,14 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+The Project tree places each active thread under its listed Project or under
+**No project**, never both. No project is a collapsible folder row following
+the Projects with no horizontal divider or separate section heading. It is
+absent when empty and does not create a Project or filesystem authority.
+Sidebar search reveals matches inside collapsed groups and restores their
+collapse state when cleared. The Activity feed is an alternative view of the
+same threads; it is not shown as a duplicate list beneath the Project tree.
+
 Chat, Work, and Code keep the active mode's sidebar current with projection-only
 navigation reads (`GET /api/chat/navigation`, `GET /api/work/navigation`,
 `GET /api/code/navigation`). Work bootstrap still validates Project roots, while
@@ -103,6 +111,63 @@ server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
 
+## Start-screen cards
+
+Under the composer, the Work and Code start screens carry a card area: a
+**Customize** control on the right, then cards in a grid (two columns, one at
+phone width). The composer paints first; the area mounts on the frame after the
+first commit, and each card begins its reads only then, so a start screen never
+waits on a card. A card that is off or unavailable is never mounted and reads
+nothing.
+
+The cards come from a small renderer registry (`apps/web/src/home`). A card is a
+value: `id`, `title`, `icon`, `defaultOn`, `available`, an optional
+`hideWhenEmpty`, one `emptyLabel`, and a `useContent` hook returning `loading`
+or `ready` with a count and a body. The shell builds the list and hands it to the
+frame, which knows nothing about any card: a new card is a new definition, with
+no change to the frame, Customize, or the stored setting. `available: false`
+(no GitHub connection, insecure token storage, no client in this window) hides
+the card and leaves it out of Customize rather than showing it broken;
+`hideWhenEmpty` drops the card from the grid while it has nothing to say. A
+card that is empty otherwise shows one quiet line and never fake rows. A lone
+card spans the row.
+
+Customize is a small panel: one switch per available card, a drag handle, and up
+and down buttons for the keyboard, with each change stored at once, and **Reset
+to default**. The choice is the `homeCards` shell setting: `order` (card ids in
+the requested order; cards it does not name follow in registry order) and
+`visibility` (an entry only where the person moved away from a card's default,
+so a card shipped later arrives with its own default). Ids are an open
+vocabulary: an id the registry does not know is ignored, and adding a card never
+changes the contract. A store from before the cards decodes to the defaults.
+
+**Working now** is the first card, on by default, never unavailable. It lists
+the threads executing now (the navigation rows the host projects as `working`,
+the sidebar's Running rule, so a snoozed or completed row is never listed) and
+the agent runs in progress from the AgentRun projection, most recently moved
+first. Work lists its Chat and Work threads together and Code its Code threads,
+as the sidebar's Running count does. A row shows the provider mark, the title, a
+step line, and a time. The step line is the most live thing the host knows, in
+this order: the running turn's own step (`Command: bun run test`, in monospace,
+or "Waiting for approval" / "Waiting for your answer" in plain text), the
+board's activity line on Code, the task of the agent run working in the thread,
+how far its plan has come, or the Project name when the host said nothing. A
+turn the host reports a start time for says how long it has run ("Running
+12m"), as does an agent run; a thread whose host reports none (an older host)
+says when it last moved ("Active 4m ago"). The time is read at minute
+resolution from the shell's once-a-minute clock. A host name appears only when the window is
+reading a host that is not this computer. A run reports under the running thread
+it belongs to rather than as a second row, and is its own row only when its
+thread is resting. At most five rows show, then **+N more**, which opens the
+Running view (the Board; Chat's Running tile opens Activity). A row opens its
+thread. The card reads what the window's controllers already hold; the run list
+is one read when the card mounts and again when the thread lists change, so it
+adds no timer, and a window sees only what its own authority returns. The turn
+start and step ride on the same navigation rows as the executing flag (see
+[Architecture: persistence](../architecture.md#persistence), fast thread
+reads), so a remote window sees them for exactly the threads it can already
+list.
+
 ## Tool lifecycles
 
 Thread utilities live in the Right Utility Dock outside the split tree.
@@ -124,9 +189,19 @@ conversation, current state, files, and subagent results, and changes none of
 them ([authority](../architecture.md#security-and-authority)). Its notice says
 what the source offers once the host names the source's mode. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
-the host-authorized file open; the renderer offers a written document (or a
-Canvas the thread's agent authored in Chat, Work, or Code) in the dock once per
-document, never after the person closed its tab, and never by moving focus. An
+the host-authorized file open; the renderer offers a written document, or a
+Canvas the thread's agent authored in Work or Code and did not ask to show
+inline, in the dock once per document, never after the person closed its tab,
+and never by moving focus. Every Canvas a thread wrote appears at the end of
+the turn that wrote it, on the reply's card face. One the agent asked to show
+inline is drawn there read-only, within a fixed height that fades out instead
+of scrolling, and is never offered in the dock, because it is already in front
+of the person; any other is a single row (a live miniature, its title, one
+line of facts) that opens it. The inline frame holds **Show as card**, a fold
+the window remembers. In Work and Code it also holds **Open in sidebar**, which
+opens the same Canvas in the dock tool, and a row opens it there too. Chat has
+no dock, so there the frame holds **Open Canvas**, and the frame and a row open
+the Canvas as a content tab. An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code
 thread's checkout; a thread whose binding the host cannot resolve is refused
@@ -152,9 +227,13 @@ thread as a context-aware dock tab opened from the dock tab strip or Add tool. I
 Subagents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every
-other AgentRun control stay. The thread's running subagents also show as a card
-tucked behind its composer, whose rows open the Agents dock on that subagent;
-finished ones, reviewed or not, stay in Environment and Agents. See
+other AgentRun control stay. A compact, collapsible Subagents card sits above
+the composer in normal layout. Its counts keep failures, waits and unreviewed
+results visible while collapsed; expansion previews up to three active or
+unresolved children. Rows open the corresponding detail in Agents, and View all
+keeps completed history reachable. Provider-observed children carry an explicit
+observation-only label and no managed controls. Task-plan progress remains a
+separate disclosure. See
 [DESIGN.md](../../DESIGN.md#welcome-and-composer).
 The Agents dock is a list and a page, and it shows and controls subagents
 without starting them: only the thread's agent starts one, through the Octant
@@ -181,6 +260,13 @@ unavailable states. Provider-native live transcripts remain unavailable unless
 their normalized provider capability supplies an equivalent host-authorized
 read; a host-retained final reply stays readable after completion. See
 [decisions/0050-bounded-live-child-conversation.md](../decisions/0050-bounded-live-child-conversation.md).
+
+Saved child-generation file comparisons open in the existing Review tool from
+Agents result history. The selection carries the parent, managed child and
+generation, never a filesystem path or the parent's live checkout. Changing the
+active thread clears that selection. Saved comparisons use the normal read-only
+diff renderer, expose capture/truncation facts, and offer a return to the thread's
+ordinary Review views.
 
 ## Boards and integrations
 
@@ -274,6 +360,23 @@ fallback estimates are labeled explicitly. Spend ceilings are host-owner policy;
 the composer and Environment explain an admission refusal and its recovery.
 [Context and usage accounting](../architecture.md#context-and-usage-accounting)
 owns budget enforcement, provenance, native-session identity, and journal rules.
+
+Under the composer of every thread, in Chat, Work, and Code and for every provider, a
+quiet stats line states what the thread used: input and output tokens, the cache
+hit, output speed, time to first token, and cost. It reads the host's recorded
+turns and is worded by one shared module in `packages/domain`
+(`turnMetricsDisplay.ts`), which the composer, the Octant Harness session card, the
+terminal footer, and the phone's session panel all call, so the rules cannot
+drift. A figure the provider did not report, or whose denominator is zero, is
+absent; a provider that reported no usage shows no line. A cache hit is never
+rounded up to a whole; an approximate speed carries a tilde and a tooltip that it
+is per turn and includes some tool time; a cost says "est." unless the provider
+reported it and is absent when the model has no price. Clicking the line, or
+**Turn details** in the context meter's popover, opens one turn at a time (tokens,
+timing, retries, cost). The line is on by default; `showThreadStats` in the shell
+settings is the one shared preference, set from the eye button on the line, the
+switch in the context meter's popover, and Settings › Appearance › Reading. Off hides
+only the line; the details stay reachable.
 
 Project overviews retain loaded content during same-Project refreshes
 on the same client connection. Changing Project or client clears retained

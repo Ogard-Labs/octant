@@ -36,16 +36,49 @@ const Endpoint = Schema.String.pipe(
 export const HostOAuthFlow = Schema.Literal("authorization-code-pkce", "device-code");
 export type HostOAuthFlow = typeof HostOAuthFlow.Type;
 
+/**
+ * A vendor wire dialect that is close to OAuth but not identical. The dialect
+ * is what lets a catalog entry declare a flow the generic runner cannot
+ * otherwise express. Only OpenRouter's key-issuing PKCE path is modeled; the
+ * exchange returns a long-lived API key, so the descriptor carries no
+ * `client_id` (OpenRouter does not register clients) and no scopes.
+ */
+export const HostOAuthDialect = Schema.Literal("openrouter-pkce");
+export type HostOAuthDialect = typeof HostOAuthDialect.Type;
+
 export const HostOAuthDescriptor = Schema.Struct({
   descriptorId: DescriptorId,
-  clientId: ClientId,
+  /** Absent only for a dialect that sends no `client_id`. */
+  clientId: Schema.optional(ClientId),
+  /** A vendor wire dialect. Absent means the standard OAuth runner path. */
+  dialect: Schema.optional(HostOAuthDialect),
   flow: HostOAuthFlow,
   authorizationEndpoint: Schema.optional(Endpoint),
   tokenEndpoint: Endpoint,
   deviceAuthorizationEndpoint: Schema.optional(Endpoint),
-  scopes: Schema.Array(Scope).pipe(Schema.minItems(1), Schema.maxItems(16)),
+  scopes: Schema.Array(Scope).pipe(Schema.maxItems(16)),
   termsId: TermsId,
-}).annotations(strict);
+})
+  .pipe(
+    Schema.filter(
+      (descriptor) => {
+        if (descriptor.dialect !== undefined && descriptor.flow !== "authorization-code-pkce") {
+          return false;
+        }
+        // A dialect entry declares its own wire shape; every other flow needs
+        // a client identity and at least one scope.
+        return (
+          descriptor.dialect !== undefined ||
+          (descriptor.clientId !== undefined && descriptor.scopes.length >= 1)
+        );
+      },
+      {
+        description:
+          "a standard flow requires a client ID and at least one scope; a dialect flow cannot pair with a device-code grant",
+      },
+    ),
+  )
+  .annotations(strict);
 export type HostOAuthDescriptor = typeof HostOAuthDescriptor.Type;
 
 export const HostOAuthTermsAcknowledgment = Schema.Struct({
@@ -185,5 +218,14 @@ export const SubscriptionOAuthOffer = Schema.Struct({
     Schema.minItems(1),
     Schema.maxItems(2),
   ),
+  /**
+   * The only provider endpoint this sign-in may attach to. Compared by
+   * canonical origin against the instance's configured base URL before a
+   * flow begins and before a credential pointer is stored, so an offered
+   * sign-in cannot be attached to an arbitrary endpoint.
+   */
+  allowedEndpoint: Endpoint,
 }).annotations(strict);
 export type SubscriptionOAuthOffer = typeof SubscriptionOAuthOffer.Type;
+
+export const decodeSubscriptionOAuthOffer = Schema.decodeUnknownSync(SubscriptionOAuthOffer);

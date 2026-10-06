@@ -1,4 +1,9 @@
 import {
+  MAX_AGENT_RESULT_SUMMARY_CHARACTERS,
+  MAX_AGENT_RESULT_PACKETS,
+  type AgentRunResultsResponse,
+  type AgentRunResultEvidence,
+  type AgentRunReviewSnapshot,
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
   USAGE_RESUME_SETTLED,
@@ -24,6 +29,8 @@ import {
 import {
   AGENT_RUN_DEPENDENCY_WAITING_REASON,
   AgentRunPolicyRejected,
+  agentRunResultReference,
+  assertAgentRunCapacityAvailable,
   agentRunPoolRouteWaitingReason,
   assertAgentRunUsageResumeCancellable,
   assertAgentRunUsageResumeSchedulable,
@@ -33,7 +40,11 @@ import {
   isAgentRunActiveStatus,
   isAgentRunTerminalStatus,
 } from "@octant/domain";
-import { readAgentRunResultText } from "../persistence/agentRunContentStore";
+import {
+  readAgentRunResultText,
+  readAgentRunResultEvidence,
+  readAgentRunReviewSnapshot,
+} from "../persistence/agentRunContentStore";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
@@ -213,12 +224,20 @@ export class AgentRunPersistenceService {
 
   applyCommand(
     command: Exclude<AgentRunCommand, { kind: "request-agent-run" }>,
+    resultEvidence?: AgentRunResultEvidence,
   ): AgentRunCommandResult {
     const runId =
       "runId" in command ? decodeAgentRunId(command.runId) : decodeAgentRunId(this.#uuid());
     const current = this.#projection.getById(runId);
     let next: AgentRun;
     try {
+      if (command.kind === "resume-agent-run" && current?.lifecycleStatus === "completed") {
+        const counts = this.#projection.activeCounts();
+        assertAgentRunCapacityAvailable({
+          activeGlobal: counts.global,
+          activeForParent: counts.byParent.get(current.parentThreadId) ?? 0,
+        });
+      }
       next = evaluateAgentRunCommand(current, command, this.#now());
     } catch (error) {
       return policyFailure(error);
@@ -291,11 +310,24 @@ export class AgentRunPersistenceService {
       };
     }
 
+    // A new attempt or an unobserved settlement cannot keep advertising a
+    // previous waiting snapshot as this generation's final comparison.
+    const evidence =
+      (command.kind === "complete-agent-run" ? command.resultEvidence : resultEvidence) ??
+      (next.workspaceReceipt.kind === "code-worktree"
+        ? {
+            files: { status: "unavailable" as const, items: [] },
+            checks: { status: "unavailable" as const, items: [] },
+          }
+        : undefined);
     try {
       this.#store.appendStatusChanged({
         runId: next.id,
+        run: next,
+        ...(evidence === undefined ? {} : { resultEvidence: evidence }),
         fromStatus,
         toStatus: next.lifecycleStatus,
+        generation: next.generation ?? 1,
         version: next.version,
         expectedVersion: command.expectedVersion,
         occurredAt: next.updatedAt,
@@ -308,7 +340,9 @@ export class AgentRunPersistenceService {
           ? {
               result: command.result,
               resultText: command.resultText,
-              run: next,
+              ...(command.resultEvidence === undefined
+                ? {}
+                : { resultEvidence: command.resultEvidence }),
               ...(next.usage === undefined ? {} : { usage: next.usage }),
             }
           : {}),
@@ -321,6 +355,7 @@ export class AgentRunPersistenceService {
       runId: next.id,
       fromStatus,
       toStatus: next.lifecycleStatus,
+      generation: next.generation ?? 1,
       version: next.version,
       updatedAt: next.updatedAt,
       ...(next.recoveryReason === undefined ? {} : { recoveryReason: next.recoveryReason }),
@@ -440,9 +475,16 @@ export class AgentRunPersistenceService {
    * and reports no text, so a reader is told the reply is gone rather than
    * handed an empty one.
    */
-  parentSummary(parentThreadId: AgentRunParentThreadId): ReadonlyArray<AgentRunParentSummaryEntry> {
+  parentSummary(
+    parentThreadId: AgentRunParentThreadId,
+    canRead: (run: AgentRun) => boolean = () => true,
+  ): ReadonlyArray<AgentRunParentSummaryEntry> {
     return this.#projection
       .parentSummary(decodeAgentRunParentThreadId(parentThreadId))
+      .filter((entry) => {
+        const run = this.getById(entry.runId);
+        return run !== undefined && canRead(run);
+      })
       .map((entry) => {
         if (entry.result === undefined) return entry;
         const resultText = this.resultText(entry.runId);
@@ -464,6 +506,101 @@ export class AgentRunPersistenceService {
       runId: run.id,
       reference: run.result.reference,
     });
+  }
+
+  reviewSnapshot(runId: AgentRunId, generation: number): AgentRunReviewSnapshot | undefined {
+    const current = this.#projection.getById(runId);
+    const retained =
+      ((current?.generation ?? 1) === generation && current !== undefined) ||
+      this.#projection
+        .resultHistory(runId)
+        .runs.some((run) => (run.generation ?? 1) === generation);
+    if (!retained) return undefined;
+    return readAgentRunReviewSnapshot(this.#connection, {
+      runId,
+      reference: agentRunResultReference(runId, generation),
+    });
+  }
+
+  resultPackets(runId: AgentRunId): AgentRunResultsResponse {
+    const history = this.#projection.resultHistory(runId);
+    const current = this.#projection.getById(runId);
+    const runs =
+      current === undefined
+        ? history.runs
+        : [
+            ...history.runs.filter((run) => (run.generation ?? 1) !== (current.generation ?? 1)),
+            current,
+          ];
+    return {
+      runId,
+      truncated: history.truncated || runs.length > MAX_AGENT_RESULT_PACKETS,
+      packets: runs.slice(-MAX_AGENT_RESULT_PACKETS).map((run) => {
+        const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+        const text =
+          run.result === undefined
+            ? undefined
+            : readAgentRunResultText(this.#connection, {
+                runId,
+                reference: run.result.reference,
+              });
+        const evidence = readAgentRunResultEvidence(this.#connection, {
+          runId,
+          reference: agentRunResultReference(runId, run.generation),
+        });
+        const review = this.reviewSnapshot(runId, run.generation ?? 1);
+        const metadata =
+          review === undefined
+            ? undefined
+            : {
+                capturedAt: review.capturedAt,
+                baseTree: review.baseTree,
+                resultTree: review.resultTree,
+                changedPaths: review.changedPaths,
+                truncated: review.truncated,
+              };
+        return {
+          runId,
+          ...(metadata === undefined ? {} : { review: metadata }),
+          parentThreadId: run.parentThreadId,
+          generation: run.generation ?? 1,
+          providerInstanceId: target.providerInstanceId,
+          modelId: target.modelId,
+          executionKind: run.executionKind,
+          workspace: run.workspaceReceipt,
+          lifecycleStatus: run.lifecycleStatus,
+          occurredAt: run.updatedAt,
+          reportedSummary: {
+            status: text === undefined ? "unavailable" : "available",
+            ...(run.result === undefined ? {} : { reference: run.result.reference }),
+            ...(text === undefined
+              ? {}
+              : { text: text.slice(0, MAX_AGENT_RESULT_SUMMARY_CHARACTERS) }),
+            truncated:
+              run.result?.truncated === true ||
+              (text?.length ?? 0) > MAX_AGENT_RESULT_SUMMARY_CHARACTERS,
+          },
+          files: {
+            ...(evidence?.files ?? { status: "unavailable" as const, items: [] }),
+            reviewStatus: review === undefined ? ("unavailable" as const) : ("available" as const),
+          },
+          checks: evidence?.checks ?? { status: "unavailable", items: [] },
+          blockers:
+            run.recoveryReason === undefined
+              ? { status: "unavailable", items: [] }
+              : {
+                  status: "recorded",
+                  items: [
+                    {
+                      text: run.recoveryReason,
+                      source: "lifecycle",
+                      reference: `octant://agent-run/${String(run.id)}/version/${run.version}`,
+                    },
+                  ],
+                },
+        };
+      }),
+    };
   }
 
   getById(runId: AgentRunId): AgentRun | undefined {
@@ -553,6 +690,7 @@ export class AgentRunPersistenceService {
         runId: payload.runId,
         fromStatus: payload.fromStatus,
         toStatus: payload.toStatus,
+        ...(payload.generation === undefined ? {} : { generation: payload.generation }),
         version: payload.version,
         updatedAt: envelope.occurredAt as UtcTimestamp,
         ...(payload.recoveryReason === undefined ? {} : { recoveryReason: payload.recoveryReason }),

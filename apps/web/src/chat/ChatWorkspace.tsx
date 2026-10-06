@@ -1,3 +1,4 @@
+import type { ProviderModelOptionValues } from "@octant/contracts";
 import {
   decodeChatAttachmentId,
   type ChatAttachmentId,
@@ -64,8 +65,12 @@ import { decodeImageGenerationScopeId } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type { HostId } from "@octant/contracts/host";
+import { activeChatTurns } from "@octant/domain/chat-policy";
 import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
+import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
@@ -363,6 +368,24 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   pendingPreviewRef.current = pendingPreviewSelections;
   pendingExtensionRef.current = props.pendingExtensionSelections ?? extensionDraft.receipts;
   pendingQuotesRef.current = pendingQuotes;
+  // Read before the early return below, which would otherwise change the hook
+  // order. The transcript draws the inline Canvases; the Canvas tools panel
+  // lists the rest.
+  const threadCanvases = useThreadCanvasCards({
+    client: props.canvasClient,
+    mode: "chat",
+    threadId: view?.thread.id,
+    projectId: view?.thread.projectId ?? null,
+    // A settled turn may have authored a Canvas; re-read the cards so the
+    // document appears without reopening the thread.
+    refreshKey: canvasRefreshKey + settledTurnCount,
+    ...(props.onCanvasReferencesObserved === undefined || view === undefined
+      ? {}
+      : {
+          onCardsObserved: (cards: ReadonlyArray<CanvasThreadReferenceCard>) =>
+            props.onCanvasReferencesObserved?.(String(view.thread.id), cards),
+        }),
+  });
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
@@ -388,6 +411,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     );
   }
   const thread = view.thread;
+  const canvasClient = props.canvasClient;
+  const canvasPlacement = placeThreadCanvases(
+    threadTurnSpans(
+      activeChatTurns(view.turns),
+      (turn) => String(turn.id),
+      (turn) => turn.createdAt,
+    ),
+    threadCanvases.cards,
+  );
   const canvasPanelId = `chat-canvas-panel-${thread.id}`;
   const pendingExtensionSelections = props.pendingExtensionSelections ?? extensionDraft.receipts;
   const removeExtensionSelection = props.onRemoveExtensionSelection ?? extensionDraft.remove;
@@ -557,14 +589,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   function selectProviderModel(selection: {
     readonly providerInstanceId: ChatThread["providerInstanceId"];
     readonly modelId: ChatThread["modelId"];
+    readonly modelOptionValues?: ProviderModelOptionValues;
   }) {
-    void enqueueThreadCommand(async (previous) => {
+    return enqueueThreadCommand(async (previous) => {
       const result = await props.controller.execute({
         kind: "change-chat-provider",
         threadId: thread.id,
         expectedVersion: queuedVersion(previous),
         providerInstanceId: selection.providerInstanceId,
         modelId: selection.modelId,
+        ...(selection.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: selection.modelOptionValues }),
       });
       return { value: undefined, base: baseFromResult(result) };
     }).catch(() => undefined);
@@ -812,20 +848,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               }}
             />
             <CanvasThreadReferenceCardList
-              client={props.canvasClient}
-              mode="chat"
+              cards={threadCanvases.cards.filter(
+                (card) => !canvasPlacement.placed.has(String(card.canvasId)),
+              )}
+              error={threadCanvases.error}
               {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
-              {...(props.onCanvasReferencesObserved === undefined
-                ? {}
-                : {
-                    onCardsObserved: (cards: ReadonlyArray<CanvasThreadReferenceCard>) =>
-                      props.onCanvasReferencesObserved?.(String(thread.id), cards),
-                  })}
-              projectId={thread.projectId ?? null}
-              // A settled turn may have authored a Canvas; re-read the cards so
-              // the document appears without reopening the thread.
-              refreshKey={canvasRefreshKey + settledTurnCount}
-              threadId={thread.id}
             />
           </section>
         )}
@@ -875,6 +902,19 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           />
         )}
         <ChatTranscript
+          {...(canvasClient === undefined
+            ? {}
+            : {
+                afterTurn: (turn: ChatThreadView["turns"][number]) => (
+                  <ThreadCanvases
+                    cards={canvasPlacement.byRow.get(String(turn.id))}
+                    client={canvasClient}
+                    // Chat has no dock, so the Canvas opens as a tab beside the thread.
+                    {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
+                    openLabel="Open Canvas"
+                  />
+                ),
+              })}
           busy={isSending || branchPending}
           {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
           {...(checkpoints.available
@@ -1218,6 +1258,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               onSelectModel: (selection: {
                 readonly providerInstanceId: (typeof view.thread)["providerInstanceId"];
                 readonly modelId: (typeof view.thread)["modelId"];
+                readonly modelOptionValues?: ProviderModelOptionValues;
               }) => selectProviderModel(selection),
             })}
         onProviderChange={(providerId) => {

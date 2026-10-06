@@ -2,22 +2,10 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { HomeStart, type HomeAction } from "./HomeStart";
-import type { RunningNowCard } from "./runningNow";
 
 function action(id: HomeAction["id"], title: string, onSelect: () => void): HomeAction {
   return { id, title, detail: `${title} detail`, onSelect };
 }
-
-const runningCard: RunningNowCard = {
-  threadId: "thread-1",
-  projectId: "project-1",
-  title: "Wire the board",
-  projectName: "octant",
-  branch: "feature/board",
-  provider: { displayName: "Claude", driverKind: "claude" },
-  latestActivity: "Reading apps/web/src/App.tsx",
-  activeAt: new Date(Date.now() - 4 * 60_000).toISOString(),
-};
 
 describe("the start screen action tiles", () => {
   it("runs the action each tile names when it is chosen", async () => {
@@ -32,7 +20,6 @@ describe("the start screen action tiles", () => {
           action("open-terminal", "Open terminal", openTerminal),
           action("review", "Review 3 changes", review),
         ]}
-        running={[]}
       />,
     );
 
@@ -48,52 +35,30 @@ describe("the start screen action tiles", () => {
     expect(addFolder).toHaveBeenCalledTimes(1);
   });
 
-  it("draws nothing when there are no actions and nothing is running", () => {
-    const { container } = render(<HomeStart actions={[]} running={[]} />);
+  it("draws nothing when there are no actions and no dashboard", () => {
+    const { container } = render(<HomeStart actions={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
 });
 
-describe("Running now", () => {
-  it("lists the running threads with where they work and opens the one chosen", async () => {
-    const user = userEvent.setup();
-    const onOpenRunning = vi.fn();
-    const onOpenBoard = vi.fn();
+describe("the start screen card area", () => {
+  it("places the dashboard under the tiles", () => {
     render(
       <HomeStart
-        actions={[]}
-        onOpenBoard={onOpenBoard}
-        onOpenRunning={onOpenRunning}
-        running={[runningCard, { threadId: "thread-2", title: "Fix the flaky test" }]}
+        actions={[action("review", "Review 2 changes", vi.fn())]}
+        dashboard={<div data-testid="dashboard" />}
       />,
     );
-
-    const section = within(screen.getByRole("region", { name: "Running now" }));
-    expect(section.getAllByRole("listitem")).toHaveLength(2);
-    expect(section.getByText("octant")).toBeInTheDocument();
-    expect(section.getByText("feature/board")).toBeInTheDocument();
-    expect(section.getByText("Reading apps/web/src/App.tsx")).toBeInTheDocument();
-    expect(section.getByText("Active 4m ago")).toBeInTheDocument();
-
-    await user.click(section.getByRole("button", { name: /Wire the board/ }));
-    expect(onOpenRunning).toHaveBeenCalledWith(runningCard);
-
-    await user.click(section.getByRole("button", { name: "Open board" }));
-    expect(onOpenBoard).toHaveBeenCalledTimes(1);
+    const tiles = screen.getByRole("group", { name: "Quick actions" });
+    const dashboard = screen.getByTestId("dashboard");
+    expect(
+      tiles.compareDocumentPosition(dashboard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
-  it("states only what the host reported for a thread", () => {
-    render(
-      <HomeStart
-        actions={[]}
-        onOpenRunning={vi.fn()}
-        running={[{ threadId: "thread-2", title: "Fix the flaky test" }]}
-      />,
-    );
-
-    const card = screen.getByRole("button", { name: /Fix the flaky test/ });
-    expect(card).not.toHaveTextContent("Active");
-    expect(card.querySelector(".running-card__chips")).toBeNull();
-    expect(card.querySelector(".running-card__well")).toBeNull();
+  it("shows the dashboard alone when no tile has a way to run", () => {
+    render(<HomeStart actions={[]} dashboard={<div data-testid="dashboard" />} />);
+    expect(screen.getByTestId("dashboard")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Quick actions" })).toBeNull();
   });
 });

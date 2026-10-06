@@ -419,14 +419,36 @@ export class GitMutationPort {
    * there. The returned `anchorId` names the refs so an unused capture can
    * release exactly its own, never a neighbour's.
    */
-  async snapshotWorkingTree(
+  snapshotWorkingTree(
+    input: {
+      readonly checkoutRoot: string;
+      readonly checkoutId: string;
+      readonly retention: "comparison";
+    } & GitMutationPolicy,
+    signal?: AbortSignal,
+  ): Promise<
+    | { readonly status: "captured"; readonly snapshot: GitTreeSnapshot }
+    | { readonly status: "failed" }
+  >;
+  snapshotWorkingTree(
     input: { readonly checkoutRoot: string; readonly checkoutId: string } & GitMutationPolicy,
+    signal?: AbortSignal,
+  ): Promise<
+    | { readonly status: "captured"; readonly snapshot: GitTreeSnapshot; readonly anchorId: string }
+    | { readonly status: "failed" }
+  >;
+  async snapshotWorkingTree(
+    input: {
+      readonly checkoutRoot: string;
+      readonly checkoutId: string;
+      readonly retention?: "comparison";
+    } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<
     | {
         readonly status: "captured";
         readonly snapshot: GitTreeSnapshot;
-        readonly anchorId: string;
+        readonly anchorId?: string;
       }
     | { readonly status: "failed" }
   > {
@@ -475,6 +497,9 @@ export class GitMutationPort {
         index,
         ...(head.exitCode === 0 && isObjectId(headOid) ? { head: headOid } : {}),
       };
+      // A comparison is persisted as bounded private diff text, not a restore
+      // point. It must not leave refs that outlive a host crash or subject purge.
+      if (input.retention === "comparison") return { status: "captured", snapshot };
       const anchorId = randomUUID();
       if (
         !(await this.#anchor(
