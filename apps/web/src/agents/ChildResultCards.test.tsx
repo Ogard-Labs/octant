@@ -81,7 +81,9 @@ describe("ChildResultCards", () => {
         providerGroups={[
           {
             instance: { id: provider, displayName: "Claude Code" },
-            sections: [],
+            sections: [
+              { label: "Models", models: [{ model: { id: "haiku", displayName: "Haiku 4.5" } }] },
+            ],
           } as never,
         ]}
         text={finished}
@@ -89,7 +91,9 @@ describe("ChildResultCards", () => {
     );
 
     const card = screen.getByRole("article", { name: "Research subagent finished" });
-    expect(card).toHaveTextContent("Claude Code · haiku");
+    // The names the model picker uses, not the ids the host recorded.
+    expect(card).toHaveTextContent("Claude Code · Haiku 4.5");
+    expect(card).not.toHaveTextContent("Claude Code · haiku");
     expect(card).toHaveTextContent("MATRIX-A1");
     expect(card).not.toHaveTextContent(run);
     expect(card).not.toHaveTextContent(provider);
@@ -97,6 +101,15 @@ describe("ChildResultCards", () => {
     await user.click(within(card).getByRole("button", { name: "Details" }));
     expect(card).toHaveTextContent(`Run: ${run} · Generation 2`);
     expect(card).toHaveTextContent(`Provider ID: ${provider}`);
+  });
+
+  it("falls back to the recorded model id only when the picker knows no label", () => {
+    render(<ChildResultCards providerGroups={[]} text={finished} />);
+
+    expect(screen.getByRole("article", { name: "Research subagent finished" })).toHaveTextContent(
+      "haiku",
+    );
+    expect(screen.queryByText(provider)).not.toBeInTheDocument();
   });
 
   it("says why a subagent stopped instead of presenting a result", () => {
