@@ -210,6 +210,7 @@ export type AgentRunRetryRequest = typeof AgentRunRetryRequest.Type;
 
 export const AgentRunResumeRequest = Schema.Struct({
   runId: AgentRunId,
+  message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
   expectedVersion: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
 }).annotations(strict);
 export type AgentRunResumeRequest = typeof AgentRunResumeRequest.Type;

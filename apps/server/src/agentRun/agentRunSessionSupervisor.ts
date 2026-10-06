@@ -5,6 +5,7 @@ import {
   isAgentRunSessionDeath,
   AgentRunSessionError,
   type AgentRunSessionHandle,
+  type AgentRunPreparedResume,
   type AgentRunResumeReadiness,
   type AgentRunSessionOutcome,
   type AgentRunSessionPort,
@@ -68,13 +69,16 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
     return this.#start(run);
   }
 
-  checkResume(run: AgentRun): AgentRunResumeReadiness {
+  checkResume(run: AgentRun): AgentRunResumeReadiness | Promise<AgentRunResumeReadiness> {
     if (this.#sessions.has(run.id))
       return { status: "refused", message: "This child still owns an active session." };
     if (this.#port.resume === undefined || this.#port.checkResume === undefined) {
       return {
         status: "refused",
-        message: "This execution cannot verify a saved child conversation.",
+        message:
+          run.lifecycleStatus === "completed"
+            ? "This execution cannot verify a saved child conversation. Start a new delegation from the parent."
+            : "This execution cannot verify a saved child conversation.",
       };
     }
     return this.#port.checkResume(run);
@@ -84,12 +88,35 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
     if (this.#port.resume === undefined)
       throw new AgentRunSessionError(
         "resume-unavailable",
-        "This execution cannot resume its saved conversation. Use Retry for a fresh session.",
+        run.lifecycleStatus === "completed"
+          ? "This execution cannot resume its saved conversation. Start a new delegation from the parent."
+          : "This execution cannot resume its saved conversation. Use Retry for a fresh session.",
       );
     return this.#start(run, input ?? {});
   }
 
-  #start(run: AgentRun, continuation?: { readonly message?: string }): AgentRunSessionHandle {
+  prepareResume(
+    run: AgentRun,
+    input?: { readonly message?: string },
+  ): AgentRunPreparedResume | undefined {
+    if (this.#sessions.has(run.id))
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "This child still owns an active session.",
+      );
+    const prepared = this.#port.prepareResume?.(run, input);
+    if (prepared === undefined) return undefined;
+    return {
+      start: (started) => this.#start(started, input ?? {}, prepared),
+      release: prepared.release,
+    };
+  }
+
+  #start(
+    run: AgentRun,
+    continuation?: { readonly message?: string },
+    prepared?: AgentRunPreparedResume,
+  ): AgentRunSessionHandle {
     if (this.#sessions.has(run.id)) {
       throw new AgentRunProcessSupervisorError(
         "duplicate",
@@ -97,11 +124,17 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
       );
     }
     const handle =
-      continuation === undefined ? this.#port.start(run) : this.#port.resume?.(run, continuation);
+      prepared !== undefined
+        ? prepared.start(run)
+        : continuation === undefined
+          ? this.#port.start(run)
+          : this.#port.resume?.(run, continuation);
     if (handle === undefined)
       throw new AgentRunSessionError(
         "resume-unavailable",
-        "This execution cannot resume its saved conversation. Use Retry for a fresh session.",
+        run.lifecycleStatus === "completed"
+          ? "This execution cannot resume its saved conversation. Start a new delegation from the parent."
+          : "This execution cannot resume its saved conversation. Use Retry for a fresh session.",
       );
     const owned: OwnedSession = {
       runId: run.id,

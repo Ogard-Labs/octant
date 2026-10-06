@@ -58,6 +58,187 @@ function summaryEntry(overrides: {
 }
 
 describe("AgentRunHierarchy", () => {
+  it("follows up a completed managed child with its existing identity and version", async () => {
+    const user = userEvent.setup();
+    const resume = vi.fn<AgentRunClient["resume"]>().mockResolvedValue({ kind: "run-updated" });
+    const client = emptyClient({
+      resume,
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [summaryEntry({ lifecycleStatus: "completed", task: "Review the migration" })],
+      })),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+    await user.click(await screen.findByRole("button", { name: /Review the migration/ }));
+    await user.click(screen.getByRole("button", { name: "Follow up" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Follow-up message" }),
+      "  Check recovery too.  ",
+    );
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(resume).toHaveBeenCalledExactlyOnceWith({
+      runId,
+      expectedVersion: 3,
+      message: "Check recovery too.",
+    });
+  });
+
+  it.each([
+    { lifecycleStatus: "cancelled", executionKind: "octant-managed" },
+    { lifecycleStatus: "completed", executionKind: "provider-native" },
+  ])("does not offer a follow-up for $lifecycleStatus $executionKind children", async (state) => {
+    const user = userEvent.setup();
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [
+          {
+            ...summaryEntry({ lifecycleStatus: state.lifecycleStatus, task: "Read-only child" }),
+            ...state,
+          },
+        ],
+      })),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+    await user.click(await screen.findByRole("button", { name: /Read-only child/ }));
+    expect(screen.queryByRole("button", { name: "Follow up" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Follow-up message" })).not.toBeInTheDocument();
+  });
+
+  it("prevents duplicate follow-ups and keeps the draft when the host refuses", async () => {
+    const user = userEvent.setup();
+    let finish: ((result: Awaited<ReturnType<AgentRunClient["resume"]>>) => void) | undefined;
+    const resume = vi.fn<AgentRunClient["resume"]>(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const client = emptyClient({
+      resume,
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [summaryEntry({ lifecycleStatus: "completed", task: "Review the migration" })],
+      })),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+    await user.click(await screen.findByRole("button", { name: /Review the migration/ }));
+    await user.click(screen.getByRole("button", { name: "Follow up" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Follow-up message" }),
+      "  Keep my draft.  ",
+    );
+    await user.dblClick(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Follow-up message" })).toBeDisabled();
+    await act(async () =>
+      finish?.({ kind: "run-command-failed", message: "Saved session is unavailable." }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Saved session is unavailable.");
+    expect(screen.getByRole("textbox", { name: "Follow-up message" })).toHaveValue(
+      "  Keep my draft.  ",
+    );
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
+  });
+
+  it("requires a message and limits follow-ups to 4096 characters", async () => {
+    const user = userEvent.setup();
+    const resume = vi.fn<AgentRunClient["resume"]>().mockResolvedValue({ kind: "run-updated" });
+    const client = emptyClient({
+      resume,
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [summaryEntry({ lifecycleStatus: "completed", task: "Review the migration" })],
+      })),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+    await user.click(await screen.findByRole("button", { name: /Review the migration/ }));
+    await user.click(screen.getByRole("button", { name: "Follow up" }));
+    const field = screen.getByRole("textbox", { name: "Follow-up message" });
+    expect(field).toHaveAttribute("maxlength", "4096");
+    await user.type(field, "   ");
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
+    expect(resume).not.toHaveBeenCalled();
+    await user.clear(field);
+    await user.paste("x".repeat(4096));
+    await user.type(field, "y");
+    expect(field).toHaveValue("x".repeat(4096));
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(resume).toHaveBeenCalledExactlyOnceWith({
+      runId,
+      expectedVersion: 3,
+      message: "x".repeat(4096),
+    });
+  });
+
+  it("keeps a new child's draft separate from the previous child's pending request", async () => {
+    const user = userEvent.setup();
+    const secondRunId = decodeAgentRunId("33333333-3333-4333-8333-333333333333");
+    let finish: ((result: Awaited<ReturnType<AgentRunClient["resume"]>>) => void) | undefined;
+    const resume = vi.fn<AgentRunClient["resume"]>(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const client = emptyClient({
+      resume,
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [
+          summaryEntry({ lifecycleStatus: "completed", task: "First child" }),
+          {
+            ...summaryEntry({ lifecycleStatus: "completed", task: "Second child" }),
+            runId: secondRunId,
+          },
+        ],
+      })),
+    });
+    const view = render(
+      <AgentRunHierarchy client={client} parentThreadId={parentThreadId} requestedRunId={runId} />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Follow up" }));
+    await user.type(screen.getByRole("textbox", { name: "Follow-up message" }), "First draft");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    view.rerender(
+      <AgentRunHierarchy
+        client={client}
+        parentThreadId={parentThreadId}
+        requestedRunId={secondRunId}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Follow up" }));
+    expect(screen.getByRole("textbox", { name: "Follow-up message" })).toHaveValue("");
+    await user.type(screen.getByRole("textbox", { name: "Follow-up message" }), "Second draft");
+    await act(async () =>
+      finish?.({ kind: "run-command-failed", message: "First child refused." }),
+    );
+    expect(screen.getByRole("textbox", { name: "Follow-up message" })).toHaveValue("Second draft");
+    expect(screen.queryByText("First child refused.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
+  });
+
+  it.each(["waiting", "interrupted"])(
+    "resumes a %s child without a follow-up message",
+    async (lifecycleStatus) => {
+      const user = userEvent.setup();
+      const resume = vi.fn<AgentRunClient["resume"]>().mockResolvedValue({ kind: "run-updated" });
+      const client = emptyClient({
+        resume,
+        parentSummary: vi.fn(async () => ({
+          parentThreadId,
+          entries: [summaryEntry({ lifecycleStatus, task: "Resume this child" })],
+        })),
+      });
+      render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+      await user.click(await screen.findByRole("button", { name: /Resume this child/ }));
+      expect(screen.queryByRole("button", { name: "Follow up" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Resume" }));
+      expect(resume).toHaveBeenCalledExactlyOnceWith({ runId, expectedVersion: 3 });
+    },
+  );
+
   it("offers no way to start a subagent by hand; only the thread's agent starts one", async () => {
     render(<AgentRunHierarchy client={emptyClient()} parentThreadId={parentThreadId} />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Subagents" })).toBeVisible());

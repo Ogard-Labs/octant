@@ -1,5 +1,10 @@
 import { Schema } from "effect";
-import { AgentRunId, AgentRunResultDeliveryMark } from "./agentRun";
+import {
+  AgentRunId,
+  AgentRunResultDeliveryMark,
+  AgentRunResultDeliveryRunIds,
+  AgentRunResultDeliveryGenerations,
+} from "./agentRun";
 import { ContextManifestId } from "./context";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
@@ -682,7 +687,25 @@ export const DeliverChatAgentResultCommand = Schema.Struct({
   kind: Schema.Literal("deliver-chat-agent-result"),
   ...ChatThreadCommandFields,
   runId: AgentRunId,
-}).annotations(strict);
+  runIds: Schema.optional(AgentRunResultDeliveryRunIds),
+  runGenerations: Schema.optional(AgentRunResultDeliveryGenerations),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((command) => {
+      const ids = command.runIds ?? [command.runId];
+      return (
+        ids.some((id) => String(id) === String(command.runId)) &&
+        (command.runGenerations === undefined ||
+          (command.runGenerations.length === ids.length &&
+            new Set(command.runGenerations.map((member) => String(member.runId))).size ===
+              ids.length &&
+            command.runGenerations.every((member) =>
+              ids.some((id) => String(id) === String(member.runId)),
+            )))
+      );
+    }),
+  );
 
 export const UpdateChatSettingsCommand = Schema.Struct({
   kind: Schema.Literal("update-chat-settings"),

@@ -316,25 +316,41 @@ export type NativeHarnessAskUserArguments = typeof NativeHarnessAskUserArguments
 
 /**
  * Delegation to a child run. `start` proposes a bounded task under a role;
- * the server decides the child's model from the role's slot, clamps its
- * authority, and admits it under the creation posture — a model never picks
- * a provider or widens anything by asking.
+ * the server resolves the configured role slot or an explicit eligible target,
+ * clamps authority, and admits it under the creation posture. Naming a target
+ * never widens the parent's authority.
  */
 export const MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS = 120_000;
 
 export const NativeHarnessDelegateArguments = Schema.Union(
+  Schema.Struct({ operation: Schema.Literal("capabilities") }).annotations(strict),
   Schema.Struct({
     operation: Schema.Literal("start"),
     role: Schema.Literal("research", "implementation", "review", "custom"),
     task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
+    providerInstanceId: Schema.optional(ProviderInstanceId),
+    modelId: Schema.optional(ProviderModelId),
+    reasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
     includeParentContext: Schema.optional(Schema.Boolean),
     /**
      * Runs this child waits for. It starts only once all of them completed,
      * receives their replies, and never runs if one failed or was cancelled.
      */
     after: Schema.optional(AgentRunDependencies),
-  }).annotations(strict),
+  })
+    .annotations(strict)
+    .pipe(
+      Schema.filter(
+        (input) => (input.providerInstanceId === undefined) === (input.modelId === undefined),
+      ),
+    ),
   Schema.Struct({ operation: Schema.Literal("status") }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("follow-up"),
+    runId: Schema.UUID,
+    expectedVersion: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
+  }).annotations(strict),
   Schema.Struct({
     operation: Schema.Literal("collect"),
     runId: Schema.UUID,
@@ -572,15 +588,31 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
   {
     name: "delegate",
     description:
-      "Run work as a graph of child agents. start hands one bounded task to a child (a standalone brief: objective, expected output, boundaries) and returns its runId. Independent tasks run in parallel; give a task that needs others' output `after` with their runIds, and it starts only when they all completed, with their replies in front of it. If one of those fails or is cancelled, it never runs. status lists your children with what each waits on; wait blocks until the named children (or all) finish; collect reads a finished child's reply. An accepted start is not completion: collect and assess results before relying on them. At most a few children run at once, so keep graphs small. Use second-opinion, when offered, for advice that needs no separate task.",
+      "Run work as a graph of child agents. capabilities reports eligible targets and supported reasoning values. Omit providerInstanceId and modelId to use the configured role slot, or supply both for an explicit target. start hands one bounded task to a child (a standalone brief: objective, expected output, boundaries) and returns its runId. Independent tasks run in parallel; give a task that needs others' output `after` with their runIds, and it starts only when they all completed, with their replies in front of it. If one of those fails or is cancelled, it never runs. status lists your children with what each waits on; wait blocks until the named children (or all) finish; collect reads a finished child's reply and current version/generation. follow-up continues that completed child with runId, its expectedVersion, and a nonempty message (at most 4096 characters); genuine saved-session resume must be supported. An accepted start is not completion: collect and assess results before relying on them. At most a few children run at once, so keep graphs small. Use second-opinion, when offered, for advice that needs no separate task.",
     inputSchema: {
       type: "object",
       properties: {
-        operation: { type: "string", enum: ["start", "status", "collect", "wait"] },
+        operation: {
+          type: "string",
+          enum: ["capabilities", "start", "status", "collect", "wait", "follow-up"],
+        },
         role: { type: "string", enum: ["research", "implementation", "review", "custom"] },
         task: {
           type: "string",
           description: "A standalone brief: objective, output format, boundaries.",
+        },
+        providerInstanceId: {
+          type: "string",
+          description: "Eligible provider from capabilities; requires modelId.",
+        },
+        modelId: {
+          type: "string",
+          description: "Model on the explicit provider; requires providerInstanceId.",
+        },
+        reasoning: {
+          type: "string",
+          maxLength: 128,
+          description: "Supported reasoning value for the selected model.",
         },
         includeParentContext: { type: "boolean" },
         after: {
@@ -590,6 +622,17 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
           description: "runIds this task must wait for (start only).",
         },
         runId: { type: "string" },
+        expectedVersion: {
+          type: "integer",
+          minimum: 1,
+          description: "Current child version from status or collect; required for follow-up.",
+        },
+        message: {
+          type: "string",
+          minLength: 1,
+          maxLength: 4096,
+          description: "Explicit message for the completed child; required for follow-up.",
+        },
         runIds: {
           type: "array",
           items: { type: "string" },

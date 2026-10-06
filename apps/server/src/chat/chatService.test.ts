@@ -8695,6 +8695,84 @@ describe("agent result delivery", () => {
       ...overrides,
     });
 
+  it("validates all siblings and keeps old group replay separate from a child's next result generation", async () => {
+    const runs = new Map<string, AgentRun>();
+    const fixture = openFixture({
+      agentRuns: { getById: (id) => runs.get(String(id)), resultText: (id) => `Result for ${id}` },
+    });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Parent",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread");
+    const first = deliveryRunFor(created.thread.id);
+    const second = deliveryRunFor(created.thread.id, {
+      id: "d1a1b000-0000-4000-8000-000000000005",
+    });
+    const third = deliveryRunFor(created.thread.id, { id: "d1a1b000-0000-4000-8000-000000000006" });
+    for (const run of [first, second, third]) runs.set(String(run.id), run);
+    const command = {
+      kind: "deliver-chat-agent-result",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      runId: first.id,
+      runIds: [first.id, second.id],
+    };
+    for (const invalid of [
+      deliveryRunFor(String(third.id), { id: second.id }),
+      { ...second, lifecycleStatus: "running" as const },
+    ]) {
+      runs.set(String(second.id), invalid);
+      await expect(fixture.service.execute(command)).rejects.toMatchObject({
+        failure: { category: "invalid" },
+      });
+    }
+    runs.set(String(second.id), second);
+    const delivered = await fixture.service.execute(command);
+    expect(delivered).toMatchObject({
+      kind: "turn-created",
+      turn: { delivery: { kind: "agent-result", runIds: [first.id, second.id] } },
+    });
+    await until(
+      () =>
+        fixture.service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+    );
+    runs.set(String(first.id), {
+      ...first,
+      resultDelivery: { outcome: "delivered", settledAt: first.updatedAt },
+    });
+    const replayed = await fixture.service.execute({
+      ...command,
+      runId: second.id,
+      runIds: [second.id, third.id],
+    });
+    expect(replayed).toMatchObject({
+      kind: "turn-created",
+      turn: { delivery: { runIds: [first.id, second.id] } },
+    });
+    expect(fixture.service.read(created.thread.id).turns).toHaveLength(1);
+    const resumed = { ...first, generation: 2 };
+    runs.set(String(first.id), resumed);
+    await expect(fixture.service.execute(command)).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    const newDelivery = {
+      kind: "agent-result",
+      runId: first.id,
+      runGenerations: [{ runId: first.id, generation: 2 }],
+    };
+    const next = await fixture.service.execute({
+      kind: "deliver-chat-agent-result",
+      threadId: created.thread.id,
+      expectedVersion: fixture.service.read(created.thread.id).thread?.version,
+      runId: first.id,
+      runGenerations: newDelivery.runGenerations,
+    });
+    expect(next).toMatchObject({ kind: "turn-created", turn: { delivery: newDelivery } });
+    expect(fixture.service.read(created.thread.id).turns).toHaveLength(2);
+  });
+
   it("delivers a finished subagent run's result as a marked turn, once", async () => {
     const runs = new Map<string, AgentRun>();
     const withRuns = openFixture({

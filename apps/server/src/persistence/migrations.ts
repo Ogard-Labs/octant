@@ -1999,6 +1999,27 @@ ALTER TABLE code_runtime_projection
       CREATE INDEX agent_run_content_subject_idx ON agent_run_content_store(subject_type, subject_id);
     `,
   },
+  {
+    version: 70,
+    name: "preserve_managed_child_provider_identities",
+    sql: `
+      ALTER TABLE agent_run_content_store RENAME TO agent_run_content_before_identities;
+      DROP INDEX agent_run_content_subject_idx;
+      CREATE TABLE agent_run_content_store (
+        content_id TEXT PRIMARY KEY CHECK(length(trim(content_id)) > 0),
+        run_id TEXT NOT NULL CHECK(length(trim(run_id)) > 0),
+        subject_type TEXT NOT NULL CHECK(length(trim(subject_type)) > 0),
+        subject_id TEXT NOT NULL CHECK(length(trim(subject_id)) > 0),
+        content_kind TEXT NOT NULL CHECK(content_kind IN ('admitted-context', 'result', 'managed-session', 'managed-conversation', 'managed-provider-identity')),
+        body_text TEXT NOT NULL CHECK(length(body_text) > 0 AND length(body_text) <= 131072),
+        created_at TEXT NOT NULL
+      ) STRICT;
+      INSERT INTO agent_run_content_store SELECT * FROM agent_run_content_before_identities;
+      DROP TABLE agent_run_content_before_identities;
+      CREATE INDEX agent_run_content_subject_idx
+        ON agent_run_content_store(subject_type, subject_id);
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {
