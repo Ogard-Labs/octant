@@ -1356,6 +1356,36 @@ describe("mapClaudeMessage", () => {
     });
   });
 
+  it("carries the runtime's account of the window on the usage that settles the turn", () => {
+    const ctx = context();
+    const contextBreakdown = {
+      parts: [{ kind: "messages", tokens: 900, accuracy: "provider-reported" }],
+    } as const;
+
+    const settled = mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage,
+      permissionDenials: [],
+      contextBreakdown,
+    });
+    const midTurn = mapped(context(), {
+      kind: "assistant",
+      sessionId: claudeSessionId,
+      messageId: "sdk-message-1",
+      content: [{ kind: "text", text: "Done." }],
+      usage,
+    });
+
+    expect(eventValues(settled)[0]).toMatchObject({ kind: "usage", contextBreakdown });
+    // The runtime is asked once per settled turn, so a request in the middle of
+    // one claims no make-up of its own.
+    expect(eventValues(midTurn)[0]).not.toHaveProperty("contextBreakdown");
+  });
+
   it("names no compaction point when the runtime promised none", () => {
     const ctx = context();
 

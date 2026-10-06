@@ -86,6 +86,42 @@ describe("the Working now card", () => {
     expect(row.querySelector(".working-now__step")).toHaveClass("oct-meta--mono");
   });
 
+  it("shows the running command in monospace and how long the turn has really run", async () => {
+    renderCard(
+      createWorkingNowCard(
+        source({
+          threads: [
+            thread(1, {
+              turnStartedAt: new Date(NOW - 7 * 60_000).toISOString(),
+              liveStep: { kind: "tool", tool: "Command", argument: "bun run test" },
+            }),
+          ],
+        }),
+      ),
+    );
+    const row = await screen.findByRole("button", { name: /Task 1/ });
+    expect(within(row).getByText("Command: bun run test")).toHaveClass("oct-meta--mono");
+    expect(within(row).getByText("Running 7m")).toBeInTheDocument();
+    expect(within(row).queryByText(/Active/)).toBeNull();
+  });
+
+  it("says a turn that is waiting on the person in plain words, not code", async () => {
+    renderCard(
+      createWorkingNowCard(
+        source({
+          threads: [
+            thread(1, {
+              turnStartedAt: new Date(NOW - 60_000).toISOString(),
+              liveStep: { kind: "waiting", reason: "approval" },
+            }),
+          ],
+        }),
+      ),
+    );
+    const row = await screen.findByRole("button", { name: /Task 1/ });
+    expect(within(row).getByText("Waiting for approval")).not.toHaveClass("oct-meta--mono");
+  });
+
   it("falls back to the Project name when the host reports no step, and names a remote host", async () => {
     renderCard(
       createWorkingNowCard(
