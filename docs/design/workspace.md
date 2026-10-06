@@ -327,6 +327,29 @@ host restart and is cleared when GitHub authority is revoked (see
 and
 [decisions/0076-pull-request-snapshot-survives-restart.md](../decisions/0076-pull-request-snapshot-survives-restart.md)).
 
+**Answering from a Board card.** A Work or Code card whose thread waits on the
+person shows what it asks and the answers, so a column of waiting cards is
+cleared without opening threads. The card carries the Needs you row
+(`PendingRequestRow`, embedded: the card already names the thread, so the row
+keeps the wait, the text clamped to two lines, and the answers): **Approve** and
+**Deny**, one numbered button per choice, or **Reply…**, which opens the thread.
+The board reads the same host list as the Needs you card (the `pendingRequests`
+read) once for the whole board, only while the board is mounted, on the same
+change-feed, settings, and workspace signals, and never on a timer. A card is
+matched to its request by thread and mode, whichever column the board files it
+in: a Code thread parked on a tool approval still counts as executing while its
+turn runs, so its card sits in In progress, and it carries the request all the
+same. A card with no listed request is drawn as before. A thread with several requests shows the oldest and **+N more
+waiting**, which opens the thread. Answers use each mode's existing command
+through the listed handle and hold no new authority. A refused answer shows one
+line on the card, and the card does not move: it changes column only when the
+host's next board read says so, and the board re-reads when the set of waiting
+requests changes (answered here or elsewhere, or newly raised). With Status
+grouping the Waiting column lists the oldest waiting request first, then cards
+with no listed request in their usual order. The list layout (narrow width, or
+Code's List view) carries the same actions in its rows. A window with no
+pending-request reader (a remote window) draws cards exactly as before.
+
 **GitHub issue browser.** The first-party GitHub plugin contributes a second
 `sidebar.destination` (`github-issues`) that opens a host-scoped, read-only
 issue browser. The sidebar row is shown only when the contribution is present,

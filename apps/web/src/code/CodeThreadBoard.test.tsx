@@ -8,6 +8,13 @@ import type { ProjectId } from "@octant/contracts/projects";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  answerClients,
+  boardPendingSource,
+  codeRequest,
+  pendingReader,
+  workRequest,
+} from "../threadBoard/boardPendingRequests.test-fixtures";
 import { CodeThreadBoard } from "./CodeThreadBoard";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -789,5 +796,214 @@ describe("CodeThreadBoard", () => {
     const listGroup = screen.getByRole("region", { name: "Ready (1)" });
     expect(listGroup.className).toContain("code-board__list-group");
     expect(document.querySelector(".board-col")).toBeNull();
+  });
+});
+
+describe("CodeThreadBoard waiting cards", () => {
+  const threadOne = "00000000-0000-4000-8000-000000005101";
+  const threadTwo = "00000000-0000-4000-8000-000000005102";
+  const threadThree = "00000000-0000-4000-8000-000000005103";
+
+  const approval = codeRequest({
+    threadId: threadOne,
+    threadTitle: "Fix the flaky build",
+    kind: "approval",
+    text: "Run: bun run test",
+    minutesAgo: 4,
+  });
+  const question = codeRequest({
+    threadId: threadTwo,
+    threadTitle: "Pick a database",
+    kind: "question",
+    text: "Which database should the service use?",
+    minutesAgo: 9,
+    options: [{ label: "SQLite" }, { label: "Postgres" }],
+  });
+
+  function renderBoard(
+    cards: readonly CodeBoardCard[],
+    pendingRequests: ReturnType<typeof boardPendingSource> | undefined,
+    options: { readonly isNarrow?: boolean } = {},
+  ) {
+    const loadBoard = vi.fn(async () => view(cards));
+    const onOpenThread = vi.fn();
+    render(
+      <CodeThreadBoard
+        {...(options.isNarrow === true ? { isNarrow: true } : {})}
+        loadBoard={loadBoard}
+        onOpenThread={onOpenThread}
+        {...(pendingRequests === undefined ? {} : { pendingRequests })}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+    return { loadBoard, onOpenThread };
+  }
+
+  it("approves and denies a waiting thread's tool from its card with the listed handle", async () => {
+    const clients = answerClients();
+    renderBoard(
+      [card({ id: "01", status: "waiting", title: "Fix the flaky build" })],
+      boardPendingSource(pendingReader([approval]), clients),
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    expect(await within(waiting).findByText("Run: bun run test")).toBeVisible();
+    fireEvent.click(within(waiting).getByRole("button", { name: "Approve" }));
+
+    await waitFor(() =>
+      expect(clients.codeClient.executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "answer-provider-approval",
+          threadId: threadOne,
+          checkoutId: "checkout-1",
+          approvalId: `approval-${threadOne}`,
+          decision: "approved",
+        }),
+      ),
+    );
+  });
+
+  it("keeps a numbered choice as evidence before answering the question that asked", async () => {
+    const clients = answerClients();
+    renderBoard(
+      [card({ id: "02", status: "waiting", title: "Pick a database" })],
+      boardPendingSource(pendingReader([question]), clients),
+    );
+
+    const asking = await screen.findByRole("group", { name: "Pick a database is waiting for you" });
+    fireEvent.click(within(asking).getByRole("button", { name: /Postgres/ }));
+
+    await waitFor(() =>
+      expect(clients.codeClient.executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "answer-provider-input",
+          threadId: threadTwo,
+          requestId: `input-${threadTwo}`,
+          response: { evidenceId: "evidence-1" },
+        }),
+      ),
+    );
+    expect(clients.codeClient.putEvidence).toHaveBeenCalledWith(threadTwo, "Postgres");
+  });
+
+  it("opens the thread from Reply… when a question offers no choices", async () => {
+    const free = codeRequest({
+      threadId: threadTwo,
+      threadTitle: "Pick a database",
+      kind: "question",
+      text: "Which database should the service use?",
+      minutesAgo: 9,
+    });
+    const { onOpenThread } = renderBoard(
+      [card({ id: "02", status: "waiting", title: "Pick a database" })],
+      boardPendingSource(pendingReader([free])),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reply…" }));
+    expect(onOpenThread).toHaveBeenCalledWith({ threadId: threadTwo, projectId: projectA });
+  });
+
+  it("says on the card that a refused answer was not delivered", async () => {
+    const clients = answerClients();
+    clients.codeClient.executeOperation.mockResolvedValue({ kind: "operation-failed" });
+    renderBoard(
+      [card({ id: "01", status: "waiting", title: "Fix the flaky build" })],
+      boardPendingSource(pendingReader([approval]), clients),
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    fireEvent.click(await within(waiting).findByRole("button", { name: "Deny" }));
+
+    expect(await within(waiting).findByRole("status")).toHaveTextContent(
+      "The answer was not delivered.",
+    );
+    expect(screen.getByRole("region", { name: "Waiting (1)" })).toBe(waiting);
+  });
+
+  it("lists the waiting column oldest request first", async () => {
+    renderBoard(
+      [
+        card({
+          id: "01",
+          status: "waiting",
+          title: "Fix the flaky build",
+          lastMeaningfulActivityAt: "2026-10-06T09:59:00.000Z" as never,
+        }),
+        card({
+          id: "02",
+          status: "waiting",
+          title: "Pick a database",
+          lastMeaningfulActivityAt: "2026-10-06T09:50:00.000Z" as never,
+        }),
+      ],
+      boardPendingSource(pendingReader([approval, question])),
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (2)" });
+    await within(waiting).findByText("Run: bun run test");
+    expect(
+      within(waiting)
+        .getAllByRole("button", { name: /^(Fix the flaky build|Pick a database)$/ })
+        .map((button) => button.textContent),
+    ).toEqual(["Pick a database", "Fix the flaky build"]);
+  });
+
+  it("gives the list layout the same answer buttons", async () => {
+    renderBoard(
+      [card({ id: "01", status: "waiting", title: "Fix the flaky build" })],
+      boardPendingSource(pendingReader([approval])),
+      { isNarrow: true },
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    expect(waiting.className).toContain("code-board__list-group");
+    expect(await within(waiting).findByRole("button", { name: "Approve" })).toBeVisible();
+  });
+
+  it("shows the tool approval on the In progress card of a thread parked on it", async () => {
+    renderBoard(
+      [card({ id: "01", status: "in-progress", title: "Fix the flaky build" })],
+      boardPendingSource(pendingReader([approval])),
+    );
+
+    const running = await screen.findByRole("region", { name: "In progress (1)" });
+    expect(await within(running).findByRole("button", { name: "Approve" })).toBeVisible();
+    expect(within(running).queryByText("Working…")).toBeNull();
+  });
+
+  it("leaves cards with no listed request, and requests from other modes, alone", async () => {
+    const workApproval = workRequest({
+      threadId: threadThree,
+      threadTitle: "Quarterly notes",
+      kind: "approval",
+      text: "Delete: old-draft.md",
+      minutesAgo: 2,
+    });
+    const reader = pendingReader([approval, workApproval]);
+    renderBoard(
+      [
+        card({ id: "02", status: "ready", title: "Pick a database" }),
+        card({ id: "03", status: "waiting", title: "Quarterly notes" }),
+      ],
+      boardPendingSource(reader),
+    );
+
+    await screen.findByRole("button", { name: "Quarterly notes" });
+    await waitFor(() => expect(reader.list).toHaveBeenCalled());
+    expect(screen.queryByRole("group", { name: /is waiting for you/ })).toBeNull();
+    expect(screen.queryByText("Delete: old-draft.md")).toBeNull();
+  });
+
+  it("looks exactly as it did when the window has no pending-request reader", async () => {
+    renderBoard(
+      [card({ id: "01", status: "waiting", title: "Fix the flaky build" })],
+      boardPendingSource(undefined),
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    expect(within(waiting).getByText("Waiting for a decision or answer")).toBeVisible();
+    expect(within(waiting).queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(within(waiting).queryByRole("group")).toBeNull();
   });
 });
