@@ -1091,7 +1091,10 @@ label's description. Ordering controls appear only in an explicit Reorder mode.
 Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
-input, output, and measurement quality. Reasoning, cache, execution time, and
+input, output, and measurement quality. Its thread table uses the same figures
+as the line under the composer: cache, speed, and first token are columns,
+omitted when unavailable, and opening a row lists that thread's turns. The
+table stays a hairline table, not a card. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay
 collapsed in Settings. The standalone Usage destination also exposes provider
 capacity independently of ledger loading. Each provider window leads with its

@@ -5771,6 +5771,7 @@ function LaunchedShell(
         isNarrow={isNarrow}
         onBack={() => setUsageOpen(false)}
         {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}
+        usageQuery={usageClient}
       />
     </Suspense>
   );

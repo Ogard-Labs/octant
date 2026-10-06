@@ -1454,7 +1454,9 @@ provider's own cost), its real start and end, how it stopped, and its timing.
 identical to the live ones, and a thread purge erases them with the thread. The
 usage query (`POST /api/usage/query`) returns them as `turnMetrics`: totals
 over every matching turn plus the most recent fifty, within the same Project
-scope as the ledger rows. It is left out when the query filters on a dimension
+scope as the ledger rows. The usage page and Settings usage read that field for
+per-thread rows and the turn drill-in, and word them with the same module as the
+composer line. It is left out when the query filters on a dimension
 only the ledger carries (request shape, category, host, quality). A harness
 turn record carries the same usage, timing, start and stop reason, and the
 session's `usage` and `metrics` totals fold them, so a Code turn on a direct
