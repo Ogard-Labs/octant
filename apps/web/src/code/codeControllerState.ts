@@ -19,6 +19,7 @@ import {
   type CodeApprovalId,
   type CodeCheckpoint,
   type CodeTurnChangedFiles,
+  type ProviderContextBreakdown,
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import {
@@ -166,6 +167,7 @@ export interface CodeTurnUsage {
   readonly contextWindow?: number | undefined;
   readonly contextTokens?: number | undefined;
   readonly autoCompactThreshold?: number | undefined;
+  readonly contextBreakdown?: ProviderContextBreakdown | undefined;
 }
 
 /**
@@ -187,6 +189,7 @@ export function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>):
   readonly contextWindow?: number;
   readonly contextTokens?: number;
   readonly autoCompactThreshold?: number;
+  readonly contextBreakdown?: ProviderContextBreakdown;
 } {
   if (byOperation.size === 0) return {};
   let inputTokens = 0;
@@ -199,6 +202,7 @@ export function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>):
   let contextWindow: number | undefined;
   let contextTokens: number | undefined;
   let autoCompactThreshold: number | undefined;
+  let contextBreakdown: ProviderContextBreakdown | undefined;
   for (const usage of byOperation.values()) {
     inputTokens += usage.inputTokens;
     outputTokens += usage.outputTokens;
@@ -216,6 +220,10 @@ export function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>):
     // Unlike the window, a promise to compact ends when the runtime stops
     // making it, so the latest turn's report stands even when it names none.
     autoCompactThreshold = usage.autoCompactThreshold;
+    // A turn still running has reported usage but not yet its make-up, so the
+    // latest breakdown that was reported stands; the reader accounts for what
+    // the window has gained since as the remainder.
+    if (usage.contextBreakdown !== undefined) contextBreakdown = usage.contextBreakdown;
   }
   return {
     inputTokens,
@@ -235,6 +243,7 @@ export function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>):
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(contextTokens === undefined ? {} : { contextTokens }),
     ...(autoCompactThreshold === undefined ? {} : { autoCompactThreshold }),
+    ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
   };
 }
 
