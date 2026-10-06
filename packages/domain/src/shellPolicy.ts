@@ -170,6 +170,7 @@ export function defaultShellSettings(): ShellSettings {
     transcriptTextSize: "small",
     transcriptWidth: "narrow",
     showThreadProviderIcons: true,
+    showThreadStats: true,
     sidebarRowProperties: {
       projects: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.projects },
       activity: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.activity },

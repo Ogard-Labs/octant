@@ -273,6 +273,23 @@ recipes through its Canvas contribution; a skill that is not enabled contributes
 none, and a contributed recipe cannot replace an in-tree id. A recipe is a
 starting shape, not a document and not authority. Describe reads no Project
 data and creates no artifact.
+`create` and `revise` take an optional thread `presentation`: `inline` or
+`sidebar` (the default). The value is part of the definition and needs Canvas
+schema version 4. An older runtime refuses a version-4 document as a future
+version and does not report it corrupt.
+The pure `canvasInlineRefusal` policy admits `inline` only for at most 12 blocks
+with no `diagram`, `plan` or `mockup`. When an author asks for `inline` over
+that bound, the host records `sidebar` and returns the reason as
+`presentationNote`.
+A revise without a choice keeps the current presentation.
+A thread reference card reports the effective presentation and the first
+version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
+revision or a person's edit, is listed as `sidebar`.
+The renderer places every Canvas after the last row of the turn the person
+opened at or before `canvasCreatedAt`. An inline one is drawn there read-only:
+it gets no layout, plan, comment or action runtime, so nothing drawn inline can
+journal a version. Any other is a row that opens it. A card from an older host,
+or one no loaded turn can place, stays in the thread's card list.
 A chart is a closed type: line, area, bar, scatter, distribution, pie, donut,
 stacked bar, grouped bar, or bar-and-line. Pie and donut are one series of
 labeled non-negative slices. Stacked, grouped, and bar-and-line charts share
@@ -1132,8 +1149,22 @@ flowchart LR
   file the sync client has not downloaded, and a conflict copy the sync client
   left behind, are reported instead of being treated as entries. A folder
   outside the user's home is refused unless the standing access-outside-project
-  approval exists — the same rule as the artifact mirror's global folder.
-  Publish and pull are not this store; they call it.
+  approval exists — the same rule as the artifact mirror's global folder. The
+  in-tree S3-compatible store sends every request to the configured endpoint and
+  only while sync is on. Its settings are the endpoint URL, region, bucket,
+  optional key prefix, and path-style or virtual-host addressing. The access key
+  and secret live in the host credential store — macOS Keychain or freedesktop
+  Secret Service — and are never journaled. A plaintext endpoint is refused and
+  no credential is sent on it. A publish uses a conditional create
+  (`If-None-Match: *`); a provider that does not enforce it is configured to
+  fall back to HEAD-then-PUT, where a key is already unique to one host's
+  instance and sequence so a lost race cannot overwrite another host's entry. A
+  failure is a typed outcome — unauthorized, not-found, throttled, unreachable;
+  a throttled or unreachable answer is retried a bounded number of times with
+  backoff, while a rejected credential or a missing object is not. A Test
+  connection action writes one probe object in a reserved key namespace and
+  deletes nothing; `list` skips that namespace. Publish and pull are not this
+  store; they call it.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -1788,7 +1819,22 @@ replay. When the destination was called but the journal could not take the
 record, the answer is `unrecorded` and carries the destination's outcome; it is
 never reported as a failed export. PDF and PNG are named formats the seam can carry later; this host does
 not render them. A target that passed activation is still reported honestly as
-`not-connected`, `ready`, or `refused`.
+`not-connected`, `ready`, or `refused`. A local target may describe the exact
+file it would write, and the card then names that path: approving a card that
+names an existing file is the confirmation to replace it, and a call without
+that confirmation writes a numbered copy beside the file instead of over it.
+
+The folder destination ships in-tree on that same port, so it is offered,
+approved, and journaled exactly as a plugin's contribution is. Its folder comes
+from the host folder browser — a renderer sends a candidate the host listed, and
+the host resolves the path — and is remembered per Project, with a host-wide
+folder for a thread filed nowhere, in a `canvas.export-folder-changed@1` journal
+frame rebuilt on restart. A folder must be inside the person's home unless the
+standing access-outside-project approval exists, the same rule the artifact
+mirror's global folder follows. Writes are confined to the chosen folder and are
+atomic: a temporary file is renamed into place, so a reader never sees a
+half-written export. The user guide's exporting page
+(`apps/docs/guide/export.md`) states the same rules for a person.
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured

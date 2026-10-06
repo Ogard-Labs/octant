@@ -627,6 +627,12 @@ import {
 } from "./canvas/artifactMirrorFilePort";
 import { createArtifactMirrorCommitPort } from "./canvas/artifactMirrorCommitPort";
 import { ArtifactMirrorService } from "./canvas/artifactMirrorService";
+import { createCanvasExportFilePort } from "./canvas/canvasExportFilePort";
+import { CanvasExportFolderService } from "./canvas/canvasExportFolderService";
+import {
+  canvasExportTargetBindings,
+  type CanvasExportTargetRegistration,
+} from "./canvas/canvasExportTargets";
 import { createDefaultCodexPluginPackageSources } from "./extensions/curatedBuildIosAppsCatalog";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "./scaffold/curatedScaffoldCatalog";
 import { resolveAvailableTools } from "./scaffold/scaffoldFilesystem";
@@ -8722,11 +8728,40 @@ export function startOctantServer(
       },
       { authorize: authorizeCanvas },
     );
-    // Destinations arrive through the export contribution. The registration
-    // path from admitted plugins is held on the maintainer's Export-surface
-    // decision (what this list shows while no destination plugin is admitted),
-    // so the provider stays empty here; rendering, approval, and the journal
-    // are already wired through the same seam a plugin will reach.
+    // Where a Project's exports are written, and whether that folder is still
+    // usable. Choosing one is a person's act on this machine: the host resolves
+    // the browser's candidate to a path itself, and the choice is judged against
+    // the same authority the artifact mirror's global folder uses — inside home
+    // unless the standing access-outside-project grant exists, which has no
+    // surface yet, so an outside folder fails closed.
+    const canvasExportFilePort = createCanvasExportFilePort();
+    const canvasExportFolderService = new CanvasExportFolderService({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString() as never,
+      files: canvasExportFilePort,
+      home: homedir(),
+      standingOutsideApproval: false,
+    });
+    const canvasExportRegistration: CanvasExportTargetRegistration = {
+      folderFor: (canvasId) => {
+        const entry = persistence.canvasProjection.getById(canvasId);
+        if (entry === undefined) return undefined;
+        return canvasExportFolderService.folderFor(
+          String(entry.currentVersion.definition.provenance.projectId),
+        );
+      },
+      files: canvasExportFilePort,
+      home: homedir(),
+      standingOutsideApproval: false,
+      newTempId: randomUUID,
+    };
+    // Destinations arrive through the export contribution and are offered
+    // through the same activation policy a plugin's contribution passes. The
+    // folder destination ships in-tree on that seam; a third-party destination
+    // reaches this list the same way, so it is granted nothing a plugin could
+    // not have.
     const canvasExportService = new CanvasExportService({
       load: (canvasId, versionId) => {
         const entry = persistence.canvasProjection.getById(canvasId);
@@ -8744,7 +8779,7 @@ export function startOctantServer(
           blocks: version.definition.blocks,
         };
       },
-      targets: () => [],
+      targets: (canvasId) => canvasExportTargetBindings(canvasExportRegistration, canvasId),
       eventStore: new CanvasExportEventStore({
         journal: persistence.journal,
         uuid: randomUUID,
@@ -8915,6 +8950,9 @@ export function startOctantServer(
       canvasService,
       canvasShareService,
       canvasExportService,
+      canvasExportFolderService,
+      resolveFolderCandidate: (windowId, input) =>
+        folderBrowseService.resolveCandidate(windowId, input),
       canvasCommentService,
       windowAuthorityStore,
       projects: projectService,

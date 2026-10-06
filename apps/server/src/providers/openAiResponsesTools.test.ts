@@ -499,4 +499,30 @@ describe("sendResponsesTurn tool calls", () => {
     const body = JSON.parse(String(init.body));
     expect(body).not.toHaveProperty("tools");
   });
+
+  it("sends a stable prompt cache key so a conversation's steps share one cache", async () => {
+    const fetch = vi.fn(async () =>
+      sse(created(1), completed(2, [], { input_tokens: 1, output_tokens: 1, total_tokens: 2 })),
+    );
+
+    await Effect.runPromise(
+      sendResponsesTurn({ ...input(fetch), promptCacheKey: "harness-session-1" }),
+    );
+
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body.prompt_cache_key).toBe("harness-session-1");
+  });
+
+  it("omits the prompt cache key when the session provides none", async () => {
+    const fetch = vi.fn(async () =>
+      sse(created(1), completed(2, [], { input_tokens: 1, output_tokens: 1, total_tokens: 2 })),
+    );
+
+    await Effect.runPromise(sendResponsesTurn(input(fetch)));
+
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body).not.toHaveProperty("prompt_cache_key");
+  });
 });

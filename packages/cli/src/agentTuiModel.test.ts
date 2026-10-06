@@ -68,13 +68,83 @@ describe("agent terminal UI model", () => {
 
   it("sums the footer from the harness session and takes its colours from the app theme", () => {
     expect(statusLineFrom(thread, session)).toBe(
-      "Running · frontier-large · 1 turns · 1.2k in · 300 out",
+      "Running · frontier-large · 1 turns · ↑ 1.2k in · ↓ 300 out",
     );
     const dark = paletteFor("octant", "dark");
     const light = paletteFor("octant", "light");
     expect(dark.background).not.toBe(light.background);
     expect(dark.accent).toMatch(/^#/);
     expect(paletteFor(undefined, "dark").text).toMatch(/^#/);
+  });
+
+  it("words the footer's figures exactly as the web composer's stats line does", () => {
+    const measured = {
+      session: {
+        status: "running",
+        lead: { modelId: "gpt-5.6-luna" },
+        turnsRun: 1,
+        cutovers: 0,
+        usage: { inputTokens: 48_000, outputTokens: 3_100, cacheReadInputTokens: 44_160 },
+        metrics: {
+          turns: 1,
+          measuredTurns: 1,
+          precision: "exact",
+          decodeOutputTokens: 410,
+          decodeMs: 10_000,
+          toolMs: 0,
+          timeToFirstTokenTotalMs: 900,
+        },
+      },
+      turns: [
+        {
+          toolCalls: 0,
+          route: { kind: "primary", candidate: { modelId: "gpt-5.6-luna" } },
+          stopReason: "end-turn",
+          usage: { inputTokens: 48_000, outputTokens: 3_100, cacheReadInputTokens: 44_160 },
+          startedAt: "2026-09-05T11:30:00.000Z",
+          endedAt: "2026-09-05T11:31:27.000Z",
+        },
+      ],
+      questions: [],
+    } as never;
+    expect(statusLineFrom(undefined, measured)).toBe(
+      "Running · gpt-5.6-luna · 1 turns · ↑ 48k in · ↓ 3.1k out · cache 92% · 41 tok/s · 0.9 s first token · $0.01 est.",
+    );
+  });
+
+  it("marks an approximate footer speed and leaves out what was never reported", () => {
+    const approximate = {
+      session: {
+        status: "running",
+        lead: { modelId: "frontier-large" },
+        turnsRun: 2,
+        cutovers: 0,
+        usage: { inputTokens: 5_000, outputTokens: 900 },
+        metrics: {
+          turns: 2,
+          measuredTurns: 1,
+          precision: "approximate",
+          decodeOutputTokens: 300,
+          decodeMs: 20_000,
+          toolMs: 4_000,
+          timeToFirstTokenTotalMs: 2_400,
+        },
+      },
+      turns: [],
+      questions: [],
+    } as never;
+    expect(statusLineFrom(undefined, approximate)).toBe(
+      "Running · frontier-large · 2 turns · ↑ 5k in · ↓ 900 out · ~15 tok/s · 2.4 s first token",
+    );
+  });
+
+  it("shows no figures for a session whose provider reported no usage", () => {
+    const silent = {
+      session: { status: "idle", lead: { modelId: "local-model" }, turnsRun: 1, cutovers: 0 },
+      turns: [],
+      questions: [],
+    } as never;
+    expect(statusLineFrom(undefined, silent)).toBe("Idle · local-model · 1 turns");
   });
 
   it("turns the turn's calls into tree lines and counts its edits and failures", () => {

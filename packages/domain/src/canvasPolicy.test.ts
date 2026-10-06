@@ -198,7 +198,7 @@ describe("Canvas validation policy", () => {
 
   it("fails closed for unknown schema versions", () => {
     expectPolicyCode(
-      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 4 }),
+      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 5 }),
       "unsupported-schema-version",
     );
     expectPolicyCode(
@@ -235,6 +235,16 @@ describe("Canvas validation policy", () => {
           createdBy: { kind: "local-user", actorId: ids.actor },
           createdAt: "2026-08-01T21:00:01.000Z",
         }),
+      "unsupported-schema-version",
+    );
+  });
+
+  it("refuses a thread presentation inside a document declaring an older schema version", () => {
+    // A rolled-back runtime that reads a newer document must refuse it as a
+    // future version, not report the Canvas corrupt.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({ ...baseDefinition, schemaVersion: 3, presentation: "inline" }),
       "unsupported-schema-version",
     );
   });

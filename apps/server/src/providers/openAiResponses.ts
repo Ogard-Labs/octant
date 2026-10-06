@@ -92,6 +92,13 @@ export interface ResponsesTurnInput {
   readonly tools?: readonly ProviderToolDefinition[];
   readonly toolAnswers?: readonly ProviderToolAnswer[];
   readonly toolChoice?: "auto" | "required";
+  /**
+   * A stable key for every request of one conversation. The endpoint uses it
+   * to route requests that share a reusable prefix to the same prompt cache,
+   * so a tool step reads the earlier steps back. Absent leaves routing to the
+   * endpoint.
+   */
+  readonly promptCacheKey?: string | undefined;
   readonly sequenceStart?: number;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: ProtocolTurnEvent) => void;
@@ -220,6 +227,7 @@ async function runResponsesTurn(
       ],
       stream: true,
       store: false,
+      ...(input.promptCacheKey === undefined ? {} : { prompt_cache_key: input.promptCacheKey }),
       ...(tools === undefined ? {} : { tools }),
       ...(input.toolChoice === undefined ? {} : { tool_choice: input.toolChoice }),
     },

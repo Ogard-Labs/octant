@@ -16,14 +16,25 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface FolderPickerProps {
-  readonly client: FolderBrowseClient;
+  /**
+   * The host's browser. `select` is only needed to bind a Project root; a
+   * picker that reports candidates itself takes `onSelectCandidate` instead and
+   * never asks the host to bind anything.
+   */
+  readonly client: Pick<FolderBrowseClient, "browse"> & Partial<Pick<FolderBrowseClient, "select">>;
   readonly mode: FolderBrowseMode;
   readonly hostId: string;
-  readonly onSelect: (
+  /** Needed only to bind a Project root; a candidate picker omits it. */
+  readonly onSelect?: (
     receiptId: string,
     displayName: string,
     selection?: { readonly initializeGit?: boolean },
   ) => void;
+  /**
+   * Report the chosen candidate to the caller instead of binding it as a
+   * Project root — for a choice that is not a binding, like an export folder.
+   */
+  readonly onSelectCandidate?: (candidate: FolderCandidate) => void;
   readonly onCancel: () => void;
   /** Overrides the mode-derived title, e.g. when browsing for a clone destination. */
   readonly title?: string;
@@ -111,15 +122,21 @@ export function FolderPicker(props: FolderPickerProps) {
 
   async function selectCandidate(candidate: FolderCandidate) {
     if (!candidate.isSelectable || selecting) return;
+    if (props.onSelectCandidate !== undefined) {
+      props.onSelectCandidate(candidate);
+      return;
+    }
+    const select = props.client.select;
+    if (select === undefined) return;
     setSelecting(true);
     setErrorMessage(undefined);
     try {
-      const selection = await props.client.select({
+      const selection = await select({
         hostId: props.hostId as HostId,
         mode: props.mode,
         candidateId: candidate.candidateId as FolderCandidateId,
       });
-      props.onSelect(
+      props.onSelect?.(
         selection.receiptId,
         selection.displayName,
         props.mode === "code" ? { initializeGit } : undefined,

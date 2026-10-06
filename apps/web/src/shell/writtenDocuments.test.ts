@@ -5,6 +5,7 @@ import {
   isDocumentPath,
   noteExistingDocuments,
   noteWrittenDocument,
+  showWrittenDocument,
 } from "./writtenDocuments";
 
 describe("documents an agent turn writes", () => {
@@ -35,6 +36,16 @@ describe("documents an agent turn writes", () => {
 
     const authored = { kind: "canvas" as const, canvasId: "canvas-2" };
     expect(noteWrittenDocument(seeded, authored).open).toBe(true);
+  });
+
+  it("shows a Canvas the person asked to open even after the thread already offered it", () => {
+    const drawn = { kind: "canvas" as const, canvasId: "canvas-1" };
+    const seen = noteExistingDocuments(NO_WRITTEN_DOCUMENTS, [drawn]);
+
+    const shown = showWrittenDocument(seen, drawn);
+    expect(shown.current).toEqual(drawn);
+    // Asking to see it is not new writing: a later turn's offer stays quiet.
+    expect(noteWrittenDocument(shown, drawn).open).toBe(false);
   });
 
   it("treats Markdown and plain text as documents and everything else as code", () => {

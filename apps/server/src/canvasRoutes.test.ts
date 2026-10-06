@@ -38,6 +38,9 @@ import { CanvasService } from "./canvas/canvasService";
 import { CanvasShareEventStore, registerCanvasShareEvents } from "./canvas/canvasShareEventStore";
 import { CanvasCommentService, registerCanvasCommentEvents } from "./canvas/canvasCommentService";
 import { CanvasShareService } from "./canvas/canvasShareService";
+import { CanvasExportFolderService } from "./canvas/canvasExportFolderService";
+import { registerCanvasExportFolderEvents } from "./canvas/canvasExportFolderEventStore";
+import { createCanvasExportFilePort } from "./canvas/canvasExportFilePort";
 import {
   CANVAS_ACTION_RECEIPT_RECORDED,
   CANVAS_CREATED,
@@ -71,6 +74,11 @@ const now = "2026-08-01T21:00:00.000Z";
 const later = "2026-08-01T21:01:00.000Z";
 const shareOwnerId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const remoteDeviceId = "16161616-1616-4161-8161-161616161616";
+
+/** The folder the stubbed browser listed, and the id it listed it under. */
+const exportFolderCandidateId = "88888888-8888-4888-8888-888888888888";
+
+const readFolderCandidate = Schema.decodeUnknownSync(Schema.Struct({ candidateId: Schema.String }));
 
 function createRevisionRoute(projection = new CanvasProjection()) {
   const versionEnvelope = {
@@ -126,13 +134,15 @@ function createRevisionRoute(projection = new CanvasProjection()) {
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => now);
-  const registry = registerCanvasCommentEvents(
-    registerCanvasShareEvents(
-      new EventRegistry()
-        .register(CANVAS_CREATED, 1, CanvasCreated)
-        .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
-        .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
-        .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+  const registry = registerCanvasExportFolderEvents(
+    registerCanvasCommentEvents(
+      registerCanvasShareEvents(
+        new EventRegistry()
+          .register(CANVAS_CREATED, 1, CanvasCreated)
+          .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
+          .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
+          .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+      ),
     ),
   );
   const projections = new ProjectionRegistry()
@@ -195,12 +205,31 @@ function createRevisionRoute(projection = new CanvasProjection()) {
     },
     { authorize: () => true },
   );
+  const exportFolderDirectory = mkdtempSync(join(tmpdir(), "octant-export-route-"));
+  directories.push(exportFolderDirectory);
+  const canvasExportFolderService = new CanvasExportFolderService({
+    journal,
+    uuid: () => `cdcdcdcd-cdcd-4dcd-8dcd-${(counter += 1).toString(16).padStart(12, "0")}`,
+    actor,
+    clock: () => later as never,
+    files: createCanvasExportFilePort(),
+    home: tmpdir(),
+    standingOutsideApproval: false,
+  });
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability: windowCapability, now: 0 });
   const route = createCanvasRouteHandler({
     canvasProjection: projection,
     canvasService,
     canvasShareService,
+    canvasExportFolderService,
+    resolveFolderCandidate: (_windowId, input) => {
+      const { candidateId } = readFolderCandidate(input);
+      if (candidateId !== exportFolderCandidateId) {
+        throw new Error("That folder is no longer available to choose.");
+      }
+      return exportFolderDirectory;
+    },
     canvasCommentService,
     windowAuthorityStore: store,
     projects: {
@@ -1100,6 +1129,128 @@ describe("canvas comment routes", () => {
     expect(outcome.threads[0].comment.author).toEqual({
       kind: "local-user",
       actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+  });
+});
+
+describe("canvas export folder routes", () => {
+  function chooseRequest(expectedVersion: number, candidateId = exportFolderCandidateId) {
+    return new Request("http://127.0.0.1/api/canvas/export-folder", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": windowCapability,
+      },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        kind: "choose-canvas-export-folder",
+        canvasId: String(canvasId),
+        mode: "work",
+        candidateId,
+        scope: "project",
+        expectedVersion,
+      }),
+    });
+  }
+
+  function readRequest() {
+    return new Request(`http://127.0.0.1/api/canvas/export-folder?canvasId=${String(canvasId)}`, {
+      method: "GET",
+      headers: { "x-octant-window-capability": windowCapability },
+    });
+  }
+
+  it("reports no chosen folder and the Project scope a Canvas would remember", async () => {
+    const route = createRevisionRoute();
+
+    const response = await route(readRequest());
+    const view = JSON.parse(await response!.text());
+
+    expect(view.kind).toBe("canvas-export-folder-view");
+    expect(view.scope).toBe("project");
+    expect(view.folder).toBeUndefined();
+    expect(view.settings.version).toBe(0);
+  });
+
+  it("remembers the folder a person chose for a Canvas's Project", async () => {
+    const route = createRevisionRoute();
+
+    const chosen = JSON.parse(await (await route(chooseRequest(0)))!.text());
+    expect(chosen.kind).toBe("canvas-export-folder-settings");
+    expect(chosen.settings.overrides).toHaveLength(1);
+    expect(chosen.settings.overrides[0].projectId).toBe(String(projectId));
+
+    const view = JSON.parse(await (await route(readRequest()))!.text());
+    expect(view.folder).toBe(chosen.settings.overrides[0].folder);
+    expect(view.folder).toContain("octant-export-route-");
+  });
+
+  it("refuses a choice made against a version the person has not seen", async () => {
+    const route = createRevisionRoute();
+    await route(chooseRequest(0));
+
+    const stale = JSON.parse(await (await route(chooseRequest(0)))!.text());
+
+    expect(stale).toMatchObject({
+      kind: "canvas-export-folder-refused",
+      reason: "stale-version",
+    });
+  });
+
+  it("refuses a choice that names a folder the host never listed", async () => {
+    const route = createRevisionRoute();
+
+    const refused = JSON.parse(
+      await (await route(chooseRequest(0, "00000000-0000-4000-8000-00000000dead")))!.text(),
+    );
+
+    expect(refused).toMatchObject({
+      kind: "canvas-export-folder-refused",
+      reason: "candidate-unavailable",
+    });
+    const view = JSON.parse(await (await route(readRequest()))!.text());
+    expect(view.folder).toBeUndefined();
+  });
+
+  it("refuses to remember a folder for a window this host never authenticated", async () => {
+    const route = createRevisionRoute();
+
+    const response = await route(
+      new Request("http://127.0.0.1/api/canvas/export-folder", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          kind: "choose-canvas-export-folder",
+          canvasId: String(canvasId),
+          mode: "work",
+          candidateId: exportFolderCandidateId,
+          scope: "project",
+          expectedVersion: 0,
+        }),
+      }),
+    );
+
+    expect(response?.status).toBe(401);
+  });
+
+  it("refuses a malformed choose as a value rather than a failure", async () => {
+    const route = createRevisionRoute();
+
+    const response = await route(
+      new Request("http://127.0.0.1/api/canvas/export-folder", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": windowCapability,
+        },
+        body: JSON.stringify({ kind: "choose-canvas-export-folder" }),
+      }),
+    );
+
+    expect(JSON.parse(await response!.text())).toMatchObject({
+      kind: "canvas-export-folder-refused",
+      reason: "malformed",
     });
   });
 });

@@ -562,6 +562,13 @@ export const ShellSettings = Schema.Struct({
   }),
   showThreadProviderIcons: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
+   * Whether the quiet stats line (tokens, cache hit, speed, first-token time,
+   * cost) sits under the composer of every thread. Off hides only the line:
+   * the per-turn detail stays reachable from the context meter. A store
+   * persisted before the line shipped decodes to on.
+   */
+  showThreadStats: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
    * Which facts each sidebar view's thread rows show. A store persisted before
    * this shipped decodes to each view's own defaults — exactly what those rows
    * carried already — so nothing disappears or appears for an existing

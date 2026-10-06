@@ -172,6 +172,32 @@ describe("chart marks", () => {
         .map((cell) => cell.textContent),
     ).toEqual(["20", "7"]);
   });
+  it("leads a lone trend with its last reading and its change since the first", () => {
+    const trend = chartBlock({
+      blockId: "signups",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "chart",
+      chartType: "line",
+      series: [
+        {
+          seriesId: "signups",
+          label: "Signups",
+          points: [
+            { x: "W1", y: 120 },
+            { x: "W2", y: 180 },
+            { x: "W5", y: 310 },
+          ],
+        },
+      ],
+    });
+    const { container } = render(
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [trend] }} />,
+    );
+    const headline = container.querySelector(".canvas-chart__headline");
+    expect(headline?.textContent).toBe("310W5+158% since W1");
+    // Only the last reading carries a point until the pointer asks for another.
+    expect(container.querySelectorAll(".canvas-chart__dot")).toHaveLength(1);
+  });
 });
 
 function chartBlock(value: unknown): CanvasChartBlock {

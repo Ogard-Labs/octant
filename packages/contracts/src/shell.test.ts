@@ -59,6 +59,7 @@ const settings = {
   transcriptTextSize: "medium",
   transcriptWidth: "narrow",
   showThreadProviderIcons: true,
+  showThreadStats: true,
   sidebarRowProperties: {
     projects: { project: false, branch: true, pullRequest: true, lastUpdated: true, status: true },
     activity: {
@@ -159,6 +160,15 @@ describe("shell bootstrap contracts", () => {
   it("defaults transcript text to the compact reading size", () => {
     const { transcriptTextSize: _omitted, ...withoutTranscriptTextSize } = settings;
     expect(decodeShellSettings(withoutTranscriptTextSize).transcriptTextSize).toBe("small");
+  });
+
+  it("shows the thread stats line unless someone turned it off", () => {
+    const { showThreadStats: _omitted, ...withoutThreadStats } = settings;
+    expect(decodeShellSettings(withoutThreadStats).showThreadStats).toBe(true);
+    expect(decodeShellSettings({ ...settings, showThreadStats: false }).showThreadStats).toBe(
+      false,
+    );
+    expect(() => decodeShellSettings({ ...settings, showThreadStats: "off" })).toThrow();
   });
 
   it("preserves an explicit choice to wait for finished replies", () => {

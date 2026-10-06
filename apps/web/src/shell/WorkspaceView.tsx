@@ -384,6 +384,8 @@ export interface WorkspaceViewProps {
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly onOpenCanvas?: (entry: CanvasInventoryEntry) => void;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
+  /** Opens the dock's Canvas tool on this Canvas, beside the thread that wrote it. */
+  readonly onOpenCanvasInSidebar?: (card: CanvasThreadReferenceCard) => void;
   readonly onCanvasReferencesObserved?: (
     mode: OctantMode,
     threadId: string,
@@ -1023,6 +1025,9 @@ function renderCodeTab(
         {...(props.onOpenCanvasReference === undefined
           ? {}
           : { onOpenCanvas: props.onOpenCanvasReference })}
+        {...(props.onOpenCanvasInSidebar === undefined
+          ? {}
+          : { onOpenCanvasInSidebar: props.onOpenCanvasInSidebar })}
         {...(props.onCanvasReferencesObserved === undefined
           ? {}
           : {
@@ -1611,6 +1616,9 @@ function renderNonCodeTab(
                 {...(props.onOpenCanvasReference === undefined
                   ? {}
                   : { onOpenCanvas: props.onOpenCanvasReference })}
+                {...(props.onOpenCanvasInSidebar === undefined
+                  ? {}
+                  : { onOpenCanvasInSidebar: props.onOpenCanvasInSidebar })}
                 {...(props.onWorkThreadUpdated === undefined
                   ? {}
                   : { onThreadUpdated: props.onWorkThreadUpdated })}
