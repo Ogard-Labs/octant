@@ -111,6 +111,55 @@ server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
 
+## Start-screen cards
+
+Under the composer, the Work and Code start screens carry a card area: a
+**Customize** control on the right, then cards in a grid (two columns, one at
+phone width). The composer paints first; the area mounts on the frame after the
+first commit, and each card begins its reads only then, so a start screen never
+waits on a card. A card that is off or unavailable is never mounted and reads
+nothing.
+
+The cards come from a small renderer registry (`apps/web/src/home`). A card is a
+value: `id`, `title`, `icon`, `defaultOn`, `available`, an optional
+`hideWhenEmpty`, one `emptyLabel`, and a `useContent` hook returning `loading`
+or `ready` with a count and a body. The shell builds the list and hands it to the
+frame, which knows nothing about any card: a new card is a new definition, with
+no change to the frame, Customize, or the stored setting. `available: false`
+(no GitHub connection, insecure token storage, no client in this window) hides
+the card and leaves it out of Customize rather than showing it broken;
+`hideWhenEmpty` drops the card from the grid while it has nothing to say. A
+card that is empty otherwise shows one quiet line and never fake rows. A lone
+card spans the row.
+
+Customize is a small panel: one switch per available card, a drag handle, and up
+and down buttons for the keyboard, with each change stored at once, and **Reset
+to default**. The choice is the `homeCards` shell setting: `order` (card ids in
+the requested order; cards it does not name follow in registry order) and
+`visibility` (an entry only where the person moved away from a card's default,
+so a card shipped later arrives with its own default). Ids are an open
+vocabulary: an id the registry does not know is ignored, and adding a card never
+changes the contract. A store from before the cards decodes to the defaults.
+
+**Working now** is the first card, on by default, never unavailable. It lists
+the threads executing now (the navigation rows the host projects as `working`,
+the sidebar's Running rule, so a snoozed or completed row is never listed) and
+the agent runs in progress from the AgentRun projection, most recently moved
+first. Work lists its Chat and Work threads together and Code its Code threads,
+as the sidebar's Running count does. A row shows the provider mark, the title, a
+step line in monospace (the host's latest line: on Code the board's activity
+line, otherwise the task of the agent run working in the thread, or the Project
+name when the host said nothing), and a time. A run says how long it has run
+("Running 12m"); a thread says when it last moved ("Active 4m ago"), because the
+host keeps no start time for a turn. A host name appears only when the window is
+reading a host that is not this computer. A run reports under the running thread
+it belongs to rather than as a second row, and is its own row only when its
+thread is resting. At most five rows show, then **+N more**, which opens the
+Running view (the Board; Chat's Running tile opens Activity). A row opens its
+thread. The card reads what the window's controllers already hold; the run list
+is one read when the card mounts and again when the thread lists change, so it
+adds no timer, and a window sees only what its own authority returns.
+
 ## Tool lifecycles
 
 Thread utilities live in the Right Utility Dock outside the split tree.
