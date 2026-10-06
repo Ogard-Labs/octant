@@ -20,6 +20,7 @@ import {
 import type { ProviderConnection } from "@octant/provider-sdk/driver";
 import { renderProviderTurnPrompt } from "@octant/provider-sdk/chat-conformance";
 import { Effect, PubSub, Stream, type Scope } from "effect";
+import { isEndpointRetriesExhausted } from "../providers/endpointRetry";
 import type { ObservedRateLimitBucket } from "../providers/rateLimitHeaders";
 import { nativeHarnessToolGuide } from "./nativeHarnessInstructions";
 import type {
@@ -27,13 +28,18 @@ import type {
   NativeHarnessTranscriptStore,
 } from "./nativeHarnessTranscriptStore";
 import type {
+  NativeHarnessLeadFallback,
+  NativeHarnessLeadFallbackOutcome,
+  NativeHarnessLeadTarget,
   NativeHarnessMessage,
   NativeHarnessRequest,
   NativeHarnessResponse,
+  NativeHarnessStreamEvent,
   NativeHarnessTransport,
   NativeHarnessTransportSession,
   NativeHarnessUsage,
 } from "./nativeHarnessTransport";
+import { addNativeHarnessUsage } from "./nativeHarnessTransport";
 
 /**
  * Tools whose call only reads. One the process stopped in the middle of can be
@@ -74,6 +80,11 @@ export interface NativeHarnessConnectionOptions {
     input: ProviderTurnInput,
     modelId: ProviderModelId,
   ) => ProviderFailure | undefined;
+  /**
+   * Where a turn continues when the lead's own model keeps failing. Without
+   * it the turn simply fails once the endpoint's retries are spent.
+   */
+  readonly leadFallback?: NativeHarnessLeadFallback;
   readonly onSessionCountChange?: (delta: 1 | -1) => void;
   readonly onReleased?: () => void;
   readonly clock: () => string;
@@ -103,6 +114,17 @@ interface SessionState {
   pending: PendingStep | undefined;
   /** Every call answered in this turn, so a retried answer after its step moved on is ignored. */
   readonly answered: Set<string>;
+  /** The turn in flight, kept so a fallback model can be asked whether it accepts it. */
+  turn: ProviderTurnInput | undefined;
+  /** The model the lead moved to this turn once its own failed, until the turn ends. */
+  fallback:
+    | {
+        readonly target: NativeHarnessLeadTarget;
+        readonly endpoint: NativeHarnessTransportSession;
+      }
+    | undefined;
+  /** Models this turn already ran on and gave up on. */
+  attempted: NativeHarnessLeadTarget[];
   nextSequence: number;
   inFlight: Promise<void> | undefined;
   abortController: AbortController | undefined;
@@ -157,6 +179,9 @@ export function createNativeHarnessConnection(
       state.stopped = true;
       state.acceptingSteering = false;
       for (const note of state.steering.splice(0)) note.resolve("unsupported");
+      state.fallback?.endpoint.release();
+      state.fallback = undefined;
+      state.turn = undefined;
       state.messages.length = 0;
       state.pending = undefined;
       state.abortController = undefined;
@@ -213,6 +238,9 @@ export function createNativeHarnessConnection(
       tools: input.tools ?? [],
       pending: undefined,
       answered: new Set(),
+      turn: undefined,
+      fallback: undefined,
+      attempted: [],
       nextSequence: 1,
       inFlight: undefined,
       abortController: undefined,
@@ -264,11 +292,7 @@ export function createNativeHarnessConnection(
       const controller = new AbortController();
       state.abortController = controller;
       state.steps += 1;
-      const step = state.endpoint
-        .send(request, {
-          signal: controller.signal,
-          onEvent: (event) => emit(state, { ...event }),
-        })
+      const step = sendOnLead(state, request, controller.signal)
         .then((response) => settleResponse(state, response))
         .catch((error: unknown) => {
           state.pending = undefined;
@@ -295,11 +319,91 @@ export function createNativeHarnessConnection(
       return step;
     };
 
+    const leadTarget = (state: SessionState): NativeHarnessLeadTarget =>
+      state.fallback?.target ?? { providerInstanceId: options.instanceId, modelId: state.modelId };
+
+    /**
+     * Sends a request on the lead's model, and on its fallback when the
+     * endpoint's own retries ran out without anything streaming. Each model
+     * is asked at most once per turn; once the router has nothing left the
+     * turn fails with the endpoint's own failure and the reason none was found.
+     */
+    const sendOnLead = async (
+      state: SessionState,
+      request: NativeHarnessRequest,
+      signal: AbortSignal,
+    ): Promise<NativeHarnessResponse> => {
+      const stream = {
+        signal,
+        onEvent: (event: NativeHarnessStreamEvent) => emit(state, { ...event }),
+      };
+      let current = request;
+      if (state.fallback !== undefined) {
+        const refit = fitRequest(state.fallback.endpoint, {
+          ...request,
+          modelId: state.fallback.target.modelId,
+        });
+        if (refit === undefined) {
+          throw failure(
+            "invalid-configuration",
+            "The provider request exceeded the configured size limit.",
+          );
+        }
+        current = refit;
+      }
+      for (;;) {
+        try {
+          return await (state.fallback?.endpoint ?? state.endpoint).send(current, stream);
+        } catch (error) {
+          if (
+            options.leadFallback === undefined ||
+            state.turn === undefined ||
+            signal.aborted ||
+            !isEndpointRetriesExhausted(error)
+          ) {
+            throw error;
+          }
+          const failed = leadTarget(state);
+          state.attempted.push(failed);
+          const spent = sanitizeFailure(error);
+          // A router that cannot answer leaves the endpoint's own failure standing.
+          const outcome: NativeHarnessLeadFallbackOutcome = await options.leadFallback
+            .next({
+              failed,
+              attempted: [...state.attempted],
+              failure: spent,
+              turn: state.turn,
+            })
+            .catch(() => ({ status: "none", reason: "not-routed" }) as const);
+          if (outcome.status === "none") throw withoutFallback(spent, outcome.reason);
+          if (signal.aborted || state.stopped) {
+            outcome.endpoint.release();
+            throw error;
+          }
+          const moved = fitRequest(outcome.endpoint, {
+            ...current,
+            modelId: outcome.target.modelId,
+          });
+          if (moved === undefined) {
+            outcome.endpoint.release();
+            throw failure(
+              "invalid-configuration",
+              "The provider request exceeded the configured size limit.",
+            );
+          }
+          state.fallback?.endpoint.release();
+          state.fallback = { target: outcome.target, endpoint: outcome.endpoint };
+          current = moved;
+        }
+      }
+    };
+
     const settleResponse = (state: SessionState, response: NativeHarnessResponse) => {
       // Header buckets describe the account after this response; they go
       // first so a consumer that stops at the terminal still sees them.
       for (const bucket of response.rateLimitBuckets ?? []) emitBucket(state, bucket);
-      if (response.usage !== undefined) state.usage = addUsage(state.usage, response.usage);
+      if (response.usage !== undefined)
+        state.usage = addNativeHarnessUsage(state.usage, response.usage);
       if (response.toolCalls.length > 0) {
         const refused = refuseToolCalls(state.tools, response.toolCalls);
         if (refused !== undefined) {
@@ -466,6 +570,11 @@ export function createNativeHarnessConnection(
             state.messages.push(user);
             state.pending = undefined;
             state.answered.clear();
+            // Each turn starts on the lead's own model again.
+            state.fallback?.endpoint.release();
+            state.fallback = undefined;
+            state.attempted = [];
+            state.turn = input;
             state.steps = 0;
             state.usage = { inputTokens: 0, outputTokens: 0 };
             state.acceptingSteering = true;
@@ -595,22 +704,6 @@ export function createNativeHarnessConnection(
         }).pipe(Effect.asVoid),
     };
   });
-}
-
-/** A figure only appears in the total once some request has reported it. */
-function addUsage(total: NativeHarnessUsage, step: NativeHarnessUsage): NativeHarnessUsage {
-  const sum = (a: number | undefined, b: number | undefined) =>
-    a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
-  const cacheRead = sum(total.cacheReadInputTokens, step.cacheReadInputTokens);
-  const cacheWrite = sum(total.cacheWriteInputTokens, step.cacheWriteInputTokens);
-  const reasoning = sum(total.reasoningTokens, step.reasoningTokens);
-  return {
-    inputTokens: total.inputTokens + step.inputTokens,
-    outputTokens: total.outputTokens + step.outputTokens,
-    ...(cacheRead === undefined ? {} : { cacheReadInputTokens: cacheRead }),
-    ...(cacheWrite === undefined ? {} : { cacheWriteInputTokens: cacheWrite }),
-    ...(reasoning === undefined ? {} : { reasoningTokens: reasoning }),
-  };
 }
 
 /**
@@ -769,6 +862,23 @@ export function fitRequest(
 function isPlainUserMessage(message: NativeHarnessMessage | undefined): boolean {
   return message?.role === "user" && message.toolResults === undefined;
 }
+
+/** The endpoint's own failure, saying why the turn found no other model to continue on. */
+function withoutFallback(
+  spent: ProviderFailure,
+  reason: Extract<NativeHarnessLeadFallbackOutcome, { status: "none" }>["reason"],
+): ProviderFailure {
+  return { ...spent, message: `${spent.message} ${FALLBACK_REFUSAL_TEXT[reason]}` };
+}
+
+const FALLBACK_REFUSAL_TEXT = {
+  "slot-empty": "No fallback model is configured.",
+  "no-eligible-candidate": "No fallback model is ready.",
+  "circuit-open": "Fallback is paused after repeated failures.",
+  "no-other-model": "No other model is configured to continue on.",
+  "not-routed": "No fallback model was available.",
+  refused: "The fallback model cannot take this turn.",
+} as const;
 
 function sanitizeFailure(error: unknown): ProviderFailure {
   try {

@@ -22,10 +22,13 @@ import {
   MemoryNativeHarnessTranscriptStore,
   type NativeHarnessTranscriptStore,
 } from "./nativeHarnessTranscriptStore";
+import { sendWithEndpointRetry } from "../providers/endpointRetry";
 import type {
+  NativeHarnessLeadFallback,
   NativeHarnessRequest,
   NativeHarnessResponse,
   NativeHarnessTransport,
+  NativeHarnessTransportSession,
 } from "./nativeHarnessTransport";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000901");
@@ -74,6 +77,7 @@ function scriptedTransport(
 function connect(
   transport: NativeHarnessTransport,
   transcripts: NativeHarnessTranscriptStore,
+  leadFallback?: NativeHarnessLeadFallback,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return createNativeHarnessConnection({
     instanceId,
@@ -82,6 +86,7 @@ function connect(
     mode: "code",
     transport,
     transcripts,
+    ...(leadFallback === undefined ? {} : { leadFallback }),
     admitTurn: () => undefined,
     clock: () => now,
     correlationId: () => "80000000-0000-4000-8000-000000000903",
@@ -499,6 +504,184 @@ describe("native harness loop", () => {
     expect(requests[0]?.system).toContain("Be brief.");
     expect(requests[0]?.system).toContain("octant_browser:");
     expect(requests[0]?.history).toEqual([{ role: "user", text: "hello" }]);
+  });
+});
+
+/** An endpoint that is down: its retries run out on every request. */
+function downEndpoint(category: "unavailable" | "unauthenticated" = "unavailable"): {
+  readonly session: NativeHarnessTransportSession;
+  readonly requests: NativeHarnessRequest[];
+} {
+  const requests: NativeHarnessRequest[] = [];
+  return {
+    requests,
+    session: {
+      fits: () => true,
+      release: () => undefined,
+      send: (request, stream) => {
+        requests.push(request);
+        return sendWithEndpointRetry({
+          signal: stream.signal,
+          onEvent: stream.onEvent,
+          options: { sleep: async () => undefined, random: () => 0.5 },
+          attempt: async () => {
+            throw { category, message: "The provider request failed with HTTP 503." };
+          },
+        });
+      },
+    },
+  };
+}
+
+function answeringEndpoint(text: string): {
+  readonly session: NativeHarnessTransportSession;
+  readonly requests: NativeHarnessRequest[];
+  readonly released: () => boolean;
+} {
+  const requests: NativeHarnessRequest[] = [];
+  let released = false;
+  return {
+    requests,
+    released: () => released,
+    session: {
+      fits: () => true,
+      release: () => {
+        released = true;
+      },
+      send: async (request) => {
+        requests.push(request);
+        return { text, toolCalls: [] };
+      },
+    },
+  };
+}
+
+const backupTarget = {
+  providerInstanceId: decodeProviderInstanceId("80000000-0000-4000-8000-000000000904"),
+  modelId: "backup-model" as ProviderModelId,
+};
+
+describe("a lead whose model keeps failing", () => {
+  const run = (
+    primary: NativeHarnessTransportSession,
+    leadFallback: NativeHarnessLeadFallback | undefined,
+    turns = 1,
+  ) =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            { open: async () => primary },
+            new MemoryNativeHarnessTranscriptStore(),
+            leadFallback,
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const turnEvents: ProviderRuntimeEvent[][] = [];
+          for (let turn = 0; turn < turns; turn += 1) {
+            turnEvents.push(yield* sendAndCollect(connection, `turn ${turn}`, isTerminal));
+          }
+          return turnEvents;
+        }),
+      ),
+    );
+
+  it("continues the turn on the next model once the endpoint's retries have run out", async () => {
+    const down = downEndpoint();
+    const backup = answeringEndpoint("from the backup");
+    const asked: Array<Parameters<NativeHarnessLeadFallback["next"]>[0]> = [];
+
+    const [first, second] = await run(
+      down.session,
+      {
+        next: async (input) => {
+          asked.push(input);
+          return { status: "switched", target: backupTarget, endpoint: backup.session };
+        },
+      },
+      2,
+    );
+
+    expect(first?.map((event) => event.kind)).toEqual([
+      "retrying",
+      "retrying",
+      "retrying",
+      "retrying",
+      "completed",
+    ]);
+    expect(backup.requests[0]?.modelId).toBe("backup-model");
+    expect(backup.requests[0]?.history).toEqual([{ role: "user", text: "turn 0" }]);
+    expect(asked[0]).toMatchObject({
+      failed: { providerInstanceId: instanceId, modelId },
+      attempted: [{ providerInstanceId: instanceId, modelId }],
+      failure: { category: "unavailable" },
+    });
+    // The next turn starts on the lead's own model again, and the backup is released.
+    expect(second?.at(-1)?.kind).toBe("completed");
+    expect(down.requests.map((request) => request.modelId)).toEqual([modelId, modelId]);
+    expect(backup.released()).toBe(true);
+  });
+
+  it("fails with the endpoint's own failure and says why when no other model is configured", async () => {
+    const down = downEndpoint();
+    const [events] = await run(down.session, {
+      next: async () => ({ status: "none", reason: "slot-empty" }),
+    });
+
+    expect(events?.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: {
+        category: "unavailable",
+        message: "The provider request failed with HTTP 503. No fallback model is configured.",
+      },
+    });
+  });
+
+  it("fails the way it always did when nothing is configured to fall back with", async () => {
+    const [events] = await run(downEndpoint().session, undefined);
+
+    expect(events?.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: { category: "unavailable", message: "The provider request failed with HTTP 503." },
+    });
+  });
+
+  it("does not look for another model after a failure that was never retried", async () => {
+    let asked = 0;
+    const [events] = await run(downEndpoint("unauthenticated").session, {
+      next: async () => {
+        asked += 1;
+        return { status: "none", reason: "slot-empty" };
+      },
+    });
+
+    expect(asked).toBe(0);
+    expect(events?.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: { category: "unauthenticated" },
+    });
+  });
+
+  it("asks again when the fallback model is down too, naming every model it already tried", async () => {
+    const down = downEndpoint();
+    const alsoDown = downEndpoint();
+    const asked: Array<Parameters<NativeHarnessLeadFallback["next"]>[0]> = [];
+    const [events] = await run(down.session, {
+      next: async (input) => {
+        asked.push(input);
+        return asked.length === 1
+          ? { status: "switched", target: backupTarget, endpoint: alsoDown.session }
+          : { status: "none", reason: "no-other-model" };
+      },
+    });
+
+    expect(asked[1]?.attempted).toEqual([
+      { providerInstanceId: instanceId, modelId },
+      backupTarget,
+    ]);
+    expect(events?.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: { message: expect.stringContaining("No other model is configured to continue on.") },
+    });
   });
 });
 

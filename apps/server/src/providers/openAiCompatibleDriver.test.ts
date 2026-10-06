@@ -95,7 +95,7 @@ describe("makeOpenAiCompatibleDriver", () => {
       bodies.push(JSON.parse(String(init?.body)) as unknown);
       turn += 1;
       if (turn === 1) return chatStream("first answer");
-      if (turn === 2) return new Response(null, { status: 500 });
+      if (turn === 2) return new Response(null, { status: 400 });
       return chatStream("third answer");
     });
     const driver = makeDriver({ fetch, runtimeRegistry });
