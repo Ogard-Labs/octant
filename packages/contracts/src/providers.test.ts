@@ -2258,6 +2258,13 @@ describe("provider runtime contracts", () => {
       kind: "usage",
       inputTokens: 10,
       outputTokens: 4,
+      contextTokens: 120_000,
+      autoCompactThreshold: 167_000,
+    },
+    {
+      kind: "usage",
+      inputTokens: 10,
+      outputTokens: 4,
       requestStartedAt: "2026-07-23T10:00:00.000Z",
     },
     {
@@ -2335,6 +2342,21 @@ describe("provider runtime contracts", () => {
       decodeProviderRuntimeEvent({ ...common, ...event, providerPayload: { private: true } }),
     ).toThrow();
   });
+
+  it.each([0, -1, 0.835, Number.NaN])(
+    "refuses a usage event whose compaction point is %s tokens",
+    (autoCompactThreshold) => {
+      expect(() =>
+        decodeProviderRuntimeEvent({
+          ...common,
+          kind: "usage",
+          inputTokens: 10,
+          outputTokens: 4,
+          autoCompactThreshold,
+        }),
+      ).toThrow();
+    },
+  );
 
   it("refuses a rate-limit bucket whose remaining count exceeds its limit", () => {
     expect(() =>

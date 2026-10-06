@@ -193,6 +193,8 @@ export interface CodeThreadUsage {
   /** The model's window and its fill after the latest turn that named them. */
   readonly contextWindow?: number;
   readonly contextTokens?: number;
+  /** Where the runtime compacts by itself, from the latest turn that said so. */
+  readonly autoCompactThreshold?: number;
   readonly limits: ReadonlyArray<CodeProviderLimit>;
 }
 
@@ -394,6 +396,7 @@ export function useCodeController(options: CodeControllerOptions) {
         costUsd,
         contextWindow,
         contextTokens,
+        autoCompactThreshold,
         cacheReadInputTokens,
         cacheWriteInputTokens,
       } = event;
@@ -406,6 +409,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
         ...(contextWindow === undefined ? {} : { contextWindow }),
         ...(contextTokens === undefined ? {} : { contextTokens }),
+        ...(autoCompactThreshold === undefined ? {} : { autoCompactThreshold }),
       });
       setThreadUsage((current) => ({
         ...totalTurnUsage(usageByOperation.current),

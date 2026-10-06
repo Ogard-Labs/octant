@@ -44,6 +44,7 @@ class FakeQuery implements ClaudeAgentSdkQueryLike {
   readonly accountInfo = vi.fn(async () => initialization.account);
   readonly close = vi.fn(() => undefined);
   readonly setMcpServers = vi.fn(async () => ({ added: ["octant"], removed: [], errors: {} }));
+  getContextUsage?: () => Promise<unknown>;
 
   constructor(private readonly output: readonly unknown[]) {}
 
@@ -2002,6 +2003,98 @@ describe("Claude Agent SDK port", () => {
     );
 
     expect(kinds).toEqual(["initialized"]);
+  });
+
+  test.each([
+    {
+      name: "an enabled compaction point inside its window",
+      answer: async () => ({
+        isAutoCompactEnabled: true,
+        autoCompactThreshold: 167_000,
+        maxTokens: 200_000,
+      }),
+      expected: 167_000,
+    },
+    {
+      name: "compaction switched off",
+      answer: async () => ({
+        isAutoCompactEnabled: false,
+        autoCompactThreshold: 167_000,
+        maxTokens: 200_000,
+      }),
+      expected: undefined,
+    },
+    {
+      name: "a runtime that omits the threshold",
+      answer: async () => ({ isAutoCompactEnabled: true, maxTokens: 200_000 }),
+      expected: undefined,
+    },
+    {
+      name: "a threshold outside its own window",
+      answer: async () => ({
+        isAutoCompactEnabled: true,
+        autoCompactThreshold: 250_000,
+        maxTokens: 200_000,
+      }),
+      expected: undefined,
+    },
+    {
+      name: "a threshold that is a share of the window rather than tokens",
+      answer: async () => ({
+        isAutoCompactEnabled: true,
+        autoCompactThreshold: 0.835,
+        maxTokens: 200_000,
+      }),
+      expected: undefined,
+    },
+    {
+      name: "a runtime that refuses the request",
+      answer: async () => {
+        throw new Error("unsupported control request");
+      },
+      expected: undefined,
+    },
+    {
+      name: "a runtime that never answers",
+      answer: () => new Promise<unknown>(() => undefined),
+      expected: undefined,
+    },
+  ])(
+    "reads the runtime's compaction point when it answers with $name",
+    async ({ answer, expected }) => {
+      const harness = makeHarness();
+      harness.query.getContextUsage = answer;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const opened = Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const query = yield* harness.port.openQuery(openInput);
+              return query.initialization.autoCompactThreshold;
+            }),
+          ),
+        );
+        await vi.advanceTimersByTimeAsync(3_500);
+        expect(await opened).toBe(expected);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  test("reports no compaction point from a runtime that cannot be asked", async () => {
+    const harness = makeHarness();
+
+    const threshold = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          return query.initialization.autoCompactThreshold;
+        }),
+      ),
+    );
+
+    expect(threshold).toBeUndefined();
   });
 
   test("opens a new session under the assigned id and holds the runtime to it", async () => {

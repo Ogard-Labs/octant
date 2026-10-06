@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { contextFixture } from "./contextFixtures";
 import {
+  autoCompactRoom,
   contextCompositionEntries,
   contextEntryControls,
   contextStatusModel,
@@ -142,5 +143,38 @@ describe("context inspector presentation model", () => {
       tokens: 42,
     });
     expect(model.segments.some((segment) => segment.label === "Octant tools")).toBe(false);
+  });
+});
+
+describe("room before auto-compact", () => {
+  it("is the threshold less the occupancy for a runtime that compacts automatically", () => {
+    expect(
+      autoCompactRoom({ compaction: "automatic", thresholdTokens: 167_000, usedTokens: 120_000 }),
+    ).toEqual({ tokens: 47_000 });
+  });
+
+  it("never goes below none once the session is at or past the threshold", () => {
+    expect(
+      autoCompactRoom({ compaction: "automatic", thresholdTokens: 167_000, usedTokens: 170_000 }),
+    ).toEqual({ tokens: 0 });
+  });
+
+  it.each(["manual", "none", "unknown"] as const)(
+    "shows nothing for %s compaction even when a threshold is known",
+    (compaction) => {
+      expect(
+        autoCompactRoom({ compaction, thresholdTokens: 167_000, usedTokens: 120_000 }),
+      ).toBeUndefined();
+    },
+  );
+
+  it.each([
+    { thresholdTokens: undefined, usedTokens: 120_000 },
+    { thresholdTokens: 167_000, usedTokens: undefined },
+    { thresholdTokens: 0, usedTokens: 120_000 },
+    { thresholdTokens: 167_000, usedTokens: -1 },
+    { thresholdTokens: Number.NaN, usedTokens: 120_000 },
+  ])("shows nothing without a usable threshold and occupancy: %o", (input) => {
+    expect(autoCompactRoom({ compaction: "automatic", ...input })).toBeUndefined();
   });
 });
