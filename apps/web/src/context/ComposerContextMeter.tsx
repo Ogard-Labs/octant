@@ -86,8 +86,12 @@ export function ComposerContextMeter() {
   const reported = fallback === undefined ? undefined : reportedWindow(fallback);
   const limit =
     fallback === undefined || reported !== undefined ? undefined : bindingLimit(fallback);
+  // A window nothing named has no share to draw: the ring stays empty rather
+  // than reading a guessed denominator as a full window.
   const percent =
-    windowModel === undefined ? (reported?.percent ?? limit?.percent ?? 0) : windowModel.percent;
+    windowModel === undefined
+      ? (reported?.percent ?? limit?.percent ?? 0)
+      : (windowModel.percent ?? 0);
   const usedPercent = Math.round(Math.max(0, Math.min(100, percent)) * 10) / 10;
   const limitAlert =
     snapshot?.serviceLimits.quota === "exhausted"
@@ -122,7 +126,9 @@ export function ComposerContextMeter() {
         : reported === undefined
           ? "Provider usage"
           : "Context window"
-      : "Context window";
+      : windowModel.totalTokens === undefined
+        ? "Context used"
+        : "Context window";
 
   return (
     <div
@@ -272,7 +278,9 @@ export function composerContextOccupancy(input: {
   | undefined {
   if (input.snapshot !== undefined) {
     const model = contextWindowModel(input.snapshot);
-    if (model.totalTokens <= 0) return undefined;
+    if (model.totalTokens === undefined || model.percent === undefined || model.totalTokens <= 0) {
+      return undefined;
+    }
     return {
       usedTokens: model.usedTokens,
       totalTokens: model.totalTokens,
@@ -592,7 +600,7 @@ function ContextUsagePopover(props: {
     { label: "Concurrent turns", limit: snapshot.serviceLimits.concurrency },
   ] as const;
   const windows = snapshot.serviceLimits.rateLimitWindows ?? [];
-  const percentLabel = `(${String(Math.round(windowModel.percent))}%)`;
+  const { percent, totalTokens } = windowModel;
 
   return (
     <>
@@ -600,14 +608,25 @@ function ContextUsagePopover(props: {
         breakdownId={breakdownId}
         expanded={expanded}
         onToggle={() => setExpanded((current) => !current)}
-        title="Context window"
-        total={`${windowModel.usageLabel} ${percentLabel}`}
+        title={totalTokens === undefined ? "Context used" : "Context window"}
+        total={
+          percent === undefined
+            ? windowModel.usageLabel
+            : `${windowModel.usageLabel} (${String(Math.round(percent))}%)`
+        }
       />
-      <SegmentBar
-        label={`Context window composition across ${compactTokens(windowModel.totalTokens)} tokens`}
-        percent={windowModel.percent}
-        segments={windowModel.segments}
-      />
+      {totalTokens === undefined || percent === undefined ? (
+        <p className="context-window-popover__source">
+          No model has reported a context-window maximum for this thread, so there is no share of a
+          window to show.
+        </p>
+      ) : (
+        <SegmentBar
+          label={`Context window composition across ${compactTokens(totalTokens)} tokens`}
+          percent={percent}
+          segments={windowModel.segments}
+        />
+      )}
       {expanded ? (
         <div className="context-window-popover__details" id={breakdownId}>
           <SegmentLegend segments={windowModel.segments} />
@@ -718,7 +737,10 @@ function SegmentBar(props: {
       {props.segments
         .filter(
           (segment) =>
-            segment.kind !== "free" && segment.tokens !== undefined && segment.percent > 0,
+            segment.kind !== "free" &&
+            segment.tokens !== undefined &&
+            segment.percent !== undefined &&
+            segment.percent > 0,
         )
         .map((segment) => (
           <span
@@ -767,7 +789,11 @@ function SegmentLegend(props: { readonly segments: ReadonlyArray<ContextWindowSe
               ) : null}
             </th>
             <td>{segment.tokens === undefined ? "Unknown" : compactTokens(segment.tokens)}</td>
-            <td>{segment.tokens === undefined ? "" : formatPercent(segment.percent)}</td>
+            <td>
+              {segment.tokens === undefined || segment.percent === undefined
+                ? ""
+                : formatPercent(segment.percent)}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -972,7 +998,7 @@ function meterLabel(input: {
   const source = contextWindowUsedSourceLabel(input.windowModel.usedSource);
   const health = input.healthLabel === undefined ? "" : ` ${input.healthLabel}.`;
   const scope = input.snapshotLabel === undefined ? "" : ` for ${input.snapshotLabel}`;
-  return `${action} context usage${scope}. ${input.windowModel.usageLabel} (${String(Math.round(input.windowModel.percent))}%)${unknown}. ${source}.${health}`;
+  return `${action} context usage${scope}. ${windowFigure(input.windowModel)}${unknown}. ${source}.${health}`;
 }
 
 function liveLabel(input: {
@@ -1004,7 +1030,17 @@ function liveLabel(input: {
   const source = contextWindowUsedSourceLabel(input.windowModel.usedSource);
   const health = input.healthLabel === undefined ? "" : ` ${input.healthLabel}.`;
   const scope = input.snapshotLabel === undefined ? "Context" : input.snapshotLabel;
-  return `${scope}. ${input.windowModel.sourceLabel} ${input.windowModel.usageLabel} (${String(Math.round(input.windowModel.percent))}%)${unknown}. ${source}.${health}`;
+  return `${scope}. ${input.windowModel.sourceLabel} ${windowFigure(input.windowModel)}${unknown}. ${source}.${health}`;
+}
+
+/**
+ * The window's figure for a screen reader. A window nothing named is said to be
+ * unavailable rather than read out as a share of a number nobody reported.
+ */
+function windowFigure(model: ReturnType<typeof contextWindowModel>): string {
+  return model.percent === undefined
+    ? `${model.usageLabel} used, context window maximum unavailable`
+    : `${model.usageLabel} (${String(Math.round(model.percent))}%)`;
 }
 
 function emptyMessage(status: string): string {

@@ -324,4 +324,6 @@ table.
   candidate until it does.
 - Context is reduced by the host's planner; each prune and cut is journaled
   with the cache cost it paid, and the lead can read `context-remaining` to
-  checkpoint before one.
+  checkpoint before one. An endpoint that never reports the model's window,
+  such as some Azure AI Foundry deployments, gives the lead no figure: the tool
+  says the context is unavailable instead of reporting room against an estimate.
