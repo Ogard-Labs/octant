@@ -508,6 +508,77 @@ describe("the public-block visual language", () => {
     );
   });
 
+  describe("categorical colour in the context window", () => {
+    const css = readFileSync(join(webRoot, "context/context.css"), "utf8");
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((match) => ({
+      selector: (match[1] ?? "").replace(/\/\*[\s\S]*?\*\//g, "").trim(),
+      body: match[2] ?? "",
+    }));
+    const toneRule = (tone: number) =>
+      rules.find((rule) => rule.selector.endsWith(`[data-tone="${String(tone)}"]`));
+    const hues = ["blue", "orange", "purple", "teal", "green", "pink", "yellow"];
+
+    it("gives the parts of the window a hue in every style, from the palette roles", () => {
+      // The Default style is monochrome chrome; the parts of a context window
+      // are categorical data, which DESIGN.md allows to keep colour beside a
+      // name. Seven hues in two steps; red stays the ring's near-full warning.
+      hues.forEach((hue, index) => {
+        expect(toneRule(index + 1)?.body).toContain(`var(--octant-palette-${hue},`);
+        const shaded = toneRule(index + 8)?.body ?? "";
+        expect(shaded).toContain(`var(--octant-palette-${hue},`);
+        expect(shaded).toContain("var(--octant-text-primary)");
+      });
+      expect(toneRule(15)).toBeUndefined();
+      expect(css).not.toMatch(/data-tone[^{]*\{[^}]*--octant-palette-red/);
+    });
+
+    it("confines palette colour in that sheet to the window's tones, the ring and the limit bars", () => {
+      const withPalette = rules.filter((rule) => rule.body.includes("--octant-palette-"));
+
+      expect(withPalette.length).toBeGreaterThan(0);
+      for (const rule of withPalette) {
+        expect(rule.selector).toMatch(
+          /\[data-tone="\d+"\]|\.composer-context-meter\b|\.context-window-popover__limit/,
+        );
+      }
+    });
+
+    it("keeps free space and reserved room neutral", () => {
+      const neutral = rules.find(
+        (rule) =>
+          rule.selector.includes(".context-window-popover,") &&
+          rule.selector.includes(".context-entry-card"),
+      );
+
+      // A segment with no tone takes the neutral fill: ink over the panel.
+      expect(neutral?.body).toMatch(
+        /--context-window-tone:\s*color-mix\(\s*in oklab,\s*var\(--octant-text-primary\)[^;]*var\(--octant-floating\)\s*\)/,
+      );
+      expect(neutral?.body).not.toContain("--octant-palette-");
+      // Free space is the empty track, drawn as the track.
+      const freeSwatch = rules.find((rule) =>
+        rule.selector.includes('tr[data-kind="free"] .context-window-popover__swatch'),
+      );
+      expect(freeSwatch?.body).toContain("background: var(--context-window-track)");
+      expect(
+        rules.some(
+          (rule) =>
+            /data-kind="(?:free|reserved)"/.test(rule.selector) &&
+            rule.body.includes("--octant-palette-"),
+        ),
+      ).toBe(false);
+    });
+
+    it("leaves the context ring coloured, amber and then red when nearly full", () => {
+      expect(css).toMatch(
+        /\.composer-context-meter \{\s*--composer-context-meter-ink: var\(--octant-palette-orange/,
+      );
+      expect(css).toMatch(
+        /\.composer-context-meter\[data-fill="high"\] \{\s*--composer-context-meter-ink: var\(--octant-palette-red/,
+      );
+    });
+  });
+
   it("keeps Usage on the open grammar instead of stat cards", () => {
     const usage = readFileSync(join(webRoot, "styles/usage.css"), "utf8");
     const dashboard = readFileSync(join(webRoot, "usage/UsageDashboard.tsx"), "utf8");

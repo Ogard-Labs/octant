@@ -42,7 +42,8 @@ asks for it (Settings › Appearance › Style):
   for discrete objects, and selection fills. In the Default style the chrome is
   monochrome; colour names identity (a Project, a provider, a count tile under
   Vivid) and never stands in for status, which keeps its own warning, failure,
-  and diff roles.
+  and diff roles. Categorical data is the other exception: the context ring and
+  the parts of the context window keep their hues in every style.
 - Controls are familiar, compact, keyboard reachable, and honest about
   loading, stale, unavailable, permission, and error states.
 
@@ -1250,11 +1251,37 @@ provider's limits as a name, a reset countdown or weekday, a share, and a thin
 bar each, and a footer action to the fuller surface (the context inspector, or
 Usage for a provider the host does not plan). The breakdown lists only the
 parts the data attributes: planned threads show their manifest categories,
-overhead, reserve, and free space; a provider-reported window shows used and
-free, with the thread's input and output totals kept apart because they are
-sums over turns, not parts of the window. Categories are told apart by palette
-hues (the largest share in blue) and each swatch is named; limit bars fill in
-blue. A limit near its cap is marked on its row and in its bar's value text,
+overhead, reserve, and free space; a provider-run window shows the parts its
+runtime reported (system prompt, system and MCP tools, memory files, skills,
+agents, messages), or, for a runtime that reported none, the parts Octant can
+count itself (Octant tools), and in either case one `Other (provider)` remainder
+so the parts add up to what the window holds. With no parts it shows used and
+free. The thread's input and output totals stay apart because they are sums over
+turns, not parts of the window. A part Octant counted is marked `Estimated`,
+with its accuracy (the existing exact tokenizer, model-family estimate and
+conservative estimate labels) in the part's tooltip and in a line under the key;
+the remainder after an estimate is marked the same way. Counts (tools, MCP, memory
+files, skills, agents) use the harness breakdown's row style; tools the runtime
+knows but has not loaded read `N deferred` and take no share of the bar.
+
+Categorical colour (the maintainer's decision, 2026-10-06): the parts of a
+context window are categorical data, so they carry hue in every style, Default
+included, beside the context ring as the second colour exception in that
+style. Each category has one tone, taken from the palette roles in seven hues
+and a second, darker step of each (the same hue mixed toward the ink, which only
+raises contrast against the panel in either theme), and keeps it wherever it
+appears: the popover's bar and key, and the swatch on the context inspector's
+entries. Related categories share a hue (conversation, current request and
+messages are blues; tool results and subagent results oranges; memory and
+workspace context purples; tool definitions teal; MCP green; the instruction
+categories yellow, pink, teal and green steps; what nothing accounts for pink).
+Red is left to the ring's near-full warning. **Free space and Reserved stay
+neutral**: no hue, the panel's ink mixed into its ground, with Free space drawn
+as the bar's empty track. Every part is named beside its swatch and carries its
+tokens and share, so hue never stands alone. The exception is scoped to these
+segments in `visualLanguageContract.test.ts`: in `context.css` palette colour
+may appear only on the tone rules, the ring and the limit bars. Limit bars fill
+in blue. A limit near its cap is marked on its row and in its bar's value text,
 never by ink alone. Unknown or stale data is labeled as such and never rendered as zero.
 Where a provider runtime compacts the session by itself and has said where, one
 secondary line under the window bar reads `N until auto-compact` in the bar's

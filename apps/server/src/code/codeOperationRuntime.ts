@@ -2692,6 +2692,7 @@ function normalizedOperationEvent(
       ...(event.autoCompactThreshold === undefined
         ? {}
         : { autoCompactThreshold: event.autoCompactThreshold }),
+      ...(event.contextBreakdown === undefined ? {} : { contextBreakdown: event.contextBreakdown }),
     };
   if (event.category === "provider-limit" && event.text !== undefined)
     return {

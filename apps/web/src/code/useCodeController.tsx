@@ -17,7 +17,7 @@ import type {
   CodeThreadView,
 } from "@octant/contracts/code";
 import { decodeCodeThreadId } from "@octant/contracts/code";
-import { decodeUtcTimestamp } from "@octant/contracts";
+import { decodeUtcTimestamp, type ProviderContextBreakdown } from "@octant/contracts";
 import { waitForReconnect } from "../lib/waitForReconnect";
 import {
   decodeCodeOperationId,
@@ -195,6 +195,8 @@ export interface CodeThreadUsage {
   readonly contextTokens?: number;
   /** Where the runtime compacts by itself, from the latest turn that said so. */
   readonly autoCompactThreshold?: number;
+  /** What the window held, from the latest turn that reported or counted it. */
+  readonly contextBreakdown?: ProviderContextBreakdown;
   readonly limits: ReadonlyArray<CodeProviderLimit>;
 }
 
@@ -397,6 +399,7 @@ export function useCodeController(options: CodeControllerOptions) {
         contextWindow,
         contextTokens,
         autoCompactThreshold,
+        contextBreakdown,
         cacheReadInputTokens,
         cacheWriteInputTokens,
       } = event;
@@ -410,6 +413,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(contextWindow === undefined ? {} : { contextWindow }),
         ...(contextTokens === undefined ? {} : { contextTokens }),
         ...(autoCompactThreshold === undefined ? {} : { autoCompactThreshold }),
+        ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
       });
       setThreadUsage((current) => ({
         ...totalTurnUsage(usageByOperation.current),

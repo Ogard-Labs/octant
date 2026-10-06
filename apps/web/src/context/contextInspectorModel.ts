@@ -6,6 +6,11 @@ import type {
   ServiceLimitBucket,
   TokenMeasurement,
 } from "@octant/contracts/context";
+import type {
+  ProviderContextBreakdown,
+  ProviderContextPart,
+  ProviderContextPartKind,
+} from "@octant/contracts";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 
 export type ContextFocus =
@@ -29,14 +34,26 @@ export interface ContextCompositionEntry extends ContextEntry {
   readonly planReason: ContextInspectorSnapshot["next"]["plan"]["entries"][number]["reason"];
 }
 
+/**
+ * A categorical hue for a context category: 1–7 are the seven palette hues, and
+ * 8–14 are the same hues one step toward the ink, so fourteen categories can
+ * stand in one bar. A segment with no tone (Free space, Reserved) is neutral.
+ */
+export type ContextTone = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14;
+
+export type ContextSegmentAccuracy = ProviderContextPart["accuracy"];
+
 export interface ContextWindowSegment {
+  /** How exact the figure is, where the source said. Absent for free space. */
+  readonly accuracy?: ContextSegmentAccuracy;
   readonly estimated?: boolean;
   readonly key: string;
   readonly kind: "content" | "overhead" | "reserved" | "free";
   readonly label: string;
   readonly percent: number;
   readonly tokens?: number;
-  readonly tone: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  /** Absent only for free space and reserved room, which stay neutral. */
+  readonly tone?: ContextTone;
 }
 
 export type ContextWindowUsedSource = "provider-reported" | "estimated" | "unknown" | "measured";
@@ -193,15 +210,18 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
   const freeTokens = hasUnknown
     ? undefined
     : Math.max(0, totalTokens - usedTokens - reservedTokens);
-  const segments: Array<ContextWindowSegment> = content.map((entry, index) => ({
-    key: entry.key,
-    kind: "content",
-    label: entry.label,
-    percent: percentOf(entry.tokens, totalTokens),
-    ...(entry.unknown ? {} : { tokens: entry.tokens }),
-    ...(entry.estimated && !entry.unknown ? { estimated: true } : {}),
-    tone: toneAt(index),
-  }));
+  const segments: Array<ContextWindowSegment> = content.map((entry) => {
+    const tone = contextCategoryTone(entry.key);
+    return {
+      key: entry.key,
+      kind: "content",
+      label: entry.label,
+      percent: percentOf(entry.tokens, totalTokens),
+      ...(entry.unknown ? {} : { tokens: entry.tokens }),
+      ...(entry.estimated && !entry.unknown ? { estimated: true } : {}),
+      ...(tone === undefined ? {} : { tone }),
+    };
+  });
   if (overheadTokens > 0) {
     segments.push({
       key: "observed-overhead",
@@ -209,7 +229,7 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
       label: "Observed overhead",
       percent: percentOf(overheadTokens, totalTokens),
       tokens: overheadTokens,
-      tone: 6,
+      tone: UNATTRIBUTED_TONE,
     });
   }
   segments.push(
@@ -219,7 +239,6 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
       label: "Reserved",
       percent: percentOf(reservedTokens, totalTokens),
       tokens: reservedTokens,
-      tone: 7,
     },
     {
       key: "free",
@@ -227,7 +246,6 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
       label: "Free space",
       percent: freeTokens === undefined ? 0 : percentOf(freeTokens, totalTokens),
       ...(freeTokens === undefined ? {} : { tokens: freeTokens }),
-      tone: 8,
     },
   );
 
@@ -276,13 +294,7 @@ export function contextCategoryLabel(category: ContextEntryCategory): string {
 
 export function tokenMeasurementLabel(measurement: TokenMeasurement): string {
   if (measurement.kind === "unknown") return "Unknown";
-  const accuracy = {
-    "provider-reported": "Provider reported",
-    "exact-tokenizer": "Exact tokenizer",
-    "model-family-estimate": "Model-family estimate",
-    "conservative-heuristic": "Conservative estimate",
-  }[measurement.accuracy];
-  return `${compact(measurement.tokens)} · ${accuracy}`;
+  return `${compact(measurement.tokens)} · ${contextAccuracyLabel(measurement.accuracy)}`;
 }
 
 export function serviceLimitLabel(bucket: ServiceLimitBucket): string {
@@ -347,8 +359,232 @@ function percentOf(value: number, total: number): number {
   return Math.max(0, Math.min(100, Math.round((value / total) * 1000) / 10));
 }
 
-function toneAt(index: number): ContextWindowSegment["tone"] {
-  return ((index % 6) + 1) as ContextWindowSegment["tone"];
+/**
+ * One hue per category, the same in the popover's bar and key and on the
+ * inspector's entries, whichever thread it is on. Categories that are the same
+ * kind of thing share a family (conversation and current request are blues,
+ * the tool results and subagent results are oranges), and a darker step
+ * separates two members of a family that can stand in one bar. Seven hues in
+ * two steps hold the fourteen categories of a planned thread without any two of
+ * them sharing a tone; a provider-run window uses a subset of the same table.
+ * Free space and reserved room have no tone: they are the window's own space,
+ * not something that fills it.
+ */
+const UNATTRIBUTED_TONE: ContextTone = 6;
+
+const CATEGORY_TONES: Readonly<Record<string, ContextTone>> = {
+  // What was said.
+  conversation: 1,
+  "current-request": 8,
+  messages: 1,
+  used: 1,
+  // What came back.
+  "tool-results": 2,
+  "subagent-results": 9,
+  agents: 9,
+  // What the project remembers.
+  "project-memory": 3,
+  "memory-files": 3,
+  "workspace-context": 10,
+  // Tool definitions.
+  "octant-tools": 4,
+  "system-tools": 4,
+  mcp: 5,
+  "mcp-tools": 5,
+  // Instructions.
+  "provider-framing": 7,
+  "system-prompt": 7,
+  "octant-policy": 14,
+  "user-instructions": 11,
+  "project-instructions": 13,
+  "extension-instructions": 12,
+  skills: 12,
+  // What no category accounts for. Pink is kept for it alone among the
+  // first-step hues, so the remainder never reads as a neighbouring tool part.
+  "observed-overhead": UNATTRIBUTED_TONE,
+  "other-provider": UNATTRIBUTED_TONE,
+};
+
+export function contextCategoryTone(key: string): ContextTone | undefined {
+  return CATEGORY_TONES[key];
+}
+
+const partLabels: Readonly<Record<ProviderContextPartKind, string>> = {
+  "system-prompt": "System prompt",
+  "system-tools": "System tools",
+  "octant-tools": "Octant tools",
+  "mcp-tools": "MCP tools",
+  "memory-files": "Memory files",
+  skills: "Skills",
+  agents: "Agents",
+  messages: "Messages",
+  reserved: "Reserved",
+};
+
+export interface ProviderWindowCount {
+  readonly key: "tools" | "mcp" | "memory-files" | "skills" | "agents";
+  readonly label: string;
+  readonly loaded?: number;
+  /** Known to the runtime but not loaded: no share of the window. */
+  readonly deferred?: { readonly count?: number };
+}
+
+export interface ProviderWindowModel {
+  /** The counts the runtime or Octant knows; a count nobody has is not a row. */
+  readonly counts: ReadonlyArray<ProviderWindowCount>;
+  /** The estimated accuracies in play, so the popover can name them. */
+  readonly estimatedAccuracies: ReadonlyArray<
+    Exclude<ContextSegmentAccuracy, "provider-reported" | "exact-tokenizer">
+  >;
+  readonly segments: ReadonlyArray<ContextWindowSegment>;
+  /** What the window holds. Never less than the parts that were counted in it. */
+  readonly usedTokens: number;
+}
+
+/**
+ * The window of a thread a provider runtime runs, as the parts that fill it.
+ *
+ * The runtime reports one occupancy figure, and possibly the parts of it; Octant
+ * may add parts it counted itself, marked with how exact they are. Whatever the
+ * occupancy holds beyond the parts is "Other (provider)", so the parts and that
+ * remainder always add up to what the window holds. When the parts outrun the
+ * occupancy (the breakdown was taken after the reply, the occupancy before it)
+ * the window holds what the parts add up to, and nothing is shown as negative.
+ * With no parts the window is a single "Used" segment, as before. Reserved room
+ * comes only from a runtime that reported it; free space is what is left.
+ */
+export function providerWindowModel(input: {
+  readonly breakdown?: ProviderContextBreakdown | undefined;
+  readonly usedTokens: number;
+  readonly windowTokens: number;
+}): ProviderWindowModel {
+  const { breakdown, windowTokens } = input;
+  // Each share is rounded once, when it is shown. Rounding here as well made
+  // 85.5% and 14.5% read as 86% and 15%: a window a point over full.
+  const share = (tokens: number) =>
+    windowTokens <= 0 ? 0 : Math.max(0, Math.min(100, (tokens / windowTokens) * 100));
+  const parts = (breakdown?.parts ?? []).filter((part) => part.kind !== "reserved");
+  const reservedTokens = (breakdown?.parts ?? [])
+    .filter((part) => part.kind === "reserved")
+    .reduce((sum, part) => sum + part.tokens, 0);
+  const partsTokens = parts.reduce((sum, part) => sum + part.tokens, 0);
+  const usedTokens = Math.max(input.usedTokens, partsTokens);
+  const remainderTokens = usedTokens - partsTokens;
+  const estimatedAccuracies = [
+    ...new Set(
+      parts.flatMap((part) =>
+        part.accuracy === "provider-reported" || part.accuracy === "exact-tokenizer"
+          ? []
+          : [part.accuracy],
+      ),
+    ),
+  ];
+  const estimated = estimatedAccuracies.length > 0;
+
+  const segments: Array<ContextWindowSegment> = [];
+  if (parts.length === 0) {
+    segments.push({
+      key: "used",
+      kind: "content",
+      label: "Used",
+      percent: share(usedTokens),
+      tokens: usedTokens,
+      tone: 1,
+    });
+  } else {
+    for (const part of parts) {
+      const tone = contextCategoryTone(part.kind);
+      segments.push({
+        key: part.kind,
+        kind: "content",
+        label: partLabels[part.kind],
+        percent: share(part.tokens),
+        tokens: part.tokens,
+        accuracy: part.accuracy,
+        ...(part.accuracy === "provider-reported" || part.accuracy === "exact-tokenizer"
+          ? {}
+          : { estimated: true }),
+        ...(tone === undefined ? {} : { tone }),
+      });
+    }
+    if (remainderTokens > 0) {
+      segments.push({
+        key: "other-provider",
+        kind: "overhead",
+        label: "Other (provider)",
+        percent: share(remainderTokens),
+        tokens: remainderTokens,
+        // What remains of a reported figure after an estimate is itself
+        // inexact, so it never reads as the provider's own count.
+        ...(estimated ? { estimated: true } : { accuracy: "provider-reported" as const }),
+        tone: UNATTRIBUTED_TONE,
+      });
+    }
+  }
+  if (reservedTokens > 0) {
+    segments.push({
+      key: "reserved",
+      kind: "reserved",
+      label: "Reserved",
+      percent: share(reservedTokens),
+      tokens: reservedTokens,
+      accuracy: "provider-reported",
+    });
+  }
+  const freeTokens = Math.max(0, windowTokens - usedTokens - reservedTokens);
+  segments.push({
+    key: "free",
+    kind: "free",
+    label: "Free space",
+    percent: share(freeTokens),
+    tokens: freeTokens,
+  });
+
+  const loaded = (...kinds: ReadonlyArray<ProviderContextPartKind>) => {
+    const counted = parts.filter((part) => kinds.includes(part.kind) && part.count !== undefined);
+    return counted.length === 0
+      ? undefined
+      : counted.reduce((sum, part) => sum + (part.count ?? 0), 0);
+  };
+  const deferred = (kind: "system-tools" | "mcp-tools") =>
+    breakdown?.deferred?.find((entry) => entry.kind === kind);
+  const counts: Array<ProviderWindowCount> = [];
+  const countRow = (
+    key: ProviderWindowCount["key"],
+    label: string,
+    loadedCount: number | undefined,
+    deferredEntry?: NonNullable<ProviderContextBreakdown["deferred"]>[number],
+  ) => {
+    if (loadedCount === undefined && deferredEntry === undefined) return;
+    counts.push({
+      key,
+      label,
+      ...(loadedCount === undefined ? {} : { loaded: loadedCount }),
+      // A group the runtime named as deferred without saying how many still
+      // says that it exists, with no share of the window.
+      ...(deferredEntry === undefined
+        ? {}
+        : {
+            deferred: deferredEntry.count === undefined ? {} : { count: deferredEntry.count },
+          }),
+    });
+  };
+  countRow("tools", "Tools", loaded("system-tools", "octant-tools"), deferred("system-tools"));
+  countRow("mcp", "MCP", loaded("mcp-tools"), deferred("mcp-tools"));
+  countRow("memory-files", "Memory files", loaded("memory-files"));
+  countRow("skills", "Skills", loaded("skills"));
+  countRow("agents", "Agents", loaded("agents"));
+
+  return { counts, estimatedAccuracies, segments, usedTokens };
+}
+
+export function contextAccuracyLabel(accuracy: ContextSegmentAccuracy): string {
+  return {
+    "provider-reported": "Provider reported",
+    "exact-tokenizer": "Exact tokenizer",
+    "model-family-estimate": "Model-family estimate",
+    "conservative-heuristic": "Conservative estimate",
+  }[accuracy];
 }
 
 /**

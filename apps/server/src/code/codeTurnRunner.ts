@@ -3,6 +3,7 @@ import {
   decodeCodeRelativePath,
   type CodeThread,
   type PermissionPersistence,
+  type ProviderContextBreakdown,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
@@ -18,6 +19,7 @@ import type {
   ProviderSessionHandle,
 } from "@octant/provider-sdk/driver";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
+import { estimateOctantToolsPart } from "./codeTurnContext";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { countsTowardTurnEventBudget, makeIdleTimeout } from "../providers/turnBudget";
@@ -114,6 +116,7 @@ export interface CodeTurnEvent {
   readonly contextWindow?: number;
   readonly contextTokens?: number;
   readonly autoCompactThreshold?: number;
+  readonly contextBreakdown?: ProviderContextBreakdown;
   readonly utilization?: number;
   readonly resetsAt?: string;
   readonly providerClaimIsMutationProof?: false;
@@ -720,7 +723,11 @@ function normalizeProviderEvent(
         text: text(event.inputJson),
         status: "app-managed-request",
       });
-    case "usage":
+    case "usage": {
+      // The runtime's own categories win. Octant counts what it adds only for
+      // a runtime that reported none, so a part is never counted twice.
+      const contextBreakdown =
+        event.contextBreakdown ?? estimateOctantToolsPart(input.appManagedTools?.definitions ?? []);
       return Effect.succeed({
         ...base,
         category: "usage",
@@ -739,7 +746,9 @@ function normalizeProviderEvent(
         ...(event.autoCompactThreshold === undefined
           ? {}
           : { autoCompactThreshold: event.autoCompactThreshold }),
+        ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
       });
+    }
     case "rate-limit-window":
       return Effect.succeed({
         ...base,
