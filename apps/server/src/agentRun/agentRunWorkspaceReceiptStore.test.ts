@@ -1,14 +1,43 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AGENT_RUN_WORKSPACE_RECEIPT_TTL_MS,
   AgentRunWorkspaceReceiptStore,
 } from "./agentRunWorkspaceReceiptStore";
 
+/**
+ * Holds one write open after the file it targets has been opened for writing,
+ * so a read that lands mid-write is deterministic instead of timing-dependent.
+ */
+const writeGate = vi.hoisted(() => ({
+  hold: undefined as (() => Promise<void>) | undefined,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
+      const hold = writeGate.hold;
+      writeGate.hold = undefined;
+      if (hold === undefined) return actual.writeFile(...args);
+      const [target, data] = args;
+      const handle = await actual.open(target as string, "w", 0o600);
+      try {
+        await hold();
+        await handle.writeFile(data as string, "utf8");
+      } finally {
+        await handle.close();
+      }
+    },
+  };
+});
+
 const directories: string[] = [];
 afterEach(() => {
+  writeGate.hold = undefined;
   while (directories.length > 0) {
     const directory = directories.pop();
     if (directory !== undefined) rmSync(directory, { recursive: true, force: true });
@@ -113,5 +142,30 @@ describe("AgentRunWorkspaceReceiptStore", () => {
         now: now + AGENT_RUN_WORKSPACE_RECEIPT_TTL_MS,
       }),
     ).toBeUndefined();
+  });
+
+  it("keeps the previous grant readable while a replayed confirmation is still being saved", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-ws-"));
+    directories.push(directory);
+    const store = new AgentRunWorkspaceReceiptStore({
+      dataDirectory: directory,
+      uuid: () => ids.receipt,
+    });
+    const issued = await store.issue({
+      parentThreadId: ids.thread,
+      windowId: ids.window,
+      mode: "code",
+      confirmed: false,
+      now: 1_700_000_000_000,
+    });
+
+    let duringSave: Awaited<ReturnType<typeof store.load>>;
+    writeGate.hold = async () => {
+      duringSave = await store.load(ids.receipt);
+    };
+    await store.save({ ...issued, confirmed: true });
+
+    expect(duringSave).toMatchObject({ receiptId: ids.receipt, confirmed: false });
+    expect(await store.load(ids.receipt)).toMatchObject({ confirmed: true });
   });
 });
