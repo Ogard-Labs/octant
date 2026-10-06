@@ -927,6 +927,51 @@ describe("AgentRunOrchestrationService", () => {
     }
   });
 
+  it("shows a child as running once its session has started, and still settles it", () => {
+    const { orchestration, persistence } = createHarness();
+    const admitted = orchestration.admit({
+      command: requestCommand(),
+      parentAuthority: authority,
+      confirmed: true,
+      liveAuthority: authority,
+    });
+    expect(admitted.kind).toBe("run-accepted");
+    if (admitted.kind !== "run-accepted") return;
+    orchestration.start(admitted.run.id, admitted.run.version, authority);
+    expect(persistence.getById(admitted.run.id)?.lifecycleStatus).toBe("starting");
+
+    const running = orchestration.onSessionRunning(admitted.run.id);
+    expect(running).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "running" } });
+    // A second report, or one for a run past Starting, records nothing.
+    expect(orchestration.onSessionRunning(admitted.run.id)).toBeUndefined();
+
+    orchestration.onSessionSettled({
+      runId: admitted.run.id,
+      outcome: { kind: "interrupted", reason: "deadline exceeded" },
+    });
+    expect(persistence.getById(admitted.run.id)?.lifecycleStatus).toBe("interrupted");
+  });
+
+  it("does not move a child that already settled to running", () => {
+    const { orchestration, persistence } = createHarness();
+    const admitted = orchestration.admit({
+      command: requestCommand(),
+      parentAuthority: authority,
+      confirmed: true,
+      liveAuthority: authority,
+    });
+    expect(admitted.kind).toBe("run-accepted");
+    if (admitted.kind !== "run-accepted") return;
+    orchestration.start(admitted.run.id, admitted.run.version, authority);
+    orchestration.onSessionSettled({
+      runId: admitted.run.id,
+      outcome: { kind: "failed", failure: { category: "provider-failed", message: "boom" } },
+    });
+
+    expect(orchestration.onSessionRunning(admitted.run.id)).toBeUndefined();
+    expect(persistence.getById(admitted.run.id)?.lifecycleStatus).toBe("failed");
+  });
+
   it("leaves the parent acknowledgement outstanding when a child completes", () => {
     const { orchestration, persistence } = createHarness();
     const admitted = orchestration.admit({

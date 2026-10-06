@@ -694,6 +694,31 @@ export class AgentRunOrchestrationService {
   }
 
   /**
+   * Records Running once a managed session has verified its workspace and is
+   * starting its provider, so a child that is calling tools no longer reads as
+   * Starting. Only a Starting run moves: a run already past it, or whose
+   * session settled first, has nothing honest left to record.
+   */
+  onSessionRunning(runId: AgentRunId): AgentRunCommandResult | undefined {
+    const current = this.#persistence.getById(runId);
+    if (current?.lifecycleStatus !== "starting" || this.#settledSessions.has(runId)) {
+      return undefined;
+    }
+    try {
+      return this.#persistence.applyCommand({
+        kind: "mark-agent-run-running",
+        runId: current.id,
+        expectedVersion: current.version as never,
+      });
+    } catch (error) {
+      console.error(
+        `AgentRun ${String(runId)} could not be recorded as running: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
    * Persists the one terminal fact of a managed in-process session.
    *
    * Mirrors {@link onProcessDeath}: the supervisor observes the outcome, this
