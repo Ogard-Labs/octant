@@ -1,7 +1,8 @@
 /* ── Vivid style ────────────────────────────────────────────────────────
    Settings › Appearance › Style. Default keeps the chrome monochrome; Vivid
    lets the places that name something carry colour: the welcome greeting,
-   the sidebar's count tiles, board column marks, and a Project's accent.
+   the sidebar's count tiles, board column marks, a Project's accent, and a
+   thread's Canvases.
    Status marks that warn or fail keep their own roles in both styles.
 
    Every hue comes from the preset's palette roles, so a tinted preset or a
@@ -22,4 +23,82 @@
 
 :root[data-octant-style="vivid"] .welcome__heading > .oct-title--hero {
   color: var(--oct-vivid-accent);
+}
+
+/* Canvases in a thread take the hue of what they hold: a plan purple, a
+   chart or a row of figures the first chart series' amber, a diagram teal,
+   a mockup pink, a table or document blue. The hue tints the card's ring
+   and ground, fills the document's mark, and colours a plan's progress and a
+   trend's change; the content's own marks keep their series colours. */
+.thread-canvas[data-kind="plan"],
+.canvas-ref[data-kind="plan"] {
+  --canvas-hue: var(--octant-palette-purple, currentColor);
+}
+.thread-canvas[data-kind="chart"],
+.canvas-ref[data-kind="chart"],
+.thread-canvas[data-kind="numbers"],
+.canvas-ref[data-kind="numbers"] {
+  --canvas-hue: var(--octant-palette-yellow, currentColor);
+}
+.thread-canvas[data-kind="diagram"],
+.canvas-ref[data-kind="diagram"] {
+  --canvas-hue: var(--octant-palette-teal, currentColor);
+}
+.thread-canvas[data-kind="mockup"],
+.canvas-ref[data-kind="mockup"] {
+  --canvas-hue: var(--octant-palette-pink, currentColor);
+}
+.thread-canvas[data-kind="table"],
+.canvas-ref[data-kind="table"],
+.thread-canvas[data-kind="document"],
+.canvas-ref[data-kind="document"] {
+  --canvas-hue: var(--octant-palette-blue, currentColor);
+}
+
+:root[data-octant-style="vivid"] .thread-canvas[data-kind],
+:root[data-octant-style="vivid"] .canvas-ref[data-kind] {
+  border-color: color-mix(in oklab, var(--canvas-hue) 34%, var(--octant-border));
+  background: color-mix(
+    in oklab,
+    var(--canvas-hue) 6%,
+    var(--octant-card, var(--octant-workspace))
+  );
+}
+
+:root[data-octant-style="vivid"] .canvas-ref[data-kind]:has(.canvas-ref__hit:hover) {
+  background: color-mix(
+    in oklab,
+    var(--canvas-hue) 10%,
+    var(--octant-card, var(--octant-workspace))
+  );
+}
+
+:root[data-octant-style="vivid"] .thread-canvas[data-kind] .thread-canvas__header {
+  border-bottom-color: color-mix(in oklab, var(--canvas-hue) 22%, transparent);
+}
+
+:root[data-octant-style="vivid"] .thread-canvas[data-kind] .thread-canvas__icon {
+  color: var(--canvas-hue);
+}
+
+:root[data-octant-style="vivid"] .canvas-ref[data-kind] .canvas-ref__preview {
+  border-color: color-mix(in oklab, var(--canvas-hue) 30%, transparent);
+}
+
+:root[data-octant-style="vivid"] .canvas-ref[data-kind] .canvas-ref__progress-track {
+  background: color-mix(in oklab, var(--canvas-hue) 18%, transparent);
+}
+
+:root[data-octant-style="vivid"] .canvas-ref[data-kind] .canvas-ref__progress-fill {
+  background: var(--canvas-hue);
+}
+
+:root[data-octant-style="vivid"] .thread-canvas[data-kind] .canvas-block__metric {
+  border-color: color-mix(in oklab, var(--canvas-hue) 24%, transparent);
+  background: color-mix(in oklab, var(--canvas-hue) 9%, transparent);
+}
+
+:root[data-octant-style="vivid"] .thread-canvas[data-kind] .canvas-chart__headline-change {
+  background: color-mix(in oklab, var(--canvas-hue) 18%, transparent);
+  color: var(--canvas-hue);
 }

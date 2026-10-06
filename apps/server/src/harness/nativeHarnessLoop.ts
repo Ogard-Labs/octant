@@ -132,6 +132,8 @@ interface SessionState {
   steps: number;
   /** Everything this turn's requests have cost so far; a figure no request reported stays absent. */
   usage: NativeHarnessUsage;
+  /** When the request now in flight was sent, which dates the usage it reports. */
+  requestStartedAt: string | undefined;
 }
 
 /**
@@ -247,6 +249,7 @@ export function createNativeHarnessConnection(
       stopped: false,
       steps: 0,
       usage: { inputTokens: 0, outputTokens: 0 },
+      requestStartedAt: undefined,
     });
 
     // A note is acknowledged only after it is durable and its next request
@@ -335,7 +338,15 @@ export function createNativeHarnessConnection(
     ): Promise<NativeHarnessResponse> => {
       const stream = {
         signal,
-        onEvent: (event: NativeHarnessStreamEvent) => emit(state, { ...event }),
+        // A request's own usage says when that request was sent, which is what
+        // lets its timing leave out the tool time between requests.
+        onEvent: (event: NativeHarnessStreamEvent) =>
+          emit(
+            state,
+            event.kind === "usage" && state.requestStartedAt !== undefined
+              ? { ...event, requestStartedAt: state.requestStartedAt }
+              : { ...event },
+          ),
       };
       let current = request;
       if (state.fallback !== undefined) {
@@ -353,6 +364,7 @@ export function createNativeHarnessConnection(
       }
       for (;;) {
         try {
+          state.requestStartedAt = options.clock();
           return await (state.fallback?.endpoint ?? state.endpoint).send(current, stream);
         } catch (error) {
           if (
@@ -450,10 +462,11 @@ export function createNativeHarnessConnection(
 
     const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
       fitRequest(state.endpoint, {
+        sessionId: state.sessionId,
         modelId: state.modelId,
         system: state.system,
         history,
-        tools: state.tools,
+        tools: sortToolDefinitionsByName(state.tools),
       });
 
     return {
@@ -812,6 +825,23 @@ function interruptedResults(
           },
     ),
   }));
+}
+
+/**
+ * The tool definitions in one fixed order, by name. The order a provider sees
+ * is part of the request prefix its cache keys on, so the order a turn happens
+ * to compose tools in (the harness set plus whatever else it offers) must
+ * never reach the wire: two turns that offer the same tools then send the same
+ * bytes, and a step reads the earlier steps from cache.
+ */
+export function sortToolDefinitionsByName(
+  tools: ReadonlyArray<ProviderToolDefinition>,
+): ReadonlyArray<ProviderToolDefinition> {
+  return [...tools].sort((left, right) => {
+    const leftName = String(left.name);
+    const rightName = String(right.name);
+    return leftName < rightName ? -1 : leftName > rightName ? 1 : 0;
+  });
 }
 
 /**

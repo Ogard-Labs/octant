@@ -33,6 +33,14 @@ re-validates the path before it is bound. A browse that fails returns an explici
 failure the picker shows with Retry, and Retry re-issues the same folder and
 search rather than restarting at the root.
 
+The Project tree places each active thread under its listed Project or under
+**No project**, never both. No project is a collapsible folder row following
+the Projects with no horizontal divider or separate section heading. It is
+absent when empty and does not create a Project or filesystem authority.
+Sidebar search reveals matches inside collapsed groups and restores their
+collapse state when cleared. The Activity feed is an alternative view of the
+same threads; it is not shown as a duplicate list beneath the Project tree.
+
 Chat, Work, and Code keep the active mode's sidebar current with projection-only
 navigation reads (`GET /api/chat/navigation`, `GET /api/work/navigation`,
 `GET /api/code/navigation`). Work bootstrap still validates Project roots, while
@@ -132,9 +140,19 @@ conversation, current state, files, and subagent results, and changes none of
 them ([authority](../architecture.md#security-and-authority)). Its notice says
 what the source offers once the host names the source's mode. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
-the host-authorized file open; the renderer offers a written document (or a
-Canvas the thread's agent authored in Chat, Work, or Code) in the dock once per
-document, never after the person closed its tab, and never by moving focus. An
+the host-authorized file open; the renderer offers a written document, or a
+Canvas the thread's agent authored in Work or Code and did not ask to show
+inline, in the dock once per document, never after the person closed its tab,
+and never by moving focus. Every Canvas a thread wrote appears at the end of
+the turn that wrote it, on the reply's card face. One the agent asked to show
+inline is drawn there read-only, within a fixed height that fades out instead
+of scrolling, and is never offered in the dock, because it is already in front
+of the person; any other is a single row (a live miniature, its title, one
+line of facts) that opens it. The inline frame holds **Show as card**, a fold
+the window remembers. In Work and Code it also holds **Open in sidebar**, which
+opens the same Canvas in the dock tool, and a row opens it there too. Chat has
+no dock, so there the frame holds **Open Canvas**, and the frame and a row open
+the Canvas as a content tab. An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code
 thread's checkout; a thread whose binding the host cannot resolve is refused
@@ -293,6 +311,23 @@ fallback estimates are labeled explicitly. Spend ceilings are host-owner policy;
 the composer and Environment explain an admission refusal and its recovery.
 [Context and usage accounting](../architecture.md#context-and-usage-accounting)
 owns budget enforcement, provenance, native-session identity, and journal rules.
+
+Under the composer of every thread, in Chat, Work, and Code and for every provider, a
+quiet stats line states what the thread used: input and output tokens, the cache
+hit, output speed, time to first token, and cost. It reads the host's recorded
+turns and is worded by one shared module in `packages/domain`
+(`turnMetricsDisplay.ts`), which the composer, the Octant Harness session card, the
+terminal footer, and the phone's session panel all call, so the rules cannot
+drift. A figure the provider did not report, or whose denominator is zero, is
+absent; a provider that reported no usage shows no line. A cache hit is never
+rounded up to a whole; an approximate speed carries a tilde and a tooltip that it
+is per turn and includes some tool time; a cost says "est." unless the provider
+reported it and is absent when the model has no price. Clicking the line, or
+**Turn details** in the context meter's popover, opens one turn at a time (tokens,
+timing, retries, cost). The line is on by default; `showThreadStats` in the shell
+settings is the one shared preference, set from the eye button on the line, the
+switch in the context meter's popover, and Settings › Appearance › Reading. Off hides
+only the line; the details stay reachable.
 
 Project overviews retain loaded content during same-Project refreshes
 on the same client connection. Changing Project or client clears retained

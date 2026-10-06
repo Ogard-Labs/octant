@@ -193,6 +193,31 @@ export class FolderBrowseService {
     };
   }
 
+  /**
+   * The canonical path behind a candidate the host already listed.
+   *
+   * This is for a person choosing a folder that is not a Project binding — an
+   * export destination. The candidate id is the only thing a renderer may
+   * send; the path stays here, where it was measured. An expired, foreign
+   * window's, or off-mode candidate is refused by the same record check a
+   * binding selection uses, so a candidate cannot be replayed into another
+   * window or another mode.
+   */
+  resolveCandidate(windowId: WindowId, input: unknown): string {
+    let request: FolderSelectionRequest;
+    try {
+      request = decodeFolderSelectionRequest(input);
+    } catch {
+      throw new FolderBrowseServiceError({
+        category: "invalid",
+        message: "Folder selection request is invalid.",
+      });
+    }
+    this.#purgeExpired();
+    const record = this.#requireRecord(request.candidateId, windowId, request.mode);
+    return record.canonicalPath;
+  }
+
   async select(authenticatedWindowId: WindowId, input: unknown): Promise<FolderSelectionResult> {
     let request: FolderSelectionRequest;
     try {

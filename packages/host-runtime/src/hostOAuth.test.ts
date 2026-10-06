@@ -223,7 +223,257 @@ async function waitForState(
   return latest;
 }
 
+interface FakeOpenRouterServer {
+  readonly url: string;
+  readonly keyHits: () => number;
+  readonly lastExchange: () => Record<string, string> | undefined;
+  readonly close: () => Promise<void>;
+}
+
+async function startFakeOpenRouterServer(): Promise<FakeOpenRouterServer> {
+  let keyHits = 0;
+  let lastExchange: Record<string, string> | undefined;
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (request.method === "GET" && url.pathname === "/auth") {
+      // OpenRouter's page redirects back to callback_url with `code` and,
+      // when the request carried one, the echoed `state`.
+      const callback = url.searchParams.get("callback_url");
+      const state = url.searchParams.get("state");
+      if (callback === null || url.searchParams.get("code_challenge") === null) {
+        response.writeHead(400);
+        response.end();
+        return;
+      }
+      const redirect = new URL(callback);
+      redirect.searchParams.set("code", "or-auth-code");
+      if (state !== null) redirect.searchParams.set("state", state);
+      response.writeHead(302, { location: redirect.toString() });
+      response.end();
+      return;
+    }
+    if (request.method !== "POST" || url.pathname !== "/api/v1/auth/keys") {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    keyHits += 1;
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer | string) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    request.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, string>;
+      lastExchange = body;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ key: "sk-or-v1-user-controlled-key" }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    keyHits: () => keyHits,
+    lastExchange: () => lastExchange,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.closeAllConnections();
+        server.close((error) => (error === undefined ? resolve() : reject(error)));
+      }),
+  };
+}
+
+function openRouterDescriptor(authorize: string, token: string): HostOAuthDescriptor {
+  return {
+    descriptorId: "openrouter",
+    dialect: "openrouter-pkce",
+    flow: "authorization-code-pkce",
+    authorizationEndpoint: authorize,
+    tokenEndpoint: token,
+    scopes: [],
+    termsId: "openrouter-terms-1",
+  };
+}
+
 describe("host OAuth runners", () => {
+  it("refuses a standard descriptor without a client ID or scopes", async () => {
+    const store = memoryStore();
+    const runtime = createHostOAuthRuntime({ store, timeoutMs: 2_000 });
+    try {
+      const started = await runtime.begin({
+        descriptor: {
+          descriptorId: "sample-http",
+          flow: "authorization-code-pkce",
+          authorizationEndpoint: "https://example.com/authorize",
+          tokenEndpoint: "https://example.com/token",
+          scopes: [],
+          termsId: "terms-v1",
+        },
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-03T18:00:00.000Z",
+      });
+      expect(started).toEqual({ kind: "refused", reason: "invalid" });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("runs the OpenRouter dialect end to end and stores the issued key", async () => {
+    const fake = await startFakeOpenRouterServer();
+    const store = memoryStore();
+    const runtime = createHostOAuthRuntime({ store, timeoutMs: 2_000 });
+    try {
+      const started = await runtime.begin({
+        descriptor: openRouterDescriptor(`${fake.url}/auth`, `${fake.url}/api/v1/auth/keys`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-03T18:00:00.000Z",
+      });
+      expect(started.kind).toBe("awaiting-consent");
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      const authorization = new URL(started.authorizationUrl);
+      // The dialect sends callback_url, the S256 challenge, and a CSRF state
+      // — no client_id, no scope.
+      expect(authorization.searchParams.get("callback_url")).toMatch(/^http:\/\/127\.0\.0\.1:/);
+      expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");
+      expect(authorization.searchParams.get("client_id")).toBeNull();
+      expect(authorization.searchParams.get("state")).not.toBeNull();
+      expect(authorization.searchParams.get("scope")).toBeNull();
+      const followed = await fetch(started.authorizationUrl);
+      expect(followed.ok).toBe(true);
+      const done = await waitForState(() => runtime.status(started.attemptId), "signed-in");
+      expect(done.kind).toBe("signed-in");
+      expect(fake.keyHits()).toBe(1);
+      expect(fake.lastExchange()).toMatchObject({
+        code: "or-auth-code",
+        code_challenge_method: "S256",
+      });
+      const published = JSON.stringify(runtime.status(started.attemptId));
+      expect(published).not.toContain("sk-or-v1");
+      const stored = [...store.values.values()].join("\n");
+      expect(stored).toContain("sk-or-v1-user-controlled-key");
+      expect(stored).toContain("openrouter-pkce");
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("refuses a dialect callback whose state does not match and does not exchange the code", async () => {
+    const fake = await startFakeOpenRouterServer();
+    const store = memoryStore();
+    const runtime = createHostOAuthRuntime({ store, timeoutMs: 2_000 });
+    try {
+      const started = await runtime.begin({
+        descriptor: openRouterDescriptor(`${fake.url}/auth`, `${fake.url}/api/v1/auth/keys`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-03T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      const redirect = new URL(
+        new URL(started.authorizationUrl).searchParams.get("callback_url") ?? "",
+      );
+      redirect.searchParams.set("code", "stolen-or-code");
+      redirect.searchParams.set("state", "not-the-issued-state");
+      await fetch(redirect);
+      const done = await waitForState(() => runtime.status(started.attemptId), "refused");
+      expect(done).toMatchObject({ kind: "refused", reason: "state-mismatch" });
+      expect(fake.keyHits()).toBe(0);
+      expect(store.values.size).toBe(0);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("stores a dialect key without expiry and still grants access far in the future", async () => {
+    const fake = await startFakeOpenRouterServer();
+    const store = memoryStore();
+    const runtime = createHostOAuthRuntime({ store, timeoutMs: 2_000 });
+    try {
+      const started = await runtime.begin({
+        descriptor: openRouterDescriptor(`${fake.url}/auth`, `${fake.url}/api/v1/auth/keys`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-03T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      await fetch(started.authorizationUrl);
+      const done = await waitForState(() => runtime.status(started.attemptId), "signed-in");
+      if (done.kind !== "signed-in") throw new Error("expected a signed-in state");
+      const status = runtime.status(started.attemptId);
+      if (status.kind !== "signed-in") throw new Error("missing credential ref");
+      const stored = JSON.parse(store.values.get(status.credentialRef) ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      // The key never expires: no expiry is manufactured, so a stored grant
+      // keeps resolving after any amount of time has passed.
+      expect(stored.expiresAt).toBeUndefined();
+      const farFuture = createHostOAuthRuntime({
+        store,
+        now: () => Date.parse("2126-10-03T18:00:00.000Z"),
+      });
+      try {
+        await expect(farFuture.refresh(status.credentialRef)).resolves.toEqual({
+          kind: "refreshed",
+        });
+        const access = await farFuture.access(status.credentialRef);
+        expect(access).toMatchObject({
+          kind: "granted",
+          accessToken: "sk-or-v1-user-controlled-key",
+        });
+        expect(
+          (access as { expiresAt?: string }).expiresAt,
+          "a non-expiring grant reports no expiry",
+        ).toBeUndefined();
+      } finally {
+        await farFuture.close();
+      }
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("refreshes a dialect grant without a token exchange while the key is stored", async () => {
+    const fake = await startFakeOpenRouterServer();
+    const store = memoryStore();
+    const runtime = createHostOAuthRuntime({ store, timeoutMs: 2_000 });
+    try {
+      const started = await runtime.begin({
+        descriptor: openRouterDescriptor(`${fake.url}/auth`, `${fake.url}/api/v1/auth/keys`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-03T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      await fetch(started.authorizationUrl);
+      const done = await waitForState(() => runtime.status(started.attemptId), "signed-in");
+      expect(done.kind).toBe("signed-in");
+      if (done.kind !== "signed-in") throw new Error("expected a signed-in state");
+      const credentialRef = (
+        done as Extract<ReturnType<typeof runtime.status>, { kind: "signed-in" }>
+      ).credentialRef;
+      const hitsBefore = fake.keyHits();
+      expect(await runtime.refresh(credentialRef)).toEqual({ kind: "refreshed" });
+      expect(fake.keyHits()).toBe(hitsBefore);
+      const access = await runtime.access(credentialRef);
+      expect(access).toMatchObject({
+        kind: "granted",
+        accessToken: "sk-or-v1-user-controlled-key",
+      });
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
   it("refuses to exchange a code when the verifier does not match the challenge", async () => {
     let fetched = false;
     const result = await exchangeAuthorizationCode({

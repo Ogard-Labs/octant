@@ -6,6 +6,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderToolDefinition,
 } from "@octant/contracts";
+import { cacheHitRate, deriveTurnMetrics } from "@octant/domain";
 import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -1396,6 +1397,35 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           expect(events.map((event) => event.kind)).toEqual(["text-delta", "completed"]);
           expect(events.map((event) => event.sequence)).toEqual([1, 2]);
           yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+  });
+
+  it("reports no usage for a streamed turn, so its speed and cache hit rate stay unavailable", async () => {
+    const { driver } = fixture(profile);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const runtimeEvents = yield* connection.subscribe;
+          const collected = yield* Effect.fork(
+            Effect.promise(() => collectTerminal(runtimeEvents)),
+          );
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          const events = yield* Fiber.join(collected);
+          yield* connection.stop(sessionId);
+
+          expect(events.some((event) => event.kind === "usage")).toBe(false);
+          const { metrics, usage } = deriveTurnMetrics({
+            startedAt: "2026-10-06T12:00:00.000Z",
+            endedAt: "2026-10-06T12:00:05.000Z",
+            events,
+          });
+          expect(metrics).toEqual({ precision: "unavailable", wallMs: 5_000 });
+          expect(usage).toBeUndefined();
+          expect(cacheHitRate(usage)).toBeUndefined();
         }),
       ),
     );
