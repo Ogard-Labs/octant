@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   categoryCenter,
+  formatTick,
+  niceAxis,
   computeYDomain,
   pieWedges,
   ringPath,
@@ -54,5 +56,24 @@ describe("chartGeometry", () => {
   it("centers category slots across the plot", () => {
     expect(categoryCenter(0, 2, 100, 0)).toBe(25);
     expect(categoryCenter(1, 2, 100, 0)).toBe(75);
+  });
+});
+
+describe("value axis gridlines", () => {
+  it("lands gridlines on round numbers that enclose every reading", () => {
+    const axis = niceAxis({ min: 120, max: 310 }, false);
+    expect(axis.ticks).toEqual([100, 150, 200, 250, 300, 350]);
+    expect(axis.domain).toEqual({ min: 100, max: 350 });
+  });
+
+  it("keeps the zero baseline for bars and areas", () => {
+    expect(niceAxis({ min: 120, max: 310 }, true).ticks[0]).toBe(0);
+  });
+
+  it("labels small steps without floating-point noise and large values compactly", () => {
+    expect(niceAxis({ min: 0.1, max: 0.3 }, false).ticks).toEqual([0.1, 0.15, 0.2, 0.25, 0.3]);
+    expect(formatTick(1_250_000)).toBe("1.25M");
+    expect(formatTick(42_000)).toBe("42k");
+    expect(formatTick(2500)).toBe("2500");
   });
 });

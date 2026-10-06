@@ -90,22 +90,32 @@ export function CanvasDocument({
         </header>
       )}
       <div className="canvas-view__body">
-        {content.map((block) => (
-          <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
-            <CanvasBlockRenderer
-              block={block}
-              {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
-              {...(planRuntime === undefined ? {} : { planRuntime })}
-            />
-            {comments === undefined ? null : (
-              <CommentMarker
-                count={comments.openCounts.get(String(block.blockId)) ?? 0}
-                label={canvasBlockLabel(block)}
-                onOpen={() => comments.onOpen(String(block.blockId))}
+        {runsOfMetrics(content).map((run) => {
+          const sections = run.map((block) => (
+            <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
+              <CanvasBlockRenderer
+                block={block}
+                {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+                {...(planRuntime === undefined ? {} : { planRuntime })}
               />
-            )}
-          </section>
-        ))}
+              {comments === undefined ? null : (
+                <CommentMarker
+                  count={comments.openCounts.get(String(block.blockId)) ?? 0}
+                  label={canvasBlockLabel(block)}
+                  onOpen={() => comments.onOpen(String(block.blockId))}
+                />
+              )}
+            </section>
+          ));
+          const first = run[0];
+          return first?.kind === "metric" ? (
+            <div className="canvas-metrics" key={`metrics-${first.blockId}`}>
+              {sections}
+            </div>
+          ) : (
+            sections
+          );
+        })}
       </div>
       {actionRuntime !== undefined && actions.length > 0 ? (
         <CanvasActionPanel
@@ -117,6 +127,22 @@ export function CanvasDocument({
       ) : null}
     </article>
   );
+}
+
+/**
+ * The document's blocks in order, with each run of consecutive metrics
+ * gathered so they sit side by side as tiles instead of one number per line.
+ */
+function runsOfMetrics(
+  blocks: ReadonlyArray<CanvasDefinition["blocks"][number]>,
+): ReadonlyArray<ReadonlyArray<CanvasDefinition["blocks"][number]>> {
+  const runs: Array<Array<CanvasDefinition["blocks"][number]>> = [];
+  for (const block of blocks) {
+    const last = runs.at(-1);
+    if (block.kind === "metric" && last?.[0]?.kind === "metric") last.push(block);
+    else runs.push([block]);
+  }
+  return runs;
 }
 
 function CommentMarker(props: {

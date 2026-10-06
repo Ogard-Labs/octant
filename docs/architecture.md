@@ -285,10 +285,11 @@ A revise without a choice keeps the current presentation.
 A thread reference card reports the effective presentation and the first
 version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
 revision or a person's edit, is listed as `sidebar`.
-The renderer draws an inline Canvas read-only, after the last row of the turn
-the person opened at or before `canvasCreatedAt`. It gets no layout, plan,
-comment or action runtime, so nothing drawn inline can journal a version.
-A card from an older host, or one no loaded turn can place, stays a card.
+The renderer places every Canvas after the last row of the turn the person
+opened at or before `canvasCreatedAt`. An inline one is drawn there read-only:
+it gets no layout, plan, comment or action runtime, so nothing drawn inline can
+journal a version. Any other is a row that opens it. A card from an older host,
+or one no loaded turn can place, stays in the thread's card list.
 A chart is a closed type: line, area, bar, scatter, distribution, pie, donut,
 stacked bar, grouped bar, or bar-and-line. Pie and donut are one series of
 labeled non-negative slices. Stacked, grouped, and bar-and-line charts share

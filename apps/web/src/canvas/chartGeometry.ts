@@ -115,3 +115,53 @@ export function ringPath(
   const innerStartY = cy + inner * Math.sin(start);
   return `M ${roundCoord(outerStartX)} ${roundCoord(outerStartY)} A ${roundCoord(outer)} ${roundCoord(outer)} 0 ${String(large)} 1 ${roundCoord(outerEndX)} ${roundCoord(outerEndY)} L ${roundCoord(innerEndX)} ${roundCoord(innerEndY)} A ${roundCoord(inner)} ${roundCoord(inner)} 0 ${String(large)} 0 ${roundCoord(innerStartX)} ${roundCoord(innerStartY)} Z`;
 }
+
+export interface NiceAxis {
+  readonly domain: YDomain;
+  readonly ticks: ReadonlyArray<number>;
+}
+
+/**
+ * A value axis a reader can scan: about `target` gridlines on round numbers
+ * (1, 2, 2.5 or 5 times a power of ten) that enclose every reading. Bars and
+ * areas measure from zero, so `includeZero` keeps the baseline in view.
+ */
+export function niceAxis(domain: YDomain, includeZero: boolean, target = 4): NiceAxis {
+  let min = includeZero ? Math.min(0, domain.min) : domain.min;
+  let max = includeZero ? Math.max(0, domain.max) : domain.max;
+  if (!Number.isFinite(min) || !Number.isFinite(max))
+    return { domain: { min: 0, max: 1 }, ticks: [0, 1] };
+  if (max - min <= Number.EPSILON) {
+    const pad = Math.abs(max) <= Number.EPSILON ? 1 : Math.abs(max) * 0.1;
+    min -= pad;
+    max += pad;
+  }
+  const rough = (max - min) / Math.max(1, target);
+  const magnitude = 10 ** Math.floor(Math.log10(rough));
+  const step =
+    [1, 2, 2.5, 5, 10]
+      .map((factor) => factor * magnitude)
+      .find((candidate) => candidate >= rough) ?? 10 * magnitude;
+  const start = Math.floor(min / step) * step;
+  const end = Math.ceil(max / step) * step;
+  const ticks: number[] = [];
+  // Rounded through the step's own precision so 0.1 + 0.2 never labels a line 0.30000000000000004.
+  const decimals = Math.max(0, -Math.floor(Math.log10(step)) + 1);
+  for (let value = start; value <= end + step / 2; value += step) {
+    ticks.push(Number(value.toFixed(decimals)));
+  }
+  return { domain: { min: start, max: end }, ticks };
+}
+
+/** A tick label short enough for a gutter: 1.2k, 3.4M, 0.25. */
+export function formatTick(value: number): string {
+  const size = Math.abs(value);
+  if (size >= 1_000_000_000) return `${trimNumber(value / 1_000_000_000)}B`;
+  if (size >= 1_000_000) return `${trimNumber(value / 1_000_000)}M`;
+  if (size >= 10_000) return `${trimNumber(value / 1_000)}k`;
+  return trimNumber(value);
+}
+
+function trimNumber(value: number): string {
+  return String(Number(value.toFixed(2)));
+}

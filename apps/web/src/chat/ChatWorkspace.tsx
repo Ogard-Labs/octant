@@ -68,8 +68,8 @@ import type { HostId } from "@octant/contracts/host";
 import { activeChatTurns } from "@octant/domain/chat-policy";
 import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
-import { InlineThreadCanvases } from "../canvas/InlineThreadCanvas";
-import { placeInlineCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -412,7 +412,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   }
   const thread = view.thread;
   const canvasClient = props.canvasClient;
-  const canvasPlacement = placeInlineCanvases(
+  const canvasPlacement = placeThreadCanvases(
     threadTurnSpans(
       activeChatTurns(view.turns),
       (turn) => String(turn.id),
@@ -906,7 +906,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             ? {}
             : {
                 afterTurn: (turn: ChatThreadView["turns"][number]) => (
-                  <InlineThreadCanvases
+                  <ThreadCanvases
                     cards={canvasPlacement.byRow.get(String(turn.id))}
                     client={canvasClient}
                     // Chat has no dock, so the Canvas opens as a tab beside the thread.

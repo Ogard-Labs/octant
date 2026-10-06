@@ -32,6 +32,13 @@ import {
 export const CANVAS_TOOL_NAME = "octant_canvas";
 
 /**
+ * Said back with every inline result. Agents read the guidance once and still
+ * wrote "the chart above" in live runs, while the thread draws it after the reply.
+ */
+const INLINE_WHERE_SHOWN =
+  "The thread draws this Canvas just below your reply, so refer to it as below.";
+
+/**
  * How many blocks one authoring call may carry.
  *
  * The canvas budget already bounds a document; this bounds one tool call, so a
@@ -707,6 +714,7 @@ function canvasToolSet(options: {
             blocks: input.blocks.length,
             presentation: result.card.presentation ?? "sidebar",
             ...(placed.note === undefined ? {} : { presentationNote: placed.note }),
+            ...(result.card.presentation === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),
           },
         };
       }
@@ -774,6 +782,7 @@ function canvasToolSet(options: {
           sequence: result.receipt.sequence,
           ...(effective === undefined ? {} : { presentation: effective }),
           ...(note === undefined ? {} : { presentationNote: note }),
+          ...(effective === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),
         },
       };
     },

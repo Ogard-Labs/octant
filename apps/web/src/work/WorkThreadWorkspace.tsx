@@ -79,8 +79,8 @@ import { GeneratedImageList } from "../image/GeneratedImageList";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
-import { InlineThreadCanvases } from "../canvas/InlineThreadCanvas";
-import { placeInlineCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
@@ -1369,7 +1369,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   });
   const canvasClient = props.canvasClient;
   const openInSidebar = props.onOpenCanvasInSidebar;
-  const canvasPlacement = placeInlineCanvases(
+  const canvasPlacement = placeThreadCanvases(
     threadTurnSpans(
       transcriptRows,
       (row) => row.key,
@@ -1421,7 +1421,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           ? {}
           : {
               afterItem: (row: WorkTranscriptRow) => (
-                <InlineThreadCanvases
+                <ThreadCanvases
                   cards={canvasPlacement.byRow.get(row.key)}
                   client={canvasClient}
                   {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}

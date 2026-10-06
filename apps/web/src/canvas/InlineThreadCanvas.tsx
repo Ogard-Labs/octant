@@ -1,9 +1,11 @@
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasDefinition } from "@octant/contracts/canvas";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
-import { PanelRightOpen } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown, FileStack, PanelRightOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { CanvasThreadReferenceCard as CanvasReferenceRow } from "./CanvasThreadReferenceCard";
 import { CanvasView } from "./CanvasView";
 
 const SHOWN_AS_CARD_KEY = "octant.canvas.shown-as-card.v1";
@@ -78,7 +80,9 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
   useEffect(() => {
     if (shownAsCard) return;
     let cancelled = false;
-    setLoaded({ kind: "loading" });
+    // A revision swaps the document in place; blanking it first would make
+    // the thread jump while the new version loads.
+    setLoaded((current) => (current.kind === "ready" ? current : { kind: "loading" }));
     void client
       .get(card.canvasId)
       .then((outcome) => {
@@ -117,13 +121,8 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
     rememberCanvasShownAsCard(canvasId, next);
     setShownAsCard(next);
   };
-  const openButton =
-    props.onOpen === undefined ? null : (
-      <OctantButton onClick={() => props.onOpen?.(card)} size="sm" type="button" variant="ghost">
-        <PanelRightOpen aria-hidden="true" size={14} strokeWidth={1.8} />
-        {props.openLabel ?? "Open in sidebar"}
-      </OctantButton>
-    );
+  const openLabel = props.openLabel ?? "Open in sidebar";
+  const foldLabel = shownAsCard ? "Show in thread" : "Show as card";
 
   return (
     <section
@@ -133,22 +132,53 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
       data-testid="thread-canvas"
     >
       <header className="thread-canvas__header">
+        <FileStack aria-hidden="true" className="thread-canvas__icon" size={14} strokeWidth={1.8} />
         <h3 className="thread-canvas__title">{card.title}</h3>
         <div className="thread-canvas__actions">
-          <OctantButton onClick={() => fold(!shownAsCard)} size="sm" type="button" variant="ghost">
-            {shownAsCard ? "Show in thread" : "Show as card"}
-          </OctantButton>
-          {openButton}
+          <OctantTooltip label={foldLabel} side="top">
+            <OctantButton
+              aria-expanded={!shownAsCard}
+              aria-label={foldLabel}
+              className="thread-canvas__action"
+              onClick={() => fold(!shownAsCard)}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              {shownAsCard ? (
+                <ChevronsUpDown aria-hidden="true" size={14} strokeWidth={1.8} />
+              ) : (
+                <ChevronsDownUp aria-hidden="true" size={14} strokeWidth={1.8} />
+              )}
+            </OctantButton>
+          </OctantTooltip>
+          {props.onOpen === undefined ? null : (
+            <OctantTooltip label={openLabel} side="top">
+              <OctantButton
+                aria-label={openLabel}
+                className="thread-canvas__action"
+                onClick={() => props.onOpen?.(card)}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <PanelRightOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+              </OctantButton>
+            </OctantTooltip>
+          )}
         </div>
       </header>
       {shownAsCard ? null : loaded.kind === "loading" ? (
-        <p className="thread-canvas__status">Loading Canvas…</p>
+        <p className="thread-canvas__status" role="status">
+          <span aria-hidden="true" className="spinner spinner-sm" />
+          Loading Canvas
+        </p>
       ) : loaded.kind === "unavailable" ? (
-        <p className="thread-canvas__status">
-          This Canvas can't be shown here. Open it in the sidebar to see why.
+        <p className="thread-canvas__status" role="status">
+          This Canvas can't be shown here. Open it to see why.
         </p>
       ) : (
-        <>
+        <div className="thread-canvas__viewport">
           <div
             className="thread-canvas__body"
             data-clipped={clipped ? "true" : "false"}
@@ -156,26 +186,30 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
           >
             <CanvasView input={loaded.definition} placement="thread" />
           </div>
+          {/* Outside the faded body, so the offer itself is never faded. */}
           {clipped && props.onOpen !== undefined ? (
             <div className="thread-canvas__more">
               <OctantButton
                 onClick={() => props.onOpen?.(card)}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="secondary"
               >
-                Read the whole Canvas
+                Show the whole Canvas
               </OctantButton>
             </div>
           ) : null}
-        </>
+        </div>
       )}
     </section>
   );
 }
 
-/** The inline Canvases a turn wrote, drawn after the row that turn ends on. */
-export function InlineThreadCanvases(props: {
+/**
+ * The Canvases a turn wrote, after the row that turn ends on: an inline one
+ * drawn in place, any other as the row that opens it.
+ */
+export function ThreadCanvases(props: {
   readonly cards: ReadonlyArray<CanvasThreadReferenceCard> | undefined;
   readonly client: CanvasClient;
   readonly onOpen?: (card: CanvasThreadReferenceCard) => void;
@@ -184,15 +218,23 @@ export function InlineThreadCanvases(props: {
   if (props.cards === undefined || props.cards.length === 0) return null;
   return (
     <div className="thread-canvas-list">
-      {props.cards.map((card) => (
-        <InlineThreadCanvas
-          card={card}
-          client={props.client}
-          key={String(card.canvasId)}
-          {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
-          {...(props.openLabel === undefined ? {} : { openLabel: props.openLabel })}
-        />
-      ))}
+      {props.cards.map((card) =>
+        card.presentation === "inline" ? (
+          <InlineThreadCanvas
+            card={card}
+            client={props.client}
+            key={String(card.canvasId)}
+            {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
+            {...(props.openLabel === undefined ? {} : { openLabel: props.openLabel })}
+          />
+        ) : (
+          <CanvasReferenceRow
+            card={card}
+            key={String(card.canvasId)}
+            {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
+          />
+        ),
+      )}
     </div>
   );
 }

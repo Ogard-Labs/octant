@@ -93,11 +93,12 @@ function referenceCardFixture(overrides: Record<string, unknown> = {}) {
 }
 
 describe("CanvasThreadReferenceCard", () => {
-  it("renders title, status, and scope", () => {
+  it("names the Canvas and when it changed, without the host's internal scope", () => {
     render(<CanvasThreadReferenceCard card={referenceCardFixture()} />);
     expect(screen.getByTestId("canvas-card-title")).toHaveTextContent("Canvas card");
-    expect(screen.getByTestId("canvas-card-status")).toHaveTextContent("ready");
-    expect(screen.getByTestId("canvas-card-scope")).toHaveTextContent("chat / chat-virtual");
+    expect(screen.getByTestId("canvas-card-meta")).toHaveTextContent(/^Canvas · Updated /);
+    expect(screen.queryByText("chat-virtual", { exact: false })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("shows summary when present", () => {
@@ -110,9 +111,23 @@ describe("CanvasThreadReferenceCard", () => {
     expect(screen.queryByTestId("canvas-card-summary")).not.toBeInTheDocument();
   });
 
-  it("shows action count", () => {
-    render(<CanvasThreadReferenceCard card={referenceCardFixture({ actionCount: 5 })} />);
-    expect(screen.getByTestId("canvas-card-actions")).toHaveTextContent("5");
+  it("says when a Canvas is not ready, and how many actions it offers", () => {
+    render(
+      <CanvasThreadReferenceCard
+        card={referenceCardFixture({ status: "stale", actionCount: 5 })}
+      />,
+    );
+    expect(screen.getByTestId("canvas-card-meta")).toHaveTextContent(
+      /^Out of date · 5 actions · Updated /,
+    );
+  });
+
+  it("opens the Canvas from the whole row", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    render(<CanvasThreadReferenceCard card={referenceCardFixture()} onOpen={onOpen} />);
+    await user.click(screen.getByRole("button", { name: /Canvas card/ }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "Canvas card" }));
   });
 });
 

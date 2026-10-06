@@ -29,32 +29,34 @@ export function threadTurnSpans<T>(
   return spans;
 }
 
-export interface InlineCanvasPlacement {
-  /** Inline Canvases to draw after the row with this key, oldest first. */
+export interface ThreadCanvasPlacement {
+  /** Canvases to show after the row with this key, oldest first. */
   readonly byRow: ReadonlyMap<string, ReadonlyArray<CanvasThreadReferenceCard>>;
-  /** Canvases the transcript draws, which the thread's card list then leaves out. */
+  /** Canvases the transcript shows, which the thread's card list then leaves out. */
   readonly placed: ReadonlySet<string>;
 }
 
 /**
- * Place each inline Canvas at the end of the turn that wrote it: the last turn
- * the person opened at or before the Canvas's first version. A Canvas the
- * transcript cannot place (no creation time from an older host, or turns not
- * loaded yet) stays a card, so nothing a thread wrote is ever hidden.
+ * Place each Canvas at the end of the turn that wrote it: the last turn the
+ * person opened at or before the Canvas's first version. An inline Canvas is
+ * drawn there and any other is a row that opens it, so a thread with many
+ * Canvases never grows a bar above its composer. A Canvas the transcript
+ * cannot place (no creation time from an older host, or turns not loaded
+ * yet) stays in the card list, so nothing a thread wrote is ever hidden.
  */
-export function placeInlineCanvases(
+export function placeThreadCanvases(
   turns: ReadonlyArray<ThreadTurnSpan>,
   cards: ReadonlyArray<CanvasThreadReferenceCard>,
-): InlineCanvasPlacement {
+): ThreadCanvasPlacement {
   const byRow = new Map<string, CanvasThreadReferenceCard[]>();
   const placed = new Set<string>();
-  const inline = cards
-    .filter((card) => card.presentation === "inline" && card.canvasCreatedAt !== undefined)
+  const dated = cards
+    .filter((card) => card.canvasCreatedAt !== undefined)
     .toSorted(
       (left, right) =>
         Date.parse(String(left.canvasCreatedAt)) - Date.parse(String(right.canvasCreatedAt)),
     );
-  for (const card of inline) {
+  for (const card of dated) {
     const createdAt = Date.parse(String(card.canvasCreatedAt));
     const turn = turns.findLast((span) => Date.parse(span.startedAt) <= createdAt);
     if (turn === undefined) continue;

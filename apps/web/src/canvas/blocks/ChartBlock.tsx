@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import type {
   CanvasChartBlock,
   CanvasChartSeries,
@@ -8,9 +8,10 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import {
   categoryCenter,
   computeYDomain,
+  formatTick,
+  niceAxis,
   pieWedges,
   ringPath,
-  scaleX,
   scaleY,
   type YDomain,
 } from "../chartGeometry";
@@ -38,19 +39,343 @@ export function ChartBlock({ block }: { readonly block: CanvasChartBlock }) {
     });
   };
 
+  const [figureRef, width] = useMeasuredWidth();
+
   return (
-    <figure className={`canvas-block__chart canvas-block__chart--${block.chartType}`}>
-      <svg
-        aria-label={chartLabel(block)}
-        className="canvas-block__chart-svg"
-        role="img"
-        viewBox={`0 0 ${PLOT_WIDTH} ${PLOT_HEIGHT}`}
-      >
-        <ChartMarks block={block} hidden={hidden} />
-      </svg>
-      <ChartLegend block={block} hidden={hidden} onToggle={toggle} />
+    <figure
+      className={`canvas-block__chart canvas-block__chart--${block.chartType}`}
+      ref={figureRef}
+    >
+      {isCartesian(block.chartType) ? (
+        <CartesianChart block={block} hidden={hidden} width={width} />
+      ) : (
+        <svg
+          aria-label={chartLabel(block)}
+          className="canvas-block__chart-svg"
+          role="img"
+          viewBox={`0 0 ${PLOT_WIDTH} ${PLOT_HEIGHT}`}
+        >
+          <ChartMarks block={block} hidden={hidden} />
+        </svg>
+      )}
+      {/* One series is named by the Canvas around it; a legend that can only
+          hide the whole chart is noise. */}
+      {isCartesian(block.chartType) && block.series.length === 1 ? null : (
+        <ChartLegend block={block} hidden={hidden} onToggle={toggle} />
+      )}
       <ChartData block={block} />
     </figure>
+  );
+}
+
+/** Width a chart draws at before the figure has been measured, and in tests. */
+const FALLBACK_CHART_WIDTH = 480;
+
+/**
+ * The figure's own width, so a line or bar chart draws in real pixels: its
+ * labels stay at the interface size instead of growing and shrinking with the
+ * column the way a stretched fixed-size drawing does.
+ */
+function useMeasuredWidth() {
+  const ref = useRef<HTMLElement>(null);
+  const [width, setWidth] = useState(FALLBACK_CHART_WIDTH);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (element === null || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const next = Math.round(element.getBoundingClientRect().width);
+      if (next > 0) setWidth(next);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, width] as const;
+}
+
+function isCartesian(type: CanvasChartType): boolean {
+  return (
+    type === "line" ||
+    type === "area" ||
+    type === "scatter" ||
+    type === "bar" ||
+    type === "distribution"
+  );
+}
+
+const CARTESIAN_HEIGHT = 200;
+const CARTESIAN_PAD = { top: 12, right: 12, bottom: 28 } as const;
+/** Readings one hover readout lists before it says how many more there are. */
+const READOUT_MAX_SERIES = 4;
+
+interface CartesianFrame {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+  readonly domain: YDomain;
+}
+
+/**
+ * Line, area, scatter, bar and distribution charts on one value axis: round
+ * gridlines labelled in a left gutter, the first series' x values along the
+ * bottom (thinned to what fits), and a hover readout that names the reading
+ * under the pointer. The data table stays the complete, accessible record.
+ */
+function CartesianChart({
+  block,
+  hidden,
+  width,
+}: {
+  readonly block: CanvasChartBlock;
+  readonly hidden: ReadonlySet<string>;
+  readonly width: number;
+}) {
+  const [hover, setHover] = useState<number | undefined>(undefined);
+  const visible = visibleSeries(block, hidden);
+  const barLike = block.chartType === "bar" || block.chartType === "distribution";
+  const axis = niceAxis(
+    computeYDomain(
+      visible.map((item) => ({
+        seriesId: item.series.seriesId,
+        label: item.series.label,
+        points: item.series.points,
+      })),
+    ),
+    barLike || block.chartType === "area",
+  );
+  const tickLabels = axis.ticks.map(formatTick);
+  const gutter = Math.min(
+    64,
+    Math.max(28, Math.max(...tickLabels.map((label) => label.length)) * 7 + 12),
+  );
+  const frame: CartesianFrame = {
+    left: gutter,
+    right: Math.max(gutter + 40, width - CARTESIAN_PAD.right),
+    top: CARTESIAN_PAD.top,
+    bottom: CARTESIAN_HEIGHT - CARTESIAN_PAD.bottom,
+    domain: axis.domain,
+  };
+  const count = Math.max(0, ...visible.map((item) => item.series.points.length));
+  const xAt = (index: number) => pointX(frame, index, count, barLike);
+  const yAt = (value: number) => {
+    const span = frame.domain.max - frame.domain.min;
+    const share = span <= 0 ? 0.5 : (value - frame.domain.min) / span;
+    return frame.bottom - share * (frame.bottom - frame.top);
+  };
+  const labelSource = visible[0]?.series.points ?? block.series[0]?.points ?? [];
+  const labelEvery = Math.max(
+    1,
+    Math.ceil(count / Math.max(1, Math.floor((frame.right - frame.left) / 56))),
+  );
+  const slot = count > 0 ? (frame.right - frame.left) / count : 0;
+
+  const pick = (clientX: number, rect: DOMRect) => {
+    if (count === 0 || rect.width <= 0) return;
+    const x = ((clientX - rect.left) / rect.width) * width;
+    let nearest = 0;
+    for (let index = 1; index < count; index += 1) {
+      if (Math.abs(xAt(index) - x) < Math.abs(xAt(nearest) - x)) nearest = index;
+    }
+    setHover(nearest);
+  };
+
+  return (
+    <div className="canvas-chart">
+      <svg
+        aria-label={chartLabel(block)}
+        className="canvas-chart__svg"
+        height={CARTESIAN_HEIGHT}
+        onPointerLeave={() => setHover(undefined)}
+        onPointerMove={(event) => pick(event.clientX, event.currentTarget.getBoundingClientRect())}
+        role="img"
+        viewBox={`0 0 ${String(width)} ${String(CARTESIAN_HEIGHT)}`}
+        width={width}
+      >
+        <g aria-hidden="true">
+          {axis.ticks.map((tick, index) => (
+            <g key={tick}>
+              <line
+                className={tick === 0 ? "canvas-chart__baseline" : "canvas-chart__grid"}
+                x1={frame.left}
+                x2={frame.right}
+                y1={yAt(tick)}
+                y2={yAt(tick)}
+              />
+              <text
+                className="canvas-chart__tick"
+                dominantBaseline="middle"
+                textAnchor="end"
+                x={frame.left - 8}
+                y={yAt(tick)}
+              >
+                {tickLabels[index]}
+              </text>
+            </g>
+          ))}
+          {labelSource.map((point, index) =>
+            index % labelEvery === 0 ? (
+              <text
+                className="canvas-block__chart-label"
+                key={index}
+                textAnchor="middle"
+                x={xAt(index)}
+                y={CARTESIAN_HEIGHT - 8}
+              >
+                {shortLabel(String(point.x))}
+              </text>
+            ) : null,
+          )}
+        </g>
+        {hover === undefined ? null : (
+          <line
+            aria-hidden="true"
+            className="canvas-chart__guide"
+            x1={xAt(hover)}
+            x2={xAt(hover)}
+            y1={frame.top}
+            y2={frame.bottom}
+          />
+        )}
+        {visible.map((item, order) => {
+          const coords = item.series.points.map((point, index) => ({
+            x: xAt(index),
+            y: yAt(point.y),
+          }));
+          const mark = `canvas-block__chart-mark ${seriesClass(item.index)}`;
+          const series = String(item.index % 6);
+          if (barLike) {
+            const groupWidth = Math.min(slot * 0.64, 48);
+            const barWidth = Math.max(2, groupWidth / Math.max(1, visible.length));
+            return (
+              <g className={mark} data-series={series} key={item.series.seriesId}>
+                {coords.map((coord, index) => {
+                  const zero = yAt(Math.max(frame.domain.min, Math.min(0, frame.domain.max)));
+                  return (
+                    <rect
+                      className="canvas-chart__bar"
+                      data-active={hover === index ? "true" : undefined}
+                      height={Math.max(1, Math.abs(zero - coord.y))}
+                      key={index}
+                      rx={2}
+                      width={barWidth}
+                      x={coord.x - groupWidth / 2 + order * barWidth}
+                      y={Math.min(zero, coord.y)}
+                    />
+                  );
+                })}
+              </g>
+            );
+          }
+          const line = coords.map((coord) => `${String(coord.x)},${String(coord.y)}`).join(" ");
+          const first = coords[0];
+          const last = coords[coords.length - 1];
+          return (
+            <g data-series={series} key={item.series.seriesId}>
+              {block.chartType === "area" && first !== undefined && last !== undefined ? (
+                <path
+                  className={`${mark} is-area`}
+                  d={`M ${String(first.x)} ${String(frame.bottom)} L ${line.replaceAll(" ", " L ")} L ${String(last.x)} ${String(frame.bottom)} Z`}
+                  data-series={series}
+                />
+              ) : null}
+              {block.chartType === "scatter" ? null : (
+                <polyline
+                  className={`${mark} is-line`}
+                  data-series={series}
+                  fill="none"
+                  points={line}
+                />
+              )}
+              {coords.map((coord, index) =>
+                block.chartType === "scatter" || hover === index || coords.length <= 16 ? (
+                  <circle
+                    className={`canvas-chart__dot ${seriesClass(item.index)}`}
+                    cx={coord.x}
+                    cy={coord.y}
+                    data-active={hover === index ? "true" : undefined}
+                    data-series={series}
+                    key={index}
+                    r={hover === index ? 4 : 2.5}
+                  />
+                ) : null,
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {hover === undefined ? null : (
+        <ChartReadout
+          frame={frame}
+          index={hover}
+          label={String(labelSource[hover]?.x ?? "")}
+          readings={visible.flatMap((item) => {
+            const point = item.series.points[hover];
+            return point === undefined
+              ? []
+              : [{ seriesIndex: item.index, label: item.series.label, value: point.y }];
+          })}
+          width={width}
+          x={xAt(hover)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Room between the gutter and a line's first point, so it never sits on a label. */
+const LINE_INSET = 12;
+
+function pointX(frame: CartesianFrame, index: number, count: number, slotted: boolean): number {
+  const span = frame.right - frame.left;
+  if (slotted)
+    return count <= 0 ? frame.left + span / 2 : frame.left + (span / count) * (index + 0.5);
+  if (count <= 1) return frame.left + span / 2;
+  return frame.left + LINE_INSET + (index / (count - 1)) * (span - LINE_INSET * 2);
+}
+
+/** The readings under the pointer, beside the guide line and kept inside the chart. */
+function ChartReadout(props: {
+  readonly frame: CartesianFrame;
+  readonly index: number;
+  readonly label: string;
+  readonly readings: ReadonlyArray<{
+    readonly seriesIndex: number;
+    readonly label: string;
+    readonly value: number;
+  }>;
+  readonly width: number;
+  readonly x: number;
+}) {
+  const shown = props.readings.slice(0, READOUT_MAX_SERIES);
+  const flip = props.x > props.width * 0.6;
+  return (
+    <div
+      aria-hidden="true"
+      className="chart-tip canvas-chart__readout"
+      data-side={flip ? "left" : "right"}
+      style={{ left: `${String(props.x)}px`, top: `${String(props.frame.top)}px` }}
+    >
+      <span className="chart-tip-head">{props.label}</span>
+      <dl>
+        {shown.map((reading) => (
+          <Fragment key={reading.seriesIndex}>
+            <dt>
+              <span
+                className={`chart-key is-block ${seriesClass(reading.seriesIndex)}`}
+                data-series={String(reading.seriesIndex % 6)}
+              />
+              {reading.label}
+            </dt>
+            <dd>{formatScalar(reading.value)}</dd>
+          </Fragment>
+        ))}
+      </dl>
+      {props.readings.length > shown.length ? (
+        <span className="chart-tip-head">{`${String(props.readings.length - shown.length)} more`}</span>
+      ) : null}
+    </div>
   );
 }
 
@@ -77,7 +402,8 @@ function ChartMarks({
     case "scatter":
     case "bar":
     case "distribution":
-      return <CartesianMarks block={block} hidden={hidden} />;
+      // Drawn at the figure's measured width by CartesianChart instead.
+      return null;
     default: {
       const exhaustive: never = block.chartType;
       return exhaustive;
@@ -264,104 +590,6 @@ function ComboMarks({
           />
         );
       })}
-    </g>
-  );
-}
-
-function CartesianMarks({
-  block,
-  hidden,
-}: {
-  readonly block: CanvasChartBlock;
-  readonly hidden: ReadonlySet<string>;
-}) {
-  const visible = visibleSeries(block, hidden);
-  const domain = computeYDomain(
-    visible.map((item) => ({
-      seriesId: item.series.seriesId,
-      label: item.series.label,
-      points: item.series.points,
-    })),
-  );
-  return (
-    <g>
-      <line
-        className="canvas-block__chart-axis"
-        x1={INSET}
-        x2={PLOT_WIDTH - INSET}
-        y1={PLOT_HEIGHT - INSET}
-        y2={PLOT_HEIGHT - INSET}
-      />
-      {visible.map((item) => (
-        <SeriesShapes
-          key={item.series.seriesId}
-          chartType={block.chartType}
-          domain={domain}
-          series={item.series}
-          seriesIndex={item.index}
-        />
-      ))}
-    </g>
-  );
-}
-
-function SeriesShapes({
-  chartType,
-  series,
-  domain,
-  seriesIndex,
-}: {
-  readonly chartType: CanvasChartType;
-  readonly series: CanvasChartSeries;
-  readonly domain: YDomain;
-  readonly seriesIndex: number;
-}) {
-  const count = series.points.length;
-  const coords = series.points.map((point, index) => ({
-    x: scaleX(index, count, PLOT_WIDTH, INSET),
-    y: scaleY(point.y, domain, PLOT_HEIGHT, INSET),
-  }));
-  const points = coords.map((coord) => `${String(coord.x)},${String(coord.y)}`).join(" ");
-  const mark = `canvas-block__chart-mark ${seriesClass(seriesIndex)}`;
-  if (chartType === "line") {
-    return (
-      <polyline
-        className={`${mark} is-line`}
-        data-series={String(seriesIndex % 6)}
-        fill="none"
-        points={points}
-      />
-    );
-  }
-  if (chartType === "area") {
-    const first = coords[0];
-    const last = coords[coords.length - 1];
-    if (first === undefined || last === undefined) return null;
-    const baseY = PLOT_HEIGHT - INSET;
-    const path = `M ${String(first.x)} ${String(baseY)} L ${points.replaceAll(" ", " L ")} L ${String(last.x)} ${String(baseY)} Z`;
-    return <path className={`${mark} is-area`} d={path} data-series={String(seriesIndex % 6)} />;
-  }
-  if (chartType === "scatter") {
-    return (
-      <g className={mark} data-series={String(seriesIndex % 6)}>
-        {coords.map((coord, index) => (
-          <circle key={index} className="canvas-block__chart-dot" cx={coord.x} cy={coord.y} r={3} />
-        ))}
-      </g>
-    );
-  }
-  const barWidth = count > 0 ? Math.max(2, PLOT_WIDTH / count / 2) : 2;
-  return (
-    <g className={mark} data-series={String(seriesIndex % 6)}>
-      {coords.map((coord, index) => (
-        <rect
-          key={index}
-          height={Math.max(1, PLOT_HEIGHT - INSET - coord.y)}
-          width={barWidth}
-          x={coord.x - barWidth / 2}
-          y={coord.y}
-        />
-      ))}
     </g>
   );
 }

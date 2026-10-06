@@ -57,8 +57,8 @@ import type { ThreadTaskChangedFiles } from "../plan/ThreadTaskViewer";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
-import { InlineThreadCanvases } from "../canvas/InlineThreadCanvas";
-import { placeInlineCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import type { HostId } from "@octant/contracts/host";
 import type { CodeClient, ThreadMentionClient } from "@octant/client-runtime";
@@ -667,7 +667,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     : providerGroups;
   const canvasClient = props.canvasClient;
   const openInSidebar = props.onOpenCanvasInSidebar;
-  const canvasPlacement = placeInlineCanvases(
+  const canvasPlacement = placeThreadCanvases(
     threadTurnSpans(
       messages,
       (message) => message.id,
@@ -1237,7 +1237,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ? {}
             : {
                 afterItem: (message: (typeof messages)[number]) => (
-                  <InlineThreadCanvases
+                  <ThreadCanvases
                     cards={canvasPlacement.byRow.get(message.id)}
                     client={canvasClient}
                     {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}

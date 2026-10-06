@@ -1,6 +1,6 @@
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { describe, expect, it } from "vitest";
-import { placeInlineCanvases, threadTurnSpans } from "./threadCanvasPlacement";
+import { placeThreadCanvases, threadTurnSpans } from "./threadCanvasPlacement";
 
 interface Row {
   readonly key: string;
@@ -28,9 +28,9 @@ const turns = threadTurnSpans(
   (row) => row.at,
 );
 
-describe("placing inline Canvases in a transcript", () => {
+describe("placing Canvases in a transcript", () => {
   it("draws a Canvas after the last row of the turn that wrote it", () => {
-    const placement = placeInlineCanvases(turns, [
+    const placement = placeThreadCanvases(turns, [
       card("first", {
         presentation: "inline",
         canvasCreatedAt: "2026-10-06T09:02:00.000Z" as never,
@@ -50,8 +50,8 @@ describe("placing inline Canvases in a transcript", () => {
     expect([...placement.placed]).toEqual(["first", "second"]);
   });
 
-  it("leaves a sidebar Canvas, or one it cannot date, to the thread's card list", () => {
-    const placement = placeInlineCanvases(turns, [
+  it("places a sidebar Canvas as well, and leaves one it cannot date to the card list", () => {
+    const placement = placeThreadCanvases(turns, [
       card("sidebar", {
         presentation: "sidebar",
         canvasCreatedAt: "2026-10-06T09:02:00.000Z" as never,
@@ -65,7 +65,9 @@ describe("placing inline Canvases in a transcript", () => {
       }),
     ]);
 
-    expect(placement.byRow.size).toBe(0);
-    expect(placement.placed.size).toBe(0);
+    expect(placement.byRow.get("reply-1b")?.map((entry) => String(entry.canvasId))).toEqual([
+      "sidebar",
+    ]);
+    expect([...placement.placed]).toEqual(["sidebar"]);
   });
 });

@@ -95,8 +95,9 @@ last observed version sequence; creation starts at sequence 1. Raw HTML,
 JavaScript, CSS, and invented file or artifact references are not Canvas
 content.
 
-A created Canvas appears as a card in its thread with **Open Canvas**. Octant
-can also offer newly authored documents beside the conversation.
+A created Canvas appears in its thread at the end of the turn that made it, as
+a row you can click to open it. Octant can also offer newly authored documents
+beside the conversation.
 
 ### Small Canvases inside the thread
 
@@ -107,12 +108,14 @@ that made it, drawn with the same blocks it has in the sidebar. It is still one
 Canvas: it keeps its versions, it appears in your library, and you can share or
 export it.
 
-- **Open in sidebar** opens the same Canvas in the sidebar next to a Work or
+- **Open in sidebar** (the panel icon) opens the same Canvas in the sidebar next to a Work or
   Code thread. There you can comment, edit a board or plan, and see its
   history. Chat has no sidebar, so in Chat the button says **Open Canvas** and
   opens the Canvas in its own tab.
-- **Show as card** folds it to a single row. **Show in thread** unfolds it. This
-  window remembers your choice.
+- **Show as card** (the fold icon in its header) folds it to a single row.
+  **Show in thread** unfolds it. This window remembers your choice.
+- Hover a line or bar chart to read the value under the pointer. **View chart
+  data** lists every reading.
 - A tall Canvas is cut off at a fixed height and fades out. Its button opens
   the whole Canvas in the sidebar. Scrolling always moves the thread, never the
   Canvas.
