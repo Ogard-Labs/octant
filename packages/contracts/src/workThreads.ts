@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
+import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { HostId } from "./host";
@@ -337,6 +338,8 @@ export const WorkThreadNavigationRuntime = Schema.Struct({
    * decodes; absent reads as nothing due.
    */
   followUpDue: Schema.optional(WorkStatusDatedItem),
+  /** The latest turn's start and latest step while it runs; absent otherwise. */
+  ...ThreadLiveTurnFields,
 }).annotations(strict);
 export type WorkThreadNavigationRuntime = typeof WorkThreadNavigationRuntime.Type;
 

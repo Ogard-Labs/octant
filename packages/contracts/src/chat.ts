@@ -10,6 +10,7 @@ import {
 import { ContextManifestId } from "./context";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
+import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { ExtensionSelection } from "./extensions";
 import { HostId } from "./host";
 import { MultiModelPool, MultiModelRouteDecisionReceipt } from "./multiModelPool";
@@ -1011,6 +1012,8 @@ export const ChatNavigationThread = Schema.Struct({
   lastSequence: GlobalSequence,
   followUpOpen: Schema.Boolean,
   executing: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /** The latest turn's start and latest step while it runs; absent otherwise. */
+  ...ThreadLiveTurnFields,
   /** Completed and snoozed rest, so the sidebar can file the row; absent on an older host. */
   ...ThreadRestFields,
 }).annotations(strict);

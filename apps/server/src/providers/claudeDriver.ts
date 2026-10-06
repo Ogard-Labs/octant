@@ -1003,6 +1003,9 @@ function makeConnection(
       claudeSessionId,
       sequence,
       terminal: false,
+      ...(state.query.initialization.autoCompactThreshold === undefined
+        ? {}
+        : { autoCompactThreshold: state.query.initialization.autoCompactThreshold }),
       requestIds: new Map(),
       taskIds: new Map(),
       toolStates: new Map(),

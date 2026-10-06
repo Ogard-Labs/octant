@@ -112,6 +112,92 @@ describe("the work in progress a start screen lists", () => {
     expect(facts.has("idle")).toBe(false);
   });
 
+  it("shows the turn's own step and real start time, ahead of the board's line", () => {
+    const facts = boardFactsByThread([
+      {
+        threadId: "a",
+        executing: true,
+        childAgents: { latestSummary: "Reading App.tsx" },
+        planProgress: { kind: "none" },
+        lastMeaningfulActivityAt: null,
+      },
+    ] as unknown as ReadonlyArray<CodeBoardCard>);
+    const rows = buildWorkingNowRows({
+      ...base,
+      boardFacts: facts,
+      runs: undefined,
+      threads: [
+        {
+          mode: "code",
+          thread: thread({
+            threadId: "a",
+            updatedAt: "2026-10-06T09:50:00.000Z",
+            turnStartedAt: "2026-10-06T09:30:00.000Z",
+            liveStep: { kind: "tool", tool: "Command", argument: "bun run test" },
+          }),
+        },
+      ],
+    });
+
+    expect(rows[0]).toMatchObject({
+      step: "Command: bun run test",
+      stepKind: "tool",
+      startedAt: "2026-10-06T09:30:00.000Z",
+    });
+  });
+
+  it("says a turn waiting on the person in words, and a tool with no argument by its name", () => {
+    const rows = buildWorkingNowRows({
+      ...base,
+      runs: undefined,
+      threads: [
+        {
+          mode: "code",
+          thread: thread({ threadId: "a", liveStep: { kind: "waiting", reason: "approval" } }),
+        },
+        {
+          mode: "code",
+          thread: thread({ threadId: "b", liveStep: { kind: "waiting", reason: "user-input" } }),
+        },
+        {
+          mode: "code",
+          thread: thread({ threadId: "c", liveStep: { kind: "tool", tool: "Web search" } }),
+        },
+      ],
+    });
+    const byThread = new Map(rows.map((row) => [row.threadId, row] as const));
+    expect(byThread.get("a")).toMatchObject({ step: "Waiting for approval", stepKind: "status" });
+    expect(byThread.get("b")).toMatchObject({
+      step: "Waiting for your answer",
+      stepKind: "status",
+    });
+    expect(byThread.get("c")).toMatchObject({ step: "Web search", stepKind: "tool" });
+  });
+
+  it("keeps the board line and the last-moved time when the host reports no live turn", () => {
+    const facts = boardFactsByThread([
+      {
+        threadId: "a",
+        executing: true,
+        childAgents: { latestSummary: "Reading App.tsx" },
+        planProgress: { kind: "none" },
+        lastMeaningfulActivityAt: "2026-10-06T09:40:00.000Z",
+      },
+    ] as unknown as ReadonlyArray<CodeBoardCard>);
+    const rows = buildWorkingNowRows({
+      ...base,
+      boardFacts: facts,
+      runs: undefined,
+      threads: [{ mode: "code", thread: thread({ threadId: "a" }) }],
+    });
+    expect(rows[0]).toMatchObject({
+      step: "Reading App.tsx",
+      activeAt: "2026-10-06T09:40:00.000Z",
+    });
+    expect(rows[0]).not.toHaveProperty("startedAt");
+    expect(rows[0]).not.toHaveProperty("stepKind");
+  });
+
   it("falls back to how far the plan has come when nothing livelier is known", () => {
     const facts = boardFactsByThread([
       {
