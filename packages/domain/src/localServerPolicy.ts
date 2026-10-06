@@ -319,7 +319,8 @@ function classifyWorkspace(
 }
 
 function isWithin(root: string, candidate: string): boolean {
-  const normalizedRoot = root.replace(/\/+$/, "");
+  let normalizedRoot = root;
+  while (normalizedRoot.endsWith("/")) normalizedRoot = normalizedRoot.slice(0, -1);
   if (normalizedRoot === "" || normalizedRoot === "/") return false;
   return candidate === normalizedRoot || candidate.startsWith(`${normalizedRoot}/`);
 }
