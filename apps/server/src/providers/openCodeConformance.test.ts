@@ -275,27 +275,23 @@ describe("OpenCode provider conformance", () => {
     });
   });
 
-  it("refuses a 2.x Chat turn with a typed runtime-incompatible failure", async () => {
+  it("offers a 2.x Chat turn once the jail serves a Git work tree", async () => {
     const chatSource = new EventSourceFixture();
     const chatDriver = makeBetaHarnessDriver(chatSource, {
       onPrompt: () => undefined,
       onAbort: () => undefined,
     });
-    const exit = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.scoped(
-        Effect.exit(
-          chatDriver.driver
-            .acquire({ instanceId, projectRoot, mode: "chat" })
-            .pipe(
-              Effect.flatMap((connection) =>
-                connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
-              ),
+        chatDriver.driver
+          .acquire({ instanceId, projectRoot, mode: "chat" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
             ),
-        ),
+          ),
       ),
     );
-    expect(exit._tag).toBe("Failure");
-    expect(String(exit)).toContain("only Code turns are offered");
   });
 });
 

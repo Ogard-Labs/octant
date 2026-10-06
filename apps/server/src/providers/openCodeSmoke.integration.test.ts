@@ -3,7 +3,7 @@ import {
   decodeProviderSessionId,
   type ProviderModelId,
 } from "@octant/contracts";
-import { accessSync, constants, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { accessSync, constants, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { Effect, Fiber, Stream } from "effect";
@@ -78,6 +78,60 @@ describe("real OpenCode integration", () => {
       );
       await registry.closeAll();
       expect(registry.hasRuntime(instanceId)).toBe(false);
+    },
+    60_000,
+  );
+
+  it.skipIf(!enabled)(
+    "creates a confined 2.x session in a Git work tree and completes a read-tool turn",
+    async () => {
+      const binaryPath = findExecutable("opencode");
+      expect(binaryPath, "enabled smoke requires an installed OpenCode CLI").not.toBeNull();
+      const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000307");
+      const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000308");
+      const registry = new ProviderRuntimeRegistry();
+      // A directory with a `.git` marker makes OpenCode 2 resolve a project
+      // via `git rev-parse`; the stand-in makes that fail gracefully.
+      const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-git-smoke-")));
+      mkdirSync(join(projectRoot, ".git"), { recursive: true });
+      try {
+        const driver = makeOpenCodeDriver({
+          instanceId,
+          binaryPath: binaryPath!,
+          process: makeOpenCodeProcessLive({ startupTimeoutMs: 20_000 }),
+          runtimeRegistry: registry,
+          idleLeaseMs: 0,
+          permissionPersistence: () => "current-session",
+        });
+        const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+        if (probe.readiness === "incompatible") {
+          // A runtime the confined jail cannot serve is listed, never offered.
+          expect(probe.reason).toBe("runtime-incompatible");
+          await registry.closeAll();
+          return;
+        }
+        expect(probe.readiness).toBe("ready");
+        expect(probe.models.length).toBeGreaterThan(0);
+        await Effect.runPromise(
+          Effect.scoped(
+            driver.acquire({ instanceId, projectRoot, mode: "chat" }).pipe(
+              Effect.flatMap((connection) =>
+                connection
+                  .start({
+                    sessionId,
+                    modelId: probe.models[0]!.id as ProviderModelId,
+                    executionPolicy: "plan",
+                  })
+                  .pipe(Effect.tap(() => connection.interrupt(sessionId))),
+              ),
+            ),
+          ),
+        );
+        await registry.closeAll();
+        expect(registry.hasRuntime(instanceId)).toBe(false);
+      } finally {
+        rmSync(projectRoot, { recursive: true, force: true });
+      }
     },
     60_000,
   );

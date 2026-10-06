@@ -2015,6 +2015,22 @@ mechanisms are:
   runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
+  OpenCode 2 runs `git rev-parse` at startup to resolve its project, and the
+  Chat, Plan, and Work jail denies fork and exec outright. Rather than widen
+  the jail to a real Git binary, the 2.x launch gets a private stand-in: a
+  `<TMPDIR>/git-standin-*/bin/git` symlink to `/usr/bin/false` placed first on
+  the child's PATH, with `allowProcessFork` and exactly one exec grant,
+  `(allow process-exec (literal "/usr/bin/false"))`. The spawn succeeds and
+  git exits non-zero, which OpenCode reads as "not a git project" and serves
+  the directory anyway. No real git, no shell, and no other exec becomes
+  possible; OpenCode 1.x and Code mode are unchanged. The readiness probe
+  attests at a directory with a `.git` marker under the Chat/Plan
+  confinement and fails closed — listing-only, no turns — if a future
+  OpenCode treats the failing git as fatal. On Linux the PATH shim is applied
+  but bwrap's seccomp still denies fork and masks host executables, so the
+  stand-in's spawn fails there; the probe fails closed and the runtime stays
+  listing-only until Linux confinement can express the narrow per-path exec
+  grant (named gap, not widened).
   Toolchain commands the Android workbench issues keep their own deliberate
   carve-out: `~/.android` — the AVD store, adb keys, and emulator lock files —
   plus a non-empty `ANDROID_AVD_HOME` when configured are bound read-write even

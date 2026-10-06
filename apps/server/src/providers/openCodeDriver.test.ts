@@ -89,8 +89,8 @@ describe("OpenCode driver", () => {
     if (process.platform === "darwin") {
       expect(probe.capabilities.appManagedTools).toBe("supported");
       expect(fixture.processInputs[0]).toMatchObject({
-        mode: "code",
-        executionPolicy: "approval-gated",
+        mode: "chat",
+        executionPolicy: "plan",
         loopbackPorts: [expect.any(Number)],
       });
       expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
@@ -98,8 +98,8 @@ describe("OpenCode driver", () => {
     } else {
       expect(probe.capabilities.appManagedTools).toBe("unsupported");
       expect(fixture.processInputs[0]).toMatchObject({
-        mode: "code",
-        executionPolicy: "approval-gated",
+        mode: "chat",
+        executionPolicy: "plan",
       });
       expect(fixture.processInputs[0]?.loopbackPorts).toBeUndefined();
       expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
@@ -1297,7 +1297,7 @@ describe("OpenCode driver", () => {
   });
 
   it("lists a 2.x runtime without offering turns when its confined server cannot resolve a Git work tree", async () => {
-    const fixture = betaDriver({ worktreeProviders: "refused" });
+    const fixture = betaDriver({ worktreeSessionCreate: "refused" });
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
     expect(probe.readiness).toBe("incompatible");
     expect(probe.reason).toBe("runtime-incompatible");
@@ -1306,34 +1306,32 @@ describe("OpenCode driver", () => {
     expect(Object.values(probe.capabilities).every((support) => support === "unsupported")).toBe(
       true,
     );
-    const marker = fixture.catalogueRoots.find((root) => root.includes("octant-opencode-probe-"));
+    const marker = fixture.sessionRoots.find((root) => root.includes("octant-opencode-probe-"));
     expect(marker).toBeDefined();
     expect(existsSync(marker!)).toBe(false);
   });
 
-  it("refuses a 2.x Chat, Plan, or Work turn and allows a Code turn", async () => {
-    const codeFixture = betaDriver();
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const connection = yield* codeFixture.driver.acquire({
-            instanceId,
-            projectRoot: "/tmp/project",
-            mode: "code",
-          });
-          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-        }),
-      ),
-    );
-    expect(codeFixture.calls).toContain("session.create:ask");
+  it("attests a 2.x runtime ready when session create succeeds in a Git work tree", async () => {
+    const fixture = betaDriver();
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("ready");
+    expect(probe.models.length).toBeGreaterThan(0);
+    // The probe attested at a directory with a `.git` marker; the marker is
+    // cleaned up after the probe.
+    const marker = fixture.sessionRoots.find((root) => root.includes("octant-opencode-probe-"));
+    expect(marker).toBeDefined();
+    expect(existsSync(marker!)).toBe(false);
+  });
 
+  it("offers a 2.x turn in every mode once the jail serves a Git work tree", async () => {
     for (const [mode, policy] of [
       ["chat", "approval-gated"],
       ["work", "plan"],
       ["work", "approval-gated"],
+      ["code", "approval-gated"],
     ] as const) {
       const fixture = betaDriver();
-      const exit = await Effect.runPromiseExit(
+      await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
             const connection = yield* fixture.driver.acquire({
@@ -1345,15 +1343,13 @@ describe("OpenCode driver", () => {
           }),
         ),
       );
-      expect(exit._tag).toBe("Failure");
-      expect(String(exit)).toContain("only Code turns are offered");
-      expect(fixture.calls).not.toContain("session.create:ask");
+      expect(fixture.calls).toContain("session.create:ask");
     }
   });
 
-  it("closes the managed-tool bridge when a 2.x non-Code start includes tools", async () => {
+  it("registers the managed-tool bridge for a 2.x Chat start that includes tools", async () => {
     const fixture = betaDriver();
-    const exit = await Effect.runPromiseExit(
+    await Effect.runPromise(
       Effect.scoped(
         fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "chat" }).pipe(
           Effect.flatMap((connection) =>
@@ -1367,39 +1363,36 @@ describe("OpenCode driver", () => {
         ),
       ),
     );
-    expect(exit._tag).toBe("Failure");
-    expect(String(exit)).toContain("only Code turns are offered");
-    expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
+    expect(fixture.calls).toContain("session.create:ask");
+    expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
   });
 
-  it("repeats the typed 2.x non-Code refusal without poisoning the connection", async () => {
+  it("starts a 2.x Chat turn twice without poisoning the connection", async () => {
     const fixture = betaDriver();
     const outcome = await Effect.runPromise(
       Effect.scoped(
-        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "chat" }).pipe(
-          Effect.flatMap((connection) =>
-            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
-              Effect.exit,
-              Effect.flatMap((refused) =>
-                refused._tag === "Failure" &&
-                String(refused).includes("only Code turns are offered")
-                  ? connection
+        fixture.driver
+          .acquire({ instanceId, projectRoot: "/tmp/project", mode: "chat" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection
+                .start({ sessionId, modelId, executionPolicy: "approval-gated" })
+                .pipe(
+                  Effect.zipRight(
+                    connection
                       .start({ sessionId, modelId, executionPolicy: "approval-gated" })
-                      .pipe(Effect.exit)
-                  : Effect.succeed(refused),
-              ),
+                      .pipe(Effect.exit),
+                  ),
+                ),
             ),
           ),
-        ),
       ),
     );
-    // A deliberate refusal must not poison the connection: the second attempt
-    // fails with the same typed refusal, not a stale-exit or aborted-stream
-    // failure masquerading as a protocol error.
+    // The second start on the same session is refused as a protocol error,
+    // not a stale-exit or aborted-stream failure masquerading as one.
     expect(outcome._tag).toBe("Failure");
-    expect(String(outcome)).toContain("only Code turns are offered");
-    expect(String(outcome)).toContain("unsupported");
-    expect(fixture.calls).not.toContain("session.create:ask");
+    expect(String(outcome)).toContain("already active");
+    expect(fixture.calls.filter((call) => call === "session.create:ask")).toHaveLength(1);
   });
 
   it("adapts a 2.x event from data when properties is empty", () => {
@@ -1602,7 +1595,11 @@ describe("OpenCode driver", () => {
 });
 
 function betaDriver(
-  options: { readonly worktreeProviders?: "refused"; readonly events?: ReadonlyArray<Event> } = {},
+  options: {
+    readonly worktreeProviders?: "refused";
+    readonly worktreeSessionCreate?: "refused";
+    readonly events?: ReadonlyArray<Event>;
+  } = {},
 ) {
   return driverFixture({
     ...options,
@@ -1642,6 +1639,8 @@ function driverFixture(
     readonly streamEnd?: "hang" | "eof" | "throw";
     /** The confined server answers 500 for a directory inside a Git work tree. */
     readonly worktreeProviders?: "refused";
+    /** The confined server refuses session create for a directory inside a Git work tree. */
+    readonly worktreeSessionCreate?: "refused";
   } = {},
 ) {
   const calls: string[] = [];
@@ -1670,6 +1669,7 @@ function driverFixture(
         : Effect.fail(options.processFailure),
   };
   const session = providerSession(options.sessionDirectory ?? "/tmp/project");
+  const sessionRoots: string[] = [];
   const client: OpenCodeClientPort = {
     health: async () => ({ healthy: true, version: "1.18.0" }),
     providers: async () => providerList(),
@@ -1680,6 +1680,14 @@ function driverFixture(
     createSession: async ({ permission }) => {
       createdPermissions.push(permission);
       calls.push(`session.create:${permission[0]?.action}`);
+      const root = sessionRoots[sessionRoots.length - 1];
+      if (
+        options.worktreeSessionCreate === "refused" &&
+        root !== undefined &&
+        existsSync(join(root, ".git"))
+      ) {
+        throw new Error("opencode server POST /api/session -> 500");
+      }
       return session;
     },
     getSession: async () => ({ ...session, id: options.resumedSessionId ?? session.id }),
@@ -1740,6 +1748,7 @@ function driverFixture(
   return {
     calls,
     catalogueRoots,
+    sessionRoots,
     processInputs,
     createdPermissions,
     registry,
@@ -1748,16 +1757,19 @@ function driverFixture(
       binaryPath: "/opt/homebrew/bin/opencode",
       process: options.process ?? processPort,
       runtimeRegistry: registry,
-      clientFactory: (_runtime, root) => ({
-        ...client,
-        providers: async () => {
-          catalogueRoots.push(root);
-          if (options.worktreeProviders === "refused" && existsSync(join(root, ".git"))) {
-            throw new Error("opencode server GET /api/provider -> 500");
-          }
-          return client.providers();
-        },
-      }),
+      clientFactory: (_runtime, root) => {
+        sessionRoots.push(root);
+        return {
+          ...client,
+          providers: async () => {
+            catalogueRoots.push(root);
+            if (options.worktreeProviders === "refused" && existsSync(join(root, ".git"))) {
+              throw new Error("opencode server GET /api/provider -> 500");
+            }
+            return client.providers();
+          },
+        };
+      },
       permissionPersistence: () =>
         typeof options.permissionPersistence === "function"
           ? options.permissionPersistence()

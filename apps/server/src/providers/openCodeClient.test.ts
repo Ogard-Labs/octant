@@ -276,7 +276,8 @@ describe("official OpenCode client routing", () => {
     const encoder = new TextEncoder();
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (request: Request) => {
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
         requests.push(request.clone());
         const url = new URL(request.url);
         if (request.method === "GET" && url.pathname === "/api/event") {
@@ -382,7 +383,7 @@ describe("official OpenCode client routing", () => {
       model: { providerID: "openai", id: "gpt-5" },
     });
     expect(await requests[3]?.json()).toEqual({
-      prompt: { text: "hello" },
+      text: "hello",
       resume: true,
     });
     expect(
@@ -458,5 +459,46 @@ describe("official OpenCode client routing", () => {
       config: { type: "remote", url: "http://127.0.0.1:9999/", enabled: true, oauth: false },
     });
     expect(requests[0]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
+  });
+
+  it("sends a flat prompt body to the 2.x session prompt route", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        requests.push(request.clone());
+        return new Response(JSON.stringify({ data: { id: "ses_1" } }), {
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode v2.0.22",
+        url: new URL("http://127.0.0.1:41730/"),
+      },
+      "/tmp/project",
+    );
+    const permission = [{ permission: "*", pattern: "*", action: "ask" }] as const;
+    await client.prompt({
+      sessionId: "ses_1",
+      providerId: "openai",
+      modelId: "gpt-5",
+      prompt: "hello",
+      permission: [...permission],
+    });
+    const promptRequest = requests.find(
+      (request) => new URL(request.url).pathname === "/api/session/ses_1/prompt",
+    );
+    expect(promptRequest).toBeDefined();
+    // The body is flat `{text, resume}` — not the nested `{prompt:{text}, resume}`
+    // the pinned SDK sends, which OpenCode 2.0.22 rejects with 400.
+    expect(await promptRequest?.json()).toEqual({ text: "hello", resume: true });
+    expect(promptRequest?.headers.get("authorization")).toBe("Basic redacted");
+    expect(promptRequest?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
   });
 });

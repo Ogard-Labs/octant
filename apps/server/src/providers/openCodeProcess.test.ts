@@ -675,6 +675,112 @@ describe("OpenCodeProcessPort", () => {
     expect(captured?.privateHomeAllowPaths).toContain(realpathSync(linkedBinary));
   });
 
+  // OpenCode 2 runs `git rev-parse` at startup to resolve its project. Under
+  // the Chat/Plan/Work jail the stand-in puts an always-failing `git` (a
+  // symlink to /usr/bin/false) first on PATH, allows fork, and grants exec
+  // of exactly /usr/bin/false. OpenCode 1.x and Code mode stay unchanged.
+  it("allows fork and exec of only /usr/bin/false for a 2.x Chat or Plan launch", async () => {
+    const fixture = probeWrapper("v2-ready");
+    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    const confinement: SeatbeltConfinementPort = {
+      prepare: (input) => {
+        captured = input;
+        return { command: input.executable, args: input.args };
+      },
+    };
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "darwin",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "chat",
+          executionPolicy: "plan",
+        }),
+      ),
+    );
+    expect(observed.runtime).toBe("beta");
+    // Fork is allowed so OpenCode can spawn the failing git; exec stays
+    // denied except for the single /usr/bin/false literal grant.
+    expect(captured?.allowProcessFork).toBe(true);
+    expect(captured?.allowProcessExec).toBe(false);
+    const rules = captured?.extraRules ?? [];
+    expect(rules).toContain('(allow process-exec (literal "/usr/bin/false"))');
+    // No other exec grant appears in the launch's own rules: the only
+    // process-exec literal rule is the stand-in target.
+    const execRules = rules.filter((rule) => rule.includes("process-exec"));
+    expect(execRules).toEqual(['(allow process-exec (literal "/usr/bin/false"))']);
+  });
+
+  it("denies fork and exec for a 1.x Chat or Plan launch without the stand-in", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    const confinement: SeatbeltConfinementPort = {
+      prepare: (input) => {
+        captured = input;
+        return { command: input.executable, args: input.args };
+      },
+    };
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "darwin",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "chat",
+          executionPolicy: "plan",
+        }),
+      ),
+    );
+    expect(observed.runtime).toBe("legacy");
+    expect(captured?.allowProcessFork).toBe(false);
+    expect(captured?.allowProcessExec).toBe(false);
+    const rules = captured?.extraRules ?? [];
+    expect(rules.some((rule) => rule.includes("process-exec"))).toBe(false);
+  });
+
+  it("keeps Code mode exec allowed without the stand-in exec grant", async () => {
+    const fixture = probeWrapper("v2-ready");
+    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    const confinement: SeatbeltConfinementPort = {
+      prepare: (input) => {
+        captured = input;
+        return { command: input.executable, args: input.args };
+      },
+    };
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "darwin",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "code",
+          executionPolicy: "approval-gated",
+        }),
+      ),
+    );
+    expect(observed.runtime).toBe("beta");
+    // Code mode allows exec behind approvals; the stand-in grant is not added.
+    expect(captured?.allowProcessExec).toBe(true);
+    expect(captured?.allowProcessFork).toBe(true);
+    const rules = captured?.extraRules ?? [];
+    expect(
+      rules.some((rule) => rule.includes('(allow process-exec (literal "/usr/bin/false"))')),
+    ).toBe(false);
+  });
+
   // The agent is a loopback HTTP server, so the confinement has to let it
   // listen on the port this launch reserved. Without the bind it exits before
   // readiness when OS egress is none. Chat and Work turns now allow the
