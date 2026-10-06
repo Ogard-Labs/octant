@@ -70,8 +70,20 @@ the repository or the branch, and how long ago it failed. Up to five rows
 show. When nothing is failing, the card is not shown. **Start a fix** opens a
 new Code task in that Project and branch with the failure already written in;
 you send it. The card is not shown without a connection, or when credential
-storage is insecure. It reads the same list Pull requests keeps, so it does
-not ask again on its own.
+storage is insecure. It reads the same list Pull requests keeps, so it
+does not ask again on its own.
+
+**Computers**, on a new Work or Code task, lists the computers this window is
+connected to: this computer, and any paired computer, devbox, or server. Each
+row says whether it is connected, reconnecting, or offline. When this window
+may see that computer's load, the row shows how many cores and how much memory
+it has, and small bars for processor, memory, and disk with a percentage. A
+computer that is connected but which this window is not allowed to read shows
+as connected with no bars. A computer that is offline shows when it was last
+seen, and no bars. The number of agents running there opens Running filtered to
+that computer. Up to four computers show, then **+N more**. The card asks for
+the load only while you are looking at it and the window is in front, about
+every ten seconds, and stops when the window is hidden.
 
 **Customize**, on the right under the composer, turns each card on or off and
 reorders them: drag a card by its handle, or use the up and down buttons from the

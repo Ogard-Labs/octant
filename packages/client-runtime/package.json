@@ -34,6 +34,7 @@
     "./integration-client": "./src/integrationClient.ts",
     "./github-clone-client": "./src/githubCloneClient.ts",
     "./host-client": "./src/hostClient.ts",
+    "./host-resource-client": "./src/hostResourceClient.ts",
     "./host-control-client": "./src/hostControlClient.ts",
     "./host-federation-registry": "./src/hostFederationRegistry.ts",
     "./host-federation-transports": "./src/hostFederationTransports.ts",

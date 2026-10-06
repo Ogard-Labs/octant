@@ -198,6 +198,20 @@ failure text the refresh recorded already written in. It does not start a
 turn; the person sends it. Opening the card reads the same cached snapshot
 Pull requests reads and adds no poll.
 
+**Computers** is the next card, on by default, on Work and Code. It lists every
+host this window is connected to: this computer, paired remote hosts, devboxes,
+and servers. A row names the host and says whether it is connected,
+reconnecting, or offline — the word, not colour alone. A connected or
+reconnecting host this window may read shows its core count, total memory, and
+small monochrome bars for CPU, memory, and disk, each with a percentage. Disk
+is left out when the volume could not be read. A host that is connected but
+which this window has no authority to read shows as connected with no figures.
+An offline host shows when it was last seen and no bars. The number of running
+agents on that host opens Running with the environment filter set to the host.
+At most four hosts show, then **+N more**. The card reads each host's load only
+while it is visible and the window is in front, about every ten seconds, and
+stops when the window is hidden. It never polls in the background.
+
 ## Tool lifecycles
 
 Thread utilities live in the Right Utility Dock outside the split tree.

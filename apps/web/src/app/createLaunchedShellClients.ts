@@ -57,6 +57,10 @@ import {
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
 import { createHostClient, type HostClient } from "@octant/client-runtime/host-client";
+import {
+  createHostResourceClient,
+  type HostResourceClient,
+} from "@octant/client-runtime/host-resource-client";
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
 import { createImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { createSpeechClient } from "@octant/client-runtime/speech-client";
@@ -136,6 +140,7 @@ export interface LaunchedShellClients {
   readonly sideTaskClient: ReturnType<typeof createSideTaskClient>;
   readonly goalLoopClient: ReturnType<typeof createGoalLoopClient>;
   readonly hostClient: HostClient;
+  readonly hostResourceClient: HostResourceClient;
   readonly hostControlClient: ReturnType<typeof createHostControlClient>;
   readonly imageGenerationClient: ReturnType<typeof createImageGenerationClient>;
   readonly speechClient: ReturnType<typeof createSpeechClient>;
@@ -222,6 +227,11 @@ export function createLaunchedShellClients(
     sideTaskClient: createSideTaskClient(port),
     goalLoopClient: createGoalLoopClient(port),
     hostClient: options.hostClient ?? createHostClient({ baseUrl: options.serverUrl, fetch }),
+    hostResourceClient: createHostResourceClient({
+      baseUrl: options.serverUrl,
+      fetch,
+      windowCapability: options.windowCapability,
+    }),
     hostControlClient: createHostControlClient(port),
     imageGenerationClient: createImageGenerationClient(port),
     speechClient: createSpeechClient(port),

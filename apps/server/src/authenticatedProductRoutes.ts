@@ -93,6 +93,10 @@ export function classifyProductAction(request: Request): string | undefined {
   if (path.startsWith("/api/projects/")) {
     return method === "GET" || method === "HEAD" ? "project.overview.read" : undefined;
   }
+  // Load figures are a read of this host, the same authority as reading its
+  // projects. A paired device that does not already have that authority is
+  // refused by the route, which returns no figures.
+  if (path === "/api/host/resources" && method === "GET") return "project.overview.read";
   if (path.startsWith("/api/context/")) {
     // Inspect and commands share one POST-only handler, so only an exact path
     // separates them: inspect returns a context snapshot, while commands
