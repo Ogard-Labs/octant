@@ -48,8 +48,10 @@ Chat has no board.
 Under the composer on a new Work or Code task, a few cards show what is
 happening now. **Working now** lists what is running across your Projects:
 each row has the provider mark, the thread's title, a line saying what it is
-doing, and a time. An agent run says how long it has run; a thread says when it
-last moved, because the app does not record when a turn began. When the window
+doing, and a time. A command or tool shows as it runs, such as `Command: bun run
+test`, or the row says it is waiting for your approval or an answer. The time is
+how long the turn has been running. Paths and anything that looks like a secret
+are removed from the line before it leaves the host. When the window
 is showing another computer's work, the row names that computer. Up to five rows
 show, then **+N more** opens Running. Choose a row to open its thread. When
 nothing is running, the card says so in one line.

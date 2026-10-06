@@ -42,7 +42,8 @@ asks for it (Settings › Appearance › Style):
   for discrete objects, and selection fills. In the Default style the chrome is
   monochrome; colour names identity (a Project, a provider, a count tile under
   Vivid) and never stands in for status, which keeps its own warning, failure,
-  and diff roles.
+  and diff roles. Categorical data is the other exception: the context ring and
+  the parts of the context window keep their hues in every style.
 - Controls are familiar, compact, keyboard reachable, and honest about
   loading, stale, unavailable, permission, and error states.
 
@@ -390,18 +391,19 @@ popover at most 340px wide: one row per card with a drag grip, the icon, the
 title, up and down icon buttons, and a switch, then **Reset to default**; a
 dragged row marks its drop target with a hairline above it. **Working now**
 lists up to five rows of threads and agent runs in progress, each with the
-provider mark, the title, a time, and a one-line mono step; it says "Nothing is
-running right now." when empty. The host keeps no turn start time on the board
-or in navigation, so a thread's time says "Active 4m ago" and only an agent run
-says "Running 12m"; a fact the host does not report is left out rather than
-invented. **Pull requests** lists up to six rows on a Code start screen, in
-Waiting on your review and Yours. Each row is the title, a short repository
-and number, and the words for checks and review — never colour alone. It is
-absent when that read is not allowed. **CI failures** lists up to five failing
-checks from that same read, the check name, the repository or branch, and how
-long ago it failed. It is absent when nothing is failing, and absent when that
-read is not allowed. **Start a fix** opens a draft; it does not send. Under the
-Vivid style the tiles'
+provider mark, the title, a time, and a one-line step; it says "Nothing is
+running right now." when empty. A running tool is shown in mono
+(`Command: bun run test`); a turn waiting on the person is plain prose. A turn's
+time says "Running 12m" from the start time the host reports, and "Active 4m
+ago" only for a host that reports none; a fact the host does not report is left
+out rather than invented. **Pull requests** lists up to six rows on a Code
+start screen, in Waiting on your review and Yours. Each row is the title, a
+short repository and number, and the words for checks and review — never
+colour alone. It is absent when that read is not allowed. **CI failures**
+lists up to five failing checks from that same read, the check name, the
+repository or branch, and how long ago it failed. It is absent when nothing is
+failing, and absent when that read is not allowed. **Start a fix** opens a
+draft; it does not send. Under the Vivid style the tiles'
 icon squares take the blue, orange, and purple palette hues. Code's five prompt
 suggestions are one compact row of label-only chips under the cards, and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
@@ -1257,11 +1259,44 @@ provider's limits as a name, a reset countdown or weekday, a share, and a thin
 bar each, and a footer action to the fuller surface (the context inspector, or
 Usage for a provider the host does not plan). The breakdown lists only the
 parts the data attributes: planned threads show their manifest categories,
-overhead, reserve, and free space; a provider-reported window shows used and
-free, with the thread's input and output totals kept apart because they are
-sums over turns, not parts of the window. Categories are told apart by palette
-hues (the largest share in blue) and each swatch is named; limit bars fill in
-blue. A limit near its cap is marked on its row and in its bar's value text,
+overhead, reserve, and free space; a provider-run window shows the parts its
+runtime reported (system prompt, system and MCP tools, memory files, skills,
+agents, messages), or, for a runtime that reported none, the parts Octant can
+count itself (Octant tools), and in either case one `Other (provider)` remainder
+so the parts add up to what the window holds. With no parts it shows used and
+free. The thread's input and output totals stay apart because they are sums over
+turns, not parts of the window. A part Octant counted is marked `Estimated`,
+with its accuracy (the existing exact tokenizer, model-family estimate and
+conservative estimate labels) in the part's tooltip and in a line under the key;
+the remainder after an estimate is marked the same way. Counts (tools, MCP, memory
+files, skills, agents) use the harness breakdown's row style; tools the runtime
+knows but has not loaded read `N deferred` and take no share of the bar.
+
+Categorical colour (the maintainer's decision, 2026-10-06): the parts of a
+context window are categorical data, so they carry hue in every style, Default
+included, beside the context ring as the second colour exception in that
+style. Each category has one tone, taken from the palette roles in seven hues
+and a second, darker step of each (the same hue mixed toward the ink, which only
+raises contrast against the panel in either theme), and keeps it wherever it
+appears: the popover's bar and key, and the swatch on the context inspector's
+entries. Categories are listed in one fixed order (the contract's category order
+for a planned thread, a fixed part order for a provider-run window) and the
+tones are chosen against that order, so neighbours differ clearly. A category
+that is the same thing in both kinds of window (conversation and messages, MCP
+and MCP tools, Octant tools and system tools, provider framing and system
+prompt, what nothing accounts for) shares one tone. Neighbour contrast is
+measured, not judged by eye: every tone holds at least 5.2:1 against the popover
+in light and dark, and the worst neighbouring pair is 0.134 apart in OKLab.
+Adjacent lightness ratios stay under 2:1, because seven hues that each clear 5:1
+cannot also sit 3:1 from one another; the one-pixel gap and the name beside every
+swatch carry the rest. `visualLanguageContract.test.ts` computes both numbers
+from the stylesheet. Red is left to the ring's near-full warning. **Free space and Reserved stay
+neutral**: no hue, the panel's ink mixed into its ground, with Free space drawn
+as the bar's empty track. Every part is named beside its swatch and carries its
+tokens and share, so hue never stands alone. The exception is scoped to these
+segments in `visualLanguageContract.test.ts`: in `context.css` palette colour
+may appear only on the tone rules, the ring and the limit bars. Limit bars fill
+in blue. A limit near its cap is marked on its row and in its bar's value text,
 never by ink alone. Unknown or stale data is labeled as such and never rendered as zero.
 Where a provider runtime compacts the session by itself and has said where, one
 secondary line under the window bar reads `N until auto-compact` in the bar's

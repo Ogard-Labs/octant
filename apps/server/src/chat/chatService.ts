@@ -207,6 +207,7 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 import { SearxngEndpointRejected, validateSearxngEndpoint } from "./research/searxngEndpoint";
 import {
@@ -503,6 +504,8 @@ interface PreparedChatContent {
 }
 
 export interface ChatServiceOptions {
+  /** Where a running turn's start time and latest step are kept for the navigation read. */
+  readonly liveTurns?: LiveTurnRegistry;
   readonly attachmentStore?: ChatAttachmentStore;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly persistence: PersistenceService;
@@ -773,6 +776,7 @@ export class ChatService {
   readonly #beforeAttachmentPurge: ChatServiceOptions["beforeAttachmentPurge"];
   readonly #scratchStore: ChatScratchStore;
   readonly #turnRunner: ChatTurnRunner;
+  readonly #liveTurns?: LiveTurnRegistry;
   readonly #researchRouter: ResearchRouter;
   readonly #contextMaintenanceTimeoutMs?: number;
   readonly #contextMaintenanceShutdownTimeoutMs?: number;
@@ -828,6 +832,7 @@ export class ChatService {
       options.attachmentStore ?? new ChatAttachmentStore(options.dataDirectory);
     this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
+    if (options.liveTurns !== undefined) this.#liveTurns = options.liveTurns;
     this.#researchRouter = options.researchRouter;
     if (options.providerRuntimeRegistry !== undefined) {
       this.#providerRuntimeRegistry = options.providerRuntimeRegistry;
@@ -1104,7 +1109,13 @@ export class ChatService {
       threads: this.#persistence
         .readChatNavigation()
         .filter((thread) => !hidden.has(String(thread.id)))
-        .slice(0, MAX_CHAT_NAVIGATION_THREADS),
+        .slice(0, MAX_CHAT_NAVIGATION_THREADS)
+        .map((thread) => {
+          // Only a row projected as executing speaks for a live turn; a stale
+          // registry entry can never make an idle row look busy.
+          const live = thread.executing ? this.#liveTurns?.read(String(thread.id)) : undefined;
+          return live === undefined ? thread : { ...thread, ...live };
+        }),
     };
   }
 
@@ -4991,6 +5002,11 @@ export class ChatService {
               onTurnEnded: (ended) => {
                 endedTurn = ended;
               },
+              ...(this.#liveTurns === undefined
+                ? {}
+                : {
+                    liveTurn: this.#liveTurns.tracker(String(input.thread.id), "chat-navigation"),
+                  }),
               ...(this.#nativeHarness === undefined
                 ? {}
                 : {

@@ -633,6 +633,80 @@ describe("CodeTurnRunner", () => {
     expect(JSON.stringify(observed)).not.toContain(checkoutRoot);
   });
 
+  describe("what fills the window", () => {
+    const tools = {
+      definitions: [
+        { name: "octant_a", description: "First", inputSchema: { type: "object" } },
+        { name: "octant_b", inputSchema: { type: "object" } },
+      ],
+      execute: vi.fn(),
+    };
+    async function usageOf(
+      usageEvent: ProviderRuntimeEvent,
+      overrides: Partial<CodeTurnRunnerInput> = {},
+    ) {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.fromIterable([usageEvent, event({ kind: "completed" })])),
+      });
+      const observed: CodeTurnEvent[] = [];
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistEvent: (next) => Effect.sync(() => observed.push(next)),
+              ...overrides,
+            }),
+          ),
+        ),
+      );
+      return observed.find((entry) => entry.category === "usage");
+    }
+
+    it("counts the tool definitions Octant registered when the runtime reported no categories", async () => {
+      const usage = await usageOf(
+        event({ kind: "usage", inputTokens: 10, outputTokens: 20, contextTokens: 5_000 }),
+        { appManagedTools: tools },
+      );
+
+      expect(usage?.contextBreakdown).toEqual({
+        parts: [
+          {
+            kind: "octant-tools",
+            tokens: expect.any(Number),
+            accuracy: "conservative-heuristic",
+            count: 2,
+          },
+        ],
+      });
+      expect(usage?.contextBreakdown?.parts[0]?.tokens).toBeGreaterThanOrEqual(32);
+    });
+
+    it("keeps the runtime's own categories and adds no estimate of its own", async () => {
+      const reported = {
+        parts: [{ kind: "messages", tokens: 900, accuracy: "provider-reported" }],
+      } as const;
+      const usage = await usageOf(
+        event({
+          kind: "usage",
+          inputTokens: 10,
+          outputTokens: 20,
+          contextTokens: 5_000,
+          contextBreakdown: reported,
+        }),
+        { appManagedTools: tools },
+      );
+
+      expect(usage?.contextBreakdown).toEqual(reported);
+    });
+
+    it("reports no breakdown when the runtime gave none and Octant added nothing", async () => {
+      const usage = await usageOf(event({ kind: "usage", inputTokens: 10, outputTokens: 20 }));
+
+      expect(usage).not.toHaveProperty("contextBreakdown");
+    });
+  });
+
   it("journals a bounded managed-tool error code when execution fails", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(
@@ -1291,6 +1365,50 @@ describe("CodeTurnRunner", () => {
         cacheReadInputTokens: 800,
         reasoningTokens: 10,
       });
+
+    it("tells the live-turn tracker only what survived sanitization, and ends it with the turn", async () => {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.make(
+            event({
+              kind: "tool-start",
+              toolCallId: "call-1",
+              toolName: "Command",
+              argument: "deploy --key hunter2-live",
+            }),
+            event({ kind: "completed", occurredAt: at(8_000) }),
+          ),
+        ),
+      });
+      const seen: string[] = [];
+
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              clock: scriptedClock([0, 500, 8_000, 8_000]),
+              sanitizeProviderEvent: ({ event: providerEvent }) =>
+                Effect.succeed(
+                  JSON.parse(
+                    JSON.stringify(providerEvent).replaceAll("hunter2-live", "[REDACTED]"),
+                  ) as ProviderRuntimeEvent,
+                ),
+              liveTurn: {
+                begin: (startedAt) => seen.push(`begin ${startedAt}`),
+                observe: (observed) => seen.push(JSON.stringify(observed)),
+                end: () => seen.push("end"),
+              },
+            }),
+          ),
+        ),
+      );
+
+      expect(seen[0]).toBe(`begin ${at(0)}`);
+      expect(seen.at(-1)).toBe("end");
+      expect(seen.join("\n")).toContain("deploy --key [REDACTED]");
+      expect(seen.join("\n")).not.toContain("hunter2-live");
+    });
 
     it("hands a completed turn's full usage, real start and speed to the observer", async () => {
       const connection = fakeConnection({
