@@ -1383,7 +1383,18 @@ and request shape is retained across restart and participates in subsequent
 planning; it replaces emergency estimates while conflicting model facts retain
 the more conservative bound.
 Provider-managed Code turns also contribute their journaled token reports to the
-usage ledger. One operation contributes one request; a later report replaces its
+usage ledger. A runtime that compacts its own session may report where, as
+`autoCompactThreshold` on the usage report (tokens of the window the last request
+filled); the meter derives its automatic-compaction line from that and from the
+report's `contextTokens`, and shows nothing when either is absent. Claude Code is
+the only runtime that reports one: the host asks its runtime for the point once,
+when the session opens (Claude Code 2.1.287 answers `getContextUsage` with
+`autoCompactThreshold` and `isAutoCompactEnabled`, in tokens, for example 167000
+of a 200000 window), and the Claude mapper stamps it on every usage report of the
+session together with the input the latest request read as `contextTokens`. The
+runtime's separate `autocompact_state` message is only sent to remote workers, so
+the host does not depend on it. Codex CLI and every other runtime report no
+point and stay `unknown`. One operation contributes one request; a later report replaces its
 previous totals. Code conversation usage also preserves optional cache-read and cache-write
 counters. Codex native-thread totals are normalized to turn usage before recording;
 missing cache reports remain unknown. Direct-endpoint (native harness) usage is

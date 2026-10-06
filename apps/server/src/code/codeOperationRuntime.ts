@@ -2689,6 +2689,9 @@ function normalizedOperationEvent(
 
       ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
       ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
+      ...(event.autoCompactThreshold === undefined
+        ? {}
+        : { autoCompactThreshold: event.autoCompactThreshold }),
     };
   if (event.category === "provider-limit" && event.text !== undefined)
     return {

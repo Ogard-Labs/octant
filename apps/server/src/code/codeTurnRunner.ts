@@ -113,6 +113,7 @@ export interface CodeTurnEvent {
   readonly costUsd?: number;
   readonly contextWindow?: number;
   readonly contextTokens?: number;
+  readonly autoCompactThreshold?: number;
   readonly utilization?: number;
   readonly resetsAt?: string;
   readonly providerClaimIsMutationProof?: false;
@@ -735,6 +736,9 @@ function normalizeProviderEvent(
 
         ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
         ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
+        ...(event.autoCompactThreshold === undefined
+          ? {}
+          : { autoCompactThreshold: event.autoCompactThreshold }),
       });
     case "rate-limit-window":
       return Effect.succeed({

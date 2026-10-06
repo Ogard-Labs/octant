@@ -2,6 +2,7 @@ import type {
   ContextEntry,
   ContextEntryCategory,
   ContextHealth,
+  ModelContextLimits,
   ServiceLimitBucket,
   TokenMeasurement,
 } from "@octant/contracts/context";
@@ -348,4 +349,27 @@ function percentOf(value: number, total: number): number {
 
 function toneAt(index: number): ContextWindowSegment["tone"] {
   return ((index % 6) + 1) as ContextWindowSegment["tone"];
+}
+
+/**
+ * How much room is left before the runtime compacts the session by itself.
+ *
+ * Only a runtime that compacts automatically has such a point, and only one
+ * that reported where it is can say how far off it stands. A kind that is
+ * manual, absent, or unknown, a threshold nobody reported, or an occupancy the
+ * provider did not measure gives nothing, so the popover shows no line rather
+ * than a figure it had to guess. Room never goes negative: a session at or past
+ * the threshold has none left.
+ */
+export function autoCompactRoom(input: {
+  readonly compaction: ModelContextLimits["compaction"];
+  readonly thresholdTokens?: number | undefined;
+  readonly usedTokens?: number | undefined;
+}): { readonly tokens: number } | undefined {
+  if (input.compaction !== "automatic") return undefined;
+  const { thresholdTokens, usedTokens } = input;
+  if (thresholdTokens === undefined || usedTokens === undefined) return undefined;
+  if (!Number.isFinite(thresholdTokens) || thresholdTokens <= 0) return undefined;
+  if (!Number.isFinite(usedTokens) || usedTokens < 0) return undefined;
+  return { tokens: Math.max(0, thresholdTokens - usedTokens) };
 }

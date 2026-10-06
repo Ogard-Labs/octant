@@ -696,6 +696,31 @@ describe("Code operation contracts", () => {
     ).toMatchObject({ admission: "refused" });
   });
 
+  it("records where the runtime compacts by itself on a usage frame, only as a whole token count", () => {
+    const frame = {
+      threadId: ids.thread,
+      operationId: ids.operation,
+      cursor: 5,
+      occurredAt: "2026-07-21T12:00:00.000Z",
+      event: {
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 4,
+        contextTokens: 120_000,
+        autoCompactThreshold: 167_000,
+      },
+    } as const;
+    expect(decodeCodeOperationEventFrame(frame)).toEqual(frame);
+    for (const autoCompactThreshold of [0, 0.835]) {
+      expect(() =>
+        decodeCodeOperationEventFrame({
+          ...frame,
+          event: { ...frame.event, autoCompactThreshold },
+        }),
+      ).toThrow();
+    }
+  });
+
   it("uses monotonically increasing resource cursors and opaque evidence in events", () => {
     const frame = {
       threadId: ids.thread,
