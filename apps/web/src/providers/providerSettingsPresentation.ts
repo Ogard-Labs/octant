@@ -138,8 +138,8 @@ export function providerRefusalCopy(
   if (reason === "runtime-incompatible") {
     if (instance.driverKind === "opencode") {
       return {
-        reason: "OpenCode 2 is listing only, turns not yet supported.",
-        nextStep: "Review the listed models. Turns are not available on this runtime yet.",
+        reason: "The installed OpenCode runtime is incompatible.",
+        nextStep: "Review the installed OpenCode version, then check the connection again.",
       };
     }
     return {
