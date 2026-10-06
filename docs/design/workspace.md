@@ -169,7 +169,7 @@ reads), so a remote window sees them for exactly the threads it can already
 list.
 
 **Needs you** surfaces (a start-screen card, answering from Board cards, the
-command palette; none is built yet) read one host list of the approvals and
+command palette) read one host list of the approvals and
 questions this window can answer, across Chat, Work, and Code and across
 Projects, oldest waiting first. Each item names its mode, Project, thread and
 title, kind, text, options where the mode has them, and when it was asked, and
@@ -180,6 +180,17 @@ on a timer; an answered or ended request is gone from the next read. It is read
 at a local window only, so a remote window has no Needs you source. What it
 includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
+
+The command palette opens on a **Needs you** group when this window can read
+that list. It has one row per waiting thread, titled with the thread and
+detailed with its mode, what it waits on, and how long, and Enter opens the
+thread. Each approval also gets **Approve** and **Deny** commands, so typing
+"approve" finds them; they answer through the mode's own command
+(`resolve-work-request`, `answer-provider-approval`) without opening the thread,
+and a refusal shows as a notice. A question's choices are not listed, so its row
+opens the thread. The palette reads the list each time it opens and never on a
+timer. With nothing waiting, or at a remote window, the group is absent, and the
+composer `/` list never carries it.
 
 ## Tool lifecycles
 
