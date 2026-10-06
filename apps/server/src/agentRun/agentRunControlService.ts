@@ -51,6 +51,7 @@ export interface AgentRunControlParentFacts {
 
 export interface AgentRunControlWorkspacePort {
   readonly prepare: (input: {
+    readonly requestId: string;
     readonly windowId: string;
     readonly parent: AgentRunWorkspaceParentFacts;
     readonly code?: AgentRunCodeWorkspaceContext;
@@ -59,6 +60,7 @@ export interface AgentRunControlWorkspacePort {
     | { readonly status: "refused"; readonly reason: AgentRunWorkspaceRefusalReason }
   >;
   readonly confirm: (input: {
+    readonly requestId: string;
     readonly windowId: string;
     readonly parent: AgentRunWorkspaceParentFacts;
     readonly worktreeReceiptId: string;
@@ -67,6 +69,7 @@ export interface AgentRunControlWorkspacePort {
     | { readonly status: "refused"; readonly reason: AgentRunWorkspaceRefusalReason }
   >;
   readonly admit: (input: {
+    readonly requestId: string;
     readonly windowId: string;
     readonly requested: AgentRunCreationWorkspace;
     readonly role: AgentRunRole;
@@ -175,6 +178,7 @@ export function resolveAgentRunControlFacts(input: {
 }
 
 export async function prepareAdmittedControlWorkspace(input: {
+  readonly requestId: string;
   readonly windowId: string;
   readonly parent: AgentRunControlParentFacts;
   readonly role: AgentRunRole;
@@ -184,6 +188,7 @@ export async function prepareAdmittedControlWorkspace(input: {
   | { readonly status: "refused"; readonly reason: AgentRunWorkspaceRefusalReason }
 > {
   const prepared = await input.workspace.prepare({
+    requestId: input.requestId,
     windowId: input.windowId,
     parent: input.parent.workspaceParent,
     ...(input.parent.codeWorkspace === undefined ? {} : { code: input.parent.codeWorkspace }),
@@ -192,6 +197,7 @@ export async function prepareAdmittedControlWorkspace(input: {
   let handle = prepared.workspace;
   if (handle.kind === "code-worktree" && handle.confirmation !== "confirmed") {
     const confirmed = await input.workspace.confirm({
+      requestId: input.requestId,
       windowId: input.windowId,
       parent: input.parent.workspaceParent,
       worktreeReceiptId: String(handle.worktreeReceiptId),
@@ -200,6 +206,7 @@ export async function prepareAdmittedControlWorkspace(input: {
     handle = confirmed.workspace;
   }
   return input.workspace.admit({
+    requestId: input.requestId,
     windowId: input.windowId,
     requested: handleToRequestedWorkspace(handle),
     role: input.role,

@@ -92,6 +92,11 @@ interface SessionState {
   readonly correlationId: CorrelationId;
   readonly endpoint: NativeHarnessTransportSession;
   readonly messages: NativeHarnessMessage[];
+  readonly steering: Array<{
+    readonly text: string;
+    readonly resolve: (outcome: "steered" | "unsupported") => void;
+  }>;
+  acceptingSteering: boolean;
   system: string | undefined;
   tools: ReadonlyArray<ProviderToolDefinition>;
   pending: PendingStep | undefined;
@@ -149,6 +154,8 @@ export function createNativeHarnessConnection(
     const release = (state: SessionState) => {
       if (state.stopped) return;
       state.stopped = true;
+      state.acceptingSteering = false;
+      for (const note of state.steering.splice(0)) note.resolve("unsupported");
       state.messages.length = 0;
       state.pending = undefined;
       state.abortController = undefined;
@@ -199,6 +206,8 @@ export function createNativeHarnessConnection(
       correlationId: options.correlationId() as CorrelationId,
       endpoint: input.endpoint,
       messages: input.messages,
+      steering: [],
+      acceptingSteering: false,
       system: undefined,
       tools: input.tools ?? [],
       pending: undefined,
@@ -211,6 +220,44 @@ export function createNativeHarnessConnection(
       inputTokens: 0,
       outputTokens: 0,
     });
+
+    // A note is acknowledged only after it is durable and its next request
+    // fits. Inserting it between a tool call and its results would break the
+    // provider's conversation, so it waits for that step's complete boundary.
+    const takeSteeringRequest = (state: SessionState): NativeHarnessRequest | undefined => {
+      const notes = state.steering.splice(0);
+      if (notes.length === 0) return undefined;
+      const messages: NativeHarnessMessage[] = notes.map((note) => ({
+        role: "user",
+        text: note.text,
+      }));
+      const request = requestFor(state, [...state.messages, ...messages]);
+      if (request === undefined) {
+        for (const note of notes) note.resolve("unsupported");
+        return undefined;
+      }
+      // Fitting can omit earlier queued notes. Object identity also keeps
+      // distinct notes with identical text from acknowledging one another.
+      const retained = notes.flatMap((note, index) => {
+        const message = messages[index];
+        if (message === undefined || !request.history.includes(message)) {
+          note.resolve("unsupported");
+          return [];
+        }
+        return [{ note, message }];
+      });
+      try {
+        for (const { message } of retained) {
+          options.transcripts.append(state.transcriptId, message);
+          state.messages.push(message);
+        }
+      } catch (error) {
+        for (const { note } of retained) note.resolve("unsupported");
+        throw error;
+      }
+      for (const { note } of retained) note.resolve("steered");
+      return request;
+    };
 
     /** Runs one request and settles what it returned; never rejects. */
     const runStep = (state: SessionState, request: NativeHarnessRequest): Promise<void> => {
@@ -225,6 +272,8 @@ export function createNativeHarnessConnection(
         .then((response) => settleResponse(state, response))
         .catch((error: unknown) => {
           state.pending = undefined;
+          state.acceptingSteering = false;
+          for (const note of state.steering.splice(0)) note.resolve("unsupported");
           const failed = controller.signal.aborted
             ? failure("interrupted", "The provider request was cancelled.")
             : sanitizeFailure(error);
@@ -238,7 +287,7 @@ export function createNativeHarnessConnection(
         .finally(() => {
           // A step waiting on tool answers keeps the turn in flight so
           // interrupt and stop still reach it during the tool phase.
-          if (state.pending !== undefined) return;
+          if (state.pending !== undefined || state.inFlight !== step) return;
           state.inFlight = undefined;
           state.abortController = undefined;
         });
@@ -281,6 +330,11 @@ export function createNativeHarnessConnection(
       const message: NativeHarnessMessage = { role: "assistant", text: response.text };
       options.transcripts.append(state.transcriptId, message);
       state.messages.push(message);
+      const steered = takeSteeringRequest(state);
+      if (steered !== undefined) {
+        void runStep(state, steered);
+        return;
+      }
       // A turn that took several requests reports its whole cost once more
       // before it ends; consumers keep the latest usage they saw.
       if (state.steps > 1 && (state.inputTokens > 0 || state.outputTokens > 0)) {
@@ -290,6 +344,7 @@ export function createNativeHarnessConnection(
           outputTokens: state.outputTokens,
         });
       }
+      state.acceptingSteering = false;
       emit(state, { kind: "completed", resumeCursor: cursorFor(state) });
     };
 
@@ -421,9 +476,27 @@ export function createNativeHarnessConnection(
             state.steps = 0;
             state.inputTokens = 0;
             state.outputTokens = 0;
+            state.acceptingSteering = true;
             void runStep(state, request);
           },
           catch: sanitizeFailure,
+        }),
+      steer: ({ sessionId, message }) =>
+        Effect.promise(async () => {
+          const state = sessions.get(String(sessionId));
+          if (
+            state === undefined ||
+            state.stopped ||
+            !state.acceptingSteering ||
+            state.abortController?.signal.aborted ||
+            state.steering.length >= 16 ||
+            message.trim().length === 0 ||
+            message.length > 4096
+          )
+            return "unsupported" as const;
+          return await new Promise<"steered" | "unsupported">((resolve) =>
+            state.steering.push({ text: message, resolve }),
+          );
         }),
       interrupt: (sessionId) =>
         Effect.tryPromise({
@@ -509,7 +582,7 @@ export function createNativeHarnessConnection(
             };
             state.messages.push(results);
             state.pending = undefined;
-            const request = requestFor(state, [...state.messages]);
+            const request = takeSteeringRequest(state) ?? requestFor(state, [...state.messages]);
             if (request === undefined) {
               emit(state, {
                 kind: "failed",
@@ -520,6 +593,7 @@ export function createNativeHarnessConnection(
               });
               state.inFlight = undefined;
               state.abortController = undefined;
+              state.acceptingSteering = false;
               return undefined;
             }
             void runStep(state, request);

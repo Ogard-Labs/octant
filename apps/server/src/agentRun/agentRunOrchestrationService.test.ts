@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AGENT_RUN_DEPENDENCY_WAITING_REASON } from "@octant/domain";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import {
   AgentRunRequested,
   AgentRunResultAcknowledged,
@@ -46,6 +46,9 @@ import {
 import { AgentRunProcessSupervisor } from "./agentRunProcessSupervisor";
 import { AgentRunDependencyScheduler } from "./agentRunDependencyScheduler";
 import { AgentRunSessionError, type AgentRunSessionOutcome } from "./agentRunSessionPort";
+import { AgentRunSessionSupervisor } from "./agentRunSessionSupervisor";
+import { createAgentRunSessionRuntime } from "./agentRunSessionRuntime";
+import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 
 const directories: string[] = [];
 const now = "2026-08-01T14:00:00.000Z";
@@ -1284,6 +1287,12 @@ describe("AgentRun dependency graphs", () => {
     await settle();
 
     const orchestration = restart();
+    const waiting = persistence.getById(dependent.id);
+    if (waiting === undefined) throw new Error("The dependent is gone.");
+    expect(orchestration.resume(dependent.id, waiting.version + 1, authority)).toMatchObject({
+      kind: "run-command-failed",
+      reason: "stale-version",
+    });
     const interrupted = persistence.getById(first);
     if (interrupted === undefined) throw new Error("The dependency is gone.");
     orchestration.retry(first, interrupted.version, authority);
@@ -1375,4 +1384,254 @@ describe("AgentRun run slots", () => {
     limits = { perThread: 4, onHost: 8 };
     expect(second().status).toBe("reserved");
   });
+});
+
+describe("managed child continuation", () => {
+  it.each(["dependency", "capacity"] as const)(
+    "leaves a never-started %s wait unchanged after Resume and still releases it normally",
+    async (kind) => {
+      let slots = kind === "capacity" ? 1 : 4;
+      const capacity = createInMemoryCapacityPort(() => ({ perThread: slots, onHost: slots }));
+      const reserve = vi.spyOn(capacity, "tryReserve");
+      const release = vi.spyOn(capacity, "release");
+      const scratchRoot = vi.fn(() => "/scratch");
+      const acquire = vi.fn(() => Effect.never);
+      const runtime = createAgentRunSessionRuntime({
+        capacityScheduler: makeProviderCapacityScheduler({
+          now: () => 0,
+          random: () => 0,
+          maxRetryJitterMs: 0,
+          ambiguousReservationTtlMs: 1000,
+        }),
+        resolveDriver: () => ({ kind: "codex", probe: () => Effect.never, acquire }),
+        supportsResume: () => true,
+        sessionStore: { read: () => undefined, write: () => true },
+        context: { resolve: () => [] },
+        scratchRoot,
+        uuid: () => ids.run,
+      });
+      const start = vi.fn((run: Parameters<typeof runtime.start>[0]) => ({
+        runId: run.id,
+        onSettled: () => undefined,
+      }));
+      const supervisor = new AgentRunSessionSupervisor({ port: { ...runtime, start } });
+      const harness = createHarness(capacity, true, supervisor);
+      const scheduler = new AgentRunDependencyScheduler({
+        agentRuns: harness.persistence,
+        orchestration: harness.orchestration,
+      });
+      harness.journal.subscribeCommitted((append) => scheduler.onCommittedAppend(append));
+      const first = harness.orchestration.admit({
+        command: {
+          ...requestCommand(),
+          requestedAuthority: { ...authority, network: false, subagents: false },
+        },
+        parentAuthority: authority,
+        liveAuthority: authority,
+        confirmed: true,
+      });
+      if (first.kind !== "run-accepted") throw new Error("Expected admitted first child");
+      harness.orchestration.start(first.run.id, first.run.version, authority);
+      const waiting = harness.orchestration.admit({
+        command: {
+          ...requestCommand(ids.requestChild),
+          requestedAuthority: { ...authority, network: false, subagents: false },
+          ...(kind === "dependency" ? { dependsOn: [first.run.id] } : {}),
+        },
+        parentAuthority: authority,
+        liveAuthority: authority,
+        confirmed: true,
+      });
+      if (waiting.kind !== "run-updated") throw new Error("Expected waiting child");
+      expect(waiting.run.recoveryReason).toBe(
+        kind === "dependency" ? AGENT_RUN_DEPENDENCY_WAITING_REASON : "provider-capacity-saturated",
+      );
+      // A slot can open without either scheduler dispatching yet. Resume must still
+      // leave this never-started child to its original scheduler.
+      slots = 4;
+      const events = () =>
+        harness.connection.prepare("SELECT * FROM event_journal ORDER BY global_sequence").all();
+      const beforeEvents = events();
+      const beforeReserve = reserve.mock.calls.length;
+      const beforeRelease = release.mock.calls.length;
+      const result = harness.orchestration.resume(waiting.run.id, waiting.run.version, authority);
+      expect(harness.persistence.getById(waiting.run.id)).toEqual(waiting.run);
+      expect(events()).toEqual(beforeEvents);
+      expect(reserve).toHaveBeenCalledTimes(beforeReserve);
+      expect(release).toHaveBeenCalledTimes(beforeRelease);
+      expect(scratchRoot).not.toHaveBeenCalled();
+      expect(acquire).not.toHaveBeenCalled();
+      expect(result).toEqual(
+        kind === "dependency"
+          ? { kind: "run-updated", run: waiting.run }
+          : {
+              kind: "run-command-failed",
+              reason: "unsupported-transition",
+              message:
+                "This child has no saved session to resume; its existing wait remains unchanged.",
+            },
+      );
+      harness.orchestration.onSessionSettled({
+        runId: first.run.id,
+        outcome: { kind: "completed", responseText: "Dependency finished" },
+      });
+      await vi.waitFor(() =>
+        expect(harness.persistence.getById(waiting.run.id)?.lifecycleStatus).toBe("starting"),
+      );
+      expect(harness.persistence.getById(waiting.run.id)).not.toHaveProperty("recoveryReason");
+      expect(start.mock.calls.map(([run]) => run.id)).toEqual([first.run.id, waiting.run.id]);
+    },
+  );
+
+  it("resumes a waiting child through its saved session and reserves a new live slot", () => {
+    const start = vi.fn();
+    const resume = vi.fn();
+    const capacity = createInMemoryCapacityPort();
+    const reserve = vi.spyOn(capacity, "tryReserve");
+    const harness = createHarness(capacity, true, { start, resume, stop: async () => undefined });
+    const admitted = harness.orchestration.admit({
+      command: requestCommand(),
+      parentAuthority: authority,
+      liveAuthority: authority,
+      confirmed: true,
+    });
+    if (admitted.kind !== "run-accepted") throw new Error("Fixture was not admitted");
+    harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
+    const waited = harness.orchestration.onSessionSettled({
+      runId: admitted.run.id,
+      outcome: { kind: "waiting", reason: "Needs a follow-up" },
+    });
+    if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
+    const continued = harness.orchestration.resume(waited.run.id, waited.run.version, authority);
+    expect(continued).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "starting" } });
+    expect(start).toHaveBeenCalledOnce();
+    expect(resume).toHaveBeenCalledOnce();
+    expect(reserve).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves an honest resume refusal and never retries the original task automatically", () => {
+    const start = vi.fn();
+    const resume = vi.fn(() => {
+      throw new AgentRunSessionError(
+        "resume-unavailable",
+        "The saved session is unavailable. Use Retry.",
+      );
+    });
+    const capacity = createInMemoryCapacityPort();
+    const release = vi.spyOn(capacity, "release");
+    const harness = createHarness(capacity, true, { start, resume, stop: async () => undefined });
+    const admitted = harness.orchestration.admit({
+      command: requestCommand(),
+      parentAuthority: authority,
+      liveAuthority: authority,
+      confirmed: true,
+    });
+    if (admitted.kind !== "run-accepted") throw new Error("Fixture was not admitted");
+    harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
+    const waited = harness.orchestration.onSessionSettled({
+      runId: admitted.run.id,
+      outcome: { kind: "waiting", reason: "Provider wait" },
+    });
+    if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
+    const continued = harness.orchestration.resume(waited.run.id, waited.run.version, authority);
+    expect(continued).toMatchObject({
+      kind: "run-updated",
+      run: { lifecycleStatus: "waiting", recoveryReason: expect.stringContaining("Retry") },
+    });
+    expect(start).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves a waiting child unchanged when its execution backend cannot resume", () => {
+    const start = vi.fn();
+    const harness = createHarness(createInMemoryCapacityPort(), true, {
+      start,
+      stop: async () => undefined,
+    });
+    const admitted = harness.orchestration.admit({
+      command: requestCommand(),
+      parentAuthority: authority,
+      liveAuthority: authority,
+      confirmed: true,
+    });
+    if (admitted.kind !== "run-accepted") throw new Error("Fixture was not admitted");
+    harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
+    const waited = harness.orchestration.onSessionSettled({
+      runId: admitted.run.id,
+      outcome: { kind: "waiting", reason: "Provider wait" },
+    });
+    if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
+    expect(
+      harness.orchestration.resume(waited.run.id, waited.run.version, authority),
+    ).toMatchObject({ kind: "run-command-failed", message: expect.stringContaining("Retry") });
+    expect(harness.persistence.getById(waited.run.id)?.version).toBe(waited.run.version);
+    expect(start).toHaveBeenCalledOnce();
+  });
+});
+
+it("starts another capacity waiter without restarting a continuation whose resume cannot be persisted", () => {
+  const start = vi.fn();
+  const resume = vi.fn();
+  const capacity = createInMemoryCapacityPort(() => ({ perThread: 1, onHost: 1 }));
+  const release = vi.spyOn(capacity, "release");
+  const harness = createHarness(capacity, true, { start, resume, stop: async () => undefined });
+  const admitted = harness.orchestration.admit({
+    command: requestCommand(),
+    parentAuthority: authority,
+    liveAuthority: authority,
+    confirmed: true,
+  });
+  if (admitted.kind !== "run-accepted") throw new Error("Fixture was not admitted");
+  harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
+  const waited = harness.orchestration.onSessionSettled({
+    runId: admitted.run.id,
+    outcome: { kind: "waiting", reason: "Provider wait" },
+  });
+  if (waited?.kind !== "run-updated") throw new Error("Fixture did not wait");
+  // A saved continuation can itself be capacity-eligible. It must not be
+  // mistaken for a fresh start when its resume transaction fails.
+  const resuming = harness.persistence.applyCommand({
+    kind: "resume-agent-run",
+    runId: waited.run.id,
+    expectedVersion: waited.run.version,
+  });
+  if (resuming.kind !== "run-updated") throw new Error("Fixture did not resume");
+  const continuation = harness.persistence.applyCommand({
+    kind: "wait-agent-run",
+    runId: resuming.run.id,
+    expectedVersion: resuming.run.version,
+    recoveryReason: "provider-capacity-saturated",
+  });
+  if (continuation.kind !== "run-updated") throw new Error("Fixture did not park");
+  const blocker = capacity.tryReserve({
+    runId: decodeAgentRunId(randomUUID()),
+    parentThreadId: otherThread,
+    providerInstanceId: ids.provider,
+  });
+  if (blocker.status !== "reserved") throw new Error("Fixture did not reserve the slot");
+  const next = harness.orchestration.admit({
+    command: requestCommand(ids.requestChild),
+    parentAuthority: authority,
+    liveAuthority: authority,
+    confirmed: true,
+  });
+  if (next.kind !== "run-updated") throw new Error("Fixture did not queue the next child");
+  expect(next.run).toMatchObject({
+    lifecycleStatus: "waiting",
+    recoveryReason: "provider-capacity-saturated",
+  });
+  capacity.release(blocker.reservationId);
+  // The journal fails once after Resume reserved the freed slot; subsequent
+  // writes can admit the independent waiter normally.
+  vi.spyOn(harness.journal, "append").mockImplementationOnce(() => {
+    throw new Error("Journal unavailable");
+  });
+  expect(() =>
+    harness.orchestration.resume(continuation.run.id, continuation.run.version, authority),
+  ).toThrow("Journal unavailable");
+  expect(resume).not.toHaveBeenCalled();
+  expect(release).toHaveBeenCalledTimes(3);
+  expect(harness.persistence.getById(continuation.run.id)).toEqual(continuation.run);
+  expect(harness.persistence.getById(next.run.id)?.lifecycleStatus).toBe("starting");
+  expect(start.mock.calls.map(([run]) => run.id)).toEqual([admitted.run.id, next.run.id]);
 });

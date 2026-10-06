@@ -15,7 +15,8 @@ export type AgentRunSessionFailureReason =
   | "spend-ceiling-exhausted"
   | "workspace-unavailable"
   | "authority-drift"
-  | "tools-unsupported";
+  | "tools-unsupported"
+  | "resume-unavailable";
 
 export class AgentRunSessionError extends Error {
   override readonly name = "AgentRunSessionError";
@@ -66,6 +67,10 @@ export interface AgentRunSessionHandle {
   readonly startupReady?: Promise<void>;
 }
 
+export type AgentRunResumeReadiness =
+  | { readonly status: "ready" }
+  | { readonly status: "refused"; readonly message: string };
+
 /**
  * Provider-agnostic seam between AgentRun supervision and whatever actually
  * executes a managed child. Keeping the supervisor behind this interface is
@@ -73,18 +78,26 @@ export interface AgentRunSessionHandle {
  * design forbids core child semantics from depending on any one provider.
  */
 export interface AgentRunSessionPort {
+  /** Checks persisted identity/cursor and current capability without starting or reserving execution. */
+  readonly checkResume?: (run: AgentRun) => AgentRunResumeReadiness;
   /**
    * Starts one managed session. Implementations resolve every start-time
    * dependency before returning and throw {@link AgentRunSessionError} when one
    * is missing, so an unstartable child fails closed instead of appearing live.
    */
   readonly start: (run: AgentRun) => AgentRunSessionHandle;
+  /** Continues a recorded conversation; refusal must never fall back to start. */
+  readonly resume?: (run: AgentRun, input?: { readonly message?: string }) => AgentRunSessionHandle;
   /**
    * Stops a managed session and resolves only once its execution is confirmed
    * stopped. Cancellation is durable only after that confirmation, so a port
    * must not resolve optimistically. Stopping an unknown run is a no-op.
    */
   readonly stop: (runId: AgentRunId) => Promise<void>;
+  readonly steer?: (input: {
+    readonly runId: AgentRunId;
+    readonly message: string;
+  }) => Promise<"steered" | "unsupported">;
   /** Optional provider-side cleanup performed once at host startup. */
   readonly reconcile?: () => Promise<void>;
 }

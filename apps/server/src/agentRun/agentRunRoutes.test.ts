@@ -47,6 +47,7 @@ import {
 import { AgentRunPersistenceService } from "./agentRunPersistenceService";
 import { AgentRunProjection } from "./agentRunProjection";
 import { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
+import { AgentRunSessionError } from "./agentRunSessionPort";
 import { createAgentRunRouteHandler, type AgentRunRouteDependencies } from "./agentRunRoutes";
 import {
   admitAgentRunControlRequest,
@@ -152,6 +153,8 @@ const routing: AgentRunRoutingReceipt = {
 
 function createHandler(
   options: {
+    readonly onExecutionAccepted?: AgentRunControlAdmissionDependencies["onExecutionAccepted"];
+    readonly resume?: (run: AgentRun) => unknown;
     readonly authorizeCancellation?: (input: { readonly run: AgentRun }) => boolean;
     readonly authorizeCreation?: () => boolean;
     readonly authorizeParentThread?: (input: {
@@ -174,6 +177,7 @@ function createHandler(
     readonly parentMode?: "chat" | "work" | "code";
     readonly workspace?: AgentRunControlAdmissionDependencies["workspace"];
     readonly snapshotCanvas?: AgentRunRouteDependencies["snapshotCanvas"];
+    readonly resolveCenterContext?: AgentRunRouteDependencies["resolveCenterContext"];
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-routes-"));
@@ -220,7 +224,11 @@ function createHandler(
     capacity: options.capacity ?? createInMemoryCapacityPort(),
     worktree: { isVerifiedIsolation: () => false, isParentCheckout: () => true },
     approvals: { isCurrent: () => true },
-    processes: { start: () => undefined, stop: async () => undefined },
+    processes: {
+      start: () => undefined,
+      stop: async () => undefined,
+      ...(options.resume === undefined ? {} : { resume: options.resume }),
+    },
   });
   const liveConversations = new AgentRunLiveConversationStore();
   let readyProviderId = ids.provider;
@@ -311,6 +319,9 @@ function createHandler(
       };
     })(),
     authorizeCreation,
+    ...(options.onExecutionAccepted === undefined
+      ? {}
+      : { onExecutionAccepted: options.onExecutionAccepted }),
     nativeEvidence: () => ({
       claimedNativeSupport: "unsupported",
       workspace: false,
@@ -332,11 +343,16 @@ function createHandler(
     liveConversations,
     orchestration,
     authorizeCreation,
+    ...(options.onExecutionAccepted === undefined
+      ? {}
+      : { onExecutionAccepted: options.onExecutionAccepted }),
     authorizeCancellation: ({ run }) => options.authorizeCancellation?.({ run }) ?? true,
     authorizeParentThread: (input) => options.authorizeParentThread?.(input) ?? true,
-    resolveCenterContext: ({ parentThreadId }) => ({
-      parentThreadTitle: `Thread ${String(parentThreadId).slice(0, 8)}`,
-    }),
+    resolveCenterContext:
+      options.resolveCenterContext ??
+      (({ parentThreadId }) => ({
+        parentThreadTitle: `Thread ${String(parentThreadId).slice(0, 8)}`,
+      })),
     ...(options.snapshotCanvas === undefined ? {} : { snapshotCanvas: options.snapshotCanvas }),
     now: () => 0,
   });
@@ -393,6 +409,7 @@ function createHandler(
     );
   return {
     handler,
+    windowAuthorityStore,
     persistence,
     liveConversations,
     orchestration,
@@ -404,6 +421,7 @@ function createHandler(
     create,
     delegate,
     settings,
+    admission,
   };
 }
 
@@ -858,7 +876,8 @@ describe("agentRunRoutes", () => {
   });
 
   it("returns authorized center rows with enriched parent titles", async () => {
-    const { handler, persistence, token } = createHandler();
+    const resolveCenterContext = vi.fn(() => ({ parentThreadTitle: "Thread context" }));
+    const { handler, persistence, token } = createHandler({ resolveCenterContext });
     persistence.requestRun({
       command: {
         kind: "request-agent-run",
@@ -887,6 +906,12 @@ describe("agentRunRoutes", () => {
     expect(body.items[0]?.task).toBe("Summarize");
     expect(body.items[0]?.parentThreadTitle).toContain("Thread");
     expect(body.items[0]?.mode).toBe("chat");
+    expect(resolveCenterContext).toHaveBeenCalledWith({
+      parentThreadId: ids.thread,
+      mode: "chat",
+      requestId: ids.request,
+      workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+    });
   });
 
   it("omits center rows the window is not authorized to read", async () => {
@@ -1307,6 +1332,94 @@ describe("agentRunRoutes", () => {
       kind: "run-accepted",
       run: { id: ids.run, lifecycleStatus: "starting" },
     });
+  });
+
+  it("binds only a newly admitted child and never rebinds an idempotent or refused delegation", async () => {
+    const onExecutionAccepted = vi.fn();
+    const { create, admission, setReadyProvider } = createHandler({ onExecutionAccepted });
+    const run = await startedRun(create);
+    expect(onExecutionAccepted).toHaveBeenCalledExactlyOnceWith({
+      run: expect.objectContaining({ requestId: run.requestId }),
+      windowId: String(windowId),
+      operation: "admission",
+    });
+    const otherWindow = "00000000-0000-4000-8000-00000000a002";
+    await admitAgentRunControlRequest(admission, {
+      controlRequest: decodeAgentRunControlRequest(creationBody()),
+      windowId: otherWindow,
+      confirmed: false,
+    });
+    expect(onExecutionAccepted).toHaveBeenCalledOnce();
+    setReadyProvider("99999999-9999-4999-8999-999999999999");
+    await create({ ...creationBody(), requestId: "00000000-0000-4000-8000-00000000a003" });
+    expect(onExecutionAccepted).toHaveBeenCalledOnce();
+  });
+
+  it.each(["resume", "retry"] as const)(
+    "rebinds only an accepted %s and leaves stale controls unable to steal the window",
+    async (action) => {
+      const onExecutionAccepted = vi.fn();
+      const { handler, windowAuthorityStore, persistence, create } = createHandler({
+        onExecutionAccepted,
+        resume: () => undefined,
+      });
+      const run = await startedRun(create);
+      const otherWindow = decodeWindowId("00000000-0000-4000-8000-00000000a002");
+      const token = capability();
+      windowAuthorityStore.register({ windowId: otherWindow, capability: token, now: 0 });
+      persistence.applyCommand({
+        kind: action === "retry" ? "fail-agent-run" : "wait-agent-run",
+        runId: run.id,
+        expectedVersion: run.version,
+        recoveryReason: "provider-unavailable",
+      });
+      const current = persistence.getById(run.id);
+      const control = (version: number | undefined) =>
+        handler(
+          new Request(`http://127.0.0.1/api/agent-runs/${action}`, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-octant-window-capability": token },
+            body: JSON.stringify({ runId: run.id, expectedVersion: version }),
+          }),
+        );
+      onExecutionAccepted.mockClear();
+      expect((await control(run.version))?.status).toBe(409);
+      expect(onExecutionAccepted).not.toHaveBeenCalled();
+      expect((await control(current?.version))?.status).toBe(200);
+      expect(onExecutionAccepted).toHaveBeenCalledExactlyOnceWith({
+        run: expect.objectContaining({ id: run.id, lifecycleStatus: "starting" }),
+        windowId: String(otherWindow),
+        operation: action,
+      });
+    },
+  );
+
+  it("does not rebind a resume that cannot open the saved provider session", async () => {
+    const onExecutionAccepted = vi.fn();
+    const { handler, token, persistence, create } = createHandler({
+      onExecutionAccepted,
+      resume: () => {
+        throw new AgentRunSessionError("resume-unavailable", "Saved cursor unavailable");
+      },
+    });
+    const run = await startedRun(create);
+    const waiting = persistence.applyCommand({
+      kind: "wait-agent-run",
+      runId: run.id,
+      expectedVersion: run.version,
+      recoveryReason: "provider-unavailable",
+    });
+    if (waiting.kind !== "run-updated") throw new Error("Expected waiting child");
+    onExecutionAccepted.mockClear();
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/resume", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({ runId: run.id, expectedVersion: waiting.run.version }),
+      }),
+    );
+    expect(await response?.json()).toMatchObject({ run: { lifecycleStatus: "waiting" } });
+    expect(onExecutionAccepted).not.toHaveBeenCalled();
   });
 
   it("rejects a request ID reused for a different parent or authority", async () => {

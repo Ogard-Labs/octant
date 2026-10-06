@@ -15,6 +15,7 @@ afterEach(() => {
 });
 
 const ids = {
+  request: "22222222-2222-4222-8222-222222222222",
   thread: "33333333-3333-4333-8333-333333333333",
   window: "11111111-1111-4111-8111-111111111111",
   otherWindow: "12121212-1212-4121-8121-121212121212",
@@ -60,6 +61,7 @@ describe("AgentRunWorkspaceService", () => {
   it("prepares a Chat virtual workspace and admits research children", async () => {
     const service = createService();
     const prepared = await service.prepare({
+      requestId: ids.request,
       windowId: ids.window,
       parent: { threadId: ids.thread, mode: "chat" },
     });
@@ -87,6 +89,7 @@ describe("AgentRunWorkspaceService", () => {
       workspace: { kind: "chat-virtual", mode: "chat", receiptId: ids.receipt },
     });
     const admitted = await service.admit({
+      requestId: ids.request,
       windowId: ids.window,
       requested: request.workspace,
       role: "research",
@@ -101,6 +104,7 @@ describe("AgentRunWorkspaceService", () => {
   it("prepares a Work binding receipt without a path and refuses a foreign window", async () => {
     const service = createService();
     const prepared = await service.prepare({
+      requestId: ids.request,
       windowId: ids.window,
       parent: {
         threadId: ids.thread,
@@ -135,6 +139,7 @@ describe("AgentRunWorkspaceService", () => {
     });
     expect(
       await service.admit({
+        requestId: ids.request,
         windowId: ids.otherWindow,
         requested: request.workspace,
         role: "research",
@@ -158,6 +163,7 @@ describe("AgentRunWorkspaceService", () => {
       checkoutRoot: "/repo",
     };
     const prepared = await service.prepare({
+      requestId: ids.request,
       windowId: ids.window,
       parent,
       code: {
@@ -174,12 +180,14 @@ describe("AgentRunWorkspaceService", () => {
     });
     expect(prepared.status).toBe("prepared");
     const confirmed = await service.confirm({
+      requestId: ids.request,
       windowId: ids.window,
       parent,
       worktreeReceiptId: ids.receipt,
     });
     expect(confirmed.status).toBe("confirmed");
     const parentCheckout = await service.confirm({
+      requestId: ids.request,
       windowId: ids.window,
       parent: { ...parent, checkoutRoot: "/workspace/.octant-worktrees/child" },
       worktreeReceiptId: ids.receipt,
