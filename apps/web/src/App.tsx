@@ -1472,6 +1472,10 @@ function LaunchedShell(
   // list each time it opens, and only where the host lists it at all.
   const pendingRequests = usePendingRequests(pendingRequestClient);
   const openCommandThread = (thread: CommandThread): void => {
+    // Picking a waiting thread means "show me this thread", the same as a
+    // sidebar row: a Board or Inbox that was open would otherwise keep the
+    // pane and hide the thread the person just chose.
+    closeWorkspaceReaders();
     // The entry keeps its thread's own Project so a cross-Project open
     // dispatches the Project switch, exactly like the sidebar's open
     // handlers, instead of a plain open-tab the server-authoritative

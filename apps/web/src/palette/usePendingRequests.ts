@@ -8,9 +8,11 @@ const NO_REQUESTS: ReadonlyArray<PendingRequest> = [];
  * The approvals and questions this window can answer, read on demand.
  *
  * Nothing here polls or runs on a timer: the caller asks for a read when a
- * surface opens. A read that fails leaves the list empty, because a row that
- * may already have been answered is worse than a missing one. A newer read
- * replaces one still in flight, so a slow answer never overwrites a fresh one.
+ * surface opens. Starting a read empties the list, and a read that fails
+ * leaves it empty, because a row that may already have been answered is worse
+ * than a missing one: a stale row stays selectable and only earns a refusal.
+ * A newer read replaces one still in flight, so a slow answer never
+ * overwrites a fresh one.
  * `client` is undefined off a local host, where the list is never read.
  */
 export function usePendingRequests(client: PendingRequestClient | undefined): {
@@ -29,6 +31,7 @@ export function usePendingRequests(client: PendingRequestClient | undefined): {
     }
     const controller = new AbortController();
     inFlight.current = controller;
+    setRequests(NO_REQUESTS);
     client
       .list(controller.signal)
       .then((list) => {
