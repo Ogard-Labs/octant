@@ -171,25 +171,31 @@ reads), so a remote window sees them for exactly the threads it can already
 list.
 
 **Running services** is the second card, on by default. It lists the dev servers
-and other listeners Octant started, across every Code Project the window can
-reach: the Code Environment's Local servers read host-wide (see
+and other listeners running in the host's Code Projects: the Code Environment's
+Local servers read host-wide, across every active Code Project the Project
+bootstrap lists, which today does not vary by window (see
 [Architecture: security and authority](../architecture.md#security-and-authority),
 Local servers and Running services). A row is the server's name (its framework,
 else its runtime) and port, the Project and the branch or thread it belongs to,
 its health with a glyph and a word ("Listening", "Not responding", "Not
 checked"; never a colour), and the host's name only when the window is reading a
-computer that is not this one. A server Octant still owns says nothing more; one
-it started earlier and no longer owns says **Left over from Octant**; Octant
-cannot prove it started a leftover, so one is listed only while nothing names
-another editor as its starter. Each row
+computer that is not this one. A server Octant owns says nothing more; any other
+says **Not owned by Octant**. Such a server is listed only while nothing names
+another editor as its starter, which does not show who did: one an earlier
+Octant session left behind looks the same as one started in Terminal, by Claude
+Code, or by Codex, so neither the row nor its Stop confirmation says Octant
+started it. Each row
 has **Open** and **Stop**. Open places the page the host prepared: as a Browser
 tab of the thread whose own worktree the server runs in, otherwise in this
 computer's own browser, and only there, so a window reading another computer
 never opens that computer's loopback address on its own. Stop is the
-Environment's authorized stop unchanged: a server Octant owns stops at once, a
-leftover asks for the same confirmation naming process, folder, and port, and a
-Stop the host will not offer (a Plan thread's server, a leftover from a paired
-device) is explained in a line with no control. At most five rows show, then
+Environment's authorized stop unchanged: a server Octant owns stops at once, one
+it does not own asks for the same confirmation naming process, folder, and port,
+and a Stop the host will not offer (a server in a Plan thread's own worktree, a
+server Octant does not own from a paired device) is explained in a line with no
+control. A server in the Project folder itself is no one thread's, so it is
+judged as the person's own, approval-gated, even when a Plan thread works in
+that folder. At most five rows show, then
 **+N more listening**. The card reads when it mounts and then every five
 seconds, the Environment panel's cadence, and only while the window is visible;
 a card that is off, or a start screen that is not showing, scans nothing. When

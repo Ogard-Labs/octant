@@ -56,13 +56,15 @@ is showing another computer's work, the row names that computer. Up to five rows
 show, then **+N more** opens Running. Choose a row to open its thread. When
 nothing is running, the card says so in one line.
 
-**Running services** lists the dev servers Octant started, across your Code
-Projects: the port, the Project and the branch or thread, what is running
-(`vite`, `node`, `bun`), and whether it is answering. A server left running from
-an earlier session is marked **Left over from Octant**. **Open** shows the page
-in a Browser tab for that thread, or in your own browser; **Stop** stops it. A
-server Octant started can stop at once; a leftover asks you to confirm first,
-and from a paired device it can only be stopped at the computer itself.
+**Running services** lists the dev servers running in your Code Projects: the
+port, the Project and the branch or thread, what is running (`vite`, `node`,
+`bun`), and whether it is answering. A server Octant does not own is marked
+**Not owned by Octant**: it may be one left from an earlier session, or one you
+started yourself in a terminal or with another tool, and Octant cannot tell
+which. **Open** shows the page in a Browser tab for that thread, or in your own
+browser; **Stop** stops it. A server Octant owns can stop at once; one it does
+not own asks you to confirm first, and from a paired device it can only be
+stopped at the computer itself.
 A server an editor such as VS Code started is not listed, and neither is
 anything outside your Code Projects. Up to five show, then **+N more
 listening**. The card refreshes about every five seconds while the window is

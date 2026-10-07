@@ -92,12 +92,12 @@ describe("the Running services card", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: "Home cards" })).toBeNull());
   });
 
-  it("says nothing Octant started is running in one quiet line", async () => {
+  it("says no server is running in the Code Projects in one quiet line", async () => {
     const { client } = fakeClient(() => listed([]));
     renderCard(createRunningServicesCard(source(client)));
     const card = await screen.findByRole("region", { name: "Running services" });
     expect(
-      await within(card).findByText("No servers Octant started are running."),
+      await within(card).findByText("No servers are running in your Code Projects."),
     ).toBeInTheDocument();
   });
 
@@ -121,7 +121,7 @@ describe("the Running services card", () => {
     expect(within(card).getByText("1")).toBeInTheDocument();
   });
 
-  it("labels a leftover as left over from Octant and names a host that is not this computer", async () => {
+  it("labels a server Octant does not own as not owned, claims nothing about who started it, and names a host that is not this computer", async () => {
     const { client } = fakeClient(() =>
       listed([
         service(1, {
@@ -132,7 +132,8 @@ describe("the Running services card", () => {
     );
     renderCard(createRunningServicesCard(source(client, { host: "Studio" })));
     const card = await screen.findByRole("region", { name: "Running services" });
-    expect(await within(card).findByText(/Left over from Octant/)).toBeInTheDocument();
+    expect(await within(card).findByText(/Not owned by Octant/)).toBeInTheDocument();
+    expect(within(card).queryByText(/Left over from Octant/)).toBeNull();
     expect(within(card).getByText(/Studio/)).toBeInTheDocument();
   });
 
@@ -208,13 +209,15 @@ describe("the Running services card", () => {
 
     await user.click(await screen.findByRole("button", { name: "Stop vite on port 5171" }));
 
-    expect(await screen.findByText("No servers Octant started are running.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("No servers are running in your Code Projects."),
+    ).toBeInTheDocument();
     const stop = commands.find((command) => command.kind === "stop-running-service");
     expect(stop).toBeDefined();
     expect(stop).not.toHaveProperty("confirmation");
   });
 
-  it("confirms a leftover by name and echoes what it showed before the host signals it", async () => {
+  it("confirms a server Octant does not own by name and echoes what it showed before the host signals it", async () => {
     const leftover = service(1, {
       ownership: "left-over",
       processName: "node",
@@ -237,6 +240,10 @@ describe("the Running services card", () => {
     await user.click(await screen.findByRole("button", { name: "Stop vite on port 3000" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Stop node on port 3000 in /Users/example/octant/apps/web?");
+    expect(dialog).toHaveTextContent(
+      "Octant does not own this server and cannot tell who started it.",
+    );
+    expect(dialog).not.toHaveTextContent("Octant started this server");
     expect(commands.some((command) => command.kind === "stop-running-service")).toBe(false);
 
     await user.click(within(dialog).getByRole("button", { name: "Keep it running" }));
@@ -311,7 +318,7 @@ describe("the Running services card", () => {
     );
     renderCard(createRunningServicesCard(source(client)));
     expect(await screen.findByText(/could not check this computer/)).toBeInTheDocument();
-    expect(screen.queryByText("No servers Octant started are running.")).toBeNull();
+    expect(screen.queryByText("No servers are running in your Code Projects.")).toBeNull();
   });
 
   it("keeps the last listing when a later refresh is refused", async () => {

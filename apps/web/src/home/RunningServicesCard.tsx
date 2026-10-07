@@ -8,7 +8,7 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
 import {
   capRunningServices,
-  LEFT_OVER_LABEL,
+  NOT_OWNED_LABEL,
   runningServiceHealthLabel,
   runningServiceName,
   runningServiceOrigin,
@@ -36,8 +36,9 @@ export interface RunningServicesCardSource {
 }
 
 /**
- * The Running services card: the dev servers and other listeners Octant
- * started, across every Project the window can reach. It is offered only where
+ * The Running services card: the dev servers and other listeners running in the
+ * host's Code Projects, the ones Octant owns and any other no editor is known to
+ * have started. It is offered only where
  * the window has a client for the host, and refreshes only while it is mounted
  * and the document is visible.
  */
@@ -48,7 +49,7 @@ export function createRunningServicesCard(source: RunningServicesCardSource): Ho
     icon: Server,
     defaultOn: true,
     available: source.client !== undefined,
-    emptyLabel: "No servers Octant started are running.",
+    emptyLabel: "No servers are running in your Code Projects.",
     useContent: () => useRunningServicesContent(source),
   };
 }
@@ -124,7 +125,7 @@ function RunningServiceRows(props: {
         >
           Stop {confirming.processName} on port {String(confirming.port)}
           {confirming.workingDirectory === undefined ? "" : ` in ${confirming.workingDirectory}`}?
-          Octant started this server and no longer owns it.
+          Octant does not own this server and cannot tell who started it.
         </OctantConfirmDialog>
       )}
     </>
@@ -151,7 +152,7 @@ function RunningServiceRow(props: {
   const detail = [
     runningServiceHealthLabel(service.health),
     service.framework === undefined ? undefined : service.processName,
-    service.ownership === "left-over" ? LEFT_OVER_LABEL : undefined,
+    service.ownership === "left-over" ? NOT_OWNED_LABEL : undefined,
     props.host,
   ].filter((part): part is string => part !== undefined);
   return (

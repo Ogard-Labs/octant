@@ -157,8 +157,11 @@ export interface RunningServiceOrigin {
   readonly branch?: string;
   /**
    * Posture Stop is judged under. A thread's own worktree carries that thread's
-   * posture, so a Plan thread's server is never stoppable from the start screen
-   * either; a Project folder is the person's own and carries no thread posture.
+   * posture, so a server in a Plan thread's worktree is never stoppable from the
+   * start screen either. A Project folder is the person's own and no one
+   * thread's, so a server there is judged approval-gated even when a Plan thread
+   * works in that folder: the listing cannot tell which thread, if any, started
+   * it.
    */
   readonly posture: LocalServerPosture;
 }
@@ -351,8 +354,9 @@ export class LocalServerService {
   /**
    * The same surface read for the whole window, for the start screen's Running
    * services. Open and Stop take the very paths a thread's Local servers take,
-   * judged for the listener's own origin: a Plan thread's server is not
-   * stoppable here either, and a leftover still needs its confirmation.
+   * judged for the listener's own origin: a server in a Plan thread's own
+   * worktree is not stoppable here either, and one Octant does not own still
+   * needs its confirmation.
    */
   async executeRunning(
     authenticatedWindowId: WindowId,
@@ -833,9 +837,10 @@ function hostObservationScope(
       "approval-gated",
     // The rules that keep this from being a process inventory: no Project to
     // attribute the listener to, no row, and no health probe either. A listener
-    // Octant does not own is shown as left over only while nothing says another
-    // editor started it; Octant cannot prove it started a leftover, so a
-    // positive sign that it was someone else's is enough to leave it out.
+    // Octant does not own is listed only while nothing names another editor as
+    // its starter. That is not proof Octant started it: a server run from
+    // Terminal, Claude Code, or Codex in the Project folder passes too, so the
+    // row says only that Octant does not own it.
     admit: (observation, facts) =>
       attributeLocalListener(observation.workingDirectory, binding.origins) !== undefined &&
       (facts.owned || !startedByAnotherEditor(facts.startSource)),
@@ -850,7 +855,7 @@ function isOctantOwned(scope: ObservationScope, observation: ObservedLocalListen
   return scope.ownedPids.has(observation.pid) || observation.ownedByOctant === true;
 }
 
-/** Octant-started servers first, then leftovers, each by port. */
+/** Servers Octant owns first, then the ones it does not, each by port. */
 function runningServices(
   binding: LocalServerHostBinding,
   resolved: ReadonlyArray<ResolvedListener>,

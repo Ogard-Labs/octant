@@ -42,12 +42,13 @@ export interface RunningServiceScopeOptions {
 /**
  * Resolve what one window may see in the start screen's Running services.
  *
- * The origins are the active Code Projects the window can already reach, plus
- * the own worktree of each of their live threads. Nothing here discovers a
- * folder the window has no binding for, so a listener outside every origin is
- * never attributed and never listed. A thread whose Project the window cannot
- * reach contributes nothing, which is how a remote window sees only the
- * Projects it holds authority over.
+ * The origins are the active Code Projects the Project bootstrap lists, plus
+ * the own worktree of each of their live threads. That bootstrap does not vary
+ * by window today, so this is every active Code Project on the host, the same
+ * set the per-thread Local servers route resolves against; a remote window is
+ * not narrowed to fewer Projects here. Nothing here discovers a folder outside
+ * those Projects, so a listener outside every origin is never attributed and
+ * never listed.
  */
 export function createRunningServiceScopeResolver(
   options: RunningServiceScopeOptions,

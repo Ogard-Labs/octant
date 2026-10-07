@@ -275,15 +275,17 @@ export const LocalServerCommandResult = Schema.Union(
 export type LocalServerCommandResult = typeof LocalServerCommandResult.Type;
 
 /**
- * Whether a running service is one Octant started in this session
- * (`octant-owned`) or one it started earlier and no longer owns (`left-over`).
- * There is no third value: a listener that is neither is never published.
+ * Whether Octant owns a running service (`octant-owned`, a live descendant of a
+ * terminal it started) or not (`left-over`). A `left-over` row may be one an
+ * earlier Octant session left behind, or one a person started in Terminal or
+ * with another agent CLI; Octant cannot tell which, so a surface must not say
+ * Octant started it. There is no third value.
  */
 export const RunningServiceOwnership = Schema.Literal("octant-owned", "left-over");
 export type RunningServiceOwnership = typeof RunningServiceOwnership.Type;
 
 /**
- * One server Octant started, as the start screen sees it.
+ * One server running in a Code Project, as the start screen sees it.
  *
  * It is a classified listener plus the Project (and, when the host could tell,
  * the thread and branch) it belongs to. A listener that cannot be attributed to
@@ -298,7 +300,7 @@ export const RunningService = Schema.Struct({
   /** Process or app name, e.g. `node`, `bun`. Never a command line. */
   processName: Schema.NonEmptyTrimmedString,
   framework: Schema.optional(Schema.NonEmptyTrimmedString),
-  /** Present so a leftover Stop confirmation can name the process, cwd, and port. */
+  /** Present so a not-owned server's Stop confirmation can name the process, cwd, and port. */
   workingDirectory: Schema.optional(Schema.NonEmptyTrimmedString),
   ownership: RunningServiceOwnership,
   health: LocalServerHealth,

@@ -2346,18 +2346,24 @@ mechanisms are:
   Running services reads the same service host-wide (`list-running-services`
   on the same authenticated route; no thread or Project in the command) and
   adds one filter before anything is probed: a listener is published only when
-  its working directory sits inside an active Code Project the window can
-  reach, or inside the worktree of one thread of such a Project, which a host-
-  written ownership receipt vouches for. A listener outside those roots gets no
-  row and no health probe. Rows are Octant-owned (a live terminal descendant)
-  or left over; nothing else exists. Octant cannot prove it started a leftover,
-  so one is listed only while nothing names another editor as its starter. The same bounded scan, health phase and
+  its working directory sits inside an active Code Project the Project
+  bootstrap lists (today every active Code Project on the host, the same set
+  the per-thread route resolves against; it does not vary by window), or inside
+  the worktree of one thread of such a Project, which a host-written ownership
+  receipt vouches for. A listener outside those roots gets no row and no health
+  probe. Rows are Octant-owned (a live terminal descendant) or not owned. A
+  not-owned row is any other admitted current-user listener in those roots
+  whose lineage names no editor; an earlier Octant session, a terminal, Claude
+  Code, or Codex could have started it, and Octant cannot tell which, so the
+  row and its Stop confirmation say only that Octant does not own it. The same bounded scan, health phase and
   deadline apply, and a scan that cannot finish is a refusal, never an empty
   list. Open and Stop re-observe and re-classify by an opaque id that is not a
   process id and differs from the per-thread id for the same listener. Stop is
-  judged under the origin's posture (a Plan thread's server is never
-  stoppable), a leftover needs the confirmation naming process, folder and
-  port, and a paired device may stop only a server Octant owns; the actor comes
+  judged under the origin's posture (a server in a Plan thread's own worktree is
+  never stoppable; the Project folder is no one thread's, so a server there is
+  judged approval-gated even when a Plan thread works in it), a server Octant
+  does not own needs the confirmation naming process, folder and port, and a
+  paired device may stop only a server Octant owns; the actor comes
   from the request's authenticated principal. A window reads the host it is
   connected to; All Hosts federation does not carry these rows.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
