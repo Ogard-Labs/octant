@@ -122,6 +122,9 @@ export interface CodeTurnEvent {
   readonly contextBreakdown?: ProviderContextBreakdown;
   readonly utilization?: number;
   readonly resetsAt?: string;
+  readonly attempt?: number;
+  readonly maxAttempts?: number;
+  readonly delayMs?: number;
   readonly providerClaimIsMutationProof?: false;
   readonly reconciliation?: CodeObservationReconciliation;
   readonly executionPolicy?: CodeThread["executionPolicy"];
@@ -816,6 +819,9 @@ function normalizeProviderEvent(
         ...base,
         category: "retry",
         status: event.reason,
+        attempt: event.attempt,
+        maxAttempts: event.maxAttempts,
+        delayMs: event.delayMs,
         text: text(
           `Retrying ${event.attempt}/${event.maxAttempts} in ${Math.max(1, Math.round(event.delayMs / 1000))} s.`,
         ),

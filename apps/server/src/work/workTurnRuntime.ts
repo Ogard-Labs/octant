@@ -66,6 +66,12 @@ export interface WorkTurnRuntimePort {
     readonly appManagedTools?: AppManagedToolSet;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
     readonly onDelta?: (response: string) => void;
+    /** The endpoint is sending the request again. */
+    readonly onRetrying?: (
+      notice: Extract<ProviderRuntimeEvent, { readonly kind: "retrying" }>,
+    ) => void;
+    /** Text or reasoning arrived, so the retry wait is over. */
+    readonly onRetryCleared?: () => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
     readonly onChildActivity?: (event: ProviderChildActivityEvent) => void;
@@ -281,7 +287,10 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (event.kind === "text-delta") {
                   response = appendBoundedResponse(response, event.text);
                   input.onDelta?.(response);
+                  input.onRetryCleared?.();
                 }
+                if (event.kind === "retrying") input.onRetrying?.(event);
+                if (event.kind === "reasoning-delta") input.onRetryCleared?.();
                 if (event.kind === "task-progress") {
                   const next = upsertThreadTaskProgress(tasks, {
                     taskId: event.taskId,

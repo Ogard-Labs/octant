@@ -32,6 +32,7 @@ import {
   NativeHarnessSlotCandidate,
   NativeHarnessSlotId,
 } from "./nativeHarnessRouting";
+import { HarnessRetryNotice } from "./harnessRetry";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId, type ProviderToolDefinition } from "./providers";
 import { ThreadPlanStepId } from "./threadPlan";
@@ -1351,6 +1352,11 @@ export const NativeHarnessSessionView = Schema.Struct({
       Schema.maxItems(MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN),
     ),
   ),
+  /**
+   * The endpoint retry in progress, announced before its wait. Not journaled.
+   * The next content, or the turn ending, clears it.
+   */
+  retrying: Schema.optional(HarnessRetryNotice),
 }).annotations(strict);
 export type NativeHarnessSessionView = typeof NativeHarnessSessionView.Type;
 

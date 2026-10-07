@@ -28,6 +28,8 @@ import {
   MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN,
   MAX_NATIVE_HARNESS_STEERING_NOTES,
   decodeNativeHarnessApproval,
+  decodeHarnessRetryNotice,
+  type HarnessRetryNotice,
   type NativeHarnessApproval,
   type NativeHarnessApprovalId,
   type NativeHarnessApprovalStatus,
@@ -84,6 +86,8 @@ export class NativeHarnessSessionStore {
   readonly #records = new Map<string, SessionRecord>();
   /** Calls of the turn running now, per thread; journaled with the turn when it ends. */
   readonly #activeTools = new Map<string, NativeHarnessToolCall[]>();
+  /** The endpoint retry in progress, per thread. Not journaled; cleared by content or the turn ending. */
+  readonly #retrying = new Map<string, HarnessRetryNotice>();
   /** Notes typed while the lead works, per thread, rebuilt from the journal; delivered at the next tool step. */
   readonly #steering = new Map<string, NativeHarnessSteeringNote[]>();
   /**
@@ -116,6 +120,7 @@ export class NativeHarnessSessionStore {
   read(threadId: string): NativeHarnessSessionView | undefined {
     const record = this.#records.get(threadId);
     if (record === undefined) return undefined;
+    const retrying = this.#retrying.get(threadId);
     return decodeNativeHarnessSessionView({
       session: record.session,
       routes: record.routes,
@@ -129,7 +134,19 @@ export class NativeHarnessSessionStore {
       approvals: record.approvals,
       steering: this.#steering.get(threadId) ?? [],
       activeTools: this.#activeTools.get(threadId) ?? [],
+      ...(retrying === undefined ? {} : { retrying }),
     });
+  }
+
+  /** Remembers the retry the endpoint just announced, replacing any earlier one. */
+  noteRetry(threadId: string, notice: HarnessRetryNotice): void {
+    if (this.#records.get(threadId) === undefined) return;
+    this.#retrying.set(threadId, decodeHarnessRetryNotice(notice));
+  }
+
+  /** Drops the retry notice. Content arriving, or the turn ending, is why. */
+  clearRetry(threadId: string): void {
+    this.#retrying.delete(threadId);
   }
 
   noteToolCall(threadId: string, call: NativeHarnessToolCall): void {
