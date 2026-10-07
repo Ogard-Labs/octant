@@ -210,6 +210,39 @@ start and step ride on the same navigation rows as the executing flag (see
 reads), so a remote window sees them for exactly the threads it can already
 list.
 
+**Running services** follows Working now, on by default. It lists the dev servers
+and other listeners running in the host's Code Projects: the Code Environment's
+Local servers read host-wide, across every active Code Project the Project
+bootstrap lists, which today does not vary by window (see
+[Architecture: security and authority](../architecture.md#security-and-authority),
+Local servers and Running services). A row is the server's name (its framework,
+else its runtime) and port, the Project and the branch or thread it belongs to,
+its health with a glyph and a word ("Listening", "Not responding", "Not
+checked"; never a colour), and the host's name only when the window is reading a
+computer that is not this one. A server Octant owns says nothing more; any other
+says **Not owned by Octant**. Such a server is listed only while nothing names
+another editor as its starter, which does not show who did: one an earlier
+Octant session left behind looks the same as one started in Terminal, by Claude
+Code, or by Codex, so neither the row nor its Stop confirmation says Octant
+started it. Each row
+has **Open** and **Stop**. Open places the page the host prepared: as a Browser
+tab of the thread whose own worktree the server runs in, otherwise in this
+computer's own browser, and only there, so a window reading another computer
+never opens that computer's loopback address on its own. Stop is the
+Environment's authorized stop unchanged: a server Octant owns stops at once, one
+it does not own asks for the same confirmation naming process, folder, and port,
+and a Stop the host will not offer (a server in a Plan thread's own worktree, a
+server Octant does not own from a paired device) is explained in a line with no
+control. A server in the Project folder itself is no one thread's, so it is
+judged as the person's own, approval-gated, even when a Plan thread works in
+that folder. At most five rows show, then
+**+N more listening**. The card reads when it mounts and then every five
+seconds, the Environment panel's cadence, and only while the window is visible;
+a card that is off, or a start screen that is not showing, scans nothing. When
+the host cannot scan, the card says it could not check rather than that nothing
+is running, and a refused refresh keeps the last listing. A window with no Code
+Project sees an empty card.
+
 Above the composer the same screens carry two tabs on its top-left edge,
 **New task** and **Running**. New task is selected first and is the composer as
 it was: the Running tab never takes the focus the composer takes on arrival. The
@@ -594,6 +627,8 @@ Local-server stop authority recognizes live terminal descendants by a host proce
 snapshot and the tracked shell's process identity. An exited shell, a reused PID,
 or missing ownership evidence leaves the listener classified as a leftover and
 requires confirmation. Editor provenance labels alone never grant stop authority.
+The start screen's Running services card applies the same rule and lists both
+kinds, labelling the leftover; it adds no authority of its own.
 
 ## Verification
 
