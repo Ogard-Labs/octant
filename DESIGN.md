@@ -828,6 +828,19 @@ carry the reading. It may also carry a `sparkline` of at most 256 recent
 readings, drawn as a glance with no axis, and a short `caption`. The value, the
 delta, and the caption are the accessible numbers; the sparkline is decorative.
 
+**Tables.** A table is columns of a declared type and rows in the order the
+author wrote. A column may name a `format` and a `display` of `text` (the plain
+reading, the default), `bar` (an in-cell bar whose length is the value's share
+of the column's largest reading), `heat` (a tint on the shared sequential
+scale), or `status` (the value drawn as a badge). The value is always drawn with
+the mark, never instead of it, so a bar and a tint are scan aids: under forced
+colours they fall to system ink and the plain value remains the reading. A text
+column whose values read as a path uses the shared path style, and a number
+column is right-aligned in tabular numerals. Sorting (each sorted header
+announces its direction with `aria-sort`; hiding the sorted column drops the
+sort), a text filter, and hidden columns are view state and revise nothing, so the exported and static forms keep the order
+the author wrote. The header sticks through a scrolling table.
+
 **Motion.** A chart transitions only on a state change — a legend toggle, a zoom
 — never on entrance. A transition lasts at most 200ms and is off under
 `prefers-reduced-motion: reduce` and when the workspace sets

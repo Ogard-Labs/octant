@@ -125,8 +125,16 @@ try {
     page.setDefaultTimeout(15_000);
     await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(
-      "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list",
+      "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__table",
     );
+
+    // Show the table's sorted state in the capture: the sort mark and the
+    // announced direction are what a header control looks like once used.
+    const tableSort = page.locator(".canvas-block__table .canvas-block__table-sort");
+    if ((await tableSort.count()) > 1) {
+      await tableSort.nth(1).click();
+      await page.waitForTimeout(50);
+    }
 
     for (const scenario of SCENARIOS) {
       await page.emulateMedia({ forcedColors: scenario === "forced" ? "active" : "none" });

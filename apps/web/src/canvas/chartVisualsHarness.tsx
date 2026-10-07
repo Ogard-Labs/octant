@@ -165,14 +165,20 @@ const table = decodeCanvasBlock({
   kind: "table",
   columns: [
     { id: "asset", label: "Asset", type: "text" },
-    { id: "size", label: "Size", type: "number", format: "bytes" },
-    { id: "requests", label: "Requests", type: "number", format: "compact" },
+    { id: "requests", label: "Requests", type: "number", format: "compact", display: "bar" },
+    { id: "errors", label: "Errors", type: "number", display: "heat" },
     { id: "p95", label: "p95", type: "number", format: "duration" },
+    { id: "state", label: "State", type: "text", display: "status" },
   ],
   rows: [
-    ["bundle.js", 1_536_000, 1_360_000, 3725],
-    ["styles.css", 245_760, 980_000, 160],
-    ["hero.png", 1_048_576, 120_000, 45],
+    ["apps/web/src/canvas/blocks/TableBlock.tsx", 1_360_000, 3, 3725, "Ready"],
+    ["packages/domain/src/canvasPolicy.ts", 300_000, 0, 160, "Ready"],
+    ["apps/server/src/canvas/artifactRender.ts", 980_000, 7, 240, "Blocked"],
+    ["apps/web/src/styles/canvas.css", 60_000, 12, 45, "Ready"],
+    ["packages/contracts/src/canvas.ts", 420_000, 1, 90, "Ready"],
+    ["packages/theme/src/chartScales.ts", 150_000, 5, 30, "Warning"],
+    ["apps/web/src/canvas/ChartTooltip.tsx", 88_000, 2, 12, "Ready"],
+    ["scripts/capture-canvas-charts.ts", 12_000, 0, 8, "Ready"],
   ],
 });
 

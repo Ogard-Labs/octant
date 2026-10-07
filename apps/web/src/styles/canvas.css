@@ -1062,6 +1062,166 @@
   }
 }
 
+/* ── Interactive table ───────────────────────────────────────────────────
+   The same data-visualisation system as a chart, a treemap, and a bar list:
+   shared number formats, the shared path style, and the shared scale roles.
+   The sort, the filter, and the hidden columns are view state — they are never
+   journaled, so the definition and the exported forms keep the order the
+   author wrote. A `bar` or a `heat` column draws its mark with the value, never
+   instead of it. */
+
+.canvas-block__table {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.canvas-block__table-toolbar {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  margin-bottom: var(--oct-space-2);
+}
+
+.canvas-block__table-filter {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-size: var(--oct-text-sm);
+}
+
+.canvas-block__table-columns {
+  position: relative;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__table-columns summary {
+  cursor: pointer;
+}
+
+.canvas-block__table-columns ul {
+  list-style: none;
+  margin: var(--oct-space-1) 0 0;
+  padding: var(--oct-space-2);
+  min-width: 160px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+  max-height: 240px;
+  overflow: auto;
+}
+
+.canvas-block__table-columns li label {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
+.canvas-block__table-scroll {
+  max-height: 420px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.canvas-block__table-scroll:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.canvas-block__table-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* The header stays put through a long scroll, which is what keeps a reading
+   labelled in a narrow sidebar. */
+.canvas-block__table-grid th {
+  position: sticky;
+  top: 0;
+  z-index: var(--oct-z-sticky);
+  background: var(--oct-surface-warm);
+  box-shadow: inset 0 -1px 0 var(--oct-border);
+}
+
+.canvas-block__table-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.canvas-block__table-grid th[aria-sort] {
+  color: var(--oct-fg);
+}
+
+.canvas-block__table-sortmark {
+  display: inline-block;
+}
+
+.canvas-block__table-sort:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.canvas-block__table-path .canvas-block__path {
+  font-family: var(--oct-font-mono);
+}
+
+/* An in-cell bar is the value's share of the column's largest reading; the
+   number sits above its bar so the reading is always legible. */
+.canvas-block__table-bar-cell {
+  display: inline-grid;
+  gap: 2px;
+  min-width: 4ch;
+}
+
+.canvas-block__table-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--oct-fg) 10%, transparent);
+  overflow: hidden;
+}
+
+.canvas-block__table-bar-fill {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 2px;
+}
+
+/* A heat tint reads through the shared sequential scale; its colour is set
+   inline from the scale roles, so only an accessibility fallback replaces it.
+   The value's own text stays on top in both modes. */
+.canvas-block__table-cell--heat {
+  border-radius: 2px;
+}
+
+.canvas-block__table-empty {
+  color: var(--oct-muted);
+  text-align: center;
+}
+
+/* System colours: the bar and the tint fall to system ink, and the value text
+   is the reading either way. */
+@media (forced-colors: active) {
+  .canvas-block__table-bar-fill {
+    background: Highlight !important;
+  }
+
+  .canvas-block__table td[data-heat-step] {
+    background: none !important;
+  }
+}
+
 .canvas-block__timeline {
   list-style: none;
   margin: 0;
