@@ -3587,8 +3587,69 @@ describe("App", () => {
           return () => undefined;
         }),
       };
+      // A failing check on the person's own pull request, so the start screen
+      // offers Start a fix and the draft is handed that pull request's branch.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = typeof input === "string" ? input : input.toString();
+          if (url.endsWith("/api/github/authentication")) {
+            return new Response(
+              JSON.stringify({
+                state: "ready",
+                account: { login: "ada", gitProtocol: "https", scopes: [] },
+                capabilities: [{ kind: "pull-requests-read", available: true }],
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            );
+          }
+          return canvasFetchPassthrough(url) ?? new Response("not found", { status: 404 });
+        }),
+      );
+      const codeApi = codesRecordingCreates();
+      vi.mocked(codeApi.queryProjectPullRequests).mockResolvedValue(
+        decodeCodeProjectPullRequestView({
+          version: 1,
+          query: { version: 1 },
+          projects: [
+            {
+              kind: "connected",
+              projectId,
+              projectName: "Octant",
+              repositoryOwner: "octant",
+              repositoryName: "octant",
+            },
+          ],
+          rows: [
+            {
+              projectId,
+              projectName: "Octant",
+              repositoryOwner: "octant",
+              repositoryName: "octant",
+              number: 12,
+              title: "List active pull requests",
+              draft: false,
+              state: "open",
+              mergeability: "mergeable",
+              author: "ada",
+              baseBranch: "main",
+              headBranch: "feature/handed-by-start-a-fix",
+              updatedAt: "2026-08-22T07:00:00.000Z",
+              checks: "failing",
+              review: "pending",
+              linkedThreads: [],
+              failingChecks: [{ name: "web tests", completedAt: "2026-08-22T07:40:00.000Z" }],
+            },
+          ],
+          repositoriesTruncated: false,
+          pullRequestsTruncated: false,
+          freshness: { status: "fresh", lastSuccessfulRefreshAt: "2026-08-22T08:00:00.000Z" },
+          generatedAt: "2026-08-22T08:00:00.000Z",
+        }),
+      );
       render(
         <App
+          codeClient={codeApi}
           hostBridge={hostBridge}
           isNarrow={false}
           launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
@@ -3599,9 +3660,16 @@ describe("App", () => {
       );
 
       await user.click(await screen.findByRole("button", { name: "New task" }));
+      const ciFailures = await screen.findByRole("region", { name: "CI failures" });
+      await user.click(
+        await within(ciFailures).findByRole("button", {
+          name: "Start a fix for web tests on octant#12",
+        }),
+      );
+      expect(await screen.findByText("feature/handed-by-start-a-fix")).toBeVisible();
       await user.type(
         await screen.findByRole("textbox", { name: "First message" }),
-        "Left over from an earlier task",
+        " Left over from an earlier task",
       );
       if (entry === "command palette") {
         await user.keyboard("{Control>}k{/Control}");
@@ -3621,6 +3689,7 @@ describe("App", () => {
       await waitFor(() =>
         expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(""),
       );
+      expect(screen.queryByText("feature/handed-by-start-a-fix")).toBeNull();
     },
   );
 
