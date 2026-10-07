@@ -72,6 +72,22 @@ for never), re-deciding against each mode's authoritative record and
 journaling the ordinary thread update as the `system` actor. It archives only;
 see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-completed-and-snoozed-threads.md).
 
+The **Review page** lists the threads the sidebar's To review count counts, by
+the same predicate (`isWaitingForReview`: unread, not working, not on a shelf),
+so the tile's number and the page's rows never disagree. Rows run oldest
+first, by the host's reported finish time where it has one. The detail panel
+reads the thread's last reply, the Code board's check facts, an Octant-run
+check after the last turn where one exists, and the checkout's diff; Chat rows
+show the reply only. Work navigation projects no unread flag, so Work threads
+never count toward To review and never list here; the page's Work wiring
+(send-back refuses and points at the thread's composer) waits for that flag. Complete, Snooze and send-back go through each
+mode's existing commands and show the host's refusal in one line; mark-seen
+moves the read cursor. Its single-key commands are page-scoped keybindings: they
+may be a bare key because only the focused page dispatches them, and the
+window-level listeners never run them. The page holds no pull-request action
+and no destructive one. The To review tile, Code's **Review N changes** tile and
+the command palette open it.
+
 A thread stopped on a provider usage limit that disclosed a reset can also be
 hidden until that reset — a distinct command whose wake time the host derives
 from the journaled limit fact, never from the caller, and refuses when no such

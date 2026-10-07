@@ -391,7 +391,7 @@ and **Review N changes** (Finished threads that wait for you) when N is above
 zero, where N counts unread threads that are not running or rested, the
 sidebar's To review rule. Open terminal starts a Project terminal and pins it in
 Zen, the only place one lives. Work offers the same tiles without a terminal,
-because Work has no shell. Review opens the Inbox. The tiles leave when they
+because Work has no shell. Review opens the Review page. The tiles leave when they
 have nothing to show.
 
 The card area is a ghost **Customize** button right-aligned under the tiles
@@ -1135,7 +1135,7 @@ executing), To review (finished turns not opened since), and Done today
 (threads completed since local midnight). Each tile is one button whose name
 carries its count ("Running, 2"); Inbox opens the Inbox, Running opens the
 Board (the Activity feed in Chat, which has no board), To review opens the
-Activity feed, and Done today opens the Completed shelf. With the tiles on,
+Review page, and Done today opens the Completed shelf. With the tiles on,
 the Inbox and Board rows are left out because their tiles go to the same
 place. Settings › Sidebar › Count tiles turns them off and brings the rows
 back. Tiles are neutral faces in the Default style; under Vivid each takes a

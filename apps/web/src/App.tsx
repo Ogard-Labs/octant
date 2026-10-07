@@ -432,6 +432,9 @@ import type {
   ThreadProviderIdentity,
 } from "./shell/navigationModel";
 import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
+import { buildReviewEntries, type ReviewEntry } from "./review/reviewModel";
+import { createReviewSource } from "./review/reviewSource";
+import type { ReviewActionOutcome, ReviewPageProps } from "./review/ReviewPage";
 import { createWorkingNowCard } from "./home/WorkingNowCard";
 import { createNeedsYouCard } from "./home/NeedsYouCard";
 import { createPullRequestsCard } from "./home/PullRequestsCard";
@@ -924,6 +927,10 @@ function LaunchedShell(
   // Deliberately not cleared on mode switch: what waits on the user spans
   // every mode, so the Inbox survives moving between them.
   const [inboxOpen, setInboxOpen] = useState(false);
+  // Like the Inbox, what finished and waits for a look spans the window, so
+  // moving between modes keeps the page; its list follows the active mode's
+  // To review count.
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [projectsListOpen, setProjectsListOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
   const [pendingIssue, setPendingIssue] = useState<RepositoryIssueRow>();
@@ -3796,6 +3803,27 @@ function LaunchedShell(
     () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
     [projectController.projects],
   );
+  // The To review count's own rows: the same threads the tile counted, so the
+  // page and the number cannot disagree.
+  const reviewEntries = useMemo(
+    () =>
+      buildReviewEntries({
+        threads: workingNowThreads,
+        projectNames: workingNowProjectNames,
+        unfiledLabel: "No project",
+      }),
+    [workingNowProjectNames, workingNowThreads],
+  );
+  const reviewSource = useMemo(
+    () =>
+      createReviewSource({
+        code: codeClient,
+        work: workThreadClient,
+        workTurns: workTurnClient,
+        chat: chatClient,
+      }),
+    [chatClient, codeClient, workThreadClient, workTurnClient],
+  );
   const workingNowProviders = useMemo(
     () =>
       new Map(
@@ -3880,6 +3908,7 @@ function LaunchedShell(
     projectsListOpen,
     selectedProjectTabId ?? "",
     inboxOpen,
+    reviewOpen,
     workBoardOpen,
     codeBoardOpen,
     codePullRequestsOpen,
@@ -4073,6 +4102,7 @@ function LaunchedShell(
     codeBoardOpen ||
     codePullRequestsOpen ||
     inboxOpen ||
+    reviewOpen ||
     githubIssuesOpen ||
     linearIssuesOpen ||
     workBoardOpen ||
@@ -4201,7 +4231,7 @@ function LaunchedShell(
                   ? continueCards.runningTotal
                   : 0
                 : runningThreadCount(workProjectThreads),
-            onReview: openInbox,
+            onReview: openReview,
             cards: homeCards,
             cardCustomization: controller.settings.homeCards,
             onCardCustomizationChange: (homeCardChoice) =>
@@ -4366,30 +4396,44 @@ function LaunchedShell(
   // Work has no controller of its own for thread metadata: a rest command
   // goes straight to the client with the version the sidebar last saw, and
   // the host's answer is folded back into the navigation list.
-  const runWorkRestCommand = async (
+  const tryWorkRestCommand = async (
     threadId: string,
     command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
-  ): Promise<void> => {
+  ): Promise<ReviewActionOutcome> => {
     const thread = workNavigation.bootstrap?.threads.find(
       (candidate) => String(candidate.id) === threadId,
     );
-    if (thread === undefined) return;
+    if (thread === undefined) {
+      return { status: "refused", message: "This thread is no longer in the list." };
+    }
     try {
       const result = await workThreadClient.execute(command(thread.version));
       if ("kind" in result && result.kind === "thread-updated") {
         workNavigation.applyThread(result.thread);
       }
+      return { status: "ok" };
     } catch (error) {
       // The host refused (a running turn, a wake time already gone) or the
-      // row was stale: say so where thread notices already appear, and read
-      // the list again so the row shows the thread as the host has it.
-      setThreadExportNotice(
-        error instanceof Error && error.message.trim() !== ""
-          ? error.message
-          : "The host could not change this thread.",
-      );
+      // row was stale: read the list again so the row shows the thread as the
+      // host has it, and hand the reason to whoever acted.
       void workNavigation.refresh();
+      return {
+        status: "refused",
+        message:
+          error instanceof Error && error.message.trim() !== ""
+            ? error.message
+            : "The host could not change this thread.",
+      };
     }
+  };
+  // A sidebar row has nowhere of its own to report a refusal, so its answer
+  // reads where thread notices already appear.
+  const runWorkRestCommand = async (
+    threadId: string,
+    command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
+  ): Promise<void> => {
+    const outcome = await tryWorkRestCommand(threadId, command);
+    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
   };
   const workThreadRowActions: ThreadRowActions = {
     ...(exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread }),
@@ -4424,6 +4468,90 @@ function LaunchedShell(
       void deliverComposerThreadDrop({ threadId });
     },
   };
+
+  // The Review page acts through each thread's own host command, the same one
+  // its sidebar row uses, but asks for the host's answer as a value: the page
+  // shows a refusal beside the thread it concerns instead of in a shared
+  // notice. Each mode keeps its own command, so a Chat thread never reaches a
+  // Work or Code command.
+  const reviewPageProps: ReviewPageProps | undefined = reviewOpen
+    ? {
+        entries: reviewEntries,
+        source: reviewSource,
+        changeRevision:
+          machineChanges.chatNavigation +
+          machineChanges.workNavigation +
+          machineChanges.codeNavigation,
+        now: minuteNow.getTime(),
+        onClose: () => setReviewOpen(false),
+        codeProjectAccess: {
+          boundProjectId:
+            controller.boundCodeProjectId === undefined
+              ? undefined
+              : String(controller.boundCodeProjectId),
+          onOpenProject: (entry: ReviewEntry) => {
+            const project = projectController.allProjects.find(
+              (candidate) => String(candidate.id) === entry.projectId,
+            );
+            if (project === undefined || project.lifecycle !== "active") return;
+            // Binds the window without closing the page, so the person stays in review.
+            void controller.openProject(project.id, "code", project.name);
+          },
+        },
+        onOpen: (entry: ReviewEntry) => {
+          if (entry.mode === "chat") selectChatThread(entry.threadId);
+          else if (entry.mode === "work") selectWorkThread(entry.threadId);
+          else selectCodeThread(entry.threadId);
+        },
+        onComplete: (entry: ReviewEntry): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.completeThread(decodeCodeThreadId(entry.threadId));
+          }
+          if (entry.mode === "chat") {
+            return chatController.completeThread(decodeChatThreadId(entry.threadId));
+          }
+          return tryWorkRestCommand(entry.threadId, (expectedVersion) => ({
+            kind: "complete-work-thread",
+            threadId: decodeWorkThreadId(entry.threadId),
+            expectedVersion,
+          }));
+        },
+        onSnooze: (entry: ReviewEntry, until: string): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.snoozeThread(decodeCodeThreadId(entry.threadId), until);
+          }
+          if (entry.mode === "chat") {
+            return chatController.snoozeThread(decodeChatThreadId(entry.threadId), until);
+          }
+          return tryWorkRestCommand(entry.threadId, (expectedVersion) => ({
+            kind: "snooze-work-thread",
+            threadId: decodeWorkThreadId(entry.threadId),
+            expectedVersion,
+            until: decodeUtcTimestamp(until),
+          }));
+        },
+        onSendBack: (entry: ReviewEntry, prompt: string): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.sendBackTurn(decodeCodeThreadId(entry.threadId), prompt);
+          }
+          if (entry.mode === "chat") {
+            return chatController.sendBackTurn(decodeChatThreadId(entry.threadId), prompt);
+          }
+          return Promise.resolve({
+            status: "refused",
+            message:
+              "A Work thread takes its follow-up from its own composer. Open it to continue.",
+          });
+        },
+        onMarkSeen: (entry: ReviewEntry) => {
+          if (entry.mode === "code")
+            codeController.markThreadRead(decodeCodeThreadId(entry.threadId));
+          else if (entry.mode === "chat") {
+            chatController.markThreadRead(decodeChatThreadId(entry.threadId));
+          }
+        },
+      }
+    : undefined;
 
   // One thread-selection handler per mode. The sidebar and every Project
   // Overview call the same one, so a row opens the same thread wherever it is
@@ -4589,6 +4717,7 @@ function LaunchedShell(
     projectsListOpen ||
     railPlaceholder !== undefined ||
     inboxOpen ||
+    reviewOpen ||
     codeBoardOpen ||
     workBoardOpen ||
     codePullRequestsOpen ||
@@ -4767,6 +4896,7 @@ function LaunchedShell(
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
     setInboxOpen(false);
+    setReviewOpen(false);
     setGithubIssuesOpen(false);
     setLinearIssuesOpen(false);
     setArchiveOpen(false);
@@ -4953,6 +5083,13 @@ function LaunchedShell(
   function openInbox() {
     pluginSidebarDestinationActionContext.closeOverlays();
     setInboxOpen(true);
+  }
+
+  // The To review tile, the start screen's review card, and the palette all
+  // land on the one page that lists the threads the tile counted.
+  function openReview() {
+    pluginSidebarDestinationActionContext.closeOverlays();
+    setReviewOpen(true);
   }
 
   const pluginSidebarDestinationActions: Record<string, () => void> = {};
@@ -5848,6 +5985,7 @@ function LaunchedShell(
     onNewThread: () => void controller.openDraftThread(activeMode),
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
+    onOpenReview: openReview,
     onOpenZen: () => {
       if (zen.active) zen.exitZen();
       else void zen.enterZen();
@@ -6359,7 +6497,7 @@ function LaunchedShell(
               ...(activeMode === "chat"
                 ? { onOpenRunning: () => openSidebarList("activity") }
                 : {}),
-              onOpenReview: () => openSidebarList("activity"),
+              onOpenReview: openReview,
               onOpenDone: () => openSidebarList("completed"),
             }}
             {...(sidebarRail
@@ -6572,6 +6710,7 @@ function LaunchedShell(
                 {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
                 onDismissRailPlaceholder={() => setRailPlaceholder(undefined)}
                 inboxOpen={inboxOpen}
+                {...(reviewPageProps === undefined ? {} : { reviewPage: reviewPageProps })}
                 onCloseInbox={() => setInboxOpen(false)}
                 inboxAttentionItems={inboxAttentionItems}
                 onOpenInboxThread={(signal) => {
@@ -6955,6 +7094,7 @@ function LaunchedShell(
                           codeBoardOpen ||
                           codePullRequestsOpen ||
                           inboxOpen ||
+                          reviewOpen ||
                           githubIssuesOpen ||
                           linearIssuesOpen ||
                           workBoardOpen ||
