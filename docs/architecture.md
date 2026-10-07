@@ -1885,27 +1885,28 @@ native harness in `apps/server/src/harness`:
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
 - **Tool verification.** A routine Check connection runs no generating
-  request, so an OpenAI-compatible or Azure AI Foundry endpoint offers a model
-  Octant's tools only after a person proved that model calls one. The
-  `verify-model-tools` command sends one forced `octant_capability_echo`
-  request through the same sender a turn uses, for one model; an
-  Anthropic-compatible endpoint takes the same command and request in its own
-  wire shape. A model that calls the tool joins `verifiedToolModelIds` on the
-  observed state, which the journal persists with the catalog and a
-  configuration change clears; a model that answers in text leaves it out, and
-  a transport failure (authentication, timeout) is reported rather than
-  recorded as "unsupported". Admission, the AgentRun transport check, and the
-  Chat preflight read that set per model, so verifying one model never offers
-  tools to its siblings. A tool call in a real turn widens nothing either: the
-  provider-level `appManagedTools` flag of an OpenAI-compatible or Foundry
-  profile stays "unsupported", because a tool call proves only the model that
-  made it. The command accepts only the models the endpoint
-  lists or the profile configures, and only a Foundry profile's configured
-  deployments, because its catalogue lists base models that are not
+  request, so an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
+  endpoint offers a model Octant's tools only after a person proved that model
+  calls one. The `verify-model-tools` command sends one forced
+  `octant_capability_echo` request through the same sender a turn uses, for one
+  model; an Anthropic-compatible endpoint sends it in its own wire shape, with
+  `tool_choice` `any`. A model that calls the tool joins
+  `verifiedToolModelIds` on the observed state, which the journal persists with
+  the catalog and a configuration change clears; a model that answers in text
+  leaves it out, and a transport failure (authentication, timeout) is reported
+  rather than recorded as "unsupported". Admission, the AgentRun transport
+  check, and the Chat preflight read that set per model, so verifying one model
+  never offers tools to its siblings; the only tool an unverified model is
+  admitted with is that echo. A tool call in a real turn widens nothing either:
+  the provider-level `appManagedTools` flag of an OpenAI-compatible,
+  Anthropic-compatible, or Foundry profile stays "unsupported", because a tool
+  call proves only the model that made it. The command accepts only the models
+  the endpoint lists or the profile configures, and only a Foundry profile's
+  configured deployments, because its catalogue lists base models that are not
   deployments. Ollama has no verify action until its driver runs the tool
   loop. The model picker marks an unverified model "Chat only" with a "Verify
-  tools" action, and Settings → Octant Harness says the same for a slot's
-  chosen model.
+  tools" action (in Chat, on the selected model), and Settings → Octant
+  Harness says the same for a slot's chosen model.
 - **Goals.** A thread goal may carry up to twelve acceptance criteria
   (`ThreadGoalCriterion`), each with an optional check command; one without a
   command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
