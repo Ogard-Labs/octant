@@ -83,8 +83,11 @@ describe("real OpenCode integration", () => {
   );
 
   it.skipIf(!enabled)(
-    "creates a confined 2.x session in a Git work tree and completes a read-tool turn",
-    async () => {
+    "creates a confined 2.x Chat session in a Git work tree through the failing git stand-in",
+    async (context) => {
+      if (process.platform !== "darwin") {
+        context.skip("the git stand-in is macOS only, so 2.x stays listing-only on this host");
+      }
       const binaryPath = findExecutable("opencode");
       expect(binaryPath, "enabled smoke requires an installed OpenCode CLI").not.toBeNull();
       const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000307");
@@ -104,13 +107,14 @@ describe("real OpenCode integration", () => {
           permissionPersistence: () => "current-session",
         });
         const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-        if (probe.readiness === "incompatible") {
-          // A runtime the confined jail cannot serve is listed, never offered.
-          expect(probe.reason).toBe("runtime-incompatible");
+        // A 1.x binary reports a bare semantic version; only 2.x needs the stand-in.
+        if (probe.detectedVersion?.startsWith("opencode") !== true) {
           await registry.closeAll();
-          return;
+          context.skip("the installed OpenCode is not a 2.x runtime");
         }
-        expect(probe.readiness).toBe("ready");
+        // An incompatible 2.x runtime is exactly the failure this smoke exists
+        // to catch: the jail did not serve the Git work tree.
+        expect(probe.readiness, probe.message).toBe("ready");
         expect(probe.models.length).toBeGreaterThan(0);
         await Effect.runPromise(
           Effect.scoped(
