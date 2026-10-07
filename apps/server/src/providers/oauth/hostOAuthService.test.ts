@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { startCredentialBroker } from "@octant/host-runtime";
+import { deriveHostRuntimeHostId, startCredentialBroker } from "@octant/host-runtime";
 import { CredentialStoreFailure, type CredentialStore } from "@octant/host-runtime";
 import {
   decodeHostOAuthDescriptor,
@@ -9,7 +9,7 @@ import {
 } from "@octant/contracts/host-oauth";
 import { describe, expect, it } from "vitest";
 import { makeHostOAuthBrokerClient } from "./hostOAuthBrokerClient";
-import { createHostOAuthService } from "./hostOAuthService";
+import { createHostOAuthService, extAgentHostIdFor } from "./hostOAuthService";
 
 const ACCESS = "access-token-must-not-reach-the-journal";
 const REFRESH = "refresh-token-must-not-reach-the-journal";
@@ -400,6 +400,57 @@ describe("host OAuth service", () => {
     });
     expect(result).toEqual({ kind: "unavailable" });
     expect(journal.map((record) => record.name)).not.toContain("host-oauth.signed-out");
+  });
+
+  it("registers a ChatGPT plan sign-in under the host id derived from the data directory", async () => {
+    const forwarded: unknown[] = [];
+    const dataDirectory = "/Users/example/Library/Application Support/Octant";
+    const hostId = extAgentHostIdFor(dataDirectory);
+    expect(hostId).toBe(`urn:uuid:${deriveHostRuntimeHostId(dataDirectory)}`);
+    expect(hostId).toMatch(
+      /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    // Stable across restarts of the same host, distinct for another host.
+    expect(extAgentHostIdFor(dataDirectory)).toBe(hostId);
+    expect(extAgentHostIdFor("/Users/example/other-octant-data")).not.toBe(hostId);
+    const service = createHostOAuthService({
+      journal: { append: () => undefined },
+      broker: {
+        begin: async (input) => {
+          forwarded.push(input.descriptor);
+          return {
+            kind: "refused",
+            descriptorId: input.descriptor.descriptorId,
+            reason: "invalid",
+          };
+        },
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
+      },
+      extAgentHostId: hostId,
+    });
+    for (const sample of [
+      chatGptPlan(),
+      descriptor("https://idp.example/authorize", "https://idp.example/token"),
+    ]) {
+      service.acknowledgeTerms({
+        principalKind: "local-window",
+        actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+        descriptor: sample,
+      });
+      await service.begin({
+        principalKind: "local-window",
+        actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+        descriptor: sample,
+      });
+    }
+    expect(forwarded[0]).toMatchObject({ descriptorId: "chatgpt-plan", extAgentHostId: hostId });
+    // Only the ChatGPT plan dialect registers the host; other sign-ins never
+    // carry the host id.
+    expect(forwarded[1]).not.toHaveProperty("extAgentHostId");
   });
 
   it("journals the sign-out only after the broker confirms the grant was revoked", async () => {

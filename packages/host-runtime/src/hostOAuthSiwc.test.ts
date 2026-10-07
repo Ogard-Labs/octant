@@ -141,6 +141,12 @@ async function startFakeSiwcServer(options?: {
   readonly jwksStatus?: number;
   /** Publishes an additional key set entry alongside the signing key. */
   readonly jwksKeys?: readonly RsaKeyPair[];
+  /**
+   * Corrupts one claim of the code-exchange identity token: a different
+   * issuer, an audience other than the issued client id, an expiry in the
+   * past, or a nonce other than the one the authorize request sent.
+   */
+  readonly exchangeIdToken?: "wrong-issuer" | "wrong-audience" | "expired" | "wrong-nonce";
   /** Answers the revocation POST with this status instead of 200. */
   readonly revocationStatus?: number;
   /** Names this URL as the discovery `revocation_endpoint` instead of its own. */
@@ -296,16 +302,17 @@ async function startFakeSiwcServer(options?: {
         return;
       }
       const nonce = nonces.get(state[0]) ?? randomUUID();
+      const corrupt = options?.exchangeIdToken;
       const token =
         options?.omitIdToken === true
           ? undefined
           : idToken(keyPair, {
-              iss: issuer,
-              aud: ISSUED_CLIENT_ID,
+              iss: corrupt === "wrong-issuer" ? "https://issuer.invalid" : issuer,
+              aud: corrupt === "wrong-audience" ? "oaiapp_someone-else" : ISSUED_CLIENT_ID,
               sub: SUBJECT,
               email: EMAIL,
-              exp: Math.floor(Date.now() / 1000) + 3600,
-              nonce,
+              exp: Math.floor(Date.now() / 1000) + (corrupt === "expired" ? -3600 : 3600),
+              nonce: corrupt === "wrong-nonce" ? randomUUID() : nonce,
             });
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
@@ -603,6 +610,38 @@ describe("ChatGPT plan (SIWC) dialect", () => {
       await fake.close();
     }
   });
+
+  it.each([
+    ["names a different issuer", "wrong-issuer"],
+    ["names a different audience than the issued client id", "wrong-audience"],
+    ["has expired", "expired"],
+    ["carries a nonce other than the one the authorize request sent", "wrong-nonce"],
+  ] as const)(
+    "refuses the exchange and stores nothing when the identity token %s",
+    async (_label, exchangeIdToken) => {
+      const fake = await startFakeSiwcServer({ exchangeIdToken });
+      const store = memoryStore();
+      const runtime = runtimeFor(store, fake);
+      try {
+        const started = await runtime.begin({
+          descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+          actorId: randomUUID(),
+          termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+        });
+        if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+          throw new Error("expected a PKCE attempt");
+        }
+        await fetch(started.authorizationUrl);
+        const done = await waitForState(() => runtime.status(started.attemptId), "refused");
+        expect(done).toMatchObject({ kind: "refused", reason: "exchange-refused" });
+        expect(fake.tokenHits()).toBe(1);
+        expect(store.values.size).toBe(0);
+      } finally {
+        await runtime.close();
+        await fake.close();
+      }
+    },
+  );
 
   it("reauthorizes from the named credential when the store cannot list grants", async () => {
     const fake = await startFakeSiwcServer();

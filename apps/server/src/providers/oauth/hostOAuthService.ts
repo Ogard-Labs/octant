@@ -15,6 +15,7 @@ import {
   type PrincipalActionDecision,
   type PrincipalKind,
 } from "@octant/domain/remote-access-policy";
+import { deriveHostRuntimeHostId } from "@octant/host-runtime";
 import { makeHostOAuthBrokerClient, type HostOAuthBrokerPort } from "./hostOAuthBrokerClient";
 
 const termsKey = (descriptorId: string, termsId: string) => `${descriptorId}\n${termsId}`;
@@ -79,6 +80,15 @@ export interface HostOAuthService {
    * OpenRouter dialect has no revocation endpoint.
    */
   readonly revokesOnSignOut: (descriptor: HostOAuthDescriptor) => boolean;
+}
+
+/**
+ * The stable host id a sign-in registers this host under, derived from the
+ * same data directory the host runtime already owns, so the broker and the
+ * server agree on one host identity instead of provisioning a second one.
+ */
+export function extAgentHostIdFor(dataDirectory: string): string {
+  return `urn:uuid:${deriveHostRuntimeHostId(dataDirectory)}`;
 }
 
 export function createHostOAuthService(options: {
