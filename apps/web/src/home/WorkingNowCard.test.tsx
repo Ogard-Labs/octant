@@ -293,4 +293,26 @@ describe("the Working now card", () => {
     await act(async () => answers.shift()?.());
     expect(reader.center).toHaveBeenCalledTimes(2);
   });
+
+  it("reads again when the Running tab opens after a refused read, without waiting for the thread lists to change", async () => {
+    const reader = {
+      center: vi.fn().mockRejectedValueOnce(new Error("refused")).mockResolvedValue({ items: [] }),
+    } as unknown as AgentRunClient;
+    const shared = source({ agentRunClient: reader, runRevision: 3 });
+    const { rerender } = renderCard(createWorkingNowCard(shared));
+    await screen.findByRole("region", { name: "Working now" });
+    await waitFor(() => expect(reader.center).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    rerender(
+      <>
+        <HomeDashboard
+          cards={[createWorkingNowCard(shared)]}
+          customization={{ order: [], visibility: [] }}
+          onCustomizationChange={vi.fn()}
+        />
+        <RunningTab onStop={vi.fn()} source={shared} />
+      </>,
+    );
+    await waitFor(() => expect(reader.center).toHaveBeenCalledTimes(2));
+  });
 });

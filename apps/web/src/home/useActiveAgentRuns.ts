@@ -53,7 +53,10 @@ function runSharedRead(client: AgentRunClient, read: SharedActiveRunRead): void 
         for (const listener of read.listeners) listener(runs);
       },
       () => {
-        // A read the host refuses says nothing new; keep what is on screen.
+        // A read the host refuses says nothing new; keep what is on screen. Forget
+        // which revision it was for, so the next surface that mounts reads again
+        // rather than waiting for the thread lists to change.
+        if (!read.pending) read.requestedRevision = undefined;
       },
     )
     .finally(() => {
@@ -67,7 +70,8 @@ function runSharedRead(client: AgentRunClient, read: SharedActiveRunRead): void 
  * reads. One read when the first surface mounts, and one more whenever the
  * thread lists change (`revision`), which is the cadence the sidebar already
  * follows: this adds no timer. `undefined` until the first answer, and a
- * refused read keeps the last answer, so the card keeps listing what it can see.
+ * refused read keeps the last answer, so the card keeps listing what it can see,
+ * and the next surface to mount reads again.
  *
  * Every surface on the screen shares the read, and changes are coalesced: at
  * most one read is in flight, and any number of revisions that arrive
