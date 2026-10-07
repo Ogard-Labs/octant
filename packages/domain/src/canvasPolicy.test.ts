@@ -880,8 +880,22 @@ describe("design frames", () => {
       ".hero { background-image: -webkit-image-set('https://x.test/a.png' 1x); }",
       '.hero { background-image: image-set("data:image/png;base64,AA" 1x, "https://x.test/b.png" 2x); }',
       String.raw`.hero { background-image: image-set("\68ttps://x.test/a.png" 1x); }`,
+      // A quote in a comment or an escaped one in a string starts no string.
+      `/* don't */ .hero { background-image: image-set("https://x.test/a.png" 1x); }`,
+      String.raw`.a::before { content: "a\"b"; } .hero { background-image: image-set("https://x.test/a.png" 1x); }`,
     ]) {
       expect(refusalOf(design(home, styles))).toContain("loads a file with image-set()");
+    }
+    // A quote in the prose around a style element is not CSS, and a browser
+    // resolves a legacy `&quot` without its semicolon in an attribute.
+    for (const html of [
+      `<p>Don't wait</p><style>.hero{background-image:image-set("https://x.test/a.png" 1x)}</style>`,
+      `<p>A 5" screen</p><style>.hero{background-image:image-set("https://x.test/a.png" 1x)}</style>`,
+      '<div style="background-image:image-set(&quot https://x.test/a.png&quot 1x)"></div>',
+    ]) {
+      expect(refusalOf(design([{ frameId: "home", html }]))).toContain(
+        "loads a file with image-set()",
+      );
     }
     expect(
       refusalOf(
