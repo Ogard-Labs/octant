@@ -35,6 +35,8 @@ const ids = {
   plan: "63000000-0000-4000-8000-000000000007",
   usage: "63000000-0000-4000-8000-000000000008",
   usage2: "63000000-0000-4000-8000-000000000009",
+  usage3: "63000000-0000-4000-8000-00000000000a",
+  checkout: "63000000-0000-4000-8000-00000000000b",
 } as const;
 
 afterEach(() => {
@@ -228,6 +230,202 @@ describe("UsageProjection", () => {
     connection.close();
   });
 
+  it("prices a Code turn at its latest report's own cost and keeps it through replay", () => {
+    const { connection, journal } = openDatabase();
+    const events = [
+      {
+        kind: "conversation-turn-started",
+        providerInstanceId: ids.provider,
+        modelId: "code-model",
+        sessionId: ids.entry,
+        prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+      },
+      {
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 2,
+        costUsd: 0.01,
+        cost: { kind: "provider-recorded", usdMicros: 10_000 },
+      },
+      {
+        kind: "usage",
+        inputTokens: 30,
+        outputTokens: 6,
+        costUsd: 0.0375,
+        cost: { kind: "provider-recorded", usdMicros: 37_500 },
+      },
+      { kind: "operation-state", state: "completed" },
+    ];
+    journal.append({
+      aggregate: { aggregateType: "code-operation", aggregateId: ids.usage },
+      expectedVersion: 0,
+      events: events.map((event, index) =>
+        pending("code.operation-event-recorded@1", {
+          threadId: ids.aggregate,
+          operationId: ids.usage,
+          cursor: index + 1,
+          occurredAt: now,
+          event,
+        }),
+      ),
+    });
+    const priced = { kind: "provider-recorded", usdMicros: 37_500 };
+    expect(readAllUsageRecords(connection)[0]?.cost).toEqual(priced);
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(readAllUsageRecords(connection)[0]?.cost).toEqual(priced);
+
+    // A later report for the turn that carries no cost leaves it unpriced.
+    journal.append({
+      aggregate: { aggregateType: "code-operation", aggregateId: ids.usage },
+      expectedVersion: events.length,
+      events: [
+        pending("code.operation-event-recorded@1", {
+          threadId: ids.aggregate,
+          operationId: ids.usage,
+          cursor: events.length + 1,
+          occurredAt: now,
+          event: { kind: "usage", inputTokens: 40, outputTokens: 7 },
+        }),
+      ],
+    });
+    expect(readAllUsageRecords(connection)[0]?.cost).toBeUndefined();
+    connection.close();
+  });
+
+  it("reproduces each Code turn's journaled cost on rebuild and never prices a report journaled without one", () => {
+    const { connection, journal } = openDatabase();
+    const turn = (operationId: string, usage: object) =>
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 0,
+        events: [
+          {
+            kind: "conversation-turn-started",
+            providerInstanceId: ids.provider,
+            // The standard-rate table prices this model today.
+            modelId: "gpt-5.6-sol",
+            sessionId: ids.entry,
+            prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+          },
+          usage,
+          { kind: "operation-state", state: "completed" },
+        ].map((event, index) =>
+          pending("code.operation-event-recorded@1", {
+            threadId: ids.aggregate,
+            operationId,
+            cursor: index + 1,
+            occurredAt: now,
+            event,
+          }),
+        ),
+      });
+    // Journaled before Code turns were priced: a provider figure and a priced
+    // model, but no ledger cost, so the turn stays as unpriced as it was.
+    turn(ids.usage, { kind: "usage", inputTokens: 100_000, outputTokens: 10_000, costUsd: 0.6 });
+    // Priced against an earlier table revision than the one in force now.
+    turn(ids.usage2, {
+      kind: "usage",
+      inputTokens: 100_000,
+      outputTokens: 10_000,
+      cost: { kind: "api-estimate", usdMicros: 450_000 },
+    });
+
+    const rows = () =>
+      connection
+        .prepare(
+          `SELECT reconciliation_id, cost_usd_micros, cost_kind
+          FROM usage_record_projection ORDER BY last_sequence`,
+        )
+        .all();
+    const expected = [
+      { reconciliation_id: ids.usage, cost_usd_micros: null, cost_kind: null },
+      { reconciliation_id: ids.usage2, cost_usd_micros: 450_000, cost_kind: "api-estimate" },
+    ];
+    expect(rows()).toEqual(expected);
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(rows()).toEqual(expected);
+    connection.close();
+  });
+
+  it("records a Code turn that reached its provider and reported no usage as unreported and unpriced, and none that failed before", () => {
+    const { connection, journal } = openDatabase();
+    const turn = (operationId: string, events: ReadonlyArray<object>) =>
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 0,
+        events: events.map((event, index) =>
+          pending("code.operation-event-recorded@1", {
+            threadId: ids.aggregate,
+            operationId,
+            cursor: index + 1,
+            occurredAt: now,
+            event,
+          }),
+        ),
+      });
+    const started = {
+      kind: "conversation-turn-started",
+      providerInstanceId: ids.provider,
+      modelId: "acp-agent",
+      sessionId: ids.entry,
+      prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+    };
+    const sessionReady = {
+      kind: "provider-session-ready",
+      sessionId: ids.entry,
+      providerInstanceId: ids.provider,
+      modelId: "acp-agent",
+      checkoutId: ids.checkout,
+    };
+    turn(ids.usage, [started, sessionReady, { kind: "operation-state", state: "failed" }]);
+    // Failed before its provider session was ready for the prompt: nothing
+    // was sent, so nothing is owed and no row may make a ceiling refuse.
+    turn(ids.usage3, [started, { kind: "operation-state", state: "failed" }]);
+    turn(ids.usage2, [
+      started,
+      {
+        kind: "usage",
+        inputTokens: 30,
+        outputTokens: 6,
+        costUsd: 0.01,
+        cost: { kind: "provider-recorded", usdMicros: 10_000 },
+      },
+      { kind: "operation-state", state: "completed" },
+    ]);
+
+    const rows = () =>
+      connection
+        .prepare(
+          `SELECT reconciliation_id, quality, input_tokens, cost_usd_micros
+          FROM usage_record_projection ORDER BY last_sequence`,
+        )
+        .all();
+    const expected = [
+      {
+        reconciliation_id: ids.usage,
+        quality: "unavailable",
+        input_tokens: 0,
+        cost_usd_micros: null,
+      },
+      {
+        reconciliation_id: ids.usage2,
+        quality: "exact",
+        input_tokens: 30,
+        cost_usd_micros: 10_000,
+      },
+    ];
+    expect(rows()).toEqual(expected);
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(rows()).toEqual(expected);
+    connection.close();
+  });
+
   it("keeps a completed request without provider usage as unavailable, not zero", () => {
     const { connection, journal } = openDatabase();
     appendFullUsageCycle(journal, {
@@ -285,6 +483,28 @@ describe("UsageProjection", () => {
         imageQuality: "high",
       },
     ]);
+  });
+
+  it("stores the request cost and replays it after a journal rebuild", () => {
+    const { connection, journal } = openDatabase();
+    appendFullUsageCycle(journal, { cost: { kind: "provider-recorded", usdMicros: 1_250_000 } });
+
+    const record = readUsageRecord(connection, ids.usage);
+    expect(record?.cost).toEqual({ kind: "provider-recorded", usdMicros: 1_250_000 });
+
+    const projection = createPhase1RuntimeRegistries().projections.get("usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    const replayed = readUsageRecord(connection, ids.usage);
+    expect(replayed?.cost).toEqual({ kind: "provider-recorded", usdMicros: 1_250_000 });
+  });
+
+  it("keeps a record without cost unpriced rather than free", () => {
+    const { connection, journal } = openDatabase();
+    appendFullUsageCycle(journal);
+
+    const record = readUsageRecord(connection, ids.usage);
+    expect(record?.cost).toBeUndefined();
   });
 
   it("builds a usage record from a full context event cycle", () => {

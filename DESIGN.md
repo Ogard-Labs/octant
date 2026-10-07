@@ -1391,7 +1391,8 @@ default only when this checkout is serving something; Subagents, one row with
 its working / to review / done counts that opens the Agents tool — reading and
 steering a subagent belongs there; Computer use) and Delivery (Pull requests,
 Sources, Delivers, Working folder, and Usage, closed by default; totals, the
-one-line token ceiling form, and Open Usage dashboard inside). A card with no
+spend ceiling form for tokens, turns, hours, and US dollars, whose fields wrap
+two by two in a narrow rail, and Open Usage dashboard inside). A card with no
 rows to show is omitted with its caption. Every row has one grammar: a 26px
 glyph tile, the name, the row's state as a small neutral pill, and a trailing
 chevron where the row opens (a row's own action, such as All pull requests,

@@ -422,13 +422,22 @@
 
 .thread-usage__ceiling-form {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--oct-space-2);
 }
 
+/* Four budgets do not fit one line of the rail; they wrap two by two rather
+   than shrinking each field below a readable figure. */
 .thread-usage__ceiling-form > input {
-  flex: 1 1 auto;
+  flex: 1 1 5.5rem;
   min-width: 0;
+}
+
+.thread-usage__ceiling-note {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 /* A floor rather than a complete total is a caveat on every number below it,

@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { AggregateReference, UtcTimestamp } from "./events";
-import { ContextEntryCategory, UsageReconciliationId } from "./context";
+import { ContextEntryCategory, UsageCost, UsageReconciliationId } from "./context";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -56,6 +56,8 @@ export const UsageRecord = Schema.Struct({
   cacheReadInputTokens: Schema.optional(NonNegativeInt),
   cacheWriteInputTokens: Schema.optional(NonNegativeInt),
   providerExecutionDurationMs: Schema.optional(NonNegativeInt),
+  /** What the request cost; absent when it could not be priced. */
+  cost: Schema.optional(UsageCost),
   plannedInputTokens: Schema.optional(NonNegativeInt),
   varianceTokens: Schema.optional(Schema.Int),
   attribution: Schema.Array(UsageAttributionEntry),

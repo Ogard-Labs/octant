@@ -8,6 +8,7 @@ import {
   SPEND_TURN_AGGREGATE_TYPE,
   decodeSpendCeilingReservationId,
   decodeUtcTimestamp,
+  type ProjectId,
   type SpendCeilingCommand,
   type SpendCeilingCommandResult,
   type SpendCeilingRefusal,
@@ -80,7 +81,7 @@ export interface SpendCeilingServiceOptions {
   readonly journal: Journal;
   readonly clock: () => string;
   readonly uuid: () => string;
-  readonly agentRuns?: Pick<AgentRunProjection, "parentSummary">;
+  readonly agentRuns?: Pick<AgentRunProjection, "parentSummary" | "projectRunIds">;
   readonly threadExists?: (input: {
     readonly threadType: SpendCeilingThreadType;
     readonly threadId: string;
@@ -100,7 +101,7 @@ export class SpendCeilingService {
   readonly #journal: Journal;
   readonly #clock: () => string;
   readonly #uuid: () => string;
-  readonly #agentRuns: Pick<AgentRunProjection, "parentSummary"> | undefined;
+  readonly #agentRuns: Pick<AgentRunProjection, "parentSummary" | "projectRunIds"> | undefined;
   readonly #threadExists: SpendCeilingServiceOptions["threadExists"];
   readonly #projectExists: SpendCeilingServiceOptions["projectExists"];
   readonly #reservations = new Map<string, LiveReservation>();
@@ -205,6 +206,9 @@ export class SpendCeilingService {
       ...(decision.previousRunTimeBudgetSeconds === undefined
         ? {}
         : { previousRunTimeBudgetSeconds: decision.previousRunTimeBudgetSeconds }),
+      ...(decision.previousCostBudgetUsdCents === undefined
+        ? {}
+        : { previousCostBudgetUsdCents: decision.previousCostBudgetUsdCents }),
     };
     this.#append(command.scope, aggregateVersion, eventName, {
       ceiling: decision.next,
@@ -296,7 +300,7 @@ export class SpendCeilingService {
   }
 
   #remaining(ceiling: SpendCeilingState, facts: SpendCeilingScopeFacts): SpendCeilingRemaining {
-    const { tokenBudget, turnBudget, runTimeBudgetSeconds } = ceiling.policy;
+    const { tokenBudget, turnBudget, runTimeBudgetSeconds, costBudgetUsdCents } = ceiling.policy;
     const tokens =
       tokenBudget === undefined || facts.committed.status !== "known"
         ? {}
@@ -328,10 +332,24 @@ export class SpendCeilingService {
             usedRunTimeSeconds: usedSeconds,
             remainingRunTimeSeconds: Math.max(0, runTimeBudgetSeconds - usedSeconds),
           };
+    // A money budget whose window cannot be priced keeps its ceiling in the
+    // reading without a used or remaining figure, so "cannot be measured" is
+    // stated rather than the dimension silently missing.
+    const money =
+      costBudgetUsdCents === undefined
+        ? {}
+        : facts.usedCostUsdCents === undefined
+          ? { ceilingUsdCents: costBudgetUsdCents }
+          : {
+              ceilingUsdCents: costBudgetUsdCents,
+              usedUsdCents: facts.usedCostUsdCents,
+              remainingUsdCents: Math.max(0, costBudgetUsdCents - facts.usedCostUsdCents),
+            };
     return {
       ...tokens,
       ...turns,
       ...runTime,
+      ...money,
       window: ceiling.window,
       ...(ceiling.overrun === undefined ? {} : { overrun: ceiling.overrun }),
       version: ceiling.version,
@@ -341,13 +359,21 @@ export class SpendCeilingService {
   #facts(ceiling: SpendCeilingState, childIds: ReadonlyArray<string>): SpendCeilingScopeFacts {
     const now = decodeUtcTimestamp(this.#clock());
     const from = spendCeilingWindowStart(ceiling.window, now);
+    const scopeChildIds =
+      ceiling.scope.kind === "project"
+        ? this.#projectChildSubjectIds(ceiling.scope.projectId, childIds)
+        : childIds;
     const committed: SpendTokenTotal =
       ceiling.policy.tokenBudget === undefined
         ? { status: "known", tokens: 0 }
-        : this.#committedSpend(ceiling.scope, childIds, from);
+        : this.#committedSpend(ceiling.scope, scopeChildIds, from);
     const needsTurns =
       ceiling.policy.turnBudget !== undefined || ceiling.policy.runTimeBudgetSeconds !== undefined;
     const used = needsTurns ? this.#turnUse(ceiling.scope, from, now) : undefined;
+    const cost =
+      ceiling.policy.costBudgetUsdCents === undefined
+        ? undefined
+        : this.#costUse(ceiling.scope, scopeChildIds, from);
     return {
       scopeKind: ceiling.scope.kind,
       scopeId:
@@ -359,7 +385,62 @@ export class SpendCeilingService {
       reservedTokens: this.#reservedFor(ceiling.scope),
       ...(ceiling.overrun === undefined ? {} : { overrun: ceiling.overrun }),
       ...(used === undefined ? {} : { usedTurns: used.turns, usedRunTimeMs: used.runTimeMs }),
+      ...(cost === undefined ? {} : { usedCostUsdCents: cost }),
     };
+  }
+
+  /**
+   * Settled US-dollar spend in the window, in whole cents. Undefined when any
+   * in-window record is unpriced or the sum cannot be measured: a monetary
+   * ceiling then refuses rather than counting unpriced usage as free.
+   */
+  #costUse(
+    scope: SpendCeilingScope,
+    childIds: ReadonlyArray<string>,
+    from: string | undefined,
+  ): number | undefined {
+    const subjects: Array<{ readonly type: string; readonly id: string }> = [];
+    if (scope.kind === "thread") {
+      subjects.push({ type: scope.threadType, id: String(scope.threadId) });
+    }
+    for (const id of childIds) subjects.push({ type: "agent-run", id });
+    if (subjects.length === 0 && scope.kind !== "project") return undefined;
+    const conditions: Array<string> = [];
+    const params: Array<string | number> = [];
+    if (subjects.length > 0) {
+      const subjectTerms = subjects.map(() => "(subject_type = ? AND subject_id = ?)");
+      conditions.push(`(${subjectTerms.join(" OR ")})`);
+      for (const subject of subjects) params.push(subject.type, subject.id);
+    }
+    if (scope.kind === "project") {
+      conditions.push(usageProjectConditionSql(1));
+      params.push(...usageProjectConditionParams([String(scope.projectId)]));
+    }
+    if (conditions.length === 0) return undefined;
+    const clauses = [`(${conditions.join(" OR ")})`];
+    if (from !== undefined) {
+      clauses.push("observed_at >= ?");
+      params.push(from);
+    }
+    let row: { readonly unpriced: number; readonly micros: number } | undefined;
+    try {
+      row = this.#connection
+        .prepare(
+          `SELECT
+            COALESCE(SUM(CASE WHEN cost_usd_micros IS NULL THEN 1 ELSE 0 END), 0) AS unpriced,
+            COALESCE(SUM(cost_usd_micros), 0) AS micros
+          FROM usage_record_projection
+          WHERE ${clauses.join(" AND ")}`,
+        )
+        .get(...params) as { readonly unpriced: number; readonly micros: number } | undefined;
+    } catch {
+      return undefined;
+    }
+    if (row === undefined || row.unpriced > 0) return undefined;
+    if (!Number.isSafeInteger(row.micros) || row.micros < 0) return undefined;
+    // Whole cents: a partial cent of estimated spend still counts against the
+    // ceiling once it reaches one cent.
+    return Math.floor(row.micros / 10_000);
   }
 
   /**
@@ -446,6 +527,21 @@ export class SpendCeilingService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * A Project's child runs, not only the admitted thread's. Counting one
+   * thread's runs left the spend of runs under the Project's other threads —
+   * and of every run in the Project overview, which admits no thread —
+   * outside the Project ceiling, so it read money left after it was spent.
+   */
+  #projectChildSubjectIds(
+    projectId: ProjectId,
+    threadChildIds: ReadonlyArray<string>,
+  ): ReadonlyArray<string> {
+    const ids = new Set(threadChildIds);
+    for (const runId of this.#agentRuns?.projectRunIds(projectId) ?? []) ids.add(String(runId));
+    return [...ids];
   }
 
   #reservedFor(scope: SpendCeilingScope): number {

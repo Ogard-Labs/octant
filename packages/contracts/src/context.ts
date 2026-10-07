@@ -459,6 +459,17 @@ export type ContextSummary = typeof ContextSummary.Type;
 
 const StableRequestShape = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
 
+/**
+ * What one reconciled request cost, in integer micro-dollars (1e-6 USD).
+ * Absent means the request could not be priced — the ledger keeps the row and
+ * a monetary spend ceiling treats the window as unpriceable, never as free.
+ */
+export const UsageCost = Schema.Struct({
+  kind: Schema.Literal("provider-recorded", "api-estimate"),
+  usdMicros: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type UsageCost = typeof UsageCost.Type;
+
 export const UsageReconciliation = Schema.Struct({
   id: UsageReconciliationId,
   planId: Schema.optional(ContextPlanId),
@@ -484,6 +495,7 @@ export const UsageReconciliation = Schema.Struct({
    * unavailable, so "requests without reported usage" can count it.
    */
   providerReported: Schema.optional(Schema.Boolean),
+  cost: Schema.optional(UsageCost),
 })
   .annotations(strict)
   .pipe(

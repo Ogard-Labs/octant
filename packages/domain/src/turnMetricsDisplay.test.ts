@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   costOfTurns,
   formatCacheHit,
+  ledgerUsageCost,
   formatCostUsd,
   formatSeconds,
   formatTokenCount,
@@ -274,6 +275,28 @@ describe("thread cost", () => {
       },
     };
     expect(threadStatsInputOf(summary).cost?.latestTurns).toBe(1);
+  });
+});
+
+describe("ledger cost", () => {
+  it("records a provider-reported cost as provider-recorded micro-dollars", () => {
+    expect(
+      ledgerUsageCost("unpriced-model", { inputTokens: 5, outputTokens: 5, costUsd: 0.0421 }),
+    ).toEqual({ kind: "provider-recorded", usdMicros: 42_100 });
+  });
+
+  it("estimates at standard API rates only when the provider reported no cost", () => {
+    const usage = { inputTokens: 100_000, cacheReadInputTokens: 80_000, outputTokens: 10_000 };
+    expect(ledgerUsageCost("gpt-5.6-luna", usage)).toEqual({
+      kind: "api-estimate",
+      usdMicros: 17_600,
+    });
+  });
+
+  it("leaves usage unpriced when the model has no price and the provider reported none", () => {
+    expect(
+      ledgerUsageCost("some-local-model", { inputTokens: 5, outputTokens: 5 }),
+    ).toBeUndefined();
   });
 });
 

@@ -288,6 +288,84 @@ describe("ChatTurnRunner", () => {
     expect(settle).toHaveBeenCalledExactlyOnceWith({ reservationId: String(reservation) });
   });
 
+  it("tells the transcript which ceiling refused the turn, in the refusal's own words", async () => {
+    const message =
+      "This thread's money ceiling cannot be checked because some of its usage in this window has no price.";
+    const acquire = vi.fn(() => Effect.die(new Error("A refused turn never reaches the provider")));
+    const harness = makeHarness();
+    const updates: ChatAttempt[] = [];
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      spendCeiling: {
+        admit: () => ({
+          status: "refused",
+          refusal: {
+            kind: "unknown-spend",
+            scopeKind: "thread",
+            scopeId: "82000000-0000-4000-8000-000000000001",
+            dimension: "monetary",
+            ceilingUsdCents: 25_00,
+            recovery: ["raise-ceiling", "clear-ceiling", "open-usage", "pause-work"],
+            message,
+          },
+        }),
+        settle: vi.fn(),
+      },
+      contextHarness: harness,
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    const result = await Effect.runPromiseExit(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { kind: "codex", probe: () => Effect.die(new Error("unused")), acquire },
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: false,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+              digest: "a".repeat(64),
+              byteLength: 5,
+            }),
+        }),
+      ),
+    );
+
+    expect(result._tag).toBe("Failure");
+    expect(acquire).not.toHaveBeenCalled();
+    expect(updates.at(-1)).toMatchObject({
+      outcome: "interrupted",
+      failure: { code: "unknown-spend", message },
+    });
+    // A turn refused before the provider cost nothing and leaves no row.
+    expect(harness.reconcileUsage).not.toHaveBeenCalled();
+  });
+
   it("fails closed when a provider completes without non-whitespace assistant content", async () => {
     const updates: ChatAttempt[] = [];
     const persistResponse = vi.fn(() =>
@@ -2089,6 +2167,7 @@ describe("ChatTurnRunner", () => {
             providerExecutionDurationMs: 42,
             contextTokens: 17,
             contextWindow: 200_000,
+            costUsd: 0.0421,
           } as never);
           yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Done" } as never);
           yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
@@ -2155,6 +2234,7 @@ describe("ChatTurnRunner", () => {
         providerExecutionDurationMs: 42,
         contextTokens: 17,
         contextWindow: 200_000,
+        costUsd: 0.0421,
       }),
     );
     expect(updates.at(-1)?.usage).toEqual({ inputTokens: 12, outputTokens: 8 });
@@ -2190,9 +2270,10 @@ describe("ChatTurnRunner", () => {
         answerTool: () => Effect.void,
       };
       const { scheduler, reservation } = makeScheduler();
+      const harness = makeHarness();
       const runner = new ChatTurnRunner({
         capacityScheduler: scheduler,
-        contextHarness: makeHarness(),
+        contextHarness: harness,
         researchRouter: new ResearchRouter({
           searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
           providerNativeExecute: async () => ({
@@ -2238,7 +2319,7 @@ describe("ChatTurnRunner", () => {
           }),
         ),
       );
-      return { exit, completed, ended };
+      return { exit, completed, ended, harness };
     }
 
     it("hands a completed turn's full usage and speed to the observer", async () => {
@@ -2289,6 +2370,61 @@ describe("ChatTurnRunner", () => {
 
       expect(exit._tag).toBe("Success");
       expect(ended[0]?.stopReason).toBe("max-tokens");
+    });
+
+    it("records every request of a failed harness turn in the usage ledger", async () => {
+      const { exit, harness } = await runTurn(
+        [
+          {
+            kind: "usage",
+            occurredAt: at(2_000),
+            requestStartedAt: at(1_000),
+            inputTokens: 100,
+            outputTokens: 4,
+            costUsd: 0.01,
+          },
+          {
+            kind: "usage",
+            occurredAt: at(4_000),
+            requestStartedAt: at(3_000),
+            inputTokens: 180,
+            outputTokens: 8,
+            costUsd: 0.02,
+          },
+          {
+            kind: "failed",
+            failure: { category: "provider-failed", message: "Provider stopped." },
+          },
+        ],
+        { finishedAtMs: 4_000 },
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(harness.reconcileUsage).toHaveBeenCalledOnce();
+      expect(harness.reconcileUsage).toHaveBeenCalledWith(
+        expect.objectContaining({ actualInputTokens: 280, actualOutputTokens: 12, costUsd: 0.03 }),
+      );
+      expect(harness.reconcileUsage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ providerReported: false }),
+      );
+    });
+
+    it("records a failed turn that reported nothing as unreported, so it is never free", async () => {
+      const { exit, harness } = await runTurn(
+        [
+          {
+            kind: "failed",
+            failure: { category: "provider-failed", message: "Provider stopped." },
+          },
+        ],
+        { finishedAtMs: 1_000 },
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(harness.reconcileUsage).toHaveBeenCalledOnce();
+      expect(harness.reconcileUsage).toHaveBeenCalledWith(
+        expect.objectContaining({ actualInputTokens: 0, providerReported: false }),
+      );
     });
 
     it("says an interrupted turn stopped without finishing, and keeps what it cost", async () => {

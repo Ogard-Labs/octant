@@ -26,9 +26,10 @@ import {
   type ProviderRuntimeEvent,
   type ProviderServiceLimits,
   type TurnStopReason,
+  type TurnUsage,
   upsertThreadTaskProgress,
 } from "@octant/contracts";
-import { observeTurnMetrics, startTurnMetrics } from "@octant/domain";
+import { accumulateTurnUsage, observeTurnMetrics, startTurnMetrics } from "@octant/domain";
 import { answerChatTurnQuestion, transitionChatAttempt } from "@octant/domain/chat-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Cause, Deferred, Effect, Fiber, Option, Schema, Scope, Stream } from "effect";
@@ -314,7 +315,15 @@ export class ChatTurnRunner {
       let cacheReadInputTokens: number | undefined;
       let cacheWriteInputTokens: number | undefined;
       let providerExecutionDurationMs: number | undefined;
+      // Per-request reports add up and a whole-turn report replaces them
+      // (`accumulateTurnUsage`); cost stays a total only while every request
+      // in it reported one.
+      let costUsd: number | undefined;
+      let turnUsage: TurnUsage | undefined;
       let sawUsage = false;
+      // Set once the prompt has gone to the provider: from then on the turn
+      // may have been charged, so it leaves a ledger row however it ends.
+      let promptSent = false;
       let sawVisibleResponse = false;
       let terminalOutcome: ChatAttemptOutcome | undefined;
       let outputLimited = false;
@@ -416,8 +425,11 @@ export class ChatTurnRunner {
         turnUpperBoundTokens: input.estimatedTokens,
       });
       if (spendAdmission?.status === "refused") {
+        // The refusal names the ceiling and dimension that refused and what to
+        // do; the bare code would leave the transcript a generic sentence.
         yield* persistOutcome("interrupted", {
           code: decodeDiagnosticFailureCode(spendAdmission.refusal.kind),
+          message: spendAdmission.refusal.message,
         });
         terminalOutcome = "interrupted";
         capacityScheduler.recordTerminal({
@@ -627,6 +639,35 @@ export class ChatTurnRunner {
           yield* connection
             .stop(input.attempt.providerSessionId)
             .pipe(Effect.catchAll(() => Effect.void));
+          // Every turn that reached the provider leaves one ledger row. A turn
+          // that failed or was cancelled used to leave none, so a money ceiling
+          // counted it as free; one that reported nothing is recorded as
+          // unreported and unpriced, and the ceiling refuses instead.
+          const reconcileTurn = () => {
+            try {
+              contextHarness.reconcileUsage({
+                subject: input.contextSubject,
+                planId: input.contextPlanId,
+                requestShape: input.requestShape,
+                actualInputTokens,
+                actualOutputTokens,
+                ...(contextTokens === undefined ? {} : { contextTokens }),
+                ...(contextWindow === undefined ? {} : { contextWindow }),
+                ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+                ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
+                ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+                ...(providerExecutionDurationMs === undefined
+                  ? {}
+                  : { providerExecutionDurationMs }),
+                ...(costUsd === undefined ? {} : { costUsd }),
+                ...(sawUsage ? {} : { providerReported: false }),
+                currentVarianceReserve: input.varianceReserve,
+                maxAdjustmentTokens: input.varianceReserve,
+              });
+            } catch {
+              // Usage reconciliation is best-effort once a turn has ended.
+            }
+          };
           if (terminalOutcome === "completed") {
             if (sawUsage) {
               spendCeiling?.settle({
@@ -647,29 +688,9 @@ export class ChatTurnRunner {
                 outcome: "completed",
               });
             }
-            try {
-              contextHarness.reconcileUsage({
-                subject: input.contextSubject,
-                planId: input.contextPlanId,
-                requestShape: input.requestShape,
-                actualInputTokens,
-                actualOutputTokens,
-                ...(contextTokens === undefined ? {} : { contextTokens }),
-                ...(contextWindow === undefined ? {} : { contextWindow }),
-                ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
-                ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
-                ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
-                ...(providerExecutionDurationMs === undefined
-                  ? {}
-                  : { providerExecutionDurationMs }),
-                ...(sawUsage ? {} : { providerReported: false }),
-                currentVarianceReserve: input.varianceReserve,
-                maxAdjustmentTokens: input.varianceReserve,
-              });
-            } catch {
-              // Usage reconciliation is best-effort after a completed turn.
-            }
+            reconcileTurn();
           } else if (terminalOutcome !== undefined) {
+            if (promptSent || sawUsage) reconcileTurn();
             spendCeiling?.settle({
               reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
             });
@@ -683,6 +704,7 @@ export class ChatTurnRunner {
                     : "interrupted",
             });
           } else {
+            if (promptSent || sawUsage) reconcileTurn();
             spendCeiling?.settle({
               reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
             });
@@ -888,18 +910,17 @@ export class ChatTurnRunner {
                 }
                 if (event.kind === "usage") {
                   sawUsage = true;
-                  actualInputTokens = event.inputTokens;
-                  actualOutputTokens = event.outputTokens;
                   contextTokens = event.contextTokens ?? contextTokens;
                   contextWindow = event.contextWindow ?? contextWindow;
                   const observation = usageFromRuntimeEvent(event);
                   if (observation !== undefined) {
-                    actualInputTokens = observation.inputTokens;
-                    actualOutputTokens = observation.outputTokens;
-                    reasoningTokens = observation.reasoningTokens ?? reasoningTokens;
-                    cacheReadInputTokens = observation.cacheReadInputTokens ?? cacheReadInputTokens;
-                    cacheWriteInputTokens =
-                      observation.cacheWriteInputTokens ?? cacheWriteInputTokens;
+                    turnUsage = accumulateTurnUsage(turnUsage, event);
+                    actualInputTokens = turnUsage.inputTokens;
+                    actualOutputTokens = turnUsage.outputTokens;
+                    reasoningTokens = turnUsage.reasoningTokens;
+                    cacheReadInputTokens = turnUsage.cacheReadInputTokens;
+                    cacheWriteInputTokens = turnUsage.cacheWriteInputTokens;
+                    costUsd = turnUsage.costUsd;
                     providerExecutionDurationMs =
                       observation.providerExecutionDurationMs ?? providerExecutionDurationMs;
                   }
@@ -1384,6 +1405,7 @@ export class ChatTurnRunner {
             );
           }
           timing = startTurnMetrics(clock());
+          promptSent = true;
           yield* connection
             .send({
               sessionId: input.attempt.providerSessionId,

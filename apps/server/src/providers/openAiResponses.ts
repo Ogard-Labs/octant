@@ -84,6 +84,8 @@ export interface ProtocolUsage {
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
   readonly reasoningTokens?: number;
+  /** What the endpoint itself charged for the request, in US dollars, when it says. */
+  readonly costUsd?: number;
 }
 
 export interface ResponsesTurnInput {

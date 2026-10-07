@@ -2,12 +2,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { decodeAggregateVersion, decodeProjectId } from "@octant/contracts";
+import { decodeAgentRunId, decodeAggregateVersion, decodeProjectId } from "@octant/contracts";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite } from "./persistence/sqlitePort";
-import { decodeSpendCeilingReservationId, SpendCeilingService } from "./spendCeilingService";
+import {
+  decodeSpendCeilingReservationId,
+  SpendCeilingService,
+  type SpendCeilingServiceOptions,
+} from "./spendCeilingService";
 
 const directories: Array<string> = [];
 const now = "2026-09-09T12:00:00.000Z";
@@ -26,7 +30,10 @@ afterEach(() => {
   }
 });
 
-function openService(options?: { readonly clock?: () => string }) {
+function openService(options?: {
+  readonly clock?: () => string;
+  readonly agentRuns?: SpendCeilingServiceOptions["agentRuns"];
+}) {
   const directory = mkdtempSync(join(tmpdir(), "octant-spend-ceiling-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "octant.sqlite3"));
@@ -45,6 +52,7 @@ function openService(options?: { readonly clock?: () => string }) {
     uuid: () => crypto.randomUUID(),
     threadExists: () => true,
     projectExists: () => true,
+    ...(options?.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
   });
   return { connection, journal, service, path: join(directory, "octant.sqlite3") };
 }
@@ -67,6 +75,8 @@ function insertUsage(
     readonly quality?: string;
     readonly sequence: number;
     readonly observedAt?: string;
+    readonly costUsdMicros?: number;
+    readonly costKind?: "provider-recorded" | "api-estimate";
   },
 ): void {
   connection
@@ -75,9 +85,10 @@ function insertUsage(
         reconciliation_id, subject_type, subject_id, provider_instance_id, model_id,
         request_shape, quality, input_tokens, output_tokens, reasoning_tokens,
         cache_read_input_tokens, cache_write_input_tokens, provider_execution_duration_ms,
+        cost_usd_micros, cost_kind,
         planned_input_tokens, variance_tokens, schema_version, attribution_json,
         observed_at, last_sequence, host_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.id,
@@ -93,6 +104,8 @@ function insertUsage(
       null,
       null,
       null,
+      input.costUsdMicros ?? null,
+      input.costUsdMicros === undefined ? null : (input.costKind ?? "provider-recorded"),
       input.tokens.input,
       0,
       2,
@@ -343,6 +356,191 @@ describe("SpendCeilingService", () => {
       tokenBudget: 5_000,
     });
     expect(raise.kind).toBe("raised");
+  });
+
+  it("refuses a turn once the monetary ceiling is used up", () => {
+    const { connection, service } = openService();
+    expect(
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { costBudgetUsdCents: 25_00 },
+        window: { kind: "lifetime" },
+      }).kind,
+    ).toBe("set");
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000301",
+      subjectType: "chat-thread",
+      subjectId: ids.thread,
+      tokens: { input: 100, output: 0 },
+      sequence: 1,
+      costUsdMicros: 25_000_000,
+    });
+    const admission = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      turnUpperBoundTokens: 100,
+    });
+    expect(admission).toMatchObject({
+      status: "refused",
+      refusal: { kind: "exhausted", dimension: "monetary" },
+    });
+  });
+
+  it("refuses a monetary ceiling when in-window usage has no price", () => {
+    const { connection, service } = openService();
+    expect(
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { costBudgetUsdCents: 25_00 },
+        window: { kind: "lifetime" },
+      }).kind,
+    ).toBe("set");
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000302",
+      subjectType: "chat-thread",
+      subjectId: ids.thread,
+      tokens: { input: 100, output: 0 },
+      sequence: 1,
+    });
+    const admission = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      turnUpperBoundTokens: 100,
+    });
+    expect(admission).toMatchObject({
+      status: "refused",
+      refusal: { kind: "unknown-spend", dimension: "monetary" },
+    });
+    // The reading names the money budget it cannot measure instead of
+    // leaving it out, so a surface can say so beside the other budgets.
+    const snapshot = service.snapshot({
+      principalKind: "local-window",
+      threadId: ids.thread,
+      threadType: "chat-thread",
+    });
+    expect(remainingOf(snapshot, "thread")).toMatchObject({ ceilingUsdCents: 25_00 });
+    expect(remainingOf(snapshot, "thread")).not.toHaveProperty("remainingUsdCents");
+  });
+
+  it("counts a child run under another Project thread against the Project ceiling and its overview", () => {
+    const { connection, service } = openService({
+      agentRuns: {
+        // The admitted thread started no run; another thread in the Project did.
+        parentSummary: () => [],
+        projectRunIds: (projectId) =>
+          String(projectId) === ids.project ? [decodeAgentRunId(ids.child)] : [],
+      },
+    });
+    expect(
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { tokenBudget: 1_000, costBudgetUsdCents: 25_00 },
+        window: { kind: "calendar", period: "month", timeZone: "UTC" },
+      }),
+    ).toMatchObject({ kind: "set" });
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000304",
+      subjectType: "agent-run",
+      subjectId: ids.child,
+      tokens: { input: 700, output: 200 },
+      sequence: 1,
+      costUsdMicros: 25_000_000,
+    });
+
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({ remainingTokens: 100, usedUsdCents: 25_00, remainingUsdCents: 0 });
+    expect(
+      service.admit({
+        reservationId: ids.reservationA,
+        threadId: ids.thread,
+        threadType: "work-thread",
+        projectId: ids.project,
+        turnUpperBoundTokens: 50,
+      }),
+    ).toMatchObject({ status: "refused", refusal: { kind: "exhausted", dimension: "monetary" } });
+  });
+
+  it("reads remaining money in cents and raises a money ceiling that survives restart", () => {
+    const { connection, journal, service } = openService();
+    const scope = {
+      kind: "thread" as const,
+      threadType: "chat-thread" as const,
+      threadId: ids.thread,
+    };
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope,
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 25_00 },
+      window: { kind: "lifetime" },
+    });
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000303",
+      subjectType: "chat-thread",
+      subjectId: ids.thread,
+      tokens: { input: 100, output: 0 },
+      sequence: 1,
+      costUsdMicros: 10_404_999,
+      costKind: "api-estimate",
+    });
+    const before = service.snapshot({
+      principalKind: "local-window",
+      threadId: ids.thread,
+      threadType: "chat-thread",
+    });
+    expect(before).toMatchObject({
+      threadRemaining: { ceilingUsdCents: 25_00, usedUsdCents: 10_40, remainingUsdCents: 14_60 },
+    });
+
+    expect(
+      service.execute("local-window", {
+        kind: "raise-spend-ceiling",
+        scope,
+        expectedVersion: decodeAggregateVersion(1),
+        costBudgetUsdCents: 10_00,
+      }),
+    ).toMatchObject({ kind: "refused", refusal: { kind: "not-a-raise" } });
+    expect(
+      service.execute("local-window", {
+        kind: "raise-spend-ceiling",
+        scope,
+        expectedVersion: decodeAggregateVersion(1),
+        costBudgetUsdCents: 40_00,
+      }),
+    ).toMatchObject({
+      kind: "raised",
+      ceiling: { policy: { costBudgetUsdCents: 40_00 } },
+      previousCostBudgetUsdCents: 25_00,
+    });
+
+    const restarted = new SpendCeilingService({
+      connection,
+      journal,
+      clock: () => now,
+      uuid: () => crypto.randomUUID(),
+    });
+    expect(
+      restarted.snapshot({
+        principalKind: "local-window",
+        threadId: ids.thread,
+        threadType: "chat-thread",
+      }),
+    ).toMatchObject({
+      thread: { policy: { costBudgetUsdCents: 40_00 } },
+      threadRemaining: { ceilingUsdCents: 40_00, usedUsdCents: 10_40, remainingUsdCents: 29_60 },
+    });
   });
 
   it("counts only scoped usage inside the calendar window", () => {

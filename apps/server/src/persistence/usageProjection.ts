@@ -128,6 +128,7 @@ export class UsageProjection implements Projection {
       ...(reconciliation.providerExecutionDurationMs === undefined
         ? {}
         : { providerExecutionDurationMs: reconciliation.providerExecutionDurationMs }),
+      ...(reconciliation.cost === undefined ? {} : { cost: reconciliation.cost }),
       plannedInputTokens: reconciliation.plannedInputTokens,
       varianceTokens: reconciliation.varianceTokens,
       attribution,
@@ -140,16 +141,18 @@ export class UsageProjection implements Projection {
           reconciliation_id, subject_type, subject_id, provider_instance_id,
           model_id, request_shape, quality, input_tokens, output_tokens,
           reasoning_tokens, cache_read_input_tokens, cache_write_input_tokens,
-          provider_execution_duration_ms,
+          provider_execution_duration_ms, cost_usd_micros, cost_kind,
           planned_input_tokens, variance_tokens, schema_version,
           attribution_json, observed_at, last_sequence, host_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (reconciliation_id) DO UPDATE SET
           quality = excluded.quality,
           reasoning_tokens = excluded.reasoning_tokens,
           cache_read_input_tokens = excluded.cache_read_input_tokens,
           cache_write_input_tokens = excluded.cache_write_input_tokens,
           provider_execution_duration_ms = excluded.provider_execution_duration_ms,
+          cost_usd_micros = excluded.cost_usd_micros,
+          cost_kind = excluded.cost_kind,
           attribution_json = excluded.attribution_json,
           last_sequence = excluded.last_sequence
         WHERE excluded.last_sequence > usage_record_projection.last_sequence
@@ -168,6 +171,8 @@ export class UsageProjection implements Projection {
         record.cacheReadInputTokens ?? null,
         record.cacheWriteInputTokens ?? null,
         record.providerExecutionDurationMs ?? null,
+        record.cost?.usdMicros ?? null,
+        record.cost?.kind ?? null,
         record.plannedInputTokens ?? 0,
         record.varianceTokens ?? 0,
         USAGE_PROJECTION_SCHEMA_VERSION,
@@ -195,18 +200,23 @@ export class CodeUsageProjection implements Projection {
     if (event.eventName !== "code.operation-event-recorded@1") return;
     assertProjection(event.eventVersion === 1 && event.aggregateType === "code-operation");
     const frame = decodeProjection(() => decodeCodeOperationEventFrame(event.payload));
-    if (frame.event.kind !== "usage") return;
+    const turnEnded =
+      frame.event.kind === "operation-state" &&
+      (frame.event.state === "completed" ||
+        frame.event.state === "interrupted" ||
+        frame.event.state === "failed");
+    if (frame.event.kind !== "usage" && !turnEnded) return;
     assertProjection(String(frame.operationId) === String(event.aggregateId));
     const start = connection
       .prepare(`
-      SELECT payload_json FROM event_journal
+      SELECT payload_json, global_sequence FROM event_journal
       WHERE aggregate_type = 'code-operation' AND aggregate_id = ?
         AND event_name = 'code.operation-event-recorded@1' AND global_sequence < ?
         AND json_extract(payload_json, '$.event.kind') = 'conversation-turn-started'
       ORDER BY global_sequence DESC LIMIT 1
     `)
       .get(String(frame.operationId), event.globalSequence) as
-      | { readonly payload_json: string }
+      | { readonly payload_json: string; readonly global_sequence: number }
       | undefined;
     if (start === undefined) return;
     const started = decodeProjection(() =>
@@ -214,7 +224,43 @@ export class CodeUsageProjection implements Projection {
     );
     assertProjection(started.event.kind === "conversation-turn-started");
     assertProjection(String(started.threadId) === String(frame.threadId));
+    if (frame.event.kind !== "usage") {
+      // A turn that ended without reporting usage — an ACP agent reports none
+      // — still ran on the provider. Recording it as unreported and unpriced
+      // keeps it out of "free": a spend ceiling refuses instead of counting
+      // it as nothing. A turn that did report keeps its row untouched.
+      // The turn starts before its provider is acquired, so one that failed
+      // or was cancelled before its session was ready sent nothing; a row
+      // would make a money ceiling refuse over spend that never happened.
+      const completed = frame.event.kind === "operation-state" && frame.event.state === "completed";
+      if (!completed && !providerSessionReady(connection, frame.operationId, start, event)) return;
+      connection
+        .prepare(`
+        INSERT INTO usage_record_projection (
+          reconciliation_id, subject_type, subject_id, provider_instance_id,
+          model_id, request_shape, quality, input_tokens, output_tokens,
+          planned_input_tokens, variance_tokens, schema_version,
+          attribution_json, observed_at, last_sequence, host_id, planning_available
+        ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'unavailable', 0, 0, 0, 0, ?, '[]', ?, ?, ?, 0)
+        ON CONFLICT (reconciliation_id) DO NOTHING
+      `)
+        .run(
+          String(frame.operationId),
+          String(frame.threadId),
+          String(started.event.providerInstanceId),
+          String(started.event.modelId),
+          USAGE_PROJECTION_SCHEMA_VERSION,
+          frame.occurredAt,
+          event.globalSequence,
+          String(event.hostId),
+        );
+      return;
+    }
     const usage = frame.event;
+    // The report's cost covers the same turn its tokens do, so it replaces the
+    // previous cost too; a report without one leaves the turn unpriced. The
+    // cost is the one journaled with the report, never priced here: a replay
+    // must reproduce the ledger, not re-price it against today's rate table.
     // Code reports replace the turn's previous totals, just as its transcript
     // does. The operation id keeps live updates and replay on the same row.
     connection
@@ -222,12 +268,16 @@ export class CodeUsageProjection implements Projection {
       INSERT INTO usage_record_projection (
         reconciliation_id, subject_type, subject_id, provider_instance_id,
         model_id, request_shape, quality, input_tokens, output_tokens,
+        cost_usd_micros, cost_kind,
         planned_input_tokens, variance_tokens, schema_version,
         attribution_json, observed_at, last_sequence, host_id, planning_available
-      ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'exact', ?, ?, 0, 0, ?, '[]', ?, ?, ?, 0)
+      ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'exact', ?, ?, ?, ?, 0, 0, ?, '[]', ?, ?, ?, 0)
       ON CONFLICT (reconciliation_id) DO UPDATE SET
+        quality = excluded.quality,
         input_tokens = excluded.input_tokens,
         output_tokens = excluded.output_tokens,
+        cost_usd_micros = excluded.cost_usd_micros,
+        cost_kind = excluded.cost_kind,
         observed_at = excluded.observed_at,
         last_sequence = excluded.last_sequence
       WHERE excluded.last_sequence > usage_record_projection.last_sequence
@@ -239,12 +289,35 @@ export class CodeUsageProjection implements Projection {
         String(started.event.modelId),
         usage.inputTokens,
         usage.outputTokens,
+        usage.cost?.usdMicros ?? null,
+        usage.cost?.kind ?? null,
         USAGE_PROJECTION_SCHEMA_VERSION,
         frame.occurredAt,
         event.globalSequence,
         String(event.hostId),
       );
   }
+}
+
+/** Whether the turn's provider session was ready for its prompt before it ended. */
+function providerSessionReady(
+  connection: SqliteConnection,
+  operationId: string,
+  start: { readonly global_sequence: number },
+  ended: EventEnvelope,
+): boolean {
+  return (
+    connection
+      .prepare(`
+      SELECT 1 AS present FROM event_journal
+      WHERE aggregate_type = 'code-operation' AND aggregate_id = ?
+        AND event_name = 'code.operation-event-recorded@1'
+        AND global_sequence > ? AND global_sequence < ?
+        AND json_extract(payload_json, '$.event.kind') = 'provider-session-ready'
+      LIMIT 1
+    `)
+      .get(operationId, start.global_sequence, ended.globalSequence) !== undefined
+  );
 }
 
 function rawUsageRecord(
@@ -567,6 +640,14 @@ function decodeUsageRow(row: UsageRecordProjectionRow): UsageRecord {
     ...(row.provider_execution_duration_ms === null
       ? {}
       : { providerExecutionDurationMs: row.provider_execution_duration_ms }),
+    ...(row.cost_usd_micros === null
+      ? {}
+      : {
+          cost: {
+            kind: row.cost_kind,
+            usdMicros: row.cost_usd_micros,
+          },
+        }),
     ...(row.planning_available === 0
       ? {}
       : {

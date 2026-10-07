@@ -20,7 +20,7 @@ snapshots. Input totals include uncached, cache-read, and cache-write tokens; co
 occupancy describes the latest model call. Totals reset for each turn, including
 retained native processes. If a completed assistant message omits valid usage,
 the turn remains unknown rather than presenting a partial total. Only provider-reported
-costs are recorded, and historical turns are not rewritten.
+costs are carried on its usage events, and historical turns are not rewritten.
 
 On host restart, orphaned running Code turns become Waiting in both runtime
 and conversation state. Recovery appends a status event without replacing prompts,
@@ -1810,18 +1810,67 @@ Work also refuses when the previous driver is unavailable and its conversation
 ownership cannot be established.
 
 Optional Project and
-thread spend ceilings (0060) are host owner policy over three dimensions:
-tokens, turns, and total agent run time per window (for example two hours a
-day for a Project). The server refuses a provider-consuming turn at admission
-when remaining reserved token capacity cannot cover a declared per-turn bound,
-when the turn count is used up, or when settled plus in-flight run time has
-reached the budget, and the composer and Environment name the exhausted
-dimension and a recovery. Token spend is the existing `UsageRecord` ledger,
-never imported provider history. Turns and run time come from journaled
+thread spend ceilings (0060) are host owner policy over four dimensions:
+tokens, turns, total agent run time, and money per window (for example two
+hours a day, or $25 a month, for a Project). The server refuses a
+provider-consuming turn at admission when remaining reserved token capacity
+cannot cover a declared per-turn bound, when the turn count is used up, when
+settled plus in-flight run time has reached the budget, or when settled money
+spend has reached the budget, and the composer and Environment name the
+exhausted dimension and a recovery. Token spend is the existing `UsageRecord`
+ledger, never imported provider history. Token and money spend include child
+runs: a thread ceiling counts its own runs, and a Project ceiling counts every
+run whose routing receipt names the Project, whichever thread started it, at
+admission and in the Project overview. Turns and run time come from journaled
 `spend.turn-recorded@1` facts, one per admitted turn or child run, charged its
 actual admitted-to-settled time; a turn still in flight counts its elapsed time,
-and a turn a host exit interrupted records nothing. Monetary ceilings stay
-unenforced until pricing metadata exists.
+and a turn a host exit interrupted records nothing.
+
+A money budget is whole US cents (`costBudgetUsdCents`); a raise must be
+strictly above the current budget and cannot add money to a ceiling that has
+none, as for the other dimensions. Spend is the sum of the window's
+`UsageRecord` costs in integer micro-dollars, floored to whole cents. Each
+reconciled request records its cost from the provider runtime's own figure
+(`costUsd` on the normalized `usage` event) as `provider-recorded`: Claude Code
+(`total_cost_usd`), OpenCode, Pi, and an OpenAI-compatible endpoint that reports
+`usage.cost` (OpenRouter; a BYOK `cost` is only OpenRouter's fee and is not
+used). Without a provider figure, a model in the checked-in standard-rate price
+table (`packages/domain/src/localUsagePricing.ts`, the same table and rule the
+composer's cost line uses) is recorded as an `api-estimate`. On a subscription
+plan both are API-rate equivalents, not the bill: Claude Code reports
+`total_cost_usd` at API rates on a Claude plan too. The cost is fixed when the
+usage is journaled: Chat and Work carry it in the usage reconciliation, and
+Code carries it in the turn's `usage` operation frame (`cost`). Projections read
+the journaled cost and never price, so a rebuild reproduces the ledger exactly:
+a later price-table revision does not re-price history, and usage journaled
+before it carried a cost stays unpriced.
+
+A turn's usage is accumulated as the runtime contract defines it
+(`accumulateTurnUsage`): reports that name their request add up, a whole-turn
+report replaces them, and the sum has a cost only when every request in it
+reported one. The Claude mapper reports the turn so far after each model call,
+summed by message id. Every turn that reached the provider leaves exactly one
+ledger row however it ended — completed, failed, cancelled, or interrupted —
+and Work keeps usage the provider reports after a cancel. A turn that reached
+the provider and reported nothing (an ACP agent in Code reports no usage) is
+recorded as unreported and unpriced, so token and money ceilings refuse after
+it; a turn refused or failed before the provider leaves no row. A Code turn
+reaches the provider once its `provider-session-ready` frame is journaled,
+just before the prompt is sent, or when it completes. Any unpriced row in the
+window — a model with no price, a provider that reports no cost or no usage,
+and usage recorded before the ledger carried cost — makes the money ceiling
+refuse `unknown-spend` rather than count that usage as free. That refusal
+offers clearing the ceiling, waiting out a Project's calendar window, Usage,
+or pausing; a raise cannot price the usage, so it is not offered. Turns from
+before this behaviour that left no ledger row at all are not counted.
+
+Money is checked between turns, like turns and run time, not reserved like
+tokens. A provider reports cost only when a turn settles and no per-turn price
+bound exists for every provider, so reserving would need a second, invented
+bound; instead admission refuses once settled spend reaches the budget, a turn
+already running finishes and may end over it, and concurrent turns admitted
+while money remained can each add their cost. The Usage panel and Project
+overview say so wherever a money budget is in force.
 
 ### Native harness
 

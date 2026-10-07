@@ -2200,6 +2200,43 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("journals the ledger's price for a Code turn with its usage report", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    // A model the standard-rate table prices; the provider reports no figure.
+    fixture.setThread(decodeCodeThread({ ...thread(), modelId: "gpt-5.6-sol" }));
+    const startOperation = operationId(29);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({ kind: "usage", inputTokens: 100_000, outputTokens: 10_000 }),
+        ),
+      );
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+        expect(frames.find((frame) => frame.event.kind === "usage")?.event).toEqual({
+          kind: "usage",
+          inputTokens: 100_000,
+          outputTokens: 10_000,
+          cost: { kind: "api-estimate", usdMicros: 600_000 },
+        });
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("sanitizes provider claims before durable frames and authorizes subscriptions", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

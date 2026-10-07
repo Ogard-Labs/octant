@@ -6,6 +6,7 @@ import type {
   TurnMetricsRecord,
   TurnMetricsSummary,
   TurnUsage,
+  UsageCost,
 } from "@octant/contracts";
 import { estimateApiEquivalentCost, type PricingProvider } from "./localUsagePricing";
 import {
@@ -196,6 +197,21 @@ export function turnCost(
   if (usage.costUsd !== undefined) return { amountUsd: usage.costUsd, estimated: false };
   const amountUsd = estimateTurnCostUsd(modelId, usage);
   return amountUsd === undefined ? undefined : { amountUsd, estimated: true };
+}
+
+/**
+ * What a request costs in the usage ledger, in whole micro-dollars. The same
+ * rule as `turnCost`, so the ledger, the composer line, and a money ceiling
+ * price a turn alike: the provider's own figure is `provider-recorded`, a
+ * standard-rate figure for a priced model is `api-estimate`, and anything else
+ * is absent. Absent is unpriced, never free: a money ceiling refuses on it.
+ */
+export function ledgerUsageCost(modelId: string, usage: TurnUsage): UsageCost | undefined {
+  const cost = turnCost(modelId, usage);
+  if (cost === undefined) return undefined;
+  const usdMicros = Math.round(cost.amountUsd * 1_000_000);
+  if (!Number.isSafeInteger(usdMicros) || usdMicros < 0) return undefined;
+  return { kind: cost.estimated ? "api-estimate" : "provider-recorded", usdMicros };
 }
 
 /**

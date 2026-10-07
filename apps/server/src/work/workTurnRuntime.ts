@@ -68,6 +68,8 @@ export interface WorkTurnRuntimePort {
     readonly access?: WorkAccess;
     readonly appManagedTools?: AppManagedToolSet;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
+    /** The prompt is about to go to the provider, so the turn may now be charged. */
+    readonly onPromptSent?: () => void;
     readonly onDelta?: (response: string) => void;
     /** The endpoint is sending the request again. */
     readonly onRetrying?: (
@@ -382,7 +384,10 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               }),
             ),
           ),
-        send: Effect.sync(() => meter.sent()).pipe(
+        send: Effect.sync(() => {
+          meter.sent();
+          input.onPromptSent?.();
+        }).pipe(
           Effect.zipRight(
             connection.send({
               sessionId: input.providerSessionId,

@@ -2830,6 +2830,7 @@ function normalizedOperationEvent(
       inputTokens: event.inputTokens ?? 0,
       outputTokens: event.outputTokens ?? 0,
       ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+      ...(event.cost === undefined ? {} : { cost: event.cost }),
       ...(event.cacheReadInputTokens === undefined
         ? {}
         : { cacheReadInputTokens: event.cacheReadInputTokens }),

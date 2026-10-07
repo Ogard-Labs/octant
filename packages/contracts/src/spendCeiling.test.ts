@@ -64,17 +64,39 @@ describe("SpendCeilingWindow", () => {
 });
 
 describe("SpendCeilingState", () => {
-  it("decodes a Project ceiling without inventing monetary fields", () => {
+  it("decodes a Project ceiling with a monetary budget in whole cents", () => {
     const state = decodeSpendCeilingState({
       scope: { kind: "project", projectId: ids.project },
       window: { kind: "calendar", period: "week", timeZone: "UTC" },
-      policy: { tokenBudget: 50_000 },
+      policy: { costBudgetUsdCents: 25_00 },
       version: 1,
       setAt: timestamp,
       setBy: { kind: "local-user", actorId: ids.actor },
     });
-    expect(state.policy.tokenBudget).toBe(50_000);
-    expect("costUsd" in state.policy).toBe(false);
+    expect(state.policy.costBudgetUsdCents).toBe(25_00);
+  });
+
+  it("refuses a monetary budget that is not a whole positive number of cents", () => {
+    expect(() =>
+      decodeSpendCeilingState({
+        scope: { kind: "project", projectId: ids.project },
+        window: { kind: "lifetime" },
+        policy: { costBudgetUsdCents: 0 },
+        version: 1,
+        setAt: timestamp,
+        setBy: { kind: "local-user", actorId: ids.actor },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeSpendCeilingState({
+        scope: { kind: "project", projectId: ids.project },
+        window: { kind: "lifetime" },
+        policy: { costBudgetUsdCents: 10.5 },
+        version: 1,
+        setAt: timestamp,
+        setBy: { kind: "local-user", actorId: ids.actor },
+      }),
+    ).toThrow();
   });
 });
 
