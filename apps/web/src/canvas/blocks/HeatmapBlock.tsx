@@ -372,28 +372,36 @@ function CalendarHeatmap({
       show(0);
       return;
     }
-    const index = layout.days.findIndex((day) => day.date === active);
-    const next = (Math.max(0, index) + delta + layout.days.length) % layout.days.length;
+    // The days are consecutive, so a step of seven is the neighbouring week.
+    // A step past either end stays put: wrapping would land on another weekday.
+    const index = Math.max(
+      0,
+      layout.days.findIndex((day) => day.date === active),
+    );
+    const next = index + delta;
+    if (next < 0 || next >= layout.days.length) return;
     show(next);
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    // Weeks are columns and weekdays are rows, so the arrows follow the
+    // picture: across is a week, up and down is a day.
     switch (event.key) {
       case "ArrowRight":
         event.preventDefault();
-        move(1);
+        move(7);
         return;
       case "ArrowLeft":
         event.preventDefault();
-        move(-1);
+        move(-7);
         return;
       case "ArrowDown":
         event.preventDefault();
-        move(7);
+        move(1);
         return;
       case "ArrowUp":
         event.preventDefault();
-        move(-7);
+        move(-1);
         return;
       case "Escape":
         event.preventDefault();

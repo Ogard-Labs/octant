@@ -43,6 +43,7 @@ const calendarFixture = {
     { date: "2026-09-01", value: 0 },
     { date: "2026-09-02", value: 4, note: "Flaky suite" },
     { date: "2026-09-03", value: 2 },
+    { date: "2026-09-09", value: 1 },
   ],
 } as const;
 
@@ -112,7 +113,7 @@ describe("heatmap block", () => {
     expect(within(table).getAllByText("—").length).toBeGreaterThan(0);
   });
 
-  it("lays a calendar out as a week grid and moves between days", () => {
+  it("lays a calendar out as a week grid and moves through it the way it is drawn", () => {
     render(<CanvasView input={calendarDefinition()} />);
 
     const calendarPlot = plot(/Calendar heatmap from/);
@@ -122,9 +123,18 @@ describe("heatmap block", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("2026-09-01");
     expect(screen.getByRole("tooltip")).toHaveTextContent("Test failures: 0");
 
-    fireEvent.keyDown(calendarPlot, { key: "ArrowRight" });
+    // A week is a column and a weekday is a row, so down is the next day and
+    // right is the same weekday a week later.
+    fireEvent.keyDown(calendarPlot, { key: "ArrowDown" });
     expect(screen.getByRole("tooltip")).toHaveTextContent("2026-09-02");
     expect(screen.getByRole("tooltip")).toHaveTextContent("Flaky suite");
+
+    fireEvent.keyDown(calendarPlot, { key: "ArrowRight" });
+    expect(screen.getByRole("tooltip")).toHaveTextContent("2026-09-09");
+
+    // The grid stops at its edges rather than wrapping onto another weekday.
+    fireEvent.keyDown(calendarPlot, { key: "ArrowRight" });
+    expect(screen.getByRole("tooltip")).toHaveTextContent("2026-09-09");
   });
 
   it("never journals a sort or a keyboard move", () => {
