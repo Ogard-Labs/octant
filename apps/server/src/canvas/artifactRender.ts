@@ -667,8 +667,10 @@ function erThumbnail(
 }
 
 /**
- * A lane thumbnail: stacked bands with a header column and a few step boxes,
- * so the picture reads as a process handed between owners.
+ * A lane thumbnail: stacked bands with a header column and the lane's first
+ * step, so the picture reads as a process handed between owners. The lane and
+ * its step are named, clamped, because the bundle's Markdown points readers at
+ * this picture.
  */
 function swimlaneThumbnail(
   block: Extract<CanvasBlock, { readonly kind: "swimlane" }>,
@@ -686,15 +688,28 @@ function swimlaneThumbnail(
       const band = `<rect x="${String(PADDING)}" y="${String(top)}" width="${String(width)}" height="${String(laneHeight - 3)}" rx="2" fill="none" stroke="${palette.muted}" opacity="0.7"/>`;
       const divider = `<line x1="${String(PADDING + headerWidth)}" y1="${String(top)}" x2="${String(PADDING + headerWidth)}" y2="${String(top + laneHeight - 3)}" stroke="${palette.muted}" opacity="0.7"/>`;
       const name = text(PADDING + 4, top + 10, clamp(lane.label, 12), 7, palette.ink, 600);
-      const step = `<rect x="${String(PADDING + headerWidth + 8)}" y="${String(top + 2)}" width="${String(Math.round(width * 0.3))}" height="9" rx="2" fill="${palette.accent}" opacity="0.5"/>`;
-      return band + divider + name + step;
+      const stepWidth = Math.round(width * 0.3);
+      const step = `<rect x="${String(PADDING + headerWidth + 8)}" y="${String(top + 2)}" width="${String(stepWidth)}" height="9" rx="2" fill="${palette.accent}" opacity="0.5"/>`;
+      const firstStep = block.steps.find((entry) => String(entry.laneId) === String(lane.laneId));
+      const stepName =
+        firstStep === undefined
+          ? ""
+          : text(
+              PADDING + headerWidth + 11,
+              top + 9,
+              clamp(firstStep.label, Math.max(4, Math.floor((stepWidth - 6) / 4))),
+              6,
+              palette.ink,
+            );
+      return band + divider + name + step + stepName;
     })
     .join("");
 }
 
 /**
- * A mind map thumbnail: a root box with two branches to the right, so the
- * picture reads as one topic and its children.
+ * A mind map thumbnail: a root box with up to three branches to the right, so
+ * the picture reads as one topic and its children. Each box carries its topic,
+ * clamped, because the bundle's Markdown points readers at this picture.
  */
 function mindmapThumbnail(
   block: Extract<CanvasBlock, { readonly kind: "mindmap" }>,
@@ -717,13 +732,22 @@ function mindmapThumbnail(
         `<line x1="${String(rootX + 70)}" y1="${String(rootY + 8)}" x2="${String(childX)}" y2="${String(y + 6 + index * 16)}" stroke="${palette.muted}" stroke-width="1"/>`,
     )
     .join("");
+  const childWidth = Math.min(120, width - childX);
   const childBoxes = children
     .map(
-      (_child, index) =>
-        `<rect x="${String(childX)}" y="${String(y + index * 16)}" width="${String(Math.min(120, width - childX))}" height="12" rx="2" fill="none" stroke="${palette.accent}" stroke-width="1"/>`,
+      (child, index) =>
+        `<rect x="${String(childX)}" y="${String(y + index * 16)}" width="${String(childWidth)}" height="12" rx="2" fill="none" stroke="${palette.accent}" stroke-width="1"/>` +
+        text(
+          childX + 4,
+          y + index * 16 + 9,
+          clamp(child.label, Math.max(4, Math.floor((childWidth - 8) / 4))),
+          7,
+          palette.ink,
+        ),
     )
     .join("");
-  return links + rootBox + childBoxes;
+  const rootLabel = text(rootX + 4, rootY + 11, clamp(root.label, 15), 7, palette.ink, 600);
+  return links + rootBox + rootLabel + childBoxes;
 }
 
 function mockupFrame(

@@ -5,7 +5,8 @@ import {
   type CanvasBlock,
 } from "@octant/contracts/canvas";
 import { describe, expect, it } from "vitest";
-import { renderArtifactThumbnail } from "./artifactRender";
+import { releaseMindmapBlock, supportFlowBlock } from "@octant/domain";
+import { renderArtifactSidecarSvg, renderArtifactThumbnail } from "./artifactRender";
 
 function definition(blocks: ReadonlyArray<CanvasBlock>, title = "Launch plan") {
   return { title, blocks };
@@ -46,6 +47,23 @@ const treemap = decodeCanvasBlock({
 });
 
 describe("drawing a preview of an artifact", () => {
+  it("names a mind map's root and its topics in the exported picture", () => {
+    const markup = renderArtifactSidecarSvg(definition([releaseMindmapBlock]));
+
+    // The root and each drawn child carry their topic, clamped to the box.
+    expect(markup).toContain(">Release readi");
+    expect(markup).toContain(">Test coverage<");
+    expect(markup).toContain(">Documentation<");
+    expect(markup).toContain(">Packaging<");
+  });
+
+  it("names each swimlane lane and its first step in the exported picture", () => {
+    const markup = renderArtifactSidecarSvg(definition([supportFlowBlock]));
+
+    expect(markup).toContain(">Customer<");
+    expect(markup).toContain(">Report a problem<");
+  });
+
   it("draws a treemap from the shared squarified layout, with no script", () => {
     const markup = renderArtifactThumbnail(definition([treemap]));
 
