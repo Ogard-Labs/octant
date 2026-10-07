@@ -1864,11 +1864,13 @@ native harness in `apps/server/src/harness`:
   state or access.
 - **Tools.** `createNativeHarnessTools` composes the nine working tools and
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
-  closed tool catalog (`harness-*` capability ids). A Chat thread is offered
-  `web-fetch` and `web-search` only while its research is on, because research
-  is its grant to reach the web; Work and Code always have both, and a child
-  has them only with network authority. A tool that was not offered refuses as
-  `tool-unavailable` if the model calls it anyway. Every call decodes its
+  closed tool catalog (`harness-*` capability ids). `web-fetch` and
+  `web-search` are offered only where the host has them (`web-search` needs a
+  configured SearXNG endpoint). A Chat thread gets them only while its
+  research is on, because research is its grant to reach the web; Work and
+  Code need no such grant, and a child gets them only with network authority.
+  A tool that was not offered refuses as `tool-unavailable` if the model calls
+  it anyway. Every call decodes its
   arguments, wraps a `ToolActionRequest` under the thread's current authority,
   and passes `ToolCallAuthorityService.authorize` before any port runs. The
   thread's authority comes from the same resolver the browser tools use, in
