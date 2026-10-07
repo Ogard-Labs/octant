@@ -345,6 +345,16 @@ export const WorkTurnStreamFrame = Schema.Union(
   })
     .annotations(strict)
     .pipe(Schema.filter((frame) => frame.attempt <= frame.maxAttempts)),
+  /**
+   * The provider answered the retried request. Sent once per retry, because a
+   * response that only calls a tool streams no text to clear it.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("provider-retry-cleared"),
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("snapshot-required"),
     sequence: Schema.Int.pipe(Schema.nonNegative()),

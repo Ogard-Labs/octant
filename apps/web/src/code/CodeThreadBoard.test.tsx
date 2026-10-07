@@ -946,6 +946,29 @@ describe("CodeThreadBoard waiting cards", () => {
     );
   });
 
+  it("shows a thread's newly raised request on its card rather than the refused one the host dropped", async () => {
+    const clients = answerClients();
+    clients.codeClient.executeOperation.mockResolvedValue({ kind: "operation-failed" });
+    const next = codeRequest({
+      threadId: threadOne,
+      threadTitle: "Fix the flaky build",
+      kind: "question",
+      text: "Which test runner should it use?",
+      minutesAgo: 1,
+      options: [{ label: "Vitest" }],
+    });
+    renderBoard(
+      [card({ id: "01", status: "waiting", title: "Fix the flaky build" })],
+      boardPendingSource(pendingReader([approval], [next]), clients),
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    fireEvent.click(await within(waiting).findByRole("button", { name: "Deny" }));
+
+    expect(await within(waiting).findByText("Which test runner should it use?")).toBeVisible();
+    expect(within(waiting).queryByText("Run: bun run test")).not.toBeInTheDocument();
+  });
+
   it("lists the waiting column oldest request first", async () => {
     renderBoard(
       [

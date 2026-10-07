@@ -345,7 +345,10 @@ function applyWorkRetryFrame(
     });
     return next;
   }
-  if (frame.kind === "response-delta" && current.has(String(frame.requestId))) {
+  if (
+    (frame.kind === "response-delta" || frame.kind === "provider-retry-cleared") &&
+    current.has(String(frame.requestId))
+  ) {
     const next = new Map(current);
     next.delete(String(frame.requestId));
     return next;
@@ -377,7 +380,7 @@ function applyWorkTurnStreamFrame(
     next[index] = { ...current, tasks: frame.tasks };
     return next;
   }
-  if (frame.kind === "provider-retry") return turns;
+  if (frame.kind === "provider-retry" || frame.kind === "provider-retry-cleared") return turns;
   if (index === -1) return turns;
   const current = turns[index];
   if (current === undefined) return turns;

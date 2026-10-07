@@ -85,6 +85,27 @@ describe("rows from recorded failing checks", () => {
     expect(card.rows).toEqual([]);
   });
 
+  it("leaves out a fork's pull request whose head branch only shares its name with a current branch", () => {
+    const card = buildCiFailureCard({
+      rows: [row({ author: "other", headBranch: "main", crossRepository: true })],
+      viewerLogin: "ada",
+      currentBranches: [{ projectId: projectA, branch: "main" }],
+    });
+    expect(card.rows).toEqual([]);
+  });
+
+  it("lists the person's own pull request from a fork with no branch to start a fix from", () => {
+    const card = buildCiFailureCard({
+      rows: [row({ headBranch: "main", crossRepository: true })],
+      viewerLogin: "ada",
+      currentBranches: [{ projectId: projectA, branch: "main" }],
+    });
+    expect(card.rows).toEqual([
+      expect.objectContaining({ checkName: "web tests", place: "octant#12" }),
+    ]);
+    expect(card.rows[0]).not.toHaveProperty("branch");
+  });
+
   it("leaves out a closed pull request and a passing check", () => {
     const card = buildCiFailureCard({
       rows: [

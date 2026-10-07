@@ -130,6 +130,10 @@ describe("answering a listed approval", () => {
       kind: "provider-turn-state",
       operationId: "x",
       state: "interrupted",
+      failure: {
+        category: "failed",
+        message: "The turn that asked has ended. Send a new message to continue.",
+      },
     });
 
     const outcome = await answerPendingApproval({
@@ -143,5 +147,23 @@ describe("answering a listed approval", () => {
       status: "refused",
       message: "The turn that asked has ended. Send a new message to continue.",
     });
+  });
+
+  it("reports the third denial that stops the turn as a delivered Deny", async () => {
+    const fake = clients();
+    fake.executeOperation.mockResolvedValue({
+      kind: "provider-turn-state",
+      operationId: "x",
+      state: "interrupted",
+    });
+
+    const outcome = await answerPendingApproval({
+      request: codeApproval(),
+      decision: "denied",
+      workRequestClient: fake.workRequestClient,
+      codeClient: fake.codeClient,
+    });
+
+    expect(outcome).toEqual({ status: "answered" });
   });
 });

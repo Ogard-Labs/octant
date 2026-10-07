@@ -1,6 +1,6 @@
 import type { CodeProjectPullRequestRow, GithubAuthenticationSnapshot } from "@octant/contracts";
-import { decodeProjectId } from "@octant/contracts";
-import { describe, expect, it } from "vitest";
+import { decodeCodeProjectPullRequestView, decodeProjectId } from "@octant/contracts";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildPullRequestCard,
   PULL_REQUEST_CARD_ROW_LIMIT,
@@ -8,6 +8,7 @@ import {
   pullRequestCardCapability,
   pullRequestCiState,
   pullRequestReviewState,
+  sharePullRequestRead,
 } from "./pullRequests";
 
 const projectA = decodeProjectId("10000000-0000-4000-8000-000000000001");
@@ -166,5 +167,41 @@ describe("pull request card capability", () => {
       repositoryName: "notes",
       number: 3,
     });
+  });
+});
+
+describe("the start screen's pull-request read", () => {
+  const view = decodeCodeProjectPullRequestView({
+    version: 1,
+    query: { version: 1 },
+    projects: [],
+    rows: [],
+    repositoriesTruncated: false,
+    pullRequestsTruncated: false,
+    freshness: { status: "empty" },
+    generatedAt: "2026-08-22T08:00:00.000Z",
+  });
+
+  it("asks the host once for cards that mount together, and again after that read settles", async () => {
+    const read = vi.fn(async () => view);
+    const load = sharePullRequestRead(read);
+    const [first, second] = await Promise.all([load({ version: 1 }), load({ version: 1 })]);
+    expect(first).toBe(view);
+    expect(second).toBe(view);
+    expect(read).toHaveBeenCalledTimes(1);
+
+    await load({ version: 1 });
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads again after a refused read instead of repeating the refusal", async () => {
+    const read = vi
+      .fn<() => Promise<typeof view>>()
+      .mockRejectedValueOnce(new Error("refused"))
+      .mockResolvedValueOnce(view);
+    const load = sharePullRequestRead(read);
+    await expect(load({ version: 1 })).rejects.toThrow("refused");
+    await expect(load({ version: 1 })).resolves.toBe(view);
+    expect(read).toHaveBeenCalledTimes(2);
   });
 });

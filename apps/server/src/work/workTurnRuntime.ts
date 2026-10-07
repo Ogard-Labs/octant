@@ -28,14 +28,17 @@ import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
   countsTowardTurnEventBudget,
+  endsHarnessRetryWait,
   makeIdleTimeout,
   type IdleTimeout,
 } from "../providers/turnBudget";
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
 const MAX_EVENTS = 4_096;
-// Inactivity window, not total wall time.
-const DEFAULT_IDLE_TIMEOUT_MS = 2 * 60_000;
+// Inactivity window, not total wall time. Matches Chat and Code: a model
+// writing one long tool call, such as a Canvas design, can be silent for
+// minutes.
+const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 const RESPONSE_TRUNCATION_MARKER = "\n[Output truncated by Octant.]";
 const textEncoder = new TextEncoder();
 
@@ -70,7 +73,7 @@ export interface WorkTurnRuntimePort {
     readonly onRetrying?: (
       notice: Extract<ProviderRuntimeEvent, { readonly kind: "retrying" }>,
     ) => void;
-    /** Text or reasoning arrived, so the retry wait is over. */
+    /** Text, reasoning, or a tool call arrived, so the retry wait is over. */
     readonly onRetryCleared?: () => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
@@ -287,10 +290,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (event.kind === "text-delta") {
                   response = appendBoundedResponse(response, event.text);
                   input.onDelta?.(response);
-                  input.onRetryCleared?.();
                 }
+                if (endsHarnessRetryWait(event)) input.onRetryCleared?.();
                 if (event.kind === "retrying") input.onRetrying?.(event);
-                if (event.kind === "reasoning-delta") input.onRetryCleared?.();
                 if (event.kind === "task-progress") {
                   const next = upsertThreadTaskProgress(tasks, {
                     taskId: event.taskId,

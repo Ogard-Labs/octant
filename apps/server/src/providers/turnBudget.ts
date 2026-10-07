@@ -15,6 +15,24 @@ export function countsTowardTurnEventBudget(event: Pick<ProviderRuntimeEvent, "k
   );
 }
 
+/**
+ * The provider answered the request a harness retry was waiting on: reply
+ * text, reasoning, or a tool call. A retried response that only calls a tool
+ * streams no text, so a tool event has to end the wait as well, or the retry
+ * line would stay up through every tool the turn then runs.
+ */
+export function endsHarnessRetryWait(event: Pick<ProviderRuntimeEvent, "kind">): boolean {
+  return (
+    event.kind === "text-delta" ||
+    event.kind === "reasoning-delta" ||
+    event.kind === "tool-request" ||
+    event.kind === "tool-start" ||
+    event.kind === "tool-progress" ||
+    event.kind === "tool-success" ||
+    event.kind === "tool-failure"
+  );
+}
+
 export interface IdleTimeout {
   /** Record activity; the idle clock restarts from now. */
   readonly touch: Effect.Effect<void>;

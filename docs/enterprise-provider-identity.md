@@ -7,7 +7,9 @@ stays Later per the Current Release Boundary in `AGENTS.md` and
 Today Octant authenticates providers two ways ([0005](decisions/0005-provider-sdk-contract.md)):
 
 1. Provider-native OAuth or subscription login, delegated to the provider's own
-   protocol or UI. Octant never stores those tokens.
+   protocol or UI. Octant never stores those tokens, except the opt-in Claude for
+   helpers token a confined Claude launch signs in with
+   ([architecture](architecture.md#security-and-authority)).
 2. Explicit API keys held as opaque refs in the host credential broker
    ([0054](decisions/0054-headless-host-credential-store.md)). The renderer never
    sees the secret.

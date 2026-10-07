@@ -52,10 +52,14 @@ describe("shared Seatbelt profile builder", () => {
         allowFileReadStar: true,
         privateHomeAllowPaths: [],
       });
+      // The shell starts in the root the profile grants. Inheriting the test's
+      // working directory would make it warn that it cannot read that
+      // directory whenever the checkout sits under `/private`, which the
+      // profile denies.
       const result = spawnSync(
         "/usr/bin/sandbox-exec",
         ["-p", profile, "/bin/sh", "-c", "printf shell-ok"],
-        { encoding: "utf8" },
+        { encoding: "utf8", cwd: root },
       );
       expect(result.status).toBe(0);
       expect(result.stdout).toBe("shell-ok");
@@ -67,6 +71,7 @@ describe("shared Seatbelt profile builder", () => {
         ["-p", profile, "/bin/cat", unrelatedFile],
         {
           encoding: "utf8",
+          cwd: root,
         },
       );
       expect(denied.status).not.toBe(0);

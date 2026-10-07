@@ -1,6 +1,9 @@
 import type {
   CodeProjectPullRequestChecksSummary,
+  CodeProjectPullRequestFreshness,
+  CodeProjectPullRequestQuery,
   CodeProjectPullRequestRow,
+  CodeProjectPullRequestView,
   GithubAuthenticationSnapshot,
   GithubRepositoryName,
   GithubRepositoryOwner,
@@ -157,5 +160,57 @@ export function buildPullRequestCard(input: {
     shown,
     hidden: ordered.length - shown.length,
     total: ordered.length,
+  };
+}
+
+/**
+ * How much of the snapshot a refresh has reached. The snapshot moves only on
+ * an explicit refresh or a Project's opt-in cadence, so on default settings a
+ * new host has never looked; and a refresh of one Project leaves the others
+ * unread. Only `checked` lets the card say nothing is waiting.
+ */
+export type PullRequestSnapshotReach = "unchecked" | "partly-checked" | "checked";
+
+function everChecked(freshness: CodeProjectPullRequestFreshness): boolean {
+  return freshness.status === "fresh" || freshness.lastSuccessfulRefreshAt !== undefined;
+}
+
+export function pullRequestSnapshotReach(
+  view: Pick<CodeProjectPullRequestView, "freshness" | "projects" | "projectFreshness">,
+): PullRequestSnapshotReach {
+  if (!everChecked(view.freshness)) return "unchecked";
+  // A host that reports no per-Project freshness is judged by the snapshot's.
+  if (view.projectFreshness === undefined) return "checked";
+  const byProject = new Map(
+    view.projectFreshness.map((entry) => [String(entry.projectId), entry.freshness]),
+  );
+  const connected = view.projects.filter((project) => project.kind === "connected");
+  const unread = connected.filter((project) => {
+    const freshness = byProject.get(String(project.projectId));
+    return freshness !== undefined && !everChecked(freshness);
+  });
+  if (unread.length === 0) return "checked";
+  return unread.length === connected.length ? "unchecked" : "partly-checked";
+}
+
+/**
+ * Calls made while a read is in flight share it, so the Pull requests and CI
+ * failures cards, which mount together, read the snapshot once. The query has
+ * one shape, so every caller is asking the same question. A call after the
+ * read settles reads again.
+ */
+export function sharePullRequestRead(
+  read: (query: CodeProjectPullRequestQuery) => Promise<CodeProjectPullRequestView>,
+): (query: CodeProjectPullRequestQuery) => Promise<CodeProjectPullRequestView> {
+  let pending: Promise<CodeProjectPullRequestView> | undefined;
+  return (query) => {
+    if (pending !== undefined) return pending;
+    const started = read(query);
+    pending = started;
+    const settle = () => {
+      if (pending === started) pending = undefined;
+    };
+    started.then(settle, settle);
+    return started;
   };
 }

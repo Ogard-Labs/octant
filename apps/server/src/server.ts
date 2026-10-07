@@ -4172,6 +4172,14 @@ export function startOctantServer(
       credentialResolver === undefined
         ? undefined
         : claudeHelperSignInFromBroker(credentialResolver);
+    const claudeHelperSignInService =
+      claudeHelperSignIn === undefined
+        ? undefined
+        : createClaudeHelperSignInService({
+            store: claudeHelperSignIn,
+            readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+            runSetupToken: runInstalledClaudeSetupToken,
+          });
     const oauthBroker =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
@@ -4218,7 +4226,7 @@ export function startOctantServer(
       // The provider is already gone; a store that cannot be reached leaves the
       // token behind rather than reporting the removal as failed.
       clearClaudeHelperSignIn: async (instanceId) => {
-        await claudeHelperSignIn?.disconnect(String(instanceId)).catch(() => undefined);
+        await claudeHelperSignInService?.forgetRemovedProvider(instanceId).catch(() => undefined);
       },
       clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
       driver: (instance) =>
@@ -4275,14 +4283,11 @@ export function startOctantServer(
         reason: "Claude for helpers needs Octant's credential store, which this host does not run.",
       }) as const;
     const claudeHelperSignInRoutes = createClaudeHelperSignInRouteHandler({
-      service:
-        claudeHelperSignIn === undefined
-          ? { status: brokerMissing, connect: brokerMissing, disconnect: brokerMissing }
-          : createClaudeHelperSignInService({
-              store: claudeHelperSignIn,
-              readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
-              runSetupToken: runInstalledClaudeSetupToken,
-            }),
+      service: claudeHelperSignInService ?? {
+        status: brokerMissing,
+        connect: brokerMissing,
+        disconnect: brokerMissing,
+      },
       windowAuthorityStore,
       ...(options.allowedRendererHttpOrigin === undefined
         ? {}

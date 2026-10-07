@@ -783,6 +783,33 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("says why the host refused an answer while the request stays open", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnError: "Plan mode cannot approve tools.",
+          providerAnswerRefusal: "Plan mode cannot approve tools.",
+          providerRequests: [
+            {
+              kind: "approval",
+              approvalId: "30000000-0000-4000-8000-000000000003" as never,
+              summary: "terminal: run bun test",
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(
+      screen
+        .getByText("Waiting for approval · Plan mode cannot approve tools.")
+        .closest('[role="status"]'),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeVisible();
+  });
+
   it("folds inline reasoning in Code history while leaving the answer readable", async () => {
     render(
       <CodeThreadWorkspace
@@ -2870,6 +2897,7 @@ function controller(
     refreshFollowUp: vi.fn(async () => undefined),
     pendingDraft: "",
     providerRequests: [],
+    providerAnswerRefusal: undefined,
     answerProviderRequest: vi.fn(async () => true),
     cancelTurn: vi.fn(async () => true),
 

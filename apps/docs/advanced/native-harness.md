@@ -22,6 +22,10 @@ the set to what it may reach:
 | Work | inside the bound folder | none      | yes                 | yes        |
 | Code | inside the checkout     | sandboxed | yes                 | yes        |
 
+Web means `web-fetch`, plus `web-search` once a SearXNG search endpoint is
+set. A Chat thread gets neither, and cannot open a page, until you turn
+research on for it.
+
 Every call passes the same server authority check as any other tool. A Chat
 thread holds that authority with or without a Project. A thread that can no
 longer act (archived, its folder or Project changed, or its provider turned
@@ -164,8 +168,8 @@ allowance is not retried.
 Each retry is announced before its wait. While the turn is quiet, the thread's
 working indicator, the terminal footer, and the phone's session panel say
 "Provider busy, retrying 2/5 in 4 s" and count the wait down. The line is
-ordinary text, not a warning; it disappears when the next content arrives or
-the turn ends, whether it finished, failed, or was stopped. A
+ordinary text, not a warning; it disappears when the next reply text or tool
+call arrives, or when the turn ends, whether it finished, failed, or was stopped. A
 retry that runs out still fails with the endpoint's own alert. The turn's
 detail counts those same announcements. A request is only sent again while nothing of it has appeared: once the
 reply has started to stream, a failure ends the turn rather than showing the
@@ -344,10 +348,9 @@ table.
 - Only endpoint providers run the harness. Coding CLIs keep their own tools;
   they can be delegated to as children, never made the lead. A lead falls back
   only to another endpoint model, never to a coding CLI.
-- Anthropic-compatible endpoints offer tools when the endpoint does; a model
-  that ignores tool calls simply answers in text. Ollama is not a harness
-  provider yet: its driver has no tool loop, so it is not offered as a slot
-  candidate until it does.
+- Every endpoint model, Anthropic-compatible ones included, is Chat only
+  until you verify its tools. Ollama is not a harness provider yet: its driver
+  has no tool loop, so it is not offered as a slot candidate until it does.
 - Context is reduced by the host's planner; each prune and cut is journaled
   with the cache cost it paid, and the lead can read `context-remaining` to
   checkpoint before one. An endpoint that never reports the model's window,

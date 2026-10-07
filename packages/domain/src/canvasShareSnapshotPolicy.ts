@@ -1,4 +1,5 @@
 import {
+  decodeCanvasShareSnapshotRecord,
   decodeCanvasShareSnapshotRequest,
   decodeCanvasShareSnapshotRevokeRequest,
   type CanvasShareSnapshotRecord,
@@ -9,6 +10,7 @@ import { decodeCanvasVersion, type CanvasVersion } from "@octant/contracts/canva
 import type { UtcTimestamp } from "@octant/contracts/events";
 import {
   buildCanvasStaticExportDocument,
+  CanvasSharePolicyRejected,
   type CanvasSharePolicyContext,
 } from "./canvasSharePolicy";
 import {
@@ -22,6 +24,7 @@ export type CanvasShareSnapshotDenialCode =
   | "consent-required"
   | "scope-mismatch"
   | "stale-version"
+  | "unsafe-payload"
   | "expired"
   | "revoked"
   | "audience-required"
@@ -198,13 +201,17 @@ export function createCanvasShareSnapshotRecord(input: {
       threatModelId: "canvas-share-authenticated-snapshot-v1" as const,
     };
   } catch (error) {
-    // buildCanvasStaticExportDocument throws CanvasSharePolicyRejected for unsafe payloads.
+    // The sanitizer refuses what this Canvas holds (a design, a secret, a host
+    // path) as an unsafe payload. That is the Canvas's content, not a malformed
+    // request, so the owner is told so.
     reject(
-      "malformed-request",
+      error instanceof CanvasSharePolicyRejected && error.denialCode === "unsafe-payload"
+        ? "unsafe-payload"
+        : "malformed-request",
       error instanceof Error ? error.message : "Canvas snapshot payload is unsafe.",
     );
   }
-  return {
+  const record: CanvasShareSnapshotRecord = {
     schemaVersion: CANVAS_SHARE_SCHEMA_VERSION,
     kind: "canvas-share-snapshot-record",
     snapshotId: request.snapshotId,
@@ -224,6 +231,16 @@ export function createCanvasShareSnapshotRecord(input: {
     provenance: document.provenance,
     sourceManifest: document.sourceManifest,
   };
+  // The sanitizer passes through any block it has no rule for, and the journal
+  // decodes the record against the share contract. A Canvas holding a kind or
+  // field that contract did not carry (a treemap, a table column's display)
+  // threw there, and the share route answered "Canvas request is invalid." The
+  // record is checked here instead, so that content is refused as content.
+  try {
+    return decodeCanvasShareSnapshotRecord(record);
+  } catch {
+    reject("unsafe-payload", "This Canvas holds content a shared snapshot cannot carry.");
+  }
 }
 
 export function revokeCanvasShareSnapshot(input: {

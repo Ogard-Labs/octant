@@ -20,6 +20,11 @@ export type HomeCardContent =
        * could not look: "nothing is running" would be a claim it never made.
        */
       readonly emptyLabel?: string;
+      /**
+       * One link after the empty line, for a card that has not looked yet and
+       * whose next step is somewhere else.
+       */
+      readonly emptyAction?: { readonly label: string; readonly onSelect: () => void };
     };
 
 /**

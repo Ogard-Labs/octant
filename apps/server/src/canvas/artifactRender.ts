@@ -1,4 +1,8 @@
-import type { CanvasBlock, CanvasDefinition } from "@octant/contracts/canvas";
+import {
+  CANVAS_DESIGN_VIEWPORT,
+  type CanvasBlock,
+  type CanvasDefinition,
+} from "@octant/contracts/canvas";
 import { MAX_ARTIFACT_PREVIEW_CHARACTERS } from "@octant/contracts/artifact-library";
 import { CHART_BAR_RADIUS, CHART_LINE_WIDTH } from "@octant/theme";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
@@ -50,6 +54,7 @@ const DRAWN_KINDS = new Set<CanvasBlock["kind"]>([
   "mockup",
   "treemap",
   "heatmap",
+  "design",
   "bar-list",
   "code-excerpt",
   "pseudocode",
@@ -224,6 +229,8 @@ function drawBlock(
       return { markup: treemap(block, y, width, palette), height: CHART_HEIGHT };
     case "heatmap":
       return { markup: heatmap(block, y, width, palette), height: CHART_HEIGHT };
+    case "design":
+      return { markup: designFrames(block, y, width, palette), height: 52 };
     case "bar-list":
       return { markup: barList(block, y, width, palette), height: barListHeight(block) };
     case "code-excerpt":
@@ -971,6 +978,30 @@ function barList(
         palette.muted,
       );
       return label + bar + value;
+    })
+    .join("");
+}
+
+/** A row of frame outlines in the design's own proportions, as many as fit. */
+function designFrames(
+  block: Extract<CanvasBlock, { readonly kind: "design" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const height = 48;
+  const viewport = CANVAS_DESIGN_VIEWPORT[block.size];
+  const frameWidth = Math.round((height * viewport.width) / viewport.height);
+  const gap = 6;
+  const fits = Math.max(1, Math.floor((width + gap) / (frameWidth + gap)));
+  return block.frames
+    .slice(0, fits)
+    .map((_frame, index) => {
+      const x = PADDING + index * (frameWidth + gap);
+      return (
+        `<rect x="${String(x)}" y="${String(y)}" width="${String(frameWidth)}" height="${String(height)}" rx="3" fill="none" stroke="${palette.accent}" stroke-width="1.2"/>` +
+        `<rect x="${String(x + 4)}" y="${String(y + 6)}" width="${String(Math.round((frameWidth - 8) * 0.7))}" height="5" rx="1.5" fill="${palette.muted}" opacity="0.5"/>`
+      );
     })
     .join("");
 }
