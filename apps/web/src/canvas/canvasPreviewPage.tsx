@@ -1,4 +1,7 @@
 import "../styles.css";
+// The app loads this after styles.css; it holds rules Canvas blocks rely on,
+// such as the checkbox tick a table's column control draws.
+import "../styles/components.css";
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { decodeCanvasDefinition, type CanvasDefinition } from "@octant/contracts/canvas";
