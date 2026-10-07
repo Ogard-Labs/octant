@@ -23,7 +23,7 @@ Welcome to the Octant guide. Use these pages to install the app, configure provi
 - [Shared Memory](/guide/memory) — persist decisions, facts, and context across threads
 - [Promotions](/guide/promotions) — escalate Work work to a linked Code thread
 - [Sync artifacts across your computers](/guide/sync-artifacts) — what leaves this computer, where it goes, and how to turn sync off
-- [Export a Canvas or artifact to a folder](/guide/export) — write a readable Markdown or HTML copy into a folder you choose
+- [Export a Canvas or artifact](/guide/export) — write a readable Markdown or HTML copy into a folder you choose, or publish it as a GitHub Gist
 
 ## Concepts
 
@@ -70,6 +70,18 @@ anything outside your Code Projects. Up to five show, then **+N more
 listening**. The card refreshes about every five seconds while the window is
 showing, and not at all when it is hidden or turned off. When the window shows
 another computer's work, the row names that computer.
+
+**Needs you** comes first and appears only while an agent is waiting on you. It
+lists every approval and question across your Projects, oldest first: the
+provider mark, the thread's title, how long it has waited, and what it asked.
+Choose **Approve** or **Deny** on an approval. A question with choices has one
+numbered button per choice (press the number while the row has focus), and
+**Reply…** opens the thread so you can type your own answer. Answering works the
+same as in the thread itself, with the same permissions. If the request changed
+before your answer arrived (it was answered elsewhere, or the turn ended), the
+row says so once and refreshes. Up to five rows show, then **+N more** opens the
+Inbox. On Work this covers Chat and Work threads; on Code, Code threads. The
+card is only available in a window on this computer.
 
 **Pull requests**, on a new Code task, lists what is waiting on you across your
 Code Projects. **Waiting on your review** is a review asked of you; **Yours**

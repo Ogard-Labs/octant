@@ -78,6 +78,12 @@ export interface AgentRunParentSummaryEntry {
    */
   readonly resultText?: string;
   readonly recoveryReason?: string;
+  /**
+   * How the host settled this result's delivery into the parent. Absent while
+   * the delivery is still owed. Lets the parent's own surfaces tell a result
+   * the parent already holds from one only the person can read.
+   */
+  readonly resultDeliveryOutcome?: AgentRunResultDelivery["outcome"];
   readonly usageLimit?: AgentRun["usageLimit"];
   readonly usageResume?: AgentRun["usageResume"];
   readonly version: AgentRun["version"];
@@ -420,6 +426,9 @@ export class AgentRunProjection implements Projection {
         resultAcknowledgement: run.resultAcknowledgement,
         ...(run.result === undefined ? {} : { result: run.result }),
         ...(run.recoveryReason === undefined ? {} : { recoveryReason: run.recoveryReason }),
+        ...(run.resultDelivery === undefined
+          ? {}
+          : { resultDeliveryOutcome: run.resultDelivery.outcome }),
         ...(run.usageLimit === undefined ? {} : { usageLimit: run.usageLimit }),
         ...(run.usageResume === undefined ? {} : { usageResume: run.usageResume }),
         version: run.version,

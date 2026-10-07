@@ -324,6 +324,7 @@ import { GhRepositoryCataloguePort } from "./github/ghRepositoryCataloguePort";
 import { GhRepositoryObservationPort } from "./github/ghRepositoryObservationPort";
 import { GithubCapabilityService } from "./github/githubCapabilityService";
 import { GithubCatalogueService } from "./github/githubCatalogueService";
+import { createGhGistCreationPort } from "./github/gistCreationPort";
 import { GithubIssueContextService } from "./github/githubIssueContextService";
 import { LinearIssueContextService } from "./plugins/linear/linearIssueContextService";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
@@ -638,6 +639,7 @@ import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
 } from "./canvas/canvasExportTargets";
+import { GistConnection } from "./canvas/gistExportTarget";
 import { createDefaultCodexPluginPackageSources } from "./extensions/curatedBuildIosAppsCatalog";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "./scaffold/curatedScaffoldCatalog";
 import { resolveAvailableTools } from "./scaffold/scaffoldFilesystem";
@@ -2722,9 +2724,14 @@ export function startOctantServer(
       options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable },
     );
     let revokeProjectPullRequests: (() => void) | undefined;
+    // The gist export destination's GitHub state. It is read on demand when an
+    // export lists or prepares destinations, never at startup; see
+    // `GistConnection`.
+    const gistConnection = new GistConnection((signal) => githubCapabilityService.snapshot(signal));
     const githubCapabilityService = new GithubCapabilityService(githubAuthenticationPort, {
       probes: githubCataloguePort,
       onAuthenticationChanged: (snapshot) => {
+        gistConnection.changed(snapshot);
         const readable = snapshot.capabilities.some(
           (capability) => capability.kind === "pull-requests-read" && capability.available,
         );
@@ -8756,6 +8763,13 @@ export function startOctantServer(
       home: homedir(),
       standingOutsideApproval: false,
       newTempId: randomUUID,
+      // The gist destination reuses the GitHub connection Octant already has:
+      // the same host-managed credential `gh` resolves, and the snapshot the
+      // host keeps current. It reads that credential nowhere here.
+      gist: {
+        availability: () => gistConnection.availability(),
+        gists: createGhGistCreationPort(options.ghExecutable),
+      },
     };
     // Destinations arrive through the export contribution and are offered
     // through the same activation policy a plugin's contribution passes. The
@@ -8950,6 +8964,11 @@ export function startOctantServer(
       canvasService,
       canvasShareService,
       canvasExportService,
+      // A host with no usable `gh` has no GitHub state to read; the gist
+      // destination then stays not-connected without spawning anything.
+      ...(options.ghExecutable === undefined
+        ? {}
+        : { refreshCanvasExportTargets: () => gistConnection.refresh() }),
       canvasExportFolderService,
       resolveFolderCandidate: (windowId, input) =>
         folderBrowseService.resolveCandidate(windowId, input),

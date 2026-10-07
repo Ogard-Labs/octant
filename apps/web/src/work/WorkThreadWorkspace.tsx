@@ -97,6 +97,7 @@ import { useWorkFileMentions } from "./useWorkFileMentions";
 import { samePollingData } from "../polling/samePollingData";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
+import { ChildResultCards } from "../agents/ChildResultCards";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
   documentIsVisible,
@@ -134,6 +135,8 @@ type WorkTranscriptRow =
       readonly streaming: boolean;
       /** When the person's message was accepted; assistant entries carry the time on their header. */
       readonly at?: string;
+      /** The host wrote this user entry to carry a subagent's result into the thread. */
+      readonly delivered?: true;
       /** The turn header, when this is the turn's first reply and so opens with it. */
       readonly head?: WorkTurnState;
     }
@@ -616,6 +619,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           streaming:
             turn.status === "running" || turn.status === "accepted" || turn.status === "waiting",
           ...(entry.role === "user" ? { at: turn.acceptedAt } : {}),
+          ...(entry.role === "user" && turn.delivery !== undefined
+            ? { delivered: true as const }
+            : {}),
           ...(opensTurn ? { head: turn } : {}),
         });
       }
@@ -1438,6 +1444,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           }
           if (row.kind === "message") {
             if (row.entry.role === "user") {
+              if (row.delivered === true) {
+                return (
+                  <article aria-label="Subagent results" className="turn-child-result">
+                    <ChildResultCards providerGroups={props.providerGroups} text={row.entry.text} />
+                  </article>
+                );
+              }
               return (
                 <article aria-label="Your message" className="turn-user">
                   <div className="bubble">
