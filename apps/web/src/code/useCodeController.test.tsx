@@ -1653,7 +1653,20 @@ describe("useCodeController", () => {
     async (state, reason) => {
       const operationId = "70000000-0000-4000-8000-000000000033";
       const approvalId = "70000000-0000-4000-8000-000000000034";
+      const laterApprovalId = "70000000-0000-4000-8000-000000000035";
+      let streams = 0;
       async function* waitingFrames() {
+        streams += 1;
+        if (streams === 2) {
+          yield {
+            threadId: ids.thread,
+            operationId,
+            cursor: 1,
+            occurredAt: now,
+            event: { kind: "operation-state", state: "interrupted" },
+          };
+          return;
+        }
         yield {
           threadId: ids.thread,
           operationId,
@@ -1661,7 +1674,7 @@ describe("useCodeController", () => {
           occurredAt: now,
           event: {
             kind: "approval-requested",
-            approvalId,
+            approvalId: streams === 1 ? approvalId : laterApprovalId,
             action: "provider-tool",
             summary: "Allow browser access?",
           },
@@ -1709,6 +1722,20 @@ describe("useCodeController", () => {
       expect(answered).toBe(false);
       expect(result.current.providerRequests).toHaveLength(1);
       expect(result.current.providerAnswerRefusal).toBe(reason);
+
+      // The refused request leaves with its turn; the next turn's request
+      // does not inherit the refusal.
+      await act(async () => {
+        await result.current.sendFollowUp("stop here");
+      });
+      expect(result.current.providerRequests).toEqual([]);
+      await act(async () => {
+        await result.current.sendFollowUp("try again");
+      });
+      expect(result.current.providerRequests).toEqual([
+        expect.objectContaining({ approvalId: laterApprovalId }),
+      ]);
+      expect(result.current.providerAnswerRefusal).toBeUndefined();
     },
   );
 

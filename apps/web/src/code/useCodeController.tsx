@@ -329,10 +329,20 @@ export function useCodeController(options: CodeControllerOptions) {
     [],
   );
   const [providerRequests, setProviderRequests] = useState<ReadonlyArray<CodeProviderRequest>>([]);
-  // Why the host refused the last answer to a request that is still open. A
-  // waiting turn's own reason is the generic waiting sentence, so this is the
-  // only place the refusal can be told while the request stays on screen.
-  const [providerAnswerRefusal, setProviderAnswerRefusal] = useState<string>();
+  // Why the host refused the last answer, and to which request. A waiting
+  // turn's own reason is the generic waiting sentence, so this is the only
+  // place the refusal can be told while the request stays on screen. It is
+  // told only while that request is still listed: a later turn's request must
+  // not inherit an earlier refusal.
+  const [refusedAnswer, setRefusedAnswer] = useState<{
+    readonly requestKey: string;
+    readonly message: string;
+  }>();
+  const providerAnswerRefusal =
+    refusedAnswer !== undefined &&
+    providerRequests.some((request) => providerRequestKey(request) === refusedAnswer.requestKey)
+      ? refusedAnswer.message
+      : undefined;
 
   /**
    * Put a refusal this controller did not perform in front of the person.
@@ -1349,7 +1359,7 @@ export function useCodeController(options: CodeControllerOptions) {
     setConversation([]);
     setConversationHistory("loading");
     setProviderRequests([]);
-    setProviderAnswerRefusal(undefined);
+    setRefusedAnswer(undefined);
     setTurnActivity(new Map());
     setTurnStatus(
       options.activeThreadId === undefined
@@ -2305,10 +2315,10 @@ export function useCodeController(options: CodeControllerOptions) {
         const outcome = providerAnswerOutcome(result);
         if (outcome.status === "refused") {
           setTurnError(outcome.message);
-          setProviderAnswerRefusal(outcome.message);
+          setRefusedAnswer({ requestKey: providerAnswerKey(answer), message: outcome.message });
           return false;
         }
-        setProviderAnswerRefusal(undefined);
+        setRefusedAnswer(undefined);
         setProviderRequests((current) =>
           current.filter((request) =>
             answer.kind === "approval"
@@ -2321,7 +2331,7 @@ export function useCodeController(options: CodeControllerOptions) {
         if (!mounted.current) return false;
         const message = codeFailure(error).message;
         setTurnError(message);
-        setProviderAnswerRefusal(message);
+        setRefusedAnswer({ requestKey: providerAnswerKey(answer), message });
         return false;
       }
     },
@@ -2444,4 +2454,16 @@ export type CodeController = Omit<CodeControllerResult, "writePendingDraftFor"> 
 function required(value: string | undefined): string {
   if (value === undefined) throw new Error("Code controller requires launch authority.");
   return value;
+}
+
+function providerRequestKey(request: CodeProviderRequest): string {
+  return request.kind === "approval"
+    ? `approval:${String(request.approvalId)}`
+    : `input:${request.requestId}`;
+}
+
+function providerAnswerKey(answer: CodeProviderAnswer): string {
+  return answer.kind === "approval"
+    ? `approval:${String(answer.approvalId)}`
+    : `input:${answer.requestId}`;
 }
