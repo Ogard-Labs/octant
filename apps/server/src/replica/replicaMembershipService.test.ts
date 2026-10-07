@@ -303,7 +303,7 @@ describe("replica membership service", () => {
     );
     expect(revoked.entry.origin.displayName).toBe("MacBook");
     expect(revoked.entry.subjectDisplayName).toBe("Mac mini");
-    expect(north.projection.state().revocations).toEqual([ids.south]);
+    expect(north.projection.state().revocations.map((cut) => cut.instanceId)).toEqual([ids.south]);
 
     // South has not read the revocation yet and approves East; North refuses
     // that record on read and does not admit East through it.
@@ -336,7 +336,7 @@ describe("replica membership service", () => {
     // Once South reads North's revocation it holds itself revoked too.
     const southSecondPull = expectKind(await south.service.execute({ kind: "pull" }), "pulled");
     expect(southSecondPull.applied).toBe(1);
-    expect(south.projection.state().revocations).toEqual([ids.south]);
+    expect(south.projection.state().revocations.map((cut) => cut.instanceId)).toEqual([ids.south]);
   });
 
   it("starts a new identity with its own sequence when a revoked computer asks to join again", async () => {
@@ -378,7 +378,7 @@ describe("replica membership service", () => {
     );
     await north.service.execute({ kind: "revoke", subject: ids.south });
     await south.service.execute({ kind: "pull" });
-    expect(south.projection.state().revocations).toEqual([ids.south]);
+    expect(south.projection.state().revocations.map((cut) => cut.instanceId)).toEqual([ids.south]);
 
     const again = expectKind(
       await south.service.execute({ kind: "write-join-request", displayName: "Mac mini" }),
@@ -523,6 +523,72 @@ describe("replica membership service", () => {
       ).toBe(true);
     }
     expect(south.projection.state().local?.instanceId).toBe(ids.south);
+  });
+
+  it("refuses what a revoked computer approved after its cut, whatever order the logs are read in", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const east = computer({ store: selected(store), instanceId: ids.east });
+    const eastRequest = expectKind(
+      await east.service.execute({ kind: "write-join-request", displayName: "Studio" }),
+      "join-requested",
+    );
+    await north.service.execute({ kind: "pull" });
+    const eastCode = deriveReplicaJoinMatchingCode({
+      joinRequest: eastRequest.entry,
+      approverInstanceId: ids.north,
+    });
+    expectKind(
+      await north.service.execute({
+        kind: "approve-join",
+        joinRequest: eastRequest.entry,
+        confirmationCode: eastCode,
+      }),
+      "join-approved",
+    );
+    expectKind(
+      await east.service.execute({
+        kind: "confirm-join",
+        approver: ids.north,
+        confirmationCode: eastCode,
+      }),
+      "join-confirmed",
+    );
+    await east.service.execute({ kind: "pull" });
+    // East (3333...) revokes South (2222...).
+    const revocation = expectKind(
+      await east.service.execute({ kind: "revoke", subject: ids.south }),
+      "revoked",
+    );
+    expect(revocation.entry.lastAcceptedSequence).toBe(1);
+    // South has not read it and approves Zed after the cut.
+    const zed = computer({ store: selected(store), instanceId: ids.zed });
+    const zedRequest = expectKind(
+      await zed.service.execute({ kind: "write-join-request", displayName: "Unknown" }),
+      "join-requested",
+    );
+    expectKind(
+      await south.service.execute({
+        kind: "approve-join",
+        joinRequest: zedRequest.entry,
+        confirmationCode: deriveReplicaJoinMatchingCode({
+          joinRequest: zedRequest.entry,
+          approverInstanceId: ids.south,
+        }),
+      }),
+      "join-approved",
+    );
+
+    // North reads South's log before East's, once.
+    const pulled = expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    const state = north.projection.state();
+    expect(state.revocations.map((cut) => cut.instanceId)).toEqual([ids.south]);
+    expect(state.members.map((member) => member.instanceId)).not.toContain(ids.zed);
+    expect(pulled.refused).toContainEqual({
+      instanceId: ids.south,
+      sequence: 2,
+      reason: "revoked-instance",
+    });
   });
 
   it("refuses an entry whose bytes were changed after it was signed, and applies nothing past it", async () => {
@@ -675,7 +741,7 @@ describe("replica membership service", () => {
     const northKey = north.projection.state().local?.publicKey ?? "";
     expect(verifiesAt(store, `${ids.north}/3`, northKey)).toBe(true);
     expect(approved.entry.origin.sequence).toBe(4);
-    expect(north.projection.state().revocations).toEqual([ids.south]);
+    expect(north.projection.state().revocations.map((cut) => cut.instanceId)).toEqual([ids.south]);
     expect(north.projection.state().pending).toBeUndefined();
   });
 

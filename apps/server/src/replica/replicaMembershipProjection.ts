@@ -21,7 +21,10 @@ import {
   ReplicaReadRefusal,
   type EventEnvelope,
 } from "@octant/contracts";
-import type { ReplicaMembershipMember } from "@octant/domain/replica-membership-policy";
+import type {
+  ReplicaMembershipMember,
+  ReplicaRevocationCut,
+} from "@octant/domain/replica-membership-policy";
 import type { ReplicaAppliedEntry } from "@octant/domain/replica-entry-policy";
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
@@ -88,6 +91,8 @@ export const ReplicaMembershipRevoked = Schema.Struct({
   revoker: ReplicaInstanceId,
   sequence: Sequence,
   subject: ReplicaInstanceId,
+  /** The cut the published revocation names. */
+  lastAcceptedSequence: Schema.Int.pipe(Schema.nonNegative()),
 }).annotations(strict);
 
 /**
@@ -172,7 +177,8 @@ export interface ReplicaLocalIdentity {
 export interface ReplicaMembershipState {
   readonly local: ReplicaLocalIdentity | undefined;
   readonly members: ReadonlyArray<ReplicaMembershipMember>;
-  readonly revocations: ReadonlyArray<ReplicaInstanceId>;
+  /** Applied revocations, each a cut on the revoked instance's sequence. */
+  readonly revocations: ReadonlyArray<ReplicaRevocationCut>;
   /** Highest sequence this host published under its own instance; 0 before any. */
   readonly localSequence: number;
   /** A signed local entry whose publish has not been confirmed yet. */
@@ -193,13 +199,30 @@ function same(left: ReplicaInstanceId, right: ReplicaInstanceId): boolean {
   return String(left) === String(right);
 }
 
+/** One approval this host holds: who admitted whom, at which of its sequences. */
+interface Admission {
+  readonly approver: ReplicaInstanceId;
+  readonly approverSequence: number;
+  readonly member: ReplicaMembershipMember;
+}
+
+/** One revocation this host holds: a cut on the subject, written by the revoker. */
+interface Revocation {
+  readonly revoker: ReplicaInstanceId;
+  readonly revokerSequence: number;
+  readonly cut: ReplicaRevocationCut;
+}
+
 export class ReplicaMembershipProjection implements Projection {
   readonly name = "replica-membership";
   readonly dependencies: ReadonlyArray<string> = [];
   readonly holdsStateInMemory = true as const;
   #local: ReplicaLocalIdentity | undefined;
-  readonly #members = new Map<string, ReplicaMembershipMember>();
-  readonly #revocations: ReplicaInstanceId[] = [];
+  /** Members trusted by this host's own act: its founding, or a confirmed approver. */
+  readonly #roots = new Map<string, ReplicaMembershipMember>();
+  readonly #admissions: Admission[] = [];
+  readonly #revocations: Revocation[] = [];
+  readonly #recorded = new Set<string>();
   #localSequence = 0;
   #pending: ReplicaMembershipEntry | undefined;
   readonly #applied = new Map<string, ReplicaAppliedEntry>();
@@ -208,8 +231,10 @@ export class ReplicaMembershipProjection implements Projection {
 
   reset(_connection: SqliteConnection): void {
     this.#local = undefined;
-    this.#members.clear();
+    this.#roots.clear();
+    this.#admissions.length = 0;
     this.#revocations.length = 0;
+    this.#recorded.clear();
     this.#localSequence = 0;
     this.#pending = undefined;
     this.#applied.clear();
@@ -231,7 +256,11 @@ export class ReplicaMembershipProjection implements Projection {
           displayName: created.displayName,
           publicKey: created.publicKey,
         };
-        this.#addMember(created.instanceId, created.displayName, created.publicKey);
+        this.#roots.set(String(created.instanceId), {
+          instanceId: created.instanceId,
+          displayName: created.displayName,
+          publicKey: created.publicKey,
+        });
         this.#published(created.sequence);
         return;
       }
@@ -248,25 +277,36 @@ export class ReplicaMembershipProjection implements Projection {
       }
       case names.joinApproved: {
         const approved = decodeApproved(event.payload);
-        this.#addMember(approved.subject, approved.subjectDisplayName, approved.subjectDeviceKey);
+        this.#admit(approved.approver, approved.sequence, {
+          instanceId: approved.subject,
+          displayName: approved.subjectDisplayName,
+          publicKey: approved.subjectDeviceKey,
+        });
         this.#published(approved.sequence);
         return;
       }
       case names.joinConfirmed: {
         const confirmed = decodeConfirmed(event.payload);
-        this.#addMember(
-          confirmed.approver,
-          confirmed.approverDisplayName,
-          confirmed.approverDeviceKey,
-        );
+        this.#roots.set(String(confirmed.approver), {
+          instanceId: confirmed.approver,
+          displayName: confirmed.approverDisplayName,
+          publicKey: confirmed.approverDeviceKey,
+        });
         if (this.#local !== undefined) {
-          this.#addMember(this.#local.instanceId, this.#local.displayName, this.#local.publicKey);
+          this.#admit(confirmed.approver, confirmed.approvalSequence, {
+            instanceId: this.#local.instanceId,
+            displayName: this.#local.displayName,
+            publicKey: this.#local.publicKey,
+          });
         }
         return;
       }
       case names.revoked: {
         const revoked = decodeRevoked(event.payload);
-        this.#revoke(revoked.subject);
+        this.#recordRevocation(revoked.revoker, revoked.sequence, {
+          instanceId: revoked.subject,
+          lastAcceptedSequence: revoked.lastAcceptedSequence,
+        });
         this.#published(revoked.sequence);
         return;
       }
@@ -300,16 +340,81 @@ export class ReplicaMembershipProjection implements Projection {
 
   state(): ReplicaMembershipState {
     const refusals = new Set(this.#refusals);
+    const { members, cuts } = this.#derive();
+    const local = this.#local;
+    const pending =
+      this.#pending !== undefined &&
+      local !== undefined &&
+      cuts.some((cut) => same(cut.instanceId, local.instanceId))
+        ? undefined
+        : this.#pending;
     return {
-      local: this.#local,
-      members: [...this.#members.values()],
-      revocations: [...this.#revocations],
+      local,
+      members,
+      revocations: cuts,
       localSequence: this.#localSequence,
-      pending: this.#pending,
+      // A revoked identity's stopped publish is never finished.
+      pending,
       applied: [...this.#applied.values()],
-      joinRequests: [...this.#joinRequests.values()],
+      joinRequests: [...this.#joinRequests.values()].filter(
+        (entry) =>
+          !members.some((member) => same(member.instanceId, entry.subject)) &&
+          !cuts.some((cut) => same(cut.instanceId, entry.subject)),
+      ),
       refusalRecorded: (refusal) => refusals.has(refusalKey(refusal)),
     };
+  }
+
+  /**
+   * Members and revocations, decided the same way whatever order the records
+   * arrived in.
+   *
+   * A member is a root, or is admitted by an approval whose approver is a
+   * member and signed it at or before every cut on that approver. A
+   * revocation counts when its revoker could sign it under the same rule.
+   * Revocations can cut each other's revokers, so this is a fixed point:
+   * the set that is certainly valid grows from nothing, and every revocation
+   * that set leaves possible is honoured. Two computers that revoked each
+   * other without seeing the other's record both stay revoked - when it is
+   * unclear, the answer is the narrower membership.
+   */
+  #derive(): {
+    readonly members: ReadonlyArray<ReplicaMembershipMember>;
+    readonly cuts: ReadonlyArray<ReplicaRevocationCut>;
+  } {
+    const valid = (counted: ReadonlyArray<Revocation>): ReadonlyArray<Revocation> => {
+      const admitted = this.#admitted(counted);
+      return this.#revocations.filter((revocation) =>
+        signedWithin(admitted, counted, revocation.revoker, revocation.revokerSequence),
+      );
+    };
+    let certain: ReadonlyArray<Revocation> = [];
+    for (let round = 0; round <= this.#revocations.length + 1; round += 1) {
+      const next = valid(valid(certain));
+      if (next.length === certain.length) break;
+      certain = next;
+    }
+    const honoured = valid(certain);
+    return {
+      members: [...this.#admitted(honoured).values()],
+      cuts: honoured.map((revocation) => revocation.cut),
+    };
+  }
+
+  #admitted(counted: ReadonlyArray<Revocation>): Map<string, ReplicaMembershipMember> {
+    const admitted = new Map(this.#roots);
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const admission of this.#admissions) {
+        if (admitted.has(String(admission.member.instanceId))) continue;
+        if (!signedWithin(admitted, counted, admission.approver, admission.approverSequence)) {
+          continue;
+        }
+        admitted.set(String(admission.member.instanceId), admission.member);
+        changed = true;
+      }
+    }
+    return admitted;
   }
 
   #applyRead(applied: typeof ReplicaEntryApplied.Type): void {
@@ -320,36 +425,49 @@ export class ReplicaMembershipProjection implements Projection {
       kind: entry.kind,
       subject: entry.subject,
     });
-    if (outcome === "request-approval") {
-      this.#joinRequests.set(String(entry.subject), entry);
+    if (entry.kind === "join-request") {
+      if (outcome === "request-approval") this.#joinRequests.set(String(entry.subject), entry);
       return;
     }
-    if (outcome === "member-added" && entry.subjectDeviceKey !== undefined) {
-      this.#addMember(entry.subject, entry.subjectDisplayName, entry.subjectDeviceKey);
+    if (entry.kind === "join-approved") {
+      // A self-approval proves nothing by itself; only an approval of another
+      // computer admits anyone.
+      if (same(entry.subject, entry.origin.instanceId) || entry.subjectDeviceKey === undefined) {
+        return;
+      }
+      this.#admit(entry.origin.instanceId, entry.origin.sequence, {
+        instanceId: entry.subject,
+        displayName: entry.subjectDisplayName,
+        publicKey: entry.subjectDeviceKey,
+      });
       return;
     }
-    if (outcome === "member-revoked") this.#revoke(entry.subject);
+    this.#recordRevocation(entry.origin.instanceId, entry.origin.sequence, {
+      instanceId: entry.subject,
+      lastAcceptedSequence: entry.lastAcceptedSequence ?? 0,
+    });
   }
 
-  #addMember(instanceId: ReplicaInstanceId, displayName: string, publicKey: string): void {
-    // Re-joining is a new identity: an instance this host holds as revoked is
-    // never re-admitted, whichever event names it again.
-    if (this.#revocations.some((revoked) => same(revoked, instanceId))) return;
-    if (!this.#members.has(String(instanceId))) {
-      this.#members.set(String(instanceId), { instanceId, displayName, publicKey });
-    }
-    this.#joinRequests.delete(String(instanceId));
+  #admit(
+    approver: ReplicaInstanceId,
+    approverSequence: number,
+    member: ReplicaMembershipMember,
+  ): void {
+    const key = `admit/${String(approver)}/${String(approverSequence)}`;
+    if (this.#recorded.has(key)) return;
+    this.#recorded.add(key);
+    this.#admissions.push({ approver, approverSequence, member });
   }
 
-  #revoke(instanceId: ReplicaInstanceId): void {
-    if (!this.#revocations.some((revoked) => same(revoked, instanceId))) {
-      this.#revocations.push(instanceId);
-    }
-    this.#joinRequests.delete(String(instanceId));
-    // A revoked identity's stopped publish is never finished.
-    if (this.#local !== undefined && same(this.#local.instanceId, instanceId)) {
-      this.#pending = undefined;
-    }
+  #recordRevocation(
+    revoker: ReplicaInstanceId,
+    revokerSequence: number,
+    cut: ReplicaRevocationCut,
+  ): void {
+    const key = `revoke/${String(revoker)}/${String(revokerSequence)}`;
+    if (this.#recorded.has(key)) return;
+    this.#recorded.add(key);
+    this.#revocations.push({ revoker, revokerSequence, cut });
   }
 
   /**
@@ -369,6 +487,21 @@ export class ReplicaMembershipProjection implements Projection {
       this.#pending = undefined;
     }
   }
+}
+
+/** Whether `instanceId` is a member and signed `sequence` at or before every counted cut on it. */
+function signedWithin(
+  admitted: ReadonlyMap<string, ReplicaMembershipMember>,
+  counted: ReadonlyArray<Revocation>,
+  instanceId: ReplicaInstanceId,
+  sequence: number,
+): boolean {
+  if (!admitted.has(String(instanceId))) return false;
+  return counted.every(
+    (revocation) =>
+      !same(revocation.cut.instanceId, instanceId) ||
+      sequence <= revocation.cut.lastAcceptedSequence,
+  );
 }
 
 export interface ReplicaMembershipJournal {

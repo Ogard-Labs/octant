@@ -1324,12 +1324,23 @@ flowchart LR
   deletes from it. A person recovers by deleting that file with the storage
   provider's own tools, revoking the store credentials that wrote it, or
   moving to a new store. A revoked identity's stopped publish is dropped, not
-  finished. Once a computer
-  has applied a revocation, it refuses every entry from the revoked instance
-  it has not already applied. Computers share no clock, so a reader cannot
-  tell whether such an entry was signed before or after the revocation; entries
-  it applied earlier stay applied. A revoked computer that joins again does so
-  as a new instance with its own sequence. Device signing
+  finished. A revocation is
+  a cut: it names the last sequence of the revoked instance that the revoker
+  accepted (what the revoker had read from it, so a person pulls before
+  revoking to keep that computer's earlier approvals). Every entry the revoked
+  instance signed after the cut is refused on every computer, and approvals it
+  made at or before the cut stay valid. Membership is worked out from all the
+  approvals and revocations a computer holds rather than in the order a pull
+  read them: a member is one admitted by an approval its approver signed
+  within every cut on that approver, and a revocation counts when its revoker
+  signed it the same way. When revocations cut each other's revokers, every
+  one that could be valid is honoured, so two computers that revoked each
+  other without seeing the other's record both stay revoked. An entry already
+  applied that falls past a cut read later is refused then, and a computer
+  admitted only through it is not a member. When two members cut the same
+  instance, the earlier cut wins. A revoked computer that joins again does so
+  as a new instance with its own sequence, and a new identity carrying a
+  revoked computer's key is refused. Device signing
   keys live per replica instance in their own namespace of the host credential
   store — a separate macOS Keychain service, `app.octant.replica-device-keys.v1`,
   or a separate Secret Service attribute — reached through the credential

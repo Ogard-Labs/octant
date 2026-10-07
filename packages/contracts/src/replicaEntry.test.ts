@@ -179,8 +179,36 @@ describe("artifact bundle contract", () => {
         subject: ids.otherVersion,
         subjectDisplayName: "South",
         subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
+        lastAcceptedSequence: 1,
       }),
     ).toThrow();
+  });
+
+  it("requires a revocation to name the last sequence it accepts, and signs it", () => {
+    const fields = {
+      format: REPLICA_ENTRY_FORMAT,
+      kind: "revocation",
+      origin: { instanceId: ids.instance, displayName: "North", sequence: 3 },
+      subject: ids.otherVersion,
+      subjectDisplayName: "South",
+    } as const;
+    expect(() => decodeReplicaMembershipEntry(fields)).toThrow();
+    const revocation = decodeReplicaMembershipEntry({ ...fields, lastAcceptedSequence: 4 });
+    const encoded = JSON.parse(encodeReplicaEntry(revocation)) as Record<string, unknown>;
+    expect(encoded.lastAcceptedSequence).toBe(4);
+    expect(Object.keys(encoded).at(-1)).toBe("lastAcceptedSequence");
+    for (const kind of ["join-request", "join-approved"] as const) {
+      expect(() =>
+        decodeReplicaMembershipEntry({
+          ...fields,
+          kind,
+          subject: ids.instance,
+          subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
+          requestedAt: 1,
+          lastAcceptedSequence: 4,
+        }),
+      ).toThrow();
+    }
   });
 });
 

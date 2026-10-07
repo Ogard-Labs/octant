@@ -67,9 +67,12 @@ same six-digit code. You approve only if the codes match, then confirm on the
 new computer. The code is a check that both screens mean the same two
 computers; it is not a password, and nothing secret passes through the store.
 
-Revoking a computer writes a signed record. After your other computers read
-it, they refuse anything that computer writes. A revoked computer that wants
-back in joins again as a new computer.
+Revoking a computer writes a signed record that marks the last of its entries
+you accept. After your other computers read it, they refuse anything that
+computer wrote after that point, including computers it approved afterwards.
+Approvals it made before that point still stand, so read the store before you
+revoke if you want to keep a computer it already brought in. A revoked
+computer that wants back in joins again as a new computer, with a new key.
 
 ## Turning sync off
 
