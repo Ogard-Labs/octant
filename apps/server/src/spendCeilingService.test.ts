@@ -2,13 +2,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { decodeAggregateVersion, decodeAgentRunId, decodeProjectId } from "@octant/contracts";
+import { decodeAgentRunId, decodeAggregateVersion, decodeProjectId } from "@octant/contracts";
 import { recordAgentRunTurnUsage } from "./agentRun/agentRunUsageLedger";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite } from "./persistence/sqlitePort";
-import { decodeSpendCeilingReservationId, SpendCeilingService } from "./spendCeilingService";
+import {
+  decodeSpendCeilingReservationId,
+  SpendCeilingService,
+  type SpendCeilingServiceOptions,
+} from "./spendCeilingService";
 
 const directories: Array<string> = [];
 const now = "2026-09-09T12:00:00.000Z";
@@ -27,7 +31,10 @@ afterEach(() => {
   }
 });
 
-function openService(options?: { readonly clock?: () => string }) {
+function openService(options?: {
+  readonly clock?: () => string;
+  readonly agentRuns?: SpendCeilingServiceOptions["agentRuns"];
+}) {
   const directory = mkdtempSync(join(tmpdir(), "octant-spend-ceiling-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "octant.sqlite3"));
@@ -46,6 +53,7 @@ function openService(options?: { readonly clock?: () => string }) {
     uuid: () => crypto.randomUUID(),
     threadExists: () => true,
     projectExists: () => true,
+    ...(options?.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
   });
   return { connection, journal, service, path: join(directory, "octant.sqlite3") };
 }
@@ -510,6 +518,50 @@ describe("SpendCeilingService", () => {
     });
     expect(remainingOf(snapshot, "thread")).toMatchObject({ ceilingUsdCents: 25_00 });
     expect(remainingOf(snapshot, "thread")).not.toHaveProperty("remainingUsdCents");
+  });
+
+  it("counts a child run under another Project thread against the Project ceiling and its overview", () => {
+    const { connection, service } = openService({
+      agentRuns: {
+        // The admitted thread started no run; another thread in the Project did.
+        parentSummary: () => [],
+        projectRunIds: (projectId) =>
+          String(projectId) === ids.project ? [decodeAgentRunId(ids.child)] : [],
+      },
+    });
+    expect(
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { tokenBudget: 1_000, costBudgetUsdCents: 25_00 },
+        window: { kind: "calendar", period: "month", timeZone: "UTC" },
+      }),
+    ).toMatchObject({ kind: "set" });
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000304",
+      subjectType: "agent-run",
+      subjectId: ids.child,
+      tokens: { input: 700, output: 200 },
+      sequence: 1,
+      costUsdMicros: 25_000_000,
+    });
+
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({ remainingTokens: 100, usedUsdCents: 25_00, remainingUsdCents: 0 });
+    expect(
+      service.admit({
+        reservationId: ids.reservationA,
+        threadId: ids.thread,
+        threadType: "work-thread",
+        projectId: ids.project,
+        turnUpperBoundTokens: 50,
+      }),
+    ).toMatchObject({ status: "refused", refusal: { kind: "exhausted", dimension: "monetary" } });
   });
 
   it("reads remaining money in cents and raises a money ceiling that survives restart", () => {
