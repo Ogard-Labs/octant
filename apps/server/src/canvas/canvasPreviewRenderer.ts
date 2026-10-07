@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
-import { chromium } from "playwright-core";
+import { chromium, type Browser } from "playwright-core";
 import type { CanvasDefinition } from "@octant/contracts/canvas";
 import { DEFAULT_BROWSER_EXECUTABLE_CANDIDATES } from "../browser/playwrightBrowserRuntime";
 
@@ -73,6 +73,8 @@ export interface PlaywrightCanvasPreviewRendererOptions {
   readonly webAssetsPath: string;
   readonly executableCandidates?: ReadonlyArray<string>;
   readonly executable?: (path: string) => Promise<boolean>;
+  /** Starts the headless browser; injectable so a test can make it fail. */
+  readonly launch?: (executablePath: string) => Promise<Browser>;
 }
 
 export function createPlaywrightCanvasPreviewRenderer(
@@ -94,6 +96,9 @@ export function createPlaywrightCanvasPreviewRenderer(
       }
     });
   const previewRoot = resolve(options.webAssetsPath, CANVAS_PREVIEW_ASSET_FOLDER);
+  const launch =
+    options.launch ??
+    ((executablePath: string) => chromium.launch({ executablePath, headless: true }));
 
   async function resolveExecutable(): Promise<string | undefined> {
     for (const candidate of candidates) {
@@ -124,8 +129,11 @@ export function createPlaywrightCanvasPreviewRenderer(
         CANVAS_PREVIEW_MAX_IMAGE_WIDTH,
         Math.max(1, Math.round(request.width)),
       );
-      const browser = await chromium.launch({ executablePath: executable, headless: true });
+      // A browser that will not start is a failed look, reported as a value
+      // like any other, not an exception thrown at the tool caller.
+      let browser: Browser | undefined;
       try {
+        browser = await launch(executable);
         const context = await browser.newContext({
           viewport: { width, height: 600 },
           deviceScaleFactor: 1,
@@ -181,7 +189,7 @@ export function createPlaywrightCanvasPreviewRenderer(
       } catch {
         return { kind: "unavailable", reason: "failed" };
       } finally {
-        await browser.close().catch(() => undefined);
+        await browser?.close().catch(() => undefined);
       }
     },
   };
