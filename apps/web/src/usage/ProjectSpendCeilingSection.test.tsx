@@ -179,7 +179,7 @@ describe("ProjectSpendCeilingSection", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Enter at least one budget.");
   });
 
-  it("shows the Project's unpriced money refusal instead of an empty reading", async () => {
+  it("says the Project's money cannot be measured and shows why", async () => {
     const projectId = "00000000-0000-4000-8000-000000000201";
     const window = { kind: "calendar" as const, period: "month" as const, timeZone: "UTC" };
     const snapshot = vi.fn().mockResolvedValue({
@@ -191,7 +191,7 @@ describe("ProjectSpendCeilingSection", () => {
         setAt: "2026-09-17T00:00:00.000Z",
         setBy: { kind: "local-user", actorId: "host" },
       },
-      projectRemaining: { window, version: 1 },
+      projectRemaining: { ceilingUsdCents: 25_00, window, version: 1 },
       refusal: {
         kind: "unknown-spend",
         scopeKind: "project",
@@ -210,6 +210,6 @@ describe("ProjectSpendCeilingSection", () => {
       />,
     );
     expect(await screen.findByRole("alert")).toHaveTextContent("has no price");
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("money cannot be measured");
   });
 });

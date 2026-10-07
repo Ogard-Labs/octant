@@ -1803,13 +1803,29 @@ reconciled request records its cost from the provider runtime's own figure
 `usage.cost` (OpenRouter; a BYOK `cost` is only OpenRouter's fee and is not
 used). Without a provider figure, a model in the checked-in standard-rate price
 table (`packages/domain/src/localUsagePricing.ts`, the same table and rule the
-composer's cost line uses) is recorded as an `api-estimate`; for a subscription
-provider that is what the tokens would cost at API rates, not what is billed. A
-native-harness turn has a cost only when every request in it reported one. Any
-other request — a model with no price, a provider that reports no cost, a
-completed request that reported no usage, and usage recorded before the ledger
-carried cost — is unpriced, and any unpriced row in the window makes the money
-ceiling refuse `unknown-spend` rather than count that usage as free.
+composer's cost line uses) is recorded as an `api-estimate`. On a subscription
+plan both are API-rate equivalents, not the bill: Claude Code reports
+`total_cost_usd` at API rates on a Claude plan too. Chat and Work journal the
+cost with the reconciliation; Code prices its row when the projection applies
+the turn's usage frame, so rebuilding the Code usage projection after a
+price-table revision re-prices Code history.
+
+A turn's usage is accumulated as the runtime contract defines it
+(`accumulateTurnUsage`): reports that name their request add up, a whole-turn
+report replaces them, and the sum has a cost only when every request in it
+reported one. The Claude mapper reports the turn so far after each model call,
+summed by message id. Every turn that reached the provider leaves exactly one
+ledger row however it ended — completed, failed, cancelled, or interrupted —
+and Work keeps usage the provider reports after a cancel. A turn that reached
+the provider and reported nothing (an ACP agent in Code reports no usage) is
+recorded as unreported and unpriced, so token and money ceilings refuse after
+it; a turn refused before the provider leaves no row. Any unpriced row in the
+window — a model with no price, a provider that reports no cost or no usage,
+and usage recorded before the ledger carried cost — makes the money ceiling
+refuse `unknown-spend` rather than count that usage as free. That refusal
+offers clearing the ceiling, waiting out a Project's calendar window, Usage,
+or pausing; a raise cannot price the usage, so it is not offered. Turns from
+before this behaviour that left no ledger row at all are not counted.
 
 Money is checked between turns, like turns and run time, not reserved like
 tokens. A provider reports cost only when a turn settles and no per-turn price

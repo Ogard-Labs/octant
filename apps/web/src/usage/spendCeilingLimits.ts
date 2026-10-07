@@ -148,8 +148,16 @@ export function spendCeilingRemainingPhrases(
       `${formatSpendCeilingRunTime(runTime.remainingRunTimeSeconds)} of ${formatSpendCeilingRunTime(runTime.ceilingRunTimeSeconds)} agent run time remaining`,
     );
   }
+  // A money budget that cannot be priced is stated beside the others: a
+  // turn is refused on it, so leaving it out would read as room to spend.
+  const unmeasuredMoney = remainings.some(
+    (remaining) =>
+      remaining.ceilingUsdCents !== undefined && remaining.remainingUsdCents === undefined,
+  );
   const money = tighter(remainings, (remaining) => remaining.remainingUsdCents);
-  if (money?.remainingUsdCents !== undefined && money.ceilingUsdCents !== undefined) {
+  if (unmeasuredMoney) {
+    phrases.push("money cannot be measured");
+  } else if (money?.remainingUsdCents !== undefined && money.ceilingUsdCents !== undefined) {
     phrases.push(
       `${formatSpendCeilingUsd(money.remainingUsdCents)} of ${formatSpendCeilingUsd(money.ceilingUsdCents)} remaining`,
     );
@@ -172,4 +180,4 @@ export function hasMoneyCeiling(
 }
 
 export const MONEY_CEILING_NOTE =
-  "Money counts settled, priced usage and is checked between turns, so a running turn can finish over it. Usage with no price refuses the next turn.";
+  "Money is what the provider reports, or otherwise an estimate at standard API rates. On a subscription plan such as Claude or ChatGPT both are API-rate equivalents, not your bill. It is checked between turns, so a running turn can finish over it, and usage with no price refuses the next turn.";

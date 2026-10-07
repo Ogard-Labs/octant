@@ -195,6 +195,10 @@ describe("evaluateSpendCeilingAdmission turn and run-time budgets", () => {
       ceilingUsdCents: 25_00,
     });
     expect(result.refusal.message).toContain("has no price");
+    // A raise can never price the usage, so it is not offered.
+    expect(result.refusal.recovery).toEqual(["clear-ceiling", "open-usage", "pause-work"]);
+    expect(result.refusal.message).not.toContain("Raise");
+    expect(result.refusal.message).toContain("wait for this window to end");
   });
 
   it("refuses the turn past a thread turn budget and needs no token bound without a token budget", () => {

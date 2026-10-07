@@ -101,9 +101,17 @@ export function formatSpendCeilingUsd(usdCents: number): string {
   return `$${dollars}.${String(cents).padStart(2, "0")}`;
 }
 
-function recoveryFor(kind: SpendCeilingRefusal["kind"]): SpendCeilingRefusal["recovery"] {
+function recoveryFor(
+  kind: SpendCeilingRefusal["kind"],
+  dimension: SpendCeilingRefusal["dimension"],
+): SpendCeilingRefusal["recovery"] {
   if (kind === "missing-turn-bound") {
     return ["raise-ceiling", "pause-work"];
+  }
+  // Unpriced usage stays unpriced however high the budget goes, so a raise
+  // would never let the next turn through.
+  if (kind === "unknown-spend" && dimension === "monetary") {
+    return ["clear-ceiling", "open-usage", "pause-work"];
   }
   return [...DEFAULT_RECOVERY];
 }
@@ -142,7 +150,8 @@ function refusalMessage(input: RefusalInput): string {
   }
   if (input.dimension === "monetary") {
     if (input.kind === "unknown-spend") {
-      return `This ${who}'s money ceiling cannot be checked because some of its usage in this window has no price: the provider reported no cost and Octant has no rate for the model, or the provider reported no usage. ${recovery}`;
+      const wait = input.scopeKind === "project" ? ", wait for this window to end" : "";
+      return `This ${who}'s money ceiling cannot be checked because some of its usage in this window has no price: the provider reported no cost and Octant has no rate for the model, or the provider reported no usage. Clear the ceiling and set it again without a money budget${wait}, open Usage for this ${who}, or pause work.`;
     }
     return `This ${who}'s money ceiling of ${formatSpendCeilingUsd(input.ceilingUsdCents ?? 0)} is used up for this window. ${recovery}`;
   }
@@ -188,7 +197,7 @@ function makeRefusal(input: RefusalInput): SpendCeilingRefusal {
       ? {}
       : { remainingUsdCents: input.remainingUsdCents }),
     ...(input.ceilingUsdCents === undefined ? {} : { ceilingUsdCents: input.ceilingUsdCents }),
-    recovery: recoveryFor(input.kind),
+    recovery: recoveryFor(input.kind, input.dimension),
     message: refusalMessage(input),
   };
 }

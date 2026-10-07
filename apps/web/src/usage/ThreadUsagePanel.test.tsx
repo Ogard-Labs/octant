@@ -293,8 +293,15 @@ describe("ThreadUsagePanel", () => {
     const message =
       "This thread's money ceiling cannot be checked because some of its usage in this window has no price: the provider reported no cost and Octant has no rate for the model, or the provider reported no usage. Raise or clear the ceiling, open Usage for this thread, or pause work.";
     const snapshot = vi.fn().mockResolvedValue({
-      thread: { version: 1, policy: { costBudgetUsdCents: 25_00 } },
-      threadRemaining: { window: { kind: "lifetime" }, version: 1 },
+      thread: { version: 1, policy: { costBudgetUsdCents: 25_00, turnBudget: 40 } },
+      threadRemaining: {
+        ceilingUsdCents: 25_00,
+        ceilingTurns: 40,
+        usedTurns: 3,
+        remainingTurns: 37,
+        window: { kind: "lifetime" },
+        version: 1,
+      },
       refusal: {
         kind: "unknown-spend",
         scopeKind: "thread",
@@ -314,8 +321,12 @@ describe("ThreadUsagePanel", () => {
       />,
     );
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("has no price"));
-    expect(screen.getByRole("status")).toHaveTextContent("Cannot be measured");
+    // The turns it can measure and the money it cannot, side by side.
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "37 of 40 turns remaining · money cannot be measured",
+    );
     expect(screen.queryByText("None")).not.toBeInTheDocument();
+    expect(screen.getByText(/API-rate equivalents, not your bill/)).toBeVisible();
   });
 
   it("reports a host failure instead of an empty total", async () => {

@@ -409,6 +409,15 @@ describe("SpendCeilingService", () => {
       status: "refused",
       refusal: { kind: "unknown-spend", dimension: "monetary" },
     });
+    // The reading names the money budget it cannot measure instead of
+    // leaving it out, so a surface can say so beside the other budgets.
+    const snapshot = service.snapshot({
+      principalKind: "local-window",
+      threadId: ids.thread,
+      threadType: "chat-thread",
+    });
+    expect(remainingOf(snapshot, "thread")).toMatchObject({ ceilingUsdCents: 25_00 });
+    expect(remainingOf(snapshot, "thread")).not.toHaveProperty("remainingUsdCents");
   });
 
   it("reads remaining money in cents and raises a money ceiling that survives restart", () => {

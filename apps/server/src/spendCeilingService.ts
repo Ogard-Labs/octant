@@ -331,14 +331,19 @@ export class SpendCeilingService {
             usedRunTimeSeconds: usedSeconds,
             remainingRunTimeSeconds: Math.max(0, runTimeBudgetSeconds - usedSeconds),
           };
+    // A money budget whose window cannot be priced keeps its ceiling in the
+    // reading without a used or remaining figure, so "cannot be measured" is
+    // stated rather than the dimension silently missing.
     const money =
-      costBudgetUsdCents === undefined || facts.usedCostUsdCents === undefined
+      costBudgetUsdCents === undefined
         ? {}
-        : {
-            ceilingUsdCents: costBudgetUsdCents,
-            usedUsdCents: facts.usedCostUsdCents,
-            remainingUsdCents: Math.max(0, costBudgetUsdCents - facts.usedCostUsdCents),
-          };
+        : facts.usedCostUsdCents === undefined
+          ? { ceilingUsdCents: costBudgetUsdCents }
+          : {
+              ceilingUsdCents: costBudgetUsdCents,
+              usedUsdCents: facts.usedCostUsdCents,
+              remainingUsdCents: Math.max(0, costBudgetUsdCents - facts.usedCostUsdCents),
+            };
     return {
       ...tokens,
       ...turns,

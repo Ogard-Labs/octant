@@ -161,16 +161,20 @@ The next turn is then refused.
 Each request's cost is the provider's own figure when it reports one: Claude
 Code, OpenCode, Pi, and OpenRouter do. Otherwise, for a model with a standard
 API rate, Octant uses the same estimate as the **est.** cost under the
-composer. For a subscription such as a ChatGPT or Claude plan, that estimate is
-what the tokens would cost at API rates, not what you are billed.
+composer. On a subscription such as a Claude or ChatGPT plan, both are what the
+tokens would cost at API rates, not what you are billed; Claude Code reports
+its cost at API rates on a Claude plan too.
 
-Usage with no price is never counted as free. If any usage in the window has
-no price — a model without a known rate (including local models), a provider
-that reports neither cost nor usage, or usage recorded before Octant recorded
-costs — the money budget cannot be checked, the Usage panel says **Cannot be
+Every turn that reached the provider counts, whether it finished, failed, or
+was cancelled. Usage with no price is never counted as free. If any usage in
+the window has no price — a model without a known rate (including local
+models), a provider that reports no cost or no usage at all (such as an ACP
+agent in a Code thread), or usage recorded before Octant recorded costs — the
+money budget cannot be checked, the Usage panel says **money cannot be
 measured**, and the next turn is refused until that usage leaves a Project's
 calendar window or you clear the ceiling and set it again without a money
-budget.
+budget. Raising the money budget does not help, because the usage still has no
+price.
 
 ## Restart-safe local history
 
