@@ -26,8 +26,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // envelopes. A decoder must reject a future version until its renderer and
 // policy have been reviewed together. The current schema version is declared
 // in `canvasIdentity.ts`: version 3 added the mockup block, version 4 the
-// thread presentation, and version 5 the treemap block, which the definition
-// filters below admit only under those declared versions.
+// thread presentation, version 5 the treemap block, version 6 the heatmap
+// block, and version 7 the ranked bar-list block, which the definition filters
+// below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -69,6 +70,13 @@ export const CANVAS_MAX_HEATMAP_CELLS = 16_384;
 // truncation.
 export const CANVAS_MAX_HEATMAP_DAYS = 3 * 366;
 export const CANVAS_MAX_HEATMAP_NOTE_LENGTH = 120;
+// A ranked list is read, not scrolled: the cap is what keeps a "hottest files"
+// list from becoming the whole repository. The renderer shows a shorter top N
+// and offers Show all up to this bound.
+export const CANVAS_MAX_BAR_LIST_ROWS = 500;
+// A metric sparkline is a glance at a recent trend, not a chart: a quarter of
+// readings at a sample a day is enough, and past that the line is a smear.
+export const CANVAS_MAX_METRIC_SPARKLINE_POINTS = 256;
 
 // The schema version that introduced each version-gated block kind or hint. A
 // document carrying one below the version that introduced it is a declared
@@ -77,6 +85,24 @@ export const CANVAS_MOCKUP_SCHEMA_VERSION = 3;
 export const CANVAS_PRESENTATION_SCHEMA_VERSION = 4;
 export const CANVAS_TREEMAP_SCHEMA_VERSION = 5;
 export const CANVAS_HEATMAP_SCHEMA_VERSION = 6;
+export const CANVAS_BAR_LIST_SCHEMA_VERSION = 7;
+// The metric's sparkline, goodDirection, and caption arrived with the bar list.
+export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
+
+/** Whether a block uses a metric field introduced at the metric-trend version. */
+export function canvasMetricUsesTrendFields(block: {
+  readonly kind?: unknown;
+  readonly sparkline?: unknown;
+  readonly goodDirection?: unknown;
+  readonly caption?: unknown;
+}): boolean {
+  return (
+    block.kind === "metric" &&
+    (block.sparkline !== undefined ||
+      block.goodDirection !== undefined ||
+      block.caption !== undefined)
+  );
+}
 
 // Descriptive aliases keep budget names discoverable without creating a
 // second source of truth.
@@ -250,6 +276,7 @@ export const CanvasBlockKind = Schema.Literal(
   "mockup",
   "treemap",
   "heatmap",
+  "bar-list",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -325,6 +352,16 @@ export type CanvasNumberFormat = typeof CanvasNumberFormat.Type;
 export const CanvasScalar = Schema.Union(CanvasText, FiniteNumber, Schema.Boolean, Schema.Null);
 export type CanvasScalar = typeof CanvasScalar.Type;
 
+/**
+ * Which way a metric is good when it moves, so a delta's tone is never guessed.
+ *
+ * `up` means a larger reading is better (throughput), `down` a smaller one
+ * (latency, failures), and `neutral` that the metric has no good side (a count
+ * of open items that should simply be watched). Absent reads as neutral.
+ */
+export const CanvasMetricDirection = Schema.Literal("up", "down", "neutral");
+export type CanvasMetricDirection = typeof CanvasMetricDirection.Type;
+
 export const CanvasMetricBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("metric"),
@@ -333,6 +370,18 @@ export const CanvasMetricBlock = Schema.Struct({
   unit: Schema.optional(CanvasLabel),
   delta: Schema.optional(FiniteNumber),
   format: Schema.optional(CanvasNumberFormat),
+  /**
+   * A recent trend drawn beside the value. Wire numbers only; the renderer
+   * reads them as one series and the static export draws the same line. The
+   * array is bounded so a sparkline stays a glance rather than a chart.
+   */
+  sparkline: Schema.optional(
+    Schema.Array(FiniteNumber).pipe(Schema.maxItems(CANVAS_MAX_METRIC_SPARKLINE_POINTS)),
+  ),
+  /** How a delta reads; absent means the arrow gives direction without a tone. */
+  goodDirection: Schema.optional(CanvasMetricDirection),
+  /** A short note under the value, e.g. "since last release". */
+  caption: Schema.optional(CanvasText),
 }).annotations(strict);
 export type CanvasMetricBlock = typeof CanvasMetricBlock.Type;
 
@@ -700,6 +749,48 @@ export const CanvasHeatmapBlock = Schema.Union(
   CanvasHeatmapCalendarBlock,
 );
 export type CanvasHeatmapBlock = typeof CanvasHeatmapBlock.Type;
+
+/**
+ * How a bar list colours its bars.
+ *
+ * `neutral` draws every bar in the same ink, which is right when the ranking
+ * itself is the point; `sequential` reads each bar's length through the shared
+ * scale, which is right when the magnitude is. Absent reads as neutral.
+ */
+export const CanvasBarListScale = Schema.Literal("neutral", "sequential");
+export type CanvasBarListScale = typeof CanvasBarListScale.Type;
+
+/**
+ * One ranked entry: a name, its magnitude, and an optional second reading.
+ *
+ * The label may be a path, which the renderer draws in the shared path style;
+ * when the row names a manifest `sourceId`, it also offers Open file through
+ * the allowlisted open-source action. Values are magnitudes, so a negative
+ * value is refused: a bar's length cannot be less than none.
+ */
+export const CanvasBarListRow = Schema.Struct({
+  label: CanvasLabel,
+  value: FiniteNumber,
+  secondaryValue: Schema.optional(FiniteNumber),
+  sourceId: Schema.optional(CanvasSourceId),
+}).annotations(strict);
+export type CanvasBarListRow = typeof CanvasBarListRow.Type;
+
+export const CanvasBarListBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("bar-list"),
+  rows: Schema.NonEmptyArray(CanvasBarListRow).pipe(Schema.maxItems(CANVAS_MAX_BAR_LIST_ROWS)),
+  /** The reading's name, shown in the tooltip and the table header. */
+  valueLabel: Schema.optional(CanvasLabel),
+  /** The second reading's name, when rows carry one. */
+  secondaryLabel: Schema.optional(CanvasLabel),
+  /** How each value reads; absent groups by locale. */
+  format: Schema.optional(CanvasNumberFormat),
+  /** How the second reading reads; defaults to the primary format. */
+  secondaryFormat: Schema.optional(CanvasNumberFormat),
+  scale: Schema.optional(CanvasBarListScale),
+}).annotations(strict);
+export type CanvasBarListBlock = typeof CanvasBarListBlock.Type;
 
 export const CanvasTimelineItem = Schema.Struct({
   itemId: boundedToken("CanvasTimelineItemId"),
@@ -1133,6 +1224,7 @@ export const CanvasBlock = Schema.Union(
   // kind per member, and a nested union would hide its members from it.
   CanvasHeatmapMatrixBlock,
   CanvasHeatmapCalendarBlock,
+  CanvasBarListBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
   // effect, so union membership never makes a definition executable.
@@ -1164,7 +1256,8 @@ export const CanvasDefinition = Schema.Struct({
   .annotations(strict)
   .pipe(
     // Version-gated blocks and hints: a mockup is admitted from version 3, the
-    // thread presentation from version 4, and a treemap from version 5. A
+    // thread presentation from version 4, a treemap from version 5, a heatmap
+    // from version 6, and a bar list and the metric trend fields from version 7. A
     // rolled-back runtime that never learned a kind or hint must see a document
     // carrying it as a declared future version, not as a document that failed
     // to decode. Each keeps its own floor so an earlier document stays valid.
@@ -1202,6 +1295,24 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `Heatmap blocks require Canvas schema version ${String(CANVAS_HEATMAP_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_BAR_LIST_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "bar-list"),
+      {
+        message: () =>
+          `Bar-list blocks require Canvas schema version ${String(CANVAS_BAR_LIST_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_METRIC_TREND_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasMetricUsesTrendFields),
+      {
+        message: () =>
+          `A metric sparkline, goodDirection, or caption requires Canvas schema version ${String(CANVAS_METRIC_TREND_SCHEMA_VERSION)}.`,
       },
     ),
   );

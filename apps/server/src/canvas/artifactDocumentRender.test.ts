@@ -209,4 +209,48 @@ describe("rendering a canvas as a document", () => {
     expect(rendered.body).toContain("| 2026-09-01 | 0 |  |");
     expect(rendered.body).toContain("| 2026-09-02 | 4 | Flaky suite |");
   });
+
+  it("writes a bar list as a ranked table with an optional second reading", () => {
+    const barList = decodeCanvasBlock({
+      blockId: "hottest-files",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "bar-list",
+      valueLabel: "Edits",
+      secondaryLabel: "Lines",
+      rows: [
+        { label: "packages/domain", value: 33 },
+        { label: "apps/web", value: 41, secondaryValue: 1189 },
+      ],
+    });
+
+    const rendered = renderArtifactMarkdown(definition([barList]));
+
+    expect(rendered.kind).toBe("rendered");
+    if (rendered.kind !== "rendered") return;
+    expect(rendered.body).toContain("| Item | Edits | Lines |");
+    // A row without a second reading leaves an empty cell rather than a zero.
+    const largest = `| apps/web | 41 | ${formatCanvasNumber(1189)} |`;
+    const smaller = "| packages/domain | 33 |  |";
+    expect(rendered.body).toContain(largest);
+    expect(rendered.body).toContain(smaller);
+    // The export ranks largest first, as the screen and the preview do.
+    expect(rendered.body.indexOf(largest)).toBeLessThan(rendered.body.indexOf(smaller));
+  });
+
+  it("carries a metric caption into its reading", () => {
+    const captioned = {
+      blockId: "metric-caption",
+      schemaVersion: 6,
+      kind: "metric",
+      label: "Signups",
+      value: 12,
+      caption: "since last release",
+    } as unknown as CanvasBlock;
+
+    const rendered = renderArtifactMarkdown(definition([captioned]));
+
+    expect(rendered.kind).toBe("rendered");
+    if (rendered.kind !== "rendered") return;
+    expect(rendered.body).toContain("Signups: 12 — since last release");
+  });
 });

@@ -408,6 +408,59 @@ describe("createCanvasAgentTools", () => {
     });
   });
 
+  it("lets an agent create a hottest-files list from the bar-list example describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["bar-list"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.blockId)).toContain("hottest-files");
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks.every((block) => block.kind === "bar-list")).toBe(true);
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Hot files", blocks: examples }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Hot files" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+    expect(examples[0]).toMatchObject({ kind: "bar-list", scale: "sequential" });
+  });
+
+  it("lets an agent create a repo-stats tile row from the metric examples describe returns", async () => {
+    const { set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["metric"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.blockId)).toEqual([
+      "repo-file-count",
+      "repo-lines",
+      "repo-coverage",
+    ]);
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks.every((block) => block.kind === "metric")).toBe(true);
+    expect(examples[1]).toMatchObject({ kind: "metric", goodDirection: "up", format: "compact" });
+  });
+
   it("lets an agent create and then revise a settings screen mockup from the example describe returns", async () => {
     const { create, revise, set } = tools();
     const described = await set.execute({

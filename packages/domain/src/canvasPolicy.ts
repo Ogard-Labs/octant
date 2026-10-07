@@ -1,5 +1,6 @@
 import {
   CANVAS_MAX_BLOCKS,
+  CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_DEPTH,
@@ -9,6 +10,7 @@ import {
   CANVAS_MAX_HEATMAP_NOTE_LENGTH,
   CANVAS_MAX_HEATMAP_ROWS,
   CANVAS_MAX_IMAGES,
+  CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MOCKUP_DEPTH,
   CANVAS_MAX_MOCKUP_NODES,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
@@ -18,6 +20,8 @@ import {
   CANVAS_MAX_TEXT_BYTES,
   CANVAS_MAX_TREEMAP_DEPTH,
   CANVAS_MAX_TREEMAP_LEAVES,
+  CANVAS_BAR_LIST_SCHEMA_VERSION,
+  CANVAS_METRIC_TREND_SCHEMA_VERSION,
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_MOCKUP_SCHEMA_VERSION,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
@@ -26,6 +30,7 @@ import {
   CanvasBlock,
   CanvasDefinition,
   CanvasVersion,
+  canvasMetricUsesTrendFields,
   decodeCanvasDefinition,
   decodeCanvasVersion,
   type CanvasSourceId,
@@ -42,6 +47,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   3,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
+  CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -53,6 +59,7 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "mockup", since: CANVAS_MOCKUP_SCHEMA_VERSION },
     { kind: "treemap", since: CANVAS_TREEMAP_SCHEMA_VERSION },
     { kind: "heatmap", since: CANVAS_HEATMAP_SCHEMA_VERSION },
+    { kind: "bar-list", since: CANVAS_BAR_LIST_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -108,7 +115,11 @@ export type CanvasPolicyRejectionCode =
   | "heatmap-columns-budget-exceeded"
   | "heatmap-cells-budget-exceeded"
   | "heatmap-days-budget-exceeded"
-  | "heatmap-note-budget-exceeded";
+  | "heatmap-note-budget-exceeded"
+  | "bar-list-rows-budget-exceeded"
+  | "duplicate-bar-list-label"
+  | "bar-list-negative-value"
+  | "metric-sparkline-budget-exceeded";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -224,6 +235,8 @@ function sourceIdsForBlock(block: CanvasBlock): ReadonlyArray<CanvasSourceId> {
       return block.tasks.flatMap((task) => task.sourceIds ?? []);
     case "treemap":
       return block.nodes.flatMap((node) => (node.sourceId === undefined ? [] : [node.sourceId]));
+    case "bar-list":
+      return block.rows.flatMap((row) => (row.sourceId === undefined ? [] : [row.sourceId]));
     default:
       return [];
   }
@@ -327,9 +340,11 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
       (block) =>
         typeof block === "object" &&
         block !== null &&
-        VERSION_GATED_BLOCK_KINDS.some(
+        (VERSION_GATED_BLOCK_KINDS.some(
           (gated) => gated.kind === (block as { kind?: unknown }).kind && declared < gated.since,
-        ),
+        ) ||
+          (declared < CANVAS_METRIC_TREND_SCHEMA_VERSION &&
+            canvasMetricUsesTrendFields(block as Record<string, unknown>))),
     )
   ) {
     return "unsupported-schema-version";
@@ -388,6 +403,7 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       columns?: unknown;
       cells?: unknown;
       days?: unknown;
+      sparkline?: unknown;
     };
     if (block.kind === "image") imageCount += 1;
     if (
@@ -470,6 +486,20 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
           return "heatmap-note-budget-exceeded";
         }
       }
+    }
+    if (
+      block.kind === "bar-list" &&
+      Array.isArray(block.rows) &&
+      block.rows.length > CANVAS_MAX_BAR_LIST_ROWS
+    ) {
+      return "bar-list-rows-budget-exceeded";
+    }
+    if (
+      block.kind === "metric" &&
+      Array.isArray(block.sparkline) &&
+      block.sparkline.length > CANVAS_MAX_METRIC_SPARKLINE_POINTS
+    ) {
+      return "metric-sparkline-budget-exceeded";
     }
   }
   if (imageCount > CANVAS_MAX_IMAGES) return "image-budget-exceeded";
@@ -571,6 +601,8 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "mockup") validateMockup(block);
     if (block.kind === "treemap") validateTreemap(block);
     if (block.kind === "heatmap") validateHeatmap(block);
+    if (block.kind === "bar-list") validateBarList(block);
+    if (block.kind === "metric") validateMetric(block);
   }
 }
 
@@ -1076,6 +1108,64 @@ function validateHeatmap(block: Extract<CanvasBlock, { readonly kind: "heatmap" 
         `Canvas heatmap ${block.blockId} has a note longer than ${String(CANVAS_MAX_HEATMAP_NOTE_LENGTH)} characters.`,
       );
     }
+  }
+}
+
+/**
+ * A bar list is a ranking of magnitudes. A repeated label would draw one entry
+ * twice, a row past the row budget would draw a list longer than the block may
+ * declare, and a negative value has no bar length, so each is refused. The
+ * sort order is not validated: largest-first is the default the renderer
+ * applies, and the person may reverse it as view state.
+ */
+function validateBarList(block: Extract<CanvasBlock, { readonly kind: "bar-list" }>): void {
+  if (block.rows.length > CANVAS_MAX_BAR_LIST_ROWS) {
+    reject(
+      "bar-list-rows-budget-exceeded",
+      `Canvas bar list ${block.blockId} has more than ${String(CANVAS_MAX_BAR_LIST_ROWS)} rows.`,
+    );
+  }
+  const labels = new Set<string>();
+  for (const row of block.rows) {
+    if (labels.has(row.label)) {
+      reject(
+        "duplicate-bar-list-label",
+        `Canvas bar list ${block.blockId} lists one label more than once.`,
+      );
+    }
+    labels.add(row.label);
+    if (!Number.isFinite(row.value) || row.value < 0) {
+      reject(
+        "bar-list-negative-value",
+        `Canvas bar list ${block.blockId} has a value that is negative or not finite.`,
+      );
+    }
+    if (
+      row.secondaryValue !== undefined &&
+      (!Number.isFinite(row.secondaryValue) || row.secondaryValue < 0)
+    ) {
+      reject(
+        "bar-list-negative-value",
+        `Canvas bar list ${block.blockId} has a second value that is negative or not finite.`,
+      );
+    }
+  }
+}
+
+/**
+ * A metric's sparkline is a bounded glance. The contract caps it, so this
+ * re-check only fires for a caller that bypassed the decoder; the block stays
+ * otherwise unconstrained because an absent direction simply means neutral.
+ */
+function validateMetric(block: Extract<CanvasBlock, { readonly kind: "metric" }>): void {
+  if (
+    block.sparkline !== undefined &&
+    block.sparkline.length > CANVAS_MAX_METRIC_SPARKLINE_POINTS
+  ) {
+    reject(
+      "metric-sparkline-budget-exceeded",
+      `Canvas metric ${block.blockId} has a sparkline longer than ${String(CANVAS_MAX_METRIC_SPARKLINE_POINTS)} points.`,
+    );
   }
 }
 

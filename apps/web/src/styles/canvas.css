@@ -95,10 +95,12 @@
 
 /* Consecutive metrics sit side by side as tiles: the face of the sidebar's
    count tiles (a faint fill inside a faint ring), so a number in a Canvas
-   reads like a number anywhere else in the app. */
+   reads like a number anywhere else in the app. The track is at least a
+   quarter of the row, so a wide Canvas lays out at most four tiles, and at
+   least 9rem, so a narrow one keeps two. */
 .canvas-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(max(9rem, 25%), 1fr));
   gap: var(--oct-space-2);
   margin: 0 0 var(--oct-space-4);
 }
@@ -137,6 +139,7 @@
   font-size: var(--oct-text-2xl);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-tight);
+  font-variant-numeric: tabular-nums;
 }
 
 .canvas-block__metric .cmetric-unit {
@@ -147,6 +150,38 @@
 
 .canvas-block__metric .cmetric-delta {
   font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A delta's tone follows the direction the block names; good and bad are the
+   only two tones, and the arrow plus the signed value stay the channel a
+   reader without colour relies on. */
+.canvas-block__metric .cmetric-delta.good {
+  color: var(--oct-success);
+}
+
+.canvas-block__metric .cmetric-delta.bad {
+  color: var(--oct-danger);
+}
+
+.canvas-block__metric .cmetric-caption {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__metric .cmetric-sparkline {
+  display: block;
+  width: 100%;
+  max-width: 160px;
+  height: 24px;
+  color: var(--oct-accent);
+}
+
+.canvas-block__metric .cmetric-sparkline-line {
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .canvas-block__progress progress {
@@ -898,6 +933,132 @@
 
   .canvas-block__heatmap-axis {
     fill: CanvasText;
+  }
+}
+
+/* ── Ranked bar list ─────────────────────────────────────────────────────
+   The same data-visualisation system as a chart and a treemap: bars drawn
+   from the shared scale roles, a path label read in the code font, and a
+   disclosed table. Bars are lengths, so neutral ink is the default and the
+   sequential scale is the opt-in. */
+
+.canvas-block__bar-list {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.canvas-block__bar-list-header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-bottom: var(--oct-space-2);
+}
+
+.canvas-block__bar-list-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.canvas-block__bar-list-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+}
+
+.canvas-block__bar-list-track {
+  grid-column: 1 / -1;
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--oct-fg) 8%, transparent);
+  overflow: hidden;
+}
+
+/* Length is the reading; the fill is the shared ink or a scale role. A tiny
+   minimum keeps a zero row visible as a present but empty bar. */
+.canvas-block__bar-list-bar {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 3px;
+}
+
+.canvas-block__bar-list-entry {
+  display: flex;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  font-size: var(--oct-text-sm);
+}
+
+.canvas-block__bar-list-entry:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.canvas-block__bar-list-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-block__bar-list-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--oct-weight-medium);
+}
+
+.canvas-block__bar-list-secondary {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-block__bar-list-open {
+  grid-column: 2;
+}
+
+.canvas-block__bar-list-show-all {
+  margin-top: var(--oct-space-2);
+}
+
+.canvas-block__bar-list-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.canvas-block__bar-list-table:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.canvas-block__bar-list-data {
+  margin-top: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__bar-list-data summary {
+  cursor: pointer;
+}
+
+/* System colours keep the bars legible when the palette is replaced; the
+   track stays a frame so an empty bar is still a bar. The fill is set inline
+   from the scale, so only `!important` in an accessibility fallback can
+   replace it. */
+@media (forced-colors: active) {
+  .canvas-block__bar-list-bar {
+    background: Highlight !important;
+  }
+
+  .canvas-block__bar-list-track {
+    background: Canvas;
+    border: 1px solid GrayText;
   }
 }
 
