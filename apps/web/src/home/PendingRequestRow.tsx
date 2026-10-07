@@ -67,7 +67,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
     // second click cannot answer it twice.
     if (result.status === "answered") return;
     setBusy(false);
-    setNotice("The answer was not delivered. The request may have changed.");
+    setNotice(result.message);
   }
 
   /** Number keys 1 to 9 pick a choice; a tenth choice is a click away. */

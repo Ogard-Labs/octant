@@ -337,6 +337,57 @@ describe("the Needs you card", () => {
     expect(within(row).getByRole("button", { name: "Approve" })).toBeEnabled();
   });
 
+  it("says why a Code approval the turn refuses was not delivered and offers it again", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    // The runtime refuses an answer it cannot hand the provider (Plan posture,
+    // changed permission persistence, a lost connection) as a failed turn
+    // state, not as operation-failed.
+    answerClients.codeClient.executeOperation.mockResolvedValueOnce({
+      kind: "provider-turn-state",
+      operationId: "operation-1",
+      state: "failed",
+    } as never);
+    const client = reader([codeApproval]);
+    renderCard(
+      createNeedsYouCard(
+        source({ answerClients: answerClients as never, pendingRequestClient: client }),
+      ),
+    );
+    const row = await screen.findByRole("group", {
+      name: "Fix the flaky build is waiting for you",
+    });
+    await user.click(within(row).getByRole("button", { name: "Approve" }));
+    expect(await within(row).findByRole("status")).toHaveTextContent(
+      "The answer was not delivered. The turn changed since it asked.",
+    );
+    await waitFor(() => expect(client.list).toHaveBeenCalledTimes(2));
+    expect(within(row).getByRole("button", { name: "Approve" })).toBeEnabled();
+  });
+
+  it("says a Code question's turn ended when the answer finds it interrupted", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    answerClients.codeClient.executeOperation.mockResolvedValueOnce({
+      kind: "provider-turn-state",
+      operationId: "operation-1",
+      state: "interrupted",
+    } as never);
+    renderCard(
+      createNeedsYouCard(
+        source({
+          answerClients: answerClients as never,
+          pendingRequestClient: reader([codeQuestion]),
+        }),
+      ),
+    );
+    const row = await screen.findByRole("group", { name: "Pick a database is waiting for you" });
+    await user.click(within(row).getByRole("button", { name: /SQLite/ }));
+    expect(await within(row).findByRole("status")).toHaveTextContent(
+      "The turn that asked has ended. Send a new message to continue.",
+    );
+  });
+
   it("keeps a refused row's line for one more read when the host no longer lists the request", async () => {
     const user = userEvent.setup();
     const answerClients = clients();
