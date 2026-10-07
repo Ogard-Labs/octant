@@ -2572,7 +2572,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       modelId: active.thread.modelId,
       projectId: active.thread.projectId,
     };
-    if (event.kind === "provider-content") {
+    // A retried response that only calls a tool streams no content.
+    if (event.kind === "provider-content" || event.kind === "tool-activity") {
       harness.clearRetry?.(scope);
       return;
     }

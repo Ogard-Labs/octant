@@ -25,7 +25,7 @@ function tool(state: "started" | "running" | "completed" | "failed"): CodeOperat
 }
 
 describe("transcript activity", () => {
-  it("shows an endpoint retry and clears it when content arrives", () => {
+  it("shows an endpoint retry and clears it when content or a tool call arrives", () => {
     const announcedAt = decodeUtcTimestamp("2026-10-06T12:00:00.000Z");
     const retrying = decodeCodeOperationEvent({
       kind: "provider-retry",
@@ -47,6 +47,10 @@ describe("transcript activity", () => {
       },
     });
     expect(applyActivityEvent(waiting, content).retrying).toBeUndefined();
+    // A retried response that only calls a tool streams no content.
+    const toolOnly = applyActivityEvent(waiting, tool("started"));
+    expect(toolOnly.retrying).toBeUndefined();
+    expect(toolOnly.rows).toHaveLength(1);
   });
 
   it("stops showing an endpoint retry once the turn fails or ends without content", () => {

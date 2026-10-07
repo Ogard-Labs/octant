@@ -143,6 +143,7 @@ export function ProviderCreateForm(
     providerType === "bfl-image" ||
     providerType === "ideogram-image" ||
     providerType === "mistral-vibe" ||
+    providerType === "fx" ||
     (providerType === "claude" && claudeAuthentication === "api-key") ||
     (providerType === "grok" && grokAuthentication === "api-key") ||
     (providerType === "glm" && glmAuthentication === "api-key") ||

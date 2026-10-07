@@ -2053,6 +2053,52 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("clears the harness retry notice when the retried response only calls a tool", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const seen: string[] = [];
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      nativeHarness: {
+        contextFor: () => [],
+        turnStarted: () => undefined,
+        turnCompleted: async () => undefined,
+        noteRetry: () => seen.push("retrying"),
+        clearRetry: () => seen.push("retry cleared"),
+      },
+    });
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(22),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "retrying",
+          attempt: 2,
+          maxAttempts: 5,
+          delayMs: 500,
+          reason: "unavailable",
+        }),
+      ),
+    );
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "Read" }),
+      ),
+    );
+
+    await vi.waitFor(() => expect(seen).toEqual(["retrying", "retry cleared"]));
+    fixture.close();
+  });
+
   it("journals a tool request whose input exceeds the summary bound as a truncated summary instead of failing the turn", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -3278,6 +3324,7 @@ function runtimeFixture(options: {
   >[0]["resolveProviderDriver"];
   isProviderModelAllowed?: (thread: CodeThread) => boolean;
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
+  nativeHarness?: Parameters<typeof createCodeOperationRuntime>[0]["nativeHarness"];
   onPendingRequestWithdrawn?: () => void;
   evidencePut?: (
     content: string,
@@ -3454,6 +3501,7 @@ function runtimeFixture(options: {
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
+    ...(options.nativeHarness === undefined ? {} : { nativeHarness: options.nativeHarness }),
     ...(options.onPendingRequestWithdrawn === undefined
       ? {}
       : { onPendingRequestWithdrawn: options.onPendingRequestWithdrawn }),

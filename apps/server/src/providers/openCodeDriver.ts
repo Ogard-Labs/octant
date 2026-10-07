@@ -115,10 +115,16 @@ interface SessionState {
   sourceId: string | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvals: Set<string>;
-  /** Action named by each pending approval, so a granted edit can release a later file change. */
-  readonly approvalActions: Map<string, string>;
-  /** Set when this session's posture or an approval has allowed an edit to run. */
-  grantedEdits: boolean;
+  /** Files each pending 2.x edit request would let change if the user approves it. */
+  readonly pendingEditGrants: Map<string, ReadonlyArray<string>>;
+  /**
+   * Files that allowed or approved 2.x edit requests may still report as
+   * changed, as resolved paths (or `*` for a request that named any file).
+   * Each reported change spends the grant for its own path, so an approval
+   * never admits a write to another file, and rejecting one request never
+   * withdraws another's.
+   */
+  readonly unreportedEditGrants: string[];
   readonly questions: Map<
     string,
     {
@@ -1100,7 +1106,7 @@ function makeConnection(
       state.terminal = true;
       cancelPendingTools(state);
       state.approvals.clear();
-      state.approvalActions.clear();
+      state.pendingEditGrants.clear();
       state.questions.clear();
       state.questionAnswers.clear();
       deactivate(state);
@@ -1111,6 +1117,7 @@ function makeConnection(
         ? undefined
         : {
             mode,
+            projectRoot,
             reply: (requestId: string, reply: "once" | "reject") => {
               const active = client;
               const source = state.sourceId;
@@ -1812,13 +1819,14 @@ function makeConnection(
                 : !state.approvals.has(input.requestId)
                   ? Effect.fail(fail("protocol", "Provider approval request is not pending."))
                   : Effect.suspend(() => {
-                      // Settle the edit grant before replying: OpenCode runs the
+                      // Grant the edit before replying: OpenCode runs the
                       // approved edit, and announces the request as settled, on
                       // its event stream, which can arrive before this reply's
-                      // response. A failed reply restores the earlier grant.
-                      const action = state.approvalActions.get(input.requestId);
-                      const priorGrant = state.grantedEdits;
-                      if (action === "edit") state.grantedEdits = input.approved;
+                      // response. A failed reply takes the grant back.
+                      const grant = input.approved
+                        ? (state.pendingEditGrants.get(input.requestId) ?? [])
+                        : [];
+                      state.unreportedEditGrants.push(...grant);
                       return request(() =>
                         activeClient.replyPermission(
                           source,
@@ -1839,12 +1847,12 @@ function makeConnection(
                       ).pipe(
                         Effect.tapError(() =>
                           Effect.sync(() => {
-                            if (action === "edit") state.grantedEdits = priorGrant;
+                            for (const file of grant) spendEditGrant(state, file);
                           }),
                         ),
                         Effect.tap(() =>
                           Effect.sync(() => {
-                            state.approvalActions.delete(input.requestId);
+                            state.pendingEditGrants.delete(input.requestId);
                             state.approvals.delete(input.requestId);
                           }),
                         ),
@@ -1945,8 +1953,8 @@ function newSessionState(
     sourceId: undefined,
     executionPolicy,
     approvals: new Set(),
-    approvalActions: new Map(),
-    grantedEdits: false,
+    pendingEditGrants: new Map(),
+    unreportedEditGrants: [],
     questions: new Map(),
     questionAnswers: new Map(),
     toolNames: new Set(tools.map((tool) => tool.name)),
@@ -1996,6 +2004,7 @@ function failClosedBetaEvent(
   event: ProviderRuntimeEvent,
   state: SessionState,
   mode: "chat" | "work" | "code",
+  projectRoot: string,
 ): ProviderRuntimeEvent {
   if (event.kind === "user-input-request") {
     return {
@@ -2014,7 +2023,10 @@ function failClosedBetaEvent(
   const edit = betaPermissionEffect(betaAgentPermissionRules(state.executionPolicy, mode), "edit");
   // An edit the posture allows, or one the user already approved, may be
   // reported. Any other file change ran without a grant, so the turn fails.
-  if (edit === "allow" || state.grantedEdits) return event;
+  if (edit === "allow") return event;
+  if (spendEditGrant(state, resolve(projectRoot, event.path)) || spendEditGrant(state, "*")) {
+    return event;
+  }
   return {
     kind: "failed",
     instanceId: event.instanceId,
@@ -2038,6 +2050,7 @@ function mapAndOffer(
   retire: (state: SessionState) => void,
   beta?: {
     readonly mode: "chat" | "work" | "code";
+    readonly projectRoot: string;
     readonly reply: (requestId: string, reply: "once" | "reject") => void;
   },
 ): void {
@@ -2055,7 +2068,7 @@ function mapAndOffer(
   if (beta !== undefined && event.type === "permission.v2.replied") {
     const settled = textProperty(event.properties, "requestID");
     state.approvals.delete(settled);
-    state.approvalActions.delete(settled);
+    state.pendingEditGrants.delete(settled);
     return;
   }
   if (beta !== undefined && event.type === "permission.v2.asked") {
@@ -2089,9 +2102,14 @@ function mapAndOffer(
       return;
     }
     if (effect === "allow") {
-      if (action === "edit") state.grantedEdits = true;
+      if (action === "edit") {
+        state.unreportedEditGrants.push(...editGrantFiles(event.properties, beta.projectRoot));
+      }
       beta.reply(requestId, "once");
       return;
+    }
+    if (action === "edit") {
+      state.pendingEditGrants.set(requestId, editGrantFiles(event.properties, beta.projectRoot));
     }
   }
   let mapped: ReadonlyArray<ProviderRuntimeEvent>;
@@ -2122,7 +2140,8 @@ function mapAndOffer(
       taskOccurrences.set(original.summary, occurrence + 1);
     }
     let normalized = stableTaskIdentity(state, original, occurrence);
-    if (beta !== undefined) normalized = failClosedBetaEvent(normalized, state, beta.mode);
+    if (beta !== undefined)
+      normalized = failClosedBetaEvent(normalized, state, beta.mode, beta.projectRoot);
     // OpenCode settles usage once per model step. Consumers keep the latest
     // report as the logical turn's figure, so make each report cumulative
     // across the prompt's tool loop while keeping the same provider session.
@@ -2148,7 +2167,6 @@ function mapAndOffer(
     }
     if (normalized.kind === "approval-request") {
       state.approvals.add(normalized.requestId);
-      state.approvalActions.set(normalized.requestId, normalized.action);
     }
     if (normalized.kind === "user-input-request") {
       const providerRequestId = normalized.requestId;
@@ -2331,6 +2349,30 @@ function betaActionMatches(pattern: string, action: string): boolean {
     .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&"))
     .join(".*")}$`;
   return new RegExp(source).test(action);
+}
+
+/**
+ * The files one 2.x edit request names, resolved against the project root so
+ * a relative resource and an absolute reported path compare equal. `*` stays
+ * as is and admits one change to any file. A request naming nothing grants
+ * nothing, so a change it would have covered fails closed.
+ */
+function editGrantFiles(properties: unknown, projectRoot: string): ReadonlyArray<string> {
+  if (typeof properties !== "object" || properties === null) return [];
+  const resources: unknown = Reflect.get(properties, "resources");
+  if (!Array.isArray(resources)) return [];
+  return resources.flatMap((resource: unknown) => {
+    if (typeof resource !== "string" || resource.trim() === "") return [];
+    return [resource === "*" ? "*" : resolve(projectRoot, resource)];
+  });
+}
+
+/** Spends one grant for exactly this file; false when none is left. */
+function spendEditGrant(state: SessionState, file: string): boolean {
+  const at = state.unreportedEditGrants.indexOf(file);
+  if (at === -1) return false;
+  state.unreportedEditGrants.splice(at, 1);
+  return true;
 }
 
 function textProperty(value: unknown, key: string): string {

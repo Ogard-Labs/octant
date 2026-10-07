@@ -1495,8 +1495,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   unsupported: 2.0.22 serves no question routes and asks through forms, which
   are not mapped, so the written posture denies `question` and a form that
   still arrives fails the turn. Resume,
-  interruption, and tool activity are reported; a file change that no allowed
-  or approved edit preceded fails the turn; and anything not mapped fails
+  interruption, and tool activity are reported; each allowed or approved edit
+  request admits one reported change to each file it names (resolved against
+  the project root; `*` admits one change to any file), rejecting one request
+  never withdraws another's grant, and a change to a file no remaining grant
+  names fails the turn; and anything not mapped fails
   closed. The probe also asks the confined 2.x server to answer for a
   directory carrying a Git marker, made in the launch's own scratch directory
   because every launch profile denies the host temporary directory beneath
@@ -1971,8 +1974,8 @@ native harness in `apps/server/src/harness`:
   Each retry is a `retrying` runtime event emitted before its wait. The thread's
   working indicator, the terminal footer, and the phone session panel show
   "Provider busy, retrying 2/5 in 4 s" and count the wait down, in ordinary
-  text rather than a warning, until the next content arrives or the turn
-  settles; a failed or cancelled attempt keeps no retry line. The turn's
+  text rather than a warning, until the next text, reasoning, or tool call
+  arrives or the turn settles; a failed or cancelled attempt keeps no retry line. The turn's
   detail counts those same events. What a
   failed attempt billed is added to the usage of the attempts after it. A
   cancel ends a wait at once and stays `interrupted`. The stream idle limit is
@@ -2454,7 +2457,10 @@ mechanisms are:
   The host runs that command on a host-owned pseudo-terminal outside any
   sandbox, reads the printed token from memory, and keeps it in the credential
   broker under the Claude Code instance, wrapped so it never reads as that
-  instance's API key. A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
+  instance's API key. Removing the provider stops a connect still waiting for
+  that approval, and a token that arrives after the instance was removed or
+  switched to an API key is discarded, never kept.
+  A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
   and no keychain lookup; unconfined launches keep the runtime's own sign-in.
   Without a connected token the launch refuses with "Connect Claude for helpers
   in Settings › Claude Code.", which a parent's `wait` and `status` carry. The

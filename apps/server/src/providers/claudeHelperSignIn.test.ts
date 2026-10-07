@@ -122,6 +122,54 @@ describe("Claude for helpers sign-in", () => {
     expect(await store.read(String(instanceId))).toEqual({ kind: "expired" });
   });
 
+  it("keeps no token when its provider is removed or switched to an API key while Connect waits", async () => {
+    for (const later of [undefined, claudeInstance("api-key")]) {
+      const { broker, entries } = memoryBroker();
+      let instance: ProviderInstance | undefined = claudeInstance("subscription");
+      let finish: (outcome: ClaudeSetupTokenOutcome) => void = () => undefined;
+      const service = createClaudeHelperSignInService({
+        store: claudeHelperSignInFromBroker(broker),
+        readInstance: () => instance,
+        runSetupToken: () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      });
+
+      expect(await service.connect(instanceId)).toEqual({ kind: "connecting" });
+      instance = later;
+      finish({ kind: "captured", token: TOKEN });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(entries.size).toBe(0);
+    }
+  });
+
+  it("stops a waiting Connect and removes the token when its provider is removed", async () => {
+    const { broker, entries } = memoryBroker();
+    await claudeHelperSignInFromBroker(broker).connect(String(instanceId), TOKEN);
+    let instance: ProviderInstance | undefined = claudeInstance("subscription");
+    let cancelled = false;
+    const service = createClaudeHelperSignInService({
+      store: claudeHelperSignInFromBroker(broker),
+      readInstance: () => instance,
+      runSetupToken: (_binaryPath, signal) =>
+        new Promise((resolve) => {
+          signal.addEventListener("abort", () => {
+            cancelled = true;
+            resolve({ kind: "refused", reason: "Connecting Claude was cancelled." });
+          });
+        }),
+    });
+
+    expect(await service.connect(instanceId)).toEqual({ kind: "connecting" });
+    instance = undefined;
+    await service.forgetRemovedProvider(instanceId);
+
+    expect(cancelled).toBe(true);
+    expect(entries.size).toBe(0);
+  });
+
   it("refuses to connect a Claude Code instance that signs in with an API key", async () => {
     const { broker } = memoryBroker();
     let ran = false;

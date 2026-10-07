@@ -1412,6 +1412,49 @@ describe("WorkTurnService", () => {
     controller.abort();
   });
 
+  it("tells live subscribers once when a retried response arrives without text", async () => {
+    const gate = deferred<void>();
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          const retrying = decodeProviderRuntimeEvent({
+            kind: "retrying",
+            instanceId: ids.provider,
+            sessionId: input.providerSessionId,
+            sequence: 1,
+            correlationId: String(ids.request),
+            occurredAt: now,
+            attempt: 2,
+            maxAttempts: 5,
+            delayMs: 500,
+            reason: "unavailable",
+          });
+          if (retrying.kind === "retrying") input.onRetrying?.(retrying);
+          // A tool call, then the text after it, both end the same wait.
+          input.onRetryCleared?.();
+          input.onRetryCleared?.();
+          await gate.promise;
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const controller = new AbortController();
+    const stream = fixture.service.subscribe(ids.window, ids.thread, 0, controller.signal);
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "provider-retry", sequence: 1, requestId: ids.request, attempt: 2 },
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "provider-retry-cleared", sequence: 2, requestId: ids.request },
+    });
+    gate.resolve();
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "turn-settled", sequence: 3 },
+    });
+    controller.abort();
+  });
+
   it("publishes the provider's task list live and journals it with the settled turn", async () => {
     const gate = deferred<void>();
     const fixture = serviceFixture({
