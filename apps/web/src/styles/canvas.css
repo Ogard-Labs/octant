@@ -174,6 +174,72 @@
   max-width: 420px;
 }
 
+/* The plot is the positioning context for the shared tooltip, which is placed
+   from the mark's own plotted coordinates rather than from the pointer. */
+.canvas-block__chart-plot {
+  position: relative;
+}
+
+.canvas-block__chart-gridline {
+  stroke: var(--oct-chart-grid);
+  stroke-width: 1;
+}
+
+/* A mark transitions only when a legend toggle or a zoom changes what is drawn.
+   That is a state change, not an entrance; it stays under 200ms and is off when
+   the person asked for reduced motion. */
+.canvas-block__chart-mark {
+  transition:
+    opacity var(--oct-motion-fast) var(--oct-ease-standard),
+    fill var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.canvas-block__chart-tip {
+  transform: translate(-50%, calc(-100% - 10px));
+}
+
+/* Near the top of the plot the tip flips below its mark so it stays on the
+   surface rather than above the frame. */
+.canvas-block__chart-tip[data-placement="below"] {
+  transform: translate(-50%, 10px);
+}
+
+/* A file path is read in the code font; the directory locates the file and is
+   dimmed, the name identifies it and keeps full ink. */
+.canvas-block__path {
+  font-family: var(--oct-font-mono);
+}
+
+.canvas-block__path-dir {
+  color: var(--oct-meta);
+}
+
+.canvas-block__path-name {
+  color: var(--oct-fg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-block__chart-mark {
+    transition: none;
+  }
+}
+
+[data-octant-reduced-motion="true"] .canvas-block__chart-mark {
+  transition: none;
+}
+
+/* The shared tooltip's listed readings keep each series key beside its name,
+   the same key the legend and the marks carry. */
+.canvas-block__chart-tip dt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.canvas-block__chart-tip .chart-key.is-block {
+  width: 8px;
+  height: 8px;
+}
 /* Line, area, scatter, bar and distribution charts draw at the figure's
    measured width, so gridline and axis labels stay at the interface size.
    The marks follow the system chart recipe in octant.css: 1.5px lines with
@@ -181,6 +247,12 @@
 .canvas-chart {
   position: relative;
   min-width: 0;
+}
+
+/* The tooltip is placed from the plot's own box, so the headline above the
+   chart never shifts where the tip lands. */
+.canvas-chart__plot {
+  position: relative;
 }
 
 .canvas-chart__svg {
@@ -277,26 +349,6 @@
 
 .canvas-chart__bar[data-active="true"] {
   filter: brightness(1.12);
-}
-
-/* The readout sits beside the guide, on whichever side has room. */
-.canvas-chart__readout[data-side="right"] {
-  transform: translateX(var(--oct-space-3));
-}
-
-.canvas-chart__readout[data-side="left"] {
-  transform: translateX(calc(-100% - var(--oct-space-3)));
-}
-
-.canvas-chart__readout dt {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.canvas-chart__readout .chart-key.is-block {
-  width: 8px;
-  height: 8px;
 }
 
 .canvas-block__chart-mark {

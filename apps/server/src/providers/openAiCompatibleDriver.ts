@@ -180,31 +180,20 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
               // unadvertised paid request per turn and would only test the
               // first listed model while setting the provider-level
               // appManagedTools flag, enabling tools for unverified models.
-              // Tool support is gated on per-model verification
-              // (verifiedToolModelIds for Foundry; stickyToolSupport after a
-              // successful tool turn for non-Foundry) instead.
-              const priorObserved = options.runtimeRegistry.observedState(instanceId);
-              const priorVerified = priorObserved?.verifiedToolModelIds;
-              // For non-Foundry profiles, preserve the prior sticky
-              // appManagedTools so a re-probe before a Chat turn does not
-              // wipe tool support that was observed during a prior successful
-              // tool turn. For Foundry, tools are gated per-model via
-              // verifiedToolModelIds, so the provider-level flag stays
-              // "unsupported" until every deployment is verified.
-              const priorAppManagedTools =
-                profile.driverKind === "azure-foundry"
-                  ? ("unsupported" as const)
-                  : (priorObserved?.capabilities.appManagedTools ?? "unsupported");
+              // Tool support is gated on per-model verification instead: a
+              // person's "Verify tools" request records the model in
+              // verifiedToolModelIds, which outlives this probe. The
+              // provider-level flag stays "unsupported" so one verified model
+              // never unlocks tools for the other models of the profile.
+              const priorVerified =
+                options.runtimeRegistry.observedState(instanceId)?.verifiedToolModelIds;
               const probe = decodeProviderObservedState({
                 instanceId,
                 readiness: result.readiness,
                 processState: "stopped",
                 ...(profile.authStrategy !== "none" ? { credentialStatus: "stored" } : {}),
                 models: result.models,
-                capabilities: {
-                  ...initialCapabilities,
-                  appManagedTools: priorAppManagedTools,
-                },
+                capabilities: initialCapabilities,
                 ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
                 ...(result.failure === undefined ? {} : { message: result.failure.message }),
                 lastSuccessfulProbeAt: observedAt,
@@ -302,27 +291,17 @@ function admitTurn(
   const model = observed?.models.find((candidate) => candidate.id === modelId);
   const isCapabilityEchoProbe =
     input.tools.length > 0 && input.tools.every((tool) => isCapabilityEchoToolCall(tool.name));
-  // For Azure AI Foundry, tool support is verified per-deployment via the
-  // separate verify-foundry-tools path. The sender gates tool requests on the
-  // per-model verifiedToolModelIds set, not on the provider-level
-  // appManagedTools flag, so one verified deployment does not unlock tools for
-  // other deployments in the same profile.
-  const isFoundry = options.profile?.driverKind === "azure-foundry";
+  // Tool support is verified per model through the verify-model-tools command,
+  // and the sender gates tool requests on the per-model verifiedToolModelIds
+  // set alone, so one verified model does not unlock tools for the other
+  // models of the same profile.
   const isVerifiedModel =
     observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;
-  const providerToolSupport =
-    observed?.capabilities.appManagedTools ?? initialCapabilities.appManagedTools;
-  const effectiveCapabilities = isCapabilityEchoProbe
-    ? { ...(observed?.capabilities ?? initialCapabilities), appManagedTools: "supported" as const }
-    : isFoundry
-      ? {
-          ...(observed?.capabilities ?? initialCapabilities),
-          appManagedTools: isVerifiedModel ? ("supported" as const) : ("unsupported" as const),
-        }
-      : {
-          ...(observed?.capabilities ?? initialCapabilities),
-          appManagedTools: isVerifiedModel ? ("supported" as const) : providerToolSupport,
-        };
+  const effectiveCapabilities = {
+    ...(observed?.capabilities ?? initialCapabilities),
+    appManagedTools:
+      isCapabilityEchoProbe || isVerifiedModel ? ("supported" as const) : ("unsupported" as const),
+  };
   return validateChatTurnInput(input, effectiveCapabilities, model);
 }
 
@@ -527,21 +506,6 @@ function recordObservedTurn(
     current?.models ?? manualModels(options.configuration.manualModelIds),
     result.verifiedManualModelId ?? "",
   );
-  const toolCallingObserved = result.terminal === "tool-calls";
-  // Tool support is sticky once observed: a follow-up plain completion after
-  // a tool step must not downgrade appManagedTools back to unsupported.
-  const priorToolSupport = current?.capabilities.appManagedTools ?? "unsupported";
-  // For Azure AI Foundry, tool support is per-deployment (gated by
-  // verifiedToolModelIds), so the provider-level appManagedTools flag must
-  // stay "unsupported" even after a verified deployment produces a tool call.
-  // Otherwise a successful tool turn on one deployment would unlock tools for
-  // all deployments in the same profile.
-  const isFoundry = options.profile?.driverKind === "azure-foundry";
-  const stickyToolSupport = isFoundry
-    ? ("unsupported" as const)
-    : priorToolSupport === "supported" || toolCallingObserved
-      ? ("supported" as const)
-      : priorToolSupport;
   options.runtimeRegistry.setObservedState({
     instanceId: options.instanceId,
     readiness: current?.readiness ?? "degraded",
@@ -554,7 +518,6 @@ function recordObservedTurn(
       streaming: result.protocol === "chat-completions" ? result.streaming : "supported",
       reasoning: result.reasoning.length > 0 ? "supported" : "unavailable",
       usage: result.usage === undefined ? "unavailable" : "supported",
-      appManagedTools: stickyToolSupport,
     },
     ...(current?.message === undefined ? {} : { message: current.message }),
     ...(current?.verifiedToolModelIds === undefined
