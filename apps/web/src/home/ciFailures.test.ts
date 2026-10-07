@@ -35,7 +35,6 @@ function row(overrides: Partial<CodeProjectPullRequestRow> = {}): CodeProjectPul
       {
         name: "web tests",
         completedAt: "2026-08-22T07:40:00.000Z",
-        excerpt: "Expected 2, received 1",
       },
     ],
     ...overrides,
@@ -58,7 +57,7 @@ describe("rows from recorded failing checks", () => {
       }),
     ]);
     expect(card.rows[0]?.prompt).toContain("Check: web tests");
-    expect(card.rows[0]?.prompt).toContain("Failure:\nExpected 2, received 1");
+    expect(card.rows[0]?.prompt).toContain("Branch: feature/list");
     expect(card.rows[0]?.prompt).toContain("CI is failing on PR #12: List active pull requests");
   });
 

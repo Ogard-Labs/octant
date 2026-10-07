@@ -65,8 +65,6 @@ export const MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS = 32;
 export const MAX_CODE_PROJECT_PULL_REQUEST_REVIEW_REQUESTS = 32;
 /** Failing checks kept from one pull request's already-fetched rollup. */
 export const MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS = 8;
-/** Failure text kept from that same rollup. A longer text is cut, not fetched again. */
-export const MAX_CODE_PROJECT_PULL_REQUEST_FAILURE_EXCERPT_BYTES = 1_024;
 
 /**
  * Cached read of the host-local Project-scoped active pull-request projection.
@@ -238,13 +236,12 @@ export type CodeProjectPullRequestLinkedThread = typeof CodeProjectPullRequestLi
 
 /**
  * One failing check from the rollup the pull-request list already fetched.
- * Absent text means that read carried none; it is not a prompt to fetch logs.
+ * That rollup names the check and when it finished; it carries no failure text
+ * or log, so none is kept here and none is fetched.
  */
 export const CodeProjectPullRequestFailingCheck = Schema.Struct({
   name: boundedNonEmptyText(512),
   completedAt: Schema.optional(githubUpdatedAt),
-  excerpt: Schema.optional(boundedText(MAX_CODE_PROJECT_PULL_REQUEST_FAILURE_EXCERPT_BYTES)),
-  excerptTruncated: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type CodeProjectPullRequestFailingCheck = typeof CodeProjectPullRequestFailingCheck.Type;
 

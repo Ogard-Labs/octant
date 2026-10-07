@@ -70,8 +70,8 @@ not ask again on its own.
 you opened and on the branch a Code Project is on now. A row shows the check,
 the repository or the branch, and how long ago it failed. Up to five rows
 show. When nothing is failing, the card is not shown. **Start a fix** opens a
-new Code task in that Project and branch with the failure already written in;
-you send it. The card is not shown without a connection, or when credential
+new Code task that starts a new worktree from the failing branch, with the
+pull request and check already written in; you send it. The card is not shown without a connection, or when credential
 storage is insecure. It reads the same list Pull requests keeps, so it does
 not ask again on its own.
 

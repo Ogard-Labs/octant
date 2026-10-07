@@ -3,7 +3,6 @@ import { accessSync, constants, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import {
   MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS,
-  MAX_CODE_PROJECT_PULL_REQUEST_FAILURE_EXCERPT_BYTES,
   type CodeProjectPullRequestMergeMethod,
   type CodeThreadId,
 } from "@octant/contracts";
@@ -152,8 +151,6 @@ export interface GhActivePullRequestRow {
   readonly failingChecks: ReadonlyArray<{
     readonly name: string;
     readonly completedAt?: string;
-    readonly excerpt?: string;
-    readonly excerptTruncated?: true;
   }>;
 }
 
@@ -960,33 +957,20 @@ const EARLIEST_RECORDED_FAILURE_MS = Date.parse("2000-01-01T00:00:00.000Z");
 
 /**
  * Failing checks already present on the list rollup. A zero timestamp is the
- * command's empty time, not a failure time, so it is left off.
+ * command's empty time, not a failure time, so it is left off. The rollup's
+ * check entries carry a name, a state, times, and a details link, never failure
+ * text, so no excerpt is read from them.
  */
 function decodeFailingChecks(value: unknown): GhActivePullRequestRow["failingChecks"] {
   if (!Array.isArray(value)) return [];
-  const checks: Array<{
-    name: string;
-    completedAt?: string;
-    excerpt?: string;
-    excerptTruncated?: true;
-  }> = [];
+  const checks: Array<{ name: string; completedAt?: string }> = [];
   for (const entry of value) {
     if (!isRecord(entry) || normalizeCheckState(entry) !== "failure") continue;
     const rawName = typeof entry.name === "string" ? entry.name : entry.context;
     const name = clampBytes(rawName, 512).trim();
     if (name.length === 0) continue;
     const completedAt = recordedFailureAt(entry.completedAt);
-    const excerpt = failureExcerpt(entry);
-    checks.push({
-      name,
-      ...(completedAt === undefined ? {} : { completedAt }),
-      ...(excerpt === undefined
-        ? {}
-        : {
-            excerpt: excerpt.text,
-            ...(excerpt.truncated ? { excerptTruncated: true as const } : {}),
-          }),
-    });
+    checks.push({ name, ...(completedAt === undefined ? {} : { completedAt }) });
   }
   checks.sort((left, right) => {
     const leftAt = left.completedAt ?? "";
@@ -1005,26 +989,6 @@ function recordedFailureAt(value: unknown): string | undefined {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed) || parsed < EARLIEST_RECORDED_FAILURE_MS) return undefined;
   return value;
-}
-
-function failureExcerpt(
-  entry: Record<string, unknown>,
-): { readonly text: string; readonly truncated: boolean } | undefined {
-  const output = isRecord(entry.output) ? entry.output : undefined;
-  const candidates = [entry.summary, entry.text, output?.summary, output?.text];
-  for (const candidate of candidates) {
-    if (typeof candidate !== "string") continue;
-    const trimmed = candidate.replaceAll("\0", "").trim();
-    if (trimmed.length === 0) continue;
-    const text = clampBytes(trimmed, MAX_CODE_PROJECT_PULL_REQUEST_FAILURE_EXCERPT_BYTES).trim();
-    if (text.length === 0) continue;
-    return {
-      text,
-      truncated:
-        Buffer.byteLength(trimmed, "utf8") > MAX_CODE_PROJECT_PULL_REQUEST_FAILURE_EXCERPT_BYTES,
-    };
-  }
-  return undefined;
 }
 
 function summarizeReview(value: unknown): GhActivePullRequestRow["review"] {

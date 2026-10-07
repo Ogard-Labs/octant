@@ -203,9 +203,13 @@ refresh's rollup carries the name and the finish time; it does not carry a
 log, so a row never invents one. At most five rows show, most recently failed
 first. The card hides when it has nothing to show — there is no empty line —
 which is its default. **Start a fix** opens a new Code task draft in that
-Project and branch, with the failing check and a bounded excerpt of whatever
-failure text the refresh recorded already written in. It does not start a
-turn; the person sends it. Opening the card reads the same cached snapshot
+Project with the failing branch as its chosen base branch and a new worktree as
+its workspace, since the current checkout may be on another branch; the
+checkout's head does not replace that branch. The pull request, check, branch,
+and repository are already written in; the rollup carries no failure text, so
+the draft quotes none. Sending, switching the draft's Project, or starting a
+new draft lets go of that branch. It does not start a turn; the person sends
+it. Opening the card reads the same cached snapshot
 Pull requests reads and adds no poll.
 
 **Needs you** surfaces (a start-screen card, answering from Board cards, the

@@ -1317,7 +1317,6 @@ describe("CodeProjectPullRequestService", () => {
               {
                 name: "web tests",
                 completedAt: "2026-08-22T07:40:00Z",
-                excerpt: "Expected 2, received 1",
               },
             ],
           }),
@@ -1333,7 +1332,6 @@ describe("CodeProjectPullRequestService", () => {
       {
         name: "web tests",
         completedAt: "2026-08-22T07:40:00Z",
-        excerpt: "Expected 2, received 1",
       },
     ]);
     expect(listActive.mock.calls.length).toBe(callsAfterRefresh);
