@@ -803,8 +803,8 @@ the mark, never instead of it, so a bar and a tint are scan aids: under forced
 colours they fall to system ink and the plain value remains the reading. A text
 column whose values read as a path uses the shared path style, and a number
 column is right-aligned in tabular numerals. Sorting (each sorted header
-announces its direction with `aria-sort`), a text filter, and hidden columns are
-view state and revise nothing, so the exported and static forms keep the order
+announces its direction with `aria-sort`; hiding the sorted column drops the
+sort), a text filter, and hidden columns are view state and revise nothing, so the exported and static forms keep the order
 the author wrote. The header sticks through a scrolling table.
 
 **Motion.** A chart transitions only on a state change — a legend toggle, a zoom
