@@ -1330,8 +1330,13 @@ flowchart LR
   tell whether such an entry was signed before or after the revocation; entries
   it applied earlier stay applied. A revoked computer that joins again does so
   as a new instance with its own sequence. Device signing
-  keys live per replica instance in the host credential store, reached through
-  the credential broker. Three things are not wired: no host setting selects a
+  keys live per replica instance in their own namespace of the host credential
+  store — a separate macOS Keychain service, `app.octant.replica-device-keys.v1`,
+  or a separate Secret Service attribute — reached through the credential
+  broker's device-key routes. The provider credential routes reach a different
+  namespace, so a provider instance created with the same UUID cannot read,
+  replace, or delete a device key; a key is written once and never replaced,
+  and the private half never leaves the host. Three things are not wired: no host setting selects a
   store yet, so every command answers a typed `not-configured` refusal and
   makes no store call; there is no Settings surface for sync; and artifact
   versions are neither published nor imported — a pull stops at a verified
@@ -2611,8 +2616,8 @@ mechanisms are:
   journaled with its principal.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
-  replica instance, in its own credential store — not a paired client's device
-  key. There is no replica key. An entry from an
+  replica instance, in a credential namespace of its own that provider
+  credentials cannot reach — not a paired client's device key. There is no replica key. An entry from an
   unknown or revoked host, or one that fails verification, is refused and
   journaled. A new computer joins by writing a join request into the store,
   signed over the time it was written; a request older than a day is not

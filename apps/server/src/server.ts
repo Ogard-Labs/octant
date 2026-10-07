@@ -468,6 +468,7 @@ import { makeAnthropicCompatibleDriver } from "./providers/anthropicCompatibleDr
 import { makeAzureFoundryDriver } from "./providers/azureFoundryDriver";
 import {
   makeCredentialBrokerClient,
+  makeReplicaDeviceKeyBrokerClient,
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
 import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
@@ -9946,14 +9947,15 @@ export function startOctantServer(
       }),
     });
     // Replica membership reads its facts from the journal and keeps device
-    // signing keys in the host credential store (Keychain on macOS, Secret
-    // Service on Linux) through the credential broker. Which store a host
+    // signing keys in their own namespace of the host credential store
+    // (Keychain on macOS, Secret Service on Linux), reached through the
+    // credential broker's device-key routes, never its provider routes. Which store a host
     // writes to is not configurable yet, so every command answers
     // `not-configured` and makes no store call until that setting exists.
     const replicaDeviceKeys =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
-        : makeCredentialBrokerClient({
+        : makeReplicaDeviceKeyBrokerClient({
             url: options.credentialBrokerUrl,
             token: options.credentialBrokerToken,
           });

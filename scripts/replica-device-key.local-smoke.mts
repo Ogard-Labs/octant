@@ -16,7 +16,8 @@ if (helper === undefined || storeScope === undefined) {
   console.error("usage: tsx replicaDeviceKey.local-smoke.mts <helperPath> <storeScopeUUID>");
   process.exit(2);
 }
-const store = makeKeychainCredentialStore(helper, { storeScope });
+const store = makeKeychainCredentialStore(helper, { storeScope, namespace: "replica-device-key" });
+const providers = makeKeychainCredentialStore(helper, { storeScope });
 const instanceId = "99999999-9999-4999-8999-999999999999";
 
 const key = await ensureReplicaDeviceKey(store, instanceId);
@@ -42,6 +43,16 @@ const tampered = verifyReplicaEntrySignature({
 });
 console.log("verify(tampered):", tampered);
 
+// A provider credential named with the same instance UUID lives in another
+// Keychain service: it cannot read, replace, or delete the device key.
+const providerSeesKey = await providers.has(instanceId);
+console.log("provider.has(same id):", providerSeesKey);
+await providers.set(instanceId, "provider-secret");
+await providers.delete(instanceId);
+const keyAfterProvider = await ensureReplicaDeviceKey(store, instanceId);
+const keyUntouched = keyAfterProvider.publicKey === key.publicKey;
+console.log("device key unchanged after provider set+delete:", keyUntouched);
+
 const other = generateKeyPairSync("ed25519");
 const wrongKey = verifyReplicaEntrySignature({
   publicKeyBase64: other.publicKey.export({ format: "der", type: "spki" }).toString("base64"),
@@ -52,4 +63,8 @@ console.log("verify(wrong key):", wrongKey);
 
 await store.delete(instanceId);
 console.log("cleanup: deleted");
-process.exit(verified && !tampered && !wrongKey ? 0 : 1);
+const gone = !(await store.has(instanceId));
+console.log("cleanup: device key absent:", gone);
+process.exit(
+  verified && !tampered && !wrongKey && !providerSeesKey && keyUntouched && gone ? 0 : 1,
+);

@@ -7,6 +7,11 @@ private let protocolVersion = 1
 private let maximumMessageBytes = 16 * 1_024
 private let providerService = "app.octant.provider-credentials"
 private let hostIdentityService = "app.octant.host-identity.v1"
+// Replica device signing keys live in their own service, so a provider
+// credential request that names the same instance UUID can never read,
+// replace, or delete one.
+private let replicaDeviceKeyService = "app.octant.replica-device-keys.v1"
+private let replicaDeviceKeyNamespace = "replica-device-key"
 private let hostIdentityNamespace = "app.octant.host-identity.v1"
 private let hostIdentityKeyId = "host-identity"
 private let maximumPurgeProviderInstances = 128
@@ -35,7 +40,7 @@ private enum StableError: String, Error {
 // host-derived store scope in `kSecAttrGeneric`; a purge matches that exact
 // scope as well as these service strings, so a selected local store can never
 // enumerate or delete credentials belonging to another store.
-private let octantOwnedServices = [providerService, hostIdentityService]
+private let octantOwnedServices = [providerService, hostIdentityService, replicaDeviceKeyService]
 
 private struct OwnedCredential {
     let service: String
@@ -423,7 +428,11 @@ private func migrateLegacyHostIdentityCredential(
 // SecItemUpdate replaces the data of an item another code identity owns while
 // leaving that owner's ACL, so this helper still cannot read it back.
 private func providerItemReadable(account: String, storeScope: String) -> Bool {
-    var query = baseQuery(service: providerService, account: account, storeScope: storeScope)
+    itemReadable(service: providerService, account: account, storeScope: storeScope)
+}
+
+private func itemReadable(service: String, account: String, storeScope: String) -> Bool {
+    var query = baseQuery(service: service, account: account, storeScope: storeScope)
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     query[kSecReturnData as String] = true
     var result: CFTypeRef?
@@ -436,7 +445,11 @@ private func providerItemReadable(account: String, storeScope: String) -> Bool {
 // SecItemDelete refuses an item owned by another code identity
 // (errSecInvalidOwnerEdit); deleting the exact item reference does not.
 private func deleteProviderItem(account: String, storeScope: String) -> OSStatus {
-    var query = baseQuery(service: providerService, account: account, storeScope: storeScope)
+    deleteItem(service: providerService, account: account, storeScope: storeScope)
+}
+
+private func deleteItem(service: String, account: String, storeScope: String) -> OSStatus {
+    var query = baseQuery(service: service, account: account, storeScope: storeScope)
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     query[kSecReturnRef as String] = true
     var result: CFTypeRef?
@@ -585,7 +598,7 @@ else {
 }
 
 // Host-identity namespace path
-if let namespace = request["namespace"] as? String {
+if let namespace = request["namespace"] as? String, namespace != replicaDeviceKeyNamespace {
     guard namespace == hostIdentityNamespace,
           let keyId = request["keyId"] as? String,
           keyId == hostIdentityKeyId,
@@ -763,6 +776,77 @@ if operation == "purge" {
         "deletedCount": deletedCount,
         "failedCount": failedCount,
     ])
+}
+
+// Replica device-key path. It has no legacy records to migrate, and a request
+// that names the namespace never falls through to the provider service.
+if request["namespace"] != nil {
+    guard let namespace = request["namespace"] as? String,
+          namespace == replicaDeviceKeyNamespace,
+          let instanceId = request["instanceId"] as? String,
+          validProviderInstanceId(instanceId),
+          let storeScope = request["storeScope"] as? String,
+          validStoreScope(storeScope)
+    else {
+        fail(.failed)
+    }
+    let commonKeys: Set<String> = ["version", "operation", "namespace", "instanceId", "storeScope"]
+    let allowedKeys = operation == "set" ? commonKeys.union(["credential"]) : commonKeys
+    guard Set(request.keys) == allowedKeys else {
+        fail(.failed)
+    }
+    let deviceAccount = providerCredentialAccount(providerInstanceId: instanceId, storeScope: storeScope)
+    switch operation {
+    case "set":
+        guard let credential = request["credential"] as? String,
+              !credential.isEmpty,
+              var credentialData = credential.data(using: .utf8)
+        else {
+            fail(.failed)
+        }
+        var addQuery = baseQuery(service: replicaDeviceKeyService, account: deviceAccount, storeScope: storeScope)
+        addQuery[kSecValueData as String] = credentialData
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        addQuery.removeValue(forKey: kSecValueData as String)
+        credentialData.resetBytes(in: 0..<credentialData.count)
+        // A device key is written once. Replacing one would strand every
+        // signature its public half already vouches for.
+        guard addStatus == errSecSuccess else { fail(mapStatus(addStatus)) }
+        guard itemReadable(service: replicaDeviceKeyService, account: deviceAccount, storeScope: storeScope) else {
+            fail(.unavailable)
+        }
+        emit(["version": protocolVersion, "ok": true])
+    case "has":
+        var query = baseQuery(service: replicaDeviceKeyService, account: deviceAccount, storeScope: storeScope)
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        if status == errSecItemNotFound {
+            emit(["version": protocolVersion, "ok": true, "present": false])
+        }
+        guard status == errSecSuccess else { fail(mapStatus(status)) }
+        emit(["version": protocolVersion, "ok": true, "present": true])
+    case "resolve":
+        var query = baseQuery(service: replicaDeviceKeyService, account: deviceAccount, storeScope: storeScope)
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        query[kSecReturnData as String] = true
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess else { fail(mapStatus(status)) }
+        guard var credentialData = result as? Data,
+              let credential = String(data: credentialData, encoding: .utf8)
+        else {
+            fail(.failed)
+        }
+        result = nil
+        credentialData.resetBytes(in: 0..<credentialData.count)
+        emit(["version": protocolVersion, "ok": true, "credential": credential])
+    case "delete":
+        let status = deleteItem(service: replicaDeviceKeyService, account: deviceAccount, storeScope: storeScope)
+        guard status == errSecSuccess || status == errSecItemNotFound else { fail(mapStatus(status)) }
+        emit(["version": protocolVersion, "ok": true])
+    default:
+        fail(.failed)
+    }
 }
 
 // Provider-credentials path (existing)
