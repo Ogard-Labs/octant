@@ -75,4 +75,20 @@ describe("createFolderBrowseClient", () => {
     expect((failure as FolderBrowseClientFailure).category).toBe("unavailable");
     expect(elapsedMs).toBeLessThan(2_000);
   });
+
+  it("fails a browse whose response body stalls after the headers arrive", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(new ReadableStream<Uint8Array>({ start() {} }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const failure = await client(fetch, 50)
+      .browse(browseRequest)
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(FolderBrowseClientFailure);
+    expect((failure as FolderBrowseClientFailure).category).toBe("unavailable");
+  }, 2_000);
 });

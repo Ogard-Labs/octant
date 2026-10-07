@@ -78,44 +78,74 @@ async function post<T>(
   timeoutMs: number,
 ): Promise<T> {
   const controller = new AbortController();
+  // The budget covers the body as well as the headers: a server that sends its
+  // status and then stalls mid-body would otherwise leave the dialog loading.
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let response: Response;
   try {
-    response = await fetch(url, { ...init, signal: controller.signal });
-  } catch {
-    throw new FolderBrowseClientFailure({
-      category: "unavailable",
-      message: "Folder browse service is unavailable.",
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    throw new FolderBrowseClientFailure({
-      category: "unavailable",
-      message: "Folder browse returned an invalid response.",
-    });
-  }
-  if (!response.ok) {
+    let response: Response;
     try {
-      throw new FolderBrowseClientFailure(decodeFolderBrowseFailure(body));
-    } catch (error) {
-      if (error instanceof FolderBrowseClientFailure) throw error;
+      response = await fetch(url, { ...init, signal: controller.signal });
+    } catch {
+      throw new FolderBrowseClientFailure({
+        category: "unavailable",
+        message: "Folder browse service is unavailable.",
+      });
+    }
+    let body: unknown;
+    try {
+      body = await untilAborted(response.json(), controller.signal);
+    } catch {
       throw new FolderBrowseClientFailure({
         category: "unavailable",
         message: "Folder browse returned an invalid response.",
       });
     }
+    if (!response.ok) {
+      try {
+        throw new FolderBrowseClientFailure(decodeFolderBrowseFailure(body));
+      } catch (error) {
+        if (error instanceof FolderBrowseClientFailure) throw error;
+        throw new FolderBrowseClientFailure({
+          category: "unavailable",
+          message: "Folder browse returned an invalid response.",
+        });
+      }
+    }
+    try {
+      return decode(body);
+    } catch {
+      throw new FolderBrowseClientFailure({
+        category: "unavailable",
+        message: "Folder browse returned an invalid response.",
+      });
+    }
+  } finally {
+    clearTimeout(timer);
   }
-  try {
-    return decode(body);
-  } catch {
-    throw new FolderBrowseClientFailure({
-      category: "unavailable",
-      message: "Folder browse returned an invalid response.",
-    });
-  }
+}
+
+/**
+ * Settles with the body read, or rejects once the request budget aborts. An
+ * injected fetch port need not tie its response body to the abort signal, so
+ * the budget is enforced here rather than trusted to the transport.
+ */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const refuse = () => reject(new DOMException("The operation was aborted.", "AbortError"));
+    if (signal.aborted) {
+      refuse();
+      return;
+    }
+    signal.addEventListener("abort", refuse, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", refuse);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", refuse);
+        reject(error);
+      },
+    );
+  });
 }
