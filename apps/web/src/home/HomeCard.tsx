@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard, OctantCardContent, OctantCardHeader } from "../ui/base/OctantCard";
 import type { HomeCardDefinition } from "./homeCards";
 
@@ -38,9 +39,22 @@ export function HomeCard(props: { readonly definition: HomeCardDefinition }) {
         {content.status === "loading" ? (
           <p className="oct-row-detail home-card__quiet">Looking…</p>
         ) : content.count === 0 ? (
-          <p className="oct-row-detail home-card__quiet">
-            {content.emptyLabel ?? definition.emptyLabel}
-          </p>
+          <>
+            <p className="oct-row-detail home-card__quiet">
+              {content.emptyLabel ?? definition.emptyLabel}
+            </p>
+            {content.emptyAction === undefined ? null : (
+              <OctantButton
+                className="home-card__empty-action window-no-drag"
+                onClick={content.emptyAction.onSelect}
+                size="sm"
+                type="button"
+                variant="link"
+              >
+                {content.emptyAction.label}
+              </OctantButton>
+            )}
+          </>
         ) : (
           content.body
         )}
