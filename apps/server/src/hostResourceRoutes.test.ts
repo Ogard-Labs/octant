@@ -119,7 +119,7 @@ describe("host resource route", () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
-  it("refuses figures to a paired client that does not already have authority on this host", async () => {
+  it("refuses figures to a remote principal bound to another host's identity", async () => {
     const { handler, read } = setup();
     const response = requireResponse(await handler(remoteRequest(otherHost)));
     expect(response.status).toBe(403);
@@ -141,7 +141,7 @@ describe("host resource route", () => {
     expect(read).not.toHaveBeenCalled();
   });
 
-  it("returns figures to a paired client that is already paired to this host", async () => {
+  it("returns figures to a paired device of this host", async () => {
     const { handler, read } = setup();
     const response = requireResponse(await handler(remoteRequest(thisHost)));
     expect(response.status).toBe(200);

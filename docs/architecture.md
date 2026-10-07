@@ -205,9 +205,12 @@ used and total memory, the core count, and used and free space on the volume
 that holds the data directory. The disk figures are omitted when that volume
 cannot be read. The snapshot names no path, no user, and no process. The server
 keeps one snapshot for about five seconds. The local owner always receives it.
-A paired remote client receives it only when that client already has authority
-on this host — its authenticated device is paired to this host's identity —
-and is refused otherwise, with no figures in the refusal. The Computers card
+A paired remote device with an active session receives it under the same
+`project.overview.read` action as the Project overview reads; an
+unauthenticated caller is refused, with no figures in the refusal. The route
+also compares the device's host identity with this host's, but every paired
+device row on a host carries that host's own identity, so the comparison does
+not separate one paired device from another. The Computers card
 reads the route only while the card is on screen and the window is in front,
 about every ten seconds, and does not poll in the background.
 

@@ -14,9 +14,10 @@ import type { ClientPrincipal } from "./clientPrincipal";
 /**
  * Read-only load snapshot for the host this process is.
  *
- * The local owner sees the figures. A paired remote client sees them only
- * when its authenticated device is already paired to this host's identity;
- * every other caller is refused and the refusal carries no figures. The
+ * The local owner sees the figures. A paired remote device with an active
+ * session sees them too: the authenticated product chain admits it under
+ * `project.overview.read`, the same action as the Project overview reads. Every
+ * other caller is refused and the refusal carries no figures. The
  * body never names a path, a user, or a process. One snapshot is reused for
  * about five seconds so a visible card does not resample on every paint.
  */
@@ -163,6 +164,10 @@ function admits(request: Request, dependencies: HostResourceRouteDependencies): 
   }
 }
 
+// Every paired device row on this host carries this host's own identity, so
+// the comparison below does not separate one paired device from another; it
+// only refuses a principal bound to some other identity, or any remote caller
+// before this host has an identity.
 function principalMayRead(principal: ClientPrincipal, hostId: string | undefined): boolean {
   if (principal.kind === "local-window") return true;
   if (principal.kind !== "remote-device") return false;
