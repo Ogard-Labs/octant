@@ -16,6 +16,7 @@ out/
 # Canvas browser evidence smoke output
 .canvas-browser-evidence/
 .canvas-inventory-browser-evidence/
+.canvas-preview-browser-evidence/
 
 # Remote exit evidence A smoke output
 .remote-exit-evidence-a/

@@ -11,6 +11,7 @@ import {
   type HostId,
   type PermissionPersistence,
   type ProviderExecutionPolicy,
+  type ProviderToolImage,
   type WindowId,
 } from "@octant/contracts";
 import { JSONSchema, Schema } from "effect";
@@ -18,6 +19,11 @@ import type { CanvasWorkspaceScope } from "@octant/contracts/canvas-cards";
 import type { ChildCanvasWorkspaceResolution } from "./childCanvasWorkspace";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { CanvasService } from "./canvasService";
+import type {
+  CanvasPreviewOutcome,
+  CanvasPreviewService,
+  CanvasPreviewWidth,
+} from "./canvasPreviewService";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
 import {
   loginSequenceExample,
@@ -68,7 +74,10 @@ const blockKinds = [...new Set(CanvasBlock.members.map(memberKind))];
 const canvasDefinitionSchema = {
   type: "object",
   properties: {
-    operation: { type: "string", enum: ["describe", "list", "read", "create", "revise"] },
+    operation: {
+      type: "string",
+      enum: ["describe", "list", "read", "create", "revise", "preview"],
+    },
     blockKinds: {
       type: "array",
       items: { type: "string", enum: blockKinds },
@@ -80,7 +89,26 @@ const canvasDefinitionSchema = {
     title: { type: "string", maxLength: MAX_TITLE_CHARS, description: "Title of a new Canvas." },
     canvasId: {
       type: "string",
-      description: "For read and revise: the id returned by create or list.",
+      description: "For read, revise, and preview: the id returned by create or list.",
+    },
+    version: {
+      type: "integer",
+      minimum: 1,
+      description:
+        "For preview: the version sequence to look at. Omit to preview the current version.",
+    },
+    width: {
+      description:
+        "For preview: where the Canvas is being shown. inline draws it at the thread width, sidebar at the card width, or give a width in pixels from 320 to 1200. Defaults to sidebar.",
+      oneOf: [
+        { type: "string", enum: ["inline", "sidebar"] },
+        { type: "integer", minimum: 320, maximum: 1200 },
+      ],
+    },
+    theme: {
+      type: "string",
+      enum: ["light", "dark"],
+      description: "For preview: the theme to draw it on. Defaults to light.",
     },
     expectedSequence: {
       type: "integer",
@@ -134,6 +162,24 @@ export interface CanvasAgentToolPort {
     { readonly id: string; readonly type: string; readonly lifecycle: string } | undefined
   >;
   readonly canvas: Pick<CanvasService, "create" | "revise" | "get" | "threadReferenceCards">;
+  /**
+   * Renders a shipped Canvas and reports its layout warnings. Absent on a host
+   * that has not wired the preview service, so the tool refuses the operation
+   * rather than inventing a picture or a warning list.
+   */
+  readonly preview?: CanvasPreviewService;
+  /**
+   * Whether a provider instance's model accepts images in a tool result.
+   *
+   * Reported per provider rather than assumed: a model that cannot take an
+   * image is told the warnings and the reason, never handed a picture it would
+   * drop on the floor. Absent means this host cannot vouch for the capability,
+   * which reads as "no" — the same fail-closed answer the model would receive.
+   */
+  readonly imagesInToolResults?: (input: {
+    readonly providerInstanceId: CanvasAuthoringThread["providerInstanceId"];
+    readonly modelId: CanvasAuthoringThread["modelId"];
+  }) => boolean;
   readonly uuid: () => string;
   readonly hostId: HostId;
   /**
@@ -303,6 +349,7 @@ function toolDescription(
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     `Choose where the thread shows it. Use presentation inline for one small visual that answers the question, such as a chart, a few metrics, a short table, or a sequence or state diagram; it is drawn in the conversation just below your reply to this turn, so refer to it as below, and the user can still open it in the sidebar. Leave presentation out (sidebar) for reports, plans, boards, mockups, and anything the user will keep working on. Inline holds at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks; when the host shows a card instead, the result says so in presentationNote.`,
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
+    "Preview once after you create or revise a chart, treemap, or inline Canvas: preview returns the same picture the person will see and the layout warnings for it (clipped labels, legend overflow, empty series, an inline document past its height cap, or ink below its contrast target). Fix what the warnings name with a revise, then reply. Previewing again before you change the document only spends the host's browser and your context, so look once per change.",
   ].join(" ");
 }
 
@@ -323,7 +370,14 @@ type CanvasToolInput =
       readonly blockKinds?: ReadonlyArray<string>;
     }
   | { readonly operation: "list" }
-  | { readonly operation: "read"; readonly canvasId: string };
+  | { readonly operation: "read"; readonly canvasId: string }
+  | {
+      readonly operation: "preview";
+      readonly canvasId: string;
+      readonly version?: number;
+      readonly width?: CanvasPreviewWidth;
+      readonly theme?: "light" | "dark";
+    };
 
 function listedDocumentRecipes(recipes: ReadonlyArray<CanvasDocumentRecipe>): ReadonlyArray<{
   readonly id: string;
@@ -402,8 +456,51 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
       ? { operation, canvasId }
       : { error: "Reading a Canvas needs its canvasId." };
   }
+  if (operation === "preview") {
+    const canvasId = record["canvasId"];
+    if (typeof canvasId !== "string") {
+      return { error: "A preview needs the canvasId of the Canvas to look at." };
+    }
+    const version = record["version"];
+    if (
+      version !== undefined &&
+      (typeof version !== "number" || !Number.isInteger(version) || version < 1)
+    ) {
+      return { error: "A preview version is a whole number from 1." };
+    }
+    const width = record["width"];
+    let previewWidth: CanvasPreviewWidth | undefined;
+    if (width !== undefined) {
+      if (width === "inline" || width === "sidebar") previewWidth = width;
+      else if (
+        typeof width === "number" &&
+        Number.isInteger(width) &&
+        width >= 320 &&
+        width <= 1200
+      )
+        previewWidth = width;
+      else
+        return {
+          error:
+            "A preview width is inline, sidebar, or a whole number of pixels from 320 to 1200.",
+        };
+    }
+    const theme = record["theme"];
+    if (theme !== undefined && theme !== "light" && theme !== "dark") {
+      return { error: "A preview theme is light or dark." };
+    }
+    return {
+      operation,
+      canvasId,
+      ...(version === undefined ? {} : { version }),
+      ...(previewWidth === undefined ? {} : { width: previewWidth }),
+      ...(theme === undefined ? {} : { theme }),
+    };
+  }
   if (operation !== "create" && operation !== "revise") {
-    return { error: "Canvas tool operation must be describe, list, read, create, or revise." };
+    return {
+      error: "Canvas tool operation must be describe, list, read, create, revise, or preview.",
+    };
   }
   const blocks = record["blocks"];
   if (!Array.isArray(blocks) || blocks.length === 0) {
@@ -683,6 +780,40 @@ function canvasToolSet(options: {
         };
       }
 
+      if (input.operation === "preview") {
+        const service = options.port.preview;
+        if (service === undefined) {
+          return {
+            result: { error: "Preview is unavailable on this host." },
+            isError: true,
+          };
+        }
+        let canvasId;
+        try {
+          canvasId = decodeCanvasId(input.canvasId);
+        } catch {
+          return { result: { error: "That Canvas is unavailable." }, isError: true };
+        }
+        const imagesInToolResults =
+          options.port.imagesInToolResults?.({
+            providerInstanceId: options.providerInstanceId,
+            modelId: options.modelId,
+          }) === true;
+        const outcome = await service.preview(
+          {
+            canvasId,
+            threadKey: options.originThreadId,
+            ...(input.version === undefined ? {} : { version: input.version }),
+            width: input.width ?? "sidebar",
+            theme: input.theme ?? "light",
+            imagesInToolResults,
+          },
+          target.context,
+          target.project,
+        );
+        return previewToolResult(outcome, imagesInToolResults);
+      }
+
       if (input.operation === "create") {
         const request = {
           schemaVersion: 1 as const,
@@ -821,4 +952,60 @@ function placement(input: CanvasAuthoringInput): {
   return refusal === undefined
     ? { presentation: "inline" }
     : { presentation: "sidebar", note: refusal };
+}
+
+/**
+ * How a preview reads back to the agent.
+ *
+ * A picture and the warnings travel separately: the warnings are the honest
+ * layout reading and arrive whether or not a picture could be taken, and the
+ * image rides in the tool result's own image channel. When no picture is
+ * attached the result names the reason — no browser on this host, no preview
+ * page in this build, a look that failed to render, or a model that cannot take
+ * images — so the agent reports the warnings rather than believing it saw the
+ * Canvas.
+ */
+function previewToolResult(
+  outcome: CanvasPreviewOutcome,
+  imagesInToolResults: boolean,
+): {
+  readonly result: unknown;
+  readonly isError?: boolean;
+  readonly images?: ReadonlyArray<ProviderToolImage>;
+} {
+  switch (outcome.kind) {
+    case "preview":
+      return {
+        ...(outcome.image === undefined ? {} : { images: [outcome.image] }),
+        result: {
+          canvasId: outcome.canvasId,
+          sequence: outcome.sequence,
+          width: outcome.width,
+          ...(outcome.height === undefined ? {} : { height: outcome.height }),
+          warnings: outcome.warnings,
+          imagesInToolResults,
+          ...(outcome.image === undefined
+            ? { imageIncluded: false, imageOmitted: outcome.imageOmitted }
+            : { imageIncluded: true }),
+        },
+      };
+    case "busy":
+      return {
+        result: {
+          error:
+            "A preview is already running for this thread. Wait for it to finish, then preview again.",
+        },
+        isError: true,
+      };
+    case "rate-limited":
+      return {
+        result: {
+          error:
+            "Too many previews for this thread just now. Change the Canvas, then preview again.",
+        },
+        isError: true,
+      };
+    case "unavailable":
+      return { result: { error: outcome.message }, isError: true };
+  }
 }
