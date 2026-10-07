@@ -966,9 +966,10 @@ function placement(input: CanvasAuthoringInput): {
  * A picture and the warnings travel separately: the warnings are the honest
  * layout reading and arrive whether or not a picture could be taken, and the
  * image rides in the tool result's own image channel. When no picture is
- * attached the result says which of the two reasons applied — no browser in
- * this build, or a model that cannot take images — so the agent reports the
- * warnings rather than believing it saw the Canvas.
+ * attached the result names the reason — no browser on this host, no preview
+ * page in this build, a look that failed to render, or a model that cannot take
+ * images — so the agent reports the warnings rather than believing it saw the
+ * Canvas.
  */
 function previewToolResult(
   outcome: CanvasPreviewOutcome,

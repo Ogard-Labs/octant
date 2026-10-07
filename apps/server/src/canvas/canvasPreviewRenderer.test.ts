@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -96,6 +96,30 @@ describe("canvas preview page input", () => {
       ).resolves.toEqual({ kind: "unavailable", reason: "no-renderer" });
     } finally {
       await rm(emptyAssets, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a browser that will not start as a failed look instead of throwing", async () => {
+    const assets = await mkdtemp(join(tmpdir(), "octant-canvas-preview-"));
+    try {
+      await mkdir(join(assets, "canvas-preview"));
+      await writeFile(
+        join(assets, "canvas-preview", "canvas-preview.html"),
+        "<html><head></head><body></body></html>",
+      );
+      const renderer = createPlaywrightCanvasPreviewRenderer({
+        webAssetsPath: assets,
+        executableCandidates: ["/nonexistent/chromium"],
+        executable: async () => true,
+        launch: async () => {
+          throw new Error("Chromium refused to start.");
+        },
+      });
+      await expect(
+        renderer.render({ definition, width: 400, theme: "light", placement: "document" }),
+      ).resolves.toEqual({ kind: "unavailable", reason: "failed" });
+    } finally {
+      await rm(assets, { recursive: true, force: true });
     }
   });
 });
