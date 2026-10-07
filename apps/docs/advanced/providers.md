@@ -126,6 +126,17 @@ available for profiles that support it. Mistral Vibe from Octant requires a
 Mistral API key entered in **Settings → Providers** because its confined launch
 does not read the macOS Keychain.
 
+Claude Code on a Claude subscription has one extra step for subagents and Plan
+turns. Those runs are read-only and cannot reach the keychain where your Claude
+sign-in lives, so **Settings → Providers → Claude Code** offers **Connect Claude
+for helpers**. Octant runs Claude's own `claude setup-token` on this Mac, you
+approve once in the browser window it opens, and Octant keeps the long-lived
+token it prints in its own credential store for that Claude Code provider. You
+never copy the token. Ordinary Claude turns keep using your normal sign-in.
+**Disconnect**, or removing the provider, removes the token. If Claude later
+refuses it, Settings shows it as expired and asks you to connect again. Connect
+only from the Mac that runs Octant, because the approval opens a browser there.
+
 The **Update CLI** action is shown only for providers with a verified native
 update command. It runs that command against the same configured executable,
 when no active session is using it, and then reports whether the observed
@@ -174,15 +185,19 @@ configuration: edits and shell commands ask unless the setting allows them,
 and other providers' tools and skills are refused. 2.x runs turns without
 Octant's app tools until Octant registers them through the 2.x MCP API: with
 OpenCode 2.0.22 they are reported as unsupported. Approval requests reach
-you as usual; questions from the agent are not supported yet and end the
-turn. OpenCode 2 resolves a project inside a Git work tree by starting Git,
-which the Chat, Plan, and Work jail does not allow. On macOS Octant gives
-those launches a stand-in `git` that always fails, so OpenCode serves the
-folder without Git and every mode runs. Linux has no such stand-in yet. A
-runtime whose confined server cannot answer for a work tree, including every
-2.x runtime on Linux, is shown as **Incompatible**: its models are listed and
-no turn is offered. Octant never falls back to an unconfined session or
-treats the 2.x version as the legacy runtime.
+you as usual, with one exception: if you saved a permission for this
+repository in OpenCode itself by choosing to always allow it, OpenCode
+applies it and Octant does not ask. Octant's own refusals still apply, and
+Octant never saves such a permission for you. Clear the saved permissions in
+OpenCode to get the prompts back. Questions from the agent are not supported
+yet and end the turn. OpenCode 2 resolves a project inside a Git work tree by
+starting Git, which the Chat, Plan, and Work jail does not allow. On macOS
+Octant gives those launches a stand-in `git` that always fails, so OpenCode
+serves the folder without Git and every mode runs. Linux has no such stand-in
+yet. A runtime whose confined server cannot answer for a work tree, including
+every 2.x runtime on Linux, is shown as **Incompatible**: its models are
+listed and no turn is offered. Octant never falls back to an unconfined
+session or treats the 2.x version as the legacy runtime.
 
 ### API endpoints
 
@@ -194,6 +209,14 @@ profiles:
 - **Azure AI Foundry** (OpenAI-compatible v1 profile; base URL must end with
   `/openai/v1/`; API-key only)
 - **Ollama** local HTTP (loopback origin only)
+
+API keys are stored only by the Octant desktop app. In a browser, the add form
+says so before you fill it in and keeps the key field off; you can still add an
+endpoint that needs no key (for example a server on this computer). If a
+configured endpoint lists far more models than you set up, such as an Azure
+resource that lists every base model, **Settings → Octant Harness** shows the
+models you configured first and the rest under **Discovered on the endpoint**;
+an Azure AI Foundry provider offers only its configured deployments.
 
 Image generation profiles are also provider instances. Open **Settings → Image
 generation → Add image provider** to choose a provider, enter its API key, and

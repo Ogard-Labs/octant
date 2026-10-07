@@ -101,10 +101,12 @@ describe("BrowserAutomationClient", () => {
     });
 
     await client.inspectThread({ threadId: threadId as any });
+    await client.inspectThread({ threadId: threadId as any, freshPicture: false });
     await client.releaseThread({ threadId: threadId as any });
 
     expect(requests).toEqual([
       { path: "/api/browser/contexts/current", body: { threadId } },
+      { path: "/api/browser/contexts/current", body: { threadId, freshPicture: false } },
       { path: "/api/browser/contexts/release", body: { threadId } },
     ]);
   });

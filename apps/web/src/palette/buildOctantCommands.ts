@@ -15,6 +15,8 @@ export interface OctantCommandSources {
   readonly onNewThread: () => void;
   readonly onOpenSearch: () => void;
   readonly onOpenSettings: () => void;
+  /** Opens the Review page for the finished threads the person has not looked at. */
+  readonly onOpenReview?: () => void;
   /** Opens Zen. Absent when this window cannot enter it. */
   readonly onOpenZen?: () => void;
   readonly threads: ReadonlyArray<CommandThread>;
@@ -119,6 +121,15 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
     keywords: ["find", "filter"],
     action: { kind: "run", run: sources.onOpenSearch },
   });
+  if (sources.onOpenReview !== undefined) {
+    commands.push({
+      id: "thread:review",
+      title: "Review finished threads",
+      group: "Threads",
+      keywords: ["review", "finished", "unread", "triage", "to review"],
+      action: { kind: "run", run: sources.onOpenReview },
+    });
+  }
   for (const thread of sources.threads.slice(0, MAX_NAVIGATION_ENTRIES)) {
     commands.push({
       id: `thread:${thread.mode}:${thread.threadId}`,

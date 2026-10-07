@@ -132,6 +132,53 @@ describe("sendAnthropicMessagesTurn", () => {
     expect(body.max_tokens).toBeGreaterThan(0);
   });
 
+  it.each([
+    ["max_tokens", "max-tokens"],
+    ["refusal", "content-filter"],
+  ] as const)("records a %s stop as %s and keeps the partial reply", async (raw, expected) => {
+    const fetch = fixture(
+      sse([
+        {
+          type: "message_start",
+          message: {
+            id: "msg",
+            type: "message",
+            role: "assistant",
+            content: [],
+            model: "fixture-model",
+            stop_reason: null,
+            usage: { input_tokens: 2, output_tokens: 0 },
+          },
+        },
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "text", text: "" },
+        },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial" } },
+        { type: "content_block_stop", index: 0 },
+        {
+          type: "message_delta",
+          delta: { stop_reason: raw },
+          usage: { output_tokens: 4 },
+        },
+        { type: "message_stop" },
+      ]),
+    );
+
+    const result = await Effect.runPromise(
+      sendAnthropicMessagesTurn({
+        endpoint: makeEndpoint(fetch),
+        modelId: "fixture-model",
+        history: [],
+        prompt: "hi",
+      }),
+    );
+
+    expect(result.text).toBe("partial");
+    expect(result.outputStopReason).toBe(expected);
+  });
+
   it("accepts output-only usage on message_delta", async () => {
     const { fetch } = captureRequest(
       fixture(

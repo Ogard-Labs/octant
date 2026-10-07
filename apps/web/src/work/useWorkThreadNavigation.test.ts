@@ -54,6 +54,26 @@ describe("buildWorkThreadNavigation", () => {
     ]);
   });
 
+  it("carries a running turn's start time and latest step onto the Work row", () => {
+    const active = workThread();
+    const [row] = buildWorkThreadNavigation(
+      [active],
+      [
+        {
+          threadId,
+          executing: true,
+          turnStartedAt: "2026-10-06T12:00:00.000Z",
+          liveStep: { kind: "tool", tool: "Command", argument: "ls" },
+        },
+      ],
+    );
+    expect(row).toMatchObject({
+      activity: "working",
+      turnStartedAt: "2026-10-06T12:00:00.000Z",
+      liveStep: { kind: "tool", tool: "Command", argument: "ls" },
+    });
+  });
+
   it("carries a due status line so the inbox can surface the reminder", () => {
     const active = workThread();
     const followUpDue = {

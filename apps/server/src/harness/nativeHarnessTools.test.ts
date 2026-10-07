@@ -255,7 +255,7 @@ describe("native harness tools", () => {
       uuid,
     });
     expect(await call(tools, "read", { path: "." })).toEqual({
-      result: { error: "tool-authority-stale" },
+      result: { error: "tool-authority-stale", message: expect.stringContaining("Do not retry") },
       isError: true,
     });
   });

@@ -22,6 +22,7 @@ import {
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
 import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { normalizedProviderCallbackId } from "./workRequestRuntime";
@@ -39,7 +40,11 @@ const RESPONSE_TRUNCATION_MARKER = "\n[Output truncated by Octant.]";
 const textEncoder = new TextEncoder();
 
 export type WorkTurnRuntimeOutcome =
-  | { readonly kind: "completed"; readonly response: string }
+  | {
+      readonly kind: "completed";
+      readonly response: string;
+      readonly outputLimited?: true;
+    }
   | { readonly kind: "cancelled" }
   | { readonly kind: "waiting"; readonly failure: WorkTurnFailure }
   | { readonly kind: "failed"; readonly failure: WorkTurnFailure };
@@ -61,6 +66,12 @@ export interface WorkTurnRuntimePort {
     readonly appManagedTools?: AppManagedToolSet;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
     readonly onDelta?: (response: string) => void;
+    /** The endpoint is sending the request again. */
+    readonly onRetrying?: (
+      notice: Extract<ProviderRuntimeEvent, { readonly kind: "retrying" }>,
+    ) => void;
+    /** Text or reasoning arrived, so the retry wait is over. */
+    readonly onRetryCleared?: () => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
     readonly onChildActivity?: (event: ProviderChildActivityEvent) => void;
@@ -70,6 +81,8 @@ export interface WorkTurnRuntimePort {
     ) => () => void;
     /** Told once when the turn is over, whatever its outcome, with what it cost and how it ran. */
     readonly onTurnEnded?: (turn: TurnEndSummary) => void;
+    /** Tells the navigation read what the running turn is doing, from its start to its end. */
+    readonly liveTurn?: LiveTurnTracker;
     /** The wall clock the turn is timed against. */
     readonly clock?: () => string;
   }): Promise<WorkTurnRuntimeOutcome>;
@@ -107,14 +120,21 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     // Re-based when the prompt is sent, so the wait for a first token never
     // includes starting the provider's session.
     let timing = startTurnMetrics(startedAt);
-    const outcome = await this.#runTurn(input, {
-      observe: (event) => {
-        timing = observeTurnMetrics(timing, event);
-      },
-      sent: () => {
-        timing = startTurnMetrics(clock());
-      },
-    });
+    input.liveTurn?.begin(startedAt);
+    let outcome: WorkTurnRuntimeOutcome;
+    try {
+      outcome = await this.#runTurn(input, {
+        observe: (event) => {
+          timing = observeTurnMetrics(timing, event);
+          input.liveTurn?.observe(event);
+        },
+        sent: () => {
+          timing = startTurnMetrics(clock());
+        },
+      });
+    } finally {
+      input.liveTurn?.end();
+    }
     try {
       input.onTurnEnded?.(
         summarizeTurnEnd({
@@ -267,7 +287,10 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (event.kind === "text-delta") {
                   response = appendBoundedResponse(response, event.text);
                   input.onDelta?.(response);
+                  input.onRetryCleared?.();
                 }
+                if (event.kind === "retrying") input.onRetrying?.(event);
+                if (event.kind === "reasoning-delta") input.onRetryCleared?.();
                 if (event.kind === "task-progress") {
                   const next = upsertThreadTaskProgress(tasks, {
                     taskId: event.taskId,
@@ -423,7 +446,7 @@ function boundedCleanup<E, R>(
 function stopReasonOf(outcome: WorkTurnRuntimeOutcome): TurnStopReason {
   switch (outcome.kind) {
     case "completed":
-      return "end-of-turn";
+      return outcome.outputLimited === true ? "max-tokens" : "end-of-turn";
     case "cancelled":
       return "cancelled";
     case "waiting":
@@ -442,7 +465,11 @@ function outcomeFromEvents(
   response: string,
 ): WorkTurnRuntimeOutcome {
   if (terminal?.kind === "completed") {
-    return { kind: "completed", response };
+    return {
+      kind: "completed",
+      response,
+      ...(terminal.stopReason === "max-tokens" ? { outputLimited: true as const } : {}),
+    };
   }
   if (terminal?.kind === "interrupted") {
     return {

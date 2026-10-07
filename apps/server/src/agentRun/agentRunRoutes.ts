@@ -1120,6 +1120,9 @@ function serializeEntries(entries: ReadonlyArray<AgentRunParentSummaryEntry>) {
           },
         }),
     ...(entry.recoveryReason === undefined ? {} : { recoveryReason: entry.recoveryReason }),
+    ...(entry.resultDeliveryOutcome === undefined
+      ? {}
+      : { resultDeliveryOutcome: entry.resultDeliveryOutcome }),
     ...(entry.usageLimit === undefined ? {} : { usageLimit: entry.usageLimit }),
     ...(entry.usageResume === undefined ? {} : { usageResume: entry.usageResume }),
     version: entry.version,

@@ -4,6 +4,7 @@ import {
   decodeChatAttemptQuestion,
   decodeChatFailure,
   decodeDiagnosticFailureCode,
+  decodeHarnessRetryNotice,
   UtcTimestamp,
   type ChatAttempt,
   type ChatAttemptFailure,
@@ -12,6 +13,7 @@ import {
   type ChatCitationId,
   type ChatContentReference,
   type ChatFailure,
+  type HarnessRetryNotice,
   type ChatThread,
   type ProviderAttachmentInput,
   type CapacityReservationId,
@@ -32,6 +34,7 @@ import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Cause, Deferred, Effect, Fiber, Option, Schema, Scope, Stream } from "effect";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
@@ -237,6 +240,11 @@ export interface ChatTurnRunnerInput {
   }) => Promise<void>;
   /** Told once when the attempt is over, whatever its outcome, with what it cost and how it ran. */
   readonly onTurnEnded?: (turn: TurnEndSummary) => void;
+  /** The endpoint is sending the request again. The same event the stats line counts. */
+  readonly onHarnessRetry?: (notice: HarnessRetryNotice) => void;
+  readonly onHarnessRetryCleared?: () => void;
+  /** Tells the navigation read what the running turn is doing, from its start to its end. */
+  readonly liveTurn?: LiveTurnTracker;
 }
 
 export type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -302,10 +310,13 @@ export class ChatTurnRunner {
       let sawUsage = false;
       let sawVisibleResponse = false;
       let terminalOutcome: ChatAttemptOutcome | undefined;
+      let outputLimited = false;
       const turnStartedAt = clock();
       // Re-based when the prompt is sent, so the wait for a first token never
       // includes starting the provider's session.
       let timing = startTurnMetrics(turnStartedAt);
+      input.liveTurn?.begin(turnStartedAt);
+      yield* Effect.addFinalizer(() => Effect.sync(() => input.liveTurn?.end()));
       const endOfTurn = (stopReason: TurnStopReason) =>
         summarizeTurnEnd({
           metrics: timing,
@@ -328,7 +339,7 @@ export class ChatTurnRunner {
               input.onTurnCompleted!({
                 text: responseText,
                 toolCalls: answeredToolRequestIds.size,
-                turn: endOfTurn("end-of-turn"),
+                turn: endOfTurn(outputLimited ? "max-tokens" : "end-of-turn"),
               }).catch(() => undefined),
             );
 
@@ -593,7 +604,9 @@ export class ChatTurnRunner {
           try {
             // Reattaching a session sends no prompt, so there is no turn to measure.
             if (input.mode !== "resume") {
-              input.onTurnEnded?.(endOfTurn(stopReasonOf(terminalOutcome, input.signal?.aborted)));
+              input.onTurnEnded?.(
+                endOfTurn(stopReasonOf(terminalOutcome, input.signal?.aborted, outputLimited)),
+              );
             }
           } catch {
             // Measuring a turn never decides how it ends.
@@ -801,6 +814,31 @@ export class ChatTurnRunner {
               Effect.gen(function* () {
                 yield* idle.touch;
                 timing = observeTurnMetrics(timing, event);
+                input.liveTurn?.observe(event);
+                if (event.kind === "retrying") {
+                  const notice = decodeHarnessRetryNotice({
+                    attempt: event.attempt,
+                    maxAttempts: event.maxAttempts,
+                    delayMs: event.delayMs,
+                    reason: event.reason,
+                    announcedAt: event.occurredAt,
+                  });
+                  currentAttempt = {
+                    ...currentAttempt,
+                    harnessRetry: notice,
+                    updatedAt: updatedAt(),
+                  };
+                  yield* input.persistAttempt(currentAttempt);
+                  input.onHarnessRetry?.(notice);
+                } else if (
+                  (event.kind === "text-delta" || event.kind === "reasoning-delta") &&
+                  currentAttempt.harnessRetry !== undefined
+                ) {
+                  const { harnessRetry: _cleared, ...withoutRetry } = currentAttempt;
+                  currentAttempt = { ...withoutRetry, updatedAt: updatedAt() };
+                  yield* input.persistAttempt(currentAttempt);
+                  input.onHarnessRetryCleared?.();
+                }
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > maxEvents) {
                   yield* persistOutcome("interrupted", {
@@ -1278,6 +1316,7 @@ export class ChatTurnRunner {
                       : {}),
                   };
                   yield* input.persistAttempt(currentAttempt);
+                  if (event.stopReason === "max-tokens") outputLimited = true;
                   terminalOutcome = "completed";
                   yield* observeCompleted();
                   return;
@@ -1436,10 +1475,11 @@ export class ChatTurnRunner {
 function stopReasonOf(
   outcome: ChatAttemptOutcome | undefined,
   cancelRequested: boolean | undefined,
+  outputLimited = false,
 ): TurnStopReason {
   switch (outcome) {
     case "completed":
-      return "end-of-turn";
+      return outputLimited ? "max-tokens" : "end-of-turn";
     case "cancelled":
       return "cancelled";
     case "interrupted":

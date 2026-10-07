@@ -1,5 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
-import { GhRepositoryCataloguePort } from "./ghRepositoryCataloguePort";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  GhRepositoryCataloguePort,
+  createGhCatalogueCommandPort,
+} from "./ghRepositoryCataloguePort";
 
 function searchItem(overrides: Record<string, unknown> = {}) {
   return {
@@ -131,4 +137,37 @@ describe("listAssignedWork", () => {
       kind: "unavailable",
     });
   });
+});
+
+const commandDirectories: string[] = [];
+
+afterEach(() => {
+  while (commandDirectories.length > 0) {
+    const directory = commandDirectories.pop();
+    if (directory !== undefined) rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+describe("the gh command port's stdin body", () => {
+  it("stays alive when gh exits before reading the whole request body", async () => {
+    // A script that closes stdin and exits at once reproduces the refusal a
+    // bad credential or an aborted deadline causes: Node sees the child's
+    // stdin pipe close while the body is still being written, which emits
+    // EPIPE. Without a listener on that stream the host process dies.
+    const directory = mkdtempSync(join(tmpdir(), "octant-gh-command-"));
+    commandDirectories.push(directory);
+    const executable = join(directory, "exit-before-reading");
+    writeFileSync(executable, "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+    chmodSync(executable, 0o700);
+    const command = createGhCatalogueCommandPort(executable);
+
+    const outcome = await command.run(
+      ["api", "gists", "--method", "POST", "--input", "-"],
+      { environment: {}, stdin: "x".repeat(256 * 1024) },
+      new AbortController().signal,
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    command.close?.();
+  }, 20_000);
 });

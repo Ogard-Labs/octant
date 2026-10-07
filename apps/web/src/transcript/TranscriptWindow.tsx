@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
+import { TranscriptOutputLimitNote } from "./outputLimitNote";
 
 /**
  * Windowed transcript rows.
@@ -460,11 +461,10 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
         {props.lead}
       </div>
       {list}
-      {props.trail === undefined ? null : (
-        <div data-transcript-trail="" ref={trailRef}>
-          {props.trail}
-        </div>
-      )}
+      <div data-transcript-trail="" ref={trailRef}>
+        {props.trail}
+        <TranscriptOutputLimitNote restoreKey={props.restoreKey} />
+      </div>
       <div aria-live="polite" className="sr-only" data-transcript-live="">
         {liveMessage}
       </div>

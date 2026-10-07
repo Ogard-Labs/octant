@@ -1,4 +1,5 @@
-import type { CanvasDefinition } from "@octant/contracts/canvas";
+import type { CanvasDefinition, CanvasNumberFormat } from "@octant/contracts/canvas";
+import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { CanvasPolicyRejected, validateCanvasDefinition } from "@octant/domain/canvas-policy";
 
 export type CanvasRenderGate =
@@ -50,4 +51,13 @@ export function formatScalar(value: unknown): string {
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number" && !Number.isFinite(value)) return "—";
   return String(value);
+}
+
+/**
+ * A scalar through the shared number formatter when it is a number, and the
+ * plain scalar reading otherwise. Charts, metrics, and table columns all call
+ * this so a named format reads the same in every one of them.
+ */
+export function formatCanvasValue(value: unknown, format?: CanvasNumberFormat | undefined): string {
+  return typeof value === "number" ? formatCanvasNumber(value, format) : formatScalar(value);
 }

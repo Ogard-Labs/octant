@@ -1323,6 +1323,38 @@ describe("mapClaudeMessage", () => {
     });
   });
 
+  it("records a max_tokens stop on the completed event and leaves an ordinary finish unstated", () => {
+    const limited = mapped(context(), {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "max_tokens",
+      usage,
+      totalCostUsd: 0.01,
+      permissionDenials: [],
+    });
+    const finished = mapped(context(), {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage,
+      totalCostUsd: 0.01,
+      permissionDenials: [],
+    });
+
+    expect(limited.at(-1)).toMatchObject({
+      kind: "event",
+      event: { kind: "completed", stopReason: "max-tokens" },
+    });
+    const finishedEvent = finished.at(-1);
+    expect(finishedEvent?.kind === "event" ? finishedEvent.event : undefined).not.toHaveProperty(
+      "stopReason",
+    );
+  });
+
   it("reports how much of the window the last request filled, and where the runtime compacts", () => {
     const ctx = context({ autoCompactThreshold: 167_000 });
     const result = {
@@ -1354,6 +1386,36 @@ describe("mapClaudeMessage", () => {
       kind: "event",
       event: { kind: "usage", inputTokens: 200, contextTokens: 150, autoCompactThreshold: 167_000 },
     });
+  });
+
+  it("carries the runtime's account of the window on the usage that settles the turn", () => {
+    const ctx = context();
+    const contextBreakdown = {
+      parts: [{ kind: "messages", tokens: 900, accuracy: "provider-reported" }],
+    } as const;
+
+    const settled = mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage,
+      permissionDenials: [],
+      contextBreakdown,
+    });
+    const midTurn = mapped(context(), {
+      kind: "assistant",
+      sessionId: claudeSessionId,
+      messageId: "sdk-message-1",
+      content: [{ kind: "text", text: "Done." }],
+      usage,
+    });
+
+    expect(eventValues(settled)[0]).toMatchObject({ kind: "usage", contextBreakdown });
+    // The runtime is asked once per settled turn, so a request in the middle of
+    // one claims no make-up of its own.
+    expect(eventValues(midTurn)[0]).not.toHaveProperty("contextBreakdown");
   });
 
   it("names no compaction point when the runtime promised none", () => {

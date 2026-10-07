@@ -1,10 +1,17 @@
-import type { CanvasBlock, CanvasDefinition } from "@octant/contracts/canvas";
+import type { CanvasBlock, CanvasDefinition, CanvasNumberFormat } from "@octant/contracts/canvas";
 import {
   CANVAS_EXPORT_BODY_MAX_BYTES,
   canvasExportBodyByteLength,
   type CanvasExportImplementedFormat,
 } from "@octant/contracts/canvas-export";
 import { isCanvasShareSafeText } from "@octant/contracts/canvas-share";
+import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
+import {
+  treemapChildren,
+  treemapRootId,
+  treemapTotals,
+} from "@octant/domain/canvas-treemap-layout";
+import { heatmapRowTotals } from "@octant/domain/canvas-heatmap-layout";
 import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
 
 /**
@@ -64,9 +71,12 @@ function reading(value: string): string {
   return isCanvasShareSafeText(trimmed) ? trimmed : "[redacted]";
 }
 
-function scalar(value: string | number | boolean | null): string {
+function scalar(value: string | number | boolean | null, format?: CanvasNumberFormat): string {
   if (value === null) return "";
   if (typeof value === "string") return reading(value);
+  // A number reads through the shared formatter so the document matches the
+  // screen; a boolean has no number reading.
+  if (typeof value === "number") return formatCanvasNumber(value, format);
   return String(value);
 }
 
@@ -107,7 +117,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       );
     case "metric":
       return paragraph(
-        `${reading(block.label)}: ${scalar(block.value)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`,
+        `${reading(block.label)}: ${scalar(block.value, block.format)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`,
       );
     case "progress":
       return paragraph(
@@ -129,7 +139,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           kind: "table",
           headers: block.columns.map((column) => reading(column.label)),
           rows: block.rows.map((row) =>
-            block.columns.map((_, index) => scalar(row[index] ?? null)),
+            block.columns.map((column, index) => scalar(row[index] ?? null, column.format)),
           ),
         },
       ];
@@ -139,7 +149,8 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           kind: "list",
           items: block.series.flatMap((series) =>
             series.points.map(
-              (point) => `${reading(series.label)}: ${scalar(point.x)} = ${String(point.y)}`,
+              (point) =>
+                `${reading(series.label)}: ${scalar(point.x, block.format)} = ${scalar(point.y, block.format)}`,
             ),
           ),
         },
@@ -268,6 +279,79 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           items: block.nodes.map((node) => `${node.component}: ${reading(node.label)}`),
         },
       ];
+    case "treemap": {
+      // The hierarchy as a table: one row per node, indented by depth, so the
+      // exported document carries the same readings the picture shows.
+      const children = treemapChildren(block);
+      const rootId = treemapRootId(block);
+      const totals = block.measures.map((measure) =>
+        treemapTotals(block, String(measure.measureId)),
+      );
+      const nodesById = new Map(block.nodes.map((node) => [String(node.nodeId), node]));
+      const rows: Array<ReadonlyArray<string>> = [];
+      const indent = (depth: number) => "\u00A0".repeat(depth * 2);
+      const walk = (nodeId: string, depth: number) => {
+        const node = nodesById.get(nodeId);
+        if (node === undefined) return;
+        rows.push([
+          `${indent(depth)}${reading(node.label)}`,
+          ...block.measures.map((measure, index) =>
+            scalar(totals[index]?.get(nodeId) ?? 0, measure.format),
+          ),
+        ]);
+        for (const child of children.get(nodeId) ?? []) walk(child, depth + 1);
+      };
+      walk(rootId, 0);
+      return [
+        {
+          kind: "table",
+          headers: ["Item", ...block.measures.map((measure) => reading(measure.label))],
+          rows,
+        },
+      ];
+    }
+    case "heatmap": {
+      // The grid as a table: a row per declared row and a column per declared
+      // column, so a coordinate the block does not list reads as an empty cell
+      // rather than as a zero.
+      if (block.layout === "matrix") {
+        const totals = heatmapRowTotals(block);
+        const byCoordinate = new Map(
+          block.cells.map((cell) => [
+            `${String(cell.rowId)}\u0000${String(cell.columnId)}`,
+            cell.value,
+          ]),
+        );
+        return [
+          {
+            kind: "table",
+            headers: ["Row", ...block.columns.map((column) => reading(column.label)), "Total"],
+            rows: block.rows.map((row) => {
+              const rowId = String(row.rowId);
+              return [
+                reading(row.label),
+                ...block.columns.map((column) => {
+                  const value = byCoordinate.get(`${rowId}\u0000${String(column.columnId)}`);
+                  return value === undefined ? "" : scalar(value, block.format);
+                }),
+                scalar(totals.get(rowId) ?? 0, block.format),
+              ];
+            }),
+          },
+        ];
+      }
+      return [
+        {
+          kind: "table",
+          headers: ["Date", reading(block.valueLabel ?? "Value"), "Note"],
+          rows: block.days.map((day) => [
+            day.date,
+            scalar(day.value, block.format),
+            day.note === undefined ? "" : reading(day.note),
+          ]),
+        },
+      ];
+    }
     case "plan": {
       const phases = new Map(
         block.phases.map((phase) => [String(phase.phaseId), reading(phase.title)]),

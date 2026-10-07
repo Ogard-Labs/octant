@@ -1,7 +1,10 @@
 import {
   decodeLocalServerCommandResult,
+  decodeRunningServiceCommandResult,
   type LocalServerCommand,
   type LocalServerCommandResult,
+  type RunningServiceCommand,
+  type RunningServiceCommandResult,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -13,6 +16,11 @@ export interface LocalServerClientOptions {
 
 export interface LocalServerClient {
   execute(command: LocalServerCommand, signal?: AbortSignal): Promise<LocalServerCommandResult>;
+  /** The host-wide read and its Open and Stop, for the start screen's Running services. */
+  executeRunningServices(
+    command: RunningServiceCommand,
+    signal?: AbortSignal,
+  ): Promise<RunningServiceCommandResult>;
 }
 
 export class LocalServerClientFailure extends Error {
@@ -38,31 +46,38 @@ export function createLocalServerClient(options: LocalServerClientOptions): Loca
   validateBaseUrl(options.baseUrl);
   const fetch = bindFetchPort(options.fetch);
 
+  async function post(command: unknown, signal?: AbortSignal): Promise<unknown> {
+    const url = new URL("/api/code/local-servers/commands", options.baseUrl);
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": options.windowCapability,
+        },
+        body: JSON.stringify(command),
+        ...(signal === undefined ? {} : { signal }),
+      });
+    } catch {
+      throw new LocalServerClientFailure("Local servers are unavailable.", 0);
+    }
+    const body: unknown = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new LocalServerClientFailure(
+        messageFrom(body, "Local servers command failed."),
+        response.status,
+      );
+    }
+    return body;
+  }
+
   return {
     async execute(command, signal) {
-      const url = new URL("/api/code/local-servers/commands", options.baseUrl);
-      let response: Response;
-      try {
-        response = await fetch(url.toString(), {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "x-octant-window-capability": options.windowCapability,
-          },
-          body: JSON.stringify(command),
-          ...(signal === undefined ? {} : { signal }),
-        });
-      } catch {
-        throw new LocalServerClientFailure("Local servers are unavailable.", 0);
-      }
-      const body: unknown = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new LocalServerClientFailure(
-          messageFrom(body, "Local servers command failed."),
-          response.status,
-        );
-      }
-      return decodeLocalServerCommandResult(body);
+      return decodeLocalServerCommandResult(await post(command, signal));
+    },
+    async executeRunningServices(command, signal) {
+      return decodeRunningServiceCommandResult(await post(command, signal));
     },
   };
 }

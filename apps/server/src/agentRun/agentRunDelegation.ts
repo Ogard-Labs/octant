@@ -6,6 +6,7 @@ import {
   decodeProjectId,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  ProviderFailureCategory,
   type AgentRun,
   type AgentRunRole,
   type AgentRunControlRequest,
@@ -18,6 +19,7 @@ import {
   effectiveAgentRunExecutionTarget,
   allowedAgentRunRolesForMode,
   nativeHarnessJobForRole,
+  redactDiagnosticText,
 } from "@octant/domain";
 import type { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import {
@@ -523,6 +525,42 @@ export function boundedAgentRunChildren<T, H extends object>(
     }
   }
   return response();
+}
+
+const MAX_AGENT_RUN_STOP_REASON_CHARACTERS = 512;
+
+/**
+ * Why a child ended without a reply, in the words the parent model may see.
+ *
+ * A parent whose `wait` answered only `{"status":"failed"}` could not tell the
+ * person that the child was signed out. The journaled reason can carry a
+ * provider message or a host path, so it is redacted the way diagnostics are
+ * and cut short before it reaches a model.
+ */
+export function agentRunStopReason(run: AgentRun): string | undefined {
+  if (
+    run.lifecycleStatus !== "failed" &&
+    run.lifecycleStatus !== "interrupted" &&
+    run.lifecycleStatus !== "cancelled"
+  )
+    return undefined;
+  if (run.recoveryReason === undefined) return undefined;
+  // Orchestration journals a provider failure as `category: message`. The
+  // category is for the host; the parent's agent relays the message, which
+  // already says what to do, such as connecting Claude for helpers.
+  const separator = run.recoveryReason.indexOf(": ");
+  const spoken =
+    separator > 0 &&
+    (ProviderFailureCategory.literals as ReadonlyArray<string>).includes(
+      run.recoveryReason.slice(0, separator),
+    )
+      ? run.recoveryReason.slice(separator + 2)
+      : run.recoveryReason;
+  const redacted = redactDiagnosticText(spoken).text.trim();
+  if (redacted.length === 0) return undefined;
+  return redacted.length <= MAX_AGENT_RUN_STOP_REASON_CHARACTERS
+    ? redacted
+    : `${redacted.slice(0, MAX_AGENT_RUN_STOP_REASON_CHARACTERS - 1).trimEnd()}…`;
 }
 
 /** Do not settle a reply that a provider would replace with a lossy preview. */

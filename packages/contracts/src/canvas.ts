@@ -25,9 +25,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // Canvas wire contracts are deliberately versioned independently from event
 // envelopes. A decoder must reject a future version until its renderer and
 // policy have been reviewed together. The current schema version is declared
-// in `canvasIdentity.ts`: version 3 added the mockup block and version 4 the
-// thread presentation, which the definition filters below admit only under
-// those declared versions.
+// in `canvasIdentity.ts`: version 3 added the mockup block, version 4 the
+// thread presentation, and version 5 the treemap block, which the definition
+// filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -57,6 +57,26 @@ export const CANVAS_MAX_PLAN_TASK_SOURCES = 8;
 export const CANVAS_MAX_MOCKUP_DEPTH = 6;
 export const CANVAS_MAX_MOCKUP_NODES = 64;
 export const CANVAS_MAX_MOCKUP_TEXT_LENGTH = 120;
+export const CANVAS_MAX_TREEMAP_LEAVES = 4_096;
+export const CANVAS_MAX_TREEMAP_DEPTH = 8;
+export const CANVAS_MAX_TREEMAP_MEASURES = 8;
+export const CANVAS_MAX_TREEMAP_LABEL_LENGTH = 120;
+export const CANVAS_MAX_HEATMAP_ROWS = 256;
+export const CANVAS_MAX_HEATMAP_COLUMNS = 256;
+export const CANVAS_MAX_HEATMAP_CELLS = 16_384;
+// Up to three years of days, leap days included, so a calendar heatmap can
+// show a year of daily readings and a multi-year view without a silent
+// truncation.
+export const CANVAS_MAX_HEATMAP_DAYS = 3 * 366;
+export const CANVAS_MAX_HEATMAP_NOTE_LENGTH = 120;
+
+// The schema version that introduced each version-gated block kind or hint. A
+// document carrying one below the version that introduced it is a declared
+// future version, not a corrupt one, so a rolled-back runtime refuses it cleanly.
+export const CANVAS_MOCKUP_SCHEMA_VERSION = 3;
+export const CANVAS_PRESENTATION_SCHEMA_VERSION = 4;
+export const CANVAS_TREEMAP_SCHEMA_VERSION = 5;
+export const CANVAS_HEATMAP_SCHEMA_VERSION = 6;
 
 // Descriptive aliases keep budget names discoverable without creating a
 // second source of truth.
@@ -228,6 +248,8 @@ export const CanvasBlockKind = Schema.Literal(
   "image",
   "plan",
   "mockup",
+  "treemap",
+  "heatmap",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -281,6 +303,25 @@ export const CanvasCitationBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasCitationBlock = typeof CanvasCitationBlock.Type;
 
+/**
+ * How a block presents a number.
+ *
+ * Absent reads as the default grouped decimal, so an author who does not care
+ * gets locale grouping for free. `compact` is the short reading (1.36M),
+ * `percent` reads the value as a ratio where 1 is 100%, `bytes` a base-1024
+ * size, and `duration` a count of seconds. The formatter that reads this is
+ * shared by charts, metrics, and tables, so one word means the same reading
+ * everywhere it appears.
+ */
+export const CanvasNumberFormat = Schema.Literal(
+  "number",
+  "compact",
+  "percent",
+  "bytes",
+  "duration",
+);
+export type CanvasNumberFormat = typeof CanvasNumberFormat.Type;
+
 export const CanvasScalar = Schema.Union(CanvasText, FiniteNumber, Schema.Boolean, Schema.Null);
 export type CanvasScalar = typeof CanvasScalar.Type;
 
@@ -291,6 +332,7 @@ export const CanvasMetricBlock = Schema.Struct({
   value: CanvasScalar,
   unit: Schema.optional(CanvasLabel),
   delta: Schema.optional(FiniteNumber),
+  format: Schema.optional(CanvasNumberFormat),
 }).annotations(strict);
 export type CanvasMetricBlock = typeof CanvasMetricBlock.Type;
 
@@ -335,6 +377,7 @@ export const CanvasTableColumn = Schema.Struct({
   id: boundedToken("CanvasTableColumnId"),
   label: CanvasLabel,
   type: CanvasTableColumnType,
+  format: Schema.optional(CanvasNumberFormat),
 }).annotations(strict);
 export type CanvasTableColumn = typeof CanvasTableColumn.Type;
 
@@ -487,6 +530,8 @@ export const CanvasChartBlock = Schema.Struct({
   kind: Schema.Literal("chart"),
   chartType: CanvasChartType,
   series: Schema.Array(CanvasChartSeries).pipe(Schema.maxItems(CANVAS_MAX_SERIES)),
+  /** How numeric axis values and readings read; absent groups by locale. */
+  format: Schema.optional(CanvasNumberFormat),
 })
   .annotations(strict)
   .pipe(
@@ -495,6 +540,166 @@ export const CanvasChartBlock = Schema.Struct({
     }),
   );
 export type CanvasChartBlock = typeof CanvasChartBlock.Type;
+
+/**
+ * How a treemap colours its cells.
+ *
+ * `categorical` assigns a hue per top-level group; `sequential` and
+ * `diverging` read the colour measure as an ordered value. Diverging centres
+ * on the mid-point of the colour domain, so a reading above the middle takes
+ * the positive family and one below it the negative family.
+ */
+export const CanvasTreemapScale = Schema.Literal("sequential", "diverging", "categorical");
+export type CanvasTreemapScale = typeof CanvasTreemapScale.Type;
+
+export const CanvasTreemapMeasureId = boundedToken("CanvasTreemapMeasureId");
+export type CanvasTreemapMeasureId = typeof CanvasTreemapMeasureId.Type;
+
+export const CanvasTreemapMeasure = Schema.Struct({
+  measureId: CanvasTreemapMeasureId,
+  label: CanvasLabel,
+  format: Schema.optional(CanvasNumberFormat),
+}).annotations(strict);
+export type CanvasTreemapMeasure = typeof CanvasTreemapMeasure.Type;
+
+/**
+ * One node of a treemap hierarchy.
+ *
+ * A node names its parent rather than nesting its children: a nested tree at
+ * the leaf budget would land past the Canvas depth budget before a repository
+ * has named its packages. Values sit on leaves; a group's reading is the sum
+ * of its children, so the picture never states a total the leaves do not.
+ */
+export const CanvasTreemapNode = Schema.Struct({
+  nodeId: CanvasNodeId,
+  parentId: Schema.optional(CanvasNodeId),
+  label: boundedNonEmptyText(CANVAS_MAX_TREEMAP_LABEL_LENGTH),
+  /** A leaf may name a manifest source; the host reauthorizes opening it. */
+  sourceId: Schema.optional(CanvasSourceId),
+  /** The leaf's value for each declared measure. Groups carry none. */
+  values: Schema.optional(Schema.Record({ key: CanvasTreemapMeasureId, value: FiniteNumber })),
+}).annotations(strict);
+export type CanvasTreemapNode = typeof CanvasTreemapNode.Type;
+
+export const CanvasTreemapBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("treemap"),
+  nodes: Schema.Array(CanvasTreemapNode).pipe(Schema.maxItems(CANVAS_MAX_TREEMAP_LEAVES)),
+  measures: Schema.NonEmptyArray(CanvasTreemapMeasure).pipe(
+    Schema.maxItems(CANVAS_MAX_TREEMAP_MEASURES),
+  ),
+  /** The measure rectangles are sized by when the block first draws. */
+  sizeBy: CanvasTreemapMeasureId,
+  /** The measure cells are coloured by when the block first draws. */
+  colorBy: CanvasTreemapMeasureId,
+  colorScale: Schema.optional(CanvasTreemapScale),
+  /** The node a static export starts from; absent draws the whole hierarchy. */
+  startNodeId: Schema.optional(CanvasNodeId),
+}).annotations(strict);
+export type CanvasTreemapBlock = typeof CanvasTreemapBlock.Type;
+
+/**
+ * A grid coloured by value.
+ *
+ * A matrix names its rows and columns and carries a sparse cell per
+ * coordinate; a calendar carries one reading per date. Both read a value
+ * through the shared scale roles (`sequential` or `diverging`), and both draw
+ * a missing coordinate apart from a zero: an absent cell is not a reading of
+ * nothing.
+ */
+export const CanvasHeatmapScale = Schema.Literal("sequential", "diverging");
+export type CanvasHeatmapScale = typeof CanvasHeatmapScale.Type;
+
+export const CanvasHeatmapLayout = Schema.Literal("matrix", "calendar");
+export type CanvasHeatmapLayout = typeof CanvasHeatmapLayout.Type;
+
+export const CanvasHeatmapRowId = boundedToken("CanvasHeatmapRowId");
+export type CanvasHeatmapRowId = typeof CanvasHeatmapRowId.Type;
+export const CanvasHeatmapColumnId = boundedToken("CanvasHeatmapColumnId");
+export type CanvasHeatmapColumnId = typeof CanvasHeatmapColumnId.Type;
+
+export const CanvasHeatmapRow = Schema.Struct({
+  rowId: CanvasHeatmapRowId,
+  label: CanvasLabel,
+}).annotations(strict);
+export type CanvasHeatmapRow = typeof CanvasHeatmapRow.Type;
+
+export const CanvasHeatmapColumn = Schema.Struct({
+  columnId: CanvasHeatmapColumnId,
+  label: CanvasLabel,
+}).annotations(strict);
+export type CanvasHeatmapColumn = typeof CanvasHeatmapColumn.Type;
+
+const CanvasHeatmapNote = boundedText(CANVAS_MAX_HEATMAP_NOTE_LENGTH);
+
+/**
+ * One coloured reading at a row and column.
+ *
+ * A cell names its axes by id rather than by index, so the picture keeps the
+ * author's labels when rows are sorted by total as view state, and a
+ * coordinate that is not listed reads as missing rather than as zero.
+ */
+export const CanvasHeatmapCell = Schema.Struct({
+  rowId: CanvasHeatmapRowId,
+  columnId: CanvasHeatmapColumnId,
+  value: FiniteNumber,
+  note: Schema.optional(CanvasHeatmapNote),
+}).annotations(strict);
+export type CanvasHeatmapCell = typeof CanvasHeatmapCell.Type;
+
+/** A calendar date as `YYYY-MM-DD`; a rolled-over value such as 2026-02-30 fails. */
+export const CanvasHeatmapDate = Schema.String.pipe(
+  Schema.pattern(/^\d{4}-\d{2}-\d{2}$/),
+  Schema.filter(
+    (value) => {
+      const parsed = new Date(`${value}T00:00:00.000Z`);
+      return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+    },
+    { message: () => "A heatmap date must be a real calendar date." },
+  ),
+);
+export type CanvasHeatmapDate = typeof CanvasHeatmapDate.Type;
+
+export const CanvasHeatmapDay = Schema.Struct({
+  date: CanvasHeatmapDate,
+  value: FiniteNumber,
+  note: Schema.optional(CanvasHeatmapNote),
+}).annotations(strict);
+export type CanvasHeatmapDay = typeof CanvasHeatmapDay.Type;
+
+const CanvasHeatmapFields = {
+  ...CanvasBlockFields,
+  kind: Schema.Literal("heatmap"),
+  /** The reading's name, shown on the legend and in the tooltip. */
+  valueLabel: Schema.optional(CanvasLabel),
+  /** How each reading reads; absent groups by locale. */
+  format: Schema.optional(CanvasNumberFormat),
+  scale: Schema.optional(CanvasHeatmapScale),
+} as const;
+
+export const CanvasHeatmapMatrixBlock = Schema.Struct({
+  ...CanvasHeatmapFields,
+  layout: Schema.Literal("matrix"),
+  rows: Schema.NonEmptyArray(CanvasHeatmapRow).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_ROWS)),
+  columns: Schema.NonEmptyArray(CanvasHeatmapColumn).pipe(
+    Schema.maxItems(CANVAS_MAX_HEATMAP_COLUMNS),
+  ),
+  cells: Schema.Array(CanvasHeatmapCell).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_CELLS)),
+}).annotations(strict);
+export type CanvasHeatmapMatrixBlock = typeof CanvasHeatmapMatrixBlock.Type;
+
+export const CanvasHeatmapCalendarBlock = Schema.Struct({
+  ...CanvasHeatmapFields,
+  layout: Schema.Literal("calendar"),
+  days: Schema.NonEmptyArray(CanvasHeatmapDay).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_DAYS)),
+}).annotations(strict);
+export type CanvasHeatmapCalendarBlock = typeof CanvasHeatmapCalendarBlock.Type;
+
+export const CanvasHeatmapBlock = Schema.Union(
+  CanvasHeatmapMatrixBlock,
+  CanvasHeatmapCalendarBlock,
+);
+export type CanvasHeatmapBlock = typeof CanvasHeatmapBlock.Type;
 
 export const CanvasTimelineItem = Schema.Struct({
   itemId: boundedToken("CanvasTimelineItemId"),
@@ -922,6 +1127,12 @@ export const CanvasBlock = Schema.Union(
   CanvasImageBlock,
   CanvasMockupBlock,
   CanvasPlanBlock,
+  CanvasTreemapBlock,
+  // A heatmap has two layouts with different shapes, so both structs join the
+  // union directly rather than nesting a union: the block catalog derives one
+  // kind per member, and a nested union would hide its members from it.
+  CanvasHeatmapMatrixBlock,
+  CanvasHeatmapCalendarBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
   // effect, so union membership never makes a definition executable.
@@ -952,21 +1163,45 @@ export const CanvasDefinition = Schema.Struct({
 })
   .annotations(strict)
   .pipe(
-    // Version-gated blocks: a mockup is declared only under version 3. An older
-    // runtime that never learned the kind must see a mockup-carrying document as
-    // a declared future version, not as a v2 document that failed to decode.
+    // Version-gated blocks and hints: a mockup is admitted from version 3, the
+    // thread presentation from version 4, and a treemap from version 5. A
+    // rolled-back runtime that never learned a kind or hint must see a document
+    // carrying it as a declared future version, not as a document that failed
+    // to decode. Each keeps its own floor so an earlier document stays valid.
     Schema.filter(
       (definition) =>
-        definition.schemaVersion >= 3 ||
+        definition.schemaVersion >= CANVAS_MOCKUP_SCHEMA_VERSION ||
         !definition.blocks.some((block) => block.kind === "mockup"),
       {
-        message: () => "Mockup blocks require Canvas schema version 3.",
+        message: () =>
+          `Mockup blocks require Canvas schema version ${String(CANVAS_MOCKUP_SCHEMA_VERSION)} or newer.`,
       },
     ),
     Schema.filter(
-      (definition) => definition.schemaVersion >= 4 || definition.presentation === undefined,
+      (definition) =>
+        definition.schemaVersion >= CANVAS_PRESENTATION_SCHEMA_VERSION ||
+        definition.presentation === undefined,
       {
-        message: () => "A thread presentation requires Canvas schema version 4.",
+        message: () =>
+          `A thread presentation requires Canvas schema version ${String(CANVAS_PRESENTATION_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_TREEMAP_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "treemap"),
+      {
+        message: () =>
+          `Treemap blocks require Canvas schema version ${String(CANVAS_TREEMAP_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_HEATMAP_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "heatmap"),
+      {
+        message: () =>
+          `Heatmap blocks require Canvas schema version ${String(CANVAS_HEATMAP_SCHEMA_VERSION)}.`,
       },
     ),
   );

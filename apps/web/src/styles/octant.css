@@ -4389,6 +4389,35 @@ input.switch:checked::after {
   box-shadow: var(--octant-shadow-md);
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
+.composer[data-drop-target="true"] {
+  position: relative;
+  box-shadow:
+    var(--octant-shadow-md),
+    0 0 0 2px var(--octant-focus-ring);
+}
+.composer-thread-drop-cue {
+  position: absolute;
+  z-index: 5;
+  inset: 8px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  color: var(--octant-text-primary);
+  background: color-mix(in srgb, var(--octant-focus-ring) 13%, var(--octant-card));
+  border: 1px solid color-mix(in srgb, var(--octant-focus-ring) 65%, var(--octant-border-strong));
+  border-radius: var(--oct-radius-sm);
+}
+.composer-thread-drop-cue > span {
+  padding: var(--oct-space-1) var(--oct-space-2);
+  background: var(--octant-floating);
+  border: 1px solid var(--octant-border-strong);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+  max-width: calc(100% - 16px);
+  overflow-wrap: anywhere;
+  text-align: center;
+}
 .composer:focus-within {
   box-shadow: var(--octant-shadow-md);
 }

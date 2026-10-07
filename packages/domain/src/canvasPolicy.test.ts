@@ -10,7 +10,10 @@ import {
   CANVAS_MAX_SERIES,
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
+  CANVAS_MAX_TREEMAP_DEPTH,
+  CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
+  CANVAS_TREEMAP_SCHEMA_VERSION,
   decodeCanvasDefinition,
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
@@ -198,7 +201,8 @@ describe("Canvas validation policy", () => {
 
   it("fails closed for unknown schema versions", () => {
     expectPolicyCode(
-      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 5 }),
+      () =>
+        validateCanvasDefinition({ ...baseDefinition, schemaVersion: CANVAS_SCHEMA_VERSION + 1 }),
       "unsupported-schema-version",
     );
     expectPolicyCode(
@@ -668,6 +672,417 @@ describe("mockup limits", () => {
           ]),
         ),
       "mockup-text-budget-exceeded",
+    );
+  });
+});
+
+function treemap(overrides: Record<string, unknown> = {}) {
+  return {
+    blockId: "repository-map",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "treemap" as const,
+    measures: [
+      { measureId: "loc", label: "Lines of code" },
+      { measureId: "edits", label: "Edits" },
+    ],
+    sizeBy: "loc",
+    colorBy: "edits",
+    colorScale: "sequential" as const,
+    nodes: [
+      { nodeId: "root", label: "Repository" },
+      { nodeId: "web", label: "web", parentId: "root", values: { loc: 210, edits: 12 } },
+      { nodeId: "server", label: "server", parentId: "root", values: { loc: 96, edits: 7 } },
+    ],
+    ...overrides,
+  };
+}
+
+describe("treemap validation", () => {
+  it("accepts a hierarchy whose leaves carry every measure", () => {
+    expect(() => validateCanvasDefinition(withBlocks([treemap()]))).not.toThrow();
+  });
+
+  it("refuses a treemap inside a document declaring an older schema version", () => {
+    // A treemap arrived at version 5: a v4 document that carries one is a
+    // rolled-back runtime's future-version failure, not a corrupt document.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_PRESENTATION_SCHEMA_VERSION,
+          blocks: [treemap()],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
+  it("rejects a hierarchy with more than one root", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                { nodeId: "web", label: "web", parentId: "root", values: { loc: 1, edits: 1 } },
+                { nodeId: "orphan", label: "orphan", values: { loc: 1, edits: 1 } },
+              ],
+            }),
+          ]),
+        ),
+      "treemap-roots",
+    );
+  });
+
+  it("rejects a hierarchy that nests a node inside itself", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                { nodeId: "web", label: "web", parentId: "root" },
+                { nodeId: "left", label: "left", parentId: "right", values: { loc: 1, edits: 1 } },
+                { nodeId: "right", label: "right", parentId: "left", values: { loc: 1, edits: 1 } },
+              ],
+            }),
+          ]),
+        ),
+      "treemap-nesting-cycle",
+    );
+  });
+
+  it("rejects a node whose parent the hierarchy does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                { nodeId: "web", label: "web", parentId: "missing", values: { loc: 1, edits: 1 } },
+              ],
+            }),
+          ]),
+        ),
+      "dangling-treemap-parent",
+    );
+  });
+
+  it("rejects a hierarchy nested deeper than the depth limit", () => {
+    const nodes: Array<Record<string, unknown>> = [{ nodeId: "n0", label: "n0" }];
+    for (let index = 1; index <= CANVAS_MAX_TREEMAP_DEPTH; index += 1) {
+      const id = `n${String(index)}`;
+      const parent = `n${String(index - 1)}`;
+      nodes.push(
+        index === CANVAS_MAX_TREEMAP_DEPTH
+          ? { nodeId: id, label: id, parentId: parent, values: { loc: 1, edits: 1 } }
+          : { nodeId: id, label: id, parentId: parent },
+      );
+    }
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([treemap({ nodes })])),
+      "depth-budget-exceeded",
+    );
+  });
+
+  it("rejects two measures that share an id", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              measures: [
+                { measureId: "loc", label: "Lines" },
+                { measureId: "loc", label: "Other" },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-measure-id",
+    );
+  });
+
+  it("rejects sizing by a measure the hierarchy does not declare", () => {
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([treemap({ sizeBy: "missing" })])),
+      "unknown-treemap-measure",
+    );
+  });
+
+  it("rejects a value placed on a group that sums its children", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository", values: { loc: 5, edits: 1 } },
+                { nodeId: "web", label: "web", parentId: "root", values: { loc: 1, edits: 1 } },
+                {
+                  nodeId: "server",
+                  label: "server",
+                  parentId: "root",
+                  values: { loc: 1, edits: 1 },
+                },
+              ],
+            }),
+          ]),
+        ),
+      "treemap-value-placement",
+    );
+  });
+
+  it("rejects a leaf that carries no value", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                { nodeId: "web", label: "web", parentId: "root" },
+                {
+                  nodeId: "server",
+                  label: "server",
+                  parentId: "root",
+                  values: { loc: 1, edits: 1 },
+                },
+              ],
+            }),
+          ]),
+        ),
+      "treemap-value-placement",
+    );
+  });
+
+  it("rejects a value that is negative", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                { nodeId: "web", label: "web", parentId: "root", values: { loc: -1, edits: 1 } },
+                {
+                  nodeId: "server",
+                  label: "server",
+                  parentId: "root",
+                  values: { loc: 1, edits: 1 },
+                },
+              ],
+            }),
+          ]),
+        ),
+      "treemap-negative-value",
+    );
+  });
+
+  it("rejects a leaf that names a file the manifest does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            treemap({
+              nodes: [
+                { nodeId: "root", label: "Repository" },
+                {
+                  nodeId: "web",
+                  label: "web",
+                  parentId: "root",
+                  sourceId: "99999999-9999-4999-8999-999999999999",
+                  values: { loc: 1, edits: 1 },
+                },
+                {
+                  nodeId: "server",
+                  label: "server",
+                  parentId: "root",
+                  values: { loc: 1, edits: 1 },
+                },
+              ],
+            }),
+          ]),
+        ),
+      "missing-source",
+    );
+  });
+});
+
+function heatmapMatrix(overrides: Record<string, unknown> = {}) {
+  return {
+    blockId: "commits-by-hour",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "heatmap" as const,
+    layout: "matrix" as const,
+    valueLabel: "Commits",
+    scale: "sequential" as const,
+    rows: [
+      { rowId: "mon", label: "Mon" },
+      { rowId: "tue", label: "Tue" },
+    ],
+    columns: [
+      { columnId: "h09", label: "09" },
+      { columnId: "h10", label: "10" },
+    ],
+    cells: [
+      { rowId: "mon", columnId: "h09", value: 3 },
+      { rowId: "tue", columnId: "h10", value: 6, note: "After the review" },
+    ],
+    ...overrides,
+  };
+}
+
+function heatmapCalendar(overrides: Record<string, unknown> = {}) {
+  return {
+    blockId: "test-failures",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "heatmap" as const,
+    layout: "calendar" as const,
+    valueLabel: "Test failures",
+    scale: "diverging" as const,
+    days: [
+      { date: "2026-09-01", value: 0 },
+      { date: "2026-09-02", value: 3 },
+    ],
+    ...overrides,
+  };
+}
+
+describe("heatmap validation", () => {
+  it("accepts a matrix whose cells name rows and columns it holds", () => {
+    expect(() => validateCanvasDefinition(withBlocks([heatmapMatrix()]))).not.toThrow();
+  });
+
+  it("accepts a calendar with one reading per date", () => {
+    expect(() => validateCanvasDefinition(withBlocks([heatmapCalendar()]))).not.toThrow();
+  });
+
+  it("refuses a heatmap block inside a document declaring an older schema version", () => {
+    // A heatmap arrived at version 6: a presentation-era v4 document and a
+    // treemap-era v5 document that carry one fail closed as declared future
+    // versions.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_PRESENTATION_SCHEMA_VERSION,
+          blocks: [heatmapMatrix()],
+        }),
+      "unsupported-schema-version",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_TREEMAP_SCHEMA_VERSION,
+          blocks: [heatmapMatrix()],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
+  it("rejects a matrix that lists one row id twice", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              rows: [
+                { rowId: "mon", label: "Mon" },
+                { rowId: "mon", label: "Monday" },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-heatmap-row-id",
+    );
+  });
+
+  it("rejects a cell on a row the matrix does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              cells: [{ rowId: "wed", columnId: "h09", value: 1 }],
+            }),
+          ]),
+        ),
+      "unknown-heatmap-row",
+    );
+  });
+
+  it("rejects a cell on a column the matrix does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              cells: [{ rowId: "mon", columnId: "h23", value: 1 }],
+            }),
+          ]),
+        ),
+      "unknown-heatmap-column",
+    );
+  });
+
+  it("rejects one coordinate listed more than once", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              cells: [
+                { rowId: "mon", columnId: "h09", value: 1 },
+                { rowId: "mon", columnId: "h09", value: 2 },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-heatmap-cell",
+    );
+  });
+
+  it("rejects a calendar that repeats a date and one that is not a real day", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapCalendar({
+              days: [
+                { date: "2026-09-01", value: 1 },
+                { date: "2026-09-01", value: 2 },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-heatmap-date",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([heatmapCalendar({ days: [{ date: "2026-02-30", value: 1 }] })]),
+        ),
+      "invalid-schema",
+    );
+  });
+
+  it("rejects a calendar that spans more days than the budget", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapCalendar({
+              days: [
+                { date: "2026-01-01", value: 1 },
+                { date: "2031-01-01", value: 2 },
+              ],
+            }),
+          ]),
+        ),
+      "heatmap-days-budget-exceeded",
     );
   });
 });

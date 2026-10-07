@@ -408,7 +408,55 @@ describe("mapCodexMessage", () => {
         },
       },
     ]);
-    expect(JSON.stringify(results)).not.toMatch(/provider-|raw command must-not-cross/);
+    expect(JSON.stringify(results)).not.toMatch(/provider-/);
+  });
+
+  it("names a started command only as one redacted, bounded line", () => {
+    const results = map(
+      context(),
+      notification("item/started", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          ...commandItem,
+          command:
+            "API_TOKEN=abc123def456 bun run test /Users/henrik/work/app/spec.ts\nsecond line",
+        },
+        startedAtMs: 10,
+      }),
+    );
+
+    expect(results[0]).toMatchObject({
+      kind: "event",
+      event: { kind: "tool-start", argument: "API_TOKEN=[redacted] bun run test …/spec.ts" },
+    });
+    expect(JSON.stringify(results)).not.toMatch(
+      /abc123def456|\/Users\/|second line|\/tmp\/project/,
+    );
+  });
+
+  it("names a started file change by its Project-relative path, never its diff", () => {
+    const results = map(
+      context(),
+      notification("item/started", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "fileChange",
+          id: "provider-file-2",
+          changes: [
+            { path: "/tmp/project/src/App.tsx", kind: { type: "add" }, diff: "+raw diff body" },
+          ],
+          status: "inProgress",
+        },
+        startedAtMs: 10,
+      }),
+    );
+
+    expect(results[0]).toMatchObject({
+      event: { kind: "tool-start", toolName: "File change", argument: "src/App.tsx" },
+    });
+    expect(JSON.stringify(results)).not.toContain("raw diff body");
   });
 
   it.each([
@@ -496,6 +544,18 @@ describe("mapCodexMessage", () => {
         }),
       ),
     ).toMatchObject([{ kind: "event", event: { kind: "completed" } }]);
+  });
+
+  it("leaves the stop reason off a completed turn because the protocol does not say the output was cut off", () => {
+    const [result] = map(
+      context(),
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed" as const },
+      }),
+    );
+    expect(result).toMatchObject({ kind: "event", event: { kind: "completed" } });
+    expect(result?.kind === "event" ? result.event : undefined).not.toHaveProperty("stopReason");
   });
 
   it("ignores item types Octant does not model instead of failing the turn", () => {

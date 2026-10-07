@@ -6,6 +6,10 @@ import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { ThreadStats } from "../threadStats/ThreadStats";
 import { OctantButton } from "../ui/base/OctantButton";
+import {
+  focusComposerThreadDrop,
+  useActiveComposerThreadDropKey,
+} from "../chat/composerThreadDrop";
 
 /**
  * The trailing send control. Sending is refused while `disabled` is true or a
@@ -107,10 +111,18 @@ export interface ThreadComposerProps {
   readonly row: ThreadComposerRow;
   /** Status line, context strip, or panels the surface shows under the row. */
   readonly footer?: ReactNode;
+  /**
+   * When set, a sidebar thread dropped on this frame attaches a mention
+   * instead of opening a pane. The key matches the registered composer.
+   */
+  readonly threadDropKey?: string;
 }
 
 export function ThreadComposer(props: ThreadComposerProps) {
   const notice = useComposerNotice();
+  const activeDropKey = useActiveComposerThreadDropKey();
+  const dropKey = props.threadDropKey;
+  const dropActive = dropKey !== undefined && activeDropKey === dropKey;
   const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
   const followUp = props.presentation === "follow-up";
   const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null ? "" : " composer--has-notice"}`;
@@ -168,19 +180,44 @@ export function ThreadComposer(props: ThreadComposerProps) {
   );
   const frame =
     props.ariaLabel === undefined ? (
-      <div className={frameClassName}>
+      <div
+        className={frameClassName}
+        {...(dropKey === undefined ? {} : { "data-composer-thread-drop": dropKey })}
+        {...(dropActive ? { "data-drop-target": "true" } : {})}
+        {...(dropKey === undefined
+          ? {}
+          : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
+      >
         {notice}
+        {dropActive ? <ComposerThreadDropCue /> : null}
         <ComposerSubagents />
         {body}
       </div>
     ) : (
-      <section aria-label={props.ariaLabel} className={frameClassName}>
+      <section
+        aria-label={props.ariaLabel}
+        className={frameClassName}
+        {...(dropKey === undefined ? {} : { "data-composer-thread-drop": dropKey })}
+        {...(dropActive ? { "data-drop-target": "true" } : {})}
+        {...(dropKey === undefined
+          ? {}
+          : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
+      >
         {notice}
+        {dropActive ? <ComposerThreadDropCue /> : null}
         <ComposerSubagents />
         {body}
       </section>
     );
   return frame;
+}
+
+function ComposerThreadDropCue() {
+  return (
+    <div aria-hidden="true" className="composer-thread-drop-cue">
+      <span>Attach as context</span>
+    </div>
+  );
 }
 
 function sendRefused(send: ThreadComposerSend): boolean {

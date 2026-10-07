@@ -1,4 +1,5 @@
 import type {
+  ProviderContextBreakdown,
   AggregateVersion,
   CodeCommand,
   CodeThreadId,
@@ -57,5 +58,38 @@ describe("totalTurnUsage", () => {
     // A runtime that stopped promising to compact must not leave the last
     // promise standing as the thread's.
     expect(later).not.toHaveProperty("autoCompactThreshold");
+  });
+
+  it("keeps the latest breakdown that was reported while a later turn has not yet reported one", () => {
+    const earlier: ProviderContextBreakdown = {
+      parts: [{ kind: "messages", tokens: 900, accuracy: "provider-reported" }],
+    };
+    const settled: ProviderContextBreakdown = {
+      parts: [{ kind: "messages", tokens: 2_400, accuracy: "provider-reported" }],
+    };
+    const first = { inputTokens: 10, outputTokens: 2, contextBreakdown: earlier };
+    const second = { inputTokens: 12, outputTokens: 3, contextBreakdown: settled };
+    // A turn that is still running has reported usage but not yet its make-up.
+    const running = { inputTokens: 14, outputTokens: 1 };
+
+    expect(totalTurnUsage(new Map([["a", first]]))).toMatchObject({ contextBreakdown: earlier });
+    expect(
+      totalTurnUsage(
+        new Map([
+          ["a", first],
+          ["b", second],
+        ]),
+      ),
+    ).toMatchObject({ contextBreakdown: settled });
+    expect(
+      totalTurnUsage(
+        new Map([
+          ["a", first],
+          ["b", second],
+          ["c", running],
+        ]),
+      ),
+    ).toMatchObject({ contextBreakdown: settled });
+    expect(totalTurnUsage(new Map([["a", running]]))).not.toHaveProperty("contextBreakdown");
   });
 });

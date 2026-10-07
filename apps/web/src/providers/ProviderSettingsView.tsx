@@ -46,7 +46,7 @@ import {
   type ProviderCreateProviderType,
 } from "./ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "./ProviderSettingsList";
-import type { TransientProviderCredential } from "./useProviderController";
+import type { ModelToolVerification, TransientProviderCredential } from "./useProviderController";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ProviderSettingsViewProps {
@@ -280,6 +280,8 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
   ) => Promise<ProviderCredentialStatus>;
   readonly onClearProviderCredential: (instanceId: ProviderInstanceId) => Promise<boolean>;
+  /** "Connect Claude for helpers" on a Claude Code subscription instance. */
+  readonly onClaudeHelpers?: import("./ClaudeHelperSignIn").RunClaudeHelperCommand;
   readonly onProviderOAuth?: (
     command: import("./ProviderOAuthSignIn").ProviderOAuthCommand,
   ) => Promise<import("./ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
@@ -298,10 +300,10 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
     options?: { readonly quiet?: boolean },
   ) => Promise<boolean>;
-  readonly onVerifyFoundryTools: (
+  readonly onVerifyModelTools: (
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,
-  ) => Promise<boolean>;
+  ) => Promise<ModelToolVerification>;
   readonly onPermissionPersistenceChange: (value: PermissionPersistence) => Promise<boolean>;
   readonly onProviderOrderChange: (
     providerOrder: ReadonlyArray<ProviderInstanceId>,
@@ -456,6 +458,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangePiConfiguration={props.onChangePiConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
         {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
+        {...(props.onClaudeHelpers === undefined ? {} : { onClaudeHelpers: props.onClaudeHelpers })}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
         {...(props.onUpdateProviderCli === undefined
           ? {}
@@ -472,7 +475,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onSetEnabled={props.onSetEnabled}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
-        onVerifyFoundryTools={props.onVerifyFoundryTools}
+        onVerifyModelTools={props.onVerifyModelTools}
       />
       <SettingsSection title="Defaults">
         <div className="setgroup">

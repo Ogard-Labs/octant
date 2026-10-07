@@ -1,6 +1,7 @@
 import {
   decodeProviderFailure,
   type ProviderFailure,
+  type ProviderOutputStopReason,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderToolImage,
@@ -10,8 +11,10 @@ import {
   type AnthropicCompatibleEndpoint,
   requestAnthropicGeneration,
 } from "./anthropicCompatibleEndpoint";
+import { contextOverflowFromBody } from "./endpointRetry";
 import { decodeSse } from "./openAiCompatibleSse";
 import { readAnthropicRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
+import { outputStopReason } from "./outputStopReason";
 
 export interface AnthropicToolCall {
   readonly toolCallId: string;
@@ -82,6 +85,8 @@ export interface AnthropicTurnResult {
   readonly verifiedManualModelId?: string;
   /** Quota buckets from the response headers. Absent when the endpoint sent none. */
   readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
+  /** Present when the endpoint said this reply stopped on a known limit or filter. */
+  readonly outputStopReason?: ProviderOutputStopReason;
 }
 
 export interface AnthropicMessagesTurnInput {
@@ -92,6 +97,8 @@ export interface AnthropicMessagesTurnInput {
   /** A stable system prompt, sent as a cached system block when present. */
   readonly system?: string;
   readonly tools?: readonly ProviderToolDefinition[];
+  /** "required" makes the model answer with a tool call; a capability probe needs that. */
+  readonly toolChoice?: "auto" | "required";
   /** Answers to the previous turn's tool calls, when this request continues a tool loop. */
   readonly toolAnswers?: readonly ProviderToolAnswer[];
   readonly sequenceStart?: number;
@@ -129,6 +136,7 @@ interface StreamState {
   readonly events: AnthropicTurnEvent[];
   readonly contentBlocks: Map<number, TrackedContentBlock>;
   readonly toolCalls: AnthropicToolCall[];
+  outputStopReason?: ProviderOutputStopReason;
 }
 
 interface TrackedContentBlock {
@@ -147,7 +155,14 @@ interface TrackedContentBlock {
 export function buildAnthropicMessagesBody(
   input: Pick<
     AnthropicMessagesTurnInput,
-    "modelId" | "history" | "prompt" | "system" | "tools" | "toolAnswers" | "maxTokens"
+    | "modelId"
+    | "history"
+    | "prompt"
+    | "system"
+    | "tools"
+    | "toolChoice"
+    | "toolAnswers"
+    | "maxTokens"
   >,
 ): Record<string, unknown> {
   const messages: AnthropicWireMessage[] = [];
@@ -222,6 +237,7 @@ export function buildAnthropicMessagesBody(
             ...(tool.description === undefined ? {} : { description: tool.description }),
             input_schema: tool.inputSchema,
           })),
+          ...(input.toolChoice === "required" ? { tool_choice: { type: "any" } } : {}),
         }),
   };
 }
@@ -266,6 +282,17 @@ async function runMessagesTurn(input: AnthropicMessagesTurnInput): Promise<Anthr
   const response = await requestAnthropicGeneration(input.endpoint, {
     path: "messages",
     body: buildAnthropicMessagesBody(input),
+    // Anthropic reports a filled window as a 400 whose error message says the
+    // prompt is too long. Reading the body once lets the harness shrink and
+    // retry instead of failing the turn.
+    classifyRejectedResponse: async (response) => {
+      try {
+        return contextOverflowFromBody(await response.text());
+      } catch (error) {
+        if (isProviderFailure(error)) throw error;
+        return undefined;
+      }
+    },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   if (response.body === null) {
@@ -350,7 +377,10 @@ function normalizeEvent(
       throw failure("provider-failed", "The provider failed to complete the response.");
     }
     default:
-      throw protocol("The provider stream contained an unsupported event.");
+      // A provider may add event types of its own; one the harness does not
+      // know is ignored and logged, not a reason to fail an otherwise good turn.
+      console.warn(`[provider] ignoring unknown stream event type: ${String(event.type)}`);
+      return;
   }
 }
 
@@ -504,12 +534,11 @@ function validateContentBlockStop(event: Record<string, unknown>, state: StreamS
   }
   tracked.status = "completed";
   if (tracked.type === "tool_use") {
+    // A tool_use that streamed no input is a call with no arguments; the
+    // harness reads an empty object for it. Input that did stream and is not
+    // JSON is surfaced with its raw bytes so the model is told and can correct
+    // itself, never replaced by an empty object.
     const argumentsJson = tracked.inputJson.trim().length === 0 ? "{}" : tracked.inputJson;
-    try {
-      JSON.parse(argumentsJson);
-    } catch {
-      throw protocol("The provider stream ended a tool call with invalid JSON input.");
-    }
     state.toolCalls.push({
       toolCallId: tracked.toolCallId!,
       toolName: tracked.toolName!,
@@ -539,6 +568,14 @@ function normalizeMessageDelta(
     ) {
       throw protocol("The provider stream contained an unsupported stop reason.");
     }
+    // The Messages protocol's `refusal` is its streaming safety classifier
+    // stopping the reply, which is a filter stop. Only this protocol's
+    // `refusal` means that: ACP's names an agent declining to continue.
+    const stop =
+      delta.stop_reason === "refusal"
+        ? "content-filter"
+        : outputStopReason(typeof delta.stop_reason === "string" ? delta.stop_reason : undefined);
+    if (stop !== undefined) state.outputStopReason = stop;
   }
   const usage = event.usage;
   if (usage !== undefined && usage !== null) {
@@ -614,6 +651,7 @@ function result(
       ? { verifiedManualModelId: input.modelId }
       : {}),
     ...(rateLimitBuckets.length === 0 ? {} : { rateLimitBuckets }),
+    ...(state.outputStopReason === undefined ? {} : { outputStopReason: state.outputStopReason }),
   };
 }
 
@@ -677,6 +715,10 @@ function sanitizeFailure(error: unknown): ProviderFailure {
 
 function protocol(message: string): ProviderFailure {
   return failure("protocol", message);
+}
+
+function isProviderFailure(error: unknown): error is ProviderFailure {
+  return typeof error === "object" && error !== null && "category" in error && "message" in error;
 }
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {

@@ -1,5 +1,11 @@
 import type { CanvasBlock, CanvasDefinition } from "@octant/contracts/canvas";
 import { MAX_ARTIFACT_PREVIEW_CHARACTERS } from "@octant/contracts/artifact-library";
+import { CHART_BAR_RADIUS, CHART_LINE_WIDTH } from "@octant/theme";
+import { layoutCanvasTreemap } from "@octant/domain/canvas-treemap-layout";
+import {
+  layoutCanvasHeatmapCalendar,
+  layoutCanvasHeatmapMatrix,
+} from "@octant/domain/canvas-heatmap-layout";
 
 /**
  * Drawing an artifact, once.
@@ -34,6 +40,8 @@ const DRAWN_KINDS = new Set<CanvasBlock["kind"]>([
   "sequence",
   "state",
   "mockup",
+  "treemap",
+  "heatmap",
   "code-excerpt",
   "pseudocode",
   "diff",
@@ -196,6 +204,10 @@ function drawBlock(
       return { markup: stateMachine(block, y, width, palette), height: 64 };
     case "mockup":
       return { markup: mockupFrame(block, y, width, palette), height: 52 };
+    case "treemap":
+      return { markup: treemap(block, y, width, palette), height: CHART_HEIGHT };
+    case "heatmap":
+      return { markup: heatmap(block, y, width, palette), height: CHART_HEIGHT };
     case "code-excerpt":
     case "pseudocode":
     case "diff":
@@ -289,7 +301,7 @@ function pie(
   const cy = y + CHART_HEIGHT / 2;
   const radius = Math.min(19, Math.max(6, Math.round((width - 4) / 2)));
   if (total <= 0) {
-    return `<circle cx="${String(cx)}" cy="${String(cy)}" r="${String(radius)}" fill="none" stroke="${palette.accent}" stroke-width="1.5" opacity="0.75"/>`;
+    return `<circle cx="${String(cx)}" cy="${String(cy)}" r="${String(radius)}" fill="none" stroke="${palette.accent}" stroke-width="${String(CHART_LINE_WIDTH)}" opacity="0.75"/>`;
   }
   let angle = -Math.PI / 2;
   const wedges = values.map((value) => {
@@ -423,7 +435,7 @@ function barAndLine(
         })
         .join(" ");
       if (points.length === 0) return "";
-      return `<polyline points="${points}" fill="none" stroke="${palette.ink}" stroke-width="1.5" opacity="${opacityFor(0.9 - seriesIndex * 0.2)}"/>`;
+      return `<polyline points="${points}" fill="none" stroke="${palette.ink}" stroke-width="${String(CHART_LINE_WIDTH)}" opacity="${opacityFor(0.9 - seriesIndex * 0.2)}"/>`;
     })
     .join("");
   return columns + lines;
@@ -464,7 +476,7 @@ function column(
   palette: ArtifactThumbnailPalette,
   opacity: number,
 ): string {
-  return `<rect x="${String(Math.round(x))}" y="${String(Math.round(top))}" width="${String(Math.max(2, Math.round(width)))}" height="${String(Math.round(height))}" rx="1" fill="${palette.accent}" opacity="${opacityFor(opacity)}"/>`;
+  return `<rect x="${String(Math.round(x))}" y="${String(Math.round(top))}" width="${String(Math.max(2, Math.round(width)))}" height="${String(Math.round(height))}" rx="${String(CHART_BAR_RADIUS)}" fill="${palette.accent}" opacity="${opacityFor(opacity)}"/>`;
 }
 
 function round(value: number): number {
@@ -614,6 +626,109 @@ function mockupFrame(
     return `<rect x="${String(x + 4)}" y="${String(y + 6 + index * 10)}" width="${String(rowWidth)}" height="6" rx="1.5" fill="${palette.muted}" opacity="0.5"/>`;
   });
   return frame + rows.join("");
+}
+
+/**
+ * A treemap drawn from the shared layout: group frames plus one cell per leaf.
+ * The same squarified rectangles the on-screen renderer draws, so a preview is
+ * the picture at a smaller size rather than a second silhouette. The export
+ * starts from the node the author chose, or the root when they chose none.
+ */
+function treemap(
+  block: Extract<CanvasBlock, { readonly kind: "treemap" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const layout = layoutCanvasTreemap(block, {
+    width,
+    height: CHART_HEIGHT,
+    ...(block.startNodeId === undefined ? {} : { rootId: String(block.startNodeId) }),
+  });
+  const leaves = layout.nodes.filter((rect) => !rect.isGroup);
+  const peak = leaves.reduce((highest, rect) => Math.max(highest, rect.value), 0) || 1;
+  const frames = layout.nodes
+    .filter((rect) => rect.isGroup && rect.depth > 0)
+    .map(
+      (rect) =>
+        `<rect x="${String(round(PADDING + rect.x))}" y="${String(round(y + rect.y))}" width="${String(Math.max(1, round(rect.width)))}" height="${String(Math.max(1, round(rect.height)))}" fill="none" stroke="${palette.muted}" opacity="0.7"/>`,
+    );
+  const cells = leaves.map(
+    (rect) =>
+      `<rect x="${String(round(PADDING + rect.x))}" y="${String(round(y + rect.y))}" width="${String(Math.max(1, round(rect.width)))}" height="${String(Math.max(1, round(rect.height)))}" fill="${palette.accent}" opacity="${opacityFor(0.25 + 0.6 * (rect.value / peak))}"/>`,
+  );
+  return frames.join("") + cells.join("");
+}
+
+/**
+ * A heatmap drawn from the shared layout: one cell per coordinate, scaled to
+ * the picture area. A missing coordinate keeps its place as an empty cell, so
+ * a gap in the data reads as a gap rather than as a zero. The export starts a
+ * calendar on Monday and lays a matrix over the whole block, so the picture is
+ * deterministic and does not depend on the reader's locale.
+ */
+function heatmap(
+  block: Extract<CanvasBlock, { readonly kind: "heatmap" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  if (block.layout === "matrix") {
+    const layout = layoutCanvasHeatmapMatrix(block, { width, height: CHART_HEIGHT });
+    return layout.cells
+      .map((cell) =>
+        heatCell(
+          PADDING + cell.x,
+          y + cell.y,
+          cell.width,
+          cell.height,
+          cell.value,
+          layout.domain.min,
+          layout.domain.max,
+          palette,
+        ),
+      )
+      .join("");
+  }
+  const layout = layoutCanvasHeatmapCalendar(block, { weekStartsOn: 1 });
+  const scaleX = width / Math.max(1, layout.width);
+  const scaleY = CHART_HEIGHT / Math.max(1, layout.height);
+  return layout.days
+    .map((day) =>
+      heatCell(
+        PADDING + day.x * scaleX,
+        y + day.y * scaleY,
+        day.width * scaleX,
+        day.height * scaleY,
+        day.value,
+        layout.domain.min,
+        layout.domain.max,
+        palette,
+      ),
+    )
+    .join("");
+}
+
+function heatCell(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  value: number | undefined,
+  min: number,
+  max: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const left = String(round(x));
+  const top = String(round(y));
+  const boxWidth = String(Math.max(1, round(width - 1)));
+  const boxHeight = String(Math.max(1, round(height - 1)));
+  if (value === undefined) {
+    return `<rect x="${left}" y="${top}" width="${boxWidth}" height="${boxHeight}" fill="none" stroke="${palette.muted}" stroke-dasharray="2 2"/>`;
+  }
+  const span = max - min;
+  const ratio = span > 0 ? (value - min) / span : 0.5;
+  return `<rect x="${left}" y="${top}" width="${boxWidth}" height="${boxHeight}" fill="${palette.accent}" opacity="${opacityFor(0.2 + 0.65 * clampUnit(ratio))}"/>`;
 }
 
 function text(

@@ -1,4 +1,9 @@
-import type { AgentRunCenterSummary, CodeBoardCard, OctantMode } from "@octant/contracts";
+import type {
+  AgentRunCenterSummary,
+  CodeBoardCard,
+  OctantMode,
+  ThreadLiveStep,
+} from "@octant/contracts";
 import { isAgentRunActiveStatus } from "@octant/domain";
 import { isLoopbackHostname } from "../shell/capabilityTransport";
 import type { ChatThreadNavigationItem, ThreadProviderIdentity } from "../shell/navigationModel";
@@ -18,11 +23,22 @@ export interface WorkingNowRow {
   readonly threadId: string;
   readonly title: string;
   readonly projectName?: string;
-  /** The host's latest line about what is happening, such as a running agent's task. */
+  /**
+   * The latest line about what is happening: the running turn's own step when
+   * the host reports one, otherwise the board's activity line or a running
+   * agent's task.
+   */
   readonly step?: string;
   /**
-   * When an agent run began. Only a run carries a start time: the host keeps
-   * none for a thread's turn, so a thread says when it last moved instead.
+   * `tool` is a tool and its redacted argument, shown as code; `status` is the
+   * turn waiting on the person, shown as prose. Absent for a line the board or
+   * an agent run supplied.
+   */
+  readonly stepKind?: "tool" | "status";
+  /**
+   * When the work began: a turn's start as the host reports it, or an agent
+   * run's creation. A thread whose host reports neither says when it last
+   * moved instead.
    */
   readonly startedAt?: string;
   readonly activeAt?: string;
@@ -81,6 +97,34 @@ export interface WorkingNowInput {
   readonly host?: string;
 }
 
+/** The provider a thread row runs on: the mark the shell attached, else its instance looked up. */
+export function threadProvider(
+  thread: Pick<ChatThreadNavigationItem, "provider" | "providerInstanceId">,
+  providers: ReadonlyMap<string, ThreadProviderIdentity>,
+): ThreadProviderIdentity | undefined {
+  return (
+    thread.provider ??
+    (thread.providerInstanceId === undefined ? undefined : providers.get(thread.providerInstanceId))
+  );
+}
+
+/** A running turn's own step, in words a row can show. */
+export function liveStepLine(step: ThreadLiveStep): {
+  readonly text: string;
+  readonly kind: "tool" | "status";
+} {
+  if (step.kind === "waiting") {
+    return {
+      kind: "status",
+      text: step.reason === "approval" ? "Waiting for approval" : "Waiting for your answer",
+    };
+  }
+  return {
+    kind: "tool",
+    text: step.argument === undefined ? step.tool : `${step.tool}: ${step.argument}`,
+  };
+}
+
 function agentLine(run: AgentRunCenterSummary): string {
   const firstLine = run.task.split("\n", 1)[0] ?? run.task;
   return `${run.role}: ${firstLine.trim()}`;
@@ -117,9 +161,12 @@ export function buildWorkingNowRows(input: WorkingNowInput): ReadonlyArray<Worki
     const facts = input.boardFacts.get(thread.threadId);
     const own = runsByThread.get(thread.threadId) ?? [];
     const latestRun = own.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-    // The most live line the host has: its own activity line, then the agent
-    // run working in the thread, then how far the plan has come.
+    // The most live line the host has: the turn's own step, then its activity
+    // line, then the agent run working in the thread, then how far the plan
+    // has come.
+    const live = thread.liveStep === undefined ? undefined : liveStepLine(thread.liveStep);
     const step =
+      live?.text ??
       facts?.step ??
       (latestRun === undefined
         ? undefined
@@ -129,11 +176,7 @@ export function buildWorkingNowRows(input: WorkingNowInput): ReadonlyArray<Worki
       facts?.planProgress;
     const projectName =
       thread.projectId === undefined ? undefined : input.projectNames.get(thread.projectId);
-    const provider =
-      thread.provider ??
-      (thread.providerInstanceId === undefined
-        ? undefined
-        : input.providers.get(thread.providerInstanceId));
+    const provider = threadProvider(thread, input.providers);
     const activeAt = facts?.activeAt ?? thread.updatedAt;
     rows.push({
       key: `thread:${mode}:${thread.threadId}`,
@@ -142,6 +185,8 @@ export function buildWorkingNowRows(input: WorkingNowInput): ReadonlyArray<Worki
       title: thread.title,
       ...(projectName === undefined ? {} : { projectName }),
       ...(step === undefined ? {} : { step }),
+      ...(live === undefined ? {} : { stepKind: live.kind }),
+      ...(thread.turnStartedAt === undefined ? {} : { startedAt: thread.turnStartedAt }),
       ...(activeAt === undefined ? {} : { activeAt }),
       ...(provider === undefined ? {} : { provider }),
       ...(input.host === undefined ? {} : { host: input.host }),

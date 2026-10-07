@@ -174,6 +174,72 @@
   max-width: 420px;
 }
 
+/* The plot is the positioning context for the shared tooltip, which is placed
+   from the mark's own plotted coordinates rather than from the pointer. */
+.canvas-block__chart-plot {
+  position: relative;
+}
+
+.canvas-block__chart-gridline {
+  stroke: var(--oct-chart-grid);
+  stroke-width: 1;
+}
+
+/* A mark transitions only when a legend toggle or a zoom changes what is drawn.
+   That is a state change, not an entrance; it stays under 200ms and is off when
+   the person asked for reduced motion. */
+.canvas-block__chart-mark {
+  transition:
+    opacity var(--oct-motion-fast) var(--oct-ease-standard),
+    fill var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.canvas-block__chart-tip {
+  transform: translate(-50%, calc(-100% - 10px));
+}
+
+/* Near the top of the plot the tip flips below its mark so it stays on the
+   surface rather than above the frame. */
+.canvas-block__chart-tip[data-placement="below"] {
+  transform: translate(-50%, 10px);
+}
+
+/* A file path is read in the code font; the directory locates the file and is
+   dimmed, the name identifies it and keeps full ink. */
+.canvas-block__path {
+  font-family: var(--oct-font-mono);
+}
+
+.canvas-block__path-dir {
+  color: var(--oct-meta);
+}
+
+.canvas-block__path-name {
+  color: var(--oct-fg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-block__chart-mark {
+    transition: none;
+  }
+}
+
+[data-octant-reduced-motion="true"] .canvas-block__chart-mark {
+  transition: none;
+}
+
+/* The shared tooltip's listed readings keep each series key beside its name,
+   the same key the legend and the marks carry. */
+.canvas-block__chart-tip dt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.canvas-block__chart-tip .chart-key.is-block {
+  width: 8px;
+  height: 8px;
+}
 /* Line, area, scatter, bar and distribution charts draw at the figure's
    measured width, so gridline and axis labels stay at the interface size.
    The marks follow the system chart recipe in octant.css: 1.5px lines with
@@ -181,6 +247,12 @@
 .canvas-chart {
   position: relative;
   min-width: 0;
+}
+
+/* The tooltip is placed from the plot's own box, so the headline above the
+   chart never shifts where the tip lands. */
+.canvas-chart__plot {
+  position: relative;
 }
 
 .canvas-chart__svg {
@@ -277,26 +349,6 @@
 
 .canvas-chart__bar[data-active="true"] {
   filter: brightness(1.12);
-}
-
-/* The readout sits beside the guide, on whichever side has room. */
-.canvas-chart__readout[data-side="right"] {
-  transform: translateX(var(--oct-space-3));
-}
-
-.canvas-chart__readout[data-side="left"] {
-  transform: translateX(calc(-100% - var(--oct-space-3)));
-}
-
-.canvas-chart__readout dt {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.canvas-chart__readout .chart-key.is-block {
-  width: 8px;
-  height: 8px;
 }
 
 .canvas-block__chart-mark {
@@ -432,6 +484,420 @@
   .canvas-block__chart-legend-item:focus-visible,
   .canvas-block__chart-table:focus-visible {
     outline-color: Highlight;
+  }
+}
+
+/* ── Treemap ─────────────────────────────────────────────────────────────
+   The same data-visualisation system as a chart: shared scale roles, marks
+   that transition only on a size or colour change, and a disclosed table. */
+
+.canvas-block__treemap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.canvas-block__treemap-header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--oct-space-2);
+}
+
+.canvas-block__treemap-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.canvas-block__treemap-control-label {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__treemap-plot {
+  position: relative;
+}
+
+.canvas-block__treemap-plot:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.canvas-block__treemap-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 420px;
+}
+
+.canvas-block__treemap-group-frame {
+  fill: none;
+  stroke: var(--oct-border);
+  stroke-width: 1;
+}
+
+.canvas-block__treemap-group-label {
+  fill: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  /* A group reads as a heading over its cells, not as one more cell label. */
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.canvas-block__treemap-mark {
+  cursor: pointer;
+  /* A visible hairline keeps neighbouring cells apart, so two similar readings
+     do not read as one cell. */
+  stroke: var(--oct-border);
+  stroke-width: 1;
+  transition:
+    opacity var(--oct-motion-fast) var(--oct-ease-standard),
+    fill var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.canvas-block__treemap-cell.is-active .canvas-block__treemap-mark,
+.canvas-block__treemap-group[data-active="true"] .canvas-block__treemap-group-frame {
+  stroke: var(--octant-focus-ring);
+  stroke-width: 2;
+}
+
+.canvas-block__treemap-label {
+  fill: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  pointer-events: none;
+  /* A label sits on a cell whose colour is the data, so it keeps a surface
+     halo: the reading is legible whatever the cell's hue, in either mode. */
+  paint-order: stroke;
+  stroke: var(--oct-surface);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+}
+
+.canvas-block__treemap-breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0 0 var(--oct-space-2);
+  padding: 0;
+  list-style: none;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-meta);
+}
+
+.canvas-block__treemap-breadcrumb li + li::before {
+  content: "/";
+  margin-right: var(--oct-space-1);
+  color: var(--oct-muted);
+}
+
+.canvas-block__treemap-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-fg-2);
+}
+
+.canvas-block__treemap-legend ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas-block__treemap-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.canvas-block__treemap-swatch,
+.canvas-block__treemap-scale-step {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.canvas-block__treemap-scale {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas-block__treemap-scale-step {
+  width: 20px;
+}
+
+.canvas-block__treemap-scale-bound {
+  font-variant-numeric: tabular-nums;
+  color: var(--oct-meta);
+}
+
+.canvas-block__treemap-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.canvas-block__treemap-table:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.canvas-block__treemap-table th button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.canvas-block__treemap-data {
+  margin-top: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__treemap-data summary {
+  cursor: pointer;
+}
+
+.canvas-block__treemap-open {
+  font-size: var(--oct-text-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-block__treemap-mark {
+    transition: none;
+  }
+}
+
+[data-octant-reduced-motion="true"] .canvas-block__treemap-mark {
+  transition: none;
+}
+
+/* System colours keep the cells legible when the palette is replaced. */
+@media (forced-colors: active) {
+  .canvas-block__treemap-mark {
+    fill: ButtonFace;
+    stroke: CanvasText;
+    stroke-width: 2;
+  }
+
+  .canvas-block__treemap-group-frame {
+    stroke: CanvasText;
+  }
+
+  .canvas-block__treemap-group-label,
+  .canvas-block__treemap-label {
+    fill: CanvasText;
+  }
+
+  .canvas-block__treemap-label {
+    stroke: Canvas;
+  }
+
+  .canvas-block__treemap-cell.is-active .canvas-block__treemap-mark,
+  .canvas-block__treemap-group[data-active="true"] .canvas-block__treemap-group-frame {
+    stroke: Highlight;
+  }
+}
+
+/* ── Heatmap ─────────────────────────────────────────────────────────────
+   The same data-visualisation system as a chart and a treemap: shared scale
+   roles, marks that transition only when the colour changes, and a disclosed
+   table. A missing coordinate is drawn apart from a zero reading. */
+
+.canvas-block__heatmap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.canvas-block__heatmap-header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--oct-space-2);
+}
+
+.canvas-block__heatmap-plot {
+  position: relative;
+  /* The tooltip is placed by fractions of the plot, so the plot is exactly as
+     wide as the drawing. */
+  max-width: 480px;
+}
+
+/* A calendar's day cells and labels are sized in pixels, so it draws at its
+   own width and only scales down to fit a narrower Canvas. Stretching to a
+   fixed width blew a few days up into huge squares and shrank a year's labels
+   to about 7px. */
+.canvas-block__heatmap[data-layout="calendar"] .canvas-block__heatmap-plot {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.canvas-block__heatmap-plot:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.canvas-block__heatmap-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.canvas-block__heatmap-svg--calendar {
+  width: auto;
+  max-width: 100%;
+}
+
+.canvas-block__heatmap-axis {
+  fill: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__heatmap-mark {
+  cursor: pointer;
+  /* A hairline keeps neighbouring cells apart, so two similar readings do not
+     read as one cell, and it is what separates a zero from its neighbour. */
+  stroke: var(--oct-surface);
+  stroke-width: 1;
+  transition:
+    opacity var(--oct-motion-fast) var(--oct-ease-standard),
+    fill var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+/* A coordinate the block does not list: empty with a dashed edge, so it never
+   reads as the low end of the scale the way a zero does. */
+.canvas-block__heatmap-mark.is-missing {
+  fill: none;
+  stroke: var(--oct-muted);
+  stroke-dasharray: 2 2;
+}
+
+.canvas-block__heatmap-mark.is-active {
+  stroke: var(--octant-focus-ring);
+  stroke-width: 2;
+}
+
+.canvas-block__heatmap-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-fg-2);
+}
+
+.canvas-block__heatmap-legend-title {
+  color: var(--oct-meta);
+}
+
+.canvas-block__heatmap-scale {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas-block__heatmap-scale-step {
+  display: inline-block;
+  width: 20px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.canvas-block__heatmap-scale-bound {
+  font-variant-numeric: tabular-nums;
+  color: var(--oct-meta);
+}
+
+.canvas-block__heatmap-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-meta);
+}
+
+.canvas-block__heatmap-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+/* The legend's missing sample repeats the empty dashed reading of a cell; as a
+   plain element it takes a border rather than the SVG mark's stroke. */
+.canvas-block__heatmap-swatch.is-missing {
+  background: none;
+  border: 1px dashed var(--oct-muted);
+}
+
+.canvas-block__heatmap-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.canvas-block__heatmap-table:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.canvas-block__heatmap-data {
+  margin-top: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__heatmap-data summary {
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-block__heatmap-mark {
+    transition: none;
+  }
+}
+
+[data-octant-reduced-motion="true"] .canvas-block__heatmap-mark {
+  transition: none;
+}
+
+/* System colours keep the cells legible when the palette is replaced; the
+   dash pattern is what keeps a missing cell apart from a present one. */
+@media (forced-colors: active) {
+  .canvas-block__heatmap-mark {
+    fill: Highlight;
+    stroke: CanvasText;
+    stroke-width: 2;
+  }
+
+  .canvas-block__heatmap-mark.is-missing {
+    fill: Canvas;
+    stroke: GrayText;
+    stroke-dasharray: 2 2;
+  }
+
+  .canvas-block__heatmap-mark.is-active {
+    stroke: Highlight;
+  }
+
+  .canvas-block__heatmap-axis {
+    fill: CanvasText;
   }
 }
 

@@ -117,9 +117,7 @@ function AgentHierarchySection(props: {
                 <span className="agent-hierarchy__task">{row.task}</span>
                 <span className="agent-hierarchy__meta">{rowFacts(row)}</span>
               </span>
-              {row.needsAcknowledgement ? (
-                <span className="agent-hierarchy__flag">Needs review</span>
-              ) : null}
+              {row.needsReview ? <span className="agent-hierarchy__flag">Needs review</span> : null}
             </OctantButton>
           </li>
         ))}
