@@ -238,8 +238,20 @@ describe("UsageProjection", () => {
         sessionId: ids.entry,
         prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
       },
-      { kind: "usage", inputTokens: 10, outputTokens: 2, costUsd: 0.01 },
-      { kind: "usage", inputTokens: 30, outputTokens: 6, costUsd: 0.0375 },
+      {
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 2,
+        costUsd: 0.01,
+        cost: { kind: "provider-recorded", usdMicros: 10_000 },
+      },
+      {
+        kind: "usage",
+        inputTokens: 30,
+        outputTokens: 6,
+        costUsd: 0.0375,
+        cost: { kind: "provider-recorded", usdMicros: 37_500 },
+      },
       { kind: "operation-state", state: "completed" },
     ];
     journal.append({
@@ -262,8 +274,7 @@ describe("UsageProjection", () => {
     rebuildProjection({ connection, journal, projection, clock: () => now });
     expect(readAllUsageRecords(connection)[0]?.cost).toEqual(priced);
 
-    // A later report for the turn that carries no cost leaves it unpriced:
-    // "code-model" has no standard rate to estimate from.
+    // A later report for the turn that carries no cost leaves it unpriced.
     journal.append({
       aggregate: { aggregateType: "code-operation", aggregateId: ids.usage },
       expectedVersion: events.length,
@@ -278,6 +289,63 @@ describe("UsageProjection", () => {
       ],
     });
     expect(readAllUsageRecords(connection)[0]?.cost).toBeUndefined();
+    connection.close();
+  });
+
+  it("reproduces each Code turn's journaled cost on rebuild and never prices a report journaled without one", () => {
+    const { connection, journal } = openDatabase();
+    const turn = (operationId: string, usage: object) =>
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 0,
+        events: [
+          {
+            kind: "conversation-turn-started",
+            providerInstanceId: ids.provider,
+            // The standard-rate table prices this model today.
+            modelId: "gpt-5.6-sol",
+            sessionId: ids.entry,
+            prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+          },
+          usage,
+          { kind: "operation-state", state: "completed" },
+        ].map((event, index) =>
+          pending("code.operation-event-recorded@1", {
+            threadId: ids.aggregate,
+            operationId,
+            cursor: index + 1,
+            occurredAt: now,
+            event,
+          }),
+        ),
+      });
+    // Journaled before Code turns were priced: a provider figure and a priced
+    // model, but no ledger cost, so the turn stays as unpriced as it was.
+    turn(ids.usage, { kind: "usage", inputTokens: 100_000, outputTokens: 10_000, costUsd: 0.6 });
+    // Priced against an earlier table revision than the one in force now.
+    turn(ids.usage2, {
+      kind: "usage",
+      inputTokens: 100_000,
+      outputTokens: 10_000,
+      cost: { kind: "api-estimate", usdMicros: 450_000 },
+    });
+
+    const rows = () =>
+      connection
+        .prepare(
+          `SELECT reconciliation_id, cost_usd_micros, cost_kind
+          FROM usage_record_projection ORDER BY last_sequence`,
+        )
+        .all();
+    const expected = [
+      { reconciliation_id: ids.usage, cost_usd_micros: null, cost_kind: null },
+      { reconciliation_id: ids.usage2, cost_usd_micros: 450_000, cost_kind: "api-estimate" },
+    ];
+    expect(rows()).toEqual(expected);
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(rows()).toEqual(expected);
     connection.close();
   });
 
@@ -307,7 +375,13 @@ describe("UsageProjection", () => {
     turn(ids.usage, [started, { kind: "operation-state", state: "failed" }]);
     turn(ids.usage2, [
       started,
-      { kind: "usage", inputTokens: 30, outputTokens: 6, costUsd: 0.01 },
+      {
+        kind: "usage",
+        inputTokens: 30,
+        outputTokens: 6,
+        costUsd: 0.01,
+        cost: { kind: "provider-recorded", usdMicros: 10_000 },
+      },
       { kind: "operation-state", state: "completed" },
     ]);
 

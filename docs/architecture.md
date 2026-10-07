@@ -1805,10 +1805,12 @@ used). Without a provider figure, a model in the checked-in standard-rate price
 table (`packages/domain/src/localUsagePricing.ts`, the same table and rule the
 composer's cost line uses) is recorded as an `api-estimate`. On a subscription
 plan both are API-rate equivalents, not the bill: Claude Code reports
-`total_cost_usd` at API rates on a Claude plan too. Chat and Work journal the
-cost with the reconciliation; Code prices its row when the projection applies
-the turn's usage frame, so rebuilding the Code usage projection after a
-price-table revision re-prices Code history.
+`total_cost_usd` at API rates on a Claude plan too. The cost is fixed when the
+usage is journaled: Chat and Work carry it in the usage reconciliation, and
+Code carries it in the turn's `usage` operation frame (`cost`). Projections read
+the journaled cost and never price, so a rebuild reproduces the ledger exactly:
+a later price-table revision does not re-price history, and usage journaled
+before it carried a cost stays unpriced.
 
 A turn's usage is accumulated as the runtime contract defines it
 (`accumulateTurnUsage`): reports that name their request add up, a whole-turn

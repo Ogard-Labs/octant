@@ -7,7 +7,7 @@ import {
   type UsageQuality,
   type UsageRecord,
 } from "@octant/contracts";
-import { buildAttribution, classifyUsageQuality, ledgerUsageCost } from "@octant/domain";
+import { buildAttribution, classifyUsageQuality } from "@octant/domain";
 import type { Projection } from "./projection";
 import type { UsageProjectScope } from "../usageProjectScope";
 import { readContextManifest, readContextPlan } from "./contextProjection";
@@ -253,18 +253,9 @@ export class CodeUsageProjection implements Projection {
     }
     const usage = frame.event;
     // The report's cost covers the same turn its tokens do, so it replaces the
-    // previous cost too; a report without one leaves the turn unpriced.
-    const cost = ledgerUsageCost(String(started.event.modelId), {
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      ...(usage.cacheReadInputTokens === undefined
-        ? {}
-        : { cacheReadInputTokens: usage.cacheReadInputTokens }),
-      ...(usage.cacheWriteInputTokens === undefined
-        ? {}
-        : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
-      ...(usage.costUsd === undefined ? {} : { costUsd: usage.costUsd }),
-    });
+    // previous cost too; a report without one leaves the turn unpriced. The
+    // cost is the one journaled with the report, never priced here: a replay
+    // must reproduce the ledger, not re-price it against today's rate table.
     // Code reports replace the turn's previous totals, just as its transcript
     // does. The operation id keeps live updates and replay on the same row.
     connection
@@ -293,8 +284,8 @@ export class CodeUsageProjection implements Projection {
         String(started.event.modelId),
         usage.inputTokens,
         usage.outputTokens,
-        cost?.usdMicros ?? null,
-        cost?.kind ?? null,
+        usage.cost?.usdMicros ?? null,
+        usage.cost?.kind ?? null,
         USAGE_PROJECTION_SCHEMA_VERSION,
         frame.occurredAt,
         event.globalSequence,

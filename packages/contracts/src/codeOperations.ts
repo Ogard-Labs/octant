@@ -33,6 +33,7 @@ import {
 import { CodeRepositoryTestDefinition, CodeRepositoryTestConcern } from "./codeTestDefinitions";
 import { ScaffoldDirectoryName, ScaffoldId, ScaffoldRun, ScaffoldRunId } from "./scaffolds";
 import { AggregateVersion, UtcTimestamp } from "./events";
+import { UsageCost } from "./context";
 import { ProjectId } from "./projects";
 import {
   PermissionPersistence,
@@ -1262,6 +1263,15 @@ const UsageEvent = Schema.Struct({
    * its own.
    */
   costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+  /**
+   * The usage ledger's price for this turn, fixed when the report is
+   * journaled: the provider's figure, or a standard-rate estimate for a model
+   * the host's table prices. A ledger rebuild reads it rather than pricing
+   * the turn again, so a later revision of the table never re-prices history.
+   * Absent means unpriced, including every report journaled before Code turns
+   * were priced; a money ceiling refuses on it rather than counting it free.
+   */
+  cost: Schema.optional(UsageCost),
   /**
    * The model's context window and how much of it the last request occupied,
    * when the provider reports them alongside usage. A runtime the host does
