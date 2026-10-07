@@ -732,6 +732,18 @@
 
 .canvas-block__heatmap-plot {
   position: relative;
+  /* The tooltip is placed by fractions of the plot, so the plot is exactly as
+     wide as the drawing. */
+  max-width: 480px;
+}
+
+/* A calendar's day cells and labels are sized in pixels, so it draws at its
+   own width and only scales down to fit a narrower Canvas. Stretching to a
+   fixed width blew a few days up into huge squares and shrank a year's labels
+   to about 7px. */
+.canvas-block__heatmap[data-layout="calendar"] .canvas-block__heatmap-plot {
+  width: fit-content;
+  max-width: 100%;
 }
 
 .canvas-block__heatmap-plot:focus-visible {
@@ -743,7 +755,11 @@
   display: block;
   width: 100%;
   height: auto;
-  max-width: 480px;
+}
+
+.canvas-block__heatmap-svg--calendar {
+  width: auto;
+  max-width: 100%;
 }
 
 .canvas-block__heatmap-axis {

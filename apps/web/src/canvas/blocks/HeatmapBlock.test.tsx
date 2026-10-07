@@ -137,6 +137,26 @@ describe("heatmap block", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("2026-09-09");
   });
 
+  it("shortens a long row label in the picture and keeps it whole in the table", async () => {
+    const user = userEvent.setup();
+    const longLabel = "apps/server/src/canvas";
+    const fixture = {
+      ...matrixFixture,
+      rows: [{ rowId: "mon", label: longLabel }, ...matrixFixture.rows.slice(1)],
+    };
+    render(<CanvasView input={{ ...canvasFixture, blocks: [fixture] }} />);
+
+    const axisLabels = [...document.querySelectorAll(".canvas-block__heatmap-axis")].map(
+      (label) => label.textContent ?? "",
+    );
+    expect(axisLabels).not.toContain(longLabel);
+    expect(axisLabels.some((label) => label.startsWith("apps/") && label.endsWith("…"))).toBe(true);
+
+    await user.click(screen.getByText("View heatmap data"));
+    const table = screen.getByRole("table", { name: "Heatmap readings" });
+    expect(within(table).getByRole("rowheader", { name: longLabel })).toBeVisible();
+  });
+
   it("never journals a sort or a keyboard move", () => {
     const definitionInput = matrixDefinition();
     const before = JSON.stringify(definitionInput);

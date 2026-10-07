@@ -245,7 +245,7 @@ function MatrixHeatmap({
               x={HEATMAP_ROW_LABEL_GUTTER - 6}
               y={row.y + row.height / 2}
             >
-              {row.label}
+              {shortLabel(row.label, HEATMAP_ROW_LABEL_GUTTER - 6)}
             </text>
           ))}
           {layout.cells.map((cell) => {
@@ -425,6 +425,8 @@ function CalendarHeatmap({
         <svg
           aria-hidden="true"
           className="canvas-block__heatmap-svg canvas-block__heatmap-svg--calendar"
+          height={layout.height}
+          width={layout.width}
           viewBox={`0 0 ${String(layout.width)} ${String(layout.height)}`}
         >
           {layout.weekdayRows.map((row) => (

@@ -756,7 +756,9 @@ accessible reading, sortable by each measure.
 (`packages/domain/src/canvasHeatmapLayout.ts`). A `matrix` names its rows and
 columns and carries a cell per coordinate with a value and an optional short
 note; a `calendar` carries one reading per date and lays the days out on a week
-grid whose first day comes from the locale. Both read a value through one of the
+grid whose first day comes from the locale, drawn at its own size and scaled
+down only to fit a narrower Canvas. A matrix row label longer than its gutter
+is shortened with an ellipsis; the table carries it in full. Both read a value through one of the
 same two scale roles — sequential or diverging — with a legend that shows a
 scale bar and its bounds. A coordinate the block does not list is drawn as an
 empty dashed cell, apart from a zero reading. The screen renderer and the static
