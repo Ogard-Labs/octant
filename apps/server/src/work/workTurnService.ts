@@ -39,6 +39,7 @@ import {
   type AgentRun,
   type AgentRunId,
   type WorkTurnStreamFrame,
+  type HarnessRetryNotice,
   type Project,
   type ProjectId,
   type ProviderAttachmentInput,
@@ -255,6 +256,8 @@ export interface WorkTurnServiceDependencies {
         readonly turn?: TurnEndSummary;
       },
     ) => Promise<void>;
+    readonly noteRetry?: (scope: NativeHarnessTurnScope, notice: HarnessRetryNotice) => void;
+    readonly clearRetry?: (scope: NativeHarnessTurnScope) => void;
   };
   /**
    * Watches the bound folder for the length of a turn. Absent on a host that
@@ -1196,6 +1199,27 @@ export class WorkTurnService {
           this.#liveResponses.set(String(input.command.requestId), response);
           const delta = response.startsWith(previous) ? response.slice(previous.length) : response;
           this.#liveUpdates.appendResponse(input.command.threadId, input.command.requestId, delta);
+        },
+        onRetrying: (event) => {
+          if (harnessScope !== undefined) {
+            this.#nativeHarness?.noteRetry?.(harnessScope, {
+              attempt: event.attempt,
+              maxAttempts: event.maxAttempts,
+              delayMs: event.delayMs,
+              reason: event.reason,
+              announcedAt: event.occurredAt,
+            });
+          }
+          this.#liveUpdates.appendRetry(input.command.threadId, input.command.requestId, {
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            delayMs: event.delayMs,
+            reason: event.reason,
+            announcedAt: event.occurredAt,
+          });
+        },
+        onRetryCleared: () => {
+          if (harnessScope !== undefined) this.#nativeHarness?.clearRetry?.(harnessScope);
         },
         ...(this.#onRequestSettled === undefined
           ? {}

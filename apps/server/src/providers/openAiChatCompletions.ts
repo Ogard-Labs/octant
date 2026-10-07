@@ -2,12 +2,14 @@ import { chatCompletionsToolImages } from "./openAiToolEncoding";
 import {
   decodeProviderFailure,
   type ProviderFailure,
+  type ProviderOutputStopReason,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import { type OpenAiCompatibleEndpoint, requestGeneration } from "./openAiCompatibleEndpoint";
 import { decodeSse } from "./openAiCompatibleSse";
+import { contextOverflowFromBody } from "./endpointRetry";
 import {
   encodeChatCompletionsTools,
   encodeChatCompletionsToolResults,
@@ -19,6 +21,7 @@ import type {
   ProtocolTurnEvent,
   ProtocolUsage,
 } from "./openAiResponses";
+import { outputStopReason } from "./outputStopReason";
 import { readOpenAiRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
 
 export interface ChatCompletionsTurnInput {
@@ -50,6 +53,8 @@ export interface ChatCompletionsTurnResult {
   readonly verifiedManualModelId?: string;
   /** Quota buckets from the response headers. Absent when the endpoint sent none. */
   readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
+  /** Present when the endpoint said this reply stopped on a known limit or filter. */
+  readonly outputStopReason?: ProviderOutputStopReason;
 }
 
 interface TrackedChatToolCall {
@@ -71,6 +76,7 @@ interface StreamState {
   readonly events: ProtocolTurnEvent[];
   readonly toolCalls: TrackedChatToolCall[];
   completedToolCalls: ProtocolToolCall[];
+  outputStopReason?: ProviderOutputStopReason;
 }
 
 // Chunks, choices, deltas, and messages are read by the keys this protocol
@@ -92,7 +98,10 @@ async function runChatTurn(input: ChatCompletionsTurnInput): Promise<ChatComplet
       path: "chat/completions",
       body: requestBody(input, true),
       classifyRejectedResponse: async (response) => {
-        if (await isStrictStreamUnsupported(response)) {
+        const body = await readRejectionText(response);
+        const overflow = contextOverflowFromBody(body);
+        if (overflow !== undefined) return overflow;
+        if (isStrictStreamUnsupported(body)) {
           streamUnsupported = true;
           return failure("unsupported", "The provider does not support streaming responses.");
         }
@@ -188,7 +197,10 @@ async function normalizeStream(
   })) {
     if (state.done) throw protocol("The provider stream continued after its terminal marker.");
     if (frame.event !== undefined && frame.event !== "message") {
-      throw protocol("The provider stream contained an unsupported event type.");
+      // A vendor may add SSE event names of its own; one that is not a chat
+      // completion is ignored and logged rather than failing a good turn.
+      console.warn(`[provider] ignoring unknown stream event: ${frame.event}`);
+      continue;
     }
     if (frame.data === "[DONE]") {
       if (!state.terminal) throw protocol("The provider stream ended without a finish reason.");
@@ -364,15 +376,15 @@ function normalizeFinish(
     state.terminal = true;
     return;
   }
+  const stop = outputStopReason(reason);
+  if (stop !== undefined) {
+    state.outputStopReason = stop;
+    state.terminal = true;
+    return;
+  }
   state.outputStarted ||= reason === "function_call";
   if (reason === "function_call") {
     throw failure("unsupported", "The provider attempted an unsupported tool call.");
-  }
-  if (reason === "length") {
-    throw failure("provider-failed", "The provider returned an incomplete response.");
-  }
-  if (reason === "content_filter") {
-    throw failure("provider-failed", "The provider refused the request.");
   }
   throw protocol("The provider stream contained an unsupported finish reason.");
 }
@@ -451,22 +463,21 @@ async function normalizeNonStreaming(
   if (!hasToolCalls && choice.finish_reason === "tool_calls") {
     throw protocol("The provider returned a tool_calls finish reason without tool calls.");
   }
+  let outputStopReasonValue: ProviderOutputStopReason | undefined;
   if (!hasToolCalls && choice.finish_reason !== "stop") {
-    normalizeFinish(
-      choice.finish_reason,
-      {
-        accepted: true,
-        outputStarted: message.content !== null,
-        terminal: false,
-        done: false,
-        text: "",
-        nextSequence: 1,
-        events: [],
-        toolCalls: [],
-        completedToolCalls: [],
-      },
-      input.onEvent,
-    );
+    const finishState: StreamState = {
+      accepted: true,
+      outputStarted: message.content !== null,
+      terminal: false,
+      done: false,
+      text: "",
+      nextSequence: 1,
+      events: [],
+      toolCalls: [],
+      completedToolCalls: [],
+    };
+    normalizeFinish(choice.finish_reason, finishState, input.onEvent);
+    outputStopReasonValue = finishState.outputStopReason;
   }
   if (!hasToolCalls && typeof message.content !== "string") {
     throw protocol("The provider returned an invalid assistant message.");
@@ -485,6 +496,7 @@ async function normalizeNonStreaming(
     toolCalls: [],
     completedToolCalls: [],
     ...(usage === undefined ? {} : { usage }),
+    ...(outputStopReasonValue === undefined ? {} : { outputStopReason: outputStopReasonValue }),
   };
   assertSequenceStart(state.nextSequence);
   if (hasToolCalls) {
@@ -558,16 +570,15 @@ function result(
       ? { verifiedManualModelId: input.modelId }
       : {}),
     ...(rateLimitBuckets.length === 0 ? {} : { rateLimitBuckets }),
+    ...(state.outputStopReason === undefined ? {} : { outputStopReason: state.outputStopReason }),
   };
 }
 
-async function isStrictStreamUnsupported(response: Response): Promise<boolean> {
-  if (response.status !== 400 && response.status !== 422) return false;
+function isStrictStreamUnsupported(body: string): boolean {
   let value: unknown;
   try {
-    value = JSON.parse(await response.text()) as unknown;
-  } catch (error) {
-    if (isProviderFailure(error)) throw error;
+    value = JSON.parse(body) as unknown;
+  } catch {
     return false;
   }
   return (
@@ -578,6 +589,20 @@ async function isStrictStreamUnsupported(response: Response): Promise<boolean> {
     value.error.param === "stream" &&
     value.error.code === "unsupported_parameter"
   );
+}
+
+/**
+ * Reads a rejected response's body once. The chat path asks two questions of
+ * the same bytes — whether the endpoint left the stream unsupported and whether
+ * it rejected a filled context window — and a second read would see nothing.
+ */
+async function readRejectionText(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch (error) {
+    if (isProviderFailure(error)) throw error;
+    return "";
+  }
 }
 
 function readUsage(value: unknown): ProtocolUsage {
@@ -674,17 +699,18 @@ const MAX_TOOL_CALL_ARGUMENT_KEY_LENGTH = 128;
 const MAX_TOOL_CALL_ARGUMENT_STRING_LENGTH = 4_096;
 
 function assertBoundedToolCallArguments(argumentsJson: string): void {
-  if (argumentsJson.length === 0) {
-    throw protocol("The provider function call arguments were empty.");
-  }
   if (argumentsJson.length > MAX_TOOL_CALL_ARGUMENT_BYTES) {
     throw protocol("The provider function call arguments exceeded the size limit.");
   }
+  // Arguments the harness cannot parse are not a broken stream: the call is
+  // surfaced with its raw bytes so the model is told what was wrong and can
+  // correct itself. Only a payload that does parse is held to the structural
+  // bounds below, and its raw bytes are never replaced by an empty object.
   let parsed: unknown;
   try {
     parsed = JSON.parse(argumentsJson);
   } catch {
-    throw protocol("The provider function call arguments were not valid JSON.");
+    return;
   }
   if (!isBoundedToolCallArguments(parsed)) {
     throw protocol("The provider function call arguments exceeded the bounded JSON limits.");

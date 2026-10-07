@@ -104,4 +104,44 @@ describe("answering a listed approval", () => {
 
     expect(outcome).toEqual({ status: "refused", message: "The approval is no longer pending." });
   });
+
+  it("reports a Code approval the turn refuses as a failed turn state, with the host's reason", async () => {
+    const fake = clients();
+    fake.executeOperation.mockResolvedValue({
+      kind: "provider-turn-state",
+      operationId: "x",
+      state: "failed",
+      failure: { category: "failed", message: "Plan mode cannot approve tools." },
+    });
+
+    const outcome = await answerPendingApproval({
+      request: codeApproval(),
+      decision: "approved",
+      workRequestClient: fake.workRequestClient,
+      codeClient: fake.codeClient,
+    });
+
+    expect(outcome).toEqual({ status: "refused", message: "Plan mode cannot approve tools." });
+  });
+
+  it("reports a Code approval whose turn had already ended instead of calling it approved", async () => {
+    const fake = clients();
+    fake.executeOperation.mockResolvedValue({
+      kind: "provider-turn-state",
+      operationId: "x",
+      state: "interrupted",
+    });
+
+    const outcome = await answerPendingApproval({
+      request: codeApproval(),
+      decision: "approved",
+      workRequestClient: fake.workRequestClient,
+      codeClient: fake.codeClient,
+    });
+
+    expect(outcome).toEqual({
+      status: "refused",
+      message: "The turn that asked has ended. Send a new message to continue.",
+    });
+  });
 });

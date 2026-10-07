@@ -59,6 +59,11 @@ export function mergeThreadRowActions(
       ? { onMarkThreadUnread: (id: string) => pick(id).onMarkThreadUnread?.(id) }
       : {}),
     ...(either("onPinInPane") ? { onPinInPane: (id: string) => pick(id).onPinInPane?.(id) } : {}),
+    ...(either("onAttachAsContext")
+      ? {
+          onAttachAsContext: (id: string, title: string) => pick(id).onAttachAsContext?.(id, title),
+        }
+      : {}),
     ...(either("onPinThread")
       ? {
           onPinThread: (id: string, pinned: boolean) => pick(id).onPinThread?.(id, pinned),

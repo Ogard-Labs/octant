@@ -618,7 +618,13 @@ export function transitionChatAttempt(
     input.failure ?? (failureOutcomes.includes(input.outcome) ? previousFailure : undefined);
   // A question dies with the attempt that parked it: a terminal attempt can
   // never deliver an answer, so the open card must not survive the outcome.
-  const { pendingQuestion: _deadQuestion, ...withoutQuestion } = attemptRest;
+  // A retry wait ends the same way: an attempt that failed or was cancelled
+  // after "retrying 5/5" is not still waiting to send again.
+  const {
+    pendingQuestion: _deadQuestion,
+    harnessRetry: _endedRetry,
+    ...withoutQuestion
+  } = attemptRest;
   const kept = terminalOutcomes.includes(input.outcome) ? withoutQuestion : attemptRest;
 
   return decodeChatAttempt({

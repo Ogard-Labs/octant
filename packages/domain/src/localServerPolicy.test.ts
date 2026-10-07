@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  attributeLocalListener,
   authorizeLocalServerAction,
   classifyLocalListener,
   describeLocalServerStopDenial,
@@ -200,5 +201,28 @@ describe("local server authority matrix", () => {
     for (const reason of ["plan-read-only", "local-host-required", "unclassified"] as const) {
       expect(describeLocalServerStopDenial({ kind: "deny", reason }).length).toBeGreaterThan(10);
     }
+  });
+});
+
+describe("local server attribution", () => {
+  const candidates = [
+    { root: "/Users/example/code/octant", name: "project" },
+    { root: "/Users/example/code/octant/.worktrees/fix", name: "worktree" },
+  ];
+
+  it("names the most specific root a working directory sits inside", () => {
+    expect(
+      attributeLocalListener("/Users/example/code/octant/.worktrees/fix/apps/web", candidates),
+    ).toMatchObject({ name: "worktree" });
+    expect(attributeLocalListener("/Users/example/code/octant/apps/web", candidates)).toMatchObject(
+      { name: "project" },
+    );
+  });
+
+  it("places nothing outside every root, beside a root, or with no working directory", () => {
+    expect(attributeLocalListener("/Users/example/code/octant-two", candidates)).toBeUndefined();
+    expect(attributeLocalListener("/tmp", candidates)).toBeUndefined();
+    expect(attributeLocalListener(undefined, candidates)).toBeUndefined();
+    expect(attributeLocalListener("", candidates)).toBeUndefined();
   });
 });

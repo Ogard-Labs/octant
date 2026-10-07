@@ -35,6 +35,26 @@ function client(fetchImpl: typeof globalThis.fetch) {
 }
 
 describe("local server client", () => {
+  it("posts a host-wide command to the same surface and decodes its own result kinds", async () => {
+    const result = {
+      kind: "running-services-listed",
+      requestId,
+      snapshot: { services: [], observedAt: "2026-08-14T08:00:00.000Z" },
+    };
+    const fetchImpl = vi.fn(async () => Response.json(result));
+    const decoded = await client(
+      fetchImpl as unknown as typeof globalThis.fetch,
+    ).executeRunningServices({
+      kind: "list-running-services",
+      requestId: requestId as never,
+    });
+
+    expect(decoded.kind).toBe("running-services-listed");
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:4319/api/code/local-servers/commands");
+    expect(JSON.parse(String(init.body))).toEqual({ kind: "list-running-services", requestId });
+  });
+
   it("posts the command with the window capability and decodes the result", async () => {
     const fetchImpl = vi.fn(async () => Response.json(listedResult));
     const result = await client(fetchImpl as unknown as typeof globalThis.fetch).execute(

@@ -2,6 +2,13 @@ import type { WorkBoardCard, WorkBoardStatus, WorkBoardView } from "@octant/cont
 import type { ProjectId } from "@octant/contracts/projects";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  answerClients,
+  boardPendingSource,
+  codeRequest,
+  pendingReader,
+  workRequest,
+} from "../threadBoard/boardPendingRequests.test-fixtures";
 import { WorkThreadBoard } from "./WorkThreadBoard";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -491,5 +498,276 @@ describe("WorkThreadBoard", () => {
     const listGroup = screen.getByRole("region", { name: "Ready (1)" });
     expect(listGroup.className).toContain("code-board__list-group");
     expect(document.querySelector(".board-col")).toBeNull();
+  });
+});
+
+describe("WorkThreadBoard waiting cards", () => {
+  const threadOne = "00000000-0000-4000-8000-000000006101";
+  const threadTwo = "00000000-0000-4000-8000-000000006102";
+  const threadThree = "00000000-0000-4000-8000-000000006103";
+
+  const approval = workRequest({
+    threadId: threadOne,
+    threadTitle: "Quarterly notes",
+    kind: "approval",
+    text: "Delete: old-draft.md",
+    minutesAgo: 4,
+  });
+  const question = workRequest({
+    threadId: threadTwo,
+    threadTitle: "Pick a format",
+    kind: "question",
+    text: "Which format should the report use?",
+    minutesAgo: 9,
+    options: [{ label: "PDF" }, { label: "Markdown" }],
+  });
+
+  function renderBoard(
+    cards: readonly WorkBoardCard[],
+    pendingRequests: ReturnType<typeof boardPendingSource> | undefined,
+    options: {
+      readonly isNarrow?: boolean;
+      readonly loadBoard?: () => Promise<WorkBoardView>;
+    } = {},
+  ) {
+    const loadBoard = vi.fn(options.loadBoard ?? (async () => view(cards)));
+    const onOpenThread = vi.fn();
+    render(
+      <WorkThreadBoard
+        {...(options.isNarrow === true ? { isNarrow: true } : {})}
+        loadBoard={loadBoard}
+        onOpenThread={onOpenThread}
+        {...(pendingRequests === undefined ? {} : { pendingRequests })}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+    return { loadBoard, onOpenThread };
+  }
+
+  it("answers a waiting task's approval from its card with the listed handle", async () => {
+    const clients = answerClients();
+    renderBoard(
+      [card({ id: "01", status: "waiting", title: "Quarterly notes" })],
+      boardPendingSource(pendingReader([approval]), clients),
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    expect(await within(waiting).findByText("Delete: old-draft.md")).toBeVisible();
+    expect(within(waiting).getByText("Waiting 4m")).toBeVisible();
+    fireEvent.click(within(waiting).getByRole("button", { name: "Approve" }));
+
+    await waitFor(() =>
+      expect(clients.workRequestClient.execute).toHaveBeenCalledWith({
+        kind: "resolve-work-request",
+        requestId: `request-${threadOne}`,
+        expectedVersion: 7,
+        resolution: { kind: "approval", approved: true },
+      }),
+    );
+  });
+
+  it("denies an approval and picks a numbered choice on the card that asked", async () => {
+    const clients = answerClients();
+    renderBoard(
+      [
+        card({ id: "01", status: "waiting", title: "Quarterly notes" }),
+        card({ id: "02", status: "waiting", title: "Pick a format" }),
+      ],
+      boardPendingSource(pendingReader([approval, question]), clients),
+    );
+
+    const notes = await screen.findByRole("group", { name: "Quarterly notes is waiting for you" });
+    fireEvent.click(within(notes).getByRole("button", { name: "Deny" }));
+    await waitFor(() =>
+      expect(clients.workRequestClient.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ resolution: { kind: "approval", approved: false } }),
+      ),
+    );
+
+    const format = screen.getByRole("group", { name: "Pick a format is waiting for you" });
+    fireEvent.click(within(format).getByRole("button", { name: /Markdown/ }));
+    await waitFor(() =>
+      expect(clients.workRequestClient.execute).toHaveBeenCalledWith({
+        kind: "resolve-work-request",
+        requestId: `request-${threadTwo}`,
+        expectedVersion: 7,
+        resolution: { kind: "user-input", answer: "Markdown" },
+      }),
+    );
+  });
+
+  it("opens the thread from Reply… and from +N more waiting, showing only the oldest request", async () => {
+    const newer = workRequest({
+      threadId: threadTwo,
+      threadTitle: "Pick a format",
+      kind: "question",
+      text: "And which paper size?",
+      minutesAgo: 1,
+      requestId: "request-newer",
+    });
+    const { onOpenThread } = renderBoard(
+      [card({ id: "02", status: "waiting", title: "Pick a format" })],
+      boardPendingSource(pendingReader([newer, question])),
+    );
+
+    const format = await screen.findByRole("group", { name: "Pick a format is waiting for you" });
+    expect(within(format).getByText("Which format should the report use?")).toBeVisible();
+    expect(within(format).queryByText("And which paper size?")).toBeNull();
+
+    fireEvent.click(within(format).getByRole("button", { name: "Reply…" }));
+    expect(onOpenThread).toHaveBeenLastCalledWith({
+      threadId: threadTwo,
+      projectId: projectA,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "+1 more waiting" }));
+    expect(onOpenThread).toHaveBeenCalledTimes(2);
+  });
+
+  it("says once on the card that a refused answer was not delivered, and leaves the card in its column", async () => {
+    const clients = answerClients();
+    clients.workRequestClient.execute.mockRejectedValue(new Error("stale"));
+    const { loadBoard } = renderBoard(
+      [card({ id: "01", status: "waiting", title: "Quarterly notes" })],
+      boardPendingSource(pendingReader([approval]), clients),
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    fireEvent.click(await within(waiting).findByRole("button", { name: "Approve" }));
+
+    expect(await within(waiting).findByRole("status")).toHaveTextContent(
+      "The answer was not delivered.",
+    );
+    expect(screen.getByRole("region", { name: "Waiting (1)" })).toBe(waiting);
+    expect(loadBoard).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves the card when the host's next board read says so, not when it is answered", async () => {
+    const clients = answerClients();
+    let boardReads = 0;
+    renderBoard([], boardPendingSource(pendingReader([approval], []), clients), {
+      loadBoard: async () => {
+        boardReads += 1;
+        return view([
+          card({
+            id: "01",
+            status: boardReads === 1 ? "waiting" : "in-progress",
+            title: "Quarterly notes",
+          }),
+        ]);
+      },
+    });
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    fireEvent.click(await within(waiting).findByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByRole("region", { name: "In progress (1)" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Waiting (0)" })).toBeVisible();
+    expect(boardReads).toBe(2);
+  });
+
+  it("lists the waiting column oldest request first, and a card with no request after them", async () => {
+    renderBoard(
+      [
+        card({
+          id: "03",
+          status: "waiting",
+          title: "Recent but no request",
+          lastMeaningfulActivityAt: "2026-10-06T09:59:00.000Z" as never,
+        }),
+        card({
+          id: "01",
+          status: "waiting",
+          title: "Quarterly notes",
+          lastMeaningfulActivityAt: "2026-10-06T09:58:00.000Z" as never,
+        }),
+        card({
+          id: "02",
+          status: "waiting",
+          title: "Pick a format",
+          lastMeaningfulActivityAt: "2026-10-06T09:57:00.000Z" as never,
+        }),
+      ],
+      boardPendingSource(pendingReader([approval, question])),
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (3)" });
+    await within(waiting).findByText("Delete: old-draft.md");
+    const titles = within(waiting)
+      .getAllByRole("button", { name: /^(Recent but no request|Quarterly notes|Pick a format)$/ })
+      .map((button) => button.textContent);
+    expect(titles).toEqual(["Pick a format", "Quarterly notes", "Recent but no request"]);
+  });
+
+  it("gives the narrow list the same answer buttons", async () => {
+    renderBoard(
+      [card({ id: "01", status: "waiting", title: "Quarterly notes" })],
+      boardPendingSource(pendingReader([approval])),
+      { isNarrow: true },
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    expect(waiting.className).toContain("code-board__list-group");
+    expect(await within(waiting).findByRole("button", { name: "Approve" })).toBeVisible();
+    expect(within(waiting).getByRole("button", { name: "Deny" })).toBeVisible();
+  });
+
+  it("shows the question on a card the board files elsewhere when the host lists one for its thread", async () => {
+    renderBoard(
+      [
+        card({ id: "01", status: "in-progress", title: "Quarterly notes" }),
+        card({ id: "02", status: "ready", title: "Pick a format" }),
+      ],
+      boardPendingSource(pendingReader([approval])),
+    );
+
+    const running = await screen.findByRole("region", { name: "In progress (1)" });
+    expect(await within(running).findByRole("button", { name: "Approve" })).toBeVisible();
+    const ready = screen.getByRole("region", { name: "Ready (1)" });
+    expect(within(ready).queryByRole("group")).toBeNull();
+  });
+
+  it("leaves a Chat or Code request off a Work card", async () => {
+    const codeApproval = codeRequest({
+      threadId: threadThree,
+      threadTitle: "Fix the build",
+      kind: "approval",
+      text: "Run: bun run test",
+      minutesAgo: 3,
+    });
+    const reader = pendingReader([codeApproval]);
+    renderBoard(
+      [card({ id: "03", status: "waiting", title: "Fix the build" })],
+      boardPendingSource(reader),
+    );
+
+    await screen.findByRole("button", { name: "Fix the build" });
+    await waitFor(() => expect(reader.list).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+  });
+
+  it("looks exactly as it did when the window has no pending-request reader", async () => {
+    const waitingCard = {
+      ...card({ id: "01", status: "waiting", title: "Quarterly notes" }),
+      activeRequest: { kind: "pending", requestKind: "approval", summary: "Delete old-draft.md" },
+    } as unknown as WorkBoardCard;
+    renderBoard([waitingCard], boardPendingSource(undefined));
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    expect(await within(waiting).findByText("Approval: Delete old-draft.md")).toBeVisible();
+    expect(within(waiting).queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(within(waiting).queryByRole("group")).toBeNull();
+  });
+
+  it("drops a waiting card's summary line once its question is drawn in full", async () => {
+    const waitingCard = {
+      ...card({ id: "01", status: "waiting", title: "Quarterly notes" }),
+      activeRequest: { kind: "pending", requestKind: "approval", summary: "Delete old-draft.md" },
+    } as unknown as WorkBoardCard;
+    renderBoard([waitingCard], boardPendingSource(pendingReader([approval])));
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    expect(await within(waiting).findByRole("button", { name: "Approve" })).toBeVisible();
+    expect(within(waiting).queryByText("Approval: Delete old-draft.md")).toBeNull();
   });
 });

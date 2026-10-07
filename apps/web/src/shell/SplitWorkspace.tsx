@@ -28,6 +28,7 @@ import {
   OctantContextMenuTrigger,
 } from "../ui/base/OctantContextMenu";
 import { WorkspaceDragStatus, WorkspaceDropOverlay } from "./WorkspaceDropOverlay";
+import { ComposerThreadDropAnnouncer } from "../chat/composerThreadDrop";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { workspaceSurfaceTitle } from "./workspaceTabLifecycle";
@@ -118,6 +119,7 @@ export function SplitWorkspace(props: SplitWorkspaceProps) {
     <div className="workspace-root" ref={props.drag.rootRef} style={splitContainerStyle}>
       <WorkspaceNode {...props} node={props.layout} />
       {props.drag.active === null ? null : <WorkspaceDragStatus drag={props.drag.active} />}
+      <ComposerThreadDropAnnouncer />
     </div>
   );
 }

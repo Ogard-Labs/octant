@@ -142,6 +142,33 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
   }
 }
 
+/* The Browser preview's caption, count, and close control sit on the picture
+   in the same glass; without transparency they take the opaque floating fill
+   and nothing else, since the picture already carries the shadow. */
+html[data-octant-reduced-transparency="true"] .browser-pip__caption,
+html[data-octant-reduced-transparency="true"] .browser-pip__count,
+html[data-octant-reduced-transparency="true"] .browser-pip__close {
+  background: var(--octant-floating);
+  backdrop-filter: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .browser-pip__caption,
+  .browser-pip__count,
+  .browser-pip__close {
+    background: var(--octant-floating);
+    backdrop-filter: none;
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .browser-pip__caption,
+  .browser-pip__count,
+  .browser-pip__close {
+    background: var(--octant-floating);
+  }
+}
+
 @media (prefers-contrast: more) {
   .octant-glass,
   .octant-chip,

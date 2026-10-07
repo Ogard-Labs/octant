@@ -91,6 +91,13 @@
   margin-block: 8px 0;
 }
 
+/* Placement only: the alert recipe paints it. One notice for a lost host
+   connection, in the thread's own measure above the transcript. */
+.thread-connection-notice {
+  width: min(100% - 40px, var(--oct-thread-measure));
+  margin: var(--oct-space-2) auto 0;
+}
+
 .chat-workspace__error {
   width: min(100% - 40px, 720px);
   margin: 10px auto 0;
@@ -154,17 +161,6 @@
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
   line-height: 1.5;
-}
-
-.chat-transcript__connection {
-  padding: var(--oct-space-2) var(--oct-space-3);
-  margin: 0 0 20px;
-  color: var(--oct-warn-fg);
-  background: var(--oct-warn-soft);
-  border: 1px solid color-mix(in oklab, var(--oct-warn-fg) 32%, transparent);
-  border-radius: var(--oct-radius-sm);
-  font-size: var(--oct-text-detail);
-  line-height: 1.4;
 }
 
 /* Provenance the transcript states rather than implies: a branched thread, or

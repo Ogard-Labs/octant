@@ -273,7 +273,9 @@
   display: grid;
   min-width: 0;
   gap: 2px;
-  margin-inline: var(--oct-space-3);
+  /* Edge to edge with the message surface below, so the two read as one stack;
+     the padding puts its words on the same inset as the message text. */
+  margin-inline: 0;
   padding: var(--oct-space-1) var(--oct-space-2);
   border: 1px solid var(--octant-border);
   border-bottom: 0;
@@ -292,6 +294,12 @@
   margin-inline: var(--oct-space-3);
   padding-bottom: var(--oct-space-2);
   transform: none;
+}
+
+/* The last status the host reported, while it cannot be reached. The thread's
+   connection notice says why; the tray only steps back. */
+.composer-subagents[data-stale="true"] {
+  opacity: 0.6;
 }
 
 .composer-subagents__head {
@@ -536,4 +544,90 @@
   .composer-subagents {
     animation: none;
   }
+}
+
+/* A subagent's result inside its parent thread: a left-aligned card attributed
+   to the child, never the right-aligned bubble that means "the person wrote
+   this". Ids stay behind Details. */
+.child-results {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-3);
+}
+
+/* The turn the host wrote for a subagent keeps the vertical rhythm a person's
+   message has, without the right-aligned bubble. */
+.turn-child-result {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-3) 0 0;
+}
+
+.child-result {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.child-result__head {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--oct-space-1) var(--oct-space-2);
+}
+
+.child-result__head > svg {
+  align-self: center;
+}
+
+.child-result__title {
+  font-weight: var(--oct-weight-display);
+}
+
+.child-result__attribution,
+.child-result__task,
+.child-result__note {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.child-result__task,
+.child-result__note,
+.child-result__text p {
+  margin: 0;
+}
+
+/* The disclosure buttons carry their own padding; pulling them back puts their
+   words on the card's text edge. */
+.child-result__text-frame > button,
+.child-result > div > button {
+  margin-inline-start: calc(var(--oct-space-2) * -1);
+}
+
+.child-result__text-frame {
+  display: grid;
+  min-width: 0;
+  justify-items: start;
+  gap: var(--oct-space-1);
+}
+
+.child-result__text {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* A long result starts folded to its first lines; the button unfolds it. */
+.child-result__text[data-folded="true"] {
+  max-height: 9.5em;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, var(--oct-fg) 70%, transparent);
 }

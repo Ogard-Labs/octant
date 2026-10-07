@@ -45,6 +45,11 @@ export interface WorkingNowRow {
   readonly provider?: ThreadProviderIdentity;
   /** The host the work runs on, only when that is not this computer. */
   readonly host?: string;
+  /**
+   * Set only on a row that is an agent run whose thread is resting. Stopping
+   * such a row cancels the run; a thread row stops the thread's own turn.
+   */
+  readonly runId?: string;
 }
 
 /** What the Code board adds to a running Code thread. */
@@ -95,6 +100,17 @@ export interface WorkingNowInput {
   /** Active agent runs from the AgentRun projection; absent until read. */
   readonly runs: ReadonlyArray<AgentRunCenterSummary> | undefined;
   readonly host?: string;
+}
+
+/** The provider a thread row runs on: the mark the shell attached, else its instance looked up. */
+export function threadProvider(
+  thread: Pick<ChatThreadNavigationItem, "provider" | "providerInstanceId">,
+  providers: ReadonlyMap<string, ThreadProviderIdentity>,
+): ThreadProviderIdentity | undefined {
+  return (
+    thread.provider ??
+    (thread.providerInstanceId === undefined ? undefined : providers.get(thread.providerInstanceId))
+  );
 }
 
 /** A running turn's own step, in words a row can show. */
@@ -165,11 +181,7 @@ export function buildWorkingNowRows(input: WorkingNowInput): ReadonlyArray<Worki
       facts?.planProgress;
     const projectName =
       thread.projectId === undefined ? undefined : input.projectNames.get(thread.projectId);
-    const provider =
-      thread.provider ??
-      (thread.providerInstanceId === undefined
-        ? undefined
-        : input.providers.get(thread.providerInstanceId));
+    const provider = threadProvider(thread, input.providers);
     const activeAt = facts?.activeAt ?? thread.updatedAt;
     rows.push({
       key: `thread:${mode}:${thread.threadId}`,
@@ -193,6 +205,7 @@ export function buildWorkingNowRows(input: WorkingNowInput): ReadonlyArray<Worki
     const provider = input.providers.get(String(run.route.executionProviderInstanceId));
     rows.push({
       key: `run:${String(run.runId)}`,
+      runId: String(run.runId),
       mode: run.mode,
       threadId: String(run.childThreadId ?? run.parentThreadId),
       title: run.parentThreadTitle,
