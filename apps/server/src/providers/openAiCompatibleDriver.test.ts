@@ -759,13 +759,6 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
     });
   }
 
-  async function lastFailureOf(events: readonly ProviderRuntimeEvent[]): Promise<ProviderFailure> {
-    const failed = events.find((event) => event.kind === "failed");
-    expect(failed).toBeDefined();
-    if (failed === undefined || failed.kind !== "failed") throw new Error("expected a failure");
-    return failed.failure;
-  }
-
   it("refuses a turn before any request when the plan profile is bound to chat-completions", async () => {
     const fetch = vi.fn(async () => modelsResponse("x"));
     const driver = planDriver({ fetch });
