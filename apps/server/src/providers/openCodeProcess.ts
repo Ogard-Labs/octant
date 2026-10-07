@@ -10,6 +10,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
@@ -141,6 +142,20 @@ const LEGACY_VERSION_PATTERN = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 // name for --version, where the earlier beta line printed opencode2 v0.0.0-beta.
 const BETA_VERSION_PATTERN = /^opencode2? (v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$/;
+/**
+ * The always-failing `git` stand-in target. OpenCode 2 runs `git rev-parse`
+ * at startup to resolve its project; under the Chat/Plan/Work jail (no fork,
+ * no exec) that spawn fails with EPERM and the server answers 500 for every
+ * route in a work tree. A private temp directory with a `bin/git` symlink to
+ * `/usr/bin/false` put first on PATH makes the spawn succeed and git exit
+ * non-zero, which OpenCode reads as "not a git project" and serves anyway.
+ * The jail allows fork plus exec of exactly this one binary — no real git,
+ * no shell, no other exec. The stand-in is macOS only. Linux confinement
+ * cannot grant that one exec without also allowing fork, which reopens the
+ * Plan jail, so a 2.x Chat, Plan, or Work launch on Linux keeps both denied
+ * and the readiness probe fails closed.
+ */
+const GIT_STANDIN_TARGET = "/usr/bin/false";
 /** A 2.x launch whose caller named no posture runs nothing without refusal. */
 const BETA_DENY_ALL: ReadonlyArray<PermissionV2Rule> = [
   { action: "*", resource: "*", effect: "deny" },
@@ -862,6 +877,25 @@ function reserveLoopbackPort(): Promise<number> {
   });
 }
 
+/**
+ * Creates the private `git` stand-in directory under the profile's temp home
+ * and returns its `bin` directory for PATH prepending. The directory lives
+ * under `TMPDIR`, which the profile owns and removes on cleanup, so the
+ * stand-in goes away with the process it was granted to.
+ */
+function prepareGitStandinDirectory(profile: PrivateOpenCodeProfile): string {
+  const tempHome = profile.environment.TMPDIR;
+  if (tempHome === undefined) {
+    throw new Error("OpenCode private temp home is missing for the git stand-in.");
+  }
+  const standinRoot = realpathSync(mkdtempSync(join(tempHome, "git-standin-")));
+  chmodSync(standinRoot, 0o700);
+  const binDirectory = join(standinRoot, "bin");
+  mkdirSync(binDirectory, { mode: 0o700 });
+  symlinkSync(GIT_STANDIN_TARGET, join(binDirectory, "git"));
+  return binDirectory;
+}
+
 function prepareOpenCodeLaunch(
   input: OpenCodeProcessStartInput,
   profile: PrivateOpenCodeProfile,
@@ -932,6 +966,28 @@ function prepareOpenCodeLaunch(
           environment: profile.environment,
         };
       }
+      // Work declares shell "denied"; an in-process provider shell emits
+      // no permission request, so the jail itself must refuse to spawn it.
+      const jailDeniesProcess = executionPolicy === "plan" || mode !== "code";
+      // OpenCode 2 runs `git rev-parse` at startup to resolve its project.
+      // Under the Chat/Plan/Work jail that spawn fails with EPERM and the
+      // server answers 500 for every route in a work tree. On macOS the
+      // stand-in puts an always-failing `git` first on PATH so the spawn
+      // succeeds and git exits non-zero, which OpenCode reads as "not a git
+      // project". The jail allows fork plus exec of exactly /usr/bin/false
+      // and nothing else. Linux confinement cannot express that one exec
+      // without also allowing fork, which is the hole the Plan jail exists
+      // to close, so Linux keeps fork denied and the probe fails closed.
+      // OpenCode 1.x and Code mode are unchanged.
+      const betaGitStandin = runtime === "beta" && jailDeniesProcess && platform === "darwin";
+      if (betaGitStandin) {
+        const standinBin = prepareGitStandinDirectory(profile);
+        const existingPath = profile.environment.PATH;
+        profile.environment.PATH =
+          existingPath === undefined || existingPath === ""
+            ? standinBin
+            : `${standinBin}:${existingPath}`;
+      }
       const networkEgress = materializeOsNetworkEgress(
         resolveProviderRuntimeEgressPolicy({ mode, executionPolicy }),
       );
@@ -945,10 +1001,10 @@ function prepareOpenCodeLaunch(
         privateHomeAllowPaths,
         networkEgress,
         writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
-        // Work declares shell "denied"; an in-process provider shell emits
-        // no permission request, so the jail itself must refuse to spawn it.
-        allowProcessExec: !(executionPolicy === "plan" || mode !== "code"),
-        allowProcessFork: !(executionPolicy === "plan" || mode !== "code"),
+        allowProcessExec: !jailDeniesProcess,
+        // The stand-in needs fork so OpenCode can spawn the failing git; exec
+        // stays denied except for the single /usr/bin/false literal grant.
+        allowProcessFork: !jailDeniesProcess || betaGitStandin,
         allowFileReadStar: true,
         // The agent is a loopback HTTP server: the confinement has to let it
         // listen on the port this launch reserved, not only reach the bridge.
@@ -969,6 +1025,11 @@ function prepareOpenCodeLaunch(
                 // Its provider listing resolves the other coding tools' home
                 // directories first, and a refusal there fails the listing.
                 ...openCodeDiscoveryRules(profile.environment.HOME),
+                // The git stand-in's only exec: the always-failing binary the
+                // PATH shim resolves `git` to. No other exec becomes possible.
+                ...(betaGitStandin
+                  ? [`(allow process-exec (literal "${GIT_STANDIN_TARGET}"))`]
+                  : []),
               ],
             }
           : {}),

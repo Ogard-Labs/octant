@@ -63,6 +63,8 @@ export interface OpenCodeClientPort {
     readonly model?: { readonly providerId: string; readonly modelId: string };
   }) => Promise<OpenCodeSessionRecord>;
   readonly getSession: (sessionId: string) => Promise<OpenCodeSessionRecord>;
+  /** Removes a session and its history from the provider's own store. */
+  readonly deleteSession: (sessionId: string) => Promise<void>;
   readonly prompt: (input: {
     readonly sessionId: string;
     readonly providerId: string;
@@ -218,8 +220,11 @@ function openCodeBetaCapabilities(reported: ProviderCapabilities): ProviderCapab
 }
 
 /**
- * A 2.x runtime whose confined catalogue is readable but whose jail cannot
- * serve a Git work tree. Models stay visible; no turn is offered.
+ * A 2.x runtime whose confined jail cannot serve a Git work tree even with
+ * the always-failing `git` stand-in. Models stay visible; no turn is offered.
+ * The probe attests at a directory with a `.git` marker under the Chat/Plan
+ * confinement; if a future OpenCode treats the failing `git` as fatal, the
+ * probe fails closed here.
  */
 const BETA_GIT_WORKTREE_REFUSAL_MESSAGE =
   "OpenCode 2 cannot resolve a Git project inside the Chat and Plan jail, so turns are not offered.";
@@ -244,11 +249,14 @@ const BETA_LISTING_ONLY_CAPABILITIES = {
 
 /**
  * Project resolution on 2.x spawns the Git binary for any directory inside a
- * work tree, and the Chat and Plan jail refuses that spawn. Observed with
- * 2.0.22 on macOS: the confined provider and model routes answered 500 for a
- * work tree and 200 for a plain directory, while the same binary unconfined
- * answered 200 for both. A `.git` marker is enough to take the Git path, so
+ * work tree. The Chat and Plan jail allows fork plus exec of exactly one
+ * binary — `/usr/bin/false`, reached through a private `git` symlink on PATH
+ * — so the spawn succeeds and git exits non-zero, which OpenCode reads as
+ * "not a git project". A `.git` marker is enough to take the Git path, so
  * the probe can attest the jail without a real repository or a Git binary.
+ * If a future OpenCode treats the failing `git` as fatal, the probe fails
+ * closed and the runtime stays listing-only.
+ *
  * The marker lives in the launch's own scratch directory: every launch profile
  * denies reading `/private`, where the host temporary directory resolves, so
  * a marker there was refused for being unreadable, not for being a work tree.
@@ -296,29 +304,6 @@ const BETA_MUTATION_TIMEOUT_MS = 10_000;
 const MCP_PROBE_TIMEOUT_MS = 5_000;
 const BETA_WRITE_REFUSAL_MESSAGE =
   "OpenCode 2 reported a file change that no approval or setting allowed, so the turn was stopped.";
-
-/**
- * Project resolution on 2.x spawns the Git binary for any directory inside a
- * work tree, and every jail that denies process execution refuses that spawn:
- * Chat, Work, and Plan in any mode. Only a Code jail outside Plan allows it,
- * so only those turns can run on 2.x until the confined jail learns to serve
- * a Git work tree.
- */
-const BETA_NON_CODE_REFUSAL_MESSAGE =
-  "OpenCode 2 cannot resolve a Git project inside the Chat, Plan, or Work jail, so only Code turns are offered, outside Plan.";
-
-/**
- * A 2.x turn is offered only in Code mode outside Plan, where the process jail
- * allows process execution and the written posture gates every write behind
- * an approval.
- */
-export function betaTurnsUnsupported(
-  runtime: "legacy" | "beta" | undefined,
-  mode: "chat" | "work" | "code",
-  policy: ProviderExecutionPolicy,
-): boolean {
-  return runtime === "beta" && (mode !== "code" || policy === "plan");
-}
 
 /**
  * OpenCode applies the last matching rule. An allow on edit or the wildcard
@@ -659,6 +644,31 @@ export function makeOfficialOpenCodeClient(
             ),
           )
         : resultData(await client.session.get({ sessionID: sessionId }, { throwOnError: true })),
+    deleteSession: async (sessionId) => {
+      if (!beta) {
+        await client.session.delete(
+          { sessionID: sessionId, directory: projectRoot },
+          { throwOnError: true, signal: AbortSignal.timeout(10_000) },
+        );
+        return;
+      }
+      // The pinned SDK 1.18.0 has no v2 session delete; 2.0.22 serves
+      // `DELETE /api/session/{sessionID}` and answers 204.
+      const response = await fetch(
+        new URL(`/api/session/${encodeURIComponent(sessionId)}`, server.url).toString(),
+        {
+          method: "DELETE",
+          headers: {
+            authorization: server.authorization,
+            "x-opencode-directory": encodeURIComponent(projectRoot),
+          },
+          signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`OpenCode 2 session delete failed with status ${response.status}.`);
+      }
+    },
     prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [], permission }) => {
       if (beta) {
         await client.v2.session.switchModel(
@@ -666,14 +676,31 @@ export function makeOfficialOpenCodeClient(
           betaMutationOptions(),
         );
         const files = openCodeBetaPromptFiles(attachments);
-        await client.v2.session.prompt(
-          {
-            sessionID: sessionId,
-            prompt: { text: prompt, ...(files.length === 0 ? {} : { files }) },
-            resume: true,
-          },
-          betaMutationOptions(),
+        // The pinned SDK 1.18.0 sends `v2.session.prompt` with a nested
+        // `prompt:{text,files}` body, but OpenCode 2.0.22 expects a flat
+        // `{text,files,resume}` body and answers 400 "Missing key at [text]"
+        // for the nested shape. Send the flat body directly.
+        const promptUrl = new URL(
+          `/api/session/${encodeURIComponent(sessionId)}/prompt`,
+          server.url,
         );
+        const response = await fetch(promptUrl.toString(), {
+          method: "POST",
+          headers: {
+            authorization: server.authorization,
+            "content-type": "application/json",
+            "x-opencode-directory": encodeURIComponent(projectRoot),
+          },
+          body: JSON.stringify({
+            text: prompt,
+            ...(files.length === 0 ? {} : { files }),
+            resume: true,
+          }),
+          signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+          throw new Error(`OpenCode 2 prompt failed with status ${response.status}.`);
+        }
         return;
       }
       await client.session.update(
@@ -786,12 +813,16 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                     (ownedBridge) => Effect.promise(() => ownedBridge.close()),
                   )
                 : undefined;
+            // Probe under the Chat/Plan jail, not the Code jail: the git
+            // stand-in (fork plus exec of /usr/bin/false only) is what makes
+            // a 2.x runtime serve a Git work tree in Chat, Plan, and Work.
+            // Attesting under Code confinement would pass even without it.
             const runtime = yield* acquireRuntime(
               options,
               projectRoot,
               bridge === undefined ? [] : [bridge.port],
-              "code",
-              "approval-gated",
+              "chat",
+              "plan",
             );
             const client = clientFactory(runtime, projectRoot);
             const health = yield* request(client.health);
@@ -822,6 +853,11 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             );
             if (runtime.runtime === "beta" && normalized.models.length > 0) {
               // A launch that reports no scratch directory cannot be attested.
+              // Otherwise attest that the Chat/Plan jail serves a Git work
+              // tree: a session create in the marker directory triggers git
+              // project resolution, which the stand-in makes fail gracefully.
+              // If a future OpenCode treats the failing git as fatal, this
+              // fails closed and the runtime stays listing-only.
               const scratch = runtime.temporaryDirectory;
               const servesWorktree =
                 scratch === undefined
@@ -834,12 +870,27 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                       }),
                       (owned) => Effect.sync(() => rmSync(owned, { recursive: true, force: true })),
                     ).pipe(
-                      Effect.flatMap((marker) =>
-                        request(clientFactory(runtime, marker).providers).pipe(
+                      Effect.flatMap((marker) => {
+                        const markerClient = clientFactory(runtime, marker);
+                        return request(() =>
+                          markerClient.createSession({
+                            permission: [{ permission: "*", pattern: "*", action: "ask" }],
+                          }),
+                        ).pipe(
+                          // OpenCode keeps sessions in the data directory it
+                          // shares with the person's own use, where its auth
+                          // lives too. Remove the attestation session; a
+                          // failed delete leaves one empty session behind and
+                          // does not change what the create attested.
+                          Effect.tap((session) =>
+                            Effect.promise(() =>
+                              markerClient.deleteSession(session.id).catch(() => undefined),
+                            ),
+                          ),
                           Effect.as(true),
                           Effect.orElseSucceed(() => false),
-                        ),
-                      ),
+                        );
+                      }),
                     );
               if (!servesWorktree) {
                 return decodeProviderProbeResult({
@@ -1459,14 +1510,6 @@ function makeConnection(
               ),
             ),
             Effect.flatMap((runtimeClient) => {
-              if (betaTurnsUnsupported(runtimeKind, mode, input.executionPolicy)) {
-                return Effect.promise(async () => {
-                  await releaseManagedTools(state);
-                  await closeRuntime();
-                }).pipe(
-                  Effect.zipRight(Effect.fail(fail("unsupported", BETA_NON_CODE_REFUSAL_MESSAGE))),
-                );
-              }
               if (state.managedTools !== undefined && !runtimeIsolated) {
                 return Effect.promise(() => releaseManagedTools(state)).pipe(
                   Effect.zipRight(
@@ -1592,16 +1635,6 @@ function makeConnection(
                   ),
                 ),
                 Effect.flatMap((runtimeClient) => {
-                  if (betaTurnsUnsupported(runtimeKind, mode, input.executionPolicy)) {
-                    return Effect.promise(async () => {
-                      await releaseManagedTools(state);
-                      await closeRuntime();
-                    }).pipe(
-                      Effect.zipRight(
-                        Effect.fail(fail("unsupported", BETA_NON_CODE_REFUSAL_MESSAGE)),
-                      ),
-                    );
-                  }
                   const attachManagedTools =
                     state.managedTools === undefined || inheritedTools !== undefined
                       ? Promise.resolve()
@@ -1676,9 +1709,6 @@ function makeConnection(
             const state = sessionsBySource.get(source)!;
             if (state.terminal) {
               return Effect.fail(fail("protocol", "Provider session is already terminal."));
-            }
-            if (betaTurnsUnsupported(runtimeKind, mode, state.executionPolicy)) {
-              return Effect.fail(fail("unsupported", BETA_NON_CODE_REFUSAL_MESSAGE));
             }
             const observed = options.runtimeRegistry.observedState(options.instanceId);
             const model = observed?.models.find((candidate) => candidate.id === state.modelId);

@@ -15,7 +15,7 @@ import type {
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -91,8 +91,8 @@ describe("OpenCode driver", () => {
     if (process.platform === "darwin") {
       expect(probe.capabilities.appManagedTools).toBe("supported");
       expect(fixture.processInputs[0]).toMatchObject({
-        mode: "code",
-        executionPolicy: "approval-gated",
+        mode: "chat",
+        executionPolicy: "plan",
         loopbackPorts: [expect.any(Number)],
       });
       expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
@@ -100,8 +100,8 @@ describe("OpenCode driver", () => {
     } else {
       expect(probe.capabilities.appManagedTools).toBe("unsupported");
       expect(fixture.processInputs[0]).toMatchObject({
-        mode: "code",
-        executionPolicy: "approval-gated",
+        mode: "chat",
+        executionPolicy: "plan",
       });
       expect(fixture.processInputs[0]?.loopbackPorts).toBeUndefined();
       expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
@@ -1300,7 +1300,7 @@ describe("OpenCode driver", () => {
   });
 
   it("lists a 2.x runtime without offering turns when its confined server cannot resolve a Git work tree", async () => {
-    const fixture = betaDriver({ worktreeProviders: "refused" });
+    const fixture = betaDriver({ worktreeSessionCreate: "refused" });
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
     expect(probe.readiness).toBe("incompatible");
     expect(probe.reason).toBe("runtime-incompatible");
@@ -1309,18 +1309,42 @@ describe("OpenCode driver", () => {
     expect(Object.values(probe.capabilities).every((support) => support === "unsupported")).toBe(
       true,
     );
-    const marker = fixture.catalogueRoots.find((root) => root.includes("octant-opencode-probe-"));
+    const marker = fixture.sessionRoots.find((root) => root.includes("octant-opencode-probe-"));
     expect(marker).toBeDefined();
     expect(existsSync(marker!)).toBe(false);
   });
 
-  it("attests a 2.x Git work tree at a marker the confined launch can read", async () => {
+  it("attests a 2.x runtime ready when session create succeeds at a Git marker the confined launch can read", async () => {
     const fixture = betaDriver();
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
     expect(probe.readiness).toBe("ready");
-    expect(probe.capabilities.approvals).toBe("supported");
-    const marker = fixture.catalogueRoots.find((root) => root.includes("octant-opencode-probe-"));
+    expect(probe.models.length).toBeGreaterThan(0);
+    // The probe attested at a directory with a `.git` marker inside the
+    // launch's scratch directory; the marker is cleaned up after the probe.
+    const marker = fixture.sessionRoots.find((root) => root.includes("octant-opencode-probe-"));
     expect(marker?.startsWith(`${fixture.launchScratch}/`)).toBe(true);
+    expect(existsSync(marker ?? "")).toBe(false);
+  });
+
+  it("deletes the session it created to attest a 2.x Git work tree", async () => {
+    const fixture = betaDriver();
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("ready");
+    expect(fixture.calls).toContain("session.delete:provider-session");
+  });
+
+  it("keeps a 2.x attestation when deleting its session fails, and deletes nothing it did not create", async () => {
+    const leftBehind = betaDriver({ sessionDelete: "refused" });
+    const ready = await Effect.runPromise(Effect.scoped(leftBehind.driver.probe({ instanceId })));
+    expect(ready.readiness).toBe("ready");
+    expect(leftBehind.calls).toContain("session.delete:provider-session");
+
+    const refused = betaDriver({ worktreeSessionCreate: "refused" });
+    const incompatible = await Effect.runPromise(
+      Effect.scoped(refused.driver.probe({ instanceId })),
+    );
+    expect(incompatible.readiness).toBe("incompatible");
+    expect(refused.calls.some((call) => call.startsWith("session.delete:"))).toBe(false);
   });
 
   it("lists a 2.x runtime without offering turns when its launch reports no readable scratch directory", async () => {
@@ -1331,29 +1355,15 @@ describe("OpenCode driver", () => {
     expect(probe.models.length).toBeGreaterThan(0);
   });
 
-  it("refuses a 2.x Chat, Plan, or Work turn and allows a Code turn", async () => {
-    const codeFixture = betaDriver();
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const connection = yield* codeFixture.driver.acquire({
-            instanceId,
-            projectRoot: "/tmp/project",
-            mode: "code",
-          });
-          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-        }),
-      ),
-    );
-    expect(codeFixture.calls).toContain("session.create:ask");
-
+  it("offers a 2.x turn in every mode once the jail serves a Git work tree", async () => {
     for (const [mode, policy] of [
       ["chat", "approval-gated"],
       ["work", "plan"],
       ["work", "approval-gated"],
+      ["code", "approval-gated"],
     ] as const) {
       const fixture = betaDriver();
-      const exit = await Effect.runPromiseExit(
+      await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
             const connection = yield* fixture.driver.acquire({
@@ -1365,15 +1375,13 @@ describe("OpenCode driver", () => {
           }),
         ),
       );
-      expect(exit._tag).toBe("Failure");
-      expect(String(exit)).toContain("only Code turns are offered");
-      expect(fixture.calls).not.toContain("session.create:ask");
+      expect(fixture.calls).toContain("session.create:ask");
     }
   });
 
-  it("closes the managed-tool bridge when a 2.x non-Code start includes tools", async () => {
+  it("registers the managed-tool bridge for a 2.x Chat start that includes tools", async () => {
     const fixture = betaDriver();
-    const exit = await Effect.runPromiseExit(
+    await Effect.runPromise(
       Effect.scoped(
         fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "chat" }).pipe(
           Effect.flatMap((connection) =>
@@ -1387,39 +1395,36 @@ describe("OpenCode driver", () => {
         ),
       ),
     );
-    expect(exit._tag).toBe("Failure");
-    expect(String(exit)).toContain("only Code turns are offered");
-    expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
+    expect(fixture.calls).toContain("session.create:ask");
+    expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
   });
 
-  it("repeats the typed 2.x non-Code refusal without poisoning the connection", async () => {
+  it("starts a 2.x Chat turn twice without poisoning the connection", async () => {
     const fixture = betaDriver();
     const outcome = await Effect.runPromise(
       Effect.scoped(
-        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "chat" }).pipe(
-          Effect.flatMap((connection) =>
-            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
-              Effect.exit,
-              Effect.flatMap((refused) =>
-                refused._tag === "Failure" &&
-                String(refused).includes("only Code turns are offered")
-                  ? connection
+        fixture.driver
+          .acquire({ instanceId, projectRoot: "/tmp/project", mode: "chat" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection
+                .start({ sessionId, modelId, executionPolicy: "approval-gated" })
+                .pipe(
+                  Effect.zipRight(
+                    connection
                       .start({ sessionId, modelId, executionPolicy: "approval-gated" })
-                      .pipe(Effect.exit)
-                  : Effect.succeed(refused),
-              ),
+                      .pipe(Effect.exit),
+                  ),
+                ),
             ),
           ),
-        ),
       ),
     );
-    // A deliberate refusal must not poison the connection: the second attempt
-    // fails with the same typed refusal, not a stale-exit or aborted-stream
-    // failure masquerading as a protocol error.
+    // The second start on the same session is refused as a protocol error,
+    // not a stale-exit or aborted-stream failure masquerading as one.
     expect(outcome._tag).toBe("Failure");
-    expect(String(outcome)).toContain("only Code turns are offered");
-    expect(String(outcome)).toContain("unsupported");
-    expect(fixture.calls).not.toContain("session.create:ask");
+    expect(String(outcome)).toContain("already active");
+    expect(fixture.calls.filter((call) => call === "session.create:ask")).toHaveLength(1);
   });
 
   it("reads 2.0.22's permission.asked and permission.replied events as 2.x permission events", () => {
@@ -1655,23 +1660,20 @@ describe("OpenCode driver", () => {
     expect(Array.from(output).some((event) => event.kind === "approval-request")).toBe(false);
   });
 
-  it("refuses a 2.x Code turn under Plan, whose jail cannot start Git", async () => {
+  it("offers a 2.x Code turn under Plan, whose jail serves Git through the stand-in", async () => {
     const fixture = betaDriver();
-    const exit = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.scoped(
-        Effect.exit(
-          fixture.driver
-            .acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" })
-            .pipe(
-              Effect.flatMap((connection) =>
-                connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-              ),
+        fixture.driver
+          .acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection.start({ sessionId, modelId, executionPolicy: "plan" }),
             ),
-        ),
+          ),
       ),
     );
-    expect(String(exit)).toContain("outside Plan");
-    expect(fixture.calls).not.toContain("session.create:ask");
+    expect(fixture.calls).toContain("session.create:ask");
   });
 
   it("forgets a 2.x approval that OpenCode settled when it rejected another request", async () => {
@@ -2035,6 +2037,8 @@ describe("OpenCode driver", () => {
 function betaDriver(
   options: {
     readonly worktreeProviders?: "refused";
+    readonly worktreeSessionCreate?: "refused";
+    readonly sessionDelete?: "refused";
     readonly events?: ReadonlyArray<Event>;
     readonly launchScratch?: "unreported";
     readonly permissionPersistence?: "project-default";
@@ -2092,6 +2096,10 @@ function driverFixture(
     readonly streamEnd?: "hang" | "eof" | "throw";
     /** The confined server answers 500 for a directory inside a Git work tree. */
     readonly worktreeProviders?: "refused";
+    /** The confined server refuses session create for a directory inside a Git work tree. */
+    readonly worktreeSessionCreate?: "refused";
+    /** The server refuses to delete a session. */
+    readonly sessionDelete?: "refused";
     /** Streamed after an approval reply is sent and before that reply resolves. */
     readonly eventsOnReply?: ReadonlyArray<Event>;
   } = {},
@@ -2123,6 +2131,7 @@ function driverFixture(
         : Effect.fail(options.processFailure),
   };
   const session = providerSession(options.sessionDirectory ?? "/tmp/project");
+  const sessionRoots: string[] = [];
   const client: OpenCodeClientPort = {
     health: async () => ({ healthy: true, version: "1.18.0" }),
     providers: async () => providerList(),
@@ -2135,6 +2144,14 @@ function driverFixture(
     createSession: async ({ permission }) => {
       createdPermissions.push(permission);
       calls.push(`session.create:${permission[0]?.action}`);
+      const root = sessionRoots[sessionRoots.length - 1];
+      if (
+        options.worktreeSessionCreate === "refused" &&
+        root !== undefined &&
+        existsSync(join(root, ".git"))
+      ) {
+        throw new Error("opencode server POST /api/session -> 500");
+      }
       return session;
     },
     getSession: async () => ({ ...session, id: options.resumedSessionId ?? session.id }),
@@ -2194,10 +2211,15 @@ function driverFixture(
     replyQuestion: async (_sessionId, _id, answers) => {
       calls.push(`question.reply:${answers.join("|")}`);
     },
+    deleteSession: async (id) => {
+      calls.push(`session.delete:${id}`);
+      if (options.sessionDelete === "refused") throw new Error("session delete -> 500");
+    },
   };
   return {
     calls,
     catalogueRoots,
+    sessionRoots,
     processInputs,
     createdPermissions,
     registry,
@@ -2206,26 +2228,33 @@ function driverFixture(
       binaryPath: "/opt/homebrew/bin/opencode",
       process: options.process ?? processPort,
       runtimeRegistry: registry,
-      clientFactory: (runtime, root) => ({
-        ...client,
-        providers: async () => {
-          catalogueRoots.push(root);
-          if (options.worktreeProviders === "refused" && existsSync(join(root, ".git"))) {
-            throw new Error("opencode server GET /api/provider -> 500");
-          }
-          // Like the launch profile, which denies `/private`: a 2.x server can
-          // read only its project root and its own scratch directory.
-          const scratch = runtime.temporaryDirectory;
-          if (
-            runtime.runtime === "beta" &&
-            root !== resolve(process.cwd()) &&
-            (scratch === undefined || !root.startsWith(`${scratch}/`))
-          ) {
-            throw new Error("opencode server GET /api/provider -> 500");
-          }
-          return client.providers();
-        },
-      }),
+      clientFactory: (runtime, root) => {
+        sessionRoots.push(root);
+        // Like the launch profile, which denies the host temporary directory
+        // beneath `/private`: a 2.x server cannot read a probe marker outside
+        // its own scratch directory.
+        const scratch = runtime.temporaryDirectory;
+        const unreadable =
+          runtime.runtime === "beta" &&
+          root.includes("octant-opencode-probe-") &&
+          (scratch === undefined || !root.startsWith(`${scratch}/`));
+        return {
+          ...client,
+          providers: async () => {
+            catalogueRoots.push(root);
+            if (options.worktreeProviders === "refused" && existsSync(join(root, ".git"))) {
+              throw new Error("opencode server GET /api/provider -> 500");
+            }
+            if (unreadable) throw new Error("opencode server GET /api/provider -> 500");
+            return client.providers();
+          },
+          createSession: unreadable
+            ? async () => {
+                throw new Error("opencode server POST /api/session -> 500");
+              }
+            : client.createSession,
+        };
+      },
       permissionPersistence: () =>
         typeof options.permissionPersistence === "function"
           ? options.permissionPersistence()
