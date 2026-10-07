@@ -7,9 +7,11 @@
  *
  * The endpoint, region, bucket, prefix, and addressing style come from
  * settings. The access key and secret come from the host credential store
- * (macOS Keychain or freedesktop Secret Service) through the same
- * {@link CredentialStore} the provider credentials use; they are held only in
- * memory for the duration of a request and never written to a log or journal.
+ * (macOS Keychain or freedesktop Secret Service) through a
+ * {@link CredentialStore} for sync buckets' key pairs: a namespace of their
+ * own that no provider instance or device key can reach. They are held only
+ * in memory for the duration of a request and never written to a log or
+ * journal.
  *
  * A conditional create (`If-None-Match: *`) is how a publish stays write-once.
  * A provider that does not honour it is configured with `conditionalWrites:

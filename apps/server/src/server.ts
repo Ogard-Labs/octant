@@ -469,6 +469,7 @@ import { makeAzureFoundryDriver } from "./providers/azureFoundryDriver";
 import {
   makeCredentialBrokerClient,
   makeReplicaDeviceKeyBrokerClient,
+  makeReplicaStoreCredentialBrokerClient,
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
 import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
@@ -9970,11 +9971,17 @@ export function startOctantServer(
       // The access-outside-project grant has no surface yet, so a sync folder
       // outside home fails closed, the same as the artifact mirror's folder.
       standingOutsideApproval: false,
-      // A bucket's key pair needs a credential namespace of its own that no
-      // provider instance id can reach, as the device keys have. Until the
-      // broker serves one, no key pair is saved here: an S3-compatible store
-      // is refused rather than kept beside provider credentials.
-      credentials: undefined,
+      // A bucket's key pair lives in a credential namespace of its own,
+      // reached through the broker's bucket-key routes, so no provider
+      // instance or device key with the same UUID can reach it. A host with no
+      // broker cannot save one, and a bucket is refused there.
+      credentials:
+        options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+          ? undefined
+          : makeReplicaStoreCredentialBrokerClient({
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            }),
     });
     const replicaStoreSettingsRoutes = createReplicaStoreSettingsRouteHandler({
       service: replicaStoreSettingsService,

@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-import type { CredentialStore } from "@octant/host-runtime";
+import { startCredentialBroker, type CredentialStore } from "@octant/host-runtime";
 import {
   EventActor,
   LOCAL_HOST_ID,
@@ -13,6 +13,7 @@ import {
 } from "@octant/contracts";
 import type { ReplicaStoreSettingsResult } from "@octant/contracts/replica-store-settings";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
+import { makeReplicaStoreCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -313,6 +314,58 @@ describe("replica store settings", () => {
       accessKeyId: "AKIAEXAMPLE",
       secretAccessKey: SECRET,
     });
+  });
+
+  it("saves a bucket's key pair through the broker where no provider credential can reach it", async () => {
+    const providers = memoryCredentials();
+    const deviceKeys = memoryCredentials();
+    const bucketKeys = memoryCredentials();
+    const broker = await startCredentialBroker(
+      providers.store,
+      undefined,
+      undefined,
+      deviceKeys.store,
+      bucketKeys.store,
+    );
+    try {
+      const credentials = makeReplicaStoreCredentialBrokerClient({
+        url: broker.url,
+        token: broker.token,
+        fetch: async (input, init) => broker.fetchForTest(new Request(input, init)),
+      });
+      const { settings } = host(connection(), { credentials });
+
+      const saved = expectView(
+        await settings.configureS3({
+          settings: bucket,
+          credentials: { accessKeyId: "AKIAEXAMPLE", secretAccessKey: SECRET },
+          expectedVersion: 0,
+        }),
+      );
+      expect(saved.store).toEqual({ kind: "s3", settings: bucket, credentials: "saved" });
+      const store = settings.settings().store;
+      if (store.kind !== "s3") throw new Error("expected a bucket");
+      expect([...bucketKeys.values.keys()]).toEqual([store.credentialRef]);
+      expect(providers.values.size).toBe(0);
+      expect(deviceKeys.values.size).toBe(0);
+
+      // A new key pair for the same bucket replaces the saved one.
+      const replaced = expectView(
+        await settings.configureS3({
+          settings: bucket,
+          credentials: { accessKeyId: "AKIAREPLACED", secretAccessKey: SECRET },
+          expectedVersion: saved.version,
+        }),
+      );
+      expect(JSON.parse(bucketKeys.values.get(store.credentialRef) ?? "{}")).toMatchObject({
+        accessKeyId: "AKIAREPLACED",
+      });
+
+      await settings.clear({ expectedVersion: replaced.version });
+      expect(bucketKeys.values.size).toBe(0);
+    } finally {
+      await broker.close();
+    }
   });
 
   it("keeps the saved key pair when only the bucket's settings change", async () => {
