@@ -799,6 +799,46 @@ describe("design frames", () => {
     ).toBe("accepted");
   });
 
+  it("refuses a remote stylesheet or image however its CSS escapes spell it", () => {
+    const home = [{ frameId: "home", html: "<p>Hi</p>" }];
+    for (const styles of [
+      String.raw`@\69mport "https://fonts.test/a.css";`,
+      String.raw`@\49 MPORT url(https://fonts.test/a.css);`,
+      String.raw`@i\mport "https://fonts.test/a.css";`,
+    ]) {
+      expect(refusalOf(design(home, styles))).toContain("stylesheet imports a stylesheet");
+    }
+    for (const styles of [
+      String.raw`.hero { background: u\72l(https://x.test/a.png); }`,
+      String.raw`.hero { background: \75 \72 \6c (https://x.test/a.png); }`,
+      String.raw`.hero { background: url("\68ttps://x.test/a.png"); }`,
+    ]) {
+      expect(refusalOf(design(home, styles))).toContain("loads a file with url()");
+    }
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "home",
+            html: String.raw`<div style="background:u\72l(https://x.test/a.png)"></div>`,
+          },
+        ]),
+      ),
+    ).toContain("loads a file with url()");
+    // An escaped character that is not a load stays as written.
+    expect(refusalOf(design(home, String.raw`.a::before { content: "\2014"; }`))).toBe("accepted");
+  });
+
+  it("reads a long run of CSS escapes in about the time it takes to read it once", () => {
+    const started = performance.now();
+    expect(
+      refusalOf(
+        design([{ frameId: "home", html: "<p>Hi</p>" }], `.a{content:"${"\\41 ".repeat(5_000)}"}`),
+      ),
+    ).toBe("accepted");
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
   it("refuses remote images and stylesheets but keeps inline ones", () => {
     expect(
       refusalOf(

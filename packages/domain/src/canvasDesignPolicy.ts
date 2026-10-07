@@ -81,7 +81,8 @@ export function canvasDesignStylesheetRefusal(styles: string): string | undefine
   return cssRefusal(styles);
 }
 
-function cssRefusal(css: string): string | undefined {
+function cssRefusal(raw: string): string | undefined {
+  const css = withoutCssEscapes(raw);
   if (/@import\b/i.test(css)) {
     return "imports a stylesheet; put every style in the design itself.";
   }
@@ -92,6 +93,27 @@ function cssRefusal(css: string): string | undefined {
     }
   }
   return undefined;
+}
+
+// A CSS escape: a backslash and one to six hex digits with one optional
+// whitespace after them, or a backslash and any other character.
+const CSS_ESCAPE = /\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|([\s\S]))/g;
+
+/**
+ * The CSS as a browser reads it once escapes are resolved. A browser reads
+ * `@\69mport` as `@import` and `u\72l(` as `url(`, so the checks must too. A
+ * backslash before a line break continues a string and stands for nothing.
+ * One left-to-right pass, so a long run of escapes costs no more than reading it.
+ */
+function withoutCssEscapes(css: string): string {
+  return css.replace(CSS_ESCAPE, (_escape, hex: string | undefined, other: string | undefined) => {
+    if (hex !== undefined) {
+      const code = Number.parseInt(hex, 16);
+      const valid = code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff);
+      return String.fromCodePoint(valid ? code : 0xfffd);
+    }
+    return other === undefined || /[\n\r\f]/.test(other) ? "" : other;
+  });
 }
 
 /**
