@@ -1183,6 +1183,53 @@ describe("recovering from a malformed tool call", () => {
     });
   });
 
+  it("answers the well-formed calls of the step that exhausts the correction cap as not run", async () => {
+    const malformedStep = (id: string): NativeHarnessResponse => ({
+      text: "",
+      toolCalls: [{ toolCallId: id, toolName: "read", argumentsJson: "{not json" }],
+    });
+    const scripted = scriptedTransport([
+      malformedStep("bad-1"),
+      malformedStep("bad-2"),
+      malformedStep("bad-3"),
+      {
+        text: "",
+        toolCalls: [
+          { toolCallId: "bad-4", toolName: "read", argumentsJson: "{not json" },
+          { toolCallId: "good", toolName: "read", argumentsJson: '{"path":"a.ts"}' },
+        ],
+      },
+      { text: "next answer", toolCalls: [] },
+    ]);
+
+    const [first, second] = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            scripted.transport,
+            new MemoryNativeHarnessTranscriptStore(),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const capped = yield* sendAndCollect(connection, "look", isTerminal);
+          const next = yield* sendAndCollect(connection, "try again", isTerminal);
+          return [capped, next] as const;
+        }),
+      ),
+    );
+
+    expect(first.at(-1)).toMatchObject({ kind: "failed", failure: { category: "protocol" } });
+    expect(first.some((event) => event.kind === "tool-request")).toBe(false);
+    expect(second.at(-1)?.kind).toBe("completed");
+    const history = scripted.requests[4]?.history ?? [];
+    const callsAt = history.findIndex((message) =>
+      message.toolCalls?.some((call) => call.toolCallId === "good"),
+    );
+    const results = history[callsAt + 1]?.toolResults ?? [];
+    expect(results.map((result) => result.toolCallId)).toEqual(["bad-4", "good"]);
+    expect(results.every((result) => result.isError)).toBe(true);
+    expect(JSON.parse(results[1]?.resultJson ?? "{}")).toMatchObject({ notRun: true });
+  });
+
   it("resolves a queued steering note when malformed calls exhaust the correction cap", async () => {
     let releaseFourth: ((response: NativeHarnessResponse) => void) | undefined;
     let sent = 0;

@@ -60,6 +60,10 @@ const OMITTED_RESULT_JSON = JSON.stringify({
   omitted: true,
   note: "An older tool result was removed to fit the context window. Call the tool again if you still need it.",
 });
+const NOT_RUN_RESULT_JSON = JSON.stringify({
+  notRun: true,
+  note: "This call was not run: the turn stopped after repeated malformed tool calls.",
+});
 const OMITTED_HISTORY_NOTE =
   "Earlier messages of this session were left out to fit the context window. Your task list and the files on disk still reflect that work.";
 
@@ -581,7 +585,24 @@ export function createNativeHarnessConnection(
         if (malformed.size > 0) {
           state.selfCorrections += 1;
           if (state.selfCorrections > MAX_SELF_CORRECTION_ROUNDS) {
-            state.pending = undefined;
+            // The well-formed calls of this step will never run. Each gets a
+            // result that says so and the step is closed, so the journal and
+            // the next send do not carry calls without results.
+            for (const call of calls) {
+              if (malformed.has(call.toolCallId)) continue;
+              options.transcripts.settle(state.transcriptId, {
+                toolCallId: call.toolCallId,
+                resultJson: NOT_RUN_RESULT_JSON,
+                isError: true,
+              });
+              answers.set(call.toolCallId, {
+                sessionId: state.sessionId,
+                requestId: call.toolCallId,
+                resultJson: NOT_RUN_RESULT_JSON,
+                isError: true,
+              });
+            }
+            closePendingStep(state);
             // This branch returns normally, so the step's catch does not run.
             // A note queued during the step would otherwise stay pending.
             state.acceptingSteering = false;

@@ -1620,14 +1620,19 @@ native harness in `apps/server/src/harness`:
   the loop recognises the refusal as a filled context window (OpenAI's
   `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
   413 shape from an OpenAI-compatible host), shrinks it one further ladder
-  step, and sends it once more; a second refusal stands. The size estimate
+  step, and sends it once more; a second refusal stands. That step always
+  changes the refused request, which may itself have been reduced already: a
+  result already omitted or a note already in front is skipped, and when
+  nothing is left to leave out the refusal stands. The size estimate
   prefers the input tokens the last call reported over a flat
   four-bytes-per-token guess. A tool call that names no offered tool, reuses a
   call id, or carries arguments that are not JSON is answered with an error
   result instead of failing the turn, so the model can correct itself; the
   arguments the model sent are never replaced by an empty object. A handful of
   such correction steps is the most a turn takes, so a model that will not
-  correct itself fails rather than loop. An unknown stream event type is
+  correct itself fails rather than loop; the well-formed calls of that last
+  step are answered as not run, so the conversation stays valid for the next
+  send. An unknown stream event type is
   ignored and logged, never fatal.
 - **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
   each step as it happens (`native-harness-transcript`, one aggregate per
