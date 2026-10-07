@@ -42,8 +42,10 @@ const TAG = /<([a-zA-Z][a-zA-Z0-9:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
 const ATTRIBUTE = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
 const FRAGMENT = /^#[A-Za-z0-9._:-]*$/;
 // A backstop for links inside a tag the pattern above could not close, such
-// as one with an unterminated quote, which a browser still turns into a link.
-const ANY_OUTSIDE_LINK = /[\s/"'](?:xlink:)?href\s*=\s*(?:["']\s*)?[^#"'\s>]/i;
+// as one with a quote in an attribute name, which a browser still turns into a
+// link. Any `href` whose value does not start with `#` is refused, including an
+// empty or quote-led one, which resolves against Octant's own page.
+const ANY_OUTSIDE_LINK = /[\s/"'](?:xlink:)?href(?=[\s/>=]|$)(?!\s*=\s*(?:["']\s*)?#)/i;
 const CSS_URL = /url\(\s*["']?\s*([^"')\s]*)/gi;
 
 /**

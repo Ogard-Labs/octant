@@ -747,6 +747,13 @@ describe("design frames", () => {
       '<a href="javascript:void(0)">Shop</a>',
       '<a href="https://example.test>Shop</a>',
       '<svg><a xlink:href="https://example.test"><text>Shop</text></a></svg>',
+      // A quote inside an attribute name is still an attribute to a browser, so
+      // the link after it is real. An empty or quote-led address resolves
+      // against Octant's own page and would load it into the frame.
+      '<a x"y href="">Shop</a>',
+      '<a x"y href>Shop</a>',
+      '<a x"y href=>Shop</a>',
+      `<a x"y href="'//example.test/a">Shop</a>`,
     ]) {
       expect(refusalOf(design([{ frameId: "home", html }]))).toMatch(
         /^design-markup-refused: .*(links to|leaves the design)/,
