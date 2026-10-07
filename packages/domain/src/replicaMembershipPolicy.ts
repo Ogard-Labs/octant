@@ -219,11 +219,12 @@ export interface ReplicaDerivedMembership {
  *   computer that approved it, or that computer's approver, up to the root -
  *   by revoking that ancestor. Whoever brought a computer in can take it back
  *   out, and the computer it removed cannot remove it in return.
- * Ancestry follows the approvals that admitted each member, ignoring cuts.
- * When more than one counted approval admits a member in the same round, only
- * the ancestors they all share count, and an approval in a later round is not
- * weighed at all, so a second approval of a computer - by anyone - can narrow
- * its ancestry but never make its writer an ancestor.
+ * A member's ancestors are the ones every approval of it with the right key
+ * shares, whatever round or cut it falls in, so a second approval of a
+ * computer - by anyone, even one signed past its writer's cut - can narrow its
+ * ancestry but never make its writer an ancestor. Narrowing also costs the
+ * real approver its standing: two computers that then revoke each other both
+ * stay revoked.
  *
  * The rest can still cut each other's revokers, so this is a fixed point: the
  * set that is certainly valid grows from nothing, and every revocation that
@@ -252,7 +253,7 @@ export function deriveReplicaMembership(input: {
       revocation.revokerSequence,
     ),
   );
-  const { ancestors } = admit(input.roots, admissions, []);
+  const ancestors = ancestry(input.roots, admissions);
   const candidates = standing.filter(
     (revocation) =>
       !standing.some(
@@ -306,8 +307,8 @@ function requestedKeys(
 /**
  * Admit in rounds outward from the roots. A member's record comes from its
  * first qualifying approval by approver id and sequence - every one names the
- * same key - and its ancestors are the ones every approval of that round
- * shares, so the result is the same in any input order.
+ * same key - so the result is the same in any input order. The ancestors it
+ * returns weigh only the admitting round; `ancestry` narrows them further.
  */
 function admit(
   roots: ReadonlyArray<ReplicaMembershipMember>,
@@ -345,6 +346,43 @@ function admit(
       ancestors.set(id, shared);
     }
   }
+}
+
+/**
+ * Each member's ancestors: the ones every counted approval of it shares, in
+ * every round, not only the round that first admitted it. A computer nearer
+ * the founder can approve a deeper one again with its real key and so admit it
+ * a round earlier; weighing only that round would make the writer the deep
+ * computer's sole line to the founder.
+ *
+ * Cuts are ignored here, deliberately: every approval only narrows the set,
+ * so one signed past its writer's cut - which never admits anyone - cannot
+ * make its writer an ancestor either. Dropping such an approval would instead
+ * widen the set and let whoever placed a cut choose a computer's ancestors.
+ *
+ * The rounds give an upper bound; each pass intersects every approval again,
+ * so the sets only shrink and the passes end.
+ */
+function ancestry(
+  roots: ReadonlyArray<ReplicaMembershipMember>,
+  admissions: ReadonlyArray<ReplicaAdmissionRecord>,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const { members, ancestors: rounds } = admit(roots, admissions, []);
+  const ancestors = new Map(rounds);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const admission of admissions) {
+      const id = String(admission.member.instanceId);
+      const current = ancestors.get(id);
+      if (current === undefined || !members.has(String(admission.approver))) continue;
+      const line = lineage(ancestors, admission.approver);
+      const shared = new Set([...current].filter((ancestor) => line.has(ancestor)));
+      if (shared.size === current.size) continue;
+      ancestors.set(id, shared);
+      changed = true;
+    }
+  }
+  return ancestors;
 }
 
 /** An approver and everyone above it. */

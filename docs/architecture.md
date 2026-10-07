@@ -1355,9 +1355,14 @@ flowchart LR
   pull read it: a member is one admitted by an approval its approver signed
   within every counted cut on that approver. An approval counts only when the
   key it names is the key of its subject's own first join request - the
-  sequence-1 record only the holder of that key can sign - because any member
-  can sign an approval of any computer, and one naming the writer's own key
-  would otherwise let it sign as that computer. Approvals that name another
+  sequence-1 record, signed with the key it names - because any member can
+  sign an approval of any computer, and one naming the writer's own key would
+  otherwise let it sign as that computer. Like any slot, that record can be
+  rewritten by whoever can write to the store: a computer that already holds
+  the member keeps it, but one that reads the store fresh finds a join request
+  for the writer's key, counts no approval of the member, and so drops the
+  member and every computer admitted only through it. The recovery is the
+  same as for slot squatting. Approvals that name another
   key are refused rather than weighed, no approval ever picks a key by depth
   or approver id, and a later approval never changes the key of a computer
   already admitted. A computer with no first join request held, or two naming
@@ -1368,11 +1373,13 @@ flowchart LR
   of its revoker's ancestors - the computer that approved it, up to the
   founder, along the approvals that admitted each one - by revoking that
   ancestor: whoever brought a computer in can take it out, and that computer
-  cannot remove it in return. When more than one counted approval admits a
-  computer at the same distance from the founder, only the ancestors they all
-  share count, and a later approval is not weighed, so a second approval -
-  from anyone - can narrow a computer's ancestry but never make its writer an
-  ancestor. The remaining revocations can cut each other's
+  cannot remove it in return. A computer's ancestors are the ones every
+  approval of it with the right key shares, at any distance from the founder
+  and whatever cut it falls past, so a second approval - from anyone, even
+  one signed after its writer was revoked - can narrow a computer's ancestry
+  but never make its writer an ancestor. Narrowing also costs the computer's
+  real approver that standing: if they then revoke each other, both stay
+  revoked. The remaining revocations can cut each other's
   revokers, and every one that could be valid is honoured, so two computers
   that are not each other's ancestors and revoked each other without seeing
   the other's record both stay revoked. An entry applied past a cut is

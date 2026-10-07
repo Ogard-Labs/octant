@@ -183,6 +183,7 @@ describe("replica membership derivation", () => {
     { instanceId: ids.joiner, publicKey: "pub-taken" },
     { instanceId: ids.approver, publicKey: "pub-kept" },
     { instanceId: ids.fresh, publicKey: "pub-fresh" },
+    { instanceId: ids.unknown, publicKey: "pub-unknown" },
   ];
 
   function derive(
@@ -303,6 +304,59 @@ describe("replica membership derivation", () => {
         false,
       );
     }
+  });
+
+  // A chain three deep - the founder approves Taken, Taken approves Kept, Kept
+  // approves Fresh - and Unknown, approved by the founder directly.
+  const deepChain = [
+    admission(ids.local, 2, taken),
+    admission(ids.joiner, 2, kept),
+    admission(ids.approver, 2, member(ids.fresh, "pub-fresh")),
+    admission(ids.local, 3, member(ids.unknown, "pub-unknown")),
+  ];
+  const nearerApprovesFresh = admission(ids.unknown, 2, member(ids.fresh, "pub-fresh"));
+
+  it("does not let a computer nearer the founder become a deeper one's ancestor by approving it again", () => {
+    // Fresh revokes Unknown first. Past that cut, Unknown approves Fresh with
+    // its real key, which admits Fresh a round earlier, and revokes Fresh.
+    const freshRevokesUnknown = revocation(ids.fresh, 2, ids.unknown, 1);
+    const unknownRevokesFresh = revocation(ids.unknown, 3, ids.fresh, 1);
+    const records = [...deepChain, nearerApprovesFresh, freshRevokesUnknown, unknownRevokesFresh];
+    const results = new Set<string>();
+    for (let seed = 1; seed <= 30; seed += 1) {
+      const shuffled = shuffle(records, seed);
+      const derived = derive(
+        shuffled.filter((record): record is ReplicaAdmissionRecord => "member" in record),
+        shuffled.filter((record): record is ReplicaRevocationRecord => "cut" in record),
+      );
+      expect(derived.cuts).toEqual([`${ids.fresh}@1`, `${ids.unknown}@1`]);
+      results.add(JSON.stringify(derived));
+    }
+    expect(results.size).toBe(1);
+  });
+
+  it("revokes both computers that revoke each other, with or without another approval of one", () => {
+    const freshRevokesUnknown = revocation(ids.fresh, 2, ids.unknown, 1);
+    const unknownRevokesFresh = revocation(ids.unknown, 3, ids.fresh, 1);
+    for (const records of [deepChain, [...deepChain, nearerApprovesFresh]]) {
+      for (const revocations of [
+        [freshRevokesUnknown, unknownRevokesFresh],
+        [unknownRevokesFresh, freshRevokesUnknown],
+      ]) {
+        expect(derive(records, revocations).cuts).toEqual([`${ids.fresh}@1`, `${ids.unknown}@1`]);
+      }
+    }
+    // Kept approved Fresh, so alone it wins their exchange. Once Unknown has
+    // approved Fresh too, Kept is no longer an ancestor every approval
+    // shares, and the exchange ends with both revoked.
+    const keptRevokesFresh = revocation(ids.approver, 3, ids.fresh, 1);
+    const freshRevokesKept = revocation(ids.fresh, 2, ids.approver, 2);
+    expect(derive(deepChain, [keptRevokesFresh, freshRevokesKept]).cuts).toEqual([
+      `${ids.fresh}@1`,
+    ]);
+    expect(
+      derive([...deepChain, nearerApprovesFresh], [keptRevokesFresh, freshRevokesKept]).cuts,
+    ).toEqual([`${ids.approver}@2`, `${ids.fresh}@1`]);
   });
 
   it("derives the same members and cuts for every order of the same records", () => {

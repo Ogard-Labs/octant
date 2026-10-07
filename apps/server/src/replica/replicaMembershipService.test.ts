@@ -279,6 +279,22 @@ function memberKey(host: Computer, instanceId: ReplicaInstanceId): string | unde
     .members.find((member) => String(member.instanceId) === String(instanceId))?.publicKey;
 }
 
+function revocationRecord(
+  origin: ReplicaInstanceId,
+  sequence: number,
+  subject: ReplicaInstanceId,
+  lastAcceptedSequence: number,
+): ReplicaMembershipEntry {
+  return decodeReplicaMembershipEntry({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "revocation",
+    origin: { instanceId: origin, displayName: "Forged", sequence },
+    subject,
+    subjectDisplayName: "Forged",
+    lastAcceptedSequence,
+  });
+}
+
 function approval(
   origin: ReplicaInstanceId,
   sequence: number,
@@ -1082,6 +1098,89 @@ describe("replica membership service", () => {
       for (const host of [north, east, zed]) expect(memberKey(host, ids.zed)).toBe(localKey(zed));
     });
   }
+
+  // North approves East, East approves Zed, Zed approves Newbie; a member
+  // nearer the founder, whose id sorts first or in the middle, joins through
+  // North.
+  for (const nearerId of [ids.early, ids.west]) {
+    it(`keeps a revoked member revoked when it approves a deeper member again past its cut (${nearerId.slice(0, 8)})`, async () => {
+      const store = memoryStore();
+      const north = computer({ store: selected(store), instanceId: ids.north });
+      await north.service.execute({ kind: "create-replica", displayName: "MacBook" });
+      const east = computer({ store: selected(store), instanceId: ids.east });
+      await joinThrough(east, north, ids.north, "Studio");
+      const zed = computer({ store: selected(store), instanceId: ids.zed });
+      await joinThrough(zed, east, ids.east, "Zed");
+      const newbie = computer({ store: selected(store), instanceId: ids.newbie });
+      await joinThrough(newbie, zed, ids.zed, "Newbie");
+      const nearer = computer({ store: selected(store), instanceId: nearerId });
+      await joinThrough(nearer, north, ids.north, "Laptop");
+      await newbie.service.execute({ kind: "pull" });
+      expectKind(await newbie.service.execute({ kind: "revoke", subject: nearerId }), "revoked");
+      expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+      expect(cutIds(north)).toEqual([nearerId]);
+
+      // Past its cut, the revoked member approves Newbie with Newbie's real
+      // key - which would admit Newbie a round earlier, through it alone - and
+      // revokes Newbie.
+      await writeSignedAs(store, nearer, approval(nearerId, 2, ids.newbie, localKey(newbie)));
+      await writeSignedAs(store, nearer, revocationRecord(nearerId, 3, ids.newbie, 1));
+
+      expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+      const late = computer({ store: selected(store), instanceId: ids.southAgain });
+      await joinThrough(late, north, ids.north, "Desk");
+      expectKind(await late.service.execute({ kind: "pull" }), "pulled");
+      expectKind(await late.service.execute({ kind: "pull" }), "pulled");
+      for (const host of [north, late]) {
+        // Neither is the other's ancestor, so both stay revoked; the revoked
+        // member does not come back.
+        expect(cutIds(host)).toEqual([nearerId, ids.newbie].sort());
+      }
+    });
+  }
+
+  it("refuses a join confirmation when a forged founder reaches a real approver whose founder record was rewritten", async () => {
+    const store = memoryStore();
+    const north = computer({ store: selected(store), instanceId: ids.north });
+    await north.service.execute({ kind: "create-replica", displayName: "MacBook" });
+    const east = computer({ store: selected(store), instanceId: ids.east });
+    await joinThrough(east, north, ids.north, "Studio");
+    const west = computer({ store: selected(store), instanceId: ids.west });
+    const request = expectKind(
+      await west.service.execute({ kind: "write-join-request", displayName: "Desk" }),
+      "join-requested",
+    );
+    await east.service.execute({ kind: "pull" });
+    const code = codeFor(request.entry, east);
+    expectKind(
+      await east.service.execute({
+        kind: "approve-join",
+        joinRequest: request.entry,
+        confirmationCode: code,
+      }),
+      "join-approved",
+    );
+    // A store writer rewrites North's founding record, so the real chain to
+    // East is gone, and founds a store of its own that approves East's real
+    // key - which matches East's own join request.
+    const attacker = storeWriter(store);
+    const forgedKey = await attacker.key(ids.forged);
+    await attacker.write(
+      ids.north,
+      joinRequestEntry(ids.north, await attacker.key(ids.north), NOW),
+    );
+    await attacker.write(ids.forged, approval(ids.forged, 1, ids.forged, forgedKey));
+    await attacker.write(ids.forged, approval(ids.forged, 2, ids.east, localKey(east)));
+
+    const outcome = await west.service.execute({
+      kind: "confirm-join",
+      approver: ids.east,
+      confirmationCode: code,
+    });
+    // The chain verifies link by link; only the founder in the code differs.
+    expect(outcome).toMatchObject({ kind: "refused", reason: "code-mismatch" });
+    expect(west.projection.state().members).toEqual([]);
+  });
 
   it("keeps what a revoked computer approved before its cut on a computer that joins later", async () => {
     const store = memoryStore();
