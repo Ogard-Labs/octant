@@ -340,7 +340,7 @@ labeled non-negative slices. Stacked, grouped, and bar-and-line charts share
 categories across series; a bar-and-line series names itself as a bar or a line.
 The accessible table lists every reading. A pie or donut legend toggles at most
 24 slices; the rest stay in the picture and the table. A shared snapshot keeps
-the chart and drops no series mark.
+the chart, its number format, and every series mark.
 A treemap is a hierarchy drawn as squarified rectangles: nodes name a parent,
 one root, values sit on leaves, and a group's reading is the sum of its
 children. A leaf carries a value for every declared measure and may name a
@@ -354,7 +354,8 @@ journaled. The domain policy refuses a second root, a cycle, a dangling parent,
 a group that carries its own value or a leaf that does not, a value that is
 negative, a measure that is not declared, and a hierarchy past the depth, node,
 measure, or label budget. The accessible fallback is a hierarchical table
-sortable by each measure.
+sortable by each measure. A shared snapshot keeps the hierarchy, its measures,
+and every reading, and drops each leaf's source id.
 A heatmap is a grid coloured by value. A matrix names its rows and columns and
 carries a cell per coordinate with a value and an optional short note; a cell on
 a coordinate the block does not hold, a repeated row, column, or coordinate, and
@@ -367,7 +368,7 @@ preview SVG, and the Markdown and HTML export all draw the same cells. The perso
 can sort a matrix's rows by their total and walk the cells with the arrow keys;
 these are view state and are never journaled. The accessible fallback is a table
 of every coordinate and its total for a matrix, or of every dated reading for a
-calendar.
+calendar. A shared snapshot keeps the grid, its readings, and their notes.
 A bar list is a ranking of magnitudes (`packages/domain/src/canvasBarListLayout.ts`):
 each row is a label, a value, an optional second value, and an optional manifest
 source. Rows sort largest first with a stable tie-break by the author's order,
@@ -381,13 +382,21 @@ which the host reauthorizes. The pure, deterministic layout is shared by the
 screen, the artifact preview SVG, and the Markdown and HTML export. The domain
 policy refuses a repeated label, a negative or non-finite value, a list past the
 row budget, and a source the manifest does not hold; the accessible fallback is a
-table of every row. A metric block may carry a `format`, a `delta`, a
+table of every row. A shared snapshot keeps every row and reading and drops each
+row's source id. A metric block may carry a `format`, a `delta`, a
 `goodDirection` of `up`, `down`, or `neutral` so a delta's tone is never guessed,
 a `sparkline` of at most 256 readings, and a short `caption`; consecutive metric
 blocks are gathered into one responsive row of two to four tiles. The bar list
 and the metric's direction, sparkline, and caption arrive with Canvas schema
 version 7, so a document declaring an older version that carries any of them is
 refused as a future version; a static export carries the same metric fields.
+A share carries every block kind and field a Canvas holds except source ids
+and the design and action blocks it refuses (see the `design` block). A table
+column keeps its number format and display, and a board keeps its own layout.
+Share documents version independently of Canvas documents: a treemap, a
+heatmap, a bar list, a chart's or a table column's number format, a table
+column's display, and a board's layout arrive with share version 3, so a share
+that declares an older version and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -472,8 +481,12 @@ or font, and any link that is not a fragment, naming the frame and the
 construct; the event store and revise policy return that reason to the
 author rather than a generic failure. The sandbox is the boundary and the
 link rule is part of it, because a link is the one way a page with no script
-can leave. A static share refuses a design, and Markdown or HTML export writes
-frame titles, not markup. A design is always a sidebar Canvas. An authored
+can leave. A share refuses a design, and Markdown or HTML export writes
+frame titles, not markup. A share also refuses an action block, whose command
+runs only on this host. Both refusals, and any block or field the share
+contract does not carry, are checked before the snapshot is journaled and
+reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not
+a malformed request. A design is always a sidebar Canvas. An authored
 revision declares the current schema version on the version and its
 definition, so a Canvas written under an earlier version moves forward and can
 gain a design; a version append never moves a Canvas back. Agents writing
@@ -1537,7 +1550,10 @@ modelId }`, and the model picker is provider-first. Discovery can find
   Provider OAuth has two postures ([0111](decisions/0111-host-driven-provider-oauth.md)).
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
-  those tokens. **Host-driven** (`subscription-oauth`, direct HTTP drivers):
+  those tokens, except the opt-in Claude for helpers token that a confined
+  Claude launch signs in with, which the credential broker holds as the Sandbox
+  paragraph of [security and authority](#security-and-authority) states.
+  **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
   id). Direct endpoint drivers accept a `subscription-oauth` credential
@@ -1886,27 +1902,28 @@ native harness in `apps/server/src/harness`:
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
 - **Tool verification.** A routine Check connection runs no generating
-  request, so an OpenAI-compatible or Azure AI Foundry endpoint offers a model
-  Octant's tools only after a person proved that model calls one. The
-  `verify-model-tools` command sends one forced `octant_capability_echo`
-  request through the same sender a turn uses, for one model; an
-  Anthropic-compatible endpoint takes the same command and request in its own
-  wire shape. A model that calls the tool joins `verifiedToolModelIds` on the
-  observed state, which the journal persists with the catalog and a
-  configuration change clears; a model that answers in text leaves it out, and
-  a transport failure (authentication, timeout) is reported rather than
-  recorded as "unsupported". Admission, the AgentRun transport check, and the
-  Chat preflight read that set per model, so verifying one model never offers
-  tools to its siblings. A tool call in a real turn widens nothing either: the
-  provider-level `appManagedTools` flag of an OpenAI-compatible or Foundry
-  profile stays "unsupported", because a tool call proves only the model that
-  made it. The command accepts only the models the endpoint
-  lists or the profile configures, and only a Foundry profile's configured
-  deployments, because its catalogue lists base models that are not
+  request, so an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
+  endpoint offers a model Octant's tools only after a person proved that model
+  calls one. The `verify-model-tools` command sends one forced
+  `octant_capability_echo` request through the same sender a turn uses, for one
+  model; an Anthropic-compatible endpoint sends it in its own wire shape, with
+  `tool_choice` `any`. A model that calls the tool joins
+  `verifiedToolModelIds` on the observed state, which the journal persists with
+  the catalog and a configuration change clears; a model that answers in text
+  leaves it out, and a transport failure (authentication, timeout) is reported
+  rather than recorded as "unsupported". Admission, the AgentRun transport
+  check, and the Chat preflight read that set per model, so verifying one model
+  never offers tools to its siblings; the only tool an unverified model is
+  admitted with is that echo. A tool call in a real turn widens nothing either:
+  the provider-level `appManagedTools` flag of an OpenAI-compatible,
+  Anthropic-compatible, or Foundry profile stays "unsupported", because a tool
+  call proves only the model that made it. The command accepts only the models
+  the endpoint lists or the profile configures, and only a Foundry profile's
+  configured deployments, because its catalogue lists base models that are not
   deployments. Ollama has no verify action until its driver runs the tool
   loop. The model picker marks an unverified model "Chat only" with a "Verify
-  tools" action, and Settings → Octant Harness says the same for a slot's
-  chosen model.
+  tools" action (in Chat, on the selected model), and Settings → Octant
+  Harness says the same for a slot's chosen model.
 - **Goals.** A thread goal may carry up to twelve acceptance criteria
   (`ThreadGoalCriterion`), each with an optional check command; one without a
   command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
@@ -2430,8 +2447,11 @@ mechanisms are:
   in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
   runtime never refreshes a handed-in token, so one it refuses is marked
   expired and the same reconnect step is reported. Only a local window may
-  connect or disconnect. A bound root a launch may not write is denied in
-  the profile, so a checkout under that launch's own temporary directory is not
+  connect or disconnect. Disconnecting deletes the token from the broker and
+  reports a broker it cannot reach. Removing the Claude Code provider clears
+  it best-effort: the removal completes even when the broker is unreachable and
+  the token can remain. Octant has no call that revokes it with Anthropic. A
+  bound root a launch may not write is denied in the profile, so a checkout under that launch's own temporary directory is not
   writable through it. The `--version` read every family and the discovery
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per

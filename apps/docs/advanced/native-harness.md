@@ -348,10 +348,9 @@ table.
 - Only endpoint providers run the harness. Coding CLIs keep their own tools;
   they can be delegated to as children, never made the lead. A lead falls back
   only to another endpoint model, never to a coding CLI.
-- Anthropic-compatible endpoints offer tools when the endpoint does; a model
-  that ignores tool calls simply answers in text. Ollama is not a harness
-  provider yet: its driver has no tool loop, so it is not offered as a slot
-  candidate until it does.
+- Every endpoint model, Anthropic-compatible ones included, is Chat only
+  until you verify its tools. Ollama is not a harness provider yet: its driver
+  has no tool loop, so it is not offered as a slot candidate until it does.
 - Context is reduced by the host's planner; each prune and cut is journaled
   with the cache cost it paid, and the lead can read `context-remaining` to
   checkpoint before one. An endpoint that never reports the model's window,

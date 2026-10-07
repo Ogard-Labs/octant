@@ -68,11 +68,12 @@ const initialCapabilities: ProviderCapabilities = {
   taskProgress: "unsupported",
   nativeChildAgents: "unsupported",
   harnessAutoReview: "unsupported",
+  // appManagedTools stays "unsupported" for the whole endpoint. Every server
+  // tool gate reads "provider flag supported, or this model verified", so a
+  // provider-level "supported" offered Octant tools to every model the
+  // endpoint routes, including ones that answer a tool call in text. Tools
+  // follow a person's per-model Verify tools result (verifiedToolModelIds).
   ...unsupportedChatCapabilities,
-  // Tool use is part of the Messages protocol itself, not a per-model extra,
-  // so an Anthropic-compatible endpoint offers app-managed tools from the
-  // first turn rather than after a probe.
-  appManagedTools: "supported",
 };
 
 export interface AnthropicCompatibleDriverOptions {
@@ -271,7 +272,21 @@ function admitTurn(
 ): ProviderFailure | undefined {
   const observed = options.runtimeRegistry.observedState(options.instanceId);
   const model = observed?.models.find((candidate) => candidate.id === modelId);
-  return validateChatTurnInput(turn, observed?.capabilities ?? initialCapabilities, model);
+  const isCapabilityEchoProbe =
+    turn.tools.length > 0 && turn.tools.every((tool) => isCapabilityEchoToolCall(tool.name));
+  // A tool call proves only the model that made it, so admission reads the
+  // per-model verifiedToolModelIds set and one verified model never unlocks
+  // tools for its siblings on the same endpoint.
+  const isVerifiedModel =
+    observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;
+  return validateChatTurnInput(
+    turn,
+    {
+      ...(observed?.capabilities ?? initialCapabilities),
+      appManagedTools: isCapabilityEchoProbe || isVerifiedModel ? "supported" : "unsupported",
+    },
+    model,
+  );
 }
 
 /**

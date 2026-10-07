@@ -10,6 +10,7 @@ import {
 } from "@octant/contracts/canvas-share";
 import {
   decodeCanvasVersion,
+  type CanvasBarListRow,
   type CanvasBlock,
   type CanvasDefinition,
   type CanvasVersion,
@@ -179,6 +180,22 @@ function sanitizeBlock(block: CanvasBlock): CanvasStaticExportBlock {
     case "plan": {
       const tasks = block.tasks.map(({ sourceIds: _sourceIds, ...task }) => task);
       const shared = { ...block, tasks };
+      assertNoSecretShape(shared, `block.${block.blockId}`);
+      return shared;
+    }
+    case "treemap": {
+      const nodes = block.nodes.map(({ sourceId: _sourceId, ...node }) => node);
+      const shared = { ...block, nodes };
+      assertNoSecretShape(shared, `block.${block.blockId}`);
+      return shared;
+    }
+    case "bar-list": {
+      const withoutSource = ({ sourceId: _sourceId, ...row }: CanvasBarListRow) => row;
+      const [first, ...rest] = block.rows;
+      const shared = {
+        ...block,
+        rows: [withoutSource(first), ...rest.map(withoutSource)] as const,
+      };
       assertNoSecretShape(shared, `block.${block.blockId}`);
       return shared;
     }

@@ -165,7 +165,8 @@ nothing.
 The cards come from a small renderer registry (`apps/web/src/home`). A card is a
 value: `id`, `title`, `icon`, `defaultOn`, `available`, an optional
 `hideWhenEmpty`, one `emptyLabel`, and a `useContent` hook returning `loading`
-or `ready` with a count and a body. The shell builds the list and hands it to the
+or `ready` with a count and a body. A `ready` result may replace the empty line
+for a card that could not look, and may add one link after it. The shell builds the list and hands it to the
 frame, which knows nothing about any card: a new card is a new definition, with
 no change to the frame, Customize, or the stored setting. `available: false`
 (no GitHub connection, insecure token storage, no client in this window) hides
@@ -305,8 +306,8 @@ and when the shell settings or the window workspace change (neither has a feed
 topic). Signals that arrive while a read is in flight become one more read once
 it lands, so a streaming reply does not start a host read per delta.
 
-**Pull requests** is the next card, on by default, and only on a Code start
-screen. It is hidden — and left out of Customize — unless the Pull requests
+**Pull requests** follows Running services, on by default, and only on a Code
+start screen. It is hidden — and left out of Customize — unless the Pull requests
 destination is offered and its read is allowed: no connection, insecure token
 storage, or a missing pull-request capability hides it, the same gate that
 refuses that destination's read. It lists open pull requests across every Code
@@ -324,7 +325,20 @@ more**, which opens Pull requests. A row opens that pull request's existing
 review for its Project. The read is one query of the window's authorized
 snapshot, so a remote window sees only the Projects it was granted.
 
-**CI failures** is the next card, on by default, and only on a Code start
+The card says "Nothing is waiting on you." only when the read succeeded and a
+refresh has reached every connected Project. The snapshot moves only on an
+explicit refresh or a Project's opt-in cadence, which is off by default, so a
+host that has never refreshed has not looked. A read that fails or is refused
+says "Octant could not read pull requests." A snapshot no refresh has reached
+says "Pull requests have not been checked yet.", and one where some connected
+Project was never refreshed says "Some Projects have not been checked yet.";
+both offer **Open Pull requests**, where the refresh is. When the latest
+refresh failed, the snapshot is as old as the last one that succeeded, and the
+card says so from the snapshot's own freshness: "Last checked 3h ago." under
+the rows, or "Nothing was waiting on you when checked 3h ago." Pull requests
+and CI failures share one read of the snapshot when they mount together.
+
+**CI failures** follows Pull requests, on by default, and only on a Code start
 screen. It uses the same gate as Pull requests: no connection, insecure token
 storage, or a missing pull-request capability hides it and leaves it out of
 Customize. It lists failing checks the pull-request refresh already recorded,
@@ -352,7 +366,7 @@ Start a fix, since its branch is not in the Project. It does not start a turn; t
 it. Opening the card reads the same cached snapshot
 Pull requests reads and adds no poll.
 
-**Computers** is the next card, on by default, on Chat, Work, and Code. It lists every
+**Computers** follows CI failures, on by default, on Chat, Work, and Code. It lists every
 host this window is connected to: this computer, paired remote hosts, devboxes,
 and servers. A row names the host and says whether it is connected,
 reconnecting, or offline — the word, not colour alone. A connected or
