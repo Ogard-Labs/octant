@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export type ProviderOAuthSignInState =
-  | { readonly kind: "signed-out" }
+  | { readonly kind: "signed-out"; readonly notice?: string }
   | { readonly kind: "awaiting-consent"; readonly detail: string; readonly href?: string }
   | { readonly kind: "signed-in"; readonly accountLabel: string }
+  /** Sign-out could not reach the issuer; the sign-in is still active. */
+  | { readonly kind: "not-revoked"; readonly accountLabel: string }
   | { readonly kind: "expired" }
   | { readonly kind: "refused"; readonly message: string };
 
@@ -18,6 +20,7 @@ export interface ProviderOAuthSignInProps {
   readonly onSignIn: () => void;
   readonly onUseApiKey: () => void;
   readonly onSignOut: () => void;
+  readonly onSignOutLocally: () => void;
 }
 
 /**
@@ -32,6 +35,16 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
       {props.state.kind === "signed-in" ? (
         <p>
           Signed in as <span className="oct-meta--mono">{props.state.accountLabel}</span>
+        </p>
+      ) : null}
+      {props.state.kind === "signed-out" && props.state.notice !== undefined ? (
+        <p role="status">{props.state.notice}</p>
+      ) : null}
+      {props.state.kind === "not-revoked" ? (
+        <p role="status">
+          Couldn't reach the sign-in service to end the sign-in for{" "}
+          <span className="oct-meta--mono">{props.state.accountLabel}</span>, so it is still active.
+          Try again, or sign out on this computer only.
         </p>
       ) : null}
       {props.state.kind === "expired" ? <p>Sign in again to use this provider.</p> : null}
@@ -74,7 +87,7 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
       >
         Use an API key
       </OctantButton>
-      {props.state.kind === "signed-in" ? (
+      {props.state.kind === "signed-in" || props.state.kind === "not-revoked" ? (
         <OctantButton
           disabled={disabled}
           onClick={props.onSignOut}
@@ -85,19 +98,37 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
           Sign out
         </OctantButton>
       ) : null}
+      {props.state.kind === "not-revoked" ? (
+        <OctantButton
+          disabled={disabled}
+          onClick={props.onSignOutLocally}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Sign out on this computer only
+        </OctantButton>
+      ) : null}
     </div>
   );
 }
 
 export interface ProviderOAuthCommand {
-  readonly kind: "status" | "acknowledge" | "begin" | "poll" | "sign-out";
+  readonly kind: "status" | "acknowledge" | "begin" | "poll" | "sign-out" | "sign-out-locally";
   readonly instanceId: string;
   readonly descriptorId: string;
   readonly attemptId?: string;
 }
 
 export interface ProviderOAuthCommandResult {
-  readonly kind: "signed-out" | "awaiting-consent" | "signed-in" | "expired" | "refused";
+  readonly kind:
+    | "signed-out"
+    | "signed-out-locally"
+    | "not-revoked"
+    | "awaiting-consent"
+    | "signed-in"
+    | "expired"
+    | "refused";
   readonly termsRequired?: boolean;
   readonly accountLabel?: string;
   readonly authorizationUrl?: string;
@@ -180,6 +211,16 @@ export function ProviderOAuthSignInPanel(props: {
           apply(result, setState, setTermsRequired, setAttemptId);
         });
       }}
+      onSignOutLocally={() => {
+        void run?.({
+          kind: "sign-out-locally",
+          instanceId,
+          descriptorId,
+        }).then((result) => {
+          if (result === undefined) return;
+          apply(result, setState, setTermsRequired, setAttemptId);
+        });
+      }}
       onUseApiKey={props.onUseApiKey}
       state={state}
       termsRequired={termsRequired}
@@ -199,6 +240,20 @@ function apply(
   if (result.kind === "signed-out") {
     setAttemptId(undefined);
     setState({ kind: "signed-out" });
+    return;
+  }
+  if (result.kind === "signed-out-locally") {
+    setAttemptId(undefined);
+    setState({
+      kind: "signed-out",
+      notice:
+        "Signed out on this computer. The sign-in service wasn't told, so the sign-in stays valid there until it expires.",
+    });
+    return;
+  }
+  if (result.kind === "not-revoked") {
+    setAttemptId(undefined);
+    setState({ kind: "not-revoked", accountLabel: result.accountLabel ?? "this account" });
     return;
   }
   if (result.kind === "signed-in") {

@@ -141,6 +141,10 @@ async function startFakeSiwcServer(options?: {
   readonly jwksStatus?: number;
   /** Publishes an additional key set entry alongside the signing key. */
   readonly jwksKeys?: readonly RsaKeyPair[];
+  /** Answers the revocation POST with this status instead of 200. */
+  readonly revocationStatus?: number;
+  /** Names this URL as the discovery `revocation_endpoint` instead of its own. */
+  readonly revocationEndpoint?: string;
 }): Promise<FakeSiwcServer> {
   const keyPair = options?.keyPair ?? rsaKeyPair();
   // `rotated-key` signs the refresh identity token with a key pair the
@@ -207,7 +211,7 @@ async function startFakeSiwcServer(options?: {
       response.end(
         JSON.stringify({
           issuer,
-          revocation_endpoint: `${baseUrl(server)}/revoke`,
+          revocation_endpoint: options?.revocationEndpoint ?? `${baseUrl(server)}/revoke`,
         }),
       );
       return;
@@ -222,7 +226,7 @@ async function startFakeSiwcServer(options?: {
         lastRevocation = Object.fromEntries(
           new URLSearchParams(Buffer.concat(chunks).toString("utf8")),
         );
-        response.writeHead(200);
+        response.writeHead(options?.revocationStatus ?? 200);
         response.end();
       });
       return;
@@ -1246,6 +1250,56 @@ describe("ChatGPT plan (SIWC) dialect", () => {
     } finally {
       await runtime.close();
       await fake.close();
+    }
+  });
+
+  it("asks to sign in again and drops the grant when the issuer no longer recognizes the client on refresh", async () => {
+    const fake = await startFakeSiwcServer({ refresh: { status: 401, error: "invalid_client" } });
+    const store = memoryStore();
+    const runtime = runtimeFor(store, fake);
+    try {
+      const credentialRef = await completeSignIn(runtime, fake);
+      await expect(runtime.refresh(credentialRef)).resolves.toEqual({
+        kind: "sign-in-again",
+        reason: "revoked",
+      });
+      expect(store.values.has(credentialRef)).toBe(false);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("does not count a 404 from the revocation endpoint as revoked and keeps the grant", async () => {
+    const fake = await startFakeSiwcServer({ revocationStatus: 404 });
+    const store = memoryStore();
+    const runtime = runtimeFor(store, fake);
+    try {
+      const credentialRef = await completeSignIn(runtime, fake);
+      await expect(runtime.revoke(credentialRef)).resolves.toEqual({ kind: "not-revoked" });
+      expect(fake.revokeHits()).toBe(1);
+      expect(store.values.has(credentialRef)).toBe(true);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
+  it("never sends the refresh token to a revocation endpoint on another origin", async () => {
+    const elsewhere = await startFakeSiwcServer();
+    const fake = await startFakeSiwcServer({ revocationEndpoint: `${elsewhere.url}/revoke` });
+    const store = memoryStore();
+    const runtime = runtimeFor(store, fake);
+    try {
+      const credentialRef = await completeSignIn(runtime, fake);
+      await expect(runtime.revoke(credentialRef)).resolves.toEqual({ kind: "not-revoked" });
+      expect(elsewhere.revokeHits()).toBe(0);
+      expect(fake.revokeHits()).toBe(0);
+      expect(store.values.has(credentialRef)).toBe(true);
+    } finally {
+      await runtime.close();
+      await fake.close();
+      await elsewhere.close();
     }
   });
 

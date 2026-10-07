@@ -286,7 +286,11 @@ stable host id is sent before the first sign-in and the issued client id
 returned by the callback is stored and reused for every later refresh. The
 identity token is validated against the issuer's published keys before the
 grant is stored. Signing out revokes the refresh token at the issuer before
-the local grant is dropped.
+the local grant is dropped. If the sign-in service can't be reached, Octant
+keeps you signed in and says so: try again, or choose **Sign out on this
+computer only**, which removes the stored sign-in here but leaves it valid at
+the sign-in service until it expires. Signing in again on the same endpoint
+always removes the previous sign-in from this computer.
 
 The ChatGPT plan route is a preview with a fixed request shape: storage is
 disabled, streaming is on, the full history is sent as an array, system text

@@ -239,10 +239,98 @@ describe("provider OAuth routes", () => {
     expect(await response?.json()).toEqual({ kind: "signed-in", accountLabel: "Fixture account" });
     expect(credentials.set).toHaveBeenCalled();
   });
+
+  it("keeps the grant and reports it is still active when the issuer cannot be told about a sign-out", async () => {
+    const credentials = pointerStore("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    const signOut = vi.fn<HostOAuthService["signOut"]>(async (input) =>
+      input.forgetWhenNotRevoked === true
+        ? { kind: "signed-out-locally" }
+        : { kind: "not-revoked" },
+    );
+    const route = fixture({ credentials, signOut });
+    const response = await route(command("sign-out"));
+    expect(await response?.json()).toEqual({
+      kind: "not-revoked",
+      accountLabel: "Fixture account",
+    });
+    expect(signOut).toHaveBeenCalledWith(expect.objectContaining({ forgetWhenNotRevoked: false }));
+    expect(credentials.delete).not.toHaveBeenCalled();
+  });
+
+  it("signs out on this host only when asked, and says the issuer was not told", async () => {
+    const credentials = pointerStore("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    const signOut = vi.fn<HostOAuthService["signOut"]>(async (input) =>
+      input.forgetWhenNotRevoked === true
+        ? { kind: "signed-out-locally" }
+        : { kind: "not-revoked" },
+    );
+    const route = fixture({ credentials, signOut });
+    const response = await route(command("sign-out-locally"));
+    expect(await response?.json()).toMatchObject({
+      kind: "signed-out-locally",
+      accountLabel: "Fixture account",
+    });
+    expect(signOut).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        forgetWhenNotRevoked: true,
+      }),
+    );
+    expect(credentials.delete).toHaveBeenCalledWith(instanceId);
+  });
+
+  it("drops the replaced grant on a re-sign-in even when the issuer cannot be told", async () => {
+    const credentials = pointerStore("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+    const signOut = vi.fn<HostOAuthService["signOut"]>(async (input) =>
+      input.forgetWhenNotRevoked === true
+        ? { kind: "signed-out-locally" }
+        : { kind: "not-revoked" },
+    );
+    const route = fixture({
+      credentials,
+      signOut,
+      status: async () => ({
+        kind: "signed-in",
+        attemptId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        descriptorId: descriptor.descriptorId,
+        credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      }),
+      readInstance: () => instanceAt("https://example.com/v1"),
+    });
+    const response = await route(command("poll"));
+    expect(await response?.json()).toEqual({ kind: "signed-in", accountLabel: "Fixture account" });
+    // The old grant's local material is forgotten, not left orphaned.
+    expect(signOut).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentialRef: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        forgetWhenNotRevoked: true,
+      }),
+    );
+    expect(credentials.set).toHaveBeenLastCalledWith(
+      instanceId,
+      expect.stringContaining("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+    );
+  });
 });
 
+function pointerStore(credentialRef: string) {
+  return {
+    has: vi.fn(async () => true),
+    resolve: vi.fn(async () =>
+      encodeSubscriptionOAuthCredential({
+        kind: "subscription-oauth",
+        credentialRef,
+        descriptorId: "fixture-oauth",
+        accountLabel: "Fixture account",
+      }),
+    ),
+    set: vi.fn(async () => undefined),
+    delete: vi.fn(async () => undefined),
+  };
+}
+
 function command(
-  kind: "status" | "sign-out" | "begin" | "poll",
+  kind: "status" | "sign-out" | "sign-out-locally" | "begin" | "poll",
   options: { readonly origin?: string } = {},
 ) {
   return new Request("http://127.0.0.1/api/providers/oauth", {

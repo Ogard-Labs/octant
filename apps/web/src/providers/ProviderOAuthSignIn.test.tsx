@@ -8,6 +8,7 @@ const handlers = () => ({
   onSignIn: vi.fn(),
   onUseApiKey: vi.fn(),
   onSignOut: vi.fn(),
+  onSignOutLocally: vi.fn(),
 });
 
 describe("provider sign-in", () => {
@@ -94,6 +95,41 @@ describe("provider sign-in", () => {
 describe("provider sign-in panel", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("offers a sign-out on this computer only when the sign-in service cannot be told, and says so afterwards", async () => {
+    const user = userEvent.setup();
+    const run = vi.fn(async (command: { readonly kind: string }) => {
+      if (command.kind === "status") {
+        return { kind: "signed-in" as const, accountLabel: "ChatGPT plan" };
+      }
+      if (command.kind === "sign-out") {
+        return { kind: "not-revoked" as const, accountLabel: "ChatGPT plan" };
+      }
+      return { kind: "signed-out-locally" as const, termsRequired: false };
+    });
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="00000000-0000-4000-8000-000000000901"
+        onUseApiKey={() => undefined}
+        run={run}
+        termsSummary="Terms"
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign out" }));
+    expect(await screen.findByText(/so it is still active/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Sign out on this computer only" }));
+    expect(
+      await screen.findByText(/wasn't told, so the sign-in stays valid there until it expires/),
+    ).toBeInTheDocument();
+    expect(run.mock.calls.map((call) => call[0].kind)).toEqual([
+      "status",
+      "sign-out",
+      "sign-out-locally",
+    ]);
+    expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
   });
 
   it("opens the consent URL once while polling awaiting-consent", async () => {

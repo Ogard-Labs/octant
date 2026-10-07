@@ -53,11 +53,26 @@ export interface HostOAuthService {
     | { readonly kind: "transient" }
     | { readonly kind: "unavailable" }
   >;
+  /**
+   * Sign out of one grant. A dialect with a revocation endpoint tells the
+   * issuer first. When the issuer does not confirm, the grant is kept and the
+   * result is `not-revoked`, unless `forgetWhenNotRevoked` asks to delete the
+   * local grant anyway: then the result is `signed-out-locally`, which says
+   * plainly that the issuer was not told and the refresh token stays valid
+   * there until it expires.
+   */
   readonly signOut: (input: {
     readonly principalKind: PrincipalKind;
     readonly descriptor: HostOAuthDescriptor;
     readonly credentialRef: string;
-  }) => Promise<{ readonly kind: "signed-out" } | Refused | { readonly kind: "unavailable" }>;
+    readonly forgetWhenNotRevoked?: boolean;
+  }) => Promise<
+    | { readonly kind: "signed-out" }
+    | { readonly kind: "signed-out-locally" }
+    | { readonly kind: "not-revoked" }
+    | Refused
+    | { readonly kind: "unavailable" }
+  >;
   /**
    * Whether a descriptor's dialect revokes the refresh token at the issuer
    * before the local grant is dropped. The ChatGPT plan dialect does; the
@@ -281,23 +296,31 @@ export function createHostOAuthService(options: {
         action: "provider.oauth.sign-out",
       });
       if (decision.kind === "deny") return refuse(input.descriptor, "local-host-required");
+      let result: { readonly kind: "signed-out" } | { readonly kind: "signed-out-locally" };
       try {
         // The ChatGPT plan dialect revokes the refresh token at the issuer's
         // revocation endpoint before the local grant is dropped; other
         // dialects have no revocation endpoint and simply forget the grant.
         if (input.descriptor.dialect === "chatgpt-plan-siwc") {
           const revoked = await options.broker.revoke(input.credentialRef);
-          // The broker answers HTTP 200 with an unavailable result when the
-          // issuer refused the revocation or the grant could not be dropped:
-          // the refresh token stayed valid at the issuer and the grant stayed
-          // in the store. Claiming signed-out anyway would make the caller
-          // delete the instance pointer and journal a sign-out that never
-          // happened, silently leaving the session alive at the issuer.
-          if (!isRecord(revoked) || revoked.kind !== "revoked") {
+          const kind = isRecord(revoked) ? revoked.kind : undefined;
+          if (kind === "revoked") {
+            result = { kind: "signed-out" };
+          } else if (kind === "not-revoked") {
+            // The issuer was not told, so the refresh token is still valid
+            // there and the broker kept the grant. Claiming a plain sign-out
+            // would hide a session that is still alive at the issuer; the
+            // caller either keeps the grant to retry or explicitly forgets it
+            // on this host only.
+            if (input.forgetWhenNotRevoked !== true) return { kind: "not-revoked" };
+            await options.broker.forget(input.credentialRef);
+            result = { kind: "signed-out-locally" };
+          } else {
             return { kind: "unavailable" };
           }
         } else {
           await options.broker.forget(input.credentialRef);
+          result = { kind: "signed-out" };
         }
       } catch {
         return { kind: "unavailable" };
@@ -307,7 +330,7 @@ export function createHostOAuthService(options: {
         descriptorId: input.descriptor.descriptorId,
         credentialRef: input.credentialRef,
       });
-      return { kind: "signed-out" };
+      return result;
     },
     revokesOnSignOut: (descriptor) => descriptor.dialect === "chatgpt-plan-siwc",
   };

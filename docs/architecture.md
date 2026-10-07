@@ -2670,11 +2670,22 @@ mechanisms are:
   checked for signature, issuer, audience, expiry, and subject equal to the
   stored subject — not for a nonce, because refresh does not send one.
   When the granted scopes omit `chatgpt.tokens.use.direct`, the sign-in is
-  still valid as identity-only and plan usage is reported disabled. Sign-out
-  revokes the refresh token at the issuer's discovery `revocation_endpoint`
-  before the local grant is dropped. The plan route's request profile is
-  enforced before send: `store:false` and `stream:true` are mandatory, `input`
-  is an array carrying the full history, system text travels as
+  still valid as identity-only and the access result reports
+  `subscriptionUsageGranted: false`, the provider-neutral seam field drivers
+  use to refuse subscription-billed turns. A refresh answered with
+  `invalid_client` means the issued client is gone, so the grant is dropped
+  and the person signs in again. Sign-out revokes the refresh token at the
+  issuer's discovery `revocation_endpoint` before the local grant is dropped;
+  the endpoint must share the issuer's origin, and only a 2xx answer counts
+  as revoked. When the issuer does not confirm, the grant is kept and the
+  person is told the sign-in is still active; they can retry or sign out on
+  this computer only, which deletes the local grant and says the issuer was
+  not told. A re-sign-in that replaces a grant always deletes the replaced
+  grant's local material, revoking it first when the issuer answers, so no
+  refresh token is left in the credential store without a pointer. The plan
+  route's request profile is enforced before send: `store:false` and
+  `stream:true` are mandatory, `input` is an array carrying the full
+  history, system text travels as
   `instructions` (an explicit system-role message item is rejected), a fixed
   parameter set is omitted entirely, and only function tools are allowed —
   hosted tools are refused. A request that cannot be expressed is refused

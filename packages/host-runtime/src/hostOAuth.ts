@@ -170,7 +170,16 @@ export interface HostOAuthRuntime {
   readonly close: () => Promise<void>;
 }
 
-export type HostOAuthRevokeResult = { readonly kind: "revoked" } | { readonly kind: "unavailable" };
+/**
+ * `not-revoked`: the issuer did not confirm the revocation (unreachable,
+ * refused, or no same-origin revocation endpoint). The local grant is kept so
+ * the caller can retry or deliberately forget it on this host only.
+ * `unavailable`: the grant could not be read or deleted locally.
+ */
+export type HostOAuthRevokeResult =
+  | { readonly kind: "revoked" }
+  | { readonly kind: "not-revoked" }
+  | { readonly kind: "unavailable" };
 
 interface StoredGrant {
   readonly kind: typeof GRANT_KIND;
@@ -765,8 +774,11 @@ const SIWC_DISCOVERY_PATH = "/.well-known/openid-configuration";
 
 /**
  * Revoke a ChatGPT plan refresh token at the issuer's discovery
- * `revocation_endpoint`. Best-effort: the local grant is dropped regardless,
- * but a failed revocation is reported so the caller can surface it.
+ * `revocation_endpoint`. True only when the issuer confirmed the revocation
+ * with a 2xx answer. The endpoint must share the issuer's origin: discovery
+ * is fetched over the network, and a document naming some other host must
+ * not be able to collect the refresh token. A 404 means there was no
+ * revocation endpoint to answer, not that the token is dead.
  */
 async function revokeSiwcRefreshToken(input: {
   readonly fetch: typeof fetch;
@@ -788,7 +800,9 @@ async function revokeSiwcRefreshToken(input: {
   const document = await readResponseJson(discovery);
   const endpoint =
     document === undefined ? undefined : stringField(document, "revocation_endpoint");
-  if (endpoint === undefined || !allowedEndpoint(endpoint)) return false;
+  if (endpoint === undefined || !allowedEndpoint(endpoint) || !sameOrigin(endpoint, input.issuer)) {
+    return false;
+  }
   try {
     const response = await input.fetch(endpoint, {
       method: "POST",
@@ -800,7 +814,7 @@ async function revokeSiwcRefreshToken(input: {
         client_id: input.clientId,
       }).toString(),
     });
-    return response.ok || response.status === 404;
+    return response.ok;
   } catch {
     return false;
   }
@@ -1537,7 +1551,7 @@ export function createHostOAuthRuntime(options: {
           clientId: grant.clientId,
           refreshToken: grant.refreshToken,
         });
-        if (!revoked) return { kind: "unavailable" };
+        if (!revoked) return { kind: "not-revoked" };
       }
       try {
         await options.store.delete(credentialRef);
@@ -1800,6 +1814,11 @@ function mapTokenError(error: string, codeExchange: boolean): TokenRequestResult
   if (error === "expired_token") return { kind: "refused", reason: "timeout", error };
   if (error === "refresh_token_reused")
     return { kind: "refused", reason: "exchange-refused", error };
+  // The issuer no longer recognizes the client the grant was issued to (a
+  // ChatGPT plan registration that was removed, for example). Retrying can
+  // never succeed, so on refresh this ends the grant like a dead refresh
+  // token instead of reporting a transient failure forever.
+  if (error === "invalid_client") return { kind: "refused", reason: "exchange-refused", error };
   // The ChatGPT plan issuer reports a dead refresh token with its own error
   // codes; every one of them means the grant is gone and the person must
   // sign in again.
@@ -1828,8 +1847,8 @@ function refreshRefusal(
   if (error === "expired_token" || error === "token_expired" || reason === "timeout") {
     return "expired";
   }
-  // invalid_grant, invalid_refresh_token, refresh_token_expired, and
-  // refresh_token_invalidated all mean the grant is gone.
+  // invalid_grant, invalid_refresh_token, refresh_token_expired,
+  // refresh_token_invalidated, and invalid_client all mean the grant is gone.
   return "revoked";
 }
 
@@ -2019,6 +2038,14 @@ function authorizationRequest(
   url.searchParams.set("code_challenge", input.challenge);
   url.searchParams.set("code_challenge_method", "S256");
   return url.toString();
+}
+
+function sameOrigin(value: string, other: string): boolean {
+  try {
+    return new URL(value).origin === new URL(other).origin;
+  } catch {
+    return false;
+  }
 }
 
 function allowedEndpoint(value: string): boolean {
