@@ -112,13 +112,33 @@ describe("bar list block", () => {
     expect(dispatched?.command.command).toBe("canvas.open-source");
   });
 
-  it("never journals Show all", async () => {
+  it("flips the ranking to smallest first and back, in the picture and the table", async () => {
+    const user = userEvent.setup();
+    render(<CanvasView input={definition()} />);
+
+    await user.click(screen.getByRole("button", { name: "Largest first ↓" }));
+    const flipped = screen.getByRole("button", { name: "Smallest first ↑" });
+    expect(flipped).toHaveAttribute("aria-pressed", "true");
+    expect(visibleLabels()[0]).toBe("packages/contracts/src/canvasIdentity.ts");
+
+    await user.click(screen.getByText("View bar list data"));
+    const table = screen.getByRole("table", { name: "Bar list readings" });
+    expect(within(table).getAllByRole("rowheader")[0]).toHaveTextContent(
+      "packages/contracts/src/canvasIdentity.ts",
+    );
+
+    await user.click(flipped);
+    expect(visibleLabels()[0]).toBe("packages/domain/src/canvasPolicy.ts");
+  });
+
+  it("never journals Show all or the ranking order", async () => {
     const user = userEvent.setup();
     const definitionInput = definition();
     const before = JSON.stringify(definitionInput);
     render(<CanvasView input={definitionInput} />);
 
     await user.click(screen.getByRole("button", { name: "Show all 10" }));
+    await user.click(screen.getByRole("button", { name: "Largest first ↓" }));
 
     expect(JSON.stringify(definitionInput)).toBe(before);
   });

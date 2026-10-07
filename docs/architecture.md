@@ -327,8 +327,8 @@ calendar.
 A bar list is a ranking of magnitudes (`packages/domain/src/canvasBarListLayout.ts`):
 each row is a label, a value, an optional second value, and an optional manifest
 source. Rows sort largest first with a stable tie-break by the author's order,
-and the list shows a top N with Show all; both are view state and are never
-journaled. A bar's length is its share of the largest value, drawn in neutral
+a reader can flip the ranking to smallest first, and the list shows a top N with
+Show all; both are view state and are never journaled. A bar's length is its share of the largest value, drawn in neutral
 ink or through the shared sequential scale. A path-like label uses the shared
 path style (directory dimmed, file name at full ink), and a row that names a
 manifest source offers Open file through the allowlisted open-source action,

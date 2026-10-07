@@ -947,6 +947,13 @@
   max-width: 100%;
 }
 
+.canvas-block__bar-list-header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-bottom: var(--oct-space-2);
+}
+
 .canvas-block__bar-list-rows {
   list-style: none;
   margin: 0;
