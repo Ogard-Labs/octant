@@ -1369,6 +1369,105 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("lists what a running turn waits on for a window that may answer it, and drops each once answered", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    const startOperation = operationId(901);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "approval-request",
+          requestId: "provider-approval-listed",
+          action: "write",
+          description: "Modify src/a.ts",
+        }),
+      ),
+    );
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+      expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
+    });
+    expect(
+      fixture.runtime.raiseHarnessQuestion?.({
+        threadId: String(threadId),
+        questionId: "harness-question-listed",
+        prompt: "Which branch should I base this on?",
+        options: ["main", "release"],
+      }),
+    ).toBe(true);
+
+    const listed = (await fixture.runtime.pendingRequests?.(windowId)) ?? [];
+    expect(listed.map((request) => `${request.mode}:${request.kind}`)).toEqual([
+      "code:approval",
+      "code:question",
+    ]);
+    const [approval, question] = listed;
+    if (approval?.mode !== "code" || approval.kind !== "approval") {
+      throw new Error("Expected a Code approval.");
+    }
+    if (question?.mode !== "code" || question.kind !== "question") {
+      throw new Error("Expected a Code question.");
+    }
+    expect(approval).toMatchObject({
+      projectId: thread().projectId,
+      threadId,
+      threadTitle: "Runtime",
+      answer: { threadId, checkoutId },
+    });
+    expect(question).toMatchObject({
+      text: "Which branch should I base this on?",
+      options: [{ label: "main" }, { label: "release" }],
+      answer: { threadId, checkoutId, requestId: "harness-question-listed" },
+    });
+
+    // A window without this Code Project's access is offered nothing.
+    fixture.access.mockResolvedValue(false);
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
+    fixture.access.mockResolvedValue(true);
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(902),
+        ...approval.answer,
+        decision: "approved",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(connection.answerApproval).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "provider-approval-listed",
+      approved: true,
+    });
+    expect((await fixture.runtime.pendingRequests?.(windowId))?.map((r) => r.kind)).toEqual([
+      "question",
+    ]);
+
+    await fixture.runtime.execute(windowId, {
+      kind: "answer-provider-input",
+      operationId: operationId(903),
+      ...question.answer,
+      response: fixture.response,
+    });
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
+    fixture.close();
+  });
+
   it("stops a provider turn whose tool requests were denied for the third time", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -1468,6 +1567,69 @@ describe("CodeOperationRuntime", () => {
         },
       });
     });
+    fixture.close();
+  });
+
+  it("says a browser approval is gone when it expires unanswered, which journals nothing", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      rootId: "90000000-0000-4000-8000-000000000009",
+      worktreeId: checkoutId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const ready = decodeBrowserAutomationSnapshot({ status: "ready", threadId, evidence: [] });
+    const withdrawn = vi.fn();
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      onPendingRequestWithdrawn: withdrawn,
+      browserAutomation: {
+        resolveAuthority: () => authority,
+        inspectThread: () => ready,
+        create: vi.fn(async () => ready),
+        act: vi.fn(async () => ready),
+        releaseThread: vi.fn(async () => ready),
+      },
+    });
+    const operation = operationId(910);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "browser-expiring",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"navigate","url":"https://example.com"}',
+          }),
+        ),
+      );
+      await vi.waitFor(async () =>
+        expect((await fixture.runtime.pendingRequests?.(windowId))?.map((r) => r.kind)).toEqual([
+          "approval",
+        ]),
+      );
+      expect(withdrawn).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(10 * 60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(withdrawn).toHaveBeenCalledOnce();
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
     fixture.close();
   });
 
@@ -3043,6 +3205,7 @@ function runtimeFixture(options: {
   >[0]["resolveProviderDriver"];
   isProviderModelAllowed?: (thread: CodeThread) => boolean;
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
+  onPendingRequestWithdrawn?: () => void;
   evidencePut?: (
     content: string,
     metadata?: { readonly truncated?: boolean },
@@ -3218,6 +3381,9 @@ function runtimeFixture(options: {
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
+    ...(options.onPendingRequestWithdrawn === undefined
+      ? {}
+      : { onPendingRequestWithdrawn: options.onPendingRequestWithdrawn }),
     reportRuntimeWorkFailure: (failure) => {
       runtimeWorkFailures.push(failure.kind);
       if (options.throwRuntimeWorkReporter === true) throw new Error("diagnostic reporter failed");

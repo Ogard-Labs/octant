@@ -445,8 +445,15 @@ import { boardFactsByThread, remoteHostLabel, type WorkingNowThread } from "./ho
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
-import { OctantCommandProvider } from "./palette/CommandRegistry";
-import { buildOctantCommands, type CommandProject } from "./palette/buildOctantCommands";
+import { NeedsYouProvider, OctantCommandProvider } from "./palette/CommandRegistry";
+import {
+  buildOctantCommands,
+  type CommandProject,
+  type CommandThread,
+} from "./palette/buildOctantCommands";
+import { answerPendingApproval } from "./palette/answerPendingApproval";
+import type { ApprovalDecision, ApprovalPendingRequest } from "./palette/needsYouCommands";
+import { usePendingRequests } from "./palette/usePendingRequests";
 import { useCommandExtensions } from "./palette/useCommandSkills";
 import { OctantAlert } from "./ui/base/OctantAlert";
 
@@ -1394,6 +1401,7 @@ function LaunchedShell(
     goalClient,
     goalLoopClient,
     hostClient,
+    pendingRequestClient,
     projectBrowserClient,
     projectTerminalClient,
     followUpSuggestionClient,
@@ -1467,6 +1475,66 @@ function LaunchedShell(
   // The row menu closes before this operation finishes. Keep its progress or
   // result available until the user dismisses it or a later operation replaces it.
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
+  // The palette opens on what is waiting for the person. It reads the host's
+  // list each time it opens, and only where the host lists it at all.
+  const pendingRequests = usePendingRequests(pendingRequestClient);
+  const openCommandThread = (thread: CommandThread): void => {
+    // Picking a waiting thread means "show me this thread", the same as a
+    // sidebar row: a Board or Inbox that was open would otherwise keep the
+    // pane and hide the thread the person just chose.
+    closeWorkspaceReaders();
+    // The entry keeps its thread's own Project so a cross-Project open
+    // dispatches the Project switch, exactly like the sidebar's open
+    // handlers, instead of a plain open-tab the server-authoritative
+    // workspace policy rejects.
+    const threadProjectId =
+      thread.projectId === undefined ? undefined : decodeProjectId(thread.projectId);
+    if (thread.mode === "chat") {
+      void controller.openChatThread(
+        decodeChatThreadId(thread.threadId),
+        thread.title,
+        threadProjectId,
+      );
+      return;
+    }
+    if (thread.mode === "work") {
+      void controller.openWorkThread(
+        decodeWorkThreadId(thread.threadId),
+        thread.title,
+        undefined,
+        threadProjectId,
+      );
+      return;
+    }
+    void controller.openCodeThread(
+      decodeCodeThreadId(thread.threadId),
+      thread.title,
+      undefined,
+      threadProjectId,
+    );
+  };
+  const answerNeedsYouApproval = (
+    request: ApprovalPendingRequest,
+    decision: ApprovalDecision,
+  ): void => {
+    void answerPendingApproval({ request, decision, workRequestClient, codeClient }).then(
+      (outcome) =>
+        setThreadExportNotice(
+          outcome.status === "refused"
+            ? outcome.message
+            : `${decision === "approved" ? "Approved" : "Denied"}: ${request.threadTitle}`,
+        ),
+    );
+  };
+  const needsYouSource =
+    pendingRequestClient === undefined
+      ? undefined
+      : {
+          requests: pendingRequests.requests,
+          refresh: pendingRequests.refresh,
+          onOpenThread: openCommandThread,
+          onAnswerApproval: answerNeedsYouApproval,
+        };
   const [updateReadyNotice, dismissUpdateReadyNotice] = useAppUpdateReadyNotice(
     props.hostBridge?.subscribeAppUpdateState,
   );
@@ -5853,37 +5921,7 @@ function LaunchedShell(
         mode: thread.mode,
         ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
       })),
-    onOpenThread: (thread) => {
-      // The entry keeps its thread's own Project so a cross-Project open
-      // dispatches the Project switch, exactly like the sidebar's open
-      // handlers, instead of a plain open-tab the server-authoritative
-      // workspace policy rejects.
-      const threadProjectId =
-        thread.projectId === undefined ? undefined : decodeProjectId(thread.projectId);
-      if (thread.mode === "chat") {
-        void controller.openChatThread(
-          decodeChatThreadId(thread.threadId),
-          thread.title,
-          threadProjectId,
-        );
-        return;
-      }
-      if (thread.mode === "work") {
-        void controller.openWorkThread(
-          decodeWorkThreadId(thread.threadId),
-          thread.title,
-          undefined,
-          threadProjectId,
-        );
-        return;
-      }
-      void controller.openCodeThread(
-        decodeCodeThreadId(thread.threadId),
-        thread.title,
-        undefined,
-        threadProjectId,
-      );
-    },
+    onOpenThread: openCommandThread,
     projects: projectController.projects
       .filter((project) => project.lifecycle === "active" && enabledProjectTypes.has(project.type))
       .map((project) => ({
@@ -7649,40 +7687,42 @@ function LaunchedShell(
         settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
       >
         <OctantCommandProvider commands={octantCommands}>
-          {/* Held here rather than with any Code pane: a thread's controller has to
+          <NeedsYouProvider source={needsYouSource}>
+            {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-          <CodeThreadControllerSlots
-            client={codeClient}
-            readCursorStore={codeReadCursorStore}
-            registry={codeThreadControllers}
-            threadIds={openCodeThreadIds}
-          />
-          <TrackerReferenceProvider ports={trackerReferencePorts}>
-            <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-              <ProjectThreadsProvider value={projectThreadsAccess}>
-                <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                  <StreamRepliesContext.Provider
-                    value={controller.settings?.streamReplies !== false}
-                  >
-                    {/* The floor for every rendered link: panes that can host a
+            <CodeThreadControllerSlots
+              client={codeClient}
+              readCursorStore={codeReadCursorStore}
+              registry={codeThreadControllers}
+              threadIds={openCodeThreadIds}
+            />
+            <TrackerReferenceProvider ports={trackerReferencePorts}>
+              <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+                <ProjectThreadsProvider value={projectThreadsAccess}>
+                  <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                    <StreamRepliesContext.Provider
+                      value={controller.settings?.streamReplies !== false}
+                    >
+                      {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                    <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                      <WorkKindChoiceContext.Provider value={workKindChoice}>
-                        <ModelToolVerificationContext.Provider
-                          value={providerController.verifyModelTools}
-                        >
-                          {shell}
-                        </ModelToolVerificationContext.Provider>
-                      </WorkKindChoiceContext.Provider>
-                    </MarkdownLinkActionsContext.Provider>
-                  </StreamRepliesContext.Provider>
-                </NewTaskDraftsContext.Provider>
-              </ProjectThreadsProvider>
-            </SidebarThreadDragContext.Provider>
-          </TrackerReferenceProvider>
+                      <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                        <WorkKindChoiceContext.Provider value={workKindChoice}>
+                          <ModelToolVerificationContext.Provider
+                            value={providerController.verifyModelTools}
+                          >
+                            {shell}
+                          </ModelToolVerificationContext.Provider>
+                        </WorkKindChoiceContext.Provider>
+                      </MarkdownLinkActionsContext.Provider>
+                    </StreamRepliesContext.Provider>
+                  </NewTaskDraftsContext.Provider>
+                </ProjectThreadsProvider>
+              </SidebarThreadDragContext.Provider>
+            </TrackerReferenceProvider>
+          </NeedsYouProvider>
         </OctantCommandProvider>
       </SpeechCapabilityProvider>
     </ComputerUseEnabledContext.Provider>

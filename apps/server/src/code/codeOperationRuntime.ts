@@ -39,6 +39,7 @@ import {
   type CodeThread,
   type CodeThreadId,
   type EventActor,
+  type PendingRequest,
   type ProviderCapabilities,
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
@@ -57,7 +58,10 @@ import {
   type GitScopedDiffResult,
 } from "./gitObservationPort";
 import { GitService } from "./gitService";
-import { CodeOperationEventStore } from "./codeOperationEventStore";
+import {
+  CodeOperationEventStore,
+  MAX_CODE_OPERATION_REPLAY_LIMIT,
+} from "./codeOperationEventStore";
 import { chooseCodeForkPoint, codeThreadTurns } from "./codeForkPoint";
 import {
   CodeRuntimeWorkRecorder,
@@ -96,6 +100,7 @@ import {
   type CodeOperationScaffoldPort,
   type CodeOperationServiceOptions,
   type CodeOperationTurnPort,
+  type CodeTurnPendingRequest,
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
@@ -192,6 +197,12 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 export interface CodeOperationRuntimeOptions {
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
+  /**
+   * Told when a pending request ends without a journal event: a browser-origin
+   * approval that expires or whose tool call is abandoned leaves nothing in the
+   * stream, so the change feed would otherwise never say it is gone.
+   */
+  readonly onPendingRequestWithdrawn?: () => void;
   readonly computerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
@@ -494,6 +505,11 @@ export interface CodeOperationRuntime {
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
   }): boolean;
+  /**
+   * Every approval and question a running turn is waiting on that this window
+   * could answer through `execute`, under the same scope those answers pass.
+   */
+  pendingRequests?(windowId: WindowId): Promise<ReadonlyArray<PendingRequest>>;
   close(): Promise<void>;
   reconcile?: () => Promise<void>;
   /**
@@ -1114,6 +1130,7 @@ export function createCodeOperationRuntime(
       return { terminalId: input.terminalId, state: snapshot.status };
     },
     raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
+    pendingRequests: (windowId) => service.listPendingForWindow(windowId),
     subscribe: (windowId, threadId, operationId, afterCursor, limit) =>
       service.subscribe(windowId, threadId, operationId, afterCursor, limit),
     readRepositoryTestStatus: (windowId, threadId, checkoutId) =>
@@ -1839,6 +1856,72 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return true;
   }
 
+  /**
+   * The approvals and questions running turns in this process are parked on,
+   * with the text and time the journal recorded when each was asked. Only a
+   * live turn can deliver an answer: a journaled request whose turn died with
+   * the process is settled interrupted by its answer, so it is never offered.
+   * A turn whose stream cannot be replayed whole offers nothing rather than a
+   * request without its journaled text.
+   */
+  pendingRequests(): ReadonlyArray<CodeTurnPendingRequest> {
+    const pending: CodeTurnPendingRequest[] = [];
+    for (const active of this.#active.values()) {
+      if (active.state !== "running" && active.state !== "waiting") continue;
+      const approvals = new Set([...active.approvals.keys(), ...active.browserApprovals.keys()]);
+      if (approvals.size === 0 && active.questions.size === 0) continue;
+      // A provider may ask again under an identity it used before; the latest
+      // ask is the one still waiting.
+      const asked = new Map<string, CodeTurnPendingRequest>();
+      for (const frame of this.#operationFrames(active)) {
+        const event = frame.event;
+        const scope = {
+          threadId: active.thread.id,
+          checkoutId: active.thread.checkoutId,
+          requestedAt: frame.occurredAt,
+        };
+        if (event.kind === "approval-requested" && approvals.has(String(event.approvalId))) {
+          asked.set(`approval:${String(event.approvalId)}`, {
+            ...scope,
+            kind: "approval",
+            approvalId: event.approvalId,
+            summary: event.summary,
+          });
+        } else if (event.kind === "input-requested" && active.questions.has(event.requestId)) {
+          asked.set(`question:${event.requestId}`, {
+            ...scope,
+            kind: "question",
+            requestId: event.requestId,
+            prompt: event.prompt,
+            options: event.options,
+          });
+        }
+      }
+      pending.push(...asked.values());
+    }
+    return pending;
+  }
+
+  #operationFrames(active: ActiveTurn): ReadonlyArray<CodeOperationEventFrame> {
+    const frames: CodeOperationEventFrame[] = [];
+    let afterCursor = 0;
+    for (;;) {
+      const replay = this.#events.replay({
+        threadId: active.thread.id,
+        operationId: active.operationId,
+        afterCursor,
+        limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+      });
+      if (replay.status !== "ok") return [];
+      frames.push(...replay.frames);
+      const last = replay.frames.at(-1);
+      if (last === undefined || replay.frames.length < MAX_CODE_OPERATION_REPLAY_LIMIT) {
+        return frames;
+      }
+      afterCursor = last.cursor;
+    }
+  }
+
   #browserApprovalKey(active: ActiveTurn, contextId: string): string {
     return JSON.stringify([
       active.windowId,
@@ -1864,6 +1947,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
         active.abort.signal.removeEventListener("abort", abort);
+        // An answer journals its own operation result; expiry and abandonment
+        // journal nothing.
+        if (outcome === "cancelled" || outcome === "expired") {
+          this.#options.onPendingRequestWithdrawn?.();
+        }
         resolve(outcome);
       };
       const abort = () => finish("cancelled");
