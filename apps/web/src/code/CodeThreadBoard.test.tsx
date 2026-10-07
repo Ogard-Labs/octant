@@ -921,6 +921,31 @@ describe("CodeThreadBoard waiting cards", () => {
     expect(screen.getByRole("region", { name: "Waiting (1)" })).toBe(waiting);
   });
 
+  it("says on the card that a turn refused the answer and offers the buttons again", async () => {
+    const clients = answerClients();
+    // Plan posture or a lost provider connection: the runtime refuses with a
+    // failed turn state rather than operation-failed.
+    clients.codeClient.executeOperation.mockResolvedValue({
+      kind: "provider-turn-state",
+      operationId: "operation-1",
+      state: "failed",
+    } as never);
+    renderBoard(
+      [card({ id: "01", status: "waiting", title: "Fix the flaky build" })],
+      boardPendingSource(pendingReader([approval]), clients),
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    fireEvent.click(await within(waiting).findByRole("button", { name: "Approve" }));
+
+    expect(await within(waiting).findByRole("status")).toHaveTextContent(
+      "The answer was not delivered. The turn changed since it asked.",
+    );
+    await waitFor(() =>
+      expect(within(waiting).getByRole("button", { name: "Approve" })).toBeEnabled(),
+    );
+  });
+
   it("lists the waiting column oldest request first", async () => {
     renderBoard(
       [
