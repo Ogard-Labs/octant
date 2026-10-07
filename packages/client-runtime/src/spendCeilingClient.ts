@@ -67,10 +67,18 @@ export function createSpendCeilingClient(options: SpendCeilingClientOptions): Sp
           ...(signal === undefined ? {} : { signal }),
         },
         "Spend ceiling command failed.",
+        // The host answers a refused command with 409 and the refusal itself,
+        // which names why (not a raise, a stale version, a remote principal).
+        // Treating it as a failure showed only "Spend ceiling command failed."
+        isRefusedCommandResult,
       );
       return decodeSpendCeilingCommandResult(body);
     },
   };
+}
+
+function isRefusedCommandResult(body: unknown): boolean {
+  return typeof body === "object" && body !== null && "kind" in body && body.kind === "refused";
 }
 
 async function send(
@@ -78,6 +86,7 @@ async function send(
   url: string,
   init: RequestInit,
   fallback: string,
+  isAnswer: (body: unknown) => boolean = () => false,
 ): Promise<unknown> {
   let response: Response;
   try {
@@ -91,7 +100,7 @@ async function send(
   } catch {
     throw new SpendCeilingClientFailure(fallback, response.status);
   }
-  if (!response.ok) {
+  if (!response.ok && !(response.status === 409 && isAnswer(body))) {
     const message =
       typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
         ? body.error

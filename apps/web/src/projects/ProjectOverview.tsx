@@ -341,7 +341,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
             <ProjectOverviewInspector
               key={`${String(props.project.id)}-ceiling`}
               label="Spend ceiling"
-              summary="Optional Project limits on tokens, turns, and agent run time"
+              summary="Optional Project limits on tokens, turns, agent run time, and money"
             >
               <ProjectSpendCeilingSection
                 client={props.spendCeilingClient}
