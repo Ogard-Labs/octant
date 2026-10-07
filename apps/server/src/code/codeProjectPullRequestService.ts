@@ -949,6 +949,14 @@ export class CodeProjectPullRequestService {
       ...(row.reviewRequestedFrom.length === 0
         ? {}
         : { reviewRequestedFrom: row.reviewRequestedFrom }),
+      ...(row.failingChecks.length === 0
+        ? {}
+        : {
+            failingChecks: row.failingChecks.map((check) => ({
+              name: check.name,
+              ...(check.completedAt === undefined ? {} : { completedAt: check.completedAt }),
+            })),
+          }),
       linkedThreads: matchLinkedThreadsToPullRequest({
         pullRequest: {
           repository: { owner: project.repositoryOwner, name: project.repositoryName },

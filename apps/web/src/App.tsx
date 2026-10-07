@@ -444,6 +444,8 @@ import type { ReviewActionOutcome, ReviewPageProps } from "./review/ReviewPage";
 import { createWorkingNowCard, type WorkingNowCardSource } from "./home/WorkingNowCard";
 import { createNeedsYouCard } from "./home/NeedsYouCard";
 import { createPullRequestsCard } from "./home/PullRequestsCard";
+import { createCiFailuresCard } from "./home/CiFailuresCard";
+import { currentCodeProjectBranches } from "./home/ciFailures";
 import {
   pullRequestCardAvailable,
   pullRequestCardCapability,
@@ -905,6 +907,7 @@ function LaunchedShell(
     if (mode === "code") {
       setDraftExecutionPolicy(undefined);
       setDraftPermissionPersistence(undefined);
+      setPendingDraftBranch(undefined);
     }
     setDraftResetRevision((revision) => revision + 1);
   }
@@ -943,6 +946,7 @@ function LaunchedShell(
   // A Canvas plan task handed to a new thread: the draft opens with it written
   // in, and the person sends it like any new thread.
   const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
+  const [pendingDraftBranch, setPendingDraftBranch] = useState<string>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [githubPullRequestCapability, setGithubPullRequestCapability] =
     useState<PullRequestCardCapability>({ readable: false });
@@ -4286,6 +4290,31 @@ function LaunchedShell(
         setCodePullRequestsOpen(true);
       },
     }),
+    createCiFailuresCard({
+      available: pullRequestCardAvailable({
+        mode: activeMode,
+        pluginEffective: FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true,
+        capability: githubPullRequestCapability,
+      }),
+      viewerLogin: githubPullRequestCapability.login ?? "",
+      currentBranches: currentCodeProjectBranches({
+        threads: codeController.bootstrap?.threads ?? [],
+        checkouts: codeController.bootstrap?.checkouts ?? [],
+      }),
+      load: loadHomePullRequests,
+      now: minuteNow.getTime(),
+      onStartFix: (fix) => {
+        // A draft only. The person sends it; this never starts a turn.
+        closeWorkspaceReaders();
+        setDraftError(undefined);
+        setDraftPendingMessage(undefined);
+        resetNewTaskDraft("code");
+        setPendingDraftPrompt(fix.prompt);
+        setPendingDraftBranch(fix.branch);
+        setDraftProjectSelection((current) => ({ ...current, code: fix.projectId }));
+        void controller.openDraftThread("code", fix.projectId);
+      },
+    }),
   ];
   // The Running tab lists the card's own rows and shows the sidebar's own
   // Running count, so the three never disagree.
@@ -5502,6 +5531,9 @@ function LaunchedShell(
         );
         return false;
       }
+      // The branch Start a fix handed in now belongs to this thread; the next
+      // draft must not open on it.
+      setPendingDraftBranch(undefined);
       // The thread opens before its first turn starts, so tell its own
       // controller which prompt is coming. Otherwise the transcript reads the
       // empty journal and calls the thread empty until the turn is durable.
@@ -7095,7 +7127,12 @@ function LaunchedShell(
                             .openDraftThread(mode, projectId)
                             .then((accepted) => {
                               if (accepted) {
-                                if (mode === "code") setDraftPermissionPersistence(undefined);
+                                if (mode === "code") {
+                                  setDraftPermissionPersistence(undefined);
+                                  // A branch handed in by Start a fix names a
+                                  // branch of the Project it came from.
+                                  setPendingDraftBranch(undefined);
+                                }
                                 setDraftProjectSelection((current) => ({
                                   ...current,
                                   [mode]: projectId,
@@ -7395,6 +7432,9 @@ function LaunchedShell(
                         {...(projectController.activeProject === undefined
                           ? {}
                           : { draftProjectName: projectController.activeProject.name })}
+                        {...(pendingDraftBranch === undefined
+                          ? {}
+                          : { draftBranchName: pendingDraftBranch })}
                         {...(effectiveDraftProviderInstanceId === undefined
                           ? {}
                           : { draftSelectedProviderInstanceId: effectiveDraftProviderInstanceId })}

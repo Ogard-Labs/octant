@@ -320,6 +320,29 @@ more**, which opens Pull requests. A row opens that pull request's existing
 review for its Project. The read is one query of the window's authorized
 snapshot, so a remote window sees only the Projects it was granted.
 
+**CI failures** is the next card, on by default, and only on a Code start
+screen. It uses the same gate as Pull requests: no connection, insecure token
+storage, or a missing pull-request capability hides it and leaves it out of
+Customize. It lists failing checks the pull-request refresh already recorded,
+on the signed-in person's open pull requests and on the current branches of
+Code Projects. A current branch is the branch of an active thread's available
+checkout; the card does not observe checkouts itself. A failing check that is
+neither is left out. A row shows the check name, the repository and number
+when the pull request is the person's (`repo#12`) or the branch when it is
+only a current checkout, and how long ago the check finished failing. The
+refresh's rollup carries the name and the finish time; it does not carry a
+log, so a row never invents one. At most five rows show, most recently failed
+first. The card hides when it has nothing to show — there is no empty line —
+which is its default. **Start a fix** opens a new Code task draft in that
+Project with the failing branch as its chosen base branch and a new worktree as
+its workspace, since the current checkout may be on another branch; the
+checkout's head does not replace that branch. The pull request, check, branch,
+and repository are already written in; the rollup carries no failure text, so
+the draft quotes none. Sending, switching the draft's Project, or starting a
+new draft lets go of that branch. It does not start a turn; the person sends
+it. Opening the card reads the same cached snapshot
+Pull requests reads and adds no poll.
+
 **Needs you** surfaces (a start-screen card, answering from Board cards, the
 command palette) read one host list of the approvals and
 questions this window can answer, across Chat, Work, and Code and across

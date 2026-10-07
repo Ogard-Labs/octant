@@ -54,6 +54,7 @@ function ghRow(overrides: Partial<GhActivePullRequestRow> = {}): GhActivePullReq
     checks: "passing",
     review: "approved",
     reviewRequestedFrom: [],
+    failingChecks: [],
     ...overrides,
   };
 }
@@ -1302,6 +1303,37 @@ describe("CodeProjectPullRequestService", () => {
     const view = await service.query(windowId, { version: 1 });
 
     expect(view.rows[0]?.reviewRequestedFrom).toEqual(["reviewer"]);
+    expect(listActive.mock.calls.length).toBe(callsAfterRefresh);
+  });
+
+  it("keeps failing checks from the same list read and does not ask again for them", async () => {
+    const { service, listActive } = serviceFixture({
+      list: async () => ({
+        status: "ok",
+        rows: [
+          ghRow({
+            checks: "failing",
+            failingChecks: [
+              {
+                name: "web tests",
+                completedAt: "2026-08-22T07:40:00Z",
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const callsAfterRefresh = listActive.mock.calls.length;
+    const view = await service.query(windowId, { version: 1 });
+
+    expect(view.rows[0]?.failingChecks).toEqual([
+      {
+        name: "web tests",
+        completedAt: "2026-08-22T07:40:00Z",
+      },
+    ]);
     expect(listActive.mock.calls.length).toBe(callsAfterRefresh);
   });
 

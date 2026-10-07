@@ -579,6 +579,7 @@ describe("GhPullRequestPort active list", () => {
           checks: "passing",
           review: "approved",
           reviewRequestedFrom: [],
+          failingChecks: [],
         },
         {
           number: 13,
@@ -594,6 +595,7 @@ describe("GhPullRequestPort active list", () => {
           checks: "passing",
           review: "approved",
           reviewRequestedFrom: [],
+          failingChecks: [],
         },
       ],
     });
@@ -638,6 +640,63 @@ describe("GhPullRequestPort active list", () => {
       status: "ok",
       rows: [{ reviewRequestedFrom: ["reviewer"] }],
     });
+  });
+
+  it("keeps failing checks from the list rollup and does not ask for logs", async () => {
+    const { command, port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          {
+            ...activeRow,
+            statusCheckRollup: [
+              {
+                __typename: "CheckRun",
+                name: "web tests",
+                status: "COMPLETED",
+                conclusion: "FAILURE",
+                completedAt: "2026-08-22T07:40:00Z",
+                detailsUrl: "https://github.com/octant/octant/actions/runs/1/job/2",
+              },
+              {
+                name: "lint",
+                conclusion: "SUCCESS",
+                status: "COMPLETED",
+                completedAt: "2026-08-22T07:30:00Z",
+              },
+              {
+                name: "still running",
+                conclusion: "FAILURE",
+                status: "COMPLETED",
+                completedAt: "0001-01-01T00:00:00Z",
+              },
+            ],
+          },
+        ]),
+      },
+    ]);
+
+    const result = await port.listActive(
+      { owner: "octant", name: "octant", limit: 100 },
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({
+      status: "ok",
+      rows: [
+        {
+          checks: "failing",
+          failingChecks: [
+            {
+              name: "web tests",
+              completedAt: "2026-08-22T07:40:00Z",
+            },
+            { name: "still running" },
+          ],
+        },
+      ],
+    });
+    expect(vi.mocked(command.run)).toHaveBeenCalledOnce();
+    expect(vi.mocked(command.run).mock.calls[0]?.[0]).not.toContain("run");
   });
 
   it("normalizes the active list state and mergeability", async () => {
