@@ -88,6 +88,9 @@ never placed in process arguments, never exported, and never included in
 diagnostics. Provider OAuth and subscription login are delegated to the
 provider's own runtime, and Octant does not store, render, export, or journal
 those logins, with one opt-in exception described below: Claude for helpers.
+Where you choose **Sign in** on a direct endpoint that offers it (today
+OpenRouter), Octant runs the sign-in itself and stores the API key it issues
+in the same credential store as a typed-in key, under the same rules.
 Secrets Octant holds for an integration follow the same
 Keychain path: the host keeps an opaque reference, plugins and the
 interface never receive the raw token, and nothing is journaled, exported,
@@ -102,8 +105,8 @@ TTL, and the secret never enters the database, journal, logs, exports,
 screenshots, or diagnostics. See [Remote access](/advanced/remote-access)
 for the full lifecycle.
 
-**Claude for helpers** is the one provider sign-in Octant keeps, and only if
-you connect it under **Settings → Providers → Claude Code**. A Plan turn and
+**Claude for helpers** is the one login from a provider's own runtime that
+Octant keeps, and only if you connect it under **Settings → Providers → Claude Code**. A Plan turn and
 every Chat subagent runs confined, away from the keychain where Claude keeps
 its subscription sign-in, so Octant runs Claude's own `claude setup-token` on
 this host after one browser approval and stores the long-lived token it
@@ -114,9 +117,11 @@ launch ends; inside the launch it has the reach an API key given to a launch
 has. Turns that are not confined, and every other provider, never receive it.
 The settings route returns state only, never the token, and only a window on
 the host can connect or disconnect. Octant never logs it, places it in a process argument, journals it,
-exports it, or includes it in diagnostics. **Disconnect**, or removing the
-provider, deletes it from the store. That removes Octant's copy only: Octant
-cannot revoke the token with Anthropic. The
+exports it, or includes it in diagnostics. **Disconnect** deletes it from the
+store and reports a store it cannot reach. Removing the provider also tries to
+delete it, but the removal completes even when the store is unreachable, so
+disconnect first. Either removes Octant's copy only: Octant cannot revoke the
+token with Anthropic. The
 [privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it)
 states what is stored, where, and who receives it.
 

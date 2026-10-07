@@ -2426,10 +2426,11 @@ mechanisms are:
   in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
   runtime never refreshes a handed-in token, so one it refuses is marked
   expired and the same reconnect step is reported. Only a local window may
-  connect or disconnect. Disconnecting, or removing the Claude Code provider,
-  deletes the token from the broker; Octant has no call that revokes it with
-  Anthropic. A bound root a launch may not write is denied in
-  the profile, so a checkout under that launch's own temporary directory is not
+  connect or disconnect. Disconnecting deletes the token from the broker and
+  reports a broker it cannot reach. Removing the Claude Code provider clears
+  it best-effort: the removal completes even when the broker is unreachable and
+  the token can remain. Octant has no call that revokes it with Anthropic. A
+  bound root a launch may not write is denied in the profile, so a checkout under that launch's own temporary directory is not
   writable through it. The `--version` read every family and the discovery
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per

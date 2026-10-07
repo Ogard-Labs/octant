@@ -43,10 +43,10 @@ On the host, Octant holds:
   and authorizes nothing.
 - **Credential references** — opaque Keychain pointers, never the secret
   values.
-- **Secrets in the credential store** — the API keys you entered and, only
-  if you connected it, the Claude for helpers token. They sit in the macOS
-  Keychain (the Secret Service on Linux) behind those references, never in
-  the journal.
+- **Secrets in the credential store** — the API keys you entered, the key a
+  direct endpoint sign-in issued, and, only if you connected it, the Claude
+  for helpers token. They sit in the macOS Keychain (the Secret Service on
+  Linux) behind those references, never in the journal.
 - **Installed extension packages** under the host data directory.
 - **Logs** under the host logs directory.
 
@@ -83,10 +83,13 @@ and capabilities without sending a prompt. See
 [Providers and models](/advanced/providers) and
 [Sub-processors](/advanced/sub-processors).
 
-Provider OAuth and subscription login stay in the provider's own runtime.
-Octant never stores, refreshes, or journals those tokens, with one exception
-you opt into:
-[Claude for helpers](#claude-for-helpers-only-if-you-connect-it).
+Provider sign-in takes one of two forms. When the provider's own CLI or SDK
+handles the login, it stays in that runtime, and Octant never stores,
+refreshes, or journals those tokens, with one exception you opt into:
+[Claude for helpers](#claude-for-helpers-only-if-you-connect-it). When you
+choose **Sign in** on a direct endpoint that offers it, which today is
+OpenRouter, Octant runs the sign-in itself and keeps what the provider issues:
+see [Sign in on a direct endpoint](#sign-in-on-a-direct-endpoint-only-if-you-choose-it).
 
 ### Claude for helpers, only if you connect it
 
@@ -95,7 +98,8 @@ and Octant never holds that login. A Plan turn, and every Chat subagent, runs
 confined, away from the keychain where that login lives.
 **Settings → Providers → Claude Code → Connect Claude for helpers** gives
 those runs a sign-in of their own. It is the one provider token Octant
-stores, and it exists only if you press the button.
+stores from a provider's own runtime, and it exists only if you press the
+button.
 
 - **What is stored.** The long-lived token that Claude's own
   `claude setup-token` prints after you approve once in a browser window.
@@ -112,13 +116,38 @@ stores, and it exists only if you press the button.
   launch lives, and the runtime presents it to Anthropic to sign in. Turns
   that are not confined, and every other provider, never receive it, and no
   Octant-operated service does.
-- **How to remove it.** Press **Disconnect**, or remove the Claude Code
-  provider; either deletes the token from the credential store. A token
-  Claude refuses is replaced by an expired marker, and Settings asks you to
-  connect again. Only a window on this Mac can connect or disconnect; a
-  paired device cannot. Removing it deletes Octant's copy only. Octant cannot
-  revoke the token with Anthropic, so the token itself stays valid there
-  until it expires or is revoked outside Octant.
+- **How to remove it.** Press **Disconnect**, which deletes the token from
+  the credential store and says so if the store cannot be reached. Removing
+  the Claude Code provider also tries to delete it, but the removal still
+  completes when the store is unreachable, and the token can then stay
+  there, so disconnect first. A token Claude refuses is replaced by an
+  expired marker, and Settings asks you to connect again. Only a window on
+  this Mac can connect or disconnect; a paired device cannot. Removing it
+  deletes Octant's copy only. Octant cannot revoke the token with Anthropic,
+  so the token itself stays valid there until it expires or is revoked
+  outside Octant.
+
+### Sign in on a direct endpoint, only if you choose it
+
+A direct HTTP provider pointed at OpenRouter's API offers **Sign in** beside
+**Use an API key**. After you acknowledge a short terms summary, Octant runs
+OpenRouter's own browser sign-in on this Mac. You authorize at openrouter.ai,
+and the browser returns to a loopback address that Octant opened for that one
+attempt.
+
+- **What is stored.** The API key OpenRouter issues for your account. There is
+  no refresh token, and the key does not expire on its own.
+- **Where.** In the same credential store as an API key you typed, reached
+  through the credential broker by an opaque reference. The journal records
+  that you acknowledged the terms, and that a sign-in started, finished, was
+  refused, or was signed out, with that reference and never the key.
+- **Who receives it.** OpenRouter, as the key on that provider's requests. The
+  sign-in attaches only to OpenRouter's API address, and no Octant-operated
+  service receives it.
+- **How to remove it.** Press **Sign out** under that provider, which deletes
+  the key from the credential store. Sign out before you remove the provider.
+  Only a window on this Mac can sign in or out. Octant does not revoke the key
+  with OpenRouter, so it stays valid there until you revoke it there.
 
 ### Update checks
 
@@ -273,11 +302,12 @@ journaled, never placed in process arguments, never exported, and never
 included in diagnostics. Headless or non-macOS sessions report Keychain
 cleanup as not integrated rather than writing secrets to disk.
 
-The Claude for helpers token, if you connect one, is held the same way and
-is never returned to the interface, journaled, exported, or included in
-diagnostics. See
-[Claude for helpers](#claude-for-helpers-only-if-you-connect-it) for who
-receives it and how to remove it.
+The Claude for helpers token, if you connect one, and the key a direct
+endpoint sign-in issues are held the same way and are never returned to the
+interface, journaled, exported, or included in diagnostics. See
+[Claude for helpers](#claude-for-helpers-only-if-you-connect-it) and
+[Sign in on a direct endpoint](#sign-in-on-a-direct-endpoint-only-if-you-choose-it)
+for who receives them and how to remove them.
 
 ## Next steps
 
