@@ -354,6 +354,9 @@ a group that carries its own value or a leaf that does not, a value that is
 negative, a measure that is not declared, and a hierarchy past the depth, node,
 measure, or label budget. The accessible fallback is a hierarchical table
 sortable by each measure.
+A treemap is version-gated at Canvas schema version 5, so a document that
+declares an earlier version and carries one is refused as a declared future
+version.
 A heatmap is a grid coloured by value. A matrix names its rows and columns and
 carries a cell per coordinate with a value and an optional short note; a cell on
 a coordinate the block does not hold, a repeated row, column, or coordinate, and
@@ -367,6 +370,12 @@ can sort a matrix's rows by their total and walk the cells with the arrow keys;
 these are view state and are never journaled. The accessible fallback is a table
 of every coordinate and its total for a matrix, or of every dated reading for a
 calendar.
+A heatmap is version-gated the same way at Canvas schema version 6. The
+optional table column `display` and the chart and table `format` fields are
+the one ungated exception: they only change how a value is drawn, so they carry
+no schema version, but the strict definition schema refuses an unknown field,
+so a runtime rolled back past them refuses a document that uses them rather
+than drawing it as plain text.
 A bar list is a ranking of magnitudes (`packages/domain/src/canvasBarListLayout.ts`):
 each row is a label, a value, an optional second value, and an optional manifest
 source. Rows sort largest first with a stable tie-break by the author's order,
