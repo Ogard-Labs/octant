@@ -476,7 +476,9 @@ shows its frame through `:target`, and the renderer writes each fragment
 against the page's own address because a `srcdoc` page resolves a bare one
 against its parent. The pure `canvasDesignMarkupRefusal` policy refuses a
 script, an event handler, an embedded document, a remote image, stylesheet,
-or font, and any link that is not a fragment, naming the frame and the
+or font (in a `url()`, an `@import`, or an `image-set()` candidate, however a
+character reference or CSS escape spells it), and any link that is not a
+fragment, naming the frame and the
 construct; the event store and revise policy return that reason to the
 author rather than a generic failure. The sandbox is the boundary and the
 link rule is part of it, because a link is the one way a page with no script

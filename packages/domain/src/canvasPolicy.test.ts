@@ -839,6 +839,82 @@ describe("design frames", () => {
     expect(performance.now() - started).toBeLessThan(250);
   });
 
+  it("refuses a remote load in markup however its character references spell it", () => {
+    // A browser resolves character references in an attribute value, and in an
+    // SVG style element, before it reads the CSS inside.
+    for (const html of [
+      '<div style="background:ur&#108;(https://x.test/a.png)"></div>',
+      '<div style="background:ur&#108(https://x.test/a.png)"></div>',
+      '<div style="background:u&#x72;l(https://x.test/a.png)"></div>',
+      '<div style="background:url&lpar;https://x.test/a.png)"></div>',
+      '<div style="background:u&bsol;72l(https://x.test/a.png)"></div>',
+    ]) {
+      expect(refusalOf(design([{ frameId: "home", html }]))).toContain("loads a file with url()");
+    }
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "home",
+            html: '<svg><style>&commat;import "https://fonts.test/a.css";</style></svg>',
+          },
+        ]),
+      ),
+    ).toContain("imports a stylesheet");
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "home",
+            html: '<p style="background:url(&quot;data:image/png;base64,AAAA&quot;)">Tom &amp; Jerry</p>',
+          },
+        ]),
+      ),
+    ).toBe("accepted");
+  });
+
+  it("refuses a remote image-set candidate, quoted or not, and keeps inline ones", () => {
+    const home = [{ frameId: "home", html: "<p>Hi</p>" }];
+    for (const styles of [
+      '.hero { background-image: image-set("https://x.test/a.png" 1x); }',
+      ".hero { background-image: -webkit-image-set('https://x.test/a.png' 1x); }",
+      '.hero { background-image: image-set("data:image/png;base64,AA" 1x, "https://x.test/b.png" 2x); }',
+      String.raw`.hero { background-image: image-set("\68ttps://x.test/a.png" 1x); }`,
+    ]) {
+      expect(refusalOf(design(home, styles))).toContain("loads a file with image-set()");
+    }
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "home",
+            html: '<div style="background-image:IMAGE-SET(&quot;https://x.test/a.png&quot; 1x)"></div>',
+          },
+        ]),
+      ),
+    ).toContain("loads a file with image-set()");
+    // A type() hint and a family list hold strings that are not addresses.
+    expect(
+      refusalOf(
+        design(
+          home,
+          '.hero { font-family: "Inter", "Helvetica"; background-image: image-set("data:image/png;base64,AA" 1x type("image/png"), linear-gradient(red, blue) 2x); }',
+        ),
+      ),
+    ).toBe("accepted");
+  });
+
+  it("reads a long run of character references or open image-sets in about the time it takes to read it once", () => {
+    const started = performance.now();
+    expect(refusalOf(design([{ frameId: "home", html: `<p>${"&#108;".repeat(5_000)}</p>` }]))).toBe(
+      "accepted",
+    );
+    expect(
+      refusalOf(design([{ frameId: "home", html: "<p>Hi</p>" }], "image-set(".repeat(3_000))),
+    ).toBe("accepted");
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
   it("refuses remote images and stylesheets but keeps inline ones", () => {
     expect(
       refusalOf(
