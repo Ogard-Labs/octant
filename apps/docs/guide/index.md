@@ -69,6 +69,16 @@ listening**. The card refreshes about every five seconds while the window is
 showing, and not at all when it is hidden or turned off. When the window shows
 another computer's work, the row names that computer.
 
+**Pull requests**, on a new Code task, lists what is waiting on you across your
+Code Projects. **Waiting on your review** is a review asked of you; **Yours**
+is one you opened. A row shows the title, a short repository and number, and
+the words for checks and review — passed, failed, running, or none, and
+approved, changes requested, in review, or draft. Up to six rows show, then
+**+N more** opens Pull requests. Choose a row to open that pull request. The
+card is not shown at all without a connection, or when credential storage is
+insecure. It reads the list the Pull requests page already keeps, so it does
+not ask again on its own.
+
 **Customize**, on the right under the composer, turns each card on or off and
 reorders them: drag a card by its handle, or use the up and down buttons from the
 keyboard. **Reset to default** puts them back. Your choices are kept on this

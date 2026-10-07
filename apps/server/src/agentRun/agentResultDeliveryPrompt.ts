@@ -5,6 +5,7 @@ import {
 } from "@octant/contracts";
 
 import { agentRunResultGeneration } from "./agentResultDeliveryBatch";
+import { agentRunStopReason } from "./agentRunDelegation";
 
 export const MAX_AGENT_RESULT_DELIVERY_PROMPT_CHARACTERS = 32_768;
 
@@ -31,7 +32,7 @@ export function agentResultDeliveryPrompt(run: AgentRun, resultText: string | un
             ? "(the reply is unavailable)"
             : resultText
         }${run.result?.truncated === true ? "\n(the reply was truncated)" : ""}`
-      : `Outcome: ${run.lifecycleStatus} — ${run.recoveryReason ?? "no detail was recorded"}`;
+      : `Outcome: ${run.lifecycleStatus} — ${agentRunStopReason(run) ?? "no detail was recorded"}`;
   return bounded(
     [
       heading,

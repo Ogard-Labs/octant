@@ -275,6 +275,50 @@
   border-top: 1px solid var(--oct-hairline);
 }
 
+.usage-thread-metrics__drill {
+  display: grid;
+  gap: 12px;
+  padding: 4px 0 8px;
+}
+
+.usage-thread-metrics__turn {
+  display: grid;
+  gap: 4px;
+}
+
+.usage-thread-metrics__label {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+}
+
+.usage-thread-metrics__rows {
+  display: grid;
+  gap: 2px 12px;
+  margin: 0;
+}
+
+.usage-thread-metrics__rows > div {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  gap: 8px;
+}
+
+.usage-thread-metrics__rows dt,
+.usage-thread-metrics__rows dd {
+  margin: 0;
+}
+
+.usage-thread-metrics__rows dt {
+  color: var(--oct-meta);
+}
+
+.usage-thread-metrics__note {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+}
+
 .usage-dashboard__table--narrow {
   font-size: var(--oct-text-xs);
 }
