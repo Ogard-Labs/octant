@@ -292,6 +292,14 @@ data and creates no artifact.
 `sidebar` (the default). The value is part of the definition and needs Canvas
 schema version 4. An older runtime refuses a version-4 document as a future
 version and does not report it corrupt.
+A treemap block is gated the same way at Canvas schema version 5 and a heatmap
+block at version 6, so a document that declares an earlier version and carries
+one is refused as a declared future version. The optional table column
+`display` and the chart, table, and metric `format` fields are the one ungated
+exception: they only change how a value is drawn, so they carry no schema
+version, but the strict definition schema refuses an unknown field, so a
+runtime rolled back past them refuses a document that uses them rather than
+drawing it as plain text.
 The pure `canvasInlineRefusal` policy admits `inline` only for at most 12 blocks
 with no `diagram`, `plan`, `mockup` or `design`. When an author asks for `inline` over
 that bound, the host records `sidebar` and returns the reason as
@@ -476,7 +484,9 @@ shows its frame through `:target`, and the renderer writes each fragment
 against the page's own address because a `srcdoc` page resolves a bare one
 against its parent. The pure `canvasDesignMarkupRefusal` policy refuses a
 script, an event handler, an embedded document, a remote image, stylesheet,
-or font, and any link that is not a fragment, naming the frame and the
+or font (in a `url()`, an `@import`, or an `image-set()` candidate, however a
+character reference or CSS escape spells it), and any link that is not a
+fragment, naming the frame and the
 construct; the event store and revise policy return that reason to the
 author rather than a generic failure. The sandbox is the boundary and the
 link rule is part of it, because a link is the one way a page with no script
