@@ -15,8 +15,9 @@ const retryFields = {
  * A direct endpoint failed in a way that usually passes, and the request is
  * going out again once `delayMs` has elapsed. Announced before the wait, so a
  * surface can say the turn is retrying while it is otherwise quiet. `attempt`
- * is the attempt about to start, counted from 1. Not journaled: the next
- * content, or the turn ending, clears it.
+ * is the attempt about to start, counted from 1. The next content, or the
+ * turn settling, clears it. A Chat attempt and a Code operation journal it
+ * with the turn; the harness session view holds it only in memory.
  */
 export const HarnessRetryNotice = Schema.Struct(retryFields)
   .annotations(strict)

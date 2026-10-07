@@ -1718,7 +1718,8 @@ native harness in `apps/server/src/harness`:
   Each retry is a `retrying` runtime event emitted before its wait. The thread's
   working indicator, the terminal footer, and the phone session panel show
   "Provider busy, retrying 2/5 in 4 s" and count the wait down, in ordinary
-  text rather than a warning, until the next content arrives. The turn's
+  text rather than a warning, until the next content arrives or the turn
+  settles; a failed or cancelled attempt keeps no retry line. The turn's
   detail counts those same events. What a
   failed attempt billed is added to the usage of the attempts after it. A
   cancel ends a wait at once and stays `interrupted`. The stream idle limit is

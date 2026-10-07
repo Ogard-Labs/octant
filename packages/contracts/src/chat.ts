@@ -297,7 +297,8 @@ export const ChatAttempt = Schema.Struct({
   usageLimit: Schema.optional(ProviderUsageLimit),
   /**
    * Set while a direct endpoint is sending the request again. Cleared by the
-   * next content, so a finished attempt does not keep a stale wait.
+   * next content or by the attempt settling, so a finished, failed, or
+   * cancelled attempt does not keep a stale wait.
    */
   harnessRetry: Schema.optional(HarnessRetryNotice),
   createdAt: UtcTimestamp,

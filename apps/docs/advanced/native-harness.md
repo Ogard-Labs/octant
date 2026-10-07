@@ -164,7 +164,8 @@ allowance is not retried.
 Each retry is announced before its wait. While the turn is quiet, the thread's
 working indicator, the terminal footer, and the phone's session panel say
 "Provider busy, retrying 2/5 in 4 s" and count the wait down. The line is
-ordinary text, not a warning; it disappears when the next content arrives. A
+ordinary text, not a warning; it disappears when the next content arrives or
+the turn ends, whether it finished, failed, or was stopped. A
 retry that runs out still fails with the endpoint's own alert. The turn's
 detail counts those same announcements. A request is only sent again while nothing of it has appeared: once the
 reply has started to stream, a failure ends the turn rather than showing the
