@@ -1738,6 +1738,14 @@ export const ProviderFailure = Schema.Struct({
 export type ProviderFailure = typeof ProviderFailure.Type;
 
 /**
+ * Why a completed reply stopped, when the runtime said so. Absent means the
+ * runtime did not say — a normal finish is not guessed into one of these.
+ * `max-tokens` is the output limit; `content-filter` is a filter stop.
+ */
+export const ProviderOutputStopReason = Schema.Literal("max-tokens", "content-filter");
+export type ProviderOutputStopReason = typeof ProviderOutputStopReason.Type;
+
+/**
  * What fills a provider-run window, by kind. A kind is the provider's own
  * category where it reports one, or something Octant itself puts in the
  * window and can count (`octant-tools`). The set is closed so a surface can
@@ -2107,6 +2115,8 @@ export const ProviderRuntimeEvent = Schema.Union(
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("completed"),
     resumeCursor: Schema.optional(ProviderResumeCursor),
+    /** Present only when the runtime said why this reply stopped. */
+    stopReason: Schema.optional(ProviderOutputStopReason),
   }).annotations(strict),
 );
 export type ProviderRuntimeEvent = typeof ProviderRuntimeEvent.Type;

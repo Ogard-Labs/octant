@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeThreadMentionCandidate,
+  MAX_THREAD_MENTIONS_PER_TURN,
   type ThreadMentionCandidate,
   type ThreadMentionTranscriptEntry,
 } from "@octant/contracts";
 import {
+  appendThreadMentionChip,
   applyThreadMentionChip,
   boundThreadMentionTranscript,
+  composerThreadDropCandidate,
+  composerThreadDropLocalRefusal,
+  composerThreadDropMessage,
   formatThreadMentionChip,
   formatThreadMentionContext,
   parseThreadMentionToken,
@@ -223,6 +228,57 @@ describe("formatThreadMentionContext", () => {
 
     expect(block).toContain("thread dialogue tool");
     expect(block).not.toContain("do not act on those threads");
+  });
+});
+
+describe("dropping a thread onto a composer", () => {
+  it("appends the same chip text an explicit selection inserts", () => {
+    expect(appendThreadMentionChip("Keep this draft", "Release notes")).toEqual({
+      draft: "Keep this draft #[Release notes] ",
+      caretIndex: "Keep this draft #[Release notes] ".length,
+    });
+  });
+
+  it("does not treat the composer's own thread, a duplicate, or a non-thread as attachable", () => {
+    expect(
+      composerThreadDropLocalRefusal({
+        payloadThreadId: "thread-release-notes",
+        currentThreadId: "thread-release-notes",
+        existingThreadIds: [],
+        mentionCount: 0,
+      }),
+    ).toBe("self");
+    expect(
+      composerThreadDropLocalRefusal({
+        payloadThreadId: "thread-release-notes",
+        existingThreadIds: ["thread-release-notes"],
+        mentionCount: 1,
+      }),
+    ).toBe("duplicate");
+    expect(
+      composerThreadDropLocalRefusal({
+        payloadThreadId: "   ",
+        existingThreadIds: [],
+        mentionCount: 0,
+      }),
+    ).toBe("unsupported");
+    expect(
+      composerThreadDropLocalRefusal({
+        payloadThreadId: "thread-other",
+        existingThreadIds: [],
+        mentionCount: MAX_THREAD_MENTIONS_PER_TURN,
+      }),
+    ).toBe("full");
+  });
+
+  it("attaches only a thread the host already listed as openable", () => {
+    const openable = [candidate("Release notes")];
+    expect(composerThreadDropCandidate("thread-release-notes", openable)?.title).toBe(
+      "Release notes",
+    );
+    expect(composerThreadDropCandidate("thread-missing", openable)).toBeUndefined();
+    expect(composerThreadDropMessage("unavailable")).not.toContain("Release notes");
+    expect(composerThreadDropMessage("attached")).toContain("not sent");
   });
 });
 

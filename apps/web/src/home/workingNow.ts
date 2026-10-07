@@ -97,6 +97,17 @@ export interface WorkingNowInput {
   readonly host?: string;
 }
 
+/** The provider a thread row runs on: the mark the shell attached, else its instance looked up. */
+export function threadProvider(
+  thread: Pick<ChatThreadNavigationItem, "provider" | "providerInstanceId">,
+  providers: ReadonlyMap<string, ThreadProviderIdentity>,
+): ThreadProviderIdentity | undefined {
+  return (
+    thread.provider ??
+    (thread.providerInstanceId === undefined ? undefined : providers.get(thread.providerInstanceId))
+  );
+}
+
 /** A running turn's own step, in words a row can show. */
 export function liveStepLine(step: ThreadLiveStep): {
   readonly text: string;
@@ -165,11 +176,7 @@ export function buildWorkingNowRows(input: WorkingNowInput): ReadonlyArray<Worki
       facts?.planProgress;
     const projectName =
       thread.projectId === undefined ? undefined : input.projectNames.get(thread.projectId);
-    const provider =
-      thread.provider ??
-      (thread.providerInstanceId === undefined
-        ? undefined
-        : input.providers.get(thread.providerInstanceId));
+    const provider = threadProvider(thread, input.providers);
     const activeAt = facts?.activeAt ?? thread.updatedAt;
     rows.push({
       key: `thread:${mode}:${thread.threadId}`,
