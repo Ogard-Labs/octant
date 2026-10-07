@@ -514,6 +514,13 @@ export interface CodeOperationRuntime {
    * could answer through `execute`, under the same scope those answers pass.
    */
   pendingRequests?(windowId: WindowId): Promise<ReadonlyArray<PendingRequest>>;
+  /**
+   * Whether the thread's running turn waits on an approval or a question that
+   * `pendingRequests` would list. It ends the moment the answer is taken, so
+   * the board moves the thread back to In progress on the same read that sees
+   * the request gone.
+   */
+  turnAwaitsPerson?(threadId: string): boolean;
   close(): Promise<void>;
   reconcile?: () => Promise<void>;
   /**
@@ -1135,6 +1142,7 @@ export function createCodeOperationRuntime(
     },
     raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
+    turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
     subscribe: (windowId, threadId, operationId, afterCursor, limit) =>
       service.subscribe(windowId, threadId, operationId, afterCursor, limit),
     readRepositoryTestStatus: (windowId, threadId, checkoutId) =>
@@ -1858,6 +1866,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
     active.cursor = frame.cursor;
     return true;
+  }
+
+  /** Whether this thread's running turn has an approval or a question still unanswered. */
+  awaitsPerson(threadId: string): boolean {
+    const active = this.#active.get(threadId);
+    if (active === undefined || (active.state !== "running" && active.state !== "waiting"))
+      return false;
+    return (
+      active.approvals.size > 0 || active.browserApprovals.size > 0 || active.questions.size > 0
+    );
   }
 
   /**

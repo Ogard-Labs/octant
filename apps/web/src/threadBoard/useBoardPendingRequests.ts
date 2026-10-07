@@ -36,9 +36,9 @@ export interface BoardCardRequest {
 export interface BoardPendingRequests {
   /**
    * The request to answer on a card. It is matched by thread alone: the host
-   * lists a request only while its thread waits on the person, and a Code
-   * thread parked on a tool approval still counts as executing while its turn
-   * runs, so the board files that card under In progress, not Waiting.
+   * lists a request only while its thread waits on the person. That thread
+   * usually files under Waiting, but other work running beside the parked turn
+   * keeps it In progress, so a card in either column may carry one.
    */
   readonly forCard: (card: { readonly threadId: unknown }) => BoardCardRequest | undefined;
   /** When each waiting thread's oldest request began, by thread id; undefined without a reader. */
