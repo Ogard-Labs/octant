@@ -65,6 +65,7 @@ import {
   createCodeReadCursorStore,
   isActive,
   projectConversationTurns,
+  providerAnswerOutcome,
   providerRequestFromEvent,
   readConversationEvidence,
   readForkConversation,
@@ -328,6 +329,10 @@ export function useCodeController(options: CodeControllerOptions) {
     [],
   );
   const [providerRequests, setProviderRequests] = useState<ReadonlyArray<CodeProviderRequest>>([]);
+  // Why the host refused the last answer to a request that is still open. A
+  // waiting turn's own reason is the generic waiting sentence, so this is the
+  // only place the refusal can be told while the request stays on screen.
+  const [providerAnswerRefusal, setProviderAnswerRefusal] = useState<string>();
 
   /**
    * Put a refusal this controller did not perform in front of the person.
@@ -1344,6 +1349,7 @@ export function useCodeController(options: CodeControllerOptions) {
     setConversation([]);
     setConversationHistory("loading");
     setProviderRequests([]);
+    setProviderAnswerRefusal(undefined);
     setTurnActivity(new Map());
     setTurnStatus(
       options.activeThreadId === undefined
@@ -2294,10 +2300,15 @@ export function useCodeController(options: CodeControllerOptions) {
                 response: await client.putEvidence(view.thread.id, answer.response),
               });
         if (!mounted.current) return false;
-        if (result.kind === "operation-failed") {
-          setTurnError(result.failure.message);
+        // A refusal can arrive as a failed or interrupted turn state rather
+        // than `operation-failed`; the request stays so the person sees why.
+        const outcome = providerAnswerOutcome(result);
+        if (outcome.status === "refused") {
+          setTurnError(outcome.message);
+          setProviderAnswerRefusal(outcome.message);
           return false;
         }
+        setProviderAnswerRefusal(undefined);
         setProviderRequests((current) =>
           current.filter((request) =>
             answer.kind === "approval"
@@ -2308,7 +2319,9 @@ export function useCodeController(options: CodeControllerOptions) {
         return true;
       } catch (error) {
         if (!mounted.current) return false;
-        setTurnError(codeFailure(error).message);
+        const message = codeFailure(error).message;
+        setTurnError(message);
+        setProviderAnswerRefusal(message);
         return false;
       }
     },
@@ -2386,6 +2399,7 @@ export function useCodeController(options: CodeControllerOptions) {
     rebindThreadCheckout,
     renameThread,
     providerRequests,
+    providerAnswerRefusal,
     refreshFollowUp,
     refreshConversation,
     restoreUndo,

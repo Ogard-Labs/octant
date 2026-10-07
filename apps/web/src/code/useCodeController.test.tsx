@@ -1642,6 +1642,76 @@ describe("useCodeController", () => {
     },
   );
 
+  it.each([
+    ["failed", "Plan mode cannot approve tools."],
+    [
+      "interrupted",
+      "The provider session that asked ended when Octant stopped. Send a new message to continue.",
+    ],
+  ] as const)(
+    "keeps an approval the host refuses with a %s turn state and says why",
+    async (state, reason) => {
+      const operationId = "70000000-0000-4000-8000-000000000033";
+      const approvalId = "70000000-0000-4000-8000-000000000034";
+      async function* waitingFrames() {
+        yield {
+          threadId: ids.thread,
+          operationId,
+          cursor: 1,
+          occurredAt: now,
+          event: {
+            kind: "approval-requested",
+            approvalId,
+            action: "provider-tool",
+            summary: "Allow browser access?",
+          },
+        };
+        yield {
+          threadId: ids.thread,
+          operationId,
+          cursor: 2,
+          occurredAt: now,
+          event: { kind: "operation-state", state: "waiting" },
+        };
+      }
+      const executeOperation = vi.fn(async (command: CodeOperationCommand) =>
+        command.kind === "answer-provider-approval"
+          ? {
+              kind: "provider-turn-state",
+              operationId: command.operationId,
+              state,
+              failure: { category: "failed", message: reason },
+            }
+          : { kind: "provider-turn-state", operationId, state: "running" },
+      );
+      const client = fakeClient({
+        executeOperation: executeOperation as never,
+        subscribeOperation: vi.fn(() => waitingFrames()) as never,
+      });
+      const { result } = renderHook(() =>
+        useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      await act(async () => {
+        await result.current.sendFollowUp("approve this turn");
+      });
+      expect(result.current.providerRequests).toHaveLength(1);
+
+      let answered = true;
+      await act(async () => {
+        answered = await result.current.answerProviderRequest({
+          kind: "approval",
+          approvalId: approvalId as never,
+          decision: "approved",
+        });
+      });
+
+      expect(answered).toBe(false);
+      expect(result.current.providerRequests).toHaveLength(1);
+      expect(result.current.providerAnswerRefusal).toBe(reason);
+    },
+  );
+
   it("keeps the dropped-context warning when a running Code turn fails", async () => {
     const store = createComposerThreadDraftStore(memoryDraftStorage());
     const operationId = "70000000-0000-4000-8000-000000000032";
