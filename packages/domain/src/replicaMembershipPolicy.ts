@@ -173,6 +173,16 @@ export interface ReplicaAdmissionRecord {
   readonly member: ReplicaMembershipMember;
 }
 
+/**
+ * The key an instance's own first join request - its sequence 1 - names and is
+ * signed with. Only the holder of that key can write it, so it is the one key
+ * an approval of that instance may name.
+ */
+export interface ReplicaJoinRequestKey {
+  readonly instanceId: ReplicaInstanceId;
+  readonly publicKey: string;
+}
+
 /** One revocation a host holds: a cut on its subject, signed by the revoker at its sequence. */
 export interface ReplicaRevocationRecord {
   readonly revoker: ReplicaInstanceId;
@@ -192,10 +202,15 @@ export interface ReplicaDerivedMembership {
  * decided the same way whatever order they arrived in.
  *
  * A member is a root, or is admitted by an approval its approver signed while
- * a member and at or before every counted cut on that approver. When two
- * approvals admit the same instance with different keys, the one nearer a
- * root wins, then the lower approver id and sequence, so the key does not
- * depend on which record arrived first.
+ * a member and at or before every counted cut on that approver. An approval
+ * counts only when the key it names is the key of the subject's own first join
+ * request. Any member can sign an approval of any instance, so without this a
+ * member could name its own key for another computer and then sign as it; the
+ * join request is the one record only the real key holder can write. An
+ * instance with no join request held, or with two naming different keys, is
+ * admitted by nobody, and no approval picks a key by depth or approver id.
+ * Every counted approval of one instance names the same key, so a later
+ * approval never changes a member's key.
  *
  * Before revocations are weighed against each other, two kinds never count:
  * - one that cuts away its own revoker's admission, such as a revocation of
@@ -204,9 +219,11 @@ export interface ReplicaDerivedMembership {
  *   computer that approved it, or that computer's approver, up to the root -
  *   by revoking that ancestor. Whoever brought a computer in can take it back
  *   out, and the computer it removed cannot remove it in return.
- * Ancestry follows the approval that admitted each member, ignoring cuts, so
- * an approval written later of a computer already in cannot make anyone its
- * ancestor.
+ * Ancestry follows the approvals that admitted each member, ignoring cuts.
+ * When more than one counted approval admits a member in the same round, only
+ * the ancestors they all share count, and an approval in a later round is not
+ * weighed at all, so a second approval of a computer - by anyone - can narrow
+ * its ancestry but never make its writer an ancestor.
  *
  * The rest can still cut each other's revokers, so this is a fixed point: the
  * set that is certainly valid grows from nothing, and every revocation that
@@ -216,11 +233,17 @@ export interface ReplicaDerivedMembership {
  */
 export function deriveReplicaMembership(input: {
   readonly roots: ReadonlyArray<ReplicaMembershipMember>;
+  readonly requests: ReadonlyArray<ReplicaJoinRequestKey>;
   readonly admissions: ReadonlyArray<ReplicaAdmissionRecord>;
   readonly revocations: ReadonlyArray<ReplicaRevocationRecord>;
 }): ReplicaDerivedMembership {
+  const requested = requestedKeys(input.requests);
+  const admissions = input.admissions.filter(
+    (admission) =>
+      requested.get(String(admission.member.instanceId)) === admission.member.publicKey,
+  );
   const admitted = (counted: ReadonlyArray<ReplicaRevocationRecord>) =>
-    admit(input.roots, input.admissions, counted).members;
+    admit(input.roots, admissions, counted).members;
   const standing = input.revocations.filter((revocation) =>
     signedWithin(
       admitted([revocation]),
@@ -229,14 +252,14 @@ export function deriveReplicaMembership(input: {
       revocation.revokerSequence,
     ),
   );
-  const { parents } = admit(input.roots, input.admissions, []);
+  const { ancestors } = admit(input.roots, admissions, []);
   const candidates = standing.filter(
     (revocation) =>
       !standing.some(
         (answer) =>
           same(answer.revoker, revocation.cut.instanceId) &&
           same(answer.cut.instanceId, revocation.revoker) &&
-          isAncestor(parents, answer.revoker, revocation.revoker),
+          (ancestors.get(String(revocation.revoker))?.has(String(answer.revoker)) ?? false),
       ),
   );
   const valid = (
@@ -261,9 +284,30 @@ export function deriveReplicaMembership(input: {
 }
 
 /**
- * Admit in rounds outward from the roots. Each round takes, per instance, the
- * first qualifying approval by approver id and sequence, so the result and
- * each member's key are the same in any input order.
+ * Each instance's join-request key. Two requests of one instance naming
+ * different keys leave it with none: its sequence 1 is written once, so two
+ * keys mean one was forged, and neither is trusted.
+ */
+function requestedKeys(
+  requests: ReadonlyArray<ReplicaJoinRequestKey>,
+): ReadonlyMap<string, string> {
+  const keys = new Map<string, string>();
+  const conflicted = new Set<string>();
+  for (const request of requests) {
+    const id = String(request.instanceId);
+    const known = keys.get(id);
+    if (known !== undefined && known !== request.publicKey) conflicted.add(id);
+    keys.set(id, request.publicKey);
+  }
+  for (const id of conflicted) keys.delete(id);
+  return keys;
+}
+
+/**
+ * Admit in rounds outward from the roots. A member's record comes from its
+ * first qualifying approval by approver id and sequence - every one names the
+ * same key - and its ancestors are the ones every approval of that round
+ * shares, so the result is the same in any input order.
  */
 function admit(
   roots: ReadonlyArray<ReplicaMembershipMember>,
@@ -271,51 +315,51 @@ function admit(
   counted: ReadonlyArray<ReplicaRevocationRecord>,
 ): {
   readonly members: ReadonlyMap<string, ReplicaMembershipMember>;
-  readonly parents: ReadonlyMap<string, string>;
+  /** Each member's approvers up to a root; a root has none. */
+  readonly ancestors: ReadonlyMap<string, ReadonlySet<string>>;
 } {
   const members = new Map(roots.map((root) => [String(root.instanceId), root] as const));
-  const parents = new Map<string, string>();
+  const ancestors = new Map<string, ReadonlySet<string>>(
+    roots.map((root) => [String(root.instanceId), new Set<string>()] as const),
+  );
   for (;;) {
-    const chosen = new Map<string, ReplicaAdmissionRecord>();
+    const qualifying = new Map<string, ReplicaAdmissionRecord[]>();
     for (const admission of admissions) {
       const id = String(admission.member.instanceId);
       if (members.has(id)) continue;
       if (!signedWithin(members, counted, admission.approver, admission.approverSequence)) {
         continue;
       }
-      const best = chosen.get(id);
-      if (best === undefined || precedes(admission, best)) chosen.set(id, admission);
+      qualifying.set(id, [...(qualifying.get(id) ?? []), admission]);
     }
-    if (chosen.size === 0) return { members, parents };
-    for (const id of [...chosen.keys()].sort()) {
-      const admission = chosen.get(id);
-      if (admission === undefined) continue;
-      members.set(id, admission.member);
-      parents.set(id, String(admission.approver));
+    if (qualifying.size === 0) return { members, ancestors };
+    for (const [id, approvals] of qualifying) {
+      const [first, ...rest] = [...approvals].sort(byApprover);
+      if (first === undefined) continue;
+      members.set(id, first.member);
+      let shared = lineage(ancestors, first.approver);
+      for (const approval of rest) {
+        const other = lineage(ancestors, approval.approver);
+        shared = new Set([...shared].filter((ancestor) => other.has(ancestor)));
+      }
+      ancestors.set(id, shared);
     }
   }
 }
 
-function precedes(left: ReplicaAdmissionRecord, right: ReplicaAdmissionRecord): boolean {
+/** An approver and everyone above it. */
+function lineage(
+  ancestors: ReadonlyMap<string, ReadonlySet<string>>,
+  approver: ReplicaInstanceId,
+): ReadonlySet<string> {
+  return new Set([String(approver), ...(ancestors.get(String(approver)) ?? [])]);
+}
+
+function byApprover(left: ReplicaAdmissionRecord, right: ReplicaAdmissionRecord): number {
   const leftApprover = String(left.approver);
   const rightApprover = String(right.approver);
-  if (leftApprover !== rightApprover) return leftApprover < rightApprover;
-  return left.approverSequence < right.approverSequence;
-}
-
-/** Whether `ancestor` admitted `instanceId`, directly or through the approvals above it. */
-function isAncestor(
-  parents: ReadonlyMap<string, string>,
-  ancestor: ReplicaInstanceId,
-  instanceId: ReplicaInstanceId,
-): boolean {
-  let current = parents.get(String(instanceId));
-  // Each parent was admitted in an earlier round, so the walk ends at a root.
-  for (let steps = 0; current !== undefined && steps <= parents.size; steps += 1) {
-    if (current === String(ancestor)) return true;
-    current = parents.get(current);
-  }
-  return false;
+  if (leftApprover !== rightApprover) return leftApprover < rightApprover ? -1 : 1;
+  return left.approverSequence - right.approverSequence;
 }
 
 /** Whether `instanceId` is a member and signed `sequence` at or before every counted cut on it. */

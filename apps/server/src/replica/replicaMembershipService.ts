@@ -43,6 +43,7 @@ import {
   revocationCut,
   type ReplicaAdmissionRecord,
   type ReplicaJoinRequestFacts,
+  type ReplicaJoinRequestKey,
   type ReplicaMembershipFacts,
   type ReplicaRevocationRecord,
 } from "@octant/domain/replica-membership-policy";
@@ -575,7 +576,10 @@ export class ReplicaMembershipService {
     return { kind: "join-confirmed", approver };
   }
 
-  /** Every instance's approvals and revocations, read in sequence order up to the first gap. */
+  /**
+   * Every instance's first join request, approvals, and revocations, read in
+   * sequence order up to the first gap.
+   */
   async #readMembershipLogs(
     store: ReplicaStore,
   ): Promise<ReadonlyArray<MembershipRecord> | undefined> {
@@ -591,7 +595,11 @@ export class ReplicaMembershipService {
         if (read.status === "unavailable") return undefined;
         if (read.status !== "ready") break;
         const entry = read.entry;
-        if (entry.kind === "join-approved" || entry.kind === "revocation") {
+        if (
+          entry.kind === "join-approved" ||
+          entry.kind === "revocation" ||
+          (entry.kind === "join-request" && sequence === 1)
+        ) {
           records.push({ entry, read });
         }
       }
@@ -1162,8 +1170,10 @@ interface FounderChain {
  * A founding record is the sequence-1 self-approval an instance signed with
  * the key it names; it counts only as the start of a chain. Each approval
  * after it must verify against the key the previous verified link named for
- * its approver, so a record anyone could write - a self-approval, or an
- * approval signed with a key nobody vouched for - cannot enter a chain. One
+ * its approver and name the key of its subject's own first join request, so a
+ * record anyone could write - a self-approval, an approval signed with a key
+ * nobody vouched for, or a member's approval that names its own key for
+ * another computer - cannot enter a chain. One
  * chain is kept per founder; a caller refuses when more than one founder
  * reaches the approver, because a second founding record is what a stranger
  * with write access to the store would add.
@@ -1179,10 +1189,30 @@ function founderChainsTo(
   local: ReplicaLocalIdentity,
 ): ReadonlyArray<FounderChain> {
   const chains: FounderChain[] = [];
+  // Each instance's own first join request, verified with the key it names:
+  // the only key an approval of that instance may carry.
+  const requests: ReplicaJoinRequestKey[] = [];
+  for (const { entry, read } of records) {
+    const key = entry.subjectDeviceKey;
+    if (
+      entry.kind === "join-request" &&
+      entry.origin.sequence === 1 &&
+      key !== undefined &&
+      verdictFor(key, read) === "verified"
+    ) {
+      requests.push({ instanceId: entry.origin.instanceId, publicKey: key });
+    }
+  }
+  const requested = (instanceId: ReplicaInstanceId, publicKey: string) =>
+    requests.some(
+      (request) =>
+        String(request.instanceId) === String(instanceId) && request.publicKey === publicKey,
+    );
   for (const founding of records) {
     const { entry } = founding;
     const key = entry.subjectDeviceKey;
     if (
+      entry.kind !== "join-approved" ||
       entry.origin.sequence !== 1 ||
       String(entry.subject) !== String(entry.origin.instanceId) ||
       key === undefined ||
@@ -1214,6 +1244,7 @@ function founderChainsTo(
           String(approval.entry.origin.instanceId) !== current ||
           String(approval.entry.subject) === current ||
           subjectKey === undefined ||
+          !requested(approval.entry.subject, subjectKey) ||
           reached.has(String(approval.entry.subject)) ||
           verdictFor(at.key, approval.read) !== "verified"
         ) {
@@ -1260,6 +1291,7 @@ function founderChainsTo(
           cut: { instanceId: entry.subject, lastAcceptedSequence: entry.lastAcceptedSequence ?? 0 },
         });
       } else if (
+        entry.kind === "join-approved" &&
         entry.subjectDeviceKey !== undefined &&
         String(entry.subject) !== String(entry.origin.instanceId)
       ) {
@@ -1274,7 +1306,12 @@ function founderChainsTo(
         });
       }
     }
-    const derived = deriveReplicaMembership({ roots: [founder], admissions, revocations });
+    const derived = deriveReplicaMembership({
+      roots: [founder],
+      requests,
+      admissions,
+      revocations,
+    });
     const admitsLocal =
       derived.members.some(
         (member) =>

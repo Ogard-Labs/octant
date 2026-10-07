@@ -9,6 +9,7 @@ import {
   revocationCut,
   REPLICA_JOIN_REQUEST_TTL_MS,
   type ReplicaAdmissionRecord,
+  type ReplicaJoinRequestKey,
   type ReplicaMembershipFacts,
   type ReplicaMembershipMember,
   type ReplicaRevocationRecord,
@@ -177,11 +178,24 @@ describe("replica membership derivation", () => {
     return { revoker, revokerSequence, cut: { instanceId: subject, lastAcceptedSequence } };
   }
 
+  // Each computer's own first join request, naming the key it signs with.
+  const requests: ReadonlyArray<ReplicaJoinRequestKey> = [
+    { instanceId: ids.joiner, publicKey: "pub-taken" },
+    { instanceId: ids.approver, publicKey: "pub-kept" },
+    { instanceId: ids.fresh, publicKey: "pub-fresh" },
+  ];
+
   function derive(
     admissions: ReadonlyArray<ReplicaAdmissionRecord>,
     revocations: ReadonlyArray<ReplicaRevocationRecord>,
+    held: ReadonlyArray<ReplicaJoinRequestKey> = requests,
   ) {
-    const derived = deriveReplicaMembership({ roots: [founder], admissions, revocations });
+    const derived = deriveReplicaMembership({
+      roots: [founder],
+      requests: held,
+      admissions,
+      revocations,
+    });
     return {
       members: derived.members.map((m) => `${String(m.instanceId)}:${m.publicKey}`).sort(),
       cuts: derived.cuts
@@ -234,20 +248,70 @@ describe("replica membership derivation", () => {
     }
   });
 
-  it("gives a member the same key whichever approval of it arrived first", () => {
-    const peers = [admission(ids.local, 2, taken), admission(ids.local, 3, kept)];
-    const byTaken = admission(ids.joiner, 2, member(ids.fresh, "pub-from-taken"));
-    const byKept = admission(ids.approver, 2, member(ids.fresh, "pub-from-kept"));
-    const one = derive([...peers, byTaken, byKept], []).members;
-    const other = derive([...peers, byKept, byTaken], []).members;
-    expect(one).toEqual(other);
-    expect(one).toContain(`${ids.fresh}:pub-from-taken`);
+  // Kept approves Fresh with the key Fresh's own request names. Taken, a peer
+  // of Kept with a lower id, also writes an approval of Fresh.
+  const peers = [admission(ids.local, 2, taken), admission(ids.local, 3, kept)];
+  const keptApprovesFresh = admission(ids.approver, 2, member(ids.fresh, "pub-fresh"));
+
+  it("keeps a member's own key when another member approves it again with its own key", () => {
+    const takeover = admission(ids.joiner, 2, member(ids.fresh, "pub-taken"));
+    for (const records of [
+      [...peers, keptApprovesFresh, takeover],
+      [...peers, takeover, keptApprovesFresh],
+    ]) {
+      const { members } = derive(records, []);
+      expect(members).toContain(`${ids.fresh}:pub-fresh`);
+      expect(members).not.toContain(`${ids.fresh}:pub-taken`);
+    }
+  });
+
+  it("does not make the writer of a second approval with the right key an ancestor", () => {
+    const second = admission(ids.joiner, 2, member(ids.fresh, "pub-fresh"));
+    const takenRevokesFresh = revocation(ids.joiner, 3, ids.fresh, 0);
+    const freshRevokesTaken = revocation(ids.fresh, 1, ids.joiner, 2);
+    for (const records of [
+      [...peers, keptApprovesFresh, second],
+      [...peers, second, keptApprovesFresh],
+    ]) {
+      const derived = derive(records, [takenRevokesFresh, freshRevokesTaken]);
+      expect(derived.members).toContain(`${ids.fresh}:pub-fresh`);
+      // Neither is the other's approver, so both stay revoked: Taken cannot
+      // remove Fresh and refuse Fresh's answer.
+      expect(derived.cuts).toEqual([`${ids.joiner}@2`, `${ids.fresh}@0`].sort());
+    }
+  });
+
+  it("admits a joiner only through an approval naming its own request's key", () => {
+    const forged = admission(ids.joiner, 2, member(ids.fresh, "pub-taken"));
+    expect(
+      derive([...peers, forged], []).members.some((m) => m.startsWith(String(ids.fresh))),
+    ).toBe(false);
+    for (const records of [
+      [...peers, forged, keptApprovesFresh],
+      [...peers, keptApprovesFresh, forged],
+    ]) {
+      expect(derive(records, []).members).toContain(`${ids.fresh}:pub-fresh`);
+    }
+  });
+
+  it("admits nobody whose join requests name different keys, or who has none", () => {
+    const records = [...peers, keptApprovesFresh];
+    const conflicting = [...requests, { instanceId: ids.fresh, publicKey: "pub-taken" }];
+    const without = requests.filter((request) => request.instanceId !== ids.fresh);
+    for (const held of [conflicting, [...conflicting].reverse(), without]) {
+      expect(derive(records, [], held).members.some((m) => m.startsWith(String(ids.fresh)))).toBe(
+        false,
+      );
+    }
   });
 
   it("derives the same members and cuts for every order of the same records", () => {
     const records = [
       ...admissions,
       admission(ids.joiner, 2, member(ids.fresh, "pub-fresh")),
+      admission(ids.approver, 2, member(ids.fresh, "pub-kept")),
+      admission(ids.approver, 3, member(ids.joiner, "pub-kept")),
+      admission(ids.joiner, 4, member(ids.unknown, "pub-taken")),
       founderRevokesTaken,
       revocation(ids.approver, 2, ids.joiner, 3),
       revocation(ids.joiner, 3, ids.approver, 1),

@@ -24,6 +24,7 @@ import {
 import {
   deriveReplicaMembership,
   type ReplicaAdmissionRecord,
+  type ReplicaJoinRequestKey,
   type ReplicaMembershipMember,
   type ReplicaRevocationCut,
   type ReplicaRevocationRecord,
@@ -237,6 +238,8 @@ export class ReplicaMembershipProjection implements Projection {
   readonly #roots = new Map<string, ReplicaMembershipMember>();
   #founder: ReplicaMembershipMember | undefined;
   readonly #admissions: ReplicaAdmissionRecord[] = [];
+  /** The key each instance's own first join request names, from every source that verified one. */
+  readonly #requests: ReplicaJoinRequestKey[] = [];
   readonly #revocations: ReplicaRevocationRecord[] = [];
   readonly #recorded = new Set<string>();
   #localSequence = 0;
@@ -250,6 +253,7 @@ export class ReplicaMembershipProjection implements Projection {
     this.#roots.clear();
     this.#founder = undefined;
     this.#admissions.length = 0;
+    this.#requests.length = 0;
     this.#revocations.length = 0;
     this.#recorded.clear();
     this.#localSequence = 0;
@@ -290,6 +294,7 @@ export class ReplicaMembershipProjection implements Projection {
           displayName: requested.displayName,
           publicKey: requested.publicKey,
         };
+        if (requested.sequence === 1) this.#request(requested.instanceId, requested.publicKey);
         this.#published(requested.sequence);
         return;
       }
@@ -311,6 +316,9 @@ export class ReplicaMembershipProjection implements Projection {
         this.#founder = confirmed.founder;
         this.#roots.set(String(confirmed.founder.instanceId), confirmed.founder);
         for (const link of confirmed.links) {
+          // Confirming checked each link's key against its subject's own
+          // first join request in the store.
+          this.#request(link.subject, link.subjectDeviceKey);
           this.#admit(link.approver, link.sequence, {
             instanceId: link.subject,
             displayName: link.subjectDisplayName,
@@ -360,6 +368,7 @@ export class ReplicaMembershipProjection implements Projection {
     const refusals = new Set(this.#refusals);
     const { members, cuts } = deriveReplicaMembership({
       roots: [...this.#roots.values()],
+      requests: this.#requests,
       admissions: this.#admissions,
       revocations: this.#revocations,
     });
@@ -385,8 +394,12 @@ export class ReplicaMembershipProjection implements Projection {
       localAdmitted:
         local !== undefined &&
         (this.#roots.has(String(local.instanceId)) ||
-          this.#admissions.some((admission) =>
-            same(admission.member.instanceId, local.instanceId),
+          // An approval naming another key never admitted this computer, so a
+          // member cannot end a joiner's identity by approving it with one.
+          this.#admissions.some(
+            (admission) =>
+              same(admission.member.instanceId, local.instanceId) &&
+              admission.member.publicKey === local.publicKey,
           )),
       founder: this.#founder,
       members,
@@ -414,6 +427,9 @@ export class ReplicaMembershipProjection implements Projection {
       subject: entry.subject,
     });
     if (entry.kind === "join-request") {
+      if (entry.origin.sequence === 1 && entry.subjectDeviceKey !== undefined) {
+        this.#request(entry.subject, entry.subjectDeviceKey);
+      }
       if (outcome === "request-approval") this.#joinRequests.set(String(entry.subject), entry);
       return;
     }
@@ -445,6 +461,13 @@ export class ReplicaMembershipProjection implements Projection {
     if (this.#recorded.has(key)) return;
     this.#recorded.add(key);
     this.#admissions.push({ approver, approverSequence, member });
+  }
+
+  #request(instanceId: ReplicaInstanceId, publicKey: string): void {
+    const key = `request/${String(instanceId)}/${publicKey}`;
+    if (this.#recorded.has(key)) return;
+    this.#recorded.add(key);
+    this.#requests.push({ instanceId, publicKey });
   }
 
   #recordRevocation(
