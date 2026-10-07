@@ -140,10 +140,9 @@ function harnessDriver(bodies: string[]): ProviderDriver {
       harnessAutoReview: "unsupported",
       nativeAttachments: "unsupported",
       nativeWebResearch: "unsupported",
-      appManagedTools: "unsupported",
+      appManagedTools: "supported",
       citations: "unsupported",
     },
-    verifiedToolModelIds: [modelId],
     observedAt: "2026-09-05T12:00:00.000Z",
   } as never);
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

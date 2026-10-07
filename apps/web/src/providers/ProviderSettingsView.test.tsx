@@ -1272,59 +1272,6 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("anthropic-secret");
   });
 
-  it("says before the form that a browser cannot add a provider that needs an API key", async () => {
-    const user = userEvent.setup();
-    renderExpanded(
-      <ProviderSettingsView
-        {...fixture({ instance: foundryProvider(), credentialManagementAvailable: false })}
-      />,
-    );
-
-    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
-
-    const notice = screen.getByTestId("provider-keys-desktop-only");
-    expect(notice).toHaveTextContent("API keys are added from the Octant desktop app");
-    expect(notice).toHaveTextContent("Azure AI Foundry needs an API key");
-    // The notice comes before the form, not inside it after the person has filled it in.
-    const form = screen.getByRole("form", { name: "Add Azure AI Foundry provider" });
-    expect(notice.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(form).getByLabelText("API key")).toBeDisabled();
-  });
-
-  it("offers a keyless endpoint in a browser and leaves the notice out for providers that need no key", async () => {
-    const user = userEvent.setup();
-    renderExpanded(
-      <ProviderSettingsView
-        {...fixture({ instance: foundryProvider(), credentialManagementAvailable: false })}
-      />,
-    );
-
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "OpenAI-compatible HTTP",
-    );
-    expect(screen.getByTestId("provider-keys-desktop-only")).toHaveTextContent(
-      "connect an endpoint that needs no key",
-    );
-
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "Ollama native HTTP",
-    );
-    expect(screen.queryByTestId("provider-keys-desktop-only")).not.toBeInTheDocument();
-  });
-
-  it("shows no desktop-only notice where keys can be stored", async () => {
-    const user = userEvent.setup();
-    renderExpanded(<ProviderSettingsView {...fixture({ instance: foundryProvider() })} />);
-
-    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
-
-    expect(screen.queryByTestId("provider-keys-desktop-only")).not.toBeInTheDocument();
-  });
-
   it("creates an Azure AI Foundry provider with an api-key credential", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: foundryProvider() });
@@ -1360,42 +1307,6 @@ describe("ProviderSettingsView", () => {
     credential.clear();
     expect(within(create).getByLabelText("API key")).toHaveValue("");
     expect(document.body.textContent).not.toContain("foundry-secret");
-  });
-
-  it.each([
-    ["OpenAI-compatible", httpProvider(), "model-a"],
-    ["Anthropic-compatible", anthropicProvider(), "claude-3-5-sonnet"],
-    ["Azure AI Foundry", foundryProvider(), "deployment-a"],
-  ] as const)(
-    "verifies tools for a configured model of an %s provider on request",
-    async (_label, instance, modelId) => {
-      const user = userEvent.setup();
-      const props = fixture({ instance, observed: observation() });
-      renderExpanded(<ProviderSettingsView {...props} />);
-
-      const card = screen.getByLabelText(instance.displayName);
-      await user.click(within(card).getByRole("button", { name: "Connection details" }));
-      expect(within(card).getByText(/Chat only until you verify/)).toBeVisible();
-      await user.click(within(card).getByRole("button", { name: `Verify tools for ${modelId}` }));
-
-      expect(props.onVerifyModelTools).toHaveBeenCalledWith(id, modelId);
-    },
-  );
-
-  it("says which models are verified for tools and keeps the endpoint's other models Chat only", async () => {
-    const user = userEvent.setup();
-    const props = fixture({
-      instance: httpProvider(),
-      observed: observation({ verifiedToolModelIds: ["model-a" as never] }),
-    });
-    renderExpanded(<ProviderSettingsView {...props} />);
-
-    const card = screen.getByLabelText("Private gateway");
-    await user.click(within(card).getByRole("button", { name: "Connection details" }));
-    expect(within(card).getByText("Verified (1 model)")).toBeVisible();
-    expect(
-      within(card).getByRole("button", { name: "Verify tools for model-a (verified)" }),
-    ).toBeVisible();
   });
 
   it("saves Azure AI Foundry configuration changes for an existing provider", async () => {
@@ -2869,7 +2780,7 @@ function ControllerBackedProviderSettings(props: {
       onPermissionPersistenceChange={controller.updatePermissionPersistence}
       onProbe={controller.probe}
       onProviderOrderChange={controller.updateProviderOrder}
-      onVerifyModelTools={controller.verifyModelTools}
+      onVerifyFoundryTools={controller.verifyFoundryTools}
       onProviderCredentialStatus={controller.providerCredentialStatus}
       onRemove={controller.remove}
       onRename={controller.rename}
@@ -3103,7 +3014,7 @@ function fixture(
     onModelDataTagsChange: vi.fn(async () => true),
     onRemove: vi.fn(async () => true),
     onProbe: vi.fn(async () => true),
-    onVerifyModelTools: vi.fn(async () => "supported" as const),
+    onVerifyFoundryTools: vi.fn(async () => true),
     onPermissionPersistenceChange: vi.fn(async () => true),
     onProviderOrderChange: vi.fn(async () => true),
     onAgentEligibleModelsChange: vi.fn(async () => true),

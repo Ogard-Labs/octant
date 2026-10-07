@@ -65,63 +65,6 @@ describe("context inspector presentation model", () => {
     expect(model).toMatchObject({ usedTokens: 12_000, totalTokens: 200_000, percent: 6 });
   });
 
-  describe("a window nothing named", () => {
-    function unnamedWindow(contextWindow?: number) {
-      const fixture = contextFixture();
-      if (fixture.latestUsage === undefined) throw new Error("Fixture has no usage");
-      return {
-        ...fixture,
-        modelLimits: {
-          ...fixture.modelLimits,
-          contextWindow: 4_096,
-          source: "conservative-fallback" as const,
-          confidence: "low" as const,
-        },
-        latestUsage: {
-          ...fixture.latestUsage,
-          actualInputTokens: 34_300,
-          contextTokens: 34_300,
-          ...(contextWindow === undefined ? {} : { contextWindow }),
-        },
-      };
-    }
-
-    it("shows the fill alone, with no fraction, share, or free room, after a turn", () => {
-      const model = contextWindowModel(unnamedWindow());
-      expect(model.usageLabel).toBe("34.3K");
-      expect(model.usedTokens).toBe(34_300);
-      expect(model).not.toHaveProperty("totalTokens");
-      expect(model).not.toHaveProperty("percent");
-      expect(model.segments.some((segment) => segment.kind === "free")).toBe(false);
-      expect(model.segments.every((segment) => segment.percent === undefined)).toBe(true);
-    });
-
-    it("shows the fill alone before the first turn", () => {
-      const model = contextWindowModel({
-        ...unnamedWindow(),
-        latestSent: undefined,
-        latestUsage: undefined,
-      });
-      expect(model.sourceLabel).toBe("Next turn");
-      expect(model.usageLabel).toBe("100");
-      expect(model).not.toHaveProperty("percent");
-    });
-
-    it("takes the window from the provider's own report when it names one", () => {
-      expect(contextWindowModel(unnamedWindow(258_000))).toMatchObject({
-        usageLabel: "34.3K / 258K",
-        totalTokens: 258_000,
-        percent: 13.3,
-      });
-    });
-
-    it("does not divide the planned input by the estimate in the status line", () => {
-      expect(contextStatusModel(unnamedWindow(), { kind: "thread" }).usageLabel).toBe(
-        "Context 100 estimated",
-      );
-    });
-  });
-
   it("keeps pane focus explicit while preserving thread attention", () => {
     expect(
       contextStatusModel(contextFixture({ health: "blocked" }), {
@@ -407,9 +350,7 @@ describe("window of a provider-run thread", () => {
       percent: 0,
     });
     expect(sum(model.segments)).toBe(100_000);
-    expect(
-      model.segments.reduce((total, segment) => total + (segment.percent ?? 0), 0),
-    ).toBeCloseTo(100);
+    expect(model.segments.reduce((total, segment) => total + segment.percent, 0)).toBeCloseTo(100);
   });
 
   it("shows no reserved room, and no free space, once the window is full", () => {

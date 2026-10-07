@@ -281,25 +281,6 @@ export const CanvasCitationBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasCitationBlock = typeof CanvasCitationBlock.Type;
 
-/**
- * How a block presents a number.
- *
- * Absent reads as the default grouped decimal, so an author who does not care
- * gets locale grouping for free. `compact` is the short reading (1.36M),
- * `percent` reads the value as a ratio where 1 is 100%, `bytes` a base-1024
- * size, and `duration` a count of seconds. The formatter that reads this is
- * shared by charts, metrics, and tables, so one word means the same reading
- * everywhere it appears.
- */
-export const CanvasNumberFormat = Schema.Literal(
-  "number",
-  "compact",
-  "percent",
-  "bytes",
-  "duration",
-);
-export type CanvasNumberFormat = typeof CanvasNumberFormat.Type;
-
 export const CanvasScalar = Schema.Union(CanvasText, FiniteNumber, Schema.Boolean, Schema.Null);
 export type CanvasScalar = typeof CanvasScalar.Type;
 
@@ -310,7 +291,6 @@ export const CanvasMetricBlock = Schema.Struct({
   value: CanvasScalar,
   unit: Schema.optional(CanvasLabel),
   delta: Schema.optional(FiniteNumber),
-  format: Schema.optional(CanvasNumberFormat),
 }).annotations(strict);
 export type CanvasMetricBlock = typeof CanvasMetricBlock.Type;
 
@@ -355,7 +335,6 @@ export const CanvasTableColumn = Schema.Struct({
   id: boundedToken("CanvasTableColumnId"),
   label: CanvasLabel,
   type: CanvasTableColumnType,
-  format: Schema.optional(CanvasNumberFormat),
 }).annotations(strict);
 export type CanvasTableColumn = typeof CanvasTableColumn.Type;
 
@@ -508,8 +487,6 @@ export const CanvasChartBlock = Schema.Struct({
   kind: Schema.Literal("chart"),
   chartType: CanvasChartType,
   series: Schema.Array(CanvasChartSeries).pipe(Schema.maxItems(CANVAS_MAX_SERIES)),
-  /** How numeric axis values and readings read; absent groups by locale. */
-  format: Schema.optional(CanvasNumberFormat),
 })
   .annotations(strict)
   .pipe(

@@ -42,7 +42,7 @@ function TableBlock({ block }: { readonly block: Extract<Block, { readonly kind:
         {block.rows.map((row, rowIndex) => (
           <tr key={rowIndex}>
             {row.map((cell, cellIndex) => (
-              <td key={cellIndex}>{formatTableCell(cell, block.columns[cellIndex]?.format)}</td>
+              <td key={cellIndex}>{formatTableCell(cell)}</td>
             ))}
           </tr>
         ))}

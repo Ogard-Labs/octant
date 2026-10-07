@@ -7,7 +7,6 @@ import type {
   ProviderModel,
 } from "@octant/contracts";
 import type { UtcTimestamp } from "@octant/contracts/events";
-import { isNativeHarnessDriverKind } from "./providerPolicy";
 
 const evidenceSourceRank: Record<CapabilityEvidence["source"], number> = {
   "endpoint-observation": 5,
@@ -128,7 +127,7 @@ export function hasWorkToolAuthority(
   verifiedToolModelIds: ReadonlyArray<ProviderModel["id"]> = [],
 ): boolean {
   if (
-    isNativeHarnessDriverKind(driverKind) &&
+    driverKind === "azure-foundry" &&
     verifiedToolModelIds.some((id) => String(id) === String(model.id))
   ) {
     return true;

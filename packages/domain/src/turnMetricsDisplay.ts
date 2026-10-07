@@ -8,17 +8,12 @@ import type {
   TurnUsage,
 } from "@octant/contracts";
 import { estimateApiEquivalentCost, type PricingProvider } from "./localUsagePricing";
-import {
-  addTurnToSessionMetrics,
-  addTurnUsage,
-  cacheHitRate,
-  tokensPerSecond,
-} from "./turnMetricsPolicy";
+import { addTurnUsage, cacheHitRate, tokensPerSecond } from "./turnMetricsPolicy";
 
 /**
  * How a thread's token, cache, speed, and cost figures are worded, in one place
- * so the web composer, the usage page, the harness session card, the terminal
- * footer, and the phone cannot drift apart. Every rule that keeps a figure honest lives here:
+ * so the web composer, the harness session card, the terminal footer, and the
+ * phone cannot drift apart. Every rule that keeps a figure honest lives here:
  *
  * - A figure the provider did not report, or whose denominator is zero, is
  *   absent. Nothing is rendered as a zero it never measured.
@@ -352,115 +347,6 @@ export function threadStatsLine(input: ThreadStatsInput): string {
   return threadStats(input)
     .map((stat) => stat.text)
     .join(" · ");
-}
-
-/** The figure columns a thread table can show, in the order the quiet line uses. */
-export const USAGE_THREAD_FIGURE_KEYS = [
-  "input",
-  "output",
-  "cache",
-  "speed",
-  "first-token",
-  "cost",
-] as const satisfies ReadonlyArray<ThreadStatKey>;
-
-export type UsageThreadFigureKey = (typeof USAGE_THREAD_FIGURE_KEYS)[number];
-
-export interface UsageThreadRow {
-  readonly threadId: string;
-  readonly mode: TurnMetricsRecord["mode"];
-  /** Newest last, the same order a turn drill-in steps through. */
-  readonly turns: ReadonlyArray<TurnMetricsRecord>;
-  /** The figures the composer line states for this thread. */
-  readonly stats: ReadonlyArray<ThreadStat>;
-}
-
-export interface UsageThreadReading {
-  readonly rows: ReadonlyArray<UsageThreadRow>;
-  /**
-   * The host listed only the latest turns, and they are not one thread's
-   * reading, so a row covers the turns still listed rather than that thread's
-   * full total. A reading of one thread uses that thread's totals, which is
-   * what the composer shows.
-   */
-  readonly listedTurnsOnly: boolean;
-}
-
-export interface UsageThreadReadingOptions {
-  /**
-   * The query named one thread, so the summary totals belong to it even when
-   * the listed turns are only the latest tail.
-   */
-  readonly scopedToThread?: boolean;
-}
-
-/**
- * Per-thread rows for a usage reading, worded by the same rules as the
- * composer line. A figure the provider did not report is absent. When the
- * reading is one thread — every matching turn is listed, or the query named
- * that thread — the row uses the reading's totals, so it matches the composer.
- * A reading that mixes threads is split by the turns still listed, and does
- * not borrow the mixed total once older turns have scrolled off.
- */
-export function usageThreadReading(
-  summary: TurnMetricsSummary | undefined,
-  options: UsageThreadReadingOptions = {},
-): UsageThreadReading {
-  if (summary === undefined || summary.turns.length === 0) {
-    return { rows: [], listedTurnsOnly: false };
-  }
-  const byThread = new Map<string, TurnMetricsRecord[]>();
-  for (const turn of summary.turns) {
-    const existing = byThread.get(turn.threadId);
-    if (existing === undefined) byThread.set(turn.threadId, [turn]);
-    else existing.push(turn);
-  }
-  const truncated = summary.turnCount > summary.turns.length;
-  const oneThread = byThread.size === 1;
-  const useSummaryTotals = oneThread && (!truncated || options.scopedToThread === true);
-  const rows: UsageThreadRow[] = [];
-  for (const [threadId, turns] of byThread) {
-    const latest = turns[turns.length - 1];
-    if (latest === undefined) continue;
-    const stats = threadStats(
-      useSummaryTotals ? threadStatsInputOf(summary) : inputOfListedTurns(turns, !truncated),
-    );
-    rows.push({ threadId, mode: latest.mode, turns, stats });
-  }
-  rows.sort((left, right) => {
-    const leftEnded = left.turns[left.turns.length - 1]?.endedAt ?? "";
-    const rightEnded = right.turns[right.turns.length - 1]?.endedAt ?? "";
-    return rightEnded.localeCompare(leftEnded);
-  });
-  return { rows, listedTurnsOnly: !useSummaryTotals && truncated };
-}
-
-/** Columns that have a figure on at least one row. The rest stay hidden. */
-export function usageThreadColumns(
-  rows: ReadonlyArray<UsageThreadRow>,
-): ReadonlyArray<UsageThreadFigureKey> {
-  const present = new Set(rows.flatMap((row) => row.stats.map((stat) => stat.key)));
-  return USAGE_THREAD_FIGURE_KEYS.filter((key) => present.has(key));
-}
-
-function inputOfListedTurns(
-  turns: ReadonlyArray<TurnMetricsRecord>,
-  coveredAllTurns: boolean,
-): ThreadStatsInput {
-  const first = turns[0];
-  if (first === undefined) return {};
-  let usage = first.usage;
-  let metrics = addTurnToSessionMetrics(undefined, first.metrics);
-  for (const turn of turns.slice(1)) {
-    if (turn.usage !== undefined) usage = addTurnUsage(usage, turn.usage);
-    metrics = addTurnToSessionMetrics(metrics, turn.metrics);
-  }
-  return threadStatsInputOf({
-    turns: [...turns],
-    turnCount: coveredAllTurns ? turns.length : turns.length + 1,
-    ...(usage === undefined ? {} : { usage }),
-    metrics,
-  });
 }
 
 export interface TurnDetailRow {

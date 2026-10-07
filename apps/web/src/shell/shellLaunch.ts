@@ -22,59 +22,12 @@ export type ShellLaunchResolution =
   | CapabilityTransportRefusal
   | { readonly status: "absent" };
 
-/** What a tab remembers between loads; `sessionStorage` has exactly this shape. */
-export interface LaunchMemory {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
-
-const REMEMBERED_SERVER_PREFIX = "octant:launch-server:";
-
-function rememberedServerUrl(memory: LaunchMemory | undefined, origin: string): string | null {
-  try {
-    return memory?.getItem(REMEMBERED_SERVER_PREFIX + origin) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function rememberServerUrl(memory: LaunchMemory | undefined, origin: string, serverUrl: string) {
-  try {
-    memory?.setItem(REMEMBERED_SERVER_PREFIX + origin, serverUrl);
-  } catch {
-    // The launch still works for this load; it just will not survive the next.
-  }
-}
-
-/** The tab's own memory, when the browser gives it one. */
-export function tabLaunchMemory(): LaunchMemory | undefined {
-  try {
-    return globalThis.sessionStorage;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Resolve the Machine a page was launched against.
- *
- * `memory` carries the address across loads of one tab. A development renderer
- * is served by Vite while the host listens elsewhere, so the page's own origin
- * is not the host: a bare `http://localhost:<vite>/` — what a reload or an
- * in-tab navigation leaves once the `serverUrl` query is gone — was read as a
- * host that answers nothing, and the window reported its Machine authority
- * unavailable. A page launched with an address names it again and wins; one
- * that does not falls back to the address this tab was launched with, judged
- * again exactly like a typed one.
- */
-export function launchFromLocation(href: string, memory?: LaunchMemory): ShellLaunchResolution {
+export function launchFromLocation(href: string): ShellLaunchResolution {
   try {
     const url = new URL(href);
     const launchTokenFragment = url.hash.startsWith("#launchToken=");
     const windowIdParam = url.searchParams.get("windowId");
-    const namedServerUrl = url.searchParams.get("serverUrl");
-    const serverUrl =
-      namedServerUrl ?? (launchTokenFragment ? null : rememberedServerUrl(memory, url.origin));
+    const serverUrl = url.searchParams.get("serverUrl");
     const directCanonicalHost =
       serverUrl === null &&
       !launchTokenFragment &&
@@ -91,11 +44,6 @@ export function launchFromLocation(href: string, memory?: LaunchMemory): ShellLa
     const transport = capabilityTransportFor(parsedServerUrl);
     if (transport.status === "refused") return transport;
     const windowId = windowIdParam === null ? undefined : decodeWindowId(windowIdParam);
-    // Only a split launch needs remembering: a host that serves its own
-    // renderer is found again from the page origin alone.
-    if (namedServerUrl !== null && parsedServerUrl.origin !== url.origin) {
-      rememberServerUrl(memory, url.origin, parsedServerUrl.toString());
-    }
     return {
       status: "accepted",
       launch: {

@@ -1143,7 +1143,7 @@ describe("CodeOperationRuntime", () => {
           kind: "user-input-request",
           requestId: "question-1",
           prompt: "Choose one",
-          options: [{ label: "A" }, { label: "B" }],
+          options: ["A", "B"],
         }),
       ),
     );
@@ -1155,7 +1155,7 @@ describe("CodeOperationRuntime", () => {
           kind: "user-input-request",
           requestId: "question-2",
           prompt: "x".repeat(10_000),
-          options: [{ label: "A" }, { label: "B" }],
+          options: ["A", "B"],
         }),
       ),
     );
@@ -1247,59 +1247,6 @@ describe("CodeOperationRuntime", () => {
     expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
     await fixture.runtime.close();
     expect(connection.stop).toHaveBeenCalledWith(sessionId);
-    fixture.close();
-  });
-
-  it("shows the answer choices a provider offers on a question, and none when it offers none", async () => {
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const connection = providerConnection(queue);
-    const fixture = runtimeFixture({ provider: providerDriver(connection) });
-    const startOperation = operationId(15);
-
-    await fixture.runtime.execute(windowId, {
-      kind: "start-provider-turn",
-      operationId: startOperation,
-      threadId,
-      checkoutId,
-      sessionId,
-      prompt: fixture.prompt,
-    });
-    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
-    const offer = (requestId: string, options: ReadonlyArray<Record<string, string>>) =>
-      Effect.runPromise(
-        Queue.offer(
-          queue,
-          providerEvent({ kind: "user-input-request", requestId, prompt: "Which one?", options }),
-        ),
-      );
-    await offer("choices", [
-      { label: "src/a.ts", description: "The entry point" },
-      { label: "src/b.ts" },
-    ]);
-    await offer("crowded", [
-      ...Array.from({ length: 40 }, (_, index) => ({ label: `option-${index}` })),
-    ]);
-    await offer("long", [{ label: "y".repeat(1_024 * 2) }]);
-    await offer("free-text", []);
-
-    let questions: ReadonlyArray<{ readonly requestId: string; readonly options: unknown }> = [];
-    await vi.waitFor(async () => {
-      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
-      questions = frames.flatMap((frame) =>
-        frame.event.kind === "input-requested" ? [frame.event] : [],
-      );
-      expect(questions).toHaveLength(4);
-    });
-    const optionsOf = (requestId: string) =>
-      questions.find((question) => question.requestId === requestId)?.options as
-        | ReadonlyArray<string>
-        | undefined;
-
-    expect(optionsOf("choices")).toEqual(["src/a.ts", "src/b.ts"]);
-    expect(optionsOf("crowded")).toHaveLength(32);
-    expect(optionsOf("long")?.[0]?.length).toBeLessThanOrEqual(1_024);
-    expect(optionsOf("free-text")).toEqual([]);
-    await fixture.runtime.close();
     fixture.close();
   });
 

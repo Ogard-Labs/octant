@@ -75,12 +75,17 @@ The remappable set:
 - **Find a file by name** — **⌘/Ctrl+P**, in the active Code thread
 - **Find text across the repository** — **⌘/Ctrl+Shift+F**, in the active
   Code thread
+- On the Review page only: **Next** and **Previous finished thread** — **J**
+  and **K**; **Open the finished thread** — **Enter**; **Complete** — **C**;
+  **Send back** — **S**; **Snooze** — **Z**; **Mark seen** — **E**
 
 If two actions share a chord, the first keeps it and the other is marked as
 sharing it and will not run. **Reset** restores one action to its default;
 **Reset all to defaults** restores every action. A chord that would swallow
 ordinary typing — a bare letter, Shift alone, Tab, Escape, or Enter — is
-refused. Keybindings are a preference about this client's keyboard, stored
+refused, except for the Review page's own keys: they answer only while that
+page has focus and you are not typing in its follow-up field, so they may be a
+bare letter or Enter. Keybindings are a preference about this client's keyboard, stored
 locally; they change which panel a key opens, not what the server will
 authorize.
 

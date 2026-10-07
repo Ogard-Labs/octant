@@ -129,12 +129,6 @@ describe("bunServe", () => {
     });
   });
 
-  it("keeps a request open while a slow upstream answers, past Bun's ten-second idle default", async () => {
-    const response = await rawRequest(new URL("/slow", serverUrl), {});
-
-    expect(response).toMatchObject({ handlerCalled: "called", status: 204 });
-  }, 30_000);
-
   it("rejects a declared POST body before invoking the Fetch handler", async () => {
     const response = await rawRequest(new URL("/declared-post", serverUrl), {
       method: "POST",

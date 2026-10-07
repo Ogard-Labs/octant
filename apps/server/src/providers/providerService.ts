@@ -88,7 +88,6 @@ import {
   describeProviderConfigurationChange,
   invalidateModelCapabilityEvidence,
   isImageProfileDriverKind,
-  isNativeHarnessDriverKind,
   type CapabilityEvidenceChange,
 } from "@octant/domain";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
@@ -214,10 +213,6 @@ export class ProviderService implements ProviderServiceApi {
   readonly #runtime: ProviderRuntimeRegistry;
   readonly #probeProvider: NonNullable<ProviderServiceOptions["probe"]>;
   readonly #instanceOperationTails = new Map<ProviderInstanceId, Promise<void>>();
-  readonly #probesInFlight = new Map<
-    ProviderInstanceId,
-    { readonly result: Promise<ProviderProbeResult>; readonly tail: Promise<void> }
-  >();
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #driverProvider: ProviderServiceOptions["driver"];
@@ -509,14 +504,14 @@ export class ProviderService implements ProviderServiceApi {
         }
       }
     }
-    if (command.kind === "verify-model-tools") {
-      const result = await this.verifyModelTools(
+    if (command.kind === "verify-foundry-tools") {
+      const result = await this.verifyFoundryTools(
         authenticatedWindowId,
         command.instanceId,
         command.modelId,
       );
       return decodeProviderRegistryCommandResult({
-        kind: "model-tools-verified",
+        kind: "foundry-tools-verified",
         instanceId: command.instanceId,
         modelId: command.modelId,
         appManagedTools: result,
@@ -1199,33 +1194,7 @@ export class ProviderService implements ProviderServiceApi {
     return this.#probeConfiguredInstance(instanceId);
   }
 
-  /**
-   * Probes of one provider run one at a time, so every caller that asked while
-   * a slow endpoint was being checked used to wait for its own full round
-   * trip behind the rest: the web client's first check, the check after
-   * adding a provider, and a person's own click took 22, 39 and 67 seconds in
-   * turn on one slow Azure listing. A probe asked for while one is already
-   * running joins it, unless another operation (an enable or a configuration
-   * change) queued after it: that one must be checked afresh.
-   */
   #probeConfiguredInstance(instanceId: ProviderInstanceId): Promise<ProviderProbeResult> {
-    const running = this.#probesInFlight.get(instanceId);
-    if (running !== undefined && this.#instanceOperationTails.get(instanceId) === running.tail) {
-      return running.result;
-    }
-    const result = this.#queueProbe(instanceId);
-    const tail = this.#instanceOperationTails.get(instanceId);
-    if (tail === undefined) return result;
-    const entry = { result, tail };
-    this.#probesInFlight.set(instanceId, entry);
-    const forget = () => {
-      if (this.#probesInFlight.get(instanceId) === entry) this.#probesInFlight.delete(instanceId);
-    };
-    result.then(forget, forget);
-    return result;
-  }
-
-  #queueProbe(instanceId: ProviderInstanceId): Promise<ProviderProbeResult> {
     return this.#withInstanceOperation(instanceId, async () => {
       try {
         this.#assertReady();
@@ -1336,7 +1305,7 @@ export class ProviderService implements ProviderServiceApi {
     });
   }
 
-  async verifyModelTools(
+  async verifyFoundryTools(
     _authenticatedWindowId: WindowId,
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,
@@ -1345,45 +1314,30 @@ export class ProviderService implements ProviderServiceApi {
       this.#assertReady();
       const instance = this.#persistence.readProviderInstance(instanceId);
       if (instance === undefined) throw this.#invalid("Provider instance was not found.");
-      // Only the endpoints Octant drives itself can prove a tool turn: the
-      // verification is one request through the same sender a harness turn
-      // uses. Other runtimes bring their own tools and have nothing to prove.
-      if (!isNativeHarnessDriverKind(instance.driverKind)) {
-        throw this.#invalid(
-          "Tool verification is only available for OpenAI-compatible, Anthropic-compatible, and Azure AI Foundry providers.",
-        );
+      if (instance.driverKind !== "azure-foundry") {
+        throw this.#invalid("Tool verification is only available for Azure AI Foundry providers.");
       }
       if (!instance.enabled) throw this.#invalid("Enable this provider before verifying tools.");
       this.#assertDriverPluginEffective(instance);
-      // Run Check connection first so the verification has an observed state
-      // to update. Without it the server would return success but silently
-      // discard the verification since there is no runtime observation to
-      // store it in.
+      // Validate the target modelId against the configured deployment IDs so
+      // an authenticated renderer cannot probe and record an arbitrary
+      // unconfigured model as verified. The Settings UI only exposes
+      // configured IDs, but the server-side command handler is the authority
+      // boundary.
+      const configuredIds = instance.configuration.manualModelIds.map((id) => String(id));
+      if (!configuredIds.includes(String(modelId))) {
+        throw this.#invalid(
+          "Azure AI Foundry tool verification is only available for configured deployment IDs.",
+        );
+      }
+      // Require a prior Connection Check so the verification has an observed
+      // state to update. Without this, the server would return success but
+      // silently discard the verification since there is no runtime observation
+      // to store it in.
       const observed = this.#runtime.observedState(instanceId);
       if (observed === undefined) {
-        throw this.#invalid("Run Check connection for this provider before verifying tools.");
-      }
-      // Validate the target modelId so an authenticated renderer cannot probe
-      // and record an arbitrary model as verified; the Settings UI only
-      // exposes known ids, but this handler is the authority boundary. An
-      // Azure AI Foundry profile runs only its configured deployments (its
-      // catalogue lists base models that are not deployments); the other
-      // endpoint profiles also run any model the endpoint reported.
-      const configuredIds =
-        instance.configuration.kind === "openai-compatible-http" ||
-        instance.configuration.kind === "anthropic-compatible-http" ||
-        instance.configuration.kind === "azure-foundry-openai-http"
-          ? instance.configuration.manualModelIds.map((id) => String(id))
-          : [];
-      const knownIds =
-        instance.driverKind === "azure-foundry"
-          ? configuredIds
-          : [...configuredIds, ...observed.models.map((model) => String(model.id))];
-      if (!knownIds.includes(String(modelId))) {
         throw this.#invalid(
-          instance.driverKind === "azure-foundry"
-            ? "Azure AI Foundry tool verification is only available for configured deployment IDs."
-            : "Tool verification is only available for models this provider lists.",
+          "Run Check connection for this Azure AI Foundry provider before verifying tools.",
         );
       }
       if (this.#driverProvider === undefined) throw this.#unavailable();

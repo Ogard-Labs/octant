@@ -57,9 +57,25 @@ The sidebar displays a mode-aware Project hierarchy. Each mode group lists its P
 Four tiles at the top of the sidebar count what matters right now: **Inbox**
 (threads that need you), **Running**, **To review** (finished turns you have
 not opened yet), and **Done today**. Click a tile to go there: Running opens
-the Board (the Activity feed in Chat), To review opens the Activity feed, and
+the Board (the Activity feed in Chat), To review opens the Review page, and
 Done today opens the Completed shelf. Turn the tiles off in **Settings ›
 Sidebar › Count tiles** to get the plain Inbox and Board rows back.
+
+## Review finished threads
+
+**To review** opens the Review page: every finished thread you have not opened
+yet, oldest first. The list on the left shows each thread's Project, how many
+files and lines it changed, and whether its checks passed. The panel on the
+right shows the agent's last reply, the checks, the changed files, and the diff
+of the file you pick. Code threads show all of it; Chat threads show the
+reply. Work threads do not carry an unread mark yet, so they do not appear.
+
+Work through the list with single keys: **J** and **K** move, **Enter** opens
+the thread, **C** completes it, **S** sends it back with a one-line follow-up
+that becomes its next turn, **Z** snoozes it, and **E** marks it seen. The page
+never merges, approves, or comments on a pull request, and nothing on it
+deletes work. You can also open it from the command palette with **Review
+finished threads**.
 
 **Hide sidebar** shrinks the sidebar to a narrow rail of icons: the modes, the
 count tiles with their numbers, your Projects as letter tiles, the Activity

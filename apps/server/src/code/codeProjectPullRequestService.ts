@@ -946,9 +946,6 @@ export class CodeProjectPullRequestService {
       updatedAt: row.updatedAt,
       checks: row.checks,
       review: row.review,
-      ...(row.reviewRequestedFrom.length === 0
-        ? {}
-        : { reviewRequestedFrom: row.reviewRequestedFrom }),
       linkedThreads: matchLinkedThreadsToPullRequest({
         pullRequest: {
           repository: { owner: project.repositoryOwner, name: project.repositoryName },

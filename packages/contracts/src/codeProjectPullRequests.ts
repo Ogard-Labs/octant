@@ -62,7 +62,6 @@ export const MAX_CODE_PROJECT_PULL_REQUEST_DETAIL_DESCRIPTION_BYTES = 256 * 1024
 export const MAX_CODE_PROJECT_PULL_REQUEST_DETAIL_DIFF_BYTES = 1024 * 1024;
 export const MAX_CODE_PROJECT_PULL_REQUEST_PROJECTS = 1_000;
 export const MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS = 32;
-export const MAX_CODE_PROJECT_PULL_REQUEST_REVIEW_REQUESTS = 32;
 
 /**
  * Cached read of the host-local Project-scoped active pull-request projection.
@@ -248,19 +247,6 @@ export const CodeProjectPullRequestRow = Schema.Struct({
   updatedAt: githubUpdatedAt,
   checks: CodeProjectPullRequestChecksSummary,
   review: CodeProjectPullRequestReviewSummary,
-  /**
-   * Logins asked to review, from the same list read as the rest of the row.
-   * Absent on a snapshot taken before that fact was recorded; that is not a
-   * request.
-   */
-  reviewRequestedFrom: Schema.optional(
-    Schema.Array(boundedNonEmptyText(128)).pipe(
-      Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_REVIEW_REQUESTS),
-      Schema.filter(
-        (values) => new Set(values.map((value) => value.toLowerCase())).size === values.length,
-      ),
-    ),
-  ),
   linkedThreads: Schema.Array(CodeProjectPullRequestLinkedThread).pipe(
     Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS),
   ),

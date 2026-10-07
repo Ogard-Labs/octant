@@ -435,52 +435,6 @@ describe("agents managed tools", () => {
     });
   });
 
-  it("tells the parent why a child failed on wait and status, bounded and without private paths", async () => {
-    const failed = queuedRun({
-      lifecycleStatus: "failed",
-      recoveryReason: `unauthenticated: Claude authentication is required. Config at /Users/someone/.claude token=abc123 ${"x".repeat(1_000)}`,
-    });
-    const { set } = tool({
-      runs: [failed],
-      summary: [
-        {
-          runId: failed.id,
-          requestId: failed.requestId,
-          parentThreadId: failed.parentThreadId,
-          role: "research",
-          task: "Look",
-          lifecycleStatus: "failed",
-          executionKind: "octant-managed",
-          usageQuality: "unavailable",
-          route: {
-            requestedProviderInstanceId: ids.provider,
-            requestedModelId: decodeProviderModelId("gpt-4o"),
-            executionProviderInstanceId: ids.provider,
-            executionModelId: decodeProviderModelId("gpt-4o"),
-            poolDerived: false,
-          },
-          resultAcknowledgement: { required: false, acknowledged: false },
-          version: failed.version,
-          updatedAt: failed.updatedAt,
-        } as AgentRunParentSummaryEntry,
-      ],
-    });
-
-    const waited = await call(set, { operation: "wait", runId: ids.run, timeoutMs: 10 });
-    const listed = await call(set, { operation: "status" });
-    const waitedReason = (waited.result as { reason?: string }).reason ?? "";
-    const listedReason =
-      (listed.result as { children: ReadonlyArray<{ reason?: string }> }).children[0]?.reason ?? "";
-
-    expect(waited.result).toMatchObject({ status: "failed", runId: ids.run });
-    for (const reason of [waitedReason, listedReason]) {
-      expect(reason).toContain("unauthenticated: Claude authentication is required.");
-      expect(reason).not.toContain("/Users/someone");
-      expect(reason).not.toContain("abc123");
-      expect(reason.length).toBeLessThanOrEqual(512);
-    }
-  });
-
   it("answers a running child's wait with its live status after the timeout", async () => {
     const { set } = tool({ runs: [queuedRun({ lifecycleStatus: "running" })] });
     const outcome = await call(set, { operation: "wait", runId: ids.run, timeoutMs: 0 });

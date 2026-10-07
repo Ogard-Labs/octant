@@ -108,10 +108,10 @@ export interface ProviderDriver {
     input: ProviderProbeInput,
   ) => Effect.Effect<ProviderProbeResult, ProviderFailure, Scope.Scope>;
   /**
-   * Optional per-model tool-capability verification. Used by drivers whose
-   * Connection Check is non-generating (the direct-endpoint profiles) so a
-   * separate, explicitly-requested generating probe can prove one model calls
-   * a tool before Octant offers it any.
+   * Optional per-deployment tool-capability verification. Used by drivers
+   * whose Connection Check is non-generating (e.g. Azure AI Foundry) so a
+   * separate, explicitly-requested generating probe can flip
+   * `appManagedTools` from "unsupported" to "supported" after proof.
    */
   readonly verifyToolCapability?: (
     input: ProviderToolVerificationInput,

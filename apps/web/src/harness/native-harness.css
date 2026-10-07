@@ -60,13 +60,6 @@
   margin-top: 0.5rem;
 }
 
-.native-harness-candidate__tools {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .native-harness-card {
   display: flex;
   flex-direction: column;

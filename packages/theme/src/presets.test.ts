@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseHexColor } from "./color";
-import { CHART_SCALE_ROLE_IDS } from "./chartScales";
-import {
-  DEFAULT_DARK_TOKENS,
-  DEFAULT_LIGHT_TOKENS,
-  THEME_TOKEN_ROLE_IDS,
-  getDefaultToken,
-} from "./tokens";
+import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, THEME_TOKEN_ROLE_IDS } from "./tokens";
 import {
   BUILT_IN_THEME_PRESET_IDS,
   THEME_PRESETS,
@@ -90,26 +84,6 @@ describe("built-in theme preset catalog", () => {
     for (const preset of THEME_PRESETS) {
       expect(validateThemePreset(preset).valid).toBe(true);
     }
-  });
-
-  it("gives every preset the chart scale roles, inherited unless the preset overrides them", () => {
-    // A custom preset that overrides nothing still needs a usable scale, so a
-    // preset carries the default steps. A preset that overrides one keeps the
-    // others, which is what makes the override a real choice.
-    for (const preset of THEME_PRESETS) {
-      for (const mode of preset.supportedModes) {
-        const tokens = preset.tokens[mode] ?? {};
-        for (const role of CHART_SCALE_ROLE_IDS) {
-          expect(typeof tokens[role]).toBe("string");
-        }
-      }
-    }
-    const system = THEME_PRESETS.find((preset) => preset.id === "system");
-    expect(system?.tokens.light).toMatchObject(
-      Object.fromEntries(
-        CHART_SCALE_ROLE_IDS.map((role) => [role, getDefaultToken(role, "light")]),
-      ),
-    );
   });
 
   it("resolves System and preserves light/dark compatibility", () => {

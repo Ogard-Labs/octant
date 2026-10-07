@@ -30,7 +30,6 @@ import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggl
 import { SettingsDisclosure } from "../settings/primitives";
 import "../styles/usage.css";
 import { LatencyStatsSection } from "./LatencyStatsSection";
-import { UsageThreadMetrics } from "./UsageThreadMetrics";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface UsageDashboardProps {
@@ -324,39 +323,29 @@ export function UsageDashboard(props: UsageDashboardProps) {
         />
       </div>
 
-      {data.turnMetrics === undefined || data.turnMetrics.turns.length === 0 ? null : (
-        <UsageThreadMetrics
-          isNarrow={props.isNarrow ?? false}
-          scopedToThread={filter.subjectAggregateId !== undefined}
-          summary={data.turnMetrics}
-        />
-      )}
-
       {isEmpty ? (
-        data.turnMetrics === undefined || data.turnMetrics.turns.length === 0 ? (
-          <SurfaceEmpty
-            {...(hasFilter
-              ? {
-                  action: (
-                    <OctantButton
-                      onClick={() => setFilter({})}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      Clear filters
-                    </OctantButton>
-                  ),
-                }
-              : {})}
-            detail={
-              hasFilter
-                ? "Clear or adjust the active filters to see other usage."
-                : "Usage appears after an agent completes a provider request."
-            }
-            title={hasFilter ? "No usage matches these filters" : "No usage recorded yet"}
-          />
-        ) : null
+        <SurfaceEmpty
+          {...(hasFilter
+            ? {
+                action: (
+                  <OctantButton
+                    onClick={() => setFilter({})}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Clear filters
+                  </OctantButton>
+                ),
+              }
+            : {})}
+          detail={
+            hasFilter
+              ? "Clear or adjust the active filters to see other usage."
+              : "Usage appears after an agent completes a provider request."
+          }
+          title={hasFilter ? "No usage matches these filters" : "No usage recorded yet"}
+        />
       ) : (
         <>
           <ActivitySection

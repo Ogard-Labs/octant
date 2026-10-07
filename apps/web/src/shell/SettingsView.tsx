@@ -124,8 +124,8 @@ import {
   type NativeHarnessProviderOption,
 } from "../harness/NativeHarnessRoutingPanel";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
-import { LOCAL_HOST_ID, type ProviderInstanceId, type ProviderModelId } from "@octant/contracts";
-import { isNativeHarnessDriverKind, modelCarriesAppManagedTools } from "@octant/domain";
+import { LOCAL_HOST_ID } from "@octant/contracts";
+import { isNativeHarnessDriverKind } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
@@ -959,15 +959,6 @@ function ActiveSectionContent({
                 hostId={LOCAL_HOST_ID}
                 onOpenProviders={() => onOpenSection("providers")}
                 providers={nativeHarnessProviderOptions(props.providerController)}
-                {...(props.providerController === undefined
-                  ? {}
-                  : {
-                      onVerifyTools: (providerInstanceId: string, modelId: string) =>
-                        props.providerController!.verifyModelTools(
-                          providerInstanceId as ProviderInstanceId,
-                          modelId as ProviderModelId,
-                        ),
-                    })}
               />
             </>
           )}
@@ -1272,7 +1263,7 @@ function ProvidersSection(props: {
         onProviderOrderChange={props.providerController.updateProviderOrder}
         onAgentEligibleModelsChange={props.providerController.updateAgentEligibleModels}
         onHiddenModelsChange={props.providerController.updateHiddenModels}
-        onVerifyModelTools={props.providerController.verifyModelTools}
+        onVerifyFoundryTools={props.providerController.verifyFoundryTools}
         onProviderCredentialStatus={props.providerController.providerCredentialStatus}
         onRemove={props.providerController.remove}
         onRename={props.providerController.rename}
@@ -2236,27 +2227,15 @@ function nativeHarnessProviderOptions(
   if (controller === undefined) return [];
   return controller.instances
     .filter((instance) => instance.enabled && isNativeHarnessDriverKind(instance.driverKind))
-    .map((instance) => {
-      const observed = controller.observedByInstance.get(instance.id);
-      const configured: ReadonlyArray<string> =
-        instance.configuration.kind === "openai-compatible-http" ||
-        instance.configuration.kind === "anthropic-compatible-http" ||
-        instance.configuration.kind === "azure-foundry-openai-http"
-          ? instance.configuration.manualModelIds.map(String)
-          : [];
-      return {
-        instanceId: String(instance.id),
-        label: instance.displayName,
-        models: (observed?.models ?? []).map((model) => ({
-          id: String(model.id),
-          label: model.displayName,
-          configured: configured.includes(String(model.id)),
-          ...(observed === undefined
-            ? {}
-            : { toolsReady: modelCarriesAppManagedTools(observed, model.id) }),
-        })),
-      };
-    });
+    .map((instance) => ({
+      instanceId: String(instance.id),
+      label: instance.displayName,
+      models: (controller.observedByInstance.get(instance.id)?.models ?? []).map((model) => ({
+        id: String(model.id),
+        label: model.displayName,
+      })),
+    }))
+    .filter((option) => option.models.length > 0);
 }
 
 function privacyThreadsFromSettings(props: SettingsViewProps): ReadonlyArray<PrivacyTarget> {

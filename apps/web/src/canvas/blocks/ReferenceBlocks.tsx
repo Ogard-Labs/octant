@@ -1,5 +1,4 @@
 import type { CanvasBlock, CanvasSourceKind } from "@octant/contracts/canvas";
-import { splitPathLabel } from "../pathLabel";
 import { formatScalar } from "../canvasRuntime";
 
 type ReferenceKind =
@@ -78,9 +77,7 @@ export function ReferenceBlocks({ block }: { readonly block: Block }) {
       return (
         <div className="canvas-block__reference" role="listitem">
           <span className="canvas-block__reference-kind">{referenceLabel[block.kind]}</span>
-          <span className="canvas-block__reference-label">
-            {block.kind === "file-reference" ? <PathLabel label={block.label} /> : block.label}
-          </span>
+          <span className="canvas-block__reference-label">{block.label}</span>
           {block.detail !== undefined ? (
             <span className="canvas-block__reference-detail">{block.detail}</span>
           ) : null}
@@ -88,22 +85,4 @@ export function ReferenceBlocks({ block }: { readonly block: Block }) {
         </div>
       );
   }
-}
-
-/**
- * A file label read from the right: the directory locates the file and is
- * dimmed, the name identifies it and keeps full ink, and the whole thing is in
- * the code font because it is a path, not prose.
- */
-export function PathLabel({ label }: { readonly label: string }) {
-  const { directory, name } = splitPathLabel(label);
-  if (directory === undefined) {
-    return <span className="canvas-block__path">{name}</span>;
-  }
-  return (
-    <span className="canvas-block__path">
-      <span className="canvas-block__path-dir">{directory}</span>
-      <span className="canvas-block__path-name">{name}</span>
-    </span>
-  );
 }

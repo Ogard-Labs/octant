@@ -135,25 +135,6 @@ describe("Code Project pull-request contracts", () => {
     });
   });
 
-  it("keeps who was asked to review when the list recorded it, and still reads a row that did not", () => {
-    const withRequest = {
-      ...connectedView,
-      rows: [{ ...connectedView.rows[0], reviewRequestedFrom: ["reviewer"] }],
-    };
-    expect(decodeCodeProjectPullRequestView(withRequest).rows[0]?.reviewRequestedFrom).toEqual([
-      "reviewer",
-    ]);
-    expect(decodeCodeProjectPullRequestView(connectedView).rows[0]?.reviewRequestedFrom).toBe(
-      undefined,
-    );
-    expect(() =>
-      decodeCodeProjectPullRequestView({
-        ...connectedView,
-        rows: [{ ...connectedView.rows[0], reviewRequestedFrom: ["ada", "Ada"] }],
-      }),
-    ).toThrow();
-  });
-
   it("labels each Project's background refresh state and refuses duplicate entries", () => {
     expect(
       decodeCodeProjectPullRequestView({

@@ -1,6 +1,5 @@
 import type { CanvasBlock, CanvasDefinition } from "@octant/contracts/canvas";
 import { MAX_ARTIFACT_PREVIEW_CHARACTERS } from "@octant/contracts/artifact-library";
-import { CHART_BAR_RADIUS, CHART_LINE_WIDTH } from "@octant/theme";
 
 /**
  * Drawing an artifact, once.
@@ -290,7 +289,7 @@ function pie(
   const cy = y + CHART_HEIGHT / 2;
   const radius = Math.min(19, Math.max(6, Math.round((width - 4) / 2)));
   if (total <= 0) {
-    return `<circle cx="${String(cx)}" cy="${String(cy)}" r="${String(radius)}" fill="none" stroke="${palette.accent}" stroke-width="${String(CHART_LINE_WIDTH)}" opacity="0.75"/>`;
+    return `<circle cx="${String(cx)}" cy="${String(cy)}" r="${String(radius)}" fill="none" stroke="${palette.accent}" stroke-width="1.5" opacity="0.75"/>`;
   }
   let angle = -Math.PI / 2;
   const wedges = values.map((value) => {
@@ -424,7 +423,7 @@ function barAndLine(
         })
         .join(" ");
       if (points.length === 0) return "";
-      return `<polyline points="${points}" fill="none" stroke="${palette.ink}" stroke-width="${String(CHART_LINE_WIDTH)}" opacity="${opacityFor(0.9 - seriesIndex * 0.2)}"/>`;
+      return `<polyline points="${points}" fill="none" stroke="${palette.ink}" stroke-width="1.5" opacity="${opacityFor(0.9 - seriesIndex * 0.2)}"/>`;
     })
     .join("");
   return columns + lines;
@@ -465,7 +464,7 @@ function column(
   palette: ArtifactThumbnailPalette,
   opacity: number,
 ): string {
-  return `<rect x="${String(Math.round(x))}" y="${String(Math.round(top))}" width="${String(Math.max(2, Math.round(width)))}" height="${String(Math.round(height))}" rx="${String(CHART_BAR_RADIUS)}" fill="${palette.accent}" opacity="${opacityFor(opacity)}"/>`;
+  return `<rect x="${String(Math.round(x))}" y="${String(Math.round(top))}" width="${String(Math.max(2, Math.round(width)))}" height="${String(Math.round(height))}" rx="1" fill="${palette.accent}" opacity="${opacityFor(opacity)}"/>`;
 }
 
 function round(value: number): number {

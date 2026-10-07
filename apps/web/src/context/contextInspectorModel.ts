@@ -12,7 +12,6 @@ import type {
   ProviderContextPartKind,
 } from "@octant/contracts";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
-import { hasKnownContextWindow } from "@octant/domain/context-policy";
 
 export type ContextFocus =
   | { readonly kind: "thread" }
@@ -51,8 +50,7 @@ export interface ContextWindowSegment {
   readonly key: string;
   readonly kind: "content" | "overhead" | "reserved" | "free";
   readonly label: string;
-  /** Absent when no window is known to take a share of. */
-  readonly percent?: number;
+  readonly percent: number;
   readonly tokens?: number;
   /** Absent only for free space and reserved room, which stay neutral. */
   readonly tone?: ContextTone;
@@ -68,12 +66,10 @@ export interface ContextWindowModel {
     readonly deferred: number;
   }>;
   readonly hasUnknown: boolean;
-  /** Absent when no window is known: a share of a guess is not a share. */
-  readonly percent?: number;
+  readonly percent: number;
   readonly segments: ReadonlyArray<ContextWindowSegment>;
   readonly sourceLabel: "Last sent" | "Next turn";
-  /** Absent when nothing named the model's window; the fill is then shown alone. */
-  readonly totalTokens?: number;
+  readonly totalTokens: number;
   readonly usageLabel: string;
   readonly usedSource: ContextWindowUsedSource;
   readonly usedTokens: number;
@@ -124,11 +120,7 @@ export function contextStatusModel(
       focus.kind === "thread"
         ? `${snapshot.displayLabel} · ${snapshot.modelLimits.modelId}`
         : focus.label,
-    usageLabel: `Context ${compact(plan.plannedInputTokens)}${
-      hasKnownContextWindow(snapshot.modelLimits)
-        ? `/${compact(snapshot.modelLimits.contextWindow)}`
-        : ""
-    }${qualifier}`,
+    usageLabel: `Context ${compact(plan.plannedInputTokens)}/${compact(snapshot.modelLimits.contextWindow)}${qualifier}`,
     headroomLabel: `Headroom ${compact(Math.max(0, plan.safeInputBudget - plan.plannedInputTokens))}`,
     toolsLabel: `Tools ${snapshot.capabilities.loadedTools}/${snapshot.capabilities.availableTools}`,
     health: plan.health,
@@ -152,11 +144,9 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
     snapshot.latestSent === undefined || snapshot.latestUsage === undefined
       ? planSnapshot.plan.plannedInputTokens
       : (snapshot.latestUsage.contextTokens ?? snapshot.latestUsage.actualInputTokens);
-  // A window nothing named is the planner's emergency estimate. It admits a
-  // turn; it is not the model's window, so no share or free room is drawn from it.
   const totalTokens =
     (snapshot.latestSent === undefined ? undefined : snapshot.latestUsage?.contextWindow) ??
-    (hasKnownContextWindow(snapshot.modelLimits) ? snapshot.modelLimits.contextWindow : undefined);
+    snapshot.modelLimits.contextWindow;
   const byCategory = new Map<
     ContextEntryCategory,
     {
@@ -219,17 +209,16 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
   // Unknown entries mean the remaining capacity cannot be proven. Keep the
   // segment visible for orientation, but omit its number rather than showing
   // a fabricated free-space total.
-  const freeTokens =
-    hasUnknown || totalTokens === undefined
-      ? undefined
-      : Math.max(0, totalTokens - usedTokens - reservedTokens);
+  const freeTokens = hasUnknown
+    ? undefined
+    : Math.max(0, totalTokens - usedTokens - reservedTokens);
   const segments: Array<ContextWindowSegment> = content.map((entry) => {
     const tone = contextCategoryTone(entry.key);
     return {
       key: entry.key,
       kind: "content",
       label: entry.label,
-      ...shareOf(entry.tokens, totalTokens),
+      percent: percentOf(entry.tokens, totalTokens),
       ...(entry.unknown ? {} : { tokens: entry.tokens }),
       ...(entry.estimated && !entry.unknown ? { estimated: true } : {}),
       ...(tone === undefined ? {} : { tone }),
@@ -240,40 +229,34 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
       key: "observed-overhead",
       kind: "overhead",
       label: "Observed overhead",
-      ...shareOf(overheadTokens, totalTokens),
+      percent: percentOf(overheadTokens, totalTokens),
       tokens: overheadTokens,
       tone: UNATTRIBUTED_TONE,
     });
   }
-  segments.push({
-    key: "reserved",
-    kind: "reserved",
-    label: "Reserved",
-    ...shareOf(reservedTokens, totalTokens),
-    tokens: reservedTokens,
-  });
-  // Free space is the window less what is held; with no window there is none to
-  // name, and with unknown entries the held part is not known either.
-  if (totalTokens !== undefined) {
-    segments.push({
+  segments.push(
+    {
+      key: "reserved",
+      kind: "reserved",
+      label: "Reserved",
+      percent: percentOf(reservedTokens, totalTokens),
+      tokens: reservedTokens,
+    },
+    {
       key: "free",
       kind: "free",
       label: "Free space",
       percent: freeTokens === undefined ? 0 : percentOf(freeTokens, totalTokens),
       ...(freeTokens === undefined ? {} : { tokens: freeTokens }),
-    });
-  }
+    },
+  );
 
   return {
     sourceLabel,
     usedTokens,
-    ...(totalTokens === undefined
-      ? {}
-      : { totalTokens, percent: percentOf(usedTokens, totalTokens) }),
-    usageLabel:
-      totalTokens === undefined
-        ? compact(usedTokens)
-        : `${compact(usedTokens)} / ${compact(totalTokens)}`,
+    totalTokens,
+    percent: percentOf(usedTokens, totalTokens),
+    usageLabel: `${compact(usedTokens)} / ${compact(totalTokens)}`,
     usedSource,
     hasUnknown,
     segments,
@@ -376,10 +359,6 @@ function compact(value: number): string {
 function percentOf(value: number, total: number): number {
   if (total <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round((value / total) * 1000) / 10));
-}
-
-function shareOf(value: number, total: number | undefined): { readonly percent?: number } {
-  return total === undefined ? {} : { percent: percentOf(value, total) };
 }
 
 /**

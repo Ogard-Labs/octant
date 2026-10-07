@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contrastRatio, hexToOklch, oklchToHex, parseHexColor, relativeLuminance } from "./color";
+import { contrastRatio, oklchToHex, parseHexColor, relativeLuminance } from "./color";
 
 describe("theme color primitives", () => {
   it("parses six-digit hex colors into rgb channels", () => {
@@ -42,23 +42,5 @@ describe("oklch to hex", () => {
     const hex = oklchToHex({ l: 0.85, c: 0.3, h: 260 });
     expect(hex).toMatch(/^#[0-9a-f]{6}$/);
     expect(relativeLuminance(parseHexColor(hex))).toBeGreaterThan(0.55);
-  });
-});
-
-describe("hex to oklch", () => {
-  it("reads a neutral grey as chromaless at its hex lightness", () => {
-    const grey = hexToOklch("#808080");
-    expect(grey.c).toBeLessThan(0.001);
-    expect(grey.l).toBeCloseTo(0.6, 1);
-  });
-
-  it("round-trips a representable colour through oklch and back within a hex step", () => {
-    for (const hex of ["#0f6f68", "#1e5fae", "#a8102f", "#d9a441"]) {
-      const { r, g, b } = parseHexColor(oklchToHex(hexToOklch(hex)));
-      const original = parseHexColor(hex);
-      expect(Math.abs(r - original.r)).toBeLessThanOrEqual(2);
-      expect(Math.abs(g - original.g)).toBeLessThanOrEqual(2);
-      expect(Math.abs(b - original.b)).toBeLessThanOrEqual(2);
-    }
   });
 });

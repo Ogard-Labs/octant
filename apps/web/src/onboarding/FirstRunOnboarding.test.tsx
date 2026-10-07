@@ -92,7 +92,6 @@ function controller(
     visible: true,
     submitting: undefined,
     blockedMessage: undefined,
-    refused: false,
     complete: vi.fn(),
     skip: vi.fn(),
     defer: vi.fn(),
@@ -534,50 +533,22 @@ describe("FirstRunOnboarding", () => {
     await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
   });
 
-  it("says a refused answer was not kept, then lets the next press continue without it", async () => {
+  it("keeps first run pending when the user clicks again without answering again", async () => {
     const user = userEvent.setup();
     const props = mount({ onSelectColorScheme: vi.fn(async () => false) });
 
     await user.click(screen.getByRole("button", { name: /Workspace/ }));
     await user.click(screen.getByRole("radio", { name: "Dark" }));
     await user.click(screen.getByRole("button", { name: "Skip setup" }));
-
-    // The first press records nothing, because the answer the user just gave
-    // is gone, but it must not look like a dead button.
-    expect(await screen.findByText(/did not keep one of your answers/)).toBeVisible();
     expect(props.controller.skip).not.toHaveBeenCalled();
 
-    // Refusing again with no new answer would trap Skip setup for as long as the
-    // host kept refusing; the user has now been told, so this press goes on.
+    // The refused answer is gone, so a second click has nothing left to wait
+    // for. Reading that as consent would record the outcome over the answer
+    // the user never got to give again.
     await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
-    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
-  });
-
-  it("finishes with a thread after a refused answer has been acknowledged", async () => {
-    const user = userEvent.setup();
-    const props = mount({
-      ...readyHandoff(),
-      onSelectChatDefault: vi.fn(async () => false),
-    });
-
-    await user.click(screen.getByRole("button", { name: /Default model/ }));
-    await user.click(screen.getByRole("option", { name: /Llama Test/ }));
-    await openHandoff(user);
-    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
-    expect(await screen.findByText(/did not keep one of your answers/)).toBeVisible();
-    expect(props.controller.complete).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
-
-    await waitFor(() => expect(props.controller.complete).toHaveBeenCalledOnce());
-    expect(props.onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
-  });
-
-  it("says when the host did not record the outcome itself", () => {
-    mount({ controller: controller({ refused: true }) });
-
-    expect(screen.getByText(/The host did not record that/)).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
+    expect(props.controller.skip).not.toHaveBeenCalled();
   });
 
   it("waits for an answer given while the first ones are still settling", async () => {
@@ -738,7 +709,7 @@ describe("FirstRunOnboarding", () => {
   it("releases the modal when it sends the user to provider settings", async () => {
     const user = userEvent.setup();
     const onOpenProviderSettings = vi.fn();
-    const resolve = vi.fn(async () => true);
+    const resolve = vi.fn(async () => {});
 
     function Harness() {
       const [concealed, setConcealed] = useState(false);
@@ -806,7 +777,7 @@ describe("FirstRunOnboarding", () => {
       const live = useFirstRunOnboardingController({
         onboarding: "pending",
         shellStatus: "ready",
-        resolve: vi.fn(async () => true),
+        resolve: vi.fn(async () => {}),
         concealed,
       });
       return (
@@ -889,84 +860,6 @@ describe("FirstRunOnboarding", () => {
     await user.keyboard("{Escape}");
 
     expect(props.controller.skip).toHaveBeenCalledOnce();
-  });
-
-  describe("against a host that keeps the outcome it is sent", () => {
-    function renderAgainstHost(overrides: Partial<FirstRunOnboardingProps> = {}) {
-      const recorded: Array<"completed" | "skipped"> = [];
-      const onStartThread = vi.fn();
-      function Harness() {
-        const [onboarding, setOnboarding] = useState<"pending" | "completed" | "skipped">(
-          "pending",
-        );
-        const live = useFirstRunOnboardingController({
-          onboarding,
-          shellStatus: "ready",
-          resolve: async (outcome) => {
-            recorded.push(outcome);
-            setOnboarding(outcome);
-            return true;
-          },
-        });
-        return (
-          <FirstRunOnboarding
-            chatModelGroups={[]}
-            controller={live}
-            navigatorModelGroups={[]}
-            onClearNavigatorDefault={vi.fn(async () => true)}
-            onCreateProject={vi.fn()}
-            onOpenProviderSettings={vi.fn()}
-            onRescan={vi.fn()}
-            onSaveProfile={vi.fn(async () => true)}
-            onSelectChatDefault={vi.fn(async () => true)}
-            onSelectColorScheme={vi.fn(async () => true)}
-            onSelectModeSwitcher={vi.fn(async () => true)}
-            onSelectNavigatorDefault={vi.fn(async () => true)}
-            onStartThread={onStartThread}
-            onToggleChat={vi.fn(async () => true)}
-            onToggleWork={vi.fn(async () => true)}
-            profile={namedProfile}
-            projects={[]}
-            readiness={summarizeFirstRunReadiness({
-              providerStatus: "ready",
-              instances: [instance],
-              observedByInstance: new Map(),
-              discovery: searchedThisMac,
-            })}
-            scanning={false}
-            workspace={defaultWorkspace}
-            {...readyHandoff()}
-            {...overrides}
-          />
-        );
-      }
-      render(<Harness />);
-      return { recorded, onStartThread };
-    }
-
-    it("closes and records completion when the final action starts the first thread", async () => {
-      const user = userEvent.setup();
-      const { recorded, onStartThread } = renderAgainstHost();
-
-      await openHandoff(user);
-      await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
-
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-      expect(recorded).toEqual(["completed"]);
-      expect(onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
-    });
-
-    it("closes and records the skip from the final step", async () => {
-      const user = userEvent.setup();
-      const { recorded, onStartThread } = renderAgainstHost();
-
-      await openHandoff(user);
-      await user.click(screen.getByRole("button", { name: "Skip setup" }));
-
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-      expect(recorded).toEqual(["skipped"]);
-      expect(onStartThread).not.toHaveBeenCalled();
-    });
   });
 
   it("blocks answering while the host cannot record it and says so", async () => {

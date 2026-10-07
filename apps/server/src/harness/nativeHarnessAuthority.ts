@@ -1,5 +1,6 @@
 import { LOCAL_HOST_ID } from "@octant/contracts";
 import type {
+  ChatThreadId,
   OctantMode,
   WorkAccess,
   ThreadExternalContentTaint,
@@ -38,9 +39,9 @@ export interface NativeHarnessAuthority {
  * The harness's view of the single authority choke point.
  *
  * Granted authority comes from the thread's own durable record — a Chat
- * thread and its Project when it has one, a Work thread's bound root, a Code
- * thread's checkout — and the live facts the policy needs come from the same
- * records plus the taint projection. Nothing is taken from the model's request.
+ * thread's Project, a Work thread's bound root, a Code thread's checkout — and
+ * the live facts the policy needs come from the same records plus the taint
+ * projection. Nothing is taken from the model's request.
  */
 export function createNativeHarnessAuthority(
   options: NativeHarnessAuthorityOptions,
@@ -51,11 +52,22 @@ export function createNativeHarnessAuthority(
     persistence: options.persistence,
     workThreads: options.workThreads,
   });
-  // Chat resolves through the same resolver as Work and Code. A Chat thread
-  // needs no Project to hold authority: most new Chat threads have none, and
-  // requiring one refused every harness tool call on them as stale.
-  const resolve = (threadId: string, mode: OctantMode): ToolActionAuthority | undefined =>
-    resolver.resolve(threadId as never, mode);
+  const resolve = (threadId: string, mode: OctantMode): ToolActionAuthority | undefined => {
+    if (mode !== "chat") return resolver.resolve(threadId as never, mode);
+    const thread = options.persistence.readChatThread(threadId as ChatThreadId);
+    if (thread === undefined || thread.lifecycle !== "active" || thread.projectId === undefined) {
+      return undefined;
+    }
+    const provider = options.persistence.readProviderInstance(thread.providerInstanceId);
+    if (provider?.enabled !== true) return undefined;
+    return {
+      hostId: options.hostId,
+      mode,
+      projectId: thread.projectId,
+      providerInstanceId: thread.providerInstanceId,
+      extension: { kind: "core" },
+    };
+  };
   const service = new ToolCallAuthorityService({
     resolveGrantedAuthority: (threadId, mode) => resolve(threadId, mode),
     resolveLiveFacts: ({ threadId, mode }) => {

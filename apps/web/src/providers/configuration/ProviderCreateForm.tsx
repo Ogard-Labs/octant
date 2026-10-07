@@ -134,25 +134,6 @@ export function ProviderCreateForm(
     useState<QwenAuthentication>("provider-owned");
   const credentialInput = useRef<HTMLInputElement>(null);
   const selectedDriverLabel = driverLabel(providerType);
-  // Whether the chosen provider can be added without a key, so a browser that
-  // cannot store one says so before the form is filled in rather than after.
-  const keyAccess: "required" | "optional" | "none" =
-    providerType === "azure-foundry" ||
-    providerType === "openai-image" ||
-    providerType === "gemini-native-image" ||
-    providerType === "bfl-image" ||
-    providerType === "ideogram-image" ||
-    providerType === "mistral-vibe" ||
-    (providerType === "claude" && claudeAuthentication === "api-key") ||
-    (providerType === "grok" && grokAuthentication === "api-key") ||
-    (providerType === "glm" && glmAuthentication === "api-key") ||
-    (providerType === "gemini" && geminiAuthentication === "api-key") ||
-    (providerType === "cline" && clineAuthentication === "api-key") ||
-    (providerType === "qwen" && qwenAuthentication === "api-key")
-      ? "required"
-      : providerType === "openai-compatible" || providerType === "anthropic-compatible"
-        ? "optional"
-        : "none";
   const allowedProviderTypes = props.allowedProviderTypes;
   const selectedBinaryName =
     providerType === "mistral-vibe"
@@ -184,17 +165,6 @@ export function ProviderCreateForm(
                 "Installed runtimes are detected automatically. Use this only for a custom HTTP endpoint or an unusual executable location."}
             </p>
           </div>
-          {props.credentialManagementAvailable || keyAccess === "none" ? null : (
-            <OctantAlert
-              testId="provider-keys-desktop-only"
-              title="API keys are added from the Octant desktop app"
-              tone="warning"
-            >
-              {keyAccess === "required"
-                ? `${selectedDriverLabel} needs an API key, and this browser cannot store one. Add this provider in the desktop app.`
-                : "This browser cannot store an API key. Add a provider that needs one in the desktop app; here you can connect an endpoint that needs no key, such as a server on this computer."}
-            </OctantAlert>
-          )}
           <form
             aria-label={
               providerType === "openai-compatible"

@@ -16,6 +16,7 @@
 @import "./styles/code.css";
 @import "./styles/github.css";
 @import "./styles/inbox.css";
+@import "./styles/review.css";
 @import "./styles/apple.css";
 @import "./styles/preview.css";
 @import "./styles/zen.css";
@@ -1388,6 +1389,7 @@ html[data-octant-native-host="true"]
   .primary-workspace-layer:has(
     > .rail-placeholder,
     > .inbox-layer,
+    > .review-layer,
     > .code-board-layer,
     > .archive-layer,
     > .artifact-library-layer,
@@ -4340,20 +4342,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
    flexing away in the row alongside the model name and detail line. */
 .composer-model-picker__model-badge {
   flex: 0 0 auto;
-}
-
-/* The Chat-only note and its action sit on a line under the model, spanning
-   the name and star columns, so the disabled row keeps its dimmed look. */
-.composer-model-picker__verify {
-  display: flex;
-  grid-row: 2;
-  grid-column: 1 / -1;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-2);
-  padding: 0 var(--oct-space-2) var(--oct-space-1);
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
 }
 
 .composer-model-picker__star {

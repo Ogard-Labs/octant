@@ -1,10 +1,4 @@
 import type { ContrastLevel } from "./contrast";
-import {
-  CHART_DIVERGING_ROLE_IDS,
-  CHART_SEQUENTIAL_ROLE_IDS,
-  deriveChartScales,
-  type ChartScaleSteps,
-} from "./chartScales";
 
 export type ThemeTokenCategory =
   | "foundation"
@@ -16,8 +10,7 @@ export type ThemeTokenCategory =
   | "accent"
   | "status"
   | "diff"
-  | "palette"
-  | "chart";
+  | "palette";
 
 export interface ThemeTokenRoleDefinition {
   readonly id: string;
@@ -29,7 +22,7 @@ export interface ThemeTokenRoleDefinition {
   readonly defaultDark: string;
 }
 
-const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
+export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
   // The default palette is a neutral graphite workspace: a near-black page
   // with a slightly lighter reading surface in dark, a white reading surface
   // on a near-white ground in light, and one scarce accent. In light the
@@ -403,56 +396,6 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultLight: "#b3356e",
     defaultDark: "#f4809a",
   },
-];
-
-// The chart scales are derived from the palette roles above rather than
-// restated, so a theme that overrides the palette family moves the scale with
-// it. Derivation reads the palette through a plain record, so it happens once
-// here from the base token maps.
-const BASE_LIGHT_TOKENS: Readonly<Record<string, string>> = Object.fromEntries(
-  BASE_THEME_TOKEN_ROLES.map((role) => [role.id, role.defaultLight]),
-);
-const BASE_DARK_TOKENS: Readonly<Record<string, string>> = Object.fromEntries(
-  BASE_THEME_TOKEN_ROLES.map((role) => [role.id, role.defaultDark]),
-);
-const LIGHT_CHART_SCALES = deriveChartScales("light", BASE_LIGHT_TOKENS);
-const DARK_CHART_SCALES = deriveChartScales("dark", BASE_DARK_TOKENS);
-
-type ChartScaleKind = keyof ChartScaleSteps;
-
-function chartScaleRoles(
-  ids: ReadonlyArray<string>,
-  kind: ChartScaleKind,
-): ReadonlyArray<ThemeTokenRoleDefinition> {
-  return ids.map((id, index) => {
-    const light = LIGHT_CHART_SCALES[kind][index];
-    const dark = DARK_CHART_SCALES[kind][index];
-    if (light === undefined || dark === undefined) {
-      throw new Error(`Chart scale is missing a step for ${id}`);
-    }
-    return {
-      id,
-      displayName: `Chart ${String(kind)} ${String(index + 1)}`,
-      category: "chart" as const,
-      // A scale step is a graphical mark, so it carries the 3:1 contract
-      // rather than the text contract; every step is checked against the
-      // surface it is drawn on, in both modes.
-      contrastTarget: "workspace",
-      contrastLevel: "non-text" as const,
-      defaultLight: light,
-      defaultDark: dark,
-    };
-  });
-}
-
-const CHART_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
-  ...chartScaleRoles(CHART_SEQUENTIAL_ROLE_IDS, "sequential"),
-  ...chartScaleRoles(CHART_DIVERGING_ROLE_IDS, "diverging"),
-];
-
-export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
-  ...BASE_THEME_TOKEN_ROLES,
-  ...CHART_TOKEN_ROLES,
 ];
 
 const ROLE_BY_ID: ReadonlyMap<string, ThemeTokenRoleDefinition> = new Map(

@@ -13,7 +13,6 @@ import {
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
-import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import type {
@@ -118,10 +117,6 @@ export function createNativeHarnessComposition(
       : (subject: ContextSubjectRef) => (): NativeHarnessContextRemaining | undefined => {
           try {
             const snapshot = options.contextHarness!.inspect(subject);
-            // The planner's emergency estimate is not the model's window.
-            // Telling the lead how little of it is left would make it wrap up
-            // work the model has room for, so it gets no figure at all.
-            if (!hasKnownContextWindow(snapshot.modelLimits)) return undefined;
             const plan = snapshot.next.plan;
             const used = Math.min(plan.plannedInputTokens, plan.safeInputBudget);
             return decodeNativeHarnessContextRemaining({

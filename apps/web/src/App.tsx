@@ -213,7 +213,6 @@ import {
   clearLaunchTokenFragment,
   isProjectWindowCapability,
   launchFromLocation,
-  tabLaunchMemory,
   type ShellLaunch,
 } from "./shell/shellLaunch";
 import {
@@ -286,7 +285,6 @@ import { OctantToast } from "./ui/base/OctantToast";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import { useProviderController } from "./providers/useProviderController";
-import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
@@ -430,14 +428,10 @@ import type {
   ThreadProviderIdentity,
 } from "./shell/navigationModel";
 import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
+import { buildReviewEntries, type ReviewEntry } from "./review/reviewModel";
+import { createReviewSource } from "./review/reviewSource";
+import type { ReviewActionOutcome, ReviewPageProps } from "./review/ReviewPage";
 import { createWorkingNowCard } from "./home/WorkingNowCard";
-import { createPullRequestsCard } from "./home/PullRequestsCard";
-import {
-  pullRequestCardAvailable,
-  pullRequestCardCapability,
-  type PullRequestCardCapability,
-  type PullRequestCardRow,
-} from "./home/pullRequests";
 import { boardFactsByThread, remoteHostLabel, type WorkingNowThread } from "./home/workingNow";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
@@ -498,9 +492,7 @@ const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 const NO_VOICE_SETTINGS: VoiceSettings = {};
 
 export function App(props: AppProps) {
-  const [locationLaunch] = useState(() =>
-    launchFromLocation(window.location.href, tabLaunchMemory()),
-  );
+  const [locationLaunch] = useState(() => launchFromLocation(window.location.href));
   const launch =
     props.launch ?? (locationLaunch.status === "accepted" ? locationLaunch.launch : undefined);
   const initialInjectedCapability =
@@ -909,6 +901,10 @@ function LaunchedShell(
   // Deliberately not cleared on mode switch: what waits on the user spans
   // every mode, so the Inbox survives moving between them.
   const [inboxOpen, setInboxOpen] = useState(false);
+  // Like the Inbox, what finished and waits for a look spans the window, so
+  // moving between modes keeps the page; its list follows the active mode's
+  // To review count.
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [projectsListOpen, setProjectsListOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
   const [pendingIssue, setPendingIssue] = useState<RepositoryIssueRow>();
@@ -916,8 +912,6 @@ function LaunchedShell(
   // in, and the person sends it like any new thread.
   const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
-  const [githubPullRequestCapability, setGithubPullRequestCapability] =
-    useState<PullRequestCardCapability>({ readable: false });
   const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
   const [linearIssuesRead, setLinearIssuesRead] = useState(false);
   const linearAvailabilityGenerationRef = useRef(0);
@@ -1483,19 +1477,10 @@ function LaunchedShell(
     navigationRefreshMs: 0,
     changeRevision: machineChanges.workNavigation,
   });
-  const githubClient = useMemo(() => {
-    const synced = withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable);
-    return {
-      ...synced,
-      executeAuthenticationCommand: async (
-        command: Parameters<typeof synced.executeAuthenticationCommand>[0],
-      ) => {
-        const snapshot = await synced.executeAuthenticationCommand(command);
-        setGithubPullRequestCapability(pullRequestCardCapability(snapshot));
-        return snapshot;
-      },
-    };
-  }, [githubTransport]);
+  const githubClient = useMemo(
+    () => withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable),
+    [githubTransport],
+  );
   const linearClient = useMemo(
     () =>
       withLinearIssuesReadSync(linearTransport, (available) => {
@@ -1521,11 +1506,6 @@ function LaunchedShell(
     (query: CodeBoardQuery) => codeClient.queryBoard(query),
     [codeClient],
   );
-  const loadHomePullRequests = useCallback(
-    (query: Parameters<typeof codeClient.queryProjectPullRequests>[0]) =>
-      codeClient.queryProjectPullRequests(query),
-    [codeClient],
-  );
   // Continue names the window's own threads, so the window reads them. The
   // draft screen that shows them is remounted whenever a new task starts, and
   // a read held down there began again — and emptied the section — on every
@@ -1542,13 +1522,9 @@ function LaunchedShell(
       .then((snapshot) => {
         if (cancelled) return;
         setGithubIssuesReadAvailable(snapshotAllowsGithubIssuesRead(snapshot));
-        setGithubPullRequestCapability(pullRequestCardCapability(snapshot));
       })
       .catch(() => {
-        if (!cancelled) {
-          setGithubIssuesReadAvailable(false);
-          setGithubPullRequestCapability({ readable: false });
-        }
+        if (!cancelled) setGithubIssuesReadAvailable(false);
       });
     return () => {
       cancelled = true;
@@ -2583,8 +2559,9 @@ function LaunchedShell(
   );
   const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery);
   const recordFirstRunOutcome = useCallback(
-    (outcome: FirstRunOnboardingOutcome) =>
-      controller.updateSettings({ firstRunOnboarding: outcome }),
+    async (outcome: FirstRunOnboardingOutcome) => {
+      await controller.updateSettings({ firstRunOnboarding: outcome });
+    },
     [controller],
   );
   const saveUserProfile = useCallback(
@@ -3706,6 +3683,27 @@ function LaunchedShell(
     () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
     [projectController.projects],
   );
+  // The To review count's own rows: the same threads the tile counted, so the
+  // page and the number cannot disagree.
+  const reviewEntries = useMemo(
+    () =>
+      buildReviewEntries({
+        threads: workingNowThreads,
+        projectNames: workingNowProjectNames,
+        unfiledLabel: "No project",
+      }),
+    [workingNowProjectNames, workingNowThreads],
+  );
+  const reviewSource = useMemo(
+    () =>
+      createReviewSource({
+        code: codeClient,
+        work: workThreadClient,
+        workTurns: workTurnClient,
+        chat: chatClient,
+      }),
+    [chatClient, codeClient, workThreadClient, workTurnClient],
+  );
   const workingNowProviders = useMemo(
     () =>
       new Map(
@@ -3780,6 +3778,7 @@ function LaunchedShell(
     projectsListOpen,
     selectedProjectTabId ?? "",
     inboxOpen,
+    reviewOpen,
     workBoardOpen,
     codeBoardOpen,
     codePullRequestsOpen,
@@ -3973,6 +3972,7 @@ function LaunchedShell(
     codeBoardOpen ||
     codePullRequestsOpen ||
     inboxOpen ||
+    reviewOpen ||
     githubIssuesOpen ||
     linearIssuesOpen ||
     workBoardOpen ||
@@ -4035,28 +4035,6 @@ function LaunchedShell(
         machineChanges.codeNavigation,
       threads: workingNowThreads,
     }),
-    createPullRequestsCard({
-      available: pullRequestCardAvailable({
-        mode: activeMode,
-        pluginEffective: FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true,
-        capability: githubPullRequestCapability,
-      }),
-      viewerLogin: githubPullRequestCapability.login ?? "",
-      load: loadHomePullRequests,
-      onOpenRow: (row: PullRequestCardRow) => {
-        closeWorkspaceReaders();
-        selectProjectPullRequestIdentity({
-          projectId: row.projectId,
-          repositoryOwner: row.repositoryOwner,
-          repositoryName: row.repositoryName,
-          number: row.number,
-        });
-      },
-      onOpenAll: () => {
-        closeWorkspaceReaders();
-        setCodePullRequestsOpen(true);
-      },
-    }),
   ];
   const homeStart: DraftThreadWorkspaceProps["homeStart"] =
     activeMode === "chat"
@@ -4079,7 +4057,7 @@ function LaunchedShell(
                   ? continueCards.runningTotal
                   : 0
                 : runningThreadCount(workProjectThreads),
-            onReview: openInbox,
+            onReview: openReview,
             cards: homeCards,
             cardCustomization: controller.settings.homeCards,
             onCardCustomizationChange: (homeCardChoice) =>
@@ -4238,30 +4216,44 @@ function LaunchedShell(
   // Work has no controller of its own for thread metadata: a rest command
   // goes straight to the client with the version the sidebar last saw, and
   // the host's answer is folded back into the navigation list.
-  const runWorkRestCommand = async (
+  const tryWorkRestCommand = async (
     threadId: string,
     command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
-  ): Promise<void> => {
+  ): Promise<ReviewActionOutcome> => {
     const thread = workNavigation.bootstrap?.threads.find(
       (candidate) => String(candidate.id) === threadId,
     );
-    if (thread === undefined) return;
+    if (thread === undefined) {
+      return { status: "refused", message: "This thread is no longer in the list." };
+    }
     try {
       const result = await workThreadClient.execute(command(thread.version));
       if ("kind" in result && result.kind === "thread-updated") {
         workNavigation.applyThread(result.thread);
       }
+      return { status: "ok" };
     } catch (error) {
       // The host refused (a running turn, a wake time already gone) or the
-      // row was stale: say so where thread notices already appear, and read
-      // the list again so the row shows the thread as the host has it.
-      setThreadExportNotice(
-        error instanceof Error && error.message.trim() !== ""
-          ? error.message
-          : "The host could not change this thread.",
-      );
+      // row was stale: read the list again so the row shows the thread as the
+      // host has it, and hand the reason to whoever acted.
       void workNavigation.refresh();
+      return {
+        status: "refused",
+        message:
+          error instanceof Error && error.message.trim() !== ""
+            ? error.message
+            : "The host could not change this thread.",
+      };
     }
+  };
+  // A sidebar row has nowhere of its own to report a refusal, so its answer
+  // reads where thread notices already appear.
+  const runWorkRestCommand = async (
+    threadId: string,
+    command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
+  ): Promise<void> => {
+    const outcome = await tryWorkRestCommand(threadId, command);
+    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
   };
   const workThreadRowActions: ThreadRowActions = {
     ...(exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread }),
@@ -4293,6 +4285,76 @@ function LaunchedShell(
       })),
     onPinInPane: pinWorkThreadInPane,
   };
+
+  // The Review page acts through each thread's own host command, the same one
+  // its sidebar row uses, but asks for the host's answer as a value: the page
+  // shows a refusal beside the thread it concerns instead of in a shared
+  // notice. Each mode keeps its own command, so a Chat thread never reaches a
+  // Work or Code command.
+  const reviewPageProps: ReviewPageProps | undefined = reviewOpen
+    ? {
+        entries: reviewEntries,
+        source: reviewSource,
+        changeRevision:
+          machineChanges.chatNavigation +
+          machineChanges.workNavigation +
+          machineChanges.codeNavigation,
+        now: minuteNow.getTime(),
+        onClose: () => setReviewOpen(false),
+        onOpen: (entry: ReviewEntry) => {
+          if (entry.mode === "chat") selectChatThread(entry.threadId);
+          else if (entry.mode === "work") selectWorkThread(entry.threadId);
+          else selectCodeThread(entry.threadId);
+        },
+        onComplete: (entry: ReviewEntry): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.completeThread(decodeCodeThreadId(entry.threadId));
+          }
+          if (entry.mode === "chat") {
+            return chatController.completeThread(decodeChatThreadId(entry.threadId));
+          }
+          return tryWorkRestCommand(entry.threadId, (expectedVersion) => ({
+            kind: "complete-work-thread",
+            threadId: decodeWorkThreadId(entry.threadId),
+            expectedVersion,
+          }));
+        },
+        onSnooze: (entry: ReviewEntry, until: string): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.snoozeThread(decodeCodeThreadId(entry.threadId), until);
+          }
+          if (entry.mode === "chat") {
+            return chatController.snoozeThread(decodeChatThreadId(entry.threadId), until);
+          }
+          return tryWorkRestCommand(entry.threadId, (expectedVersion) => ({
+            kind: "snooze-work-thread",
+            threadId: decodeWorkThreadId(entry.threadId),
+            expectedVersion,
+            until: decodeUtcTimestamp(until),
+          }));
+        },
+        onSendBack: (entry: ReviewEntry, prompt: string): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.sendBackTurn(decodeCodeThreadId(entry.threadId), prompt);
+          }
+          if (entry.mode === "chat") {
+            return chatController.sendBackTurn(decodeChatThreadId(entry.threadId), prompt);
+          }
+          return Promise.resolve({
+            status: "refused",
+            message:
+              "A Work thread takes its follow-up from its own composer. Open it to continue.",
+          });
+        },
+        onMarkSeen: (entry: ReviewEntry) => {
+          if (entry.mode === "code")
+            codeController.markThreadRead(decodeCodeThreadId(entry.threadId));
+          else if (entry.mode === "chat") {
+            chatController.markThreadRead(decodeChatThreadId(entry.threadId));
+          }
+        },
+      }
+    : undefined;
 
   // One thread-selection handler per mode. The sidebar and every Project
   // Overview call the same one, so a row opens the same thread wherever it is
@@ -4458,6 +4520,7 @@ function LaunchedShell(
     projectsListOpen ||
     railPlaceholder !== undefined ||
     inboxOpen ||
+    reviewOpen ||
     codeBoardOpen ||
     workBoardOpen ||
     codePullRequestsOpen ||
@@ -4636,6 +4699,7 @@ function LaunchedShell(
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
     setInboxOpen(false);
+    setReviewOpen(false);
     setGithubIssuesOpen(false);
     setLinearIssuesOpen(false);
     setArchiveOpen(false);
@@ -4822,6 +4886,13 @@ function LaunchedShell(
   function openInbox() {
     pluginSidebarDestinationActionContext.closeOverlays();
     setInboxOpen(true);
+  }
+
+  // The To review tile, the start screen's review card, and the palette all
+  // land on the one page that lists the threads the tile counted.
+  function openReview() {
+    pluginSidebarDestinationActionContext.closeOverlays();
+    setReviewOpen(true);
   }
 
   const pluginSidebarDestinationActions: Record<string, () => void> = {};
@@ -5717,6 +5788,7 @@ function LaunchedShell(
     onNewThread: () => void controller.openDraftThread(activeMode),
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
+    onOpenReview: openReview,
     onOpenZen: () => {
       if (zen.active) zen.exitZen();
       else void zen.enterZen();
@@ -5825,7 +5897,6 @@ function LaunchedShell(
         isNarrow={isNarrow}
         onBack={() => setUsageOpen(false)}
         {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}
-        usageQuery={usageClient}
       />
     </Suspense>
   );
@@ -6258,7 +6329,7 @@ function LaunchedShell(
               ...(activeMode === "chat"
                 ? { onOpenRunning: () => openSidebarList("activity") }
                 : {}),
-              onOpenReview: () => openSidebarList("activity"),
+              onOpenReview: openReview,
               onOpenDone: () => openSidebarList("completed"),
             }}
             {...(sidebarRail
@@ -6471,6 +6542,7 @@ function LaunchedShell(
                 {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
                 onDismissRailPlaceholder={() => setRailPlaceholder(undefined)}
                 inboxOpen={inboxOpen}
+                {...(reviewPageProps === undefined ? {} : { reviewPage: reviewPageProps })}
                 onCloseInbox={() => setInboxOpen(false)}
                 inboxAttentionItems={inboxAttentionItems}
                 onOpenInboxThread={(signal) => {
@@ -6836,6 +6908,7 @@ function LaunchedShell(
                         codeBoardOpen ||
                         codePullRequestsOpen ||
                         inboxOpen ||
+                        reviewOpen ||
                         githubIssuesOpen ||
                         linearIssuesOpen ||
                         workBoardOpen ||
@@ -7545,11 +7618,7 @@ function LaunchedShell(
                     external open and copy rather than a dead anchor. */}
                     <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
                       <WorkKindChoiceContext.Provider value={workKindChoice}>
-                        <ModelToolVerificationContext.Provider
-                          value={providerController.verifyModelTools}
-                        >
-                          {shell}
-                        </ModelToolVerificationContext.Provider>
+                        {shell}
                       </WorkKindChoiceContext.Provider>
                     </MarkdownLinkActionsContext.Provider>
                   </StreamRepliesContext.Provider>

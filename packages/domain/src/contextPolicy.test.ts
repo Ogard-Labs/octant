@@ -5,7 +5,6 @@ import {
   applyContextOverrides,
   calculateSafeInputBudget,
   evaluateContextHealth,
-  hasKnownContextWindow,
   reduceContextToBudget,
   resolveEffectiveModelLimits,
 } from "./contextPolicy";
@@ -163,19 +162,6 @@ describe("context policy", () => {
     expect(resolved.source).toBe("runtime-reported");
     expect(resolved).not.toHaveProperty("maxOutput");
     expect(resolved.conflicts).toEqual([]);
-  });
-
-  it("does not take an emergency estimate for the model's own window", () => {
-    expect(hasKnownContextWindow(modelLimits({ source: "conservative-fallback" }))).toBe(false);
-    for (const source of [
-      "runtime-reported",
-      "provider-discovery",
-      "reviewed-catalog",
-      "user-supplied",
-      "observed-evidence",
-    ] as const) {
-      expect(hasKnownContextWindow(modelLimits({ source }))).toBe(true);
-    }
   });
 
   it("resolves conflicting limits conservatively and retains conflict evidence", () => {

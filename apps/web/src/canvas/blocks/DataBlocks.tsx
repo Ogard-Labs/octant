@@ -1,7 +1,7 @@
-import type { CanvasBlock, CanvasNumberFormat, CanvasTableCell } from "@octant/contracts/canvas";
+import type { CanvasBlock, CanvasTableCell } from "@octant/contracts/canvas";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { Fragment } from "react";
-import { formatCanvasValue, formatScalar } from "../canvasRuntime";
+import { formatScalar } from "../canvasRuntime";
 
 type Block = Extract<
   CanvasBlock,
@@ -25,12 +25,10 @@ export function DataBlocks({ block }: { readonly block: Block }) {
         <div className="cmetric canvas-block__metric">
           <span className="cmetric-label">{block.label}</span>
           <span className="cmetric-value">
-            {formatCanvasValue(block.value, block.format)}
+            {formatScalar(block.value)}
             {block.unit !== undefined ? <span className="cmetric-unit">{block.unit}</span> : null}
           </span>
-          {block.delta !== undefined ? (
-            <MetricDelta delta={block.delta} format={block.format} />
-          ) : null}
+          {block.delta !== undefined ? <MetricDelta delta={block.delta} /> : null}
         </div>
       );
     case "progress":
@@ -71,27 +69,21 @@ export function DataBlocks({ block }: { readonly block: Block }) {
  * How a number moved. The block does not say whether up is good, so the
  * change keeps the neutral ink and the arrow alone gives its direction.
  */
-function MetricDelta({
-  delta,
-  format,
-}: {
-  readonly delta: number;
-  readonly format: CanvasNumberFormat | undefined;
-}) {
+function MetricDelta({ delta }: { readonly delta: number }) {
   const Icon = delta > 0 ? ArrowUpRight : delta < 0 ? ArrowDownRight : Minus;
   return (
     <span className="cmetric-delta flat">
       <Icon aria-hidden="true" size={12} strokeWidth={2} />
-      {formatDelta(delta, format)}
+      {formatDelta(delta)}
     </span>
   );
 }
 
-function formatDelta(delta: number, format: CanvasNumberFormat | undefined): string {
+function formatDelta(delta: number): string {
   const sign = delta > 0 ? "+" : "";
-  return `${sign}${formatCanvasValue(delta, format)}`;
+  return `${sign}${formatScalar(delta)}`;
 }
 
-export function formatTableCell(value: CanvasTableCell, format?: CanvasNumberFormat): string {
-  return formatCanvasValue(value, format);
+export function formatTableCell(value: CanvasTableCell): string {
+  return formatScalar(value);
 }

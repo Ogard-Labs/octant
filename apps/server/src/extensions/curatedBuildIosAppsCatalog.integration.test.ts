@@ -386,7 +386,7 @@ describe("curated Build iOS Apps through the provider-neutral extension path", (
     );
     runtimeRegistry.setObservedState({
       ...observed,
-      verifiedToolModelIds: observed.models.map((model) => model.id),
+      capabilities: { ...observed.capabilities, appManagedTools: "supported" },
     });
 
     await Effect.runPromise(

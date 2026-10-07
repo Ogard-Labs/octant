@@ -238,7 +238,7 @@ function ImageProviderSettings(props: { readonly controller: ProviderController 
         onSetEnabled={controller.setEnabled}
         onDataTagsChange={controller.setDataTags}
         onModelDataTagsChange={controller.setModelDataTags}
-        onVerifyModelTools={controller.verifyModelTools}
+        onVerifyFoundryTools={controller.verifyFoundryTools}
         presentationObservedByInstance={controller.presentationObservedByInstance}
         probingIds={controller.probingIds}
         showAgentEligibleModels={false}

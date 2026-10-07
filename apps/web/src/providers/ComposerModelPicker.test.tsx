@@ -17,7 +17,6 @@ import {
   readLastModelChoice,
 } from "./modelChoiceMemory";
 import { ComposerModelPicker } from "./ComposerModelPicker";
-import { ModelToolVerificationContext } from "./ModelToolVerificationContext";
 
 const providerA = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000a1");
 const providerB = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000a2");
@@ -884,70 +883,6 @@ describe("ComposerModelPicker with the native harness", () => {
       providerInstanceId: endpointB,
       modelId: decodeProviderModelId("claude-y"),
     });
-  });
-});
-
-describe("ComposerModelPicker tool verification", () => {
-  const endpoint = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000b3");
-  const gpt = decodeProviderModelId("gpt-x");
-  const toolsOff = {
-    capabilities: { ...observation(endpoint, []).capabilities, appManagedTools: "unsupported" },
-  } as Partial<ProviderObservedState>;
-
-  function codeGroupsFor(verified: ReadonlyArray<typeof gpt> = []) {
-    return buildModelPickerGroups({
-      instances: [endpointInstance("openai-compatible", endpoint, "My OpenAI key")],
-      observedByInstance: new Map([
-        [
-          endpoint,
-          observation(endpoint, [model(gpt, "GPT X")], {
-            ...toolsOff,
-            ...(verified.length === 0 ? {} : { verifiedToolModelIds: verified }),
-          }),
-        ],
-      ]),
-      mode: "code",
-    });
-  }
-
-  it("lets a person verify tools on a Chat-only endpoint model straight from the picker", async () => {
-    const user = userEvent.setup();
-    const verify = vi.fn(async () => "supported" as const);
-    render(
-      <ModelToolVerificationContext.Provider value={verify}>
-        <ComposerModelPicker groups={codeGroupsFor()} onSelect={vi.fn()} />
-      </ModelToolVerificationContext.Provider>,
-    );
-    await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    expect(await screen.findByText("Chat only")).toBeVisible();
-
-    await user.click(
-      screen.getByRole("button", { name: "Verify tools for GPT X (My OpenAI key)" }),
-    );
-
-    expect(verify).toHaveBeenCalledWith(endpoint, gpt);
-    expect(await screen.findByText("Tools verified.")).toBeVisible();
-  });
-
-  it("offers a verified endpoint model as tool-capable with nothing left to verify", async () => {
-    const user = userEvent.setup();
-    render(
-      <ModelToolVerificationContext.Provider value={vi.fn()}>
-        <ComposerModelPicker groups={codeGroupsFor([gpt])} onSelect={vi.fn()} />
-      </ModelToolVerificationContext.Provider>,
-    );
-    await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    expect(screen.getByRole("option", { name: "GPT X" })).toBeEnabled();
-    expect(screen.queryByText("Chat only")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Verify tools/ })).not.toBeInTheDocument();
-  });
-
-  it("leaves the action out where no provider authority can run it", async () => {
-    const user = userEvent.setup();
-    render(<ComposerModelPicker groups={codeGroupsFor()} onSelect={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    expect(await screen.findByText("Chat only")).toBeVisible();
-    expect(screen.queryByRole("button", { name: /Verify tools/ })).not.toBeInTheDocument();
   });
 });
 

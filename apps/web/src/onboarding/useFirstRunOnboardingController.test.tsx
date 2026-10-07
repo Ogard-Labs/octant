@@ -6,7 +6,7 @@ import {
 } from "./useFirstRunOnboardingController";
 
 function render(overrides: Partial<UseFirstRunOnboardingControllerOptions> = {}) {
-  const resolve = vi.fn(async () => true);
+  const resolve = vi.fn(async () => {});
   const options: UseFirstRunOnboardingControllerOptions = {
     onboarding: "pending",
     shellStatus: "ready",
@@ -65,8 +65,8 @@ describe("useFirstRunOnboardingController", () => {
     let release = () => {};
     const resolve = vi.fn(
       async () =>
-        await new Promise<boolean>((resolveGate) => {
-          release = () => resolveGate(true);
+        await new Promise<void>((resolveGate) => {
+          release = resolveGate;
         }),
     );
     const { result } = render({ resolve });
@@ -88,8 +88,8 @@ describe("useFirstRunOnboardingController", () => {
     const gates: Array<() => void> = [];
     const resolve = vi.fn(
       async () =>
-        await new Promise<boolean>((resolveGate) => {
-          gates.push(() => resolveGate(true));
+        await new Promise<void>((resolveGate) => {
+          gates.push(resolveGate);
         }),
     );
     const { result } = render({ resolve });
@@ -119,33 +119,5 @@ describe("useFirstRunOnboardingController", () => {
     expect(result.current.submitting).toBeUndefined();
     expect(result.current.blockedMessage).toContain("cannot reach the host");
     expect(render().result.current.blockedMessage).toBeUndefined();
-  });
-
-  it("reports an outcome the host refused until the next one is sent", async () => {
-    const resolve = vi.fn<UseFirstRunOnboardingControllerOptions["resolve"]>();
-    resolve.mockResolvedValueOnce(false).mockResolvedValue(true);
-    const { result } = render({ resolve });
-
-    expect(result.current.refused).toBe(false);
-    act(() => result.current.skip());
-    await waitFor(() => expect(result.current.refused).toBe(true));
-    expect(result.current.submitting).toBeUndefined();
-
-    act(() => result.current.skip());
-    expect(result.current.refused).toBe(false);
-    await waitFor(() => expect(result.current.submitting).toBeUndefined());
-    expect(result.current.refused).toBe(false);
-  });
-
-  it("treats an outcome write that throws as refused", async () => {
-    const resolve = vi.fn(async () => {
-      throw new Error("host went away");
-    });
-    const { result } = render({ resolve });
-
-    act(() => result.current.complete());
-
-    await waitFor(() => expect(result.current.refused).toBe(true));
-    expect(result.current.submitting).toBeUndefined();
   });
 });

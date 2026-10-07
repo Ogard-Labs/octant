@@ -286,61 +286,6 @@ describe("shared Seatbelt profile builder", () => {
     expect(buildDenyDefaultSeatbeltProfile(input)).not.toContain("com.apple.SecurityServer");
   });
 
-  it.skipIf(process.platform !== "darwin" || !existsSync("/usr/bin/security"))(
-    "keeps a credential-lookup launch away from the login keychain and the security tool",
-    () => {
-      // The Claude runtime reads its sign-in by running `/usr/bin/security`,
-      // which would hand back any item that trusts the tool, including other
-      // command-line programs' tokens. A confined launch may run neither the
-      // tool nor read the keychain file, even with the lookup open.
-      const root = temporaryRoot();
-      const home = join(root, "home");
-      const keychains = join(home, "Library", "Keychains");
-      const checkout = join(root, "checkout");
-      const temporaryDirectory = join(root, "tmp");
-      mkdirSync(keychains, { recursive: true });
-      mkdirSync(checkout);
-      mkdirSync(temporaryDirectory);
-      writeFileSync(join(keychains, "login.keychain-db"), "kych\n");
-      const script = join(checkout, "runtime.sh");
-      writeFileSync(
-        script,
-        [
-          "#!/bin/bash",
-          `IFS= read -r login < '${join(keychains, "login.keychain-db")}' && echo login=read`,
-          "echo reached-security-step",
-          "/usr/bin/security help >/dev/null 2>&1 && echo security=ran",
-          "",
-        ].join("\n"),
-        { mode: 0o700 },
-      );
-      const profile = buildDenyDefaultSeatbeltProfile({
-        boundRoot: checkout,
-        temporaryDirectory,
-        networkEgress: "none",
-        writeBoundRoot: false,
-        allowFileReadStar: true,
-        allowProcessExec: false,
-        allowProcessFork: false,
-        execAllowPaths: ["/bin/bash", script],
-        allowProviderCredentialLookup: true,
-        homeDirectory: home,
-        usersDirectory: root,
-      });
-
-      expect(profile).not.toContain("/usr/bin/security");
-      expect(profile).not.toContain("(allow process-fork)");
-      expect(profile).not.toContain("login.keychain-db");
-      const output = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, script], {
-        cwd: checkout,
-        encoding: "utf8",
-      }).stdout;
-      expect(output).toContain("reached-security-step");
-      expect(output).not.toContain("login=read");
-      expect(output).not.toContain("security=ran");
-    },
-  );
-
   it("grants the resolved form of a launch root reached through a symlink", () => {
     const root = temporaryRoot();
     const checkout = join(root, "project");

@@ -21,12 +21,6 @@ export const bunServe: Serve = (options) => {
     hostname: options.hostname,
     port: options.port,
     maxRequestBodySize: options.maxRequestBodySize ?? MAX_CHAT_ATTACHMENT_BYTES,
-    // Bun drops a request that has had no bytes for ten seconds by default. A
-    // provider check or tool verification waits on a remote endpoint and
-    // answers only when it is done, so a slow listing came back to the browser
-    // as ERR_EMPTY_RESPONSE while the host kept working on it. 255 seconds is
-    // Bun's maximum; the endpoint's own deadlines still bound the wait.
-    idleTimeout: 255,
     ...(options.tls === undefined ? {} : { tls: options.tls }),
     fetch: (request, runtime: BunServer) => {
       const hostUrl = parseListenerRequestHost(

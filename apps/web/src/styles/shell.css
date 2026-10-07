@@ -2518,13 +2518,6 @@ html[data-octant-native-host="true"]
   margin-top: 56px;
 }
 
-/* The card area sits between the composer and the suggestions or Continue list.
-   Items in this flex column are ordered by number, and an unnumbered one would
-   paint above the composer. */
-.draft-thread__canvas > .home-start {
-  order: 3;
-}
-
 .draft-thread__composer {
   order: 2;
   display: flex;

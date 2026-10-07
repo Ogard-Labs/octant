@@ -175,16 +175,6 @@ export function resolveEffectiveModelLimits(
   };
 }
 
-/**
- * Whether anything named the model's context window. A limit that is only the
- * emergency fallback is a planning estimate: it admits a turn, but it is not
- * the model's window, so no meter, remaining-room figure or share of a window
- * may be shown or told to a model as if it were.
- */
-export function hasKnownContextWindow(limits: Pick<ModelContextLimits, "source">): boolean {
-  return limits.source !== "conservative-fallback";
-}
-
 export interface SafeInputBudgetResult {
   readonly safeInputBudget: number;
   readonly blocked: boolean;

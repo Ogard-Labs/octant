@@ -1,5 +1,5 @@
 import { UsageName } from "./UsageName";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type {
   UsageAttributionDimension,
   UsageBreakdownGroup,
@@ -13,8 +13,6 @@ import type {
   ProviderInstance,
 } from "@octant/contracts";
 import type { UsageDashboardClient } from "@octant/client-runtime";
-import type { UsageClient } from "@octant/client-runtime/usage-client";
-import type { TurnMetricsSummary } from "@octant/contracts";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
 import { ProviderUsageHistoryWorkspace } from "./ProviderUsageHistoryWorkspace";
@@ -26,7 +24,6 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { UsageActivityHeatmap } from "./UsageActivityHeatmap";
-import { UsageThreadMetrics } from "./UsageThreadMetrics";
 import { LatencyStatsSection } from "./LatencyStatsSection";
 import { useUsageDashboardController } from "./useUsageDashboardController";
 import "./usageWorkspace.css";
@@ -34,11 +31,6 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface UsageWorkspaceProps {
   readonly client: UsageDashboardClient | undefined;
-  /**
-   * The same usage query the composer reads. Thread figures come from its
-   * `turnMetrics`; the ledger projection is not asked to grow a second copy.
-   */
-  readonly usageQuery?: Pick<UsageClient, "query">;
   readonly providerLimitsClient?: ProviderUsageLimitsClient;
   readonly historyClient?: LocalUsageHistoryClient;
   readonly providers?: ReadonlyArray<ProviderInstance>;
@@ -169,7 +161,6 @@ function RecordedUsageWorkspace(
 
   const controller = useUsageDashboardController({ client: props.client, request });
   const dashboard = controller.dashboard;
-  const turnMetrics = useUsageTurnMetrics(props.usageQuery, request.filter);
 
   return (
     <Surface ariaLabel="Usage">
@@ -222,12 +213,6 @@ function RecordedUsageWorkspace(
             </OctantButton>
           </OctantAlert>
         ) : null}
-
-        <UsageThreadMetrics
-          isNarrow={props.isNarrow ?? false}
-          scopedToThread={request.filter.subjectAggregateId !== undefined}
-          summary={turnMetrics}
-        />
 
         {dashboard === undefined ? null : (
           <>
@@ -851,52 +836,4 @@ function rangeFor(preset: RangePreset): Record<string, string> {
 function resolveTimeZone(): string {
   const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return resolved === undefined || resolved.trim() === "" ? "UTC" : resolved;
-}
-
-/**
- * Thread figures from the usage query the composer already uses. A failed
- * read leaves the last answer for the same filter, so a dropped request does
- * not blank a table that was already honest.
- */
-function useUsageTurnMetrics(
-  client: Pick<UsageClient, "query"> | undefined,
-  filter: UsageQueryFilter,
-): TurnMetricsSummary | undefined {
-  const [summary, setSummary] = useState<TurnMetricsSummary | undefined>(undefined);
-  const [forFilter, setForFilter] = useState<string | undefined>(undefined);
-  const key = usageFilterKey(filter);
-  useEffect(() => {
-    if (client === undefined) return;
-    let cancelled = false;
-    void client
-      .query({ filter, limit: 1 })
-      .then((response) => {
-        if (cancelled) return;
-        setSummary(response.turnMetrics);
-        setForFilter(key);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [client, filter, key]);
-  if (client === undefined || forFilter !== key) return undefined;
-  return summary;
-}
-
-function usageFilterKey(filter: UsageQueryFilter): string {
-  return [
-    filter.providerInstanceId,
-    filter.modelId,
-    filter.subjectAggregateType,
-    filter.subjectAggregateId,
-    filter.mode,
-    filter.projectId,
-    filter.requestShape,
-    filter.category,
-    filter.hostId,
-    filter.quality,
-    filter.from,
-    filter.to,
-  ].join("\u0000");
 }

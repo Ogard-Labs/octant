@@ -18,7 +18,6 @@ import {
   effectiveAgentRunExecutionTarget,
   allowedAgentRunRolesForMode,
   nativeHarnessJobForRole,
-  redactDiagnosticText,
 } from "@octant/domain";
 import type { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import {
@@ -524,31 +523,6 @@ export function boundedAgentRunChildren<T, H extends object>(
     }
   }
   return response();
-}
-
-const MAX_AGENT_RUN_STOP_REASON_CHARACTERS = 512;
-
-/**
- * Why a child ended without a reply, in the words the parent model may see.
- *
- * A parent whose `wait` answered only `{"status":"failed"}` could not tell the
- * person that the child was signed out. The journaled reason can carry a
- * provider message or a host path, so it is redacted the way diagnostics are
- * and cut short before it reaches a model.
- */
-export function agentRunStopReason(run: AgentRun): string | undefined {
-  if (
-    run.lifecycleStatus !== "failed" &&
-    run.lifecycleStatus !== "interrupted" &&
-    run.lifecycleStatus !== "cancelled"
-  )
-    return undefined;
-  if (run.recoveryReason === undefined) return undefined;
-  const redacted = redactDiagnosticText(run.recoveryReason).text.trim();
-  if (redacted.length === 0) return undefined;
-  return redacted.length <= MAX_AGENT_RUN_STOP_REASON_CHARACTERS
-    ? redacted
-    : `${redacted.slice(0, MAX_AGENT_RUN_STOP_REASON_CHARACTERS - 1).trimEnd()}…`;
 }
 
 /** Do not settle a reply that a provider would replace with a lossy preview. */

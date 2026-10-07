@@ -698,13 +698,6 @@ Delivery does not wait for every sibling to finish. Each member's identity and
 result generation are validated and journaled on the receiving turn; replay
 settles only those members. Actual fallback provider/model attribution is kept.
 The delivery service serializes work per parent and defers while it is busy.
-A Chat delivery names the parent at its thread aggregate's head version, the
-version Chat admission checks, and a refusal that only says the parent is
-mid-turn or moved on is deferred and retried, never journaled as a failed
-delivery. A child that ends without a reply (failed, interrupted, or cancelled)
-reports why on the managed `wait` and `status` answers and in the delivered
-outcome line: its journaled reason, redacted with the diagnostics rules and cut
-to 512 characters.
 
 A completed managed child accepts an explicit follow-up through either
 delegation tool or the Agents views. The caller supplies its current version
@@ -1264,15 +1257,6 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   `answerUserInput`, and `answerTool`, with optional current-turn `steer`. Every driver passes
   the shared conformance harness (chat, child-agent, and context-facts
   suites) before it is selectable.
-- **Probe scheduling.** Operations on one provider instance run one at a time.
-  A probe asked for while another probe of that instance is running joins it
-  and shares its result, unless an enable or configuration change queued after
-  it, which gets a fresh probe; so a slow endpoint costs one round trip however
-  many surfaces ask. The host's HTTP listener allows a request 255 seconds
-  (Bun's maximum) without bytes, because a probe or tool verification answers
-  only when the endpoint does; the endpoint's own deadlines bound the wait.
-  A direct-endpoint model list shows the models a person configured under their
-  own heading ahead of the ones the endpoint reports.
 - **Model configuration.** Model variants may carry normalized family and choice
   labels (for example a Fusion lead and sidekick). Choosing a label binds an
   already advertised model id; the renderer never constructs provider ids or
@@ -1414,15 +1398,7 @@ from a response reservation. Emergency admission budgets are explicitly marked a
 conservative fallbacks. A matching runtime window from the same provider, model,
 and request shape is retained across restart and participates in subsequent
 planning; it replaces emergency estimates while conflicting model facts retain
-the more conservative bound. The Chat emergency window is 256,000 tokens: large
-enough that an ordinary thread is sent whole, small enough to remain an
-estimate. A limit whose source is `conservative-fallback` is never the model's
-window (`hasKnownContextWindow` in the domain policy says so). The composer meter
-then shows the fill alone, with no fraction, percentage, free space, or full
-ring; the context inspector names the number as an estimate; and the native
-harness's `context-remaining` tool refuses rather than hand the model an
-estimate of its own room. A window the provider's own usage report names still
-takes precedence.
+the more conservative bound.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. A runtime that compacts its own session may report where, as
 `autoCompactThreshold` on the usage report (tokens of the window the last request
@@ -1547,9 +1523,7 @@ provider's own cost), its real start and end, how it stopped, and its timing.
 identical to the live ones, and a thread purge erases them with the thread. The
 usage query (`POST /api/usage/query`) returns them as `turnMetrics`: totals
 over every matching turn plus the most recent fifty, within the same Project
-scope as the ledger rows. The usage page and Settings usage read that field for
-per-thread rows and the turn drill-in, and word them with the same module as the
-composer line. It is left out when the query filters on a dimension
+scope as the ledger rows. It is left out when the query filters on a dimension
 only the ledger carries (request shape, category, host, quality). A harness
 turn record carries the same usage, timing, start and stop reason, and the
 session's `usage` and `metrics` totals fold them, so a Code turn on a direct
@@ -1647,40 +1621,13 @@ native harness in `apps/server/src/harness`:
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
   closed tool catalog (`harness-*` capability ids). Every call decodes its
   arguments, wraps a `ToolActionRequest` under the thread's current authority,
-  and passes `ToolCallAuthorityService.authorize` before any port runs. The
-  thread's authority comes from the same resolver the browser tools use, in
-  every mode: a Chat thread holds it with or without a Project; a Work or Code
-  thread holds it only on its Project's current binding. When none resolves,
-  every call refuses as `tool-authority-stale` with a message the model
-  relays to the person; nothing renews it except the thread becoming usable
-  again. Files go through `NativeHarnessFileSystem` (confined to the root, symlinks
+  and passes `ToolCallAuthorityService.authorize` before any port runs. Files
+  go through `NativeHarnessFileSystem` (confined to the root, symlinks
   resolved, edits require a prior read); `bash` runs through the same
   Seatbelt-confined owned-process-group port as repository tests; web fetches
   refuse private destinations, and connect through a `lookup` that checks
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
-- **Tool verification.** A routine Check connection runs no generating
-  request, so an OpenAI-compatible or Azure AI Foundry endpoint offers a model
-  Octant's tools only after a person proved that model calls one. The
-  `verify-model-tools` command sends one forced `octant_capability_echo`
-  request through the same sender a turn uses, for one model; an
-  Anthropic-compatible endpoint takes the same command and request in its own
-  wire shape. A model that calls the tool joins `verifiedToolModelIds` on the
-  observed state, which the journal persists with the catalog and a
-  configuration change clears; a model that answers in text leaves it out, and
-  a transport failure (authentication, timeout) is reported rather than
-  recorded as "unsupported". Admission, the AgentRun transport check, and the
-  Chat preflight read that set per model, so verifying one model never offers
-  tools to its siblings. A tool call in a real turn widens nothing either: the
-  provider-level `appManagedTools` flag of an OpenAI-compatible or Foundry
-  profile stays "unsupported", because a tool call proves only the model that
-  made it. The command accepts only the models the endpoint
-  lists or the profile configures, and only a Foundry profile's configured
-  deployments, because its catalogue lists base models that are not
-  deployments. Ollama has no verify action until its driver runs the tool
-  loop. The model picker marks an unverified model "Chat only" with a "Verify
-  tools" action, and Settings → Octant Harness says the same for a slot's
-  chosen model.
 - **Goals.** A thread goal may carry up to twelve acceptance criteria
   (`ThreadGoalCriterion`), each with an optional check command; one without a
   command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
@@ -1921,9 +1868,6 @@ not render them. A target that passed activation is still reported honestly as
 file it would write, and the card then names that path: approving a card that
 names an existing file is the confirmation to replace it, and a call without
 that confirmation writes a numbered copy beside the file instead of over it.
-The rendered Markdown, HTML, and the artifact preview SVG read numbers through
-the shared Canvas formatter and draw marks to the shared chart specifications,
-so an exported reading matches the screen rather than growing a second reading.
 
 The folder destination ships in-tree on that same port, so it is offered,
 approved, and journaled exactly as a plugin's contribution is. Its folder comes
@@ -2123,16 +2067,10 @@ mechanisms are:
   by
   [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md)
   and narrowed by 0145, and the tools those threads reach stay confined either
-  way. A confined Claude launch never reaches the keychain itself: the runtime
-  reads its subscription sign-in by running `/usr/bin/security`, which would
-  return any keychain item that trusts that tool, including other command-line
-  programs' tokens, so the profile runs neither the tool nor reads the keychain
-  file. Measured on macOS 27, the security-server lookup alone therefore leaves
-  a Claude Plan launch on subscription sign-in, Chat children included,
-  reporting itself signed out. A bound root a launch may not write is denied in
-  the profile, so a checkout under that launch's own temporary directory is not
-  writable through it. The `--version` read every family and the discovery
-  scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
+  way. A bound root a launch may not write is denied in the profile, so a
+  checkout under that launch's own temporary directory is not writable through
+  it. The `--version` read every family and the discovery scan perform before a
+  runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
   Toolchain commands the Android workbench issues keep their own deliberate
@@ -2240,10 +2178,8 @@ mechanisms are:
   inside its verified budget to export it, and release the exact runtime after
   an explicit export. A dedicated Linux CI job proves two real capsules
   cannot see or signal one another. Ordinary Code threads do not use this
-  service yet: on a Linux host they run under Bubblewrap like every other
-  confined process (see Sandbox above), and only the protected capsule remains
-  an unavailable destination until the AgentRun and Station launch paths are
-  wired and revalidated.
+  service yet, so Linux remains an incompatible destination until the AgentRun
+  and Station launch paths are wired and revalidated.
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,
@@ -2396,11 +2332,7 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
 - `octant web --dev` changes only the renderer: it starts Vite and attaches it
   to the canonical Machine host. Browser QA and Electron share the same store,
   Projects, threads, and live journal. Destructive tests use an explicit
-  `OCTANT_DATA_DIR`; development mode never creates an implicit profile. The
-  Vite page is not the host, so the tab remembers the `serverUrl` it was
-  launched with (per renderer origin, in tab session storage, judged again like
-  a typed address); a reload or in-tab navigation that loses the query keeps
-  its Machine instead of reading the Vite origin as one.
+  `OCTANT_DATA_DIR`; development mode never creates an implicit profile.
 - `bun run package:desktop` packages the peer Machine for the build host:
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with

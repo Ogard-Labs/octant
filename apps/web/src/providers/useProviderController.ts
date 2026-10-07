@@ -86,9 +86,6 @@ function findProvider(current: ProviderRegistrySnapshot, instanceId: ProviderIns
  * provider policy reads them. Both the authoritative and the presentation
  * observations carry them so every picker filters by the same facts.
  */
-/** What one explicit "Verify tools" request found, or "failed" when it could not run. */
-export type ModelToolVerification = "supported" | "unsupported" | "failed";
-
 function withCatalogModelTags(
   observed: ProviderObservedState,
   tags: ReadonlyMap<string, ProviderDataTags | undefined> | undefined,
@@ -3023,49 +3020,48 @@ export function useProviderController(options: ProviderControllerOptions) {
     [client, install],
   );
 
-  const verifyModelTools = useCallback(
-    async (
-      instanceId: ProviderInstanceId,
-      modelId: ProviderModelId,
-    ): Promise<ModelToolVerification> => {
-      if (client === undefined) return "failed";
+  const verifyFoundryTools = useCallback(
+    async (instanceId: ProviderInstanceId, modelId: ProviderModelId) => {
+      if (client === undefined) return false;
       setProbingIds((current) => new Set(current).add(instanceId));
       setMessage(undefined);
       try {
         const result = await client.execute({
-          kind: "verify-model-tools",
+          kind: "verify-foundry-tools",
           instanceId,
           modelId,
         });
-        if (result.kind !== "model-tools-verified") return "failed";
-        const current = authoritative.current;
-        if (current !== undefined) {
-          install({
-            ...current,
-            observedStates: current.observedStates.map((state) => {
-              if (state.instanceId !== instanceId) return state;
-              const priorVerified = state.verifiedToolModelIds ?? [];
-              const verifiedToolModelIds =
-                result.appManagedTools === "supported"
-                  ? [...new Set([...priorVerified, String(modelId)])].map(
-                      (id) => id as ProviderModelId,
-                    )
-                  : priorVerified.filter((id) => String(id) !== String(modelId));
-              return { ...state, verifiedToolModelIds };
-            }),
-          });
+        if (result.kind === "foundry-tools-verified") {
+          const current = authoritative.current;
+          if (current !== undefined) {
+            install({
+              ...current,
+              observedStates: current.observedStates.map((state) => {
+                if (state.instanceId !== instanceId) return state;
+                const priorVerified = state.verifiedToolModelIds ?? [];
+                const verifiedToolModelIds =
+                  result.appManagedTools === "supported"
+                    ? [...new Set([...priorVerified, String(modelId)])].map(
+                        (id) => id as ProviderModelId,
+                      )
+                    : priorVerified.filter((id) => String(id) !== String(modelId));
+                return { ...state, verifiedToolModelIds };
+              }),
+            });
+          }
+          if (mounted.current) {
+            setMessage(
+              result.appManagedTools === "supported"
+                ? "Azure AI Foundry deployment supports Octant-managed tools."
+                : "Azure AI Foundry deployment does not support Octant-managed tools.",
+            );
+          }
+          return true;
         }
-        if (mounted.current) {
-          setMessage(
-            result.appManagedTools === "supported"
-              ? `${String(modelId)} supports Octant-managed tools.`
-              : `${String(modelId)} did not call the test tool, so it stays Chat only.`,
-          );
-        }
-        return result.appManagedTools;
+        return false;
       } catch (error) {
         if (mounted.current) setMessage(redactedProbeFailureMessage(error));
-        return "failed";
+        return false;
       } finally {
         if (mounted.current) {
           setProbingIds((current) => {
@@ -3144,7 +3140,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     completeProviderAuthentication,
     updateProviderCli,
     probe,
-    verifyModelTools,
+    verifyFoundryTools,
     updatePermissionPersistence,
     updateProviderOrder,
     updateAgentEligibleModels,

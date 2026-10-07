@@ -1,17 +1,9 @@
 import { decodeWindowId } from "@octant/contracts/shell";
 import { describe, expect, it } from "vitest";
-import { launchFromLocation, type LaunchMemory } from "./shellLaunch";
+import { launchFromLocation } from "./shellLaunch";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000601");
 const launchToken = `${"A".repeat(42)}A`;
-
-function tabMemory(): LaunchMemory {
-  const entries = new Map<string, string>();
-  return {
-    getItem: (key) => entries.get(key) ?? null,
-    setItem: (key, value) => void entries.set(key, value),
-  };
-}
 
 describe("launchFromLocation", () => {
   it("derives the host URL from the browser origin when only a launch token fragment is present", () => {
@@ -87,68 +79,6 @@ describe("launchFromLocation", () => {
     expect(launchFromLocation("http://192.168.1.5:13773/")).toEqual({ status: "absent" });
     expect(launchFromLocation("file:///Applications/Octant.app/index.html")).toEqual({
       status: "absent",
-    });
-  });
-
-  describe("in a development tab whose renderer is not the host", () => {
-    const launched = `http://localhost:5299/?serverUrl=${encodeURIComponent("http://127.0.0.1:14299/")}&developmentWebBootstrap=1`;
-
-    it("keeps its host after a reload or in-tab navigation drops the query", () => {
-      const memory = tabMemory();
-      launchFromLocation(launched, memory);
-
-      // Without this the bare Vite origin was taken for the host itself, which
-      // answers none of the Machine routes: the window showed "Project
-      // authority is unavailable" until someone reopened the launch URL.
-      expect(launchFromLocation("http://localhost:5299/", memory)).toEqual({
-        status: "accepted",
-        launch: { serverUrl: "http://127.0.0.1:14299/" },
-      });
-      expect(launchFromLocation("http://localhost:5299/#settings", memory)).toMatchObject({
-        status: "accepted",
-        launch: { serverUrl: "http://127.0.0.1:14299/" },
-      });
-    });
-
-    it("follows a newly named host rather than the remembered one", () => {
-      const memory = tabMemory();
-      launchFromLocation(launched, memory);
-      launchFromLocation(
-        `http://localhost:5299/?serverUrl=${encodeURIComponent("http://127.0.0.1:14300/")}`,
-        memory,
-      );
-
-      expect(launchFromLocation("http://localhost:5299/", memory)).toEqual({
-        status: "accepted",
-        launch: { serverUrl: "http://127.0.0.1:14300/" },
-      });
-    });
-
-    it("does not carry a host from one renderer origin to another", () => {
-      const memory = tabMemory();
-      launchFromLocation(launched, memory);
-
-      expect(launchFromLocation("http://localhost:5300/", memory)).toEqual({
-        status: "accepted",
-        launch: { serverUrl: "http://localhost:5300/" },
-      });
-    });
-
-    it("judges a remembered address again instead of trusting it", () => {
-      const memory = tabMemory();
-      memory.setItem("octant:launch-server:http://localhost:5299", "http://192.168.1.5:13773/");
-
-      expect(launchFromLocation("http://localhost:5299/", memory)).toMatchObject({
-        status: "refused",
-        reason: "plain-http-off-loopback",
-      });
-    });
-
-    it("still reads a bare loopback origin as the host when nothing was remembered", () => {
-      expect(launchFromLocation("http://localhost:5299/", tabMemory())).toEqual({
-        status: "accepted",
-        launch: { serverUrl: "http://localhost:5299/" },
-      });
     });
   });
 });

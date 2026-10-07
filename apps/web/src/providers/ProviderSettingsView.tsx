@@ -46,7 +46,7 @@ import {
   type ProviderCreateProviderType,
 } from "./ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "./ProviderSettingsList";
-import type { ModelToolVerification, TransientProviderCredential } from "./useProviderController";
+import type { TransientProviderCredential } from "./useProviderController";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ProviderSettingsViewProps {
@@ -298,10 +298,10 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
     options?: { readonly quiet?: boolean },
   ) => Promise<boolean>;
-  readonly onVerifyModelTools: (
+  readonly onVerifyFoundryTools: (
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,
-  ) => Promise<ModelToolVerification>;
+  ) => Promise<boolean>;
   readonly onPermissionPersistenceChange: (value: PermissionPersistence) => Promise<boolean>;
   readonly onProviderOrderChange: (
     providerOrder: ReadonlyArray<ProviderInstanceId>,
@@ -472,7 +472,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onSetEnabled={props.onSetEnabled}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
-        onVerifyModelTools={props.onVerifyModelTools}
+        onVerifyFoundryTools={props.onVerifyFoundryTools}
       />
       <SettingsSection title="Defaults">
         <div className="setgroup">

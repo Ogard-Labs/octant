@@ -115,39 +115,6 @@ describe("ComposerContextMeter", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the fill without a fraction, share, or full ring when no window was named", async () => {
-    const fixture = contextFixture();
-    if (fixture.latestUsage === undefined) throw new Error("Fixture has no usage");
-    const user = userEvent.setup();
-    render(
-      <Harness
-        snapshot={{
-          ...fixture,
-          modelLimits: {
-            ...fixture.modelLimits,
-            contextWindow: 4_096,
-            source: "conservative-fallback",
-            confidence: "low",
-          },
-          latestUsage: { ...fixture.latestUsage, actualInputTokens: 34_300, contextTokens: 34_300 },
-        }}
-      />,
-    );
-    const button = screen.getByRole("button", { name: /Show context usage/i });
-    expect(button).toHaveAccessibleName(/34\.3K used, context window maximum unavailable/);
-    expect(button).not.toHaveAccessibleName(/4\.1K|%\)/);
-    // An empty ring says nothing about a window; a red one would say it is full.
-    expect(button.querySelector(".composer-context-meter__used")).toBeNull();
-    expect(document.querySelector(".composer-context-meter")).not.toHaveAttribute("data-fill");
-
-    await user.click(button);
-    const popover = screen.getByRole("dialog", { name: "Context used" });
-    expect(popover).toHaveTextContent("Context used34.3K");
-    expect(popover).toHaveTextContent("no share of a window to show");
-    expect(popover).not.toHaveTextContent("4.1K");
-    expect(within(popover).queryByRole("meter", { name: /Context window/ })).toBeNull();
-  });
-
   it("opens the popover from pointer, Enter, and Space without a further inspect call", async () => {
     const inspect = vi.fn();
     const user = userEvent.setup();
