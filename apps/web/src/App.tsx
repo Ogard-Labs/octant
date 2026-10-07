@@ -7026,6 +7026,14 @@ function LaunchedShell(
                         controller.openSurface(surface, paneId, browserContextId)
                       }
                       onRevealBrowserActivity={(input) => controller.revealBrowserActivity(input)}
+                      onOpenThreadBrowser={(input) => controller.openThreadBrowser(input)}
+                      {...(dockThreadId === undefined ||
+                      !(
+                        (dockOpen && dockSurface === "browser") ||
+                        (bottomPanelOpen && activeBottomSurface?.id === "browser")
+                      )
+                        ? {}
+                        : { browserToolThreadId: String(dockThreadId) })}
                       {...(browserAutomationClient === undefined
                         ? {}
                         : { onOpenLink: (request) => void openLinkInApp(request) })}

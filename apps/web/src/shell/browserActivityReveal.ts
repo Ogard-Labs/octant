@@ -1,3 +1,5 @@
+import type { WindowWorkspace, WorkspaceLayoutNode } from "@octant/contracts";
+
 /**
  * Window-local memory of Browser sessions the shell has already offered.
  *
@@ -45,4 +47,25 @@ export function decideBrowserActivityReveal(input: {
   for (const id of input.activeSessionIds) nextAnnouncedSessionIds.add(id);
   const overlap = input.activeSessionIds.some((id) => input.announcedSessionIds.has(id));
   return { decision: overlap ? "ignore" : "reveal", nextAnnouncedSessionIds };
+}
+
+/** Whether some pane of the workspace shows a Browser surface bound to this thread. */
+export function threadHasBrowserSurface(workspace: WindowWorkspace, threadId: string): boolean {
+  return (["chat", "work", "code"] as const).some((mode) =>
+    layoutHasThreadBrowser(workspace.layouts[mode], threadId),
+  );
+}
+
+function layoutHasThreadBrowser(layout: WorkspaceLayoutNode, threadId: string): boolean {
+  if (layout.kind === "pane") {
+    return (
+      layout.surface.kind === "browser" &&
+      layout.surface.threadId !== undefined &&
+      String(layout.surface.threadId) === String(threadId)
+    );
+  }
+  return (
+    layoutHasThreadBrowser(layout.first, threadId) ||
+    layoutHasThreadBrowser(layout.second, threadId)
+  );
 }

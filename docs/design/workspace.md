@@ -260,7 +260,22 @@ an ordinary answer (see
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
-tool does not stop its server-owned lifecycle. The iOS Simulator and Android emulator are separate device destinations. An
+tool does not stop its server-owned lifecycle. While an agent's Browser
+session is live and the thread's Browser is out of sight, a small live preview
+of its active page floats over the thread: about 264px wide, resting in one of
+the four corners of the thread frame (top right by default), draggable between
+them with an arrow-key twin, and remembered per client. Out of sight means no
+pane shows the thread's Browser and neither the dock nor the bottom panel has it
+as its active tool; the preview leaves as soon as the Browser appears and returns
+when it closes. Clicking it shows the Browser (the dock when the thread is the
+dock's subject, else the pane), the close control hides it for that session, and
+the page's title or host shows only under the pointer or focus. A bottom corner
+rests above the composer by measuring it; the preview ranks below the window
+chrome (z-index 6). It holds a skeleton at the page's aspect ratio until the
+first frame and never prints status prose. It reads the same host snapshot the
+Browser pane reads, asks for a fresh picture only while it is on screen, pauses
+with the window, and backs off while the page does not change. Computer Use keeps
+its separate card. The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Live,
 unavailable, booting, interrupted, and stale states stay explicit; closing a pane
 does not shut down its device. Allow input is the explicit destination approval;
