@@ -677,7 +677,17 @@ describe("CanvasWorkspaceTab", () => {
 
     render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
 
-    const toggle = await screen.findByRole("button", { name: "Comments, 3 open" });
+    // The count appears only once the drawer has loaded the threads, after the
+    // Canvas itself has rendered. Under a loaded parallel run that took longer
+    // than the one-second default and the test failed before the comments
+    // arrived. The wait stays below this test's own budget so a slow load still
+    // ends in this query's diagnostic rather than a bare test timeout, with
+    // time left for the clicks that follow.
+    const toggle = await screen.findByRole(
+      "button",
+      { name: "Comments, 3 open" },
+      { timeout: 10_000 },
+    );
     expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull();
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
@@ -699,7 +709,7 @@ describe("CanvasWorkspaceTab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close comments" }));
     expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull();
-  });
+  }, 15_000);
 
   it("moves focus into the comments drawer so Escape closes it and returns to the marker", async () => {
     const comments = vi.fn(async () => ({

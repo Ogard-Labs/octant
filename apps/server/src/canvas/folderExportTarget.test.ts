@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -21,9 +30,14 @@ afterEach(() => {
   }
 });
 
-/** A real folder on this machine, readable and writable by its owner alone. */
+/**
+ * A real folder on this machine, readable and writable by its owner alone.
+ *
+ * It is named by its real path, as the host's folder browser names every folder
+ * it hands out: the system temporary folder on macOS sits behind a link.
+ */
 function privateFolder(): string {
-  const directory = join(tmpdir(), `octant-export-${randomUUID()}`);
+  const directory = join(realpathSync(tmpdir()), `octant-export-${randomUUID()}`);
   mkdirSync(directory, { mode: 0o700 });
   directories.push(directory);
   return directory;
@@ -199,5 +213,46 @@ describe("the folder export destination", () => {
     });
     expect(readdirSync(approved)).toEqual([]);
     expect(readdirSync(chosen)).toEqual([]);
+  });
+
+  it("refuses to follow a link that replaced the chosen folder after it was chosen", async () => {
+    const chosen = privateFolder();
+    const elsewhere = privateFolder();
+    const target = folderTarget(() => ({ kind: "ready", folder: chosen }));
+    // The folder still has the name the person chose, but it now leads to a
+    // folder they never approved.
+    rmSync(chosen, { recursive: true });
+    symlinkSync(elsewhere, chosen, "dir");
+
+    const delivery = await target.exportDocument(document({}));
+
+    expect(delivery).toEqual({
+      kind: "refused",
+      code: "refused",
+      message: "The export could not be written to that folder.",
+    });
+    expect(readdirSync(elsewhere)).toEqual([]);
+  });
+
+  it("refuses to follow a link that replaced a folder above the chosen folder", async () => {
+    const parent = privateFolder();
+    const chosen = join(parent, "Exports");
+    mkdirSync(chosen, { mode: 0o700 });
+    const elsewhere = privateFolder();
+    mkdirSync(join(elsewhere, "Exports"), { mode: 0o700 });
+    const target = folderTarget(() => ({ kind: "ready", folder: chosen }));
+    // The chosen folder itself is no link, but the path to it now runs through
+    // one: a folder of the same name somewhere the person never approved.
+    rmSync(parent, { recursive: true });
+    symlinkSync(elsewhere, parent, "dir");
+
+    const delivery = await target.exportDocument(document({}));
+
+    expect(delivery).toEqual({
+      kind: "refused",
+      code: "refused",
+      message: "The export could not be written to that folder.",
+    });
+    expect(readdirSync(join(elsewhere, "Exports"))).toEqual([]);
   });
 });
