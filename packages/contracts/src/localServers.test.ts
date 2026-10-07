@@ -5,6 +5,9 @@ import {
   decodeLocalServerListener,
   decodeLocalServerSnapshot,
   decodeLocalServerUrl,
+  decodeRunningService,
+  decodeRunningServiceCommand,
+  decodeRunningServiceCommandResult,
 } from "./localServers";
 
 const ids = {
@@ -148,5 +151,53 @@ describe("local server contracts", () => {
         },
       }).kind,
     ).toBe("local-server-rejected");
+  });
+});
+
+describe("running service contracts", () => {
+  const service = {
+    listenerId,
+    port: 5173,
+    url: "http://127.0.0.1:5173/",
+    processName: "node",
+    framework: "vite",
+    ownership: "octant-owned",
+    health: "listening",
+    openAvailable: true,
+    stop: { status: "available", confirmationRequired: false },
+    projectId: ids.project,
+    projectName: "Octant",
+    thread: { threadId: ids.thread, title: "Fix login" },
+    branch: "fix/login",
+  } as const;
+
+  it("decodes a service and its listing", () => {
+    expect(decodeRunningService(service).projectName).toBe("Octant");
+    expect(
+      decodeRunningServiceCommandResult({
+        kind: "running-services-listed",
+        requestId: ids.request,
+        snapshot: { services: [service], observedAt },
+      }).kind,
+    ).toBe("running-services-listed");
+  });
+
+  it("admits no ownership beyond Octant-started and left over, and no process handle", () => {
+    expect(() => decodeRunningService({ ...service, ownership: "current-user" })).toThrow();
+    expect(() => decodeRunningService({ ...service, pid: 4213 })).toThrow();
+    expect(() => decodeRunningService({ ...service, commandLine: "node vite" })).toThrow();
+  });
+
+  it("names no thread or Project in a host-wide command", () => {
+    expect(
+      decodeRunningServiceCommand({ kind: "list-running-services", requestId: ids.request }).kind,
+    ).toBe("list-running-services");
+    expect(() =>
+      decodeRunningServiceCommand({
+        kind: "list-running-services",
+        requestId: ids.request,
+        projectId: ids.project,
+      }),
+    ).toThrow();
   });
 });

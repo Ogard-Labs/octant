@@ -15,6 +15,11 @@ export type HomeCardContent =
       readonly count: number;
       /** Rendered inside the card when `count` is above zero. */
       readonly body: ReactNode;
+      /**
+       * Replaces the card's `emptyLabel` while `count` is zero, for a card that
+       * could not look: "nothing is running" would be a claim it never made.
+       */
+      readonly emptyLabel?: string;
     };
 
 /**

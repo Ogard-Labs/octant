@@ -72,6 +72,22 @@ for never), re-deciding against each mode's authoritative record and
 journaling the ordinary thread update as the `system` actor. It archives only;
 see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-completed-and-snoozed-threads.md).
 
+The **Review page** lists the threads the sidebar's To review count counts, by
+the same predicate (`isWaitingForReview`: unread, not working, not on a shelf),
+so the tile's number and the page's rows never disagree. Rows run oldest
+first, by the host's reported finish time where it has one. The detail panel
+reads the thread's last reply, the Code board's check facts, an Octant-run
+check after the last turn where one exists, and the checkout's diff; Chat rows
+show the reply only. Work navigation projects no unread flag, so Work threads
+never count toward To review and never list here; the page's Work wiring
+(send-back refuses and points at the thread's composer) waits for that flag. Complete, Snooze and send-back go through each
+mode's existing commands and show the host's refusal in one line; mark-seen
+moves the read cursor. Its single-key commands are page-scoped keybindings: they
+may be a bare key because only the focused page dispatches them, and the
+window-level listeners never run them. The page holds no pull-request action
+and no destructive one. The To review tile, Code's **Review N changes** tile and
+the command palette open it.
+
 A thread stopped on a provider usage limit that disclosed a reset can also be
 hidden until that reset — a distinct command whose wake time the host derives
 from the journaled limit fact, never from the caller, and refuses when no such
@@ -121,6 +137,19 @@ accessible active state. Completed layout operations go through
 server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
+
+Dragging a sidebar thread onto a Chat, Work, or Code composer attaches that
+thread as context. The drop uses the same mention path as typing `#` and
+choosing a thread: the host decides whether this window can Open it, the
+chip is a bounded reference, and the draft is not sent. The source thread
+is not moved or opened. While the pointer is over the composer, the
+composer itself is the drop target, not the pane behind it. The row menu's
+**Attach as context** does the same thing for the composer that has focus,
+or the only composer when one is open. Dropping the composer's own thread,
+a thread already attached, something that is not a thread, or a thread this
+window cannot Open leaves the draft unchanged and says so without reading
+the thread. Image and file drops, and dropping a thread on a pane rather
+than its composer, stay pane and attachment behaviour.
 
 ## Start-screen cards
 
@@ -180,6 +209,39 @@ start and step ride on the same navigation rows as the executing flag (see
 [Architecture: persistence](../architecture.md#persistence), fast thread
 reads), so a remote window sees them for exactly the threads it can already
 list.
+
+**Running services** follows Working now, on by default. It lists the dev servers
+and other listeners running in the host's Code Projects: the Code Environment's
+Local servers read host-wide, across every active Code Project the Project
+bootstrap lists, which today does not vary by window (see
+[Architecture: security and authority](../architecture.md#security-and-authority),
+Local servers and Running services). A row is the server's name (its framework,
+else its runtime) and port, the Project and the branch or thread it belongs to,
+its health with a glyph and a word ("Listening", "Not responding", "Not
+checked"; never a colour), and the host's name only when the window is reading a
+computer that is not this one. A server Octant owns says nothing more; any other
+says **Not owned by Octant**. Such a server is listed only while nothing names
+another editor as its starter, which does not show who did: one an earlier
+Octant session left behind looks the same as one started in Terminal, by Claude
+Code, or by Codex, so neither the row nor its Stop confirmation says Octant
+started it. Each row
+has **Open** and **Stop**. Open places the page the host prepared: as a Browser
+tab of the thread whose own worktree the server runs in, otherwise in this
+computer's own browser, and only there, so a window reading another computer
+never opens that computer's loopback address on its own. Stop is the
+Environment's authorized stop unchanged: a server Octant owns stops at once, one
+it does not own asks for the same confirmation naming process, folder, and port,
+and a Stop the host will not offer (a server in a Plan thread's own worktree, a
+server Octant does not own from a paired device) is explained in a line with no
+control. A server in the Project folder itself is no one thread's, so it is
+judged as the person's own, approval-gated, even when a Plan thread works in
+that folder. At most five rows show, then
+**+N more listening**. The card reads when it mounts and then every five
+seconds, the Environment panel's cadence, and only while the window is visible;
+a card that is off, or a start screen that is not showing, scans nothing. When
+the host cannot scan, the card says it could not check rather than that nothing
+is running, and a refused refresh keeps the last listing. A window with no Code
+Project sees an empty card.
 
 **Needs you** is the card before Working now, on by default. It lists the
 approvals and questions a provider is waiting on, from one host list of every
@@ -303,7 +365,23 @@ an ordinary answer (see
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
-tool does not stop its server-owned lifecycle. The iOS Simulator and Android emulator are separate device destinations. An
+tool does not stop its server-owned lifecycle. While an agent's Browser
+session is live and the thread's Browser is out of sight, a small live preview
+of its active page floats over the thread: about 264px wide, resting in one of
+the four corners of the thread frame (top right by default), draggable between
+them with an arrow-key twin, and remembered per client. Out of sight means no
+pane shows the thread's shared Browser and neither the dock nor the bottom panel
+has it as its active tool (a tab bound to one link or local server is a page of
+its own and does not count); the preview leaves as soon as the Browser appears and returns
+when it closes. Clicking it shows the Browser (the dock when the thread is the
+dock's subject, else the pane), the close control hides it for that session, and
+the page's title or host shows only under the pointer or focus. A bottom corner
+rests above the composer by measuring it; the preview ranks below the window
+chrome (z-index 6). It holds a skeleton at the page's aspect ratio until the
+first frame and never prints status prose. It reads the same host snapshot the
+Browser pane reads, asks for a fresh picture only while it is on screen, pauses
+with the window, and backs off while the page does not change. Computer Use keeps
+its separate card. The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Live,
 unavailable, booting, interrupted, and stale states stay explicit; closing a pane
 does not shut down its device. Allow input is the explicit destination approval;
@@ -534,6 +612,8 @@ Local-server stop authority recognizes live terminal descendants by a host proce
 snapshot and the tracked shell's process identity. An exited shell, a reused PID,
 or missing ownership evidence leaves the listener classified as a leftover and
 requires confirmation. Editor provenance labels alone never grant stop authority.
+The start screen's Running services card applies the same rule and lists both
+kinds, labelling the leftover; it adds no authority of its own.
 
 ## Verification
 

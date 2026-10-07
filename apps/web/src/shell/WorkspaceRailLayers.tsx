@@ -33,6 +33,7 @@ import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import type { ThreadBoardProjectRef } from "../threadBoard/threadBoardGrouping";
 import type { BoardPendingRequestSource } from "../threadBoard/useBoardPendingRequests";
 import type { WorkThreadOpenTarget } from "../work/WorkThreadBoard";
+import type { ReviewPageProps } from "../review/ReviewPage";
 import type { ArchivedThreadEntry, ArchiveProject } from "./ArchiveView";
 import { ShellState } from "./ShellState";
 
@@ -66,6 +67,9 @@ const GitHubIssueBrowser = lazy(() =>
 );
 const InboxView = lazy(() =>
   import("../inbox/InboxView").then((module) => ({ default: module.InboxView })),
+);
+const ReviewPage = lazy(() =>
+  import("../review/ReviewPage").then((module) => ({ default: module.ReviewPage })),
 );
 const LinearIssueBrowser = lazy(() =>
   import("../linear/LinearIssueBrowser").then((module) => ({
@@ -159,6 +163,8 @@ export interface WorkspaceRailLayersProps {
   readonly onCloseInbox: () => void;
   readonly inboxAttentionItems: ReadonlyArray<InboxAttentionItem>;
   readonly onOpenInboxThread: (signal: ThreadAttentionSignal) => void;
+  /** The Review page, where finished threads are triaged with single keys. */
+  readonly reviewPage?: ReviewPageProps;
   readonly loadAssignedGithubWork?: () => Promise<GithubCatalogueReadResponse>;
   readonly loadAssignedLinearIssues?: () => Promise<AssignedLinearIssuesList>;
   readonly onOpenLinearIssues?: () => void;
@@ -203,6 +209,13 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
           </LazyRailSurface>
         </div>
       ) : null}
+      {props.reviewPage === undefined ? null : (
+        <div className="review-layer">
+          <LazyRailSurface label="Review">
+            <ReviewPage {...props.reviewPage} />
+          </LazyRailSurface>
+        </div>
+      )}
       {props.githubIssuesOpen && props.activeMode === "code" ? (
         <div className="code-board-layer">
           <LazyRailSurface label="GitHub issues">

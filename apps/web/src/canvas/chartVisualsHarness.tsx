@@ -2,7 +2,13 @@ import "../styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts/canvas";
-import { chartExampleBlocks, treemapExampleBlocks } from "@octant/domain";
+import {
+  chartExampleBlocks,
+  treemapExampleBlocks,
+  heatmapExampleBlocks,
+  barListExampleBlocks,
+  metricExampleBlocks,
+} from "@octant/domain";
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, getThemePreset } from "@octant/theme";
 import { CanvasDocument } from "./CanvasDocument";
 import { canvasFixture } from "./test-fixtures";
@@ -124,6 +130,33 @@ const metric = decodeCanvasBlock({
   value: 1_360_000,
   format: "compact",
   delta: 42_000,
+  goodDirection: "up",
+  sparkline: [980_000, 1_010_000, 1_120_000, 1_180_000, 1_360_000],
+  caption: "since last release",
+});
+
+const hotFiles = decodeCanvasBlock({
+  ...base,
+  blockId: "bar-list-qa",
+  kind: "bar-list",
+  valueLabel: "Edits",
+  secondaryLabel: "Lines",
+  format: "number",
+  scale: "sequential",
+  rows: [
+    { label: "apps/web/src/canvas/blocks/ChartBlock.tsx", value: 41, secondaryValue: 1189 },
+    { label: "packages/domain/src/canvasPolicy.ts", value: 33, secondaryValue: 1255 },
+    { label: "apps/server/src/canvas/artifactRender.ts", value: 27, secondaryValue: 769 },
+    { label: "packages/contracts/src/canvas.ts", value: 19, secondaryValue: 1290 },
+    { label: "apps/web/src/styles/canvas.css", value: 16, secondaryValue: 2607 },
+    { label: "packages/theme/src/chartScales.ts", value: 12, secondaryValue: 507 },
+    { label: "apps/web/src/canvas/ChartTooltip.tsx", value: 10, secondaryValue: 360 },
+    { label: "packages/domain/src/canvasHeatmapLayout.ts", value: 8, secondaryValue: 359 },
+    { label: "apps/web/src/canvas/blocks/TreemapBlock.tsx", value: 6, secondaryValue: 670 },
+    { label: "packages/domain/src/canvasBarListLayout.ts", value: 4, secondaryValue: 210 },
+    { label: "apps/server/src/canvas/canvasAgentTools.ts", value: 3, secondaryValue: 817 },
+    { label: "packages/contracts/src/canvasIdentity.ts", value: 2, secondaryValue: 65 },
+  ],
 });
 
 const table = decodeCanvasBlock({
@@ -168,6 +201,10 @@ const definition = {
     distribution,
     ...chartExampleBlocks,
     ...treemapExampleBlocks,
+    ...heatmapExampleBlocks,
+    ...barListExampleBlocks,
+    hotFiles,
+    ...metricExampleBlocks,
     metric,
     table,
     timeline,

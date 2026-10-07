@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatChord,
   matchKeybinding,
+  matchPageKeybinding,
   parseChord,
   parseKeybindingOverrides,
   resolveKeybindings,
@@ -104,6 +105,32 @@ describe("matchKeybinding", () => {
     expect(matchKeybinding(rebound, keyEvent("k", { alt: true, shift: true }), true)).toBe(
       "command-palette",
     );
+  });
+});
+
+describe("a page's own commands", () => {
+  const bindings = resolveKeybindings();
+
+  it("answers to bare keys on that page and nowhere else", () => {
+    expect(matchPageKeybinding(bindings, "review", keyEvent("j"), true)).toBe("review-next");
+    expect(matchPageKeybinding(bindings, "review", keyEvent("Enter"), true)).toBe("review-open");
+    // The window-level matcher never runs a page's command, bare or qualified.
+    expect(matchKeybinding(bindings, keyEvent("j"), true)).toBeUndefined();
+    const rebound = resolveKeybindings({ "review-next": "Mod+J" });
+    expect(matchKeybinding(rebound, keyEvent("j", { meta: true }), true)).toBeUndefined();
+    expect(matchPageKeybinding(rebound, "review", keyEvent("j", { meta: true }), true)).toBe(
+      "review-next",
+    );
+  });
+
+  it("lets a page action be rebound to another bare key but still refuses Escape and Tab", () => {
+    expect(parseChord("x", { page: true })).toMatchObject({ status: "ok" });
+    expect(parseChord("Escape", { page: true })).toMatchObject({ status: "invalid" });
+    expect(parseChord("Tab", { page: true })).toMatchObject({ status: "invalid" });
+    const resolved = resolveKeybindings({ "review-complete": "x", "command-palette": "x" });
+    expect(formatChord(resolved.bindings.get("review-complete")!)).toBe("X");
+    // A global action still cannot be a bare key.
+    expect(formatChord(resolved.bindings.get("command-palette")!)).toBe("Mod+K");
   });
 });
 

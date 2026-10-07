@@ -88,6 +88,7 @@ import {
   useThreadMentionTypeahead,
 } from "../../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../../chat/useThreadMentions";
+import { useComposerThreadDropRegistration } from "../../chat/composerThreadDrop";
 import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type {
   GithubIssueContextRequest,
@@ -349,6 +350,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
     ...(props.creating === true ? { disabled: true } : {}),
+  });
+  const threadDropKey = useComposerThreadDropRegistration({
+    enabled: threadMentions.composer !== undefined,
+    onDraftChange: (next) => setPrompt(next),
+    attachDroppedThread: threadMentions.attachDroppedThread,
   });
   const [executionPolicy, setExecutionPolicy] = useState(props.defaultExecutionPolicy);
   const [permissionPersistence, setPermissionPersistence] = useState(
@@ -700,6 +706,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
         <div className="composer-stack">
           <ThreadComposer
+            {...(threadDropKey === undefined ? {} : { threadDropKey })}
             startContext={
               <div className="composer-tray composer-tray--inside" aria-label="Thread context">
                 <div className="composer-tray__leading">

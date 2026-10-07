@@ -2,13 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   CANVAS_AGGREGATE_TYPE,
   CANVAS_CREATED,
+  CANVAS_BAR_LIST_SCHEMA_VERSION,
   CANVAS_EVENT_NAMES,
+  CANVAS_HEATMAP_SCHEMA_VERSION,
+  CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_BLOCKS,
   CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_IMAGES,
+  CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_SCHEMA_VERSION,
+  CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_VERSION_APPENDED,
   CanvasCreated,
   CanvasDefinition,
@@ -398,6 +403,18 @@ describe("Canvas contracts", () => {
         nodes: [
           { nodeId: "screen", component: "window", label: "Settings" },
           { nodeId: "save", component: "button", label: "Save", parentId: "screen" },
+        ],
+      },
+      {
+        blockId: "bar-list-1",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "bar-list",
+        valueLabel: "Edits",
+        format: "number",
+        scale: "sequential",
+        rows: [
+          { label: "apps/web", value: 41, secondaryValue: 1189 },
+          { label: "packages/domain", value: 33 },
         ],
       },
     ] as const;
@@ -872,5 +889,253 @@ describe("treemap blocks", () => {
     ).toThrow();
     expect(() => decodeCanvasBlock({ ...treemap, colorScale: "rainbow" })).toThrow();
     expect(() => decodeCanvasBlock({ ...treemap, onClick: "alert(1)" })).toThrow();
+  });
+});
+
+describe("heatmap blocks", () => {
+  const matrix = {
+    blockId: "commits-by-hour",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "heatmap",
+    layout: "matrix",
+    valueLabel: "Commits",
+    format: "number",
+    scale: "sequential",
+    rows: [
+      { rowId: "mon", label: "Mon" },
+      { rowId: "tue", label: "Tue" },
+    ],
+    columns: [
+      { columnId: "h09", label: "09" },
+      { columnId: "h10", label: "10" },
+    ],
+    cells: [
+      { rowId: "mon", columnId: "h09", value: 3 },
+      { rowId: "tue", columnId: "h10", value: 6, note: "After the review" },
+    ],
+  };
+  const calendar = {
+    blockId: "test-failures",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "heatmap",
+    layout: "calendar",
+    valueLabel: "Test failures",
+    scale: "diverging",
+    days: [
+      { date: "2026-09-01", value: 0 },
+      { date: "2026-09-02", value: 2 },
+    ],
+  };
+
+  it("decodes a matrix with rows, columns, and a cell per coordinate", () => {
+    const block = decodeCanvasBlock(matrix);
+
+    expect(block).toMatchObject({
+      kind: "heatmap",
+      layout: "matrix",
+      valueLabel: "Commits",
+      scale: "sequential",
+    });
+  });
+
+  it("decodes a calendar with one reading per date", () => {
+    const block = decodeCanvasBlock(calendar);
+
+    expect(block).toMatchObject({ kind: "heatmap", layout: "calendar", scale: "diverging" });
+  });
+
+  it("admits a heatmap only under the version that declared it", () => {
+    // A heatmap arrived at version 6: a document declaring the presentation-era
+    // v4 bound or the treemap-era v5 bound refuses it as a declared future
+    // version.
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: 4,
+        blocks: [matrix],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_TREEMAP_SCHEMA_VERSION,
+        blocks: [matrix],
+      }),
+    ).toThrow();
+    expect(
+      decodeCanvasDefinition({
+        ...definition,
+        blocks: [calendar],
+      }),
+    ).toMatchObject({ blocks: [calendar] });
+  });
+
+  it("rejects an unknown layout or scale, a bad date, an over-long note, and executable fields", () => {
+    expect(() => decodeCanvasBlock({ ...matrix, layout: "spiral" })).toThrow();
+    expect(() => decodeCanvasBlock({ ...matrix, scale: "rainbow" })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...calendar, days: [{ date: "2026-02-30", value: 1 }] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...matrix,
+        cells: [{ rowId: "mon", columnId: "h09", value: 1, note: "x".repeat(121) }],
+      }),
+    ).toThrow();
+    expect(() => decodeCanvasBlock({ ...matrix, onClick: "alert(1)" })).toThrow();
+  });
+});
+
+describe("bar list blocks", () => {
+  const barList = {
+    blockId: "hottest-files",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "bar-list",
+    valueLabel: "Edits",
+    secondaryLabel: "Lines",
+    format: "number",
+    scale: "sequential",
+    rows: [
+      { label: "apps/web/src/canvas/blocks/ChartBlock.tsx", value: 41, secondaryValue: 1189 },
+      { label: "packages/domain/src", value: 33 },
+    ],
+  };
+
+  it("decodes a ranking of labeled rows with a value and an optional second value", () => {
+    const block = decodeCanvasBlock(barList);
+
+    expect(block).toMatchObject({
+      kind: "bar-list",
+      valueLabel: "Edits",
+      scale: "sequential",
+      rows: [
+        { label: "apps/web/src/canvas/blocks/ChartBlock.tsx", value: 41, secondaryValue: 1189 },
+        { label: "packages/domain/src", value: 33 },
+      ],
+    });
+  });
+
+  it("admits a bar list only under the version that declared it", () => {
+    // A bar list arrived at version 7: a treemap-era v5 document and a
+    // heatmap-era v6 document refuse it as a declared future version.
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_TREEMAP_SCHEMA_VERSION,
+        blocks: [barList],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION,
+        blocks: [barList],
+      }),
+    ).toThrow();
+    expect(decodeCanvasDefinition({ ...definition, blocks: [barList] })).toMatchObject({
+      blocks: [barList],
+    });
+  });
+
+  it("rejects an unknown scale, an empty ranking, an over-long list, and executable fields", () => {
+    expect(() => decodeCanvasBlock({ ...barList, scale: "rainbow" })).toThrow();
+    expect(() => decodeCanvasBlock({ ...barList, rows: [] })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...barList,
+        rows: Array.from({ length: CANVAS_MAX_BAR_LIST_ROWS + 1 }, (_value, index) => ({
+          label: `row-${String(index)}`,
+          value: index,
+        })),
+      }),
+    ).toThrow();
+    expect(() => decodeCanvasBlock({ ...barList, onClick: "alert(1)" })).toThrow();
+  });
+
+  it("keeps the bar-list floor ahead of every earlier version", () => {
+    expect(CANVAS_BAR_LIST_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
+    expect(CANVAS_BAR_LIST_SCHEMA_VERSION).toBeGreaterThan(CANVAS_HEATMAP_SCHEMA_VERSION);
+  });
+});
+
+describe("metric additions", () => {
+  const metric = {
+    blockId: "repo-lines",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "metric",
+    label: "Lines of code",
+    value: 1_360_000,
+    format: "compact",
+    delta: 12_400,
+    goodDirection: "up",
+    sparkline: [1.2, 1.24, 1.27, 1.3],
+    caption: "since last release",
+  };
+
+  it("decodes a metric with a direction, a sparkline, and a caption", () => {
+    expect(decodeCanvasBlock(metric)).toMatchObject({
+      kind: "metric",
+      goodDirection: "up",
+      sparkline: [1.2, 1.24, 1.27, 1.3],
+      caption: "since last release",
+    });
+  });
+
+  it("leaves the new metric fields absent when an author does not name them", () => {
+    const block = decodeCanvasBlock({
+      blockId: "metric-plain",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "metric",
+      label: "Requests",
+      value: 42,
+    });
+    expect(block).not.toHaveProperty("goodDirection");
+    expect(block).not.toHaveProperty("sparkline");
+    expect(block).not.toHaveProperty("caption");
+  });
+
+  it("admits the new metric fields only under the version that introduced them", () => {
+    // A heatmap-era v6 document carrying a sparkline, a direction, or a caption
+    // is a declared future version; a plain v6 metric still decodes.
+    for (const field of ["sparkline", "goodDirection", "caption"] as const) {
+      expect(() =>
+        decodeCanvasDefinition({
+          ...definition,
+          schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION,
+          blocks: [
+            { ...metric, schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION, [field]: metric[field] },
+          ],
+        }),
+      ).toThrow();
+    }
+    const {
+      sparkline: _sparkline,
+      goodDirection: _goodDirection,
+      caption: _caption,
+      ...plain
+    } = metric;
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION,
+        blocks: [{ ...plain, schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION }],
+      }),
+    ).not.toThrow();
+    expect(decodeCanvasDefinition({ ...definition, blocks: [metric] })).toMatchObject({
+      blocks: [metric],
+    });
+  });
+
+  it("rejects a direction outside the closed set and a sparkline past the budget", () => {
+    expect(() => decodeCanvasBlock({ ...metric, goodDirection: "sideways" })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...metric,
+        sparkline: Array.from(
+          { length: CANVAS_MAX_METRIC_SPARKLINE_POINTS + 1 },
+          (_value, index) => index,
+        ),
+      }),
+    ).toThrow();
   });
 });

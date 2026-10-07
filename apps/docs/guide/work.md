@@ -124,7 +124,7 @@ Paste or attach a PNG, JPEG, WebP, or GIF in the Work composer to send it with a
 
 A turn carries at most eight images, each up to 10 MB, alongside a written message. If the selected model does not read images, the composer says so at the paste instead of taking the file. The host checks the thread's own model again at send, so a turn never reaches a model with its pictures quietly dropped. Removing a chip before sending keeps that image off the turn.
 
-Type `#` in the composer to mention another thread as read-only context, the same bounded excerpt Chat uses. Type `@` to complete a path inside this Project's bound folder; the host refuses a path outside that root before reading it. Chat has no `@file` mention, because Chat Projects have no filesystem authority.
+Type `#` in the composer to mention another thread as read-only context, the same bounded excerpt Chat uses. Dragging a sidebar thread onto the composer, or choosing **Attach as context** from that row's menu, attaches the same reference and does not send the draft. Type `@` to complete a path inside this Project's bound folder; the host refuses a path outside that root before reading it. Chat has no `@file` mention, because Chat Projects have no filesystem authority.
 
 ## Thread board
 

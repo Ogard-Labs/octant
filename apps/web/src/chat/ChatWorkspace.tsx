@@ -18,6 +18,7 @@ import {
 import { pastedImageName } from "./composerImagePaste";
 import { COMPOSER_STAGED_DROPPED_NOTE } from "../composer/composerThreadDraftStore";
 import { useThreadMentions } from "./useThreadMentions";
+import { useComposerThreadDropRegistration } from "./composerThreadDrop";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/contracts/providers";
@@ -362,6 +363,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ...(props.onOpenSideChat === undefined ? {} : { onSideChatOpened: props.onOpenSideChat }),
   });
   threadMentionChipsRef.current = threadMentions.chips;
+  const threadDropKey = useComposerThreadDropRegistration({
+    enabled: threadMentions.composer !== undefined,
+    ...(activeThreadId === undefined ? {} : { currentThreadId: String(activeThreadId) }),
+    onDraftChange: (draft, caretIndex) => {
+      draftEditRevisionRef.current += 1;
+      props.controller.setPendingDraft(draft, caretIndex);
+    },
+    attachDroppedThread: threadMentions.attachDroppedThread,
+  });
   const parallelReview = useLinkedThreadParallelReview({
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
@@ -1175,6 +1185,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           {...(threadMentions.composer === undefined
             ? {}
             : { threadMentions: threadMentions.composer })}
+          {...(threadDropKey === undefined ? {} : { threadDropKey })}
           onFileSelected={(file) => {
             // A pasted image usually has no file name; name it once so the chip,
             // its remove control, and any failure message all agree.

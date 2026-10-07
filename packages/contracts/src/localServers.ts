@@ -274,6 +274,114 @@ export const LocalServerCommandResult = Schema.Union(
 );
 export type LocalServerCommandResult = typeof LocalServerCommandResult.Type;
 
+/**
+ * Whether Octant owns a running service (`octant-owned`, a live descendant of a
+ * terminal it started) or not (`left-over`). A `left-over` row may be one an
+ * earlier Octant session left behind, or one a person started in Terminal or
+ * with another agent CLI; Octant cannot tell which, so a surface must not say
+ * Octant started it. There is no third value.
+ */
+export const RunningServiceOwnership = Schema.Literal("octant-owned", "left-over");
+export type RunningServiceOwnership = typeof RunningServiceOwnership.Type;
+
+/**
+ * One server running in a Code Project, as the start screen sees it.
+ *
+ * It is a classified listener plus the Project (and, when the host could tell,
+ * the thread and branch) it belongs to. A listener that cannot be attributed to
+ * a Project this window can access is never a row, so the card can never be read
+ * as a host process inventory. Strict for the same reason `LocalServerListener`
+ * is: a command line or PID fails to encode.
+ */
+export const RunningService = Schema.Struct({
+  listenerId: LocalServerListenerId,
+  port: LocalServerPort,
+  url: LocalServerUrl,
+  /** Process or app name, e.g. `node`, `bun`. Never a command line. */
+  processName: Schema.NonEmptyTrimmedString,
+  framework: Schema.optional(Schema.NonEmptyTrimmedString),
+  /** Present so a not-owned server's Stop confirmation can name the process, cwd, and port. */
+  workingDirectory: Schema.optional(Schema.NonEmptyTrimmedString),
+  ownership: RunningServiceOwnership,
+  health: LocalServerHealth,
+  openAvailable: Schema.Boolean,
+  stop: LocalServerStopAvailability,
+  projectId: ProjectId,
+  projectName: Schema.NonEmptyTrimmedString,
+  /** The thread whose own worktree the server runs in, when that is knowable. */
+  thread: Schema.optional(
+    Schema.Struct({ threadId: CodeThreadId, title: Schema.NonEmptyTrimmedString }).annotations(
+      strict,
+    ),
+  ),
+  branch: Schema.optional(Schema.NonEmptyTrimmedString),
+}).annotations(strict);
+export type RunningService = typeof RunningService.Type;
+
+/** Host-wide observation: every Project the window can access, not one thread. */
+export const RunningServicesSnapshot = Schema.Struct({
+  services: Schema.Array(RunningService),
+  observedAt: UtcTimestamp,
+}).annotations(strict);
+export type RunningServicesSnapshot = typeof RunningServicesSnapshot.Type;
+
+/**
+ * Host-wide counterparts of the Local servers commands. They name no thread or
+ * Project: the host resolves what the window may see, re-observes, and
+ * re-classifies on every command, so a stale id is a claim and never authority.
+ */
+export const RunningServiceCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("list-running-services"),
+    requestId: LocalServerRequestId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("open-running-service"),
+    requestId: LocalServerRequestId,
+    listenerId: LocalServerListenerId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("stop-running-service"),
+    requestId: LocalServerRequestId,
+    listenerId: LocalServerListenerId,
+    confirmation: Schema.optional(LocalServerStopConfirmation),
+  }).annotations(strict),
+);
+export type RunningServiceCommand = typeof RunningServiceCommand.Type;
+
+export const RunningServiceCommandResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("running-services-listed"),
+    requestId: LocalServerRequestId,
+    snapshot: RunningServicesSnapshot,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("running-service-open-prepared"),
+    requestId: LocalServerRequestId,
+    listenerId: LocalServerListenerId,
+    target: LocalServerOpenTarget,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("running-service-stopped"),
+    requestId: LocalServerRequestId,
+    listenerId: LocalServerListenerId,
+    snapshot: RunningServicesSnapshot,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("running-service-rejected"),
+    requestId: LocalServerRequestId,
+    failure: LocalServerFailure,
+  }).annotations(strict),
+);
+export type RunningServiceCommandResult = typeof RunningServiceCommandResult.Type;
+
+export const decodeRunningService = Schema.decodeUnknownSync(RunningService);
+export const decodeRunningServicesSnapshot = Schema.decodeUnknownSync(RunningServicesSnapshot);
+export const decodeRunningServiceCommand = Schema.decodeUnknownSync(RunningServiceCommand);
+export const decodeRunningServiceCommandResult = Schema.decodeUnknownSync(
+  RunningServiceCommandResult,
+);
+
 export const decodeLocalServerListenerId = Schema.decodeUnknownSync(LocalServerListenerId);
 export const decodeLocalServerRequestId = Schema.decodeUnknownSync(LocalServerRequestId);
 export const decodeLocalServerPort = Schema.decodeUnknownSync(LocalServerPort);

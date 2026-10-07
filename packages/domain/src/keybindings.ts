@@ -17,14 +17,27 @@ export type OctantKeybindingActionId =
   | "code-content-search"
   | "zen-mode"
   | "zen-next-space"
-  | "zen-previous-space";
+  | "zen-previous-space"
+  | "review-next"
+  | "review-previous"
+  | "review-open"
+  | "review-complete"
+  | "review-send-back"
+  | "review-snooze"
+  | "review-mark-seen";
 
 export interface OctantKeybindingAction {
   readonly id: OctantKeybindingActionId;
   readonly label: string;
   /** Where the action lives, so the settings list can group it. */
-  readonly area: "Shell" | "Code";
+  readonly area: "Shell" | "Code" | "Review";
   readonly defaultChord: string;
+  /**
+   * An action that only means something while one page has focus. Its chord
+   * may be a bare key, because that page decides when a keystroke is typing
+   * and when it is a command; every other action must hold Mod or Alt.
+   */
+  readonly page?: "review";
 }
 
 /**
@@ -65,6 +78,55 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     area: "Code",
     defaultChord: "Mod+Shift+F",
   },
+  {
+    id: "review-next",
+    label: "Next finished thread",
+    area: "Review",
+    defaultChord: "J",
+    page: "review",
+  },
+  {
+    id: "review-previous",
+    label: "Previous finished thread",
+    area: "Review",
+    defaultChord: "K",
+    page: "review",
+  },
+  {
+    id: "review-open",
+    label: "Open the finished thread",
+    area: "Review",
+    defaultChord: "Enter",
+    page: "review",
+  },
+  {
+    id: "review-complete",
+    label: "Complete the thread",
+    area: "Review",
+    defaultChord: "C",
+    page: "review",
+  },
+  {
+    id: "review-send-back",
+    label: "Send the thread back with a follow-up",
+    area: "Review",
+    defaultChord: "S",
+    page: "review",
+  },
+  {
+    id: "review-snooze",
+    label: "Snooze the thread",
+    area: "Review",
+    defaultChord: "Z",
+    page: "review",
+  },
+  {
+    id: "review-mark-seen",
+    label: "Mark the thread seen",
+    area: "Review",
+    defaultChord: "E",
+    page: "review",
+  },
 ];
 
 export interface OctantChord {
@@ -85,6 +147,8 @@ export interface OctantChord {
  * with the platform whatever modifiers are held.
  */
 const RESERVED_KEYS = new Set(["tab", "escape", "enter", " "]);
+/** A page's own commands may take Enter, because the page decides when it is typing. */
+const PAGE_RESERVED_KEYS = new Set(["tab", "escape", " "]);
 
 export type OctantChordParse =
   | { readonly status: "ok"; readonly chord: OctantChord }
@@ -96,7 +160,10 @@ export type OctantChordParse =
  * Deliberately strict: an override the user typed by hand is rejected with a
  * reason rather than silently becoming a chord they did not ask for.
  */
-export function parseChord(text: string): OctantChordParse {
+export function parseChord(
+  text: string,
+  options: { readonly page?: boolean } = {},
+): OctantChordParse {
   const parts = text
     .split("+")
     .map((part) => part.trim())
@@ -126,10 +193,10 @@ export function parseChord(text: string): OctantChordParse {
     key = normalized;
   }
   if (key === undefined) return { status: "invalid", reason: "A chord must name a key." };
-  if (RESERVED_KEYS.has(key)) {
+  if ((options.page === true ? PAGE_RESERVED_KEYS : RESERVED_KEYS).has(key)) {
     return { status: "invalid", reason: `${part(key)} is reserved for the platform.` };
   }
-  if (!mod && !alt) {
+  if (!mod && !alt && options.page !== true) {
     return {
       status: "invalid",
       reason: "A chord must hold Mod or Alt, so it cannot swallow ordinary typing.",
@@ -231,7 +298,7 @@ export function resolveKeybindings(
       rejected.push({ actionId, chord, reason: "No such action." });
       continue;
     }
-    const parsed = parseChord(chord);
+    const parsed = parseChord(chord, { page: action.page !== undefined });
     if (parsed.status !== "ok") {
       rejected.push({ actionId, chord, reason: parsed.reason });
       continue;
@@ -241,7 +308,7 @@ export function resolveKeybindings(
 
   for (const action of OCTANT_KEYBINDING_ACTIONS) {
     if (bindings.has(action.id)) continue;
-    const fallback = parseChord(action.defaultChord);
+    const fallback = parseChord(action.defaultChord, { page: action.page !== undefined });
     if (fallback.status === "ok") bindings.set(action.id, fallback.chord);
   }
 
@@ -276,6 +343,31 @@ export function matchKeybinding(
   const chord = chordFromEvent(event, apple);
   if (!chord.mod && !chord.alt) return undefined;
   for (const action of OCTANT_KEYBINDING_ACTIONS) {
+    // A page's commands answer only on that page; the window-level listeners
+    // that call this must never run one from anywhere else.
+    if (action.page !== undefined) continue;
+    const bound = keybindings.bindings.get(action.id);
+    if (bound !== undefined && sameChord(bound, chord)) return action.id;
+  }
+  return undefined;
+}
+
+/**
+ * Which of a page's own commands a keyboard event runs, if any.
+ *
+ * The page calls this only from its own key handler and only when the event is
+ * not typing into a field, so a bare letter bound here never reaches the
+ * composer or any other text control.
+ */
+export function matchPageKeybinding(
+  keybindings: OctantKeybindings,
+  page: NonNullable<OctantKeybindingAction["page"]>,
+  event: Parameters<typeof chordFromEvent>[0],
+  apple: boolean,
+): OctantKeybindingActionId | undefined {
+  const chord = chordFromEvent(event, apple);
+  for (const action of OCTANT_KEYBINDING_ACTIONS) {
+    if (action.page !== page) continue;
     const bound = keybindings.bindings.get(action.id);
     if (bound !== undefined && sameChord(bound, chord)) return action.id;
   }

@@ -6,13 +6,17 @@ import { threadRowActivity, type ChatThreadNavigationItem } from "./navigationMo
  * the list on purpose, the same rule the sidebar's To review count follows.
  */
 export function reviewWaitingCount(threads: ReadonlyArray<ChatThreadNavigationItem>): number {
-  let count = 0;
-  for (const thread of threads) {
-    if (thread.shelf !== undefined) continue;
-    if (threadRowActivity(thread) === "working") continue;
-    if (thread.unread === true) count += 1;
-  }
-  return count;
+  return threads.filter(isWaitingForReview).length;
+}
+
+/**
+ * The one rule behind the sidebar's To review count and the Review page's
+ * list, so the number and the rows can never disagree.
+ */
+export function isWaitingForReview(thread: ChatThreadNavigationItem): boolean {
+  return (
+    thread.shelf === undefined && threadRowActivity(thread) !== "working" && thread.unread === true
+  );
 }
 
 /** A row is running only while the host projects it as executing; a rested row never is. */

@@ -11,6 +11,8 @@ import {
   treemapRootId,
   treemapTotals,
 } from "@octant/domain/canvas-treemap-layout";
+import { heatmapRowTotals } from "@octant/domain/canvas-heatmap-layout";
+import { layoutCanvasBarList } from "@octant/domain/canvas-bar-list-layout";
 import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
 
 /**
@@ -114,10 +116,12 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           .filter((part) => part.length > 0)
           .join(": "),
       );
-    case "metric":
+    case "metric": {
+      const value = `${reading(block.label)}: ${scalar(block.value, block.format)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`;
       return paragraph(
-        `${reading(block.label)}: ${scalar(block.value, block.format)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`,
+        block.caption === undefined ? value : `${value} — ${reading(block.caption)}`,
       );
+    }
     case "progress":
       return paragraph(
         `${reading(block.label)}: ${String(Math.round(block.value * 100))}%${block.detail === undefined ? "" : ` — ${reading(block.detail)}`}`,
@@ -306,6 +310,76 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           kind: "table",
           headers: ["Item", ...block.measures.map((measure) => reading(measure.label))],
           rows,
+        },
+      ];
+    }
+    case "heatmap": {
+      // The grid as a table: a row per declared row and a column per declared
+      // column, so a coordinate the block does not list reads as an empty cell
+      // rather than as a zero.
+      if (block.layout === "matrix") {
+        const totals = heatmapRowTotals(block);
+        const byCoordinate = new Map(
+          block.cells.map((cell) => [
+            `${String(cell.rowId)}\u0000${String(cell.columnId)}`,
+            cell.value,
+          ]),
+        );
+        return [
+          {
+            kind: "table",
+            headers: ["Row", ...block.columns.map((column) => reading(column.label)), "Total"],
+            rows: block.rows.map((row) => {
+              const rowId = String(row.rowId);
+              return [
+                reading(row.label),
+                ...block.columns.map((column) => {
+                  const value = byCoordinate.get(`${rowId}\u0000${String(column.columnId)}`);
+                  return value === undefined ? "" : scalar(value, block.format);
+                }),
+                scalar(totals.get(rowId) ?? 0, block.format),
+              ];
+            }),
+          },
+        ];
+      }
+      return [
+        {
+          kind: "table",
+          headers: ["Date", reading(block.valueLabel ?? "Value"), "Note"],
+          rows: block.days.map((day) => [
+            day.date,
+            scalar(day.value, block.format),
+            day.note === undefined ? "" : reading(day.note),
+          ]),
+        },
+      ];
+    }
+    case "bar-list": {
+      // The ranking as a table in the order the screen and the preview draw
+      // it, largest first through the shared layout, carrying every row the
+      // block declares rather than only the top rows.
+      const hasSecondary = block.rows.some((row) => row.secondaryValue !== undefined);
+      const ranked = layoutCanvasBarList(block).rows;
+      return [
+        {
+          kind: "table",
+          headers: [
+            "Item",
+            reading(block.valueLabel ?? "Value"),
+            ...(hasSecondary ? [reading(block.secondaryLabel ?? "Second")] : []),
+          ],
+          rows: ranked.map((row) => [
+            reading(row.label),
+            scalar(row.value, block.format),
+            ...(hasSecondary
+              ? [
+                  row.secondaryValue === undefined
+                    ? ""
+                    : scalar(row.secondaryValue, block.secondaryFormat ?? block.format),
+                ]
+              : []),
+          ]),
         },
       ];
     }
