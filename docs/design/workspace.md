@@ -204,7 +204,10 @@ thread is resting. At most five rows show, then **+N more**, which opens the
 Running view (the Board; Chat's Running tile opens Activity). A row opens its
 thread. The card reads what the window's controllers already hold; the run list
 is one read when the card mounts and again when the thread lists change, so it
-adds no timer, and a window sees only what its own authority returns. The turn
+adds no timer, and a window sees only what its own authority returns. Working
+now, the Running tab, and the Computers card share that one read: at most one is
+in flight, and the changes that arrive meanwhile (a streaming Chat reply moves
+the thread lists on every delta) become one more read once it lands. The turn
 start and step ride on the same navigation rows as the executing flag (see
 [Architecture: persistence](../architecture.md#persistence), fast thread
 reads), so a remote window sees them for exactly the threads it can already

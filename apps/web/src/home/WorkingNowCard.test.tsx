@@ -1,10 +1,12 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunCenterSummary } from "@octant/contracts";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
+import { createComputersCard } from "./ComputersCard";
 import { HomeDashboard } from "./HomeDashboard";
+import { RunningTab } from "./RunningTab";
 import { createWorkingNowCard, type WorkingNowCardSource } from "./WorkingNowCard";
 
 const NOW = Date.parse("2026-10-06T10:00:00.000Z");
@@ -243,5 +245,52 @@ describe("the Working now card", () => {
       />,
     );
     await waitFor(() => expect(reader.center).toHaveBeenCalledTimes(2));
+  });
+
+  it("shares one agent run read with Computers and the Running tab, and folds a burst of changes into one more", async () => {
+    const answers: Array<() => void> = [];
+    const reader = {
+      center: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            answers.push(() => resolve({ items: [] }));
+          }),
+      ),
+    } as unknown as AgentRunClient;
+    const startScreen = (revision: number) => {
+      const shared = source({ agentRunClient: reader, runRevision: revision });
+      return (
+        <>
+          <HomeDashboard
+            cards={[
+              createWorkingNowCard(shared),
+              createComputersCard({
+                hosts: [],
+                launchHostId: "local",
+                agentRunClient: reader,
+                runRevision: revision,
+                now: NOW,
+                readResources: vi.fn(async () => ({ status: "unavailable" as const })),
+                onOpenRunning: vi.fn(),
+              }),
+            ]}
+            customization={{ order: [], visibility: [] }}
+            onCustomizationChange={vi.fn()}
+          />
+          <RunningTab onStop={vi.fn()} source={shared} />
+        </>
+      );
+    };
+    const { rerender } = render(startScreen(0));
+    await screen.findByRole("region", { name: "Working now" });
+    await screen.findByRole("region", { name: "Computers" });
+    expect(reader.center).toHaveBeenCalledTimes(1);
+    // A streaming Chat reply moves the navigation topics on every delta.
+    for (let revision = 1; revision <= 10; revision += 1) rerender(startScreen(revision));
+    expect(reader.center).toHaveBeenCalledTimes(1);
+    await act(async () => answers.shift()?.());
+    await waitFor(() => expect(reader.center).toHaveBeenCalledTimes(2));
+    await act(async () => answers.shift()?.());
+    expect(reader.center).toHaveBeenCalledTimes(2);
   });
 });
