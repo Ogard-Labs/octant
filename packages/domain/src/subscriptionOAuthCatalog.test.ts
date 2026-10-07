@@ -3,7 +3,7 @@ import {
   decodeSubscriptionOAuthOffer,
 } from "@octant/contracts/host-oauth";
 import { describe, expect, it } from "vitest";
-import { chatGptPlanOfferWithHostId, subscriptionOAuthOffers } from "./subscriptionOAuthCatalog";
+import { subscriptionOAuthOffers } from "./subscriptionOAuthCatalog";
 
 describe("subscription OAuth catalog", () => {
   it("offers OpenRouter as the first catalog entry", () => {
@@ -48,11 +48,8 @@ describe("subscription OAuth catalog", () => {
     expect(chatGpt.accountLabel).toBe("ChatGPT plan");
   });
 
-  it("binds a provisioned host id into the ChatGPT plan offer", () => {
-    const bound = chatGptPlanOfferWithHostId("urn:uuid:11111111-2222-4333-8444-555555555555");
-    expect(bound.descriptor.extAgentHostId).toBe("urn:uuid:11111111-2222-4333-8444-555555555555");
-    expect(bound.descriptor.descriptorId).toBe("chatgpt-plan");
-    // The catalog entry itself never carries a host id.
+  it("never carries a host id in the ChatGPT plan catalog entry", () => {
+    // The server binds the host's derived id when a sign-in begins.
     const catalog = subscriptionOAuthOffers().find(
       (offer) => offer.descriptor.descriptorId === "chatgpt-plan",
     );

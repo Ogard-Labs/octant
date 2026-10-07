@@ -66,16 +66,3 @@ const chatGptPlanOffer: SubscriptionOAuthOffer = {
   driverKinds: ["openai-compatible"],
   allowedEndpoint: "https://api.openai.com/v1",
 };
-
-/**
- * The ChatGPT plan offer with the host's stable id bound into the descriptor.
- * The host id must be stable before the first sign-in, so the caller
- * provisions it (from the host runtime's derived host id) and passes it here;
- * the catalog never invents one.
- */
-export function chatGptPlanOfferWithHostId(extAgentHostId: string): SubscriptionOAuthOffer {
-  return {
-    ...chatGptPlanOffer,
-    descriptor: { ...chatGptPlanOffer.descriptor, extAgentHostId },
-  };
-}
