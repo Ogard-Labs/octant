@@ -1,12 +1,13 @@
 import { accessSync, constants, existsSync, statSync } from "node:fs";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, realpath, rename, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 /**
  * The folder destination's one door to the filesystem.
  *
  * A write lands in the folder the person chose and nowhere else: the name is
- * built by policy, the parent is proved to be the chosen folder, and the bytes
+ * built by policy, the parent is proved to be the chosen folder, the folder is
+ * proved to still be where it was chosen rather than behind a link, and the bytes
  * are written to a temporary file and renamed into place so a reader never sees
  * a half-written export. A crash leaves a dotted temporary file, never a
  * truncated document under the real name.
@@ -43,6 +44,14 @@ export function createCanvasExportFilePort(): CanvasExportFilePort {
         throw new Error("Refusing to write outside the export folder.");
       }
       await mkdir(root, { recursive: true });
+      // The folder was stored by its real path when the person chose it — the
+      // host's folder browser hands out nothing else — so a folder that no
+      // longer resolves to that path has had it, or a folder above it, replaced
+      // by a link since. Writing would follow that link somewhere the person
+      // never approved.
+      if ((await realpath(root)) !== root) {
+        throw new Error("Refusing to write through a link out of the export folder.");
+      }
       const temporary = join(root, `.${fileName}.${tempId}.tmp`);
       await writeFile(temporary, contents, "utf8");
       await rename(temporary, target);

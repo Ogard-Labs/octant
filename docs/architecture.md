@@ -2169,8 +2169,11 @@ frame rebuilt on restart. A folder must be inside the person's home unless the
 standing access-outside-project approval exists, the same rule the artifact
 mirror's global folder follows. Writes are confined to the chosen folder and are
 atomic: a temporary file is renamed into place, so a reader never sees a
-half-written export. The user guide's exporting page
-(`apps/docs/guide/export.md`) states the same rules for a person.
+half-written export. The folder is stored by its real path, and a write whose
+folder no longer resolves to that path — because it or a folder above it was
+replaced by a link after it was chosen — is refused rather than followed. The
+user guide's exporting page (`apps/docs/guide/export.md`) states the same rules
+for a person.
 
 The GitHub Gist destination ships in-tree on the same port. It reuses the GitHub
 connection Octant already resolved through the `gh` command — the host-managed
