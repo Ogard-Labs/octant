@@ -262,7 +262,11 @@ describe("CanvasExportPanel", () => {
     expect(screen.getByTestId("canvas-export-note")).toHaveTextContent("visible to anyone");
 
     await user.click(screen.getByRole("combobox", { name: "Who can see this export" }));
-    await user.click(await screen.findByRole("option", { name: "Public — visible to anyone" }));
+    // A secret gist is unlisted, not private: anyone holding its URL can read it.
+    expect(
+      await screen.findByRole("option", { name: "Secret — anyone with the link" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Public — visible to anyone" }));
     await user.click(screen.getByRole("button", { name: "Approve export" }));
 
     expect(onDecide).toHaveBeenCalledWith(expect.objectContaining({ visibility: "public" }));

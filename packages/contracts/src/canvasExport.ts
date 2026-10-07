@@ -116,9 +116,10 @@ export type CanvasExportTargetStatus = typeof CanvasExportTargetStatus.Type;
 /**
  * Who can see a remote export, when the destination keeps one.
  *
- * `secret` keeps the result visible only to the account that owns it; `public`
- * is visible to anyone, which is a thing to say plainly before it happens. A
- * destination with no audience — a file on this Mac — declares neither.
+ * `secret` keeps the result unlisted — it appears on no profile or search, but
+ * anyone holding its link can open it; `public` is listed and visible to
+ * anyone, which is a thing to say plainly before it happens. A destination with
+ * no audience — a file on this Mac — declares neither.
  */
 export const CanvasExportVisibility = Schema.Literal("secret", "public");
 export type CanvasExportVisibility = typeof CanvasExportVisibility.Type;

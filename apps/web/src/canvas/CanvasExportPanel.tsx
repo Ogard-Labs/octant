@@ -261,7 +261,7 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
                 if (value === "secret" || value === "public") setVisibility(value);
               }}
               options={[
-                { id: "secret", label: "Secret — only you" },
+                { id: "secret", label: "Secret — anyone with the link" },
                 { id: "public", label: "Public — visible to anyone" },
               ]}
               value={visibility}
