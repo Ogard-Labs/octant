@@ -4122,18 +4122,6 @@ function LaunchedShell(
   // The card list is rebuilt each render and is cheap: each card's own rows are
   // memoized from the inputs above, which keep their identity between renders.
   const homeCards = [
-    createRunningServicesCard({
-      client: runningServicesClient,
-      ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
-      // A service on another computer opens only as that thread's Browser tab,
-      // which the host itself shows; this window's own browser cannot reach it.
-      canOpen: (service) =>
-        workingNowHost === undefined ||
-        (service.thread !== undefined &&
-          browserAutomationClient !== undefined &&
-          activePaneId !== undefined),
-      onOpenTarget: openRunningService,
-    }),
     createWorkingNowCard({
       agentRunClient,
       boardFacts: workingNowBoardFacts,
@@ -4163,6 +4151,18 @@ function LaunchedShell(
         machineChanges.workNavigation +
         machineChanges.codeNavigation,
       threads: workingNowThreads,
+    }),
+    createRunningServicesCard({
+      client: runningServicesClient,
+      ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
+      // A service on another computer opens only as that thread's Browser tab,
+      // which the host itself shows; this window's own browser cannot reach it.
+      canOpen: (service) =>
+        workingNowHost === undefined ||
+        (service.thread !== undefined &&
+          browserAutomationClient !== undefined &&
+          activePaneId !== undefined),
+      onOpenTarget: openRunningService,
     }),
     createPullRequestsCard({
       available: pullRequestCardAvailable({
