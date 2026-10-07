@@ -183,14 +183,17 @@ Project, model, and attachments are all there when New task comes back; the list
 mounts, and reads, only while it is open. It shows the Working now rows
 without the five-row limit, compact, each with **Open** (the thread, as a Working
 now row does) and **Stop**. A start screen has no thread open, and the
-navigation rows carry no turn or attempt identity, so Stop first reads the
-thread's running turn and then sends the command its mode already uses for the
-Stop control inside the thread (interrupt a Chat attempt, cancel a Work turn,
-cancel a Code provider turn, or cancel an agent run for a row that is only a
-run). It asks first, in the row: "Stop this turn?" with **Stop** and **Keep
-running**, the safe answer holding the focus. A turn that finished meanwhile is
-reported ("Already finished.") and never cancelled twice, and a host refusal
-shows in the row in the host's words. The tabs and list add no persisted state or authority.
+navigation rows carry no turn or attempt identity, so Stop sends the command its
+mode already uses for the Stop control inside the thread (interrupt a Chat
+attempt, cancel a Work turn, cancel a Code provider turn, or cancel an agent run
+for a row that is only a run). Chat and Work first read the thread's running
+turn and send nothing when there is none. Code has no turn to name: its host
+cancels only the turn it is running for that thread and answers a cancel it had
+no turn for with a failed turn state and no reason, which counts as nothing
+running. It asks first, in the row: "Stop this turn?" with **Stop** and **Keep
+running**, the safe answer holding the focus. In every mode a turn that finished
+meanwhile is reported ("Already finished.") and never cancelled twice, and a
+host refusal shows in the row in the host's words. The tabs and list add no persisted state or authority.
 
 **Pull requests** is the next card, on by default, and only on a Code start
 screen. It is hidden — and left out of Customize — unless the Pull requests

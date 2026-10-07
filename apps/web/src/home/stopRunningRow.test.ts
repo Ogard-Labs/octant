@@ -87,10 +87,11 @@ describe("stopping a running row from the start screen", () => {
     });
   });
 
-  it("cancels the Code thread's provider turn in its checkout and reports a refusal in the host's words", async () => {
-    const executeOperation = vi.fn(async (command: { readonly kind: string }) => ({
-      kind: "operation-accepted",
-      operationId: command.kind,
+  it("cancels the Code thread's provider turn in its checkout", async () => {
+    const executeOperation = vi.fn(async () => ({
+      kind: "provider-turn-state",
+      operationId: UUID_C,
+      state: "interrupted",
     }));
     const codeClient = {
       thread: vi.fn(async () => ({ thread: { id: UUID_A }, checkout: { id: UUID_B } })),
@@ -107,15 +108,38 @@ describe("stopping a running row from the start screen", () => {
         checkoutId: UUID_B,
       }),
     );
+  });
 
-    executeOperation.mockResolvedValueOnce({
-      kind: "operation-failed",
-      operationId: "x",
-      failure: { message: "No turn is running." },
-    } as never);
+  it("reports a Code turn that finished before the person confirmed as already finished", async () => {
+    // The host answers a cancel with no turn of its own to stop as a failed
+    // turn state with no reason, and stops nothing.
+    const codeClient = {
+      thread: vi.fn(async () => ({ thread: { id: UUID_A }, checkout: { id: UUID_B } })),
+      executeOperation: vi.fn(async () => ({
+        kind: "provider-turn-state",
+        operationId: UUID_C,
+        state: "failed",
+      })),
+    } as unknown as CodeClient;
+
+    expect(await stopRunningRow({ ...none, codeClient }, row({ mode: "code" }))).toEqual({
+      kind: "nothing-running",
+    });
+  });
+
+  it("shows a host refusal of a Code stop in the host's words", async () => {
+    const codeClient = {
+      thread: vi.fn(async () => ({ thread: { id: UUID_A }, checkout: { id: UUID_B } })),
+      executeOperation: vi.fn(async () => ({
+        kind: "operation-failed",
+        operationId: UUID_C,
+        failure: { category: "unauthorized", message: "This window cannot use that checkout." },
+      })),
+    } as unknown as CodeClient;
+
     expect(await stopRunningRow({ ...none, codeClient }, row({ mode: "code" }))).toEqual({
       kind: "refused",
-      message: "No turn is running.",
+      message: "This window cannot use that checkout.",
     });
   });
 

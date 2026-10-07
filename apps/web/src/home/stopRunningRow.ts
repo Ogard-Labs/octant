@@ -49,7 +49,9 @@ function failureMessage(error: unknown): string {
  * for the Stop control inside an open thread. A start screen has no thread
  * open, so the running turn is read first (the navigation rows carry no turn
  * or attempt id) and then cancelled by the same command with the same guards:
- * a turn that finished meanwhile is reported, never cancelled twice.
+ * a turn that finished meanwhile is reported, never cancelled twice. Code has
+ * no turn id to read; its host cancels only the turn it owns and says when it
+ * had none, which is reported the same way.
  */
 export async function stopRunningRow(
   clients: StopRowClients,
@@ -113,9 +115,17 @@ async function stopCodeTurn(client: CodeClient | undefined, id: string): Promise
     threadId: view.thread.id,
     checkoutId: view.checkout.id,
   });
-  return result.kind === "operation-failed"
-    ? { kind: "refused", message: result.failure.message }
-    : { kind: "stopped" };
+  if (result.kind === "operation-failed") {
+    return { kind: "refused", message: result.failure.message };
+  }
+  if (result.kind !== "provider-turn-state") return { kind: "nothing-running" };
+  if (result.state === "interrupted") return { kind: "stopped" };
+  // The host answers a cancel it had no running turn for with a failed turn
+  // state and no reason, and stops nothing, so that is a turn that already
+  // finished. A reason, when there is one, is the host refusing.
+  return result.failure === undefined
+    ? { kind: "nothing-running" }
+    : { kind: "refused", message: result.failure.message };
 }
 
 async function stopAgentRun(
