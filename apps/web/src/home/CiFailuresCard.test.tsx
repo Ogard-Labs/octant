@@ -7,7 +7,6 @@ import { createCiFailuresCard, type CiFailuresCardSource } from "./CiFailuresCar
 
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
 const NOW = Date.parse("2026-08-22T08:00:00.000Z");
-const EXCERPT = "Expected 2, received 1";
 
 function view() {
   return decodeCodeProjectPullRequestView({
@@ -44,7 +43,6 @@ function view() {
           {
             name: "web tests",
             completedAt: "2026-08-22T07:40:00.000Z",
-            excerpt: EXCERPT,
           },
         ],
       },
@@ -89,7 +87,7 @@ describe("the CI failures card", () => {
     expect(within(card).queryByText("No failing checks")).toBeNull();
   });
 
-  it("opens a draft with the failing check and a bounded excerpt, and sends nothing", async () => {
+  it("opens a draft on the failing branch with the failing check written in, and sends nothing", async () => {
     const onStartFix = vi.fn();
     const load = vi.fn(async () => view());
     render(
@@ -118,8 +116,6 @@ describe("the CI failures card", () => {
         "Check: web tests",
         "Branch: feature/list",
         "Repository: octant/octant",
-        "",
-        `Failure:\n${EXCERPT}`,
       ].join("\n"),
     );
     expect(load).toHaveBeenCalledTimes(1);

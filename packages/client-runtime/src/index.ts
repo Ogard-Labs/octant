@@ -18,6 +18,7 @@ export * from "./workMutationClient";
 export * from "./workFileListingClient";
 export * from "./workPromotionClient";
 export * from "./workRequestClient";
+export * from "./pendingRequestClient";
 export * from "./workThreadClient";
 export * from "./workTurnClient";
 export * from "./contextClient";

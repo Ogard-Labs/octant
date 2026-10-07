@@ -643,7 +643,6 @@ describe("GhPullRequestPort active list", () => {
   });
 
   it("keeps failing checks from the list rollup and does not ask for logs", async () => {
-    const longExcerpt = "x".repeat(2_000);
     const { command, port } = fixture([
       {
         exitCode: 0,
@@ -657,7 +656,7 @@ describe("GhPullRequestPort active list", () => {
                 status: "COMPLETED",
                 conclusion: "FAILURE",
                 completedAt: "2026-08-22T07:40:00Z",
-                summary: longExcerpt,
+                detailsUrl: "https://github.com/octant/octant/actions/runs/1/job/2",
               },
               {
                 name: "lint",
@@ -690,8 +689,6 @@ describe("GhPullRequestPort active list", () => {
             {
               name: "web tests",
               completedAt: "2026-08-22T07:40:00Z",
-              excerpt: "x".repeat(1_024),
-              excerptTruncated: true,
             },
             { name: "still running" },
           ],

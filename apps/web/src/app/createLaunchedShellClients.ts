@@ -71,6 +71,10 @@ import {
   type NavigatorAssistantClient,
 } from "@octant/client-runtime/navigator-assistant-client";
 import { createPlanClient, type PlanClient } from "@octant/client-runtime/plan-client";
+import {
+  createPendingRequestClient,
+  type PendingRequestClient,
+} from "@octant/client-runtime/pending-request-client";
 import { createPreviewClient } from "@octant/client-runtime/preview-client";
 import { createProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { createShipClient, type ShipClient } from "@octant/client-runtime/ship-client";
@@ -147,6 +151,8 @@ export interface LaunchedShellClients {
   readonly linearTransport: ReturnType<typeof createIntegrationClient>;
   readonly machineChangeClient: ReturnType<typeof createMachineChangeClient>;
   readonly navigatorAssistantClient: NavigatorAssistantClient | undefined;
+  /** Absent off a local host: the read spans every Project and is local-window only. */
+  readonly pendingRequestClient: PendingRequestClient | undefined;
   readonly planClient: PlanClient;
   readonly previewClient: ReturnType<typeof createPreviewClient>;
   readonly providerUsageLimitsClient:
@@ -200,6 +206,15 @@ export function createLaunchedShellClients(
     providerUsageLimitsClient = undefined;
   }
 
+  let pendingRequestClient: PendingRequestClient | undefined;
+  try {
+    pendingRequestClient = createPendingRequestClient(port);
+  } catch {
+    // Every approval and question across Projects is read at a local window
+    // only; a client on any other host leaves it out.
+    pendingRequestClient = undefined;
+  }
+
   return {
     agentProfileClient: options.agentProfileClient ?? createAgentProfileClient(port),
     agentRunClient: options.agentRunClient ?? createAgentRunClient(port),
@@ -239,6 +254,7 @@ export function createLaunchedShellClients(
     machineChangeClient: createMachineChangeClient(port),
     nativeHarnessClient: options.nativeHarnessClient ?? createNativeHarnessClient(port),
     navigatorAssistantClient,
+    pendingRequestClient,
     planClient: options.planClient ?? createPlanClient(port),
     previewClient: createPreviewClient(port),
     providerUsageLimitsClient,

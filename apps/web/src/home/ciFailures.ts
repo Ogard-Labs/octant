@@ -121,8 +121,6 @@ export function buildCiFailureCard(input: {
           checkName: check.name,
           branch: row.headBranch,
           repository: `${row.repositoryOwner}/${row.repositoryName}`,
-          ...(check.excerpt === undefined ? {} : { excerpt: check.excerpt }),
-          ...(check.excerptTruncated === true ? { excerptTruncated: true } : {}),
         }),
       });
     });

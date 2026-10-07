@@ -955,8 +955,6 @@ export class CodeProjectPullRequestService {
             failingChecks: row.failingChecks.map((check) => ({
               name: check.name,
               ...(check.completedAt === undefined ? {} : { completedAt: check.completedAt }),
-              ...(check.excerpt === undefined ? {} : { excerpt: check.excerpt }),
-              ...(check.excerptTruncated === true ? { excerptTruncated: true as const } : {}),
             })),
           }),
       linkedThreads: matchLinkedThreadsToPullRequest({

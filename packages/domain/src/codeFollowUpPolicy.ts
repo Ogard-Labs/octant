@@ -1,7 +1,4 @@
-import {
-  MAX_CODE_PROJECT_PULL_REQUEST_FAILURE_EXCERPT_BYTES,
-  type CodeProjectPullRequestRow,
-} from "@octant/contracts";
+import type { CodeProjectPullRequestRow } from "@octant/contracts";
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { CodeOperationEvent, CodeThreadFollowUp } from "@octant/contracts/code-operations";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
@@ -276,23 +273,11 @@ export function failingChecksFollowUpReason(input: {
   return `CI is failing on PR #${input.number}: ${input.title}`;
 }
 
-const FAILURE_EXCERPT_NOTE = "\n(the failure excerpt was truncated)";
-
-function boundFailureExcerpt(text: string): { readonly text: string; readonly truncated: boolean } {
-  const bytes = new TextEncoder().encode(text);
-  if (bytes.byteLength <= MAX_CODE_PROJECT_PULL_REQUEST_FAILURE_EXCERPT_BYTES) {
-    return { text, truncated: false };
-  }
-  const sliced = new TextDecoder()
-    .decode(bytes.subarray(0, MAX_CODE_PROJECT_PULL_REQUEST_FAILURE_EXCERPT_BYTES))
-    .replace(/\uFFFD+$/u, "");
-  return { text: sliced, truncated: true };
-}
-
 /**
  * The draft a person sends to start a fix. It reuses the follow-up reason and
- * adds the check, the branch, and a bounded excerpt of whatever failure text
- * the refresh already recorded. It does not start a turn.
+ * adds the check, the branch, and the repository. The pull-request list names a
+ * failing check but carries no failure text, so the draft quotes none. It does
+ * not start a turn.
  */
 export function buildCiFailureFollowUpDraft(input: {
   readonly number: number;
@@ -300,23 +285,12 @@ export function buildCiFailureFollowUpDraft(input: {
   readonly checkName: string;
   readonly branch: string;
   readonly repository: string;
-  readonly excerpt?: string;
-  readonly excerptTruncated?: boolean;
 }): string {
-  const recorded = input.excerpt?.replaceAll("\0", "").trim() ?? "";
-  const bounded = recorded.length === 0 ? undefined : boundFailureExcerpt(recorded);
-  const truncated = input.excerptTruncated === true || bounded?.truncated === true;
-  const failure =
-    bounded === undefined
-      ? "The recorded check included no failure text."
-      : `Failure:\n${bounded.text}${truncated ? FAILURE_EXCERPT_NOTE : ""}`;
   return [
     failingChecksFollowUpReason(input),
     "",
     `Check: ${input.checkName}`,
     `Branch: ${input.branch}`,
     `Repository: ${input.repository}`,
-    "",
-    failure,
   ].join("\n");
 }

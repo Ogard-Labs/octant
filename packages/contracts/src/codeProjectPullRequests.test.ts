@@ -164,8 +164,6 @@ describe("Code Project pull-request contracts", () => {
             {
               name: "web tests",
               completedAt: "2026-08-22T07:40:00.000Z",
-              excerpt: "Expected 2, received 1",
-              excerptTruncated: true,
             },
           ],
         },
@@ -175,8 +173,6 @@ describe("Code Project pull-request contracts", () => {
       {
         name: "web tests",
         completedAt: "2026-08-22T07:40:00.000Z",
-        excerpt: "Expected 2, received 1",
-        excerptTruncated: true,
       },
     ]);
     expect(decodeCodeProjectPullRequestView(connectedView).rows[0]?.failingChecks).toBe(undefined);

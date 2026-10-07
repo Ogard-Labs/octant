@@ -354,14 +354,13 @@ describe("failing checks follow-up trigger derivation", () => {
 });
 
 describe("a CI failure draft", () => {
-  it("reuses the follow-up reason and includes the check and a bounded excerpt", () => {
+  it("reuses the follow-up reason and names the check, the branch, and the repository", () => {
     const draft = buildCiFailureFollowUpDraft({
       number: 12,
       title: "List active pull requests",
       checkName: "web tests",
       branch: "feature/list",
       repository: "octant/octant",
-      excerpt: "Expected 2, received 1",
     });
     expect(draft).toBe(
       [
@@ -370,32 +369,7 @@ describe("a CI failure draft", () => {
         "Check: web tests",
         "Branch: feature/list",
         "Repository: octant/octant",
-        "",
-        "Failure:\nExpected 2, received 1",
       ].join("\n"),
     );
-  });
-
-  it("cuts a long excerpt and says so, and does not invent text the refresh omitted", () => {
-    const cut = buildCiFailureFollowUpDraft({
-      number: 12,
-      title: "List active pull requests",
-      checkName: "web tests",
-      branch: "feature/list",
-      repository: "octant/octant",
-      excerpt: "x".repeat(2_000),
-    });
-    expect(cut).toContain("Failure:\n" + "x".repeat(1_024));
-    expect(cut).toContain("(the failure excerpt was truncated)");
-    expect(cut).not.toContain("x".repeat(1_025));
-    expect(
-      buildCiFailureFollowUpDraft({
-        number: 12,
-        title: "List active pull requests",
-        checkName: "web tests",
-        branch: "feature/list",
-        repository: "octant/octant",
-      }),
-    ).toContain("The recorded check included no failure text.");
   });
 });
