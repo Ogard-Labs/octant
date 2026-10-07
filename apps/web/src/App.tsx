@@ -2115,13 +2115,13 @@ function LaunchedShell(
       .map((project) => project.id),
   });
   const latestShellActions = useRef({
-    openDraftThread: controller.openDraftThread,
+    startNewThreadDraft,
     openSettings: controller.openSettings,
     status: controller.status,
     workspace: controller.workspace,
   });
   latestShellActions.current = {
-    openDraftThread: controller.openDraftThread,
+    startNewThreadDraft,
     openSettings: controller.openSettings,
     status: controller.status,
     workspace: controller.workspace,
@@ -2137,7 +2137,7 @@ function LaunchedShell(
     return subscribe(() => {
       const latest = latestShellActions.current;
       if (latest.status !== "ready") return;
-      void latest.openDraftThread(latest.workspace?.activeMode ?? "chat");
+      latest.startNewThreadDraft(latest.workspace?.activeMode ?? "chat");
     });
   }, [props.hostBridge?.subscribeStartNewAgent]);
   useEffect(() => {
@@ -5132,6 +5132,15 @@ function LaunchedShell(
     void controller.openDraftThread(mode);
   }
 
+  // Every other way to ask for a new thread (the command palette, thread
+  // search, the menu bar's Start new agent) starts the same clean draft as the
+  // sidebar's New task. Opening the draft alone kept the last draft's text and
+  // a branch a Start a fix had handed it.
+  function startNewThreadDraft(mode: OctantMode) {
+    if (mode === "chat") createChat();
+    else openDraftInActiveProject(mode);
+  }
+
   function createChat(
     prompt?: string,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
@@ -6182,7 +6191,7 @@ function LaunchedShell(
     activeMode,
     modes: enabledModes(controller.settings),
     onSelectMode: handleSelectMode,
-    onNewThread: () => void controller.openDraftThread(activeMode),
+    onNewThread: () => startNewThreadDraft(activeMode),
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
     onOpenReview: openReview,
@@ -7852,7 +7861,7 @@ function LaunchedShell(
           onCloseSearch={closeThreadSearch}
           onNewSearchThread={() => {
             closeThreadSearch();
-            void controller.openDraftThread(activeMode);
+            startNewThreadDraft(activeMode);
           }}
           onNewSearchProject={() => {
             closeThreadSearch();

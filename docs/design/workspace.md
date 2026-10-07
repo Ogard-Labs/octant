@@ -343,7 +343,9 @@ its workspace, since the current checkout may be on another branch; the
 checkout's head does not replace that branch. The pull request, check, branch,
 and repository are already written in; the rollup carries no failure text, so
 the draft quotes none. Sending, switching the draft's Project, or starting a
-new draft lets go of that branch. It does not start a turn; the person sends
+new draft lets go of that branch, wherever the new draft is started: the
+sidebar's New task, the command palette, thread search, or the menu bar's Start
+new agent all start the same clean draft. It does not start a turn; the person sends
 it. Opening the card reads the same cached snapshot
 Pull requests reads and adds no poll.
 

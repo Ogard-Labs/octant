@@ -3567,6 +3567,63 @@ describe("App", () => {
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue("");
   });
 
+  it.each(["command palette", "thread search", "menu-bar Start new agent"] as const)(
+    "starts a clean Code draft from the %s, as the sidebar's New task does",
+    async (entry) => {
+      const user = userEvent.setup();
+      let startNewAgent: (() => void) | undefined;
+      const hostBridge: OctantHostBridge = {
+        ...credentialHostOperations(),
+        close: vi.fn(),
+        maximizeOrRestore: vi.fn(),
+        minimize: vi.fn(),
+        projectWindowCapability,
+        resetBounds: vi.fn(),
+        selectProjectRoot: vi.fn(),
+        setSidebarMaterialPreference: vi.fn(),
+        subscribeResolvedMaterial: vi.fn(() => () => undefined),
+        subscribeStartNewAgent: vi.fn((listener: () => void) => {
+          startNewAgent = listener;
+          return () => undefined;
+        }),
+      };
+      render(
+        <App
+          hostBridge={hostBridge}
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projects({ ...projectBootstrap(), availability: [] })}
+          projectWindowCapability={projectWindowCapability}
+          shellClient={client(codeShellBootstrap())}
+        />,
+      );
+
+      await user.click(await screen.findByRole("button", { name: "New task" }));
+      await user.type(
+        await screen.findByRole("textbox", { name: "First message" }),
+        "Left over from an earlier task",
+      );
+      if (entry === "command palette") {
+        await user.keyboard("{Control>}k{/Control}");
+        const search = await screen.findByRole("combobox", { name: "Search commands" });
+        await waitFor(() => expect(search).toHaveFocus());
+        await user.keyboard("New Code thread");
+        await user.keyboard("{Enter}");
+      } else if (entry === "thread search") {
+        await user.keyboard("{Control>}k{/Control}");
+        await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
+        const dialog = await screen.findByRole("dialog", { name: "Search Code threads" });
+        await user.click(within(dialog).getByRole("button", { name: "New task" }));
+      } else {
+        await act(async () => startNewAgent?.());
+      }
+
+      await waitFor(() =>
+        expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(""),
+      );
+    },
+  );
+
   it("uses one narrow modal dock and restores focus through Escape dismissal", async () => {
     const user = userEvent.setup();
     const projectApi = projects();
