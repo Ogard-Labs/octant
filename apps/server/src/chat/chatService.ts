@@ -4370,11 +4370,11 @@ export class ChatService {
   }
 
   /**
-   * For Azure AI Foundry, tool support is per-deployment (gated by
-   * verifiedToolModelIds). The Chat preflight and research routing must treat
-   * the selected model as tool-supported when its id is verified, even though
-   * the provider-level appManagedTools flag stays "unsupported" until all
-   * deployments are verified.
+   * An endpoint that verifies tools per model keeps its provider-level
+   * appManagedTools flag "unsupported", so one verified model never unlocks
+   * the others, and lists each model a person verified in
+   * verifiedToolModelIds. The Chat preflight and research routing treat the
+   * selected model as tool-supported when its id is in that list.
    */
   #effectiveAppManagedTools(
     probe: ProviderProbeResult,
