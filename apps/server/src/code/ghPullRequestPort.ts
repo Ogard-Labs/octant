@@ -1,7 +1,11 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import type { CodeProjectPullRequestMergeMethod, CodeThreadId } from "@octant/contracts";
+import {
+  MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS,
+  type CodeProjectPullRequestMergeMethod,
+  type CodeThreadId,
+} from "@octant/contracts";
 import { childProcessEnvironment } from "../childProcessEnvironment";
 
 const MAX_GH_OUTPUT_BYTES = 1_048_576;
@@ -138,6 +142,16 @@ export interface GhActivePullRequestRow {
   readonly url: string;
   readonly checks: "unknown" | "pending" | "passing" | "failing";
   readonly review: "unknown" | "none" | "pending" | "approved" | "changes-requested";
+  /** Logins asked to review. A team request has no login and is not listed. */
+  readonly reviewRequestedFrom: ReadonlyArray<string>;
+  /**
+   * Failing checks from the same rollup the summary already reads. Empty when
+   * none failed, or when the rollup named none.
+   */
+  readonly failingChecks: ReadonlyArray<{
+    readonly name: string;
+    readonly completedAt?: string;
+  }>;
 }
 
 export type GhActivePullRequestListResult =
@@ -164,6 +178,7 @@ const ACTIVE_PR_LIST_FIELDS = [
   "headRefName",
   "statusCheckRollup",
   "reviewDecision",
+  "reviewRequests",
 ].join(",");
 
 const MAX_PR_REVIEW_ITEMS = 500;
@@ -899,6 +914,8 @@ function decodeActivePullRequests(
       url,
       checks: summarizeChecks(item.statusCheckRollup),
       review: summarizeReview(item.reviewDecision),
+      reviewRequestedFrom: reviewRequestLogins(item.reviewRequests),
+      failingChecks: decodeFailingChecks(item.statusCheckRollup),
     });
   }
   return rows;
@@ -935,6 +952,45 @@ function summarizeChecks(value: unknown): GhActivePullRequestRow["checks"] {
   return "unknown";
 }
 
+const RECORDED_FAILURE_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+const EARLIEST_RECORDED_FAILURE_MS = Date.parse("2000-01-01T00:00:00.000Z");
+
+/**
+ * Failing checks already present on the list rollup. A zero timestamp is the
+ * command's empty time, not a failure time, so it is left off. The rollup's
+ * check entries carry a name, a state, times, and a details link, never failure
+ * text, so no excerpt is read from them.
+ */
+function decodeFailingChecks(value: unknown): GhActivePullRequestRow["failingChecks"] {
+  if (!Array.isArray(value)) return [];
+  const checks: Array<{ name: string; completedAt?: string }> = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || normalizeCheckState(entry) !== "failure") continue;
+    const rawName = typeof entry.name === "string" ? entry.name : entry.context;
+    const name = clampBytes(rawName, 512).trim();
+    if (name.length === 0) continue;
+    const completedAt = recordedFailureAt(entry.completedAt);
+    checks.push({ name, ...(completedAt === undefined ? {} : { completedAt }) });
+  }
+  checks.sort((left, right) => {
+    const leftAt = left.completedAt ?? "";
+    const rightAt = right.completedAt ?? "";
+    if (leftAt === rightAt) return left.name.localeCompare(right.name);
+    if (leftAt === "") return 1;
+    if (rightAt === "") return -1;
+    return rightAt.localeCompare(leftAt);
+  });
+  return checks.slice(0, MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS);
+}
+
+function recordedFailureAt(value: unknown): string | undefined {
+  if (typeof value !== "string" || !RECORDED_FAILURE_AT.test(value)) return undefined;
+  if (value.startsWith("0001-")) return undefined;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed) || parsed < EARLIEST_RECORDED_FAILURE_MS) return undefined;
+  return value;
+}
+
 function summarizeReview(value: unknown): GhActivePullRequestRow["review"] {
   const decision = typeof value === "string" ? value.toUpperCase() : "";
   if (decision === "APPROVED") return "approved";
@@ -942,6 +998,30 @@ function summarizeReview(value: unknown): GhActivePullRequestRow["review"] {
   if (decision === "REVIEW_REQUIRED") return "pending";
   if (decision === "") return "none";
   return "unknown";
+}
+
+const MAX_REVIEW_REQUEST_LOGINS = 32;
+const GITHUB_LOGIN = /^[A-Za-z0-9-]{1,128}$/;
+
+/**
+ * User logins asked to review. A missing field is no request, not a malformed
+ * list: an older read simply did not carry the fact. A team has no login.
+ */
+function reviewRequestLogins(value: unknown): ReadonlyArray<string> {
+  if (!Array.isArray(value)) return [];
+  const logins: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.login !== "string") continue;
+    const login = entry.login.trim();
+    if (!GITHUB_LOGIN.test(login)) continue;
+    const key = login.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    logins.push(login);
+    if (logins.length >= MAX_REVIEW_REQUEST_LOGINS) break;
+  }
+  return logins;
 }
 
 function decodeCommits(value: unknown): GhPullRequestReviewDetail["commits"] {

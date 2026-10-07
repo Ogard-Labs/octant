@@ -199,6 +199,21 @@ that file and continues, and it checks the socket is still absent before the
 move so a peer that bound in the meantime keeps the secret it just wrote. An
 ownership failure names the code, the artifact path, and the next step.
 
+**Host resources.** `GET /api/host/resources` is a read-only snapshot of this
+host's load: CPU use averaged over a short sample of the process's CPU times,
+used and total memory, the core count, and used and free space on the volume
+that holds the data directory. The disk figures are omitted when that volume
+cannot be read. The snapshot names no path, no user, and no process. The server
+keeps one snapshot for about five seconds. The local owner always receives it.
+A paired remote device with an active session receives it under the same
+`project.overview.read` action as the Project overview reads; an
+unauthenticated caller is refused, with no figures in the refusal. The route
+also compares the device's host identity with this host's, but every paired
+device row on a host carries that host's own identity, so the comparison does
+not separate one paired device from another. The Computers card
+reads the route only while the card is on screen and the window is in front,
+about every ten seconds, and does not poll in the background.
+
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
 `@octant/client-runtime` and never holds authority of its own. In development
@@ -282,6 +297,34 @@ with no `diagram`, `plan` or `mockup`. When an author asks for `inline` over
 that bound, the host records `sidebar` and returns the reason as
 `presentationNote`.
 A revise without a choice keeps the current presentation.
+`preview` returns a picture and a layout reading of one shipped version. Its
+input is the `canvasId`, an optional `version` (a sequence), a `width`
+(`inline`, `sidebar`, or 320–1200 px) and a `theme` (`light` or `dark`). The
+layout warnings are computed from the document and the target width alone and
+are typed values — a clipped label, a legend over its row, an empty series, an
+inline document past the block cap, and ink below its contrast target — so a
+build reports them whether or not a browser rendered the picture. The picture is
+a screenshot of the web app's own Canvas renderer: the host's headless Chromium,
+found through the same executable list the browser runtime and the Canvas
+browser smokes use, loads the Canvas preview page built with the web assets
+(`apps/web/canvas-preview.html`, built into `dist/canvas-preview/`), which draws
+the version with the same blocks and stylesheet the thread uses, in the chosen
+theme and at the chosen width. The host writes the document into that page as
+inert JSON and answers only the page's own built files from disk; every other
+request is aborted, and the page's content security policy forbids connections,
+so the network is off and the page holds no server address or credential. The
+operation is bounded: one preview in flight per thread, a small allowance per
+minute, and an image no wider than 1,600 px and no taller than 4,096 px. When no
+Chromium is present, the build carries no preview page, the page fails to
+settle, or the model driving the turn does not accept images in a tool result,
+the warnings still return and the result names which (`no-browser`,
+`no-renderer`, `render-failed`, `provider-cannot-take-images`). Whether a model
+accepts images is read from its own input modalities, the same signal the
+computer-use screenshots use; there is no separate provider capability for
+images in a tool result.
+The signed desktop app bundles the `playwright-core` driver but no browser
+binary, so it resolves Chromium from the host's installed browsers. On a host
+with none, `preview` is warnings-only, and the user guide says so.
 A thread reference card reports the effective presentation and the first
 version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
 revision or a person's edit, is listed as `sidebar`.
@@ -297,6 +340,53 @@ categories across series; a bar-and-line series names itself as a bar or a line.
 The accessible table lists every reading. A pie or donut legend toggles at most
 24 slices; the rest stay in the picture and the table. A shared snapshot keeps
 the chart and drops no series mark.
+A treemap is a hierarchy drawn as squarified rectangles: nodes name a parent,
+one root, values sit on leaves, and a group's reading is the sum of its
+children. A leaf carries a value for every declared measure and may name a
+manifest source, which offers Open file through the allowlisted open-source
+action; the host reauthorizes it. The pure, deterministic layout lives in
+`packages/domain`, so the screen, the artifact preview SVG, and the Markdown and
+HTML export all draw the same rectangles. The person switches the size and
+colour measures and zooms into a group (click, breadcrumb, Escape, right-click,
+or Enter on a keyboard-selected cell); these are view state and are never
+journaled. The domain policy refuses a second root, a cycle, a dangling parent,
+a group that carries its own value or a leaf that does not, a value that is
+negative, a measure that is not declared, and a hierarchy past the depth, node,
+measure, or label budget. The accessible fallback is a hierarchical table
+sortable by each measure.
+A heatmap is a grid coloured by value. A matrix names its rows and columns and
+carries a cell per coordinate with a value and an optional short note; a cell on
+a coordinate the block does not hold, a repeated row, column, or coordinate, and
+a grid past the row, column, or cell budget are each refused. A calendar carries
+one reading per date and lays the days out on a week grid whose first day comes
+from the locale. A coordinate the block does not list is drawn apart from a zero.
+Both read a value through the shared scale roles. The pure, deterministic layout
+lives in `packages/domain` (`canvasHeatmapLayout`), so the screen, the artifact
+preview SVG, and the Markdown and HTML export all draw the same cells. The person
+can sort a matrix's rows by their total and walk the cells with the arrow keys;
+these are view state and are never journaled. The accessible fallback is a table
+of every coordinate and its total for a matrix, or of every dated reading for a
+calendar.
+A bar list is a ranking of magnitudes (`packages/domain/src/canvasBarListLayout.ts`):
+each row is a label, a value, an optional second value, and an optional manifest
+source. Rows sort largest first with a stable tie-break by the author's order,
+a reader can flip the ranking to smallest first, and the list shows a top N with
+Show all; both are view state and are never journaled. A bar's length is its
+share of the largest value, drawn in neutral ink or through the shared
+sequential scale. A path-like label uses the shared
+path style (directory dimmed, file name at full ink), and a row that names a
+manifest source offers Open file through the allowlisted open-source action,
+which the host reauthorizes. The pure, deterministic layout is shared by the
+screen, the artifact preview SVG, and the Markdown and HTML export. The domain
+policy refuses a repeated label, a negative or non-finite value, a list past the
+row budget, and a source the manifest does not hold; the accessible fallback is a
+table of every row. A metric block may carry a `format`, a `delta`, a
+`goodDirection` of `up`, `down`, or `neutral` so a delta's tone is never guessed,
+a `sparkline` of at most 256 readings, and a short `caption`; consecutive metric
+blocks are gathered into one responsive row of two to four tiles. The bar list
+and the metric's direction, sparkline, and caption arrive with Canvas schema
+version 7, so a document declaring an older version that carries any of them is
+refused as a future version; a static export carries the same metric fields.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -333,11 +423,23 @@ pure `admitCanvasDiagramLayoutRevision` policy (target must be a diagram,
 every moved node must exist, the sequence must be the head, budgets stand).
 Beside that generic node-and-edge diagram, a `sequence` block is participants,
 ordered messages, activations, and notes, and a `state` block is states that
-may nest by parent id, labeled transitions, and initial and final roles. Both
-use the diagram node and edge budgets. Layout is deterministic. Participants
-and states are node comment anchors; messages and transitions are edge comment
-anchors. Static export draws both through the same artifact SVG path as the
-other blocks.
+may nest by parent id, labeled transitions, and initial and final roles. Three
+further kinds share the same budgets: an `er` block is entities with named,
+typed attributes (an attribute may be a key) and relationships that name a
+cardinality at each end and an optional label; a `swimlane` block is ordered
+lanes of actors or teams, the steps each lane owns (a step may be flagged as a
+decision), and labeled connections; and a `mindmap` block is one root topic
+over children that name their parent, each with an optional note. Both
+sequence and state, and the three later kinds, use the diagram node and edge
+budgets; the er, swimlane, and mindmap kinds are version-gated together at
+Canvas schema version 8, so a document that declares an earlier version and
+carries one is refused as a declared future version. Layout is deterministic.
+Participants and states are node comment anchors; messages and transitions are
+edge comment anchors; entities, steps, and topics are node anchors and
+relationships and connections are edge anchors. Static export draws every kind
+through the same artifact SVG path as the other blocks, and the Markdown/HTML
+document renderer gives the er kind an attribute table, the swimlane kind
+numbered steps per lane, and the mindmap kind a nested list.
 Agent revisions and user layout share one history; a stale drag is refused and
 the renderer reloads rather than overwriting a newer version. Only the head
 version is editable. The route is host-window only; a paired browser reads
@@ -698,6 +800,13 @@ Delivery does not wait for every sibling to finish. Each member's identity and
 result generation are validated and journaled on the receiving turn; replay
 settles only those members. Actual fallback provider/model attribution is kept.
 The delivery service serializes work per parent and defers while it is busy.
+A Chat delivery names the parent at its thread aggregate's head version, the
+version Chat admission checks, and a refusal that only says the parent is
+mid-turn or moved on is deferred and retried, never journaled as a failed
+delivery. A child that ends without a reply (failed, interrupted, or cancelled)
+reports why on the managed `wait` and `status` answers and in the delivered
+outcome line: its journaled reason, redacted with the diagnostics rules and cut
+to 512 characters.
 
 A completed managed child accepts an explicit follow-up through either
 delegation tool or the Agents views. The caller supplies its current version
@@ -775,7 +884,11 @@ ambiguous state resolves to Waiting.
 
 A `#thread` mention points at another thread the sender can already Open. The
 host resolves a bounded, read-only title, status, and transcript window at send
-time. In Chat, an explicit mention also grants the source provider the bounded
+time. Dragging a sidebar thread onto a composer, or choosing Attach as context
+from that thread's row menu, uses this same path: the mention search, given
+the thread's id, returns that thread only when this window can Open it, so
+where its title would rank does not matter, and the renderer does not read the
+transcript to attach the chip. In Chat, an explicit mention also grants the source provider the bounded
 `octant_thread_message` tool for that turn: it may send one of the user's
 instructions to the mentioned Chat thread and receive its completed reply. The
 target's own Chat turn, provider, Project, and authority remain authoritative;
@@ -1257,6 +1370,15 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   `answerUserInput`, and `answerTool`, with optional current-turn `steer`. Every driver passes
   the shared conformance harness (chat, child-agent, and context-facts
   suites) before it is selectable.
+- **Probe scheduling.** Operations on one provider instance run one at a time.
+  A probe asked for while another probe of that instance is running joins it
+  and shares its result, unless an enable or configuration change queued after
+  it, which gets a fresh probe; so a slow endpoint costs one round trip however
+  many surfaces ask. The host's HTTP listener allows a request 255 seconds
+  (Bun's maximum) without bytes, because a probe or tool verification answers
+  only when the endpoint does; the endpoint's own deadlines bound the wait.
+  A direct-endpoint model list shows the models a person configured under their
+  own heading ahead of the ones the endpoint reports.
 - **Model configuration.** Model variants may carry normalized family and choice
   labels (for example a Fusion lead and sidekick). Choosing a label binds an
   already advertised model id; the renderer never constructs provider ids or
@@ -1289,16 +1411,53 @@ modelId }`, and the model picker is provider-first. Discovery can find
   picker), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
   GitHub Copilot, Cline, Qwen Code, fx). The installed OpenCode binary's
-  version selects its routes: 1.x keeps the legacy session API, and 2.x lists
-  providers and models, then runs a turn where the process jail already
-  enforces the permission boundary. Chat turns run. Work and Code writes stay
-  refused until session permission rules can be enforced; resume, interruption,
-  and tool activity are reported, and anything not mapped fails closed. The probe
-  also asks the confined 2.x server to answer for a directory carrying a Git
-  marker: project resolution starts Git, which the Chat and Plan jail refuses
-  (observed with 2.0.22 on macOS as HTTP 500 for any work tree), so a runtime
-  that cannot answer reports `incompatible` with its models listed and every
-  capability unsupported, and no turn is offered. fx runs in a per-instance managed
+  version selects its routes: 1.x keeps the legacy session API and its
+  per-session permission ruleset. 2.x accepts no per-session ruleset, so each
+  launch writes its session posture — the same rules in 2.x action names
+  (`shell`, `subagent`), every namespaced tool and skill denied, and only that
+  connection's app-managed tool bridge allowed — into the private
+  configuration, where OpenCode appends it after every agent's built-in rules
+  (its default agent otherwise allows everything); a launch that names no
+  posture denies all. The bridge allow has nothing to admit yet: Octant
+  registers app-managed tools through the 1.x MCP route, which 2.0.22 does
+  not serve (it lists `/api/experimental/mcp/{server}` instead), so the probe
+  reports app-managed tools unsupported and 2.x runs turns without Octant's
+  app tools until registration supports the 2.x MCP API. Project resolution
+  starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
+  launches get the failing `git` stand-in described under
+  [Security and authority](#security-and-authority), so 2.x offers turns in
+  every mode there; on Linux the probe fails closed and the runtime is listed
+  without turns. Approvals map through 2.0.22's `permission.asked` event and
+  its reply route, whose body is `{decision}`. An approval is answered
+  `once`, never `always`, even when approvals are remembered for the Project:
+  `always` would save a grant in OpenCode's data directory, which it shares
+  with the person's own use, outside Octant's revocation. Approval-gated on
+  2.x honours permission grants the person saved in OpenCode itself for the
+  same repository: OpenCode keys them by the repository's root commit, keeps
+  them in its own data store (shared with the person's own use because
+  provider credentials live there), and applies them as allow after Octant's
+  rules. Octant's denies still win, so Plan and the Work shell and subagent
+  denials hold, and Octant itself never writes such a grant because it
+  answers approvals `once`. An edit allowed this way still fails the turn
+  through the file-change check, after the write; a shell command allowed
+  this way runs without an approval card. Clearing the saved grants in
+  OpenCode restores the prompts. A 2.x reject settles every pending request
+  in the session, so each settled request is forgotten. Questions are
+  unsupported: 2.0.22 serves no question routes and asks through forms, which
+  are not mapped, so the written posture denies `question` and a form that
+  still arrives fails the turn. Resume,
+  interruption, and tool activity are reported; a file change that no allowed
+  or approved edit preceded fails the turn; and anything not mapped fails
+  closed. The probe also asks the confined 2.x server to answer for a
+  directory carrying a Git marker, made in the launch's own scratch directory
+  because every launch profile denies the host temporary directory beneath
+  `/private`; it attests by creating a session there and then deletes that
+  session, best effort, because OpenCode keeps sessions in the data directory
+  it shares with the person's own use and their provider credentials. A
+  failed delete leaves one empty session and does not change the result. A
+  runtime that cannot answer (observed with 2.0.22 on macOS as HTTP 500
+  without the stand-in) reports `incompatible` with its models listed and
+  every capability unsupported, and no turn is offered. fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable; see
   [fx-acp-compatibility.md](fx-acp-compatibility.md) and
   [0130](decisions/0130-fx-runs-in-a-managed-home.md). Image profiles are
@@ -1398,7 +1557,15 @@ from a response reservation. Emergency admission budgets are explicitly marked a
 conservative fallbacks. A matching runtime window from the same provider, model,
 and request shape is retained across restart and participates in subsequent
 planning; it replaces emergency estimates while conflicting model facts retain
-the more conservative bound.
+the more conservative bound. The Chat emergency window is 256,000 tokens: large
+enough that an ordinary thread is sent whole, small enough to remain an
+estimate. A limit whose source is `conservative-fallback` is never the model's
+window (`hasKnownContextWindow` in the domain policy says so). The composer meter
+then shows the fill alone, with no fraction, percentage, free space, or full
+ring; the context inspector names the number as an estimate; and the native
+harness's `context-remaining` tool refuses rather than hand the model an
+estimate of its own room. A window the provider's own usage report names still
+takes precedence.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. A runtime that compacts its own session may report where, as
 `autoCompactThreshold` on the usage report (tokens of the window the last request
@@ -1467,7 +1634,10 @@ protocol that reports uncached input, cache reads, and cache writes as disjoint 
 absent rather than zero, a turn of several requests reports the sum of the figures its
 requests reported, and a report whose cache or reasoning figure exceeds its total is
 refused as invalid usage. Unknown fields in a response are ignored; a known field of
-the wrong type still fails the turn. ACP and Pi resume cursors carry a durable
+the wrong type still fails the turn. The input tokens a request reports also
+calibrate the native harness's next size estimate: a model's real bytes-per-token,
+measured from the last call, is preferred over a flat four-bytes-per-token guess, so
+a filled window is caught before the endpoint has to refuse the request. ACP and Pi resume cursors carry a durable
 task binding, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
 follow-ups; Chat retries retain that identity and native scratch files. Native
@@ -1523,12 +1693,40 @@ provider's own cost), its real start and end, how it stopped, and its timing.
 identical to the live ones, and a thread purge erases them with the thread. The
 usage query (`POST /api/usage/query`) returns them as `turnMetrics`: totals
 over every matching turn plus the most recent fifty, within the same Project
-scope as the ledger rows. It is left out when the query filters on a dimension
+scope as the ledger rows. The usage page and Settings usage read that field for
+per-thread rows and the turn drill-in, and word them with the same module as the
+composer line. It is left out when the query filters on a dimension
 only the ledger carries (request shape, category, host, quality). A harness
 turn record carries the same usage, timing, start and stop reason, and the
 session's `usage` and `metrics` totals fold them, so a Code turn on a direct
 endpoint no longer records zero tokens. Chat, Work and Code on every provider
 journal the frame; the harness additionally keeps its own record.
+
+### Stop reasons
+
+A completed runtime event may carry an optional stop reason. `max-tokens` means
+the reply was cut off because the output limit was reached. `content-filter`
+means the provider stopped the reply on a content filter. The field is absent
+when the runtime did not say why the turn ended; absence is not a normal
+finish guessed into a reason.
+
+Chat Completions maps `finish_reason` `length` to `max-tokens` and
+`content_filter` to `content-filter`. The Responses protocol maps
+`incomplete_details.reason` `max_output_tokens` and `content_filter` the same
+way. The Messages protocol maps `stop_reason` `max_tokens`, and `refusal`
+(its safety classifier stopping the reply) to `content-filter`; an ACP prompt
+result's `refusal` names the agent declining to continue, not a filter, so it
+leaves the field absent. Claude's result
+`stop_reason`, Pi's assistant `stopReason` of `length`, OpenCode's step
+`finish` of `length`, and an ACP prompt result that names one of those
+strings, map when the protocol reports them. A local runtime's `done_reason`
+of `length` maps the same way. Codex's turn status does not say the output
+was cut off, so its completed event leaves the field absent.
+
+A turn record's stop reason is `max-tokens` when the completed event carried
+that reason. The per-turn detail says "Cut off at the output limit". The
+transcript shows a quiet note with Continue, which drafts a follow-up into
+the composer and sends nothing until the person does.
 
 The ACP and RPC mappers (Devin, Kimi, Grok, Copilot, Mistral Vibe, Oh My Pi)
 report no usage today: the prompt result is read only for its stop reason, and
@@ -1587,7 +1785,24 @@ native harness in `apps/server/src/harness`:
   results return in one message in call order. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
-  alone does not fit.
+  alone does not fit. When the endpoint still rejects a request as too large,
+  the loop recognises the refusal as a filled context window (OpenAI's
+  `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
+  413 shape from an OpenAI-compatible host), shrinks it one further ladder
+  step, and sends it once more; a second refusal stands. That step always
+  changes the refused request, which may itself have been reduced already: a
+  result already omitted or a note already in front is skipped, and when
+  nothing is left to leave out the refusal stands. The size estimate
+  prefers the input tokens the last call reported over a flat
+  four-bytes-per-token guess. A tool call that names no offered tool, reuses a
+  call id, or carries arguments that are not JSON is answered with an error
+  result instead of failing the turn, so the model can correct itself; the
+  arguments the model sent are never replaced by an empty object. A handful of
+  such correction steps is the most a turn takes, so a model that will not
+  correct itself fails rather than loop; the well-formed calls of that last
+  step are answered as not run, so the conversation stays valid for the next
+  send. An unknown stream event type is
+  ignored and logged, never fatal.
 - **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
   each step as it happens (`native-harness-transcript`, one aggregate per
   session): the user message once the request is known to fit, each reply,
@@ -1598,7 +1813,12 @@ native harness in `apps/server/src/harness`:
   stopped in the middle of with a journaled interrupted result that says
   whether the tool only reads (`replay: "safe"`, call it again) or may have
   taken effect (`replay: "unsafe"`, check before repeating); nothing is
-  silently re-run. Chat and Work still rebuild their history on the host and
+  silently re-run. A cancel (`interrupt`) ends only the turn in flight: the
+  session and its conversation stay live, so the next `send` continues it
+  without a resume or a journal rebuild, and a cancel during a tool step first
+  closes the calls its runner never answered with the same interrupted results
+  a resume would write. Only `stop` releases the session. Chat and Work still
+  rebuild their history on the host and
   start a fresh session each turn.
 - **Forks.** A Code fork on a harness model starts its first session from a
   copy of the source's transcript through the fork point
@@ -1621,13 +1841,40 @@ native harness in `apps/server/src/harness`:
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
   closed tool catalog (`harness-*` capability ids). Every call decodes its
   arguments, wraps a `ToolActionRequest` under the thread's current authority,
-  and passes `ToolCallAuthorityService.authorize` before any port runs. Files
-  go through `NativeHarnessFileSystem` (confined to the root, symlinks
+  and passes `ToolCallAuthorityService.authorize` before any port runs. The
+  thread's authority comes from the same resolver the browser tools use, in
+  every mode: a Chat thread holds it with or without a Project; a Work or Code
+  thread holds it only on its Project's current binding. When none resolves,
+  every call refuses as `tool-authority-stale` with a message the model
+  relays to the person; nothing renews it except the thread becoming usable
+  again. Files go through `NativeHarnessFileSystem` (confined to the root, symlinks
   resolved, edits require a prior read); `bash` runs through the same
   Seatbelt-confined owned-process-group port as repository tests; web fetches
   refuse private destinations, and connect through a `lookup` that checks
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
+- **Tool verification.** A routine Check connection runs no generating
+  request, so an OpenAI-compatible or Azure AI Foundry endpoint offers a model
+  Octant's tools only after a person proved that model calls one. The
+  `verify-model-tools` command sends one forced `octant_capability_echo`
+  request through the same sender a turn uses, for one model; an
+  Anthropic-compatible endpoint takes the same command and request in its own
+  wire shape. A model that calls the tool joins `verifiedToolModelIds` on the
+  observed state, which the journal persists with the catalog and a
+  configuration change clears; a model that answers in text leaves it out, and
+  a transport failure (authentication, timeout) is reported rather than
+  recorded as "unsupported". Admission, the AgentRun transport check, and the
+  Chat preflight read that set per model, so verifying one model never offers
+  tools to its siblings. A tool call in a real turn widens nothing either: the
+  provider-level `appManagedTools` flag of an OpenAI-compatible or Foundry
+  profile stays "unsupported", because a tool call proves only the model that
+  made it. The command accepts only the models the endpoint
+  lists or the profile configures, and only a Foundry profile's configured
+  deployments, because its catalogue lists base models that are not
+  deployments. Ollama has no verify action until its driver runs the tool
+  loop. The model picker marks an unverified model "Chat only" with a "Verify
+  tools" action, and Settings → Octant Harness says the same for a slot's
+  chosen model.
 - **Goals.** A thread goal may carry up to twelve acceptance criteria
   (`ThreadGoalCriterion`), each with an optional check command; one without a
   command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
@@ -1662,12 +1909,21 @@ native harness in `apps/server/src/harness`:
   jitter; `Retry-After` replaces the wait, capped at a minute. A request is
   retried only while nothing of it has streamed (text or reasoning); tool calls
   reach the loop only with the settled response, so they never count as output.
-  Each retry is a `retrying` runtime event emitted before its wait, and what a
+  Each retry is a `retrying` runtime event emitted before its wait. The thread's
+  working indicator, the terminal footer, and the phone session panel show
+  "Provider busy, retrying 2/5 in 4 s" and count the wait down, in ordinary
+  text rather than a warning, until the next content arrives or the turn
+  settles; a failed or cancelled attempt keeps no retry line. The turn's
+  detail counts those same events. What a
   failed attempt billed is added to the usage of the attempts after it. A
   cancel ends a wait at once and stays `interrupted`. The stream idle limit is
   120 s and restarts on any byte, so keep-alive comments and reasoning deltas
   count. A spent allowance (`usageLimit` other than `temporary`), a rejected
-  credential, and a malformed event are never retried. Transports reject with
+  credential, and a malformed event are never retried. A refusal that names a
+  filled context window (OpenAI's `context_length_exceeded`, Anthropic's
+  "prompt is too long", or a 400 or 413 shape) is classified as context
+  overflow, which the retry policy never sends again as-is: the loop shrinks
+  the request and retries it once (above). Transports reject with
   the typed `ProviderFailure` (`runProviderEffect`), not the Effect runtime's
   wrapper, because the category is what these rules decide on.
 - **Lead fallback.** When a request's retries are spent, the loop asks its
@@ -1868,6 +2124,10 @@ not render them. A target that passed activation is still reported honestly as
 file it would write, and the card then names that path: approving a card that
 names an existing file is the confirmation to replace it, and a call without
 that confirmation writes a numbered copy beside the file instead of over it.
+The rendered Markdown, HTML, and the artifact preview SVG read numbers through
+the shared Canvas formatter and draw marks to the shared chart specifications
+and the shared squarified treemap layout, so an exported reading matches the
+screen rather than growing a second reading.
 
 The folder destination ships in-tree on that same port, so it is offered,
 approved, and journaled exactly as a plugin's contribution is. Its folder comes
@@ -1880,6 +2140,28 @@ mirror's global folder follows. Writes are confined to the chosen folder and are
 atomic: a temporary file is renamed into place, so a reader never sees a
 half-written export. The user guide's exporting page
 (`apps/docs/guide/export.md`) states the same rules for a person.
+
+The GitHub Gist destination ships in-tree on the same port. It reuses the GitHub
+connection Octant already resolved through the `gh` command — the host-managed
+credential, never a token read by this code — so a host with no usable
+connection reports `not-connected` and one whose credential is stored in plain
+text reports `refused`, the same states the other GitHub capabilities report.
+The connection state is read on demand, when an export lists or prepares its
+destinations, and kept until Octant's own GitHub commands report a change; a
+state that cannot offer the gist is read again on the next listing. No GitHub
+call happens at host start. A GitHub refusal other than a rejected credential
+(for example a connection without the `gist` scope) is reported as declined, not
+as GitHub being unreachable. A remote destination can describe more than a file:
+`describeDestination` names the account the export acts as and the audience the
+result will have, and a destination's own note, which the approval card shows
+verbatim. The person chooses `secret` or `public` on the card, the choice
+travels back through the `canvas-export-decision` request into `exportDocument`,
+and the card states plainly that a public result is visible to anyone. A gist is
+Markdown only and one file named from the Canvas title with a `.md` extension;
+the rendered document passes the same secret-and-path filter every exported
+document does, and one that fails it is refused rather than published. The
+receipt is the gist URL and its id, journaled in `canvas.export@1` like any
+other destination's.
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured
@@ -2022,6 +2304,11 @@ mechanisms are:
   and records the posture the turn ran under. Compatible harnesses may
   answer those prompts themselves when the thread opts in
   (`docs/decisions/0104`); categories and confinement stay Octant's.
+  One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
+  honours permission grants the person saved in OpenCode itself for the same
+  repository, so such an action runs without an Octant prompt. Octant's
+  denies still win, and Octant never writes such a grant; the
+  [providers](#providers) entry on OpenCode states the details.
   The access picker also offers "Lower thread" to durably return a thread to
   approval-gated and revoke a session-only Full-access grant for that window
   without confirmation.
@@ -2038,6 +2325,33 @@ mechanisms are:
   Three provider tool requests denied in one Code turn end it as
   interrupted, with the reason journaled, so a provider cannot loop a
   person's refusals.
+- **Pending requests across modes.** `GET /api/pending-requests` returns every
+  approval and question the calling window can answer, oldest waiting first,
+  at most 128 with a `truncated` flag. It adds no authority: each mode lists
+  only what its existing answer command would admit for that window. Work uses
+  the Work request service's Project check (an active Work Project) and lists a
+  request only on a thread the window's Work thread list holds; Code passes each
+  request through the scope `answer-provider-approval` and
+  `answer-provider-input` pass first (thread and checkout identity, the window's
+  bound Code Project, an available checkout, an active thread); Chat lists a
+  question on an active, listed thread filed under no Project or an active Chat
+  Project. A disabled Chat or Work mode is not asked. Each item carries the
+  handle its mode's existing answer command takes; there is no new answer route.
+  Only requests a live turn in this host can deliver are listed: a Code or Chat
+  request journaled by a turn that died with the process is left out, because
+  answering it settles the turn interrupted. Excluded: Chat approvals (Chat
+  declines every provider approval), hidden Side Chats, browser tool approvals
+  (`/api/browser/approvals`), Computer Use approvals, extension tool approvals,
+  and native-harness session approvals; a native-harness question raised on a
+  Code turn is a Code question and is listed. Text keeps
+  each mode's own bounds and sanitization. The read is local-window only: its
+  path is outside every prefix the remote listener forwards, the remote action
+  classifier names no action for it, and the route refuses a paired device's
+  principal. Freshness rides the Machine change feed: a Work request's
+  transitions and a Chat attempt's question are journaled, a Code request's ask,
+  answer, and turn end are journaled stream events, and a Code browser-origin
+  approval that expires or is abandoned — which journals nothing — publishes
+  `code-navigation` itself.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
@@ -2067,12 +2381,45 @@ mechanisms are:
   by
   [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md)
   and narrowed by 0145, and the tools those threads reach stay confined either
-  way. A bound root a launch may not write is denied in the profile, so a
-  checkout under that launch's own temporary directory is not writable through
-  it. The `--version` read every family and the discovery scan perform before a
-  runtime starts is wrapped too, with no root, no home, no network and one
+  way. A confined Claude launch never reaches the keychain itself: the runtime
+  reads its subscription sign-in by running `/usr/bin/security`, which would
+  return any keychain item that trusts that tool, including other command-line
+  programs' tokens, so the profile runs neither the tool nor reads the keychain
+  file. Measured on macOS 27, the security-server lookup alone leaves such a
+  launch signed out, so a confined Claude launch on subscription sign-in, Chat
+  children included, signs in with "Claude for helpers" instead: a long-lived
+  token the runtime's own `claude setup-token` mints after one browser approval.
+  The host runs that command on a host-owned pseudo-terminal outside any
+  sandbox, reads the printed token from memory, and keeps it in the credential
+  broker under the Claude Code instance, wrapped so it never reads as that
+  instance's API key. A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
+  and no keychain lookup; unconfined launches keep the runtime's own sign-in.
+  Without a connected token the launch refuses with "Connect Claude for helpers
+  in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
+  runtime never refreshes a handed-in token, so one it refuses is marked
+  expired and the same reconnect step is reported. Only a local window may
+  connect or disconnect. A bound root a launch may not write is denied in
+  the profile, so a checkout under that launch's own temporary directory is not
+  writable through it. The `--version` read every family and the discovery
+  scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
+  OpenCode 2 runs `git rev-parse` at startup to resolve its project, and the
+  Chat, Plan, and Work jail denies fork and exec outright. Rather than widen
+  the jail to a real Git binary, a macOS 2.x launch gets a private stand-in: a
+  `<TMPDIR>/git-standin-*/bin/git` symlink to `/usr/bin/false` placed first on
+  the child's PATH, with `allowProcessFork` and exactly one exec grant,
+  `(allow process-exec (literal "/usr/bin/false"))`. The spawn succeeds and
+  git exits non-zero, which OpenCode reads as "not a git project" and serves
+  the directory anyway. No real git, no shell, and no other exec becomes
+  possible; OpenCode 1.x and Code mode are unchanged. The readiness probe
+  attests at a directory with a `.git` marker under the Chat/Plan
+  confinement and fails closed — listing-only, no turns — if a future
+  OpenCode treats the failing git as fatal. Linux confinement cannot express
+  that one exec without also allowing fork, which is the hole the Plan jail
+  exists to close, so a 2.x Chat, Plan, or Work launch on Linux keeps fork
+  and exec denied. The probe fails closed and the runtime stays listing-only
+  there until Linux confinement can express the narrow per-path exec grant.
   Toolchain commands the Android workbench issues keep their own deliberate
   carve-out: `~/.android` — the AVD store, adb keys, and emulator lock files —
   plus a non-empty `ANDROID_AVD_HOME` when configured are bound read-write even
@@ -2178,8 +2525,10 @@ mechanisms are:
   inside its verified budget to export it, and release the exact runtime after
   an explicit export. A dedicated Linux CI job proves two real capsules
   cannot see or signal one another. Ordinary Code threads do not use this
-  service yet, so Linux remains an incompatible destination until the AgentRun
-  and Station launch paths are wired and revalidated.
+  service yet: on a Linux host they run under Bubblewrap like every other
+  confined process (see Sandbox above), and only the protected capsule remains
+  an unavailable destination until the AgentRun and Station launch paths are
+  wired and revalidated.
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,
@@ -2249,6 +2598,35 @@ mechanisms are:
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
   into authority on another.
+- **Local servers and Running services.** Listener observation is ephemeral,
+  scoped to listening sockets of the current user, and never journaled. One
+  classifier decides what may be listed at all: a system daemon, another user's
+  process, or an interpreter with no project and no editor lineage is omitted
+  rather than shown disabled, so no surface can be read as a host process
+  inventory. The Code Environment reads it per thread. The start screen's
+  Running services reads the same service host-wide (`list-running-services`
+  on the same authenticated route; no thread or Project in the command) and
+  adds one filter before anything is probed: a listener is published only when
+  its working directory sits inside an active Code Project the Project
+  bootstrap lists (today every active Code Project on the host, the same set
+  the per-thread route resolves against; it does not vary by window), or inside
+  the worktree of one thread of such a Project, which a host-written ownership
+  receipt vouches for. A listener outside those roots gets no row and no health
+  probe. Rows are Octant-owned (a live terminal descendant) or not owned. A
+  not-owned row is any other admitted current-user listener in those roots
+  whose lineage names no editor; an earlier Octant session, a terminal, Claude
+  Code, or Codex could have started it, and Octant cannot tell which, so the
+  row and its Stop confirmation say only that Octant does not own it. The same bounded scan, health phase and
+  deadline apply, and a scan that cannot finish is a refusal, never an empty
+  list. Open and Stop re-observe and re-classify by an opaque id that is not a
+  process id and differs from the per-thread id for the same listener. Stop is
+  judged under the origin's posture (a server in a Plan thread's own worktree is
+  never stoppable; the Project folder is no one thread's, so a server there is
+  judged approval-gated even when a Plan thread works in it), a server Octant
+  does not own needs the confirmation naming process, folder and port, and a
+  paired device may stop only a server Octant owns; the actor comes
+  from the request's authenticated principal. A window reads the host it is
+  connected to; All Hosts federation does not carry these rows.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and
@@ -2335,7 +2713,11 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
 - `octant web --dev` changes only the renderer: it starts Vite and attaches it
   to the canonical Machine host. Browser QA and Electron share the same store,
   Projects, threads, and live journal. Destructive tests use an explicit
-  `OCTANT_DATA_DIR`; development mode never creates an implicit profile.
+  `OCTANT_DATA_DIR`; development mode never creates an implicit profile. The
+  Vite page is not the host, so the tab remembers the `serverUrl` it was
+  launched with (per renderer origin, in tab session storage, judged again like
+  a typed address); a reload or in-tab navigation that loses the query keeps
+  its Machine instead of reading the Vite origin as one.
 - `bun run package:desktop` packages the peer Machine for the build host:
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with

@@ -1,10 +1,18 @@
-import type { CanvasBlock, CanvasDefinition } from "@octant/contracts/canvas";
+import type { CanvasBlock, CanvasDefinition, CanvasNumberFormat } from "@octant/contracts/canvas";
 import {
   CANVAS_EXPORT_BODY_MAX_BYTES,
   canvasExportBodyByteLength,
   type CanvasExportImplementedFormat,
 } from "@octant/contracts/canvas-export";
 import { isCanvasShareSafeText } from "@octant/contracts/canvas-share";
+import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
+import {
+  treemapChildren,
+  treemapRootId,
+  treemapTotals,
+} from "@octant/domain/canvas-treemap-layout";
+import { heatmapRowTotals } from "@octant/domain/canvas-heatmap-layout";
+import { layoutCanvasBarList } from "@octant/domain/canvas-bar-list-layout";
 import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
 
 /**
@@ -44,6 +52,11 @@ type Piece =
   | { readonly kind: "heading"; readonly level: number; readonly text: string }
   | { readonly kind: "paragraph"; readonly text: string }
   | { readonly kind: "list"; readonly items: ReadonlyArray<string> }
+  | { readonly kind: "ordered"; readonly items: ReadonlyArray<string> }
+  | {
+      readonly kind: "tree";
+      readonly items: ReadonlyArray<{ readonly depth: number; readonly text: string }>;
+    }
   | {
       readonly kind: "table";
       readonly headers: ReadonlyArray<string>;
@@ -64,9 +77,12 @@ function reading(value: string): string {
   return isCanvasShareSafeText(trimmed) ? trimmed : "[redacted]";
 }
 
-function scalar(value: string | number | boolean | null): string {
+function scalar(value: string | number | boolean | null, format?: CanvasNumberFormat): string {
   if (value === null) return "";
   if (typeof value === "string") return reading(value);
+  // A number reads through the shared formatter so the document matches the
+  // screen; a boolean has no number reading.
+  if (typeof value === "number") return formatCanvasNumber(value, format);
   return String(value);
 }
 
@@ -105,10 +121,12 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           .filter((part) => part.length > 0)
           .join(": "),
       );
-    case "metric":
+    case "metric": {
+      const value = `${reading(block.label)}: ${scalar(block.value, block.format)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`;
       return paragraph(
-        `${reading(block.label)}: ${scalar(block.value)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`,
+        block.caption === undefined ? value : `${value} — ${reading(block.caption)}`,
       );
+    }
     case "progress":
       return paragraph(
         `${reading(block.label)}: ${String(Math.round(block.value * 100))}%${block.detail === undefined ? "" : ` — ${reading(block.detail)}`}`,
@@ -129,7 +147,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           kind: "table",
           headers: block.columns.map((column) => reading(column.label)),
           rows: block.rows.map((row) =>
-            block.columns.map((_, index) => scalar(row[index] ?? null)),
+            block.columns.map((column, index) => scalar(row[index] ?? null, column.format)),
           ),
         },
       ];
@@ -139,7 +157,8 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           kind: "list",
           items: block.series.flatMap((series) =>
             series.points.map(
-              (point) => `${reading(series.label)}: ${scalar(point.x)} = ${String(point.y)}`,
+              (point) =>
+                `${reading(series.label)}: ${scalar(point.x, block.format)} = ${scalar(point.y, block.format)}`,
             ),
           ),
         },
@@ -268,6 +287,107 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           items: block.nodes.map((node) => `${node.component}: ${reading(node.label)}`),
         },
       ];
+    case "treemap": {
+      // The hierarchy as a table: one row per node, indented by depth, so the
+      // exported document carries the same readings the picture shows.
+      const children = treemapChildren(block);
+      const rootId = treemapRootId(block);
+      const totals = block.measures.map((measure) =>
+        treemapTotals(block, String(measure.measureId)),
+      );
+      const nodesById = new Map(block.nodes.map((node) => [String(node.nodeId), node]));
+      const rows: Array<ReadonlyArray<string>> = [];
+      const indent = (depth: number) => "\u00A0".repeat(depth * 2);
+      const walk = (nodeId: string, depth: number) => {
+        const node = nodesById.get(nodeId);
+        if (node === undefined) return;
+        rows.push([
+          `${indent(depth)}${reading(node.label)}`,
+          ...block.measures.map((measure, index) =>
+            scalar(totals[index]?.get(nodeId) ?? 0, measure.format),
+          ),
+        ]);
+        for (const child of children.get(nodeId) ?? []) walk(child, depth + 1);
+      };
+      walk(rootId, 0);
+      return [
+        {
+          kind: "table",
+          headers: ["Item", ...block.measures.map((measure) => reading(measure.label))],
+          rows,
+        },
+      ];
+    }
+    case "heatmap": {
+      // The grid as a table: a row per declared row and a column per declared
+      // column, so a coordinate the block does not list reads as an empty cell
+      // rather than as a zero.
+      if (block.layout === "matrix") {
+        const totals = heatmapRowTotals(block);
+        const byCoordinate = new Map(
+          block.cells.map((cell) => [
+            `${String(cell.rowId)}\u0000${String(cell.columnId)}`,
+            cell.value,
+          ]),
+        );
+        return [
+          {
+            kind: "table",
+            headers: ["Row", ...block.columns.map((column) => reading(column.label)), "Total"],
+            rows: block.rows.map((row) => {
+              const rowId = String(row.rowId);
+              return [
+                reading(row.label),
+                ...block.columns.map((column) => {
+                  const value = byCoordinate.get(`${rowId}\u0000${String(column.columnId)}`);
+                  return value === undefined ? "" : scalar(value, block.format);
+                }),
+                scalar(totals.get(rowId) ?? 0, block.format),
+              ];
+            }),
+          },
+        ];
+      }
+      return [
+        {
+          kind: "table",
+          headers: ["Date", reading(block.valueLabel ?? "Value"), "Note"],
+          rows: block.days.map((day) => [
+            day.date,
+            scalar(day.value, block.format),
+            day.note === undefined ? "" : reading(day.note),
+          ]),
+        },
+      ];
+    }
+    case "bar-list": {
+      // The ranking as a table in the order the screen and the preview draw
+      // it, largest first through the shared layout, carrying every row the
+      // block declares rather than only the top rows.
+      const hasSecondary = block.rows.some((row) => row.secondaryValue !== undefined);
+      const ranked = layoutCanvasBarList(block).rows;
+      return [
+        {
+          kind: "table",
+          headers: [
+            "Item",
+            reading(block.valueLabel ?? "Value"),
+            ...(hasSecondary ? [reading(block.secondaryLabel ?? "Second")] : []),
+          ],
+          rows: ranked.map((row) => [
+            reading(row.label),
+            scalar(row.value, block.format),
+            ...(hasSecondary
+              ? [
+                  row.secondaryValue === undefined
+                    ? ""
+                    : scalar(row.secondaryValue, block.secondaryFormat ?? block.format),
+                ]
+              : []),
+          ]),
+        },
+      ];
+    }
     case "plan": {
       const phases = new Map(
         block.phases.map((phase) => [String(phase.phaseId), reading(phase.title)]),
@@ -283,6 +403,105 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           }),
         },
       ];
+    }
+    case "er": {
+      // The schema as one attribute table plus a relationship list: the same
+      // reading the picture shows, so an exported model is not a second model.
+      const keys = new Map(
+        block.entities.map((entity) => [String(entity.entityId), reading(entity.label)]),
+      );
+      const rows: Array<ReadonlyArray<string>> = [];
+      for (const entity of block.entities) {
+        if (entity.attributes.length === 0) {
+          rows.push([reading(entity.label), "", "", ""]);
+          continue;
+        }
+        for (const attribute of entity.attributes) {
+          rows.push([
+            reading(entity.label),
+            reading(attribute.name),
+            reading(attribute.type),
+            attribute.key === true ? "key" : "",
+          ]);
+        }
+      }
+      const relationshipItems = block.relationships.map((relationship) => {
+        const from = keys.get(String(relationship.source)) ?? "entity";
+        const to = keys.get(String(relationship.target)) ?? "entity";
+        const label = relationship.label === undefined ? "" : ` (${reading(relationship.label)})`;
+        return `${from} ${relationship.sourceCardinality} — ${relationship.targetCardinality} ${to}${label}`;
+      });
+      const pieces: Piece[] = [
+        {
+          kind: "table",
+          headers: ["Entity", "Attribute", "Type", "Key"],
+          rows,
+        },
+      ];
+      if (relationshipItems.length > 0) {
+        pieces.push({ kind: "list", items: relationshipItems });
+      }
+      return pieces;
+    }
+    case "swimlane": {
+      // Numbered steps per lane, in lane order, then the connections.
+      const pieces: Piece[] = [];
+      const laneSteps = new Map<string, string[]>();
+      for (const step of block.steps) {
+        const bucket = laneSteps.get(String(step.laneId)) ?? [];
+        bucket.push(reading(step.label));
+        laneSteps.set(String(step.laneId), bucket);
+      }
+      for (const lane of block.lanes) {
+        const steps = laneSteps.get(String(lane.laneId)) ?? [];
+        pieces.push({ kind: "heading", level: 3, text: reading(lane.label) });
+        pieces.push({
+          kind: "ordered",
+          items: steps.length === 0 ? ["(no steps)"] : steps,
+        });
+      }
+      if (block.connections.length > 0) {
+        const names = new Map(
+          block.steps.map((step) => [String(step.stepId), reading(step.label)]),
+        );
+        pieces.push({
+          kind: "list",
+          items: block.connections.map((connection) => {
+            const from = names.get(String(connection.source)) ?? "step";
+            const to = names.get(String(connection.target)) ?? "step";
+            const label = connection.label === undefined ? "" : `: ${reading(connection.label)}`;
+            return `${from} → ${to}${label}`;
+          }),
+        });
+      }
+      return pieces;
+    }
+    case "mindmap": {
+      // A nested list, indented by depth, so the branch structure survives the
+      // round trip even though the block stores parents rather than nesting.
+      const childrenOf = new Map<string, string[]>();
+      const nodesById = new Map(block.nodes.map((node) => [String(node.nodeId), node]));
+      let rootId: string | undefined;
+      for (const node of block.nodes) {
+        const id = String(node.nodeId);
+        if (node.parentId === undefined) {
+          rootId ??= id;
+          continue;
+        }
+        const siblings = childrenOf.get(String(node.parentId)) ?? [];
+        siblings.push(id);
+        childrenOf.set(String(node.parentId), siblings);
+      }
+      const items: Array<{ readonly depth: number; readonly text: string }> = [];
+      const walk = (id: string, depth: number) => {
+        const node = nodesById.get(id);
+        if (node === undefined) return;
+        const note = node.note === undefined ? "" : ` — ${reading(node.note)}`;
+        items.push({ depth, text: `${reading(node.label)}${note}` });
+        for (const child of childrenOf.get(id) ?? []) walk(child, depth + 1);
+      };
+      if (rootId !== undefined) walk(rootId, 0);
+      return [{ kind: "tree", items }];
     }
     case "action":
       return paragraph(
@@ -337,6 +556,12 @@ function markdownPiece(piece: Piece): string {
       return inline(piece.text);
     case "list":
       return piece.items.map((item) => `- ${inline(item)}`).join("\n");
+    case "ordered":
+      return piece.items.map((item, index) => `${String(index + 1)}. ${inline(item)}`).join("\n");
+    case "tree":
+      return piece.items
+        .map((item) => `${"  ".repeat(item.depth)}- ${inline(item.text)}`)
+        .join("\n");
     case "table":
       return [
         `| ${piece.headers.map(cell).join(" | ")} |`,
@@ -385,6 +610,10 @@ function htmlPiece(piece: Piece): string {
       return `<p>${htmlInline(piece.text)}</p>`;
     case "list":
       return `<ul>${piece.items.map((item) => `<li>${htmlInline(item)}</li>`).join("")}</ul>`;
+    case "ordered":
+      return `<ol>${piece.items.map((item) => `<li>${htmlInline(item)}</li>`).join("")}</ol>`;
+    case "tree":
+      return htmlTree(piece.items);
     case "table":
       return `<table><thead><tr>${piece.headers.map((header) => `<th>${escapeXml(header)}</th>`).join("")}</tr></thead><tbody>${piece.rows
         .map((row) => `<tr>${row.map((value) => `<td>${escapeXml(value)}</td>`).join("")}</tr>`)
@@ -398,6 +627,37 @@ function htmlPiece(piece: Piece): string {
       return unhandled;
     }
   }
+}
+
+/**
+ * Render an indented list as real nested unordered lists, so an exported mind
+ * map keeps the branch structure rather than reading as a flat list.
+ */
+function htmlTree(items: ReadonlyArray<{ readonly depth: number; readonly text: string }>): string {
+  interface TreeNode {
+    readonly text: string;
+    readonly children: TreeNode[];
+  }
+  const roots: TreeNode[] = [];
+  const stack: Array<{ readonly depth: number; readonly node: TreeNode }> = [];
+  for (const item of items) {
+    const node: TreeNode = { text: item.text, children: [] };
+    while (stack.length > 0 && (stack[stack.length - 1]?.depth ?? -1) >= item.depth) {
+      stack.pop();
+    }
+    const parent = stack[stack.length - 1];
+    if (parent === undefined) roots.push(node);
+    else parent.node.children.push(node);
+    stack.push({ depth: item.depth, node });
+  }
+  const render = (nodes: ReadonlyArray<TreeNode>): string =>
+    `<ul>${nodes
+      .map(
+        (node) =>
+          `<li>${htmlInline(node.text)}${node.children.length === 0 ? "" : render(node.children)}</li>`,
+      )
+      .join("")}</ul>`;
+  return render(roots);
 }
 
 /** Markdown links stay links in HTML; everything else is escaped text. */

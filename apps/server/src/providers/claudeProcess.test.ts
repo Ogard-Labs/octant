@@ -565,13 +565,14 @@ describe("Claude runtime confinement", () => {
     expect(readdirSync(ambient)).toEqual([]);
   });
 
-  it("opens the credential-store lookup for a subscription launch and not for an API-key one", () => {
+  it("opens the credential-store lookup only for a launch that carries no credential of its own", () => {
     const target = fixture();
     const confinement = recordingConfinement();
 
     for (const environment of [
       target.environment,
       { ...target.environment, ANTHROPIC_API_KEY: "sk-test-not-a-real-key" },
+      { ...target.environment, CLAUDE_CODE_OAUTH_TOKEN: "helper-token-sentinel-0123456789" },
     ]) {
       const child = makePort(target, { confinement: confinement.port }).spawn({
         projectRoot: target.root,
@@ -589,7 +590,26 @@ describe("Claude runtime confinement", () => {
     expect(confinement.prepared.map((launch) => launch.allowProviderCredentialLookup)).toEqual([
       true,
       false,
+      false,
     ]);
+    // The helper token reaches the runtime through its environment, never its arguments.
+    expect(JSON.stringify(confinement.prepared)).not.toContain("helper-token-sentinel");
+  });
+
+  it("refuses a launch whose arguments carry the helper token", () => {
+    const target = fixture();
+    expect(() =>
+      makePort(target, { confinement: recordingConfinement().port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["--token", "helper-token-sentinel-0123456789"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CODE_OAUTH_TOKEN: "helper-token-sentinel-0123456789" },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("must not contain credentials");
   });
 
   it("refuses a Plan turn whose project root is also a runtime state directory", () => {

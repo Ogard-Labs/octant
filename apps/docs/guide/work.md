@@ -44,7 +44,7 @@ thread has a current plan artifact, instead of replacing the Work thread. The
 sidebar follows the pane that last received pointer or keyboard input and
 restores that thread's open tools and selected tool when you return to it.
 
-The sidebar **Thread board** is a server-derived view of Work threads as Ready, In progress, Waiting, and Done. Status comes from turn, request, artifact, citation, child-run, recovery, and delivery evidence; a thread is Done only when its confirmed delivery target is objectively satisfied. Each column is a soft well headed by a mark, its name, and a count; the In progress mark turns while a task is running. A card shows its title, a live line while the task is executing, what it waits on, any linked pull request as a small preview, and a footer with the provider and when it last moved. Cards are not dragged between columns. Opening a card activates that Work Project and thread. Chat has no board.
+The sidebar **Thread board** is a server-derived view of Work threads as Ready, In progress, Waiting, and Done. Status comes from turn, request, artifact, citation, child-run, recovery, and delivery evidence; a thread is Done only when its confirmed delivery target is objectively satisfied. Each column is a soft well headed by a mark, its name, and a count; the In progress mark turns while a task is running. A card shows its title, a live line while the task is executing, what it waits on, any linked pull request as a small preview, and a footer with the provider and when it last moved. A card that waits on you also shows the question or approval with its answer buttons, so you can clear it without opening the task. Cards are not dragged between columns. Opening a card activates that Work Project and thread. Chat has no board.
 
 Work has no shell and no Git. The agent in a Work thread is never given a way to run commands, so it never asks you to approve one; changes to files in the Project still ask first. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
@@ -124,7 +124,7 @@ Paste or attach a PNG, JPEG, WebP, or GIF in the Work composer to send it with a
 
 A turn carries at most eight images, each up to 10 MB, alongside a written message. If the selected model does not read images, the composer says so at the paste instead of taking the file. The host checks the thread's own model again at send, so a turn never reaches a model with its pictures quietly dropped. Removing a chip before sending keeps that image off the turn.
 
-Type `#` in the composer to mention another thread as read-only context, the same bounded excerpt Chat uses. Type `@` to complete a path inside this Project's bound folder; the host refuses a path outside that root before reading it. Chat has no `@file` mention, because Chat Projects have no filesystem authority.
+Type `#` in the composer to mention another thread as read-only context, the same bounded excerpt Chat uses. Dragging a sidebar thread onto the composer, or choosing **Attach as context** from that row's menu, attaches the same reference and does not send the draft. Type `@` to complete a path inside this Project's bound folder; the host refuses a path outside that root before reading it. Chat has no `@file` mention, because Chat Projects have no filesystem authority.
 
 ## Thread board
 

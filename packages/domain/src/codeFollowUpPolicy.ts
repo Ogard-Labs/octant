@@ -255,7 +255,7 @@ export function deriveFailingChecksFollowUpTriggers(input: {
         triggers.push({
           threadId: linked.threadId,
           origin: "automatic",
-          reason: `CI is failing on PR #${row.number}: ${row.title}`,
+          reason: failingChecksFollowUpReason(row),
           observationKey: key,
         });
       }
@@ -263,4 +263,34 @@ export function deriveFailingChecksFollowUpTriggers(input: {
     }
   }
   return { triggers, lastDefinitiveChecks: next };
+}
+
+/** The reason an automatic follow-up uses when a linked pull request's checks fail. */
+export function failingChecksFollowUpReason(input: {
+  readonly number: number;
+  readonly title: string;
+}): string {
+  return `CI is failing on PR #${input.number}: ${input.title}`;
+}
+
+/**
+ * The draft a person sends to start a fix. It reuses the follow-up reason and
+ * adds the check, the branch, and the repository. The pull-request list names a
+ * failing check but carries no failure text, so the draft quotes none. It does
+ * not start a turn.
+ */
+export function buildCiFailureFollowUpDraft(input: {
+  readonly number: number;
+  readonly title: string;
+  readonly checkName: string;
+  readonly branch: string;
+  readonly repository: string;
+}): string {
+  return [
+    failingChecksFollowUpReason(input),
+    "",
+    `Check: ${input.checkName}`,
+    `Branch: ${input.branch}`,
+    `Repository: ${input.repository}`,
+  ].join("\n");
 }

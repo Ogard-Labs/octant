@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClientHostRegistry } from "@octant/client-runtime/host-federation-registry";
-import { createHostFederationTransports } from "@octant/client-runtime/host-federation-transports";
+import {
+  createHostFederationTransports,
+  type HostFederationTransports,
+} from "@octant/client-runtime/host-federation-transports";
 import {
   createHostFederationLifecycle,
   type HostFederationLifecycle,
@@ -14,10 +17,21 @@ import { createBrowserHostRegistryStorage } from "./browserHostRegistryStorage";
  * Safe when IndexedDB / localStorage are unavailable — falls back to empty
  * in-memory device keys and an empty durable registry.
  */
-export function useHostFederationLifecycle(): HostFederationLifecycle | undefined {
-  const [lifecycle, setLifecycle] = useState<HostFederationLifecycle>();
+export function useHostFederationLifecycle():
+  | {
+      readonly lifecycle: HostFederationLifecycle;
+      readonly transports: HostFederationTransports;
+    }
+  | undefined {
+  const [stack, setStack] = useState<
+    | {
+        readonly lifecycle: HostFederationLifecycle;
+        readonly transports: HostFederationTransports;
+      }
+    | undefined
+  >();
 
-  const stack = useMemo(() => {
+  const built = useMemo(() => {
     if (typeof window === "undefined") return undefined;
     try {
       const deviceKeyStore = createDefaultDeviceKeyStore();
@@ -28,27 +42,30 @@ export function useHostFederationLifecycle(): HostFederationLifecycle | undefine
         fetch: globalThis.fetch.bind(globalThis),
       });
       const cache = createHostReadModelCache();
-      return createHostFederationLifecycle({
-        registry,
+      return {
+        lifecycle: createHostFederationLifecycle({
+          registry,
+          transports,
+          deviceKeyStore,
+          cache,
+        }),
         transports,
-        deviceKeyStore,
-        cache,
-      });
+      };
     } catch {
       return undefined;
     }
   }, []);
 
   useEffect(() => {
-    if (stack === undefined) return;
+    if (built === undefined) return;
     let cancelled = false;
-    void stack.sync().then(() => {
-      if (!cancelled) setLifecycle(stack);
+    void built.lifecycle.sync().then(() => {
+      if (!cancelled) setStack(built);
     });
     return () => {
       cancelled = true;
     };
-  }, [stack]);
+  }, [built]);
 
-  return lifecycle;
+  return stack;
 }

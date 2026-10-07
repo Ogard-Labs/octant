@@ -1,5 +1,6 @@
 import { AggregateVersion, type EventActor, type UtcTimestamp } from "@octant/contracts";
 import {
+  MAX_CANVAS_EXPORT_FOLDER_OVERRIDES,
   CANVAS_EXPORT_FOLDER_AGGREGATE_TYPE,
   CANVAS_EXPORT_FOLDER_CHANGED,
   decodeCanvasExportFolderResult,
@@ -111,13 +112,20 @@ export class CanvasExportFolderService {
     const others = this.#settings.overrides.filter(
       (override) => String(override.projectId) !== String(input.projectId ?? ""),
     );
+    // The contract holds one choice per Project up to the bound; making room
+    // for a new Project drops the oldest override, because old Projects cannot
+    // crowd out new ones — a full bound must not wedge every later choice.
+    const retained =
+      others.length >= MAX_CANVAS_EXPORT_FOLDER_OVERRIDES
+        ? others.slice(others.length - MAX_CANVAS_EXPORT_FOLDER_OVERRIDES + 1)
+        : others;
     const next = decodeCanvasExportFolderSettings({
       kind: "canvas-export-folder-settings",
       ...(input.scope === "host"
         ? { fallback: input.folder, overrides: this.#settings.overrides }
         : {
             ...(this.#settings.fallback === undefined ? {} : { fallback: this.#settings.fallback }),
-            overrides: [...others, { projectId: input.projectId, folder: input.folder }],
+            overrides: [...retained, { projectId: input.projectId, folder: input.folder }],
           }),
       version: decodeAggregateVersion(this.#settings.version + 1),
       updatedAt: this.#dependencies.clock(),

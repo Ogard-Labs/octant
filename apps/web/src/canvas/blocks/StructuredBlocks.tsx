@@ -1,7 +1,7 @@
 import type { CanvasBlock, CanvasStatusTone } from "@octant/contracts/canvas";
 import { ChartBlock } from "./ChartBlock";
 import { DiagramBoard, type DiagramBoardLayoutRuntime } from "./DiagramBoard";
-import { formatTableCell } from "./DataBlocks";
+import { TableBlock } from "./TableBlock";
 
 type Block = Extract<CanvasBlock, { readonly kind: "table" | "chart" | "timeline" | "diagram" }>;
 
@@ -24,31 +24,6 @@ export function StructuredBlocks({
         <DiagramBlock block={block} {...(layoutRuntime === undefined ? {} : { layoutRuntime })} />
       );
   }
-}
-
-function TableBlock({ block }: { readonly block: Extract<Block, { readonly kind: "table" }> }) {
-  return (
-    <table className="ds-table">
-      <thead>
-        <tr>
-          {block.columns.map((column) => (
-            <th key={column.id} scope="col">
-              {column.label}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {block.rows.map((row, rowIndex) => (
-          <tr key={rowIndex}>
-            {row.map((cell, cellIndex) => (
-              <td key={cellIndex}>{formatTableCell(cell)}</td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
 }
 
 function TimelineBlock({

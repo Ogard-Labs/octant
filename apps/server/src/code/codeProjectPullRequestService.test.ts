@@ -53,6 +53,8 @@ function ghRow(overrides: Partial<GhActivePullRequestRow> = {}): GhActivePullReq
     url: "https://github.com/octant/octant/pull/12",
     checks: "passing",
     review: "approved",
+    reviewRequestedFrom: [],
+    failingChecks: [],
     ...overrides,
   };
 }
@@ -1286,6 +1288,108 @@ describe("CodeProjectPullRequestService", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("keeps review requests from the same list read and does not ask GitHub again to group them", async () => {
+    const { service, listActive } = serviceFixture({
+      list: async () => ({
+        status: "ok",
+        rows: [ghRow({ reviewRequestedFrom: ["reviewer"] })],
+      }),
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const callsAfterRefresh = listActive.mock.calls.length;
+    const view = await service.query(windowId, { version: 1 });
+
+    expect(view.rows[0]?.reviewRequestedFrom).toEqual(["reviewer"]);
+    expect(listActive.mock.calls.length).toBe(callsAfterRefresh);
+  });
+
+  it("keeps failing checks from the same list read and does not ask again for them", async () => {
+    const { service, listActive } = serviceFixture({
+      list: async () => ({
+        status: "ok",
+        rows: [
+          ghRow({
+            checks: "failing",
+            failingChecks: [
+              {
+                name: "web tests",
+                completedAt: "2026-08-22T07:40:00Z",
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const callsAfterRefresh = listActive.mock.calls.length;
+    const view = await service.query(windowId, { version: 1 });
+
+    expect(view.rows[0]?.failingChecks).toEqual([
+      {
+        name: "web tests",
+        completedAt: "2026-08-22T07:40:00Z",
+      },
+    ]);
+    expect(listActive.mock.calls.length).toBe(callsAfterRefresh);
+  });
+
+  it("shows a remote window only the projects that window was granted", async () => {
+    const remoteWindow = decodeWindowId("00000000-0000-4000-8000-000000000990");
+    const granted = codeProject({ id: projectC, name: "Docs", root: "/repos/docs" });
+    const hostProjects = [
+      codeProject({ id: projectA, name: "Octant", root: "/repos/octant" }),
+      granted,
+    ];
+    const service = new CodeProjectPullRequestService({
+      projects: {
+        bootstrap: async (id) => ({
+          active: String(id) === String(remoteWindow) ? [granted] : hostProjects,
+        }),
+      },
+      remotes: {
+        remotes: async (root) => [
+          {
+            name: "origin",
+            fetchUrl:
+              root === "/repos/docs"
+                ? "https://github.com/octant/docs.git"
+                : "https://github.com/octant/octant.git",
+            pushUrl:
+              root === "/repos/docs"
+                ? "https://github.com/octant/docs.git"
+                : "https://github.com/octant/octant.git",
+          },
+        ],
+      },
+      list: {
+        listActive: async (request) => ({
+          status: "ok",
+          rows: [
+            ghRow({
+              number: request.name === "docs" ? 4 : 12,
+              title: request.name,
+              author: request.name === "docs" ? "remote-author" : "host-author",
+            }),
+          ],
+        }),
+      },
+      detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
+      threads: { list: async () => [] },
+      clock: () => now,
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const remote = await service.query(remoteWindow, { version: 1 });
+    const host = await service.query(windowId, { version: 1 });
+
+    expect(remote.projects.map((project) => project.projectName)).toEqual(["Docs"]);
+    expect(remote.rows.map((row) => row.repositoryName)).toEqual(["docs"]);
+    expect(remote.rows.some((row) => row.repositoryName === "octant")).toBe(false);
+    expect(host.rows.map((row) => row.repositoryName).toSorted()).toEqual(["docs", "octant"]);
   });
 
   it("drops a Project's cached rows once that Project is no longer authorized", async () => {

@@ -1498,8 +1498,30 @@ describe("ChatWorkspace", () => {
       />,
     );
 
-    expect(screen.getByText(/Disconnected — reconnecting/)).toBeVisible();
-    expect(screen.getByRole("alert")).toHaveTextContent("Connection lost.");
+    // One notice, in plain words, with the controller's own failure text left
+    // to it rather than repeated in a second banner.
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toHaveTextContent("Can't reach the host");
+    expect(screen.queryByText(/authoritative transcript/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Connection lost.")).not.toBeInTheDocument();
+  });
+
+  it("says Reconnected for a moment when the host answers again", async () => {
+    const controller = controllerFixture({ status: "disconnected" });
+    const { rerender } = render(
+      <ChatWorkspace controller={controller} providerSnapshot={providerSnapshot()} />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Can't reach the host");
+
+    rerender(
+      <ChatWorkspace
+        controller={{ ...controller, status: "ready", errorMessage: undefined }}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+    expect(await screen.findByText("Reconnected")).toBeVisible();
+    expect(screen.queryByText("Can't reach the host")).not.toBeInTheDocument();
   });
 
   it("offers the selected model's declared options and issues change-chat-provider with the values", async () => {

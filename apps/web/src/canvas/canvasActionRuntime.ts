@@ -1,6 +1,7 @@
 import type { CanvasClient } from "@octant/client-runtime";
 import type { CanvasId } from "@octant/contracts/canvas";
 import {
+  decodeCanvasActionBlock,
   type CanvasActionApproval,
   type CanvasActionBlock,
   type CanvasActionCancelRequest,
@@ -104,6 +105,34 @@ export interface CanvasActionRuntime {
   readonly availability: (block: CanvasActionBlock) => CanvasActionAvailability;
   readonly onExecute: (block: CanvasActionBlock) => Promise<CanvasActionResult>;
   readonly onCancel?: (block: CanvasActionBlock) => Promise<CanvasActionResult>;
+}
+
+/**
+ * The one allowlisted action a block may offer for a named source: open it.
+ *
+ * A leaf that carries a source id offers this through the same
+ * `canvas.open-source` command an action block names, so the surface is the
+ * existing allowlisted one and the host reauthorizes on dispatch. The block id
+ * is derived from the offering block and the leaf so a later cancel can
+ * correlate, and the value is decoded against the closed action catalog rather
+ * than assembled loosely: a malformed id yields no control at all.
+ */
+export function openSourceActionBlock(input: {
+  readonly blockId: string;
+  readonly sourceId: string;
+  readonly label: string;
+}): CanvasActionBlock | undefined {
+  try {
+    return decodeCanvasActionBlock({
+      blockId: input.blockId,
+      schemaVersion: 1,
+      kind: "action",
+      label: input.label.slice(0, 256),
+      command: { command: "canvas.open-source", sourceId: input.sourceId },
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 /**

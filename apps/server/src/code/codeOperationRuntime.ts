@@ -15,6 +15,7 @@ import {
   decodeCodeOperationCommand,
   decodeCodeEvidenceBatchResponse,
   decodeCodeRelativePath,
+  decodeHarnessRetryNotice,
   decodeCodeReviewFindingId,
   decodeProviderSessionId,
   type CodeCheckoutIdentity,
@@ -32,6 +33,7 @@ import {
   type CodeOperationApprovalConfirmation,
   type CodeEvidenceContentId,
   type CodeOperationEvent,
+  type HarnessRetryNotice,
   type CodeOperationEventFrame,
   type CodeOperationId,
   type CodeRuntimeWorkId,
@@ -39,6 +41,7 @@ import {
   type CodeThread,
   type CodeThreadId,
   type EventActor,
+  type PendingRequest,
   type ProviderCapabilities,
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
@@ -57,7 +60,10 @@ import {
   type GitScopedDiffResult,
 } from "./gitObservationPort";
 import { GitService } from "./gitService";
-import { CodeOperationEventStore } from "./codeOperationEventStore";
+import {
+  CodeOperationEventStore,
+  MAX_CODE_OPERATION_REPLAY_LIMIT,
+} from "./codeOperationEventStore";
 import { chooseCodeForkPoint, codeThreadTurns } from "./codeForkPoint";
 import {
   CodeRuntimeWorkRecorder,
@@ -96,6 +102,7 @@ import {
   type CodeOperationScaffoldPort,
   type CodeOperationServiceOptions,
   type CodeOperationTurnPort,
+  type CodeTurnPendingRequest,
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
@@ -192,6 +199,12 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 export interface CodeOperationRuntimeOptions {
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
+  /**
+   * Told when a pending request ends without a journal event: a browser-origin
+   * approval that expires or whose tool call is abandoned leaves nothing in the
+   * stream, so the change feed would otherwise never say it is gone.
+   */
+  readonly onPendingRequestWithdrawn?: () => void;
   readonly computerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
@@ -366,6 +379,8 @@ export interface CodeOperationRuntimeOptions {
         readonly turn?: TurnEndSummary;
       },
     ) => Promise<void>;
+    readonly noteRetry?: (scope: NativeHarnessTurnScope, notice: HarnessRetryNotice) => void;
+    readonly clearRetry?: (scope: NativeHarnessTurnScope) => void;
     /** Settles a harness question the person answered through the Code question surface. */
     readonly answerQuestion?: (threadId: string, questionId: string, answer: string) => void;
   };
@@ -494,6 +509,18 @@ export interface CodeOperationRuntime {
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
   }): boolean;
+  /**
+   * Every approval and question a running turn is waiting on that this window
+   * could answer through `execute`, under the same scope those answers pass.
+   */
+  pendingRequests?(windowId: WindowId): Promise<ReadonlyArray<PendingRequest>>;
+  /**
+   * Whether the thread's running turn waits on an approval or a question that
+   * `pendingRequests` would list. It ends the moment the answer is taken, so
+   * the board moves the thread back to In progress on the same read that sees
+   * the request gone.
+   */
+  turnAwaitsPerson?(threadId: string): boolean;
   close(): Promise<void>;
   reconcile?: () => Promise<void>;
   /**
@@ -1114,6 +1141,8 @@ export function createCodeOperationRuntime(
       return { terminalId: input.terminalId, state: snapshot.status };
     },
     raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
+    pendingRequests: (windowId) => service.listPendingForWindow(windowId),
+    turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
     subscribe: (windowId, threadId, operationId, afterCursor, limit) =>
       service.subscribe(windowId, threadId, operationId, afterCursor, limit),
     readRepositoryTestStatus: (windowId, threadId, checkoutId) =>
@@ -1839,6 +1868,82 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return true;
   }
 
+  /** Whether this thread's running turn has an approval or a question still unanswered. */
+  awaitsPerson(threadId: string): boolean {
+    const active = this.#active.get(threadId);
+    if (active === undefined || (active.state !== "running" && active.state !== "waiting"))
+      return false;
+    return (
+      active.approvals.size > 0 || active.browserApprovals.size > 0 || active.questions.size > 0
+    );
+  }
+
+  /**
+   * The approvals and questions running turns in this process are parked on,
+   * with the text and time the journal recorded when each was asked. Only a
+   * live turn can deliver an answer: a journaled request whose turn died with
+   * the process is settled interrupted by its answer, so it is never offered.
+   * A turn whose stream cannot be replayed whole offers nothing rather than a
+   * request without its journaled text.
+   */
+  pendingRequests(): ReadonlyArray<CodeTurnPendingRequest> {
+    const pending: CodeTurnPendingRequest[] = [];
+    for (const active of this.#active.values()) {
+      if (active.state !== "running" && active.state !== "waiting") continue;
+      const approvals = new Set([...active.approvals.keys(), ...active.browserApprovals.keys()]);
+      if (approvals.size === 0 && active.questions.size === 0) continue;
+      // A provider may ask again under an identity it used before; the latest
+      // ask is the one still waiting.
+      const asked = new Map<string, CodeTurnPendingRequest>();
+      for (const frame of this.#operationFrames(active)) {
+        const event = frame.event;
+        const scope = {
+          threadId: active.thread.id,
+          checkoutId: active.thread.checkoutId,
+          requestedAt: frame.occurredAt,
+        };
+        if (event.kind === "approval-requested" && approvals.has(String(event.approvalId))) {
+          asked.set(`approval:${String(event.approvalId)}`, {
+            ...scope,
+            kind: "approval",
+            approvalId: event.approvalId,
+            summary: event.summary,
+          });
+        } else if (event.kind === "input-requested" && active.questions.has(event.requestId)) {
+          asked.set(`question:${event.requestId}`, {
+            ...scope,
+            kind: "question",
+            requestId: event.requestId,
+            prompt: event.prompt,
+            options: event.options,
+          });
+        }
+      }
+      pending.push(...asked.values());
+    }
+    return pending;
+  }
+
+  #operationFrames(active: ActiveTurn): ReadonlyArray<CodeOperationEventFrame> {
+    const frames: CodeOperationEventFrame[] = [];
+    let afterCursor = 0;
+    for (;;) {
+      const replay = this.#events.replay({
+        threadId: active.thread.id,
+        operationId: active.operationId,
+        afterCursor,
+        limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+      });
+      if (replay.status !== "ok") return [];
+      frames.push(...replay.frames);
+      const last = replay.frames.at(-1);
+      if (last === undefined || replay.frames.length < MAX_CODE_OPERATION_REPLAY_LIMIT) {
+        return frames;
+      }
+      afterCursor = last.cursor;
+    }
+  }
+
   #browserApprovalKey(active: ActiveTurn, contextId: string): string {
     return JSON.stringify([
       active.windowId,
@@ -1864,6 +1969,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
         active.abort.signal.removeEventListener("abort", abort);
+        // An answer journals its own operation result; expiry and abandonment
+        // journal nothing.
+        if (outcome === "cancelled" || outcome === "expired") {
+          this.#options.onPendingRequestWithdrawn?.();
+        }
         resolve(outcome);
       };
       const abort = () => finish("cancelled");
@@ -2452,6 +2562,33 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
   }
 
+  #noteHarnessRetry(active: ActiveTurn, event: CodeOperationEvent): void {
+    const harness = this.#options.nativeHarness;
+    if (harness === undefined) return;
+    const scope: NativeHarnessTurnScope = {
+      threadId: String(active.thread.id),
+      mode: "code",
+      providerInstanceId: active.thread.providerInstanceId,
+      modelId: active.thread.modelId,
+      projectId: active.thread.projectId,
+    };
+    if (event.kind === "provider-content") {
+      harness.clearRetry?.(scope);
+      return;
+    }
+    if (event.kind !== "provider-retry") return;
+    harness.noteRetry?.(
+      scope,
+      decodeHarnessRetryNotice({
+        attempt: event.attempt,
+        maxAttempts: event.maxAttempts,
+        delayMs: event.delayMs,
+        reason: event.reason,
+        announcedAt: event.announcedAt,
+      }),
+    );
+  }
+
   #persistNormalized(active: ActiveTurn, event: CodeTurnEvent): void {
     const operationEvent = normalizedOperationEvent(
       event,
@@ -2460,6 +2597,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#options.uuid,
     );
     if (operationEvent === undefined) return;
+    this.#noteHarnessRetry(active, operationEvent);
     const frame = this.#events.append({
       threadId: active.thread.id,
       operationId: active.operationId,
@@ -2646,7 +2784,7 @@ function normalizedOperationEvent(
           MAX_PROVIDER_INPUT_PROMPT_BYTES,
           "",
         ) ?? "Provider input requested.",
-      options: [],
+      options: boundProviderInputOptions(event.options ?? []),
     };
   }
   if (
@@ -2752,6 +2890,30 @@ function normalizedOperationEvent(
       ...(summary === undefined ? {} : { summary }),
     };
   }
+  if (
+    event.category === "retry" &&
+    event.attempt !== undefined &&
+    event.maxAttempts !== undefined &&
+    event.delayMs !== undefined &&
+    event.status !== undefined
+  ) {
+    const reason = event.status;
+    if (
+      reason === "rate-limited" ||
+      reason === "unavailable" ||
+      reason === "stream-interrupted" ||
+      reason === "empty-completion"
+    ) {
+      return {
+        kind: "provider-retry",
+        attempt: event.attempt,
+        maxAttempts: event.maxAttempts,
+        delayMs: event.delayMs,
+        reason,
+        announcedAt: event.occurredAt,
+      };
+    }
+  }
   if (event.category === "completion") return { kind: "operation-state", state: "completed" };
   if (event.category === "waiting") return { kind: "operation-state", state: "waiting" };
   if (event.category === "interruption") {
@@ -2788,6 +2950,21 @@ function normalizedOperationEvent(
 const FAILURE_MESSAGE_SUFFIX = "\n[Provider failure message truncated.]";
 const SUMMARY_SUFFIX = " [truncated]";
 const MAX_PROVIDER_INPUT_PROMPT_BYTES = 8 * 1024;
+// `CodeOperationEvent`'s `input-requested` accepts at most this many choices of
+// at most this many bytes each; a provider that offers more keeps its first.
+const MAX_PROVIDER_INPUT_OPTIONS = 32;
+const MAX_PROVIDER_INPUT_OPTION_BYTES = 1_024;
+
+/**
+ * What the person is offered to click on a provider's question. Blank labels
+ * are dropped rather than invented into something, and a question left with
+ * none stays a free-text question.
+ */
+function boundProviderInputOptions(options: ReadonlyArray<string>): ReadonlyArray<string> {
+  return options
+    .flatMap((label) => boundProviderText(label, MAX_PROVIDER_INPUT_OPTION_BYTES, "") ?? [])
+    .slice(0, MAX_PROVIDER_INPUT_OPTIONS);
+}
 
 /**
  * `CodeOperationFailure` accepts at most

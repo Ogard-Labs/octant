@@ -191,6 +191,7 @@ export const REQUIRED_STAGED_PACKAGED_FILES = [
   "apps/desktop/resources/whats-new.txt",
   "apps/server/dist/main.mjs",
   "apps/web/dist/index.html",
+  "apps/web/dist/canvas-preview/canvas-preview.html",
   "apps/server/node_modules/@anthropic-ai/claude-agent-sdk/package.json",
   "apps/server/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs",
   "apps/server/node_modules/@opencode-ai/sdk/package.json",

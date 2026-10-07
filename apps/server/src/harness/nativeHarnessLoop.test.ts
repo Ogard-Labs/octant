@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
+  type ProviderFailure,
   type ProviderModelId,
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
@@ -733,6 +734,31 @@ describe("fitting a request to the endpoint", () => {
     expect(fitRequest(fitsUnder(10), base)).toBeUndefined();
   });
 
+  it("cuts further when forced on a request that already left earlier messages out", () => {
+    const acceptsAll = { fits: () => true };
+    const reduced = fitRequest(fitsUnder(260), base);
+    expect(reduced).toBeDefined();
+    if (reduced === undefined) return;
+    const withMore: NativeHarnessRequest = {
+      ...reduced,
+      history: [
+        ...reduced.history,
+        { role: "assistant", text: "another answer" },
+        { role: "user", text: "newest question" },
+      ],
+    };
+
+    const forced = fitRequest(acceptsAll, withMore, { reduceOnce: true });
+
+    expect(forced?.history).not.toEqual(withMore.history);
+    expect(forced?.history.at(-1)).toEqual({ role: "user", text: "newest question" });
+    expect(forced?.history.some((message) => message.text === "new question")).toBe(false);
+    expect(
+      fitRequest(acceptsAll, forced ?? withMore, { reduceOnce: true }),
+      "nothing is left to leave out",
+    ).toBeUndefined();
+  });
+
   describe("usage across the requests of one turn", () => {
     /** Runs a turn of two requests, the first calling a tool, and returns every event it produced. */
     const twoRequestTurn = (
@@ -934,5 +960,428 @@ describe("fitting a request to the endpoint", () => {
         cacheReadInputTokens: 200,
       });
     });
+  });
+});
+
+/** An endpoint whose `fits` always passes, so only the endpoint itself can refuse a size. */
+/**
+ * An endpoint whose own size estimate is `fits`, recording every request it
+ * is sent. The estimate accepting a request does not stop `send` refusing it.
+ */
+function endpointWithSizeEstimate(
+  send: (request: NativeHarnessRequest) => Promise<NativeHarnessResponse>,
+  fits: (request: NativeHarnessRequest) => boolean = () => true,
+): { readonly transport: NativeHarnessTransport; readonly requests: NativeHarnessRequest[] } {
+  const requests: NativeHarnessRequest[] = [];
+  return {
+    requests,
+    transport: {
+      open: async () => ({
+        fits,
+        send: async (request) => {
+          requests.push(request);
+          return await send(request);
+        },
+        release: () => undefined,
+      }),
+    },
+  };
+}
+
+/** Waits until the loop has emitted the tool request, so an answer lands on a live step. */
+async function whenRequested(
+  events: ReadonlyArray<ProviderRuntimeEvent>,
+  requestId: string,
+): Promise<void> {
+  while (!events.some((event) => event.kind === "tool-request" && event.requestId === requestId)) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+}
+
+describe("recovering from a request the endpoint refuses as too large", () => {
+  const overflow: ProviderFailure = {
+    category: "provider-failed",
+    message:
+      "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (context_length_exceeded).",
+  };
+  const callTool = (toolCallId: string, toolName: string): NativeHarnessResponse => ({
+    text: "",
+    toolCalls: [{ toolCallId, toolName, argumentsJson: "{}" }],
+  });
+
+  /** Runs one turn, answering each tool request in order, and returns every event. */
+  const runTurn = async (
+    transport: NativeHarnessTransport,
+    answers: ReadonlyArray<readonly [requestId: string, resultJson: string]>,
+  ): Promise<ReadonlyArray<ProviderRuntimeEvent>> => {
+    const events: ProviderRuntimeEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            Stream.runForEach(
+              (yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal)),
+              (event) => Effect.sync(() => events.push(event)),
+            ),
+          );
+          yield* connection.send({ sessionId, prompt: "look", attachments: [], tools });
+          for (const [requestId, resultJson] of answers) {
+            yield* Effect.promise(() => whenRequested(events, requestId));
+            yield* connection.answerTool({ sessionId, requestId, resultJson, isError: false });
+          }
+          yield* Fiber.join(collected);
+        }),
+      ),
+    );
+    return events;
+  };
+
+  it("forces one more reduction and completes after a single overflow retry", async () => {
+    const calls: string[] = [];
+    const scripted = endpointWithSizeEstimate(async () => {
+      calls.push("call");
+      if (calls.length === 1) return callTool("a", "read");
+      if (calls.length === 2) return callTool("b", "grep");
+      if (calls.length === 3) throw overflow;
+      return { text: "recovered", toolCalls: [] };
+    });
+
+    const events = await runTurn(scripted.transport, [
+      ["a", "{}"],
+      ["b", "{}"],
+    ]);
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(scripted.requests).toHaveLength(4);
+    const retried = scripted.requests[3]?.history ?? [];
+    expect(
+      retried.some((message) =>
+        message.toolResults?.some((result) => result.resultJson.includes('"omitted":true')),
+      ),
+    ).toBe(true);
+  });
+
+  it("shrinks a request it had already reduced before the endpoint refused it", async () => {
+    const first = "a".repeat(2_000);
+    const second = "b".repeat(1_000);
+    const calls: string[] = [];
+    const scripted = endpointWithSizeEstimate(
+      async (request) => {
+        calls.push("call");
+        if (calls.length === 1) return callTool("a", "read");
+        if (calls.length === 2) return callTool("b", "grep");
+        if (calls.length === 3) return callTool("c", "read");
+        // The real window is smaller than the estimate: it refuses any request
+        // that still carries the second result.
+        if (JSON.stringify(request.history).includes(second)) throw overflow;
+        return { text: "recovered", toolCalls: [] };
+      },
+      // The estimate only rejects the fourth request while it carries the first result.
+      (request) => request.history.length < 7 || !JSON.stringify(request.history).includes(first),
+    );
+
+    const events = await runTurn(scripted.transport, [
+      ["a", JSON.stringify(first)],
+      ["b", JSON.stringify(second)],
+      ["c", "{}"],
+    ]);
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(scripted.requests).toHaveLength(5);
+    const refused = scripted.requests[3];
+    const retried = scripted.requests[4];
+    expect(JSON.stringify(refused?.history)).not.toContain(first);
+    expect(retried?.history).not.toEqual(refused?.history);
+    expect(JSON.stringify(retried?.history)).not.toContain(second);
+  });
+});
+
+describe("recovering from a malformed tool call", () => {
+  const runWithBadArguments = async () => {
+    const scripted = scriptedTransport([
+      {
+        text: "mis-firing",
+        toolCalls: [{ toolCallId: "bad", toolName: "read", argumentsJson: "{not json" }],
+      },
+      {
+        text: "",
+        toolCalls: [{ toolCallId: "good", toolName: "read", argumentsJson: '{"path":"a.ts"}' }],
+      },
+      { text: "recovered", toolCalls: [] },
+    ]);
+    const events: ProviderRuntimeEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            scripted.transport,
+            new MemoryNativeHarnessTranscriptStore(),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            Stream.runForEach(
+              (yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal)),
+              (event) => Effect.sync(() => events.push(event)),
+            ),
+          );
+          yield* connection.send({ sessionId, prompt: "look", attachments: [], tools });
+          yield* Effect.promise(() => whenRequested(events, "good"));
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "good",
+            resultJson: "{}",
+            isError: false,
+          });
+          yield* Fiber.join(collected);
+        }),
+      ),
+    );
+    return { events, requests: scripted.requests };
+  };
+
+  it("answers a bad-arguments call with an error result and completes the model's next call", async () => {
+    const { events, requests } = await runWithBadArguments();
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(
+      events.flatMap((event) => (event.kind === "tool-request" ? [event.requestId] : [])),
+    ).toEqual(["good"]);
+    const errorResult = requests[1]?.history
+      .flatMap((message) => message.toolResults ?? [])
+      .find((result) => result.toolCallId === "bad");
+    expect(errorResult?.isError).toBe(true);
+    expect(JSON.parse(errorResult?.resultJson ?? "{}")).toMatchObject({
+      error: "arguments were not valid JSON",
+    });
+  });
+
+  it("fails the turn once a model will not stop returning malformed calls", async () => {
+    const scripted = scriptedTransport(
+      Array.from({ length: 6 }, () => ({
+        text: "",
+        toolCalls: [{ toolCallId: "bad", toolName: "read", argumentsJson: "{not json" }],
+      })),
+    );
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            scripted.transport,
+            new MemoryNativeHarnessTranscriptStore(),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          return yield* sendAndCollect(connection, "look", isTerminal);
+        }),
+      ),
+    );
+
+    expect(events.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: { category: "protocol" },
+    });
+  });
+
+  it("answers the well-formed calls of the step that exhausts the correction cap as not run", async () => {
+    const malformedStep = (id: string): NativeHarnessResponse => ({
+      text: "",
+      toolCalls: [{ toolCallId: id, toolName: "read", argumentsJson: "{not json" }],
+    });
+    const scripted = scriptedTransport([
+      malformedStep("bad-1"),
+      malformedStep("bad-2"),
+      malformedStep("bad-3"),
+      {
+        text: "",
+        toolCalls: [
+          { toolCallId: "bad-4", toolName: "read", argumentsJson: "{not json" },
+          { toolCallId: "good", toolName: "read", argumentsJson: '{"path":"a.ts"}' },
+        ],
+      },
+      { text: "next answer", toolCalls: [] },
+    ]);
+
+    const [first, second] = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            scripted.transport,
+            new MemoryNativeHarnessTranscriptStore(),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const capped = yield* sendAndCollect(connection, "look", isTerminal);
+          const next = yield* sendAndCollect(connection, "try again", isTerminal);
+          return [capped, next] as const;
+        }),
+      ),
+    );
+
+    expect(first.at(-1)).toMatchObject({ kind: "failed", failure: { category: "protocol" } });
+    expect(first.some((event) => event.kind === "tool-request")).toBe(false);
+    expect(second.at(-1)?.kind).toBe("completed");
+    const history = scripted.requests[4]?.history ?? [];
+    const callsAt = history.findIndex((message) =>
+      message.toolCalls?.some((call) => call.toolCallId === "good"),
+    );
+    const results = history[callsAt + 1]?.toolResults ?? [];
+    expect(results.map((result) => result.toolCallId)).toEqual(["bad-4", "good"]);
+    expect(results.every((result) => result.isError)).toBe(true);
+    expect(JSON.parse(results[1]?.resultJson ?? "{}")).toMatchObject({ notRun: true });
+  });
+
+  it("resolves a queued steering note when malformed calls exhaust the correction cap", async () => {
+    let releaseFourth: ((response: NativeHarnessResponse) => void) | undefined;
+    let sent = 0;
+    const malformed: NativeHarnessResponse = {
+      text: "",
+      toolCalls: [{ toolCallId: "bad", toolName: "read", argumentsJson: "{not json" }],
+    };
+    const transport: NativeHarnessTransport = {
+      open: async () => ({
+        fits: () => true,
+        send: async () => {
+          sent += 1;
+          if (sent < 4) return malformed;
+          return await new Promise<NativeHarnessResponse>((resolve) => {
+            releaseFourth = resolve;
+          });
+        },
+        release: () => undefined,
+      }),
+    };
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({ sessionId, prompt: "look", attachments: [], tools });
+          for (let spin = 0; releaseFourth === undefined && spin < 50; spin += 1) {
+            yield* Effect.yieldNow();
+          }
+          const finish = releaseFourth;
+          expect(finish).toBeTypeOf("function");
+          const note = yield* Effect.fork(
+            connection.steer?.({ sessionId, message: "try a different tool" }) ??
+              Effect.succeed("unsupported" as const),
+          );
+          yield* Effect.yieldNow();
+          finish?.(malformed);
+          const steered = yield* Effect.race(
+            Fiber.join(note),
+            Effect.sleep("2 seconds").pipe(Effect.as("pending" as const)),
+          );
+          const events = Array.from(yield* Fiber.join(terminal));
+          expect(events.at(-1)).toMatchObject({
+            kind: "failed",
+            failure: { category: "protocol" },
+          });
+          return steered;
+        }),
+      ),
+    );
+
+    expect(outcome).toBe("unsupported");
+  });
+});
+
+describe("cancelling a turn without rebuilding the session", () => {
+  it("accepts the next send on the same session after a cancel", async () => {
+    const requests: NativeHarnessRequest[] = [];
+    const transport: NativeHarnessTransport = {
+      open: async () => ({
+        fits: () => true,
+        send: (request, stream) =>
+          new Promise<NativeHarnessResponse>((resolve, reject) => {
+            requests.push(request);
+            if (requests.length > 1) {
+              resolve({ text: "second", toolCalls: [] });
+              return;
+            }
+            stream.signal.addEventListener(
+              "abort",
+              () =>
+                reject({ category: "interrupted", message: "The provider request was cancelled." }),
+              { once: true },
+            );
+          }),
+        release: () => undefined,
+      }),
+    };
+    const events: ProviderRuntimeEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const first = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({ sessionId, prompt: "first", attachments: [], tools });
+          yield* connection.interrupt(sessionId);
+          expect(Array.from(yield* Fiber.join(first)).at(-1)?.kind).toBe("interrupted");
+
+          // No resume: the same live session takes the next prompt straight away.
+          const second = yield* sendAndCollect(connection, "second", isTerminal);
+          for (const event of second) events.push(event);
+        }),
+      ),
+    );
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(requests[1]?.history.map((message) => message.text)).toEqual(["first", "second"]);
+  });
+
+  it("releases the session when an interrupted tool step cannot be journaled, so resume can retry the open step", async () => {
+    const inner = new MemoryNativeHarnessTranscriptStore();
+    let rejectSettle = true;
+    const transcripts: NativeHarnessTranscriptStore = {
+      open: (id, binding, forkedFrom) => inner.open(id, binding, forkedFrom),
+      load: (id) => inner.load(id),
+      append: (id, message) => inner.append(id, message),
+      settle: (id, result) => {
+        if (rejectSettle) throw new Error("journal append failed");
+        inner.settle(id, result);
+      },
+    };
+    const scripted = scriptedTransport([
+      {
+        text: "",
+        toolCalls: [{ toolCallId: "call-read", toolName: "read", argumentsJson: "{}" }],
+      },
+      { text: "continued", toolCalls: [] },
+    ]);
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(scripted.transport, transcripts);
+          const handle = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          yield* sendAndCollect(connection, "look", (event) => event.kind === "tool-request");
+          const interrupted = yield* Effect.exit(connection.interrupt(sessionId));
+          expect(interrupted._tag).toBe("Failure");
+          rejectSettle = false;
+          const cursor = handle.resumeCursor;
+          if (cursor === undefined) throw new Error("The session did not return a resume cursor.");
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: cursor,
+            executionPolicy: "approval-gated",
+          });
+          return yield* sendAndCollect(connection, "carry on", isTerminal);
+        }),
+      ),
+    );
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    const results = scripted.requests[1]?.history.flatMap((message) => message.toolResults ?? []);
+    expect(results?.map((result) => result.toolCallId)).toEqual(["call-read"]);
+    expect(JSON.parse(results?.[0]?.resultJson ?? "{}")).toMatchObject({ interrupted: true });
   });
 });

@@ -1,7 +1,12 @@
 import { decodeArtifactLibraryEntry } from "@octant/contracts/artifact-library";
-import type { CanvasBlock } from "@octant/contracts/canvas";
+import {
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasBlock,
+  type CanvasBlock,
+} from "@octant/contracts/canvas";
 import { describe, expect, it } from "vitest";
-import { renderArtifactThumbnail } from "./artifactRender";
+import { releaseMindmapBlock, supportFlowBlock } from "@octant/domain";
+import { renderArtifactSidecarSvg, renderArtifactThumbnail } from "./artifactRender";
 
 function definition(blocks: ReadonlyArray<CanvasBlock>, title = "Launch plan") {
   return { title, blocks };
@@ -24,7 +29,58 @@ const chart = {
   ],
 } as unknown as CanvasBlock;
 
+const treemap = decodeCanvasBlock({
+  blockId: "map-1",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "treemap",
+  measures: [
+    { measureId: "loc", label: "Lines of code" },
+    { measureId: "edits", label: "Edits" },
+  ],
+  sizeBy: "loc",
+  colorBy: "edits",
+  nodes: [
+    { nodeId: "root", label: "Root" },
+    { nodeId: "a", label: "A", parentId: "root", values: { loc: 10, edits: 2 } },
+    { nodeId: "b", label: "B", parentId: "root", values: { loc: 30, edits: 5 } },
+  ],
+});
+
 describe("drawing a preview of an artifact", () => {
+  it("names a mind map's root and its topics in the exported picture", () => {
+    const markup = renderArtifactSidecarSvg(definition([releaseMindmapBlock]));
+
+    // The root and each drawn child carry their topic, clamped to the box.
+    expect(markup).toContain(">Release readi");
+    expect(markup).toContain(">Test coverage<");
+    expect(markup).toContain(">Documentation<");
+    expect(markup).toContain(">Packaging<");
+  });
+
+  it("names each swimlane lane and its first step in the exported picture", () => {
+    const markup = renderArtifactSidecarSvg(definition([supportFlowBlock]));
+
+    expect(markup).toContain(">Customer<");
+    expect(markup).toContain(">Report a problem<");
+  });
+
+  it("draws a treemap from the shared squarified layout, with no script", () => {
+    const markup = renderArtifactThumbnail(definition([treemap]));
+
+    expect(markup.startsWith("<svg")).toBe(true);
+    expect(markup).not.toMatch(/<\s*script/i);
+    // A group frame plus one cell per leaf.
+    expect((markup.match(/<rect/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("starts a treemap export from the node the author chose", () => {
+    const fromLeaf = decodeCanvasBlock({ ...treemap, startNodeId: "a" });
+    const whole = (renderArtifactThumbnail(definition([treemap])).match(/<rect/g) ?? []).length;
+    const zoomed = (renderArtifactThumbnail(definition([fromLeaf])).match(/<rect/g) ?? []).length;
+
+    expect(zoomed).toBeLessThan(whole);
+  });
+
   it("draws a self-contained picture with no script and no external references", () => {
     const markup = renderArtifactThumbnail(definition([chart]));
 
@@ -277,5 +333,94 @@ describe("drawing a preview of an artifact", () => {
     expect(phone).toContain("<rect");
     expect(phone).not.toMatch(/<\s*script/i);
     expect(phone).not.toBe(desktop);
+  });
+
+  it("draws a heatmap as one cell per coordinate, with a dashed cell for a gap", () => {
+    const matrix = {
+      blockId: "commits",
+      schemaVersion: 5,
+      kind: "heatmap",
+      layout: "matrix",
+      rows: [
+        { rowId: "mon", label: "Mon" },
+        { rowId: "tue", label: "Tue" },
+      ],
+      columns: [
+        { columnId: "h09", label: "09" },
+        { columnId: "h10", label: "10" },
+      ],
+      cells: [{ rowId: "mon", columnId: "h09", value: 3 }],
+    } as unknown as CanvasBlock;
+
+    const markup = renderArtifactThumbnail(definition([matrix]));
+
+    expect(markup.startsWith("<svg")).toBe(true);
+    expect(markup).not.toMatch(/<\s*script/i);
+    // A background, then one cell per coordinate the block declares.
+    expect((markup.match(/<rect/g) ?? []).length).toBe(5);
+    // The coordinate the block does not list is drawn apart from a zero.
+    expect(markup).toContain('stroke-dasharray="2 2"');
+  });
+
+  it("draws a calendar heatmap from the shared week grid", () => {
+    const calendar = {
+      blockId: "failures",
+      schemaVersion: 5,
+      kind: "heatmap",
+      layout: "calendar",
+      days: [
+        { date: "2026-09-01", value: 0 },
+        { date: "2026-09-08", value: 5 },
+      ],
+    } as unknown as CanvasBlock;
+
+    const markup = renderArtifactThumbnail(definition([calendar]));
+
+    expect(markup.startsWith("<svg")).toBe(true);
+    expect(markup).not.toMatch(/<\s*script/i);
+    // Eight days are laid out between the first and last reading.
+    expect((markup.match(/<rect/g) ?? []).length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("draws a bar list as a bar and a value per row, with no script", () => {
+    const barList = {
+      blockId: "hottest-files",
+      schemaVersion: 6,
+      kind: "bar-list",
+      valueLabel: "Edits",
+      rows: [
+        { label: "apps/web", value: 41 },
+        { label: "packages/domain", value: 10 },
+      ],
+    } as unknown as CanvasBlock;
+
+    const markup = renderArtifactThumbnail(definition([barList], "Hot files"));
+
+    expect(markup.startsWith("<svg")).toBe(true);
+    expect(markup).not.toMatch(/<\s*script/i);
+    // The background plus one bar per row, and the labels beside them.
+    expect(markup).toContain("apps/web");
+    expect((markup.match(/<rect/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("draws a metric sparkline as a polyline when the block carries one", () => {
+    const withSpark = {
+      blockId: "metric-1",
+      schemaVersion: 6,
+      kind: "metric",
+      label: "Lines of code",
+      value: 1_360_000,
+      format: "compact",
+      sparkline: [1.2, 1.24, 1.27, 1.36],
+      caption: "since last release",
+    } as unknown as CanvasBlock;
+    const plain = { ...(withSpark as unknown as Record<string, unknown>) };
+    delete plain["sparkline"];
+
+    const withMarkup = renderArtifactThumbnail(definition([withSpark]));
+    const plainMarkup = renderArtifactThumbnail(definition([plain as unknown as CanvasBlock]));
+
+    expect(withMarkup).toContain("<polyline");
+    expect(plainMarkup).not.toContain("<polyline");
   });
 });

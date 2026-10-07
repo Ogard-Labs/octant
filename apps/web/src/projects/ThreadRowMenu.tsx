@@ -12,6 +12,7 @@ import {
   Flag,
   Forward,
   GitPullRequest,
+  Hash,
   Mail,
   MailOpen,
   Pencil,
@@ -81,6 +82,11 @@ export interface ThreadRowActions {
    * only marks the thread in the list.
    */
   readonly onPinInPane?: (threadId: string) => void;
+  /**
+   * Attaches this thread as read-only context on the focused composer, the
+   * same mention a drop would add. Absent when no composer can receive it.
+   */
+  readonly onAttachAsContext?: (threadId: string, title: string) => void;
   /** Absent when the host cannot accept a list pin. */
   readonly onPinThread?: (threadId: string, pinned: boolean) => void;
   /**
@@ -112,6 +118,7 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onMarkThreadRead === undefined &&
     actions.onMarkThreadUnread === undefined &&
     actions.onPinInPane === undefined &&
+    actions.onAttachAsContext === undefined &&
     actions.onPinThread === undefined &&
     actions.onOpenPullRequest === undefined &&
     actions.onOpenPullRequestOnGithub === undefined &&
@@ -133,6 +140,7 @@ export function ThreadRowMenu(props: {
   const pinned = props.thread.pinned === true;
   const pullRequestDestinations = threadRowPullRequestDestinations(props.thread, props.actions);
   const hasThreadActions =
+    props.actions.onAttachAsContext !== undefined ||
     props.actions.onPinInPane !== undefined ||
     props.actions.onPinThread !== undefined ||
     props.actions.onStartRenameThread !== undefined ||
@@ -155,6 +163,15 @@ export function ThreadRowMenu(props: {
       {hasThreadActions ? (
         <>
           <OctantContextMenuGroup>
+            {props.actions.onAttachAsContext === undefined ? null : (
+              <OctantContextMenuItem
+                className="thread-row-context-menu__item"
+                label="Attach as context"
+                onClick={() => props.actions.onAttachAsContext?.(threadId, props.thread.title)}
+              >
+                <MenuContent icon={Hash}>Attach as context</MenuContent>
+              </OctantContextMenuItem>
+            )}
             {props.actions.onPinInPane === undefined ? null : (
               <OctantContextMenuItem
                 className="thread-row-context-menu__item"

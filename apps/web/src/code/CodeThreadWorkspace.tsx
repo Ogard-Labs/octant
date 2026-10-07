@@ -51,6 +51,8 @@ import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { CodeCheckoutBar } from "./CodeCheckoutBar";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
+import { ChildResultCards } from "../agents/ChildResultCards";
+import { isChildResultDelivery } from "../agents/childResultDelivery";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
 import { useThreadPlan } from "../plan/ThreadPlanContext";
 import type { ThreadTaskChangedFiles } from "../plan/ThreadTaskViewer";
@@ -71,9 +73,11 @@ import {
   useThreadMentionTypeahead,
 } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
+import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
+import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
@@ -487,6 +491,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       props.controller.setPendingDraft?.(next, caretIndex);
     },
     textarea: () => textareaRef.current,
+  });
+  const threadDropKey = useComposerThreadDropRegistration({
+    enabled: threadMentions.composer !== undefined,
+    currentThreadId: String(props.threadId),
+    onDraftChange: (next, caretIndex) => {
+      draftRevisionRef.current += 1;
+      setDraft(next);
+      props.controller.setPendingDraft?.(next, caretIndex);
+    },
+    attachDroppedThread: threadMentions.attachDroppedThread,
   });
   const mentionListId = `code-thread-mentions-${String(props.threadId)}`;
 
@@ -1268,6 +1282,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   threadId={message.sourceThreadId ?? props.threadId}
                 />
               );
+            // Code's conversation turns do not carry the delivery mark, so the
+            // host's own delivery wording is what says this is a subagent's
+            // result and not something the person typed.
+            const delivered = message.role === "user" && isChildResultDelivery(message.text);
             const workedFor =
               message.role === "assistant" &&
               message.status === "completed" &&
@@ -1295,8 +1313,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   </OctantSeparatorWithLabel>
                 ) : null}
                 <article
-                  aria-label={message.role === "user" ? "Your message" : "Assistant message"}
-                  className={`code-thread-workspace__message ${message.role === "user" ? "turn-user" : "turn-agent"}`}
+                  aria-label={
+                    delivered
+                      ? "Subagent results"
+                      : message.role === "user"
+                        ? "Your message"
+                        : "Assistant message"
+                  }
+                  className={`code-thread-workspace__message ${delivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
                 >
                   <TurnActionMenu
                     actions={codeTurnActions({
@@ -1344,7 +1368,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       }
                     }}
                   >
-                    {message.role === "user" ? (
+                    {delivered ? (
+                      <ChildResultCards providerGroups={providerGroups} text={message.text} />
+                    ) : message.role === "user" ? (
                       <>
                         {/* What the user typed stays exactly as they typed it,
                             in the shared bubble, with the time beneath it. */}
@@ -1391,6 +1417,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                               })}
                           {...(message.at === undefined ? {} : { at: message.at })}
                         />
+                        {activity?.retrying === undefined ? null : (
+                          <HarnessRetryStatus
+                            events={[
+                              {
+                                kind: "retrying",
+                                attempt: activity.retrying.attempt,
+                                maxAttempts: activity.retrying.maxAttempts,
+                                delayMs: activity.retrying.delayMs,
+                                reason: activity.retrying.reason,
+                                announcedAt: activity.retrying.announcedAt,
+                              },
+                            ]}
+                          />
+                        )}
                         {gallery}
                         {activity === undefined ? null : (
                           <CodeTranscriptRow
@@ -1593,6 +1633,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       <ThreadComposer
         queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
         presentation="follow-up"
+        {...(threadDropKey === undefined ? {} : { threadDropKey })}
         context={
           <CodeCheckoutBar
             {...(props.onCreatePullRequest === undefined

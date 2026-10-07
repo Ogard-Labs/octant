@@ -279,13 +279,19 @@ names the state and claims no elapsed time. See
 
 ### Welcome and composer
 
-A thread's subagents sit in an inset card attached above the composer's message
-surface. The card participates in normal layout so expansion cannot cover the
-preceding task list or transcript. Cross-context notices share the same flow;
+A thread's subagents sit in a card attached above the composer's message
+surface, edge to edge with it so the two read as one stack. The card
+participates in normal layout so expansion cannot cover the preceding task list
+or transcript. Cross-context notices share the same flow;
 they never hide failed children or results needing review. The card starts
-collapsed and remembers the viewer's fold choice. Its head names the total,
-prioritizing failed, waiting, review-needed and unknown states over redundant
-activity counts. A truncated list identifies its count as listed children.
+collapsed and remembers the viewer's fold choice. Its head names every state
+the children are in as counts of that state ("1 failed · 1 to review · 1
+working · 2 done"), attention states first, with no unexplained total. A result
+counts as to review only while a person can still act on it: one the host has
+already delivered to the parent, or the parent consumed through its own tool,
+is done, because it sits in the thread as a child-result card. A truncated list
+says earlier children are not retained. While a Chat thread's host cannot be
+reached the card dims and withholds Stop; the thread's connection notice says why.
 Task-plan completion is never counted as child completion. View all opens the
 full Agents list even when every child has finished. Expansion previews at most
 three active or unresolved children; longer history stays in Environment and
@@ -296,6 +302,17 @@ in details. Rows open the child in Agents. Only managed active children offer
 Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
 narrow widths, disclosures work with the keyboard and retain visible focus,
 and expanded lists have bounded height.
+
+A result the host delivers into the parent thread is a turn the person did
+not write, so it never renders as their right-aligned bubble. It is a
+left-aligned child-result card in the thread's measure: a status mark and
+"<Role> subagent finished" (or the state it stopped in), the provider and
+model, the task in meta ink, then the reply as Markdown, folded after about
+eight lines behind Show full result. A subagent that stopped gives the host's
+recorded reason in place of a reply. Run ID, generation and provider ID sit
+behind a Details disclosure. The card is one component in Chat, Work and
+Code; a delivery the card cannot read is shown as its text under a plain
+"Subagent result" head.
 
 Provider-observed children remain separate from managed runs. Their detail shows
 reported activity, observation timing, available lineage and explicit partial,
@@ -362,7 +379,7 @@ asked up front; it is derived from the chips and shown on the thread once it
 exists.
 
 Under the composer, Work and Code start screens offer a row of action tiles and
-then the card area, both on the composer's measure and ahead of Code's prompt
+then the card area (Chat's start screens carry the card area alone), both on the composer's measure and ahead of Code's prompt
 suggestions, so a running thread is never under the fold. The tiles are
 always a three-column grid, one column under 560px, so one or two tiles keep a
 tile's width instead of stretching across the row; a detail line wraps to a
@@ -374,8 +391,18 @@ and **Review N changes** (Finished threads that wait for you) when N is above
 zero, where N counts unread threads that are not running or rested, the
 sidebar's To review rule. Open terminal starts a Project terminal and pins it in
 Zen, the only place one lives. Work offers the same tiles without a terminal,
-because Work has no shell. Review opens the Inbox. The tiles leave when they
+because Work has no shell. Review opens the Review page. The tiles leave when they
 have nothing to show.
+
+Above the composer, the two start-screen tabs (**New task**, **Running** with
+the sidebar's count as tabular meta text) use the plain-text underline tabs
+(`surface-tabs`) on the composer's top-left edge. They never wrap, and the
+selected tab is carried by ink and the underline, with no fill or hue. The
+Running tab's body is one hairline-ringed list on the card fill: each row is the
+Working now row face with **Open** and **Stop** ghost buttons at the extra-small
+step, and the stop question takes its own line under the row with a destructive
+**Stop** and a ghost **Keep running**. See
+[Workspace](docs/design/workspace.md#start-screen-cards) for behavior.
 
 The card area is a ghost **Customize** button right-aligned under the tiles
 (icon at the 14px step and the label), then a grid of cards, two columns and one
@@ -389,14 +416,28 @@ fills at 5% ink on hover and focus, the provider mark and a row label on its
 first line, and a mono meta line for what is happening. The Customize panel is a
 popover at most 340px wide: one row per card with a drag grip, the icon, the
 title, up and down icon buttons, and a switch, then **Reset to default**; a
-dragged row marks its drop target with a hairline above it. **Working now**
+dragged row marks its drop target with a hairline above it. **Needs you**
+comes first and leaves the grid while nothing waits: each row is the provider
+mark (or the mode's glyph), the thread title, "Waiting 4m" with a pause glyph
+at the 12px step, the Project as meta text, and the request text clamped to two
+lines, with small buttons below (Approve filled, Deny ghost; a question's
+choices as outline buttons with a leading number, then a ghost Reply…). Rows
+are told apart by a hairline, never a tinted fill, and the waiting state is a
+glyph and words with no hue. **Working now**
 lists up to five rows of threads and agent runs in progress, each with the
 provider mark, the title, a time, and a one-line step; it says "Nothing is
 running right now." when empty. A running tool is shown in mono
 (`Command: bun run test`); a turn waiting on the person is plain prose. A turn's
 time says "Running 12m" from the start time the host reports, and "Active 4m
 ago" only for a host that reports none; a fact the host does not report is left
-out rather than invented. Under the Vivid style the tiles'
+out rather than invented. **Pull requests** lists up to six rows on a Code
+start screen, in Waiting on your review and Yours. Each row is the title, a
+short repository and number, and the words for checks and review — never
+colour alone. It is absent when that read is not allowed. **CI failures**
+lists up to five failing checks from that same read, the check name, the
+repository or branch, and how long ago it failed. It is absent when nothing is
+failing, and absent when that read is not allowed. **Start a fix** opens a
+draft; it does not send. Under the Vivid style the tiles'
 icon squares take the blue, orange, and purple palette hues. Code's five prompt
 suggestions are one compact row of label-only chips under the cards, and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
@@ -668,6 +709,152 @@ The original warm charcoal-and-brass `Octant` preset remains an optional
 theme. It is not the default neutral system. Custom themes may override only
 validated semantic roles; incomplete or low-contrast imports fall back safely.
 
+## Data visualisation
+
+Charts, metric blocks, tables, and timelines are one visual system, so a Canvas
+reads as one document whatever kinds it mixes. These rules own the mark, the
+ink, and the reading; a later block (treemap, heatmap, bar list) builds on them
+rather than inventing a second chart language.
+
+**Hue is for marks only.** Data colour appears on the mark — a bar, a line, a
+slice, a scale cell — never on the chrome. The Default style keeps its
+monochrome chrome, and a chart in the default theme still draws its series in
+the palette hues, because the series are the data. Every mark pairs its hue
+with a second channel: a dash pattern on a line, a label in the legend, a value
+in the disclosed table. Colour alone never carries a distinction, and under
+forced colours the marks fall to system colours while the dash pattern and the
+labels keep them apart.
+
+**Categorical series order.** Six hues, assigned in a fixed order so a series
+keeps the same colour across charts and legends: brass, teal, rose, violet,
+green, blue (`--oct-series-1..6`, each pinned per mode). A seventh series
+restarts the order, and the legend, the dash pattern, and the data table keep
+them apart. A series label is drawn in `--oct-fg-2`, never in the series hue: a
+12px label needs text contrast the mark's hue does not carry.
+
+**Scales.** Ordered data — a heatmap cell, a bar list's length — uses one of two
+scales, exposed as theme roles and derived from the palette
+(`packages/theme/src/chartScales.ts`):
+
+- `--octant-chart-sequential-1..5`, one hue from low to high, the teal family.
+- `--octant-chart-diverging-1..5`, the red family through a neutral midpoint to
+  the blue family: 1 the strongest negative, 3 the neutral, 5 the strongest
+  positive.
+
+Every step clears 3:1 against the workspace in light and dark, so a scale cell
+reads on the surface it sits on. A custom theme inherits both scales or
+overrides any step through a semantic override.
+
+**Marks.** One set of specs (`packages/theme/src/chartMarks.ts`) is shared by the
+on-screen renderer and the static SVG export:
+
+- Bars: a 2px top corner, a 2px gap between bars in one category; bars touch
+  only when a distribution's density is the subject.
+- Lines: a 2px stroke with round caps and joins.
+- Dots: a 3px radius, on a scatter point and on each line vertex.
+
+**Axis and grid ink.** The axis is `--oct-chart-axis`, a hairline that reads as
+a rule. The grid behind a cartesian chart is `--oct-chart-grid`, deliberately
+fainter than `--oct-border-soft`: it repeats four times inside one small frame
+and at border weight it reads as a table. The grid is a backdrop, never a frame;
+gridlines stop short of the plot edges.
+
+**Reading numbers.** One formatter (`formatCanvasNumber`) reads every number a
+Canvas shows, in the renderer and in the static export. A chart, a metric block,
+and a table column may name an optional `format`: `number` (the default, locale
+grouping — 1,234,567), `compact` (1.36M), `percent` (a ratio where 1 is 100%),
+`bytes` (base-1024 — 1.5 KB), and `duration` (seconds — 1h 2m 5s). Numbers use
+tabular numerals so a column of readings aligns. A label longer than its slot
+truncates with an ellipsis rather than wrapping or shrinking.
+
+**One tooltip.** Every chart mark has one hover and focus tooltip that names the
+series and its formatted value. It is placed from the mark's own plotted
+coordinates, offset above (or below near the top), so it never covers the
+pointer, and it follows keyboard focus as well as the pointer. It has no
+entrance motion.
+
+**Path labels.** A file label is read from the right: the directory is dimmed and
+the file name is at full ink, in the code font.
+
+**Treemap.** A hierarchy is drawn as squarified rectangles
+(`packages/domain/src/canvasTreemapLayout.ts`): each leaf's area is a size
+measure and its colour is a colour measure, and a group's reading is the sum of
+its children, so the picture never states a total the leaves do not. The screen
+renderer and the static SVG export draw the same deterministic layout. The size
+and colour measures are switches in the block header; those switches, and a zoom
+into a group (by click, breadcrumb, Escape, or right-click; arrow keys move
+between cells and Enter zooms in), are view state and revise nothing. A colour
+scale is sequential, diverging (centred on the mid-point of the colour domain),
+or categorical by top-level group, and reads through the shared scale roles.
+Cell labels are drawn only where they fit, and the disclosed table is the
+accessible reading, sortable by each measure.
+
+**Heatmap.** A grid is coloured by value
+(`packages/domain/src/canvasHeatmapLayout.ts`). A `matrix` names its rows and
+columns and carries a cell per coordinate with a value and an optional short
+note; a `calendar` carries one reading per date and lays the days out on a week
+grid whose first day comes from the locale, drawn at its own size and scaled
+down only to fit a narrower Canvas. A matrix row label longer than its gutter
+is shortened with an ellipsis; the table carries it in full. Both read a value through one of the
+same two scale roles — sequential or diverging — with a legend that shows a
+scale bar and its bounds. A coordinate the block does not list is drawn as an
+empty dashed cell, apart from a zero reading. The screen renderer and the static
+SVG export draw the same deterministic layout. A matrix's rows can be sorted by
+their total and the cells can be walked with the arrow keys; these are view
+state and revise nothing. The disclosed table is the accessible reading, and it
+shows a missing coordinate as an empty cell rather than a zero.
+
+**Bar list.** A ranking of magnitudes — the "hottest files" or "slowest tests"
+panel (`packages/domain/src/canvasBarListLayout.ts`). Each row is a label, a
+value, an optional second value, and an optional manifest source. Rows sort
+largest first by default and a reader can flip the ranking to smallest first; a
+tie keeps the author's order. The list shows a top N with Show all up to the row
+budget, and both the order and the number shown are view state. A bar's length is its share of the largest value — the reading is
+the length, so bars use the neutral ink, or the sequential scale when the
+magnitude is the subject; a value is never negative. A label that reads as a
+path uses the shared path style: the directory is dimmed and the file name keeps
+full ink in the code font. A row that names a manifest source offers Open file
+through the allowlisted open-source action, which the host reauthorizes. The
+screen renderer, the static SVG export, and the Markdown and HTML export rank
+the same list. The disclosed
+table is the accessible reading of every row, including the rows Show all holds
+back.
+
+**Metric tiles.** Consecutive metric blocks are gathered into one responsive
+row of two to four tiles, and a metric's value is set large in tabular numerals
+so a row of numbers aligns. A metric may name how its value reads (`format`), a
+unit, a `delta`, and a `goodDirection` of `up`, `down`, or `neutral` so a
+delta's tone is never guessed: a direction that agrees with the change reads in
+`--oct-success`, one that disagrees in `--oct-danger`, and an absent or
+`neutral` direction keeps the neutral ink so the arrow and the signed value
+carry the reading. It may also carry a `sparkline` of at most 256 recent
+readings, drawn as a glance with no axis, and a short `caption`. The value, the
+delta, and the caption are the accessible numbers; the sparkline is decorative.
+
+**Tables.** A table is columns of a declared type and rows in the order the
+author wrote. A column may name a `format` and a `display` of `text` (the plain
+reading, the default), `bar` (an in-cell bar whose length is the value's share
+of the column's largest reading), `heat` (a tint on the shared sequential
+scale), or `status` (the value drawn as a badge). The value is always drawn with
+the mark, never instead of it, so a bar and a tint are scan aids: under forced
+colours they fall to system ink and the plain value remains the reading. A text
+column whose values read as a path uses the shared path style, and a number
+column is right-aligned in tabular numerals. Sorting (each sorted header
+announces its direction with `aria-sort`; hiding the sorted column drops the
+sort), a text filter, and hidden columns are view state and revise nothing, so the exported and static forms keep the order
+the author wrote. The header sticks through a scrolling table.
+
+**Motion.** A chart transitions only on a state change — a legend toggle, a zoom
+— never on entrance. A transition lasts at most 200ms and is off under
+`prefers-reduced-motion: reduce` and when the workspace sets
+`data-octant-reduced-motion="true"`.
+
+**Empty and error states.** A chart with no series, a table with no rows, and a
+timeline with no items keep their block's height and say so in `--oct-muted` text
+rather than collapsing, so a document does not jump as data arrives. A block that
+cannot be drawn fails closed to its plain reading and its disclosed data table;
+it never shows a broken mark.
+
 ## Typography
 
 Typography has distinct jobs:
@@ -872,7 +1059,9 @@ edge: the overlay shadow carries it for menus and popovers, and the shared
 dialog draws it as a border. A feature stylesheet sizes and places a popup and
 never sets its fill, border, or shadow. Environment's cards on the dock and a Settings section on the page are
 hairline-ringed cards, not floating objects. Frosted material is limited to native/optional sidebar
-translucency and the floating activity picture-in-picture; reduced
+translucency and the floating activity picture-in-picture (the Browser's live
+preview shows the page itself and frosts only its caption, count, and close
+control, over the glass tokens, never over the page); reduced
 transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
@@ -1016,7 +1205,7 @@ executing), To review (finished turns not opened since), and Done today
 (threads completed since local midnight). Each tile is one button whose name
 carries its count ("Running, 2"); Inbox opens the Inbox, Running opens the
 Board (the Activity feed in Chat, which has no board), To review opens the
-Activity feed, and Done today opens the Completed shelf. With the tiles on,
+Review page, and Done today opens the Completed shelf. With the tiles on,
 the Inbox and Board rows are left out because their tiles go to the same
 place. Settings › Sidebar › Count tiles turns them off and brings the rows
 back. Tiles are neutral faces in the Default style; under Vivid each takes a
@@ -1093,7 +1282,10 @@ label's description. Ordering controls appear only in an explicit Reorder mode.
 Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
-input, output, and measurement quality. Reasoning, cache, execution time, and
+input, output, and measurement quality. Its thread table uses the same figures
+as the line under the composer: cache, speed, and first token are columns,
+omitted when unavailable, and opening a row lists that thread's turns. The
+table stays a hairline table, not a card. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay
 collapsed in Settings. The standalone Usage destination also exposes provider
 capacity independently of ledger loading. Each provider window leads with its
@@ -1110,7 +1302,11 @@ First run is a five-step wizard with a progress rail. Each step is pending,
 current, or completed: the current step is a filled card, completed steps show
 a check, and pending steps show their number. Mode choices on the readiness
 step use `OctantToggleGroup`. Answers still write through to the settings that
-own them.
+own them. First run records its outcome only after every answer has landed. When
+the host refused an answer, the first press of Skip setup or the primary action
+says so in a warning notice and records nothing; the next press goes on without
+that answer, so a refusing host can never leave the dialog impossible to leave.
+A refused outcome is reported the same way and the dialog stays open.
 
 The right dock follows the active pane and never leaks another pane's content.
 The dock and the bottom panel both step aside while a reader route (Board,
@@ -1196,10 +1392,12 @@ wraps under it when the dock is narrow rather than squeezing the pill). Rows are
 rather than taking a fill, and an open row's content starts under its name.
 Other servers stay behind a nested disclosure; none are stopped or removed by
 hiding them. The cards sit one step above the dock's own background. Sources list the current thread's journaled image attachments when present.
-Computer use offers Picture in Picture show/hide for the same live activity
-preview that floats over the main conversation. The preview never occupies
-Environment, and hiding it never stops its session. Browser stop and computer-use
-approval controls stay with the preview. It does not duplicate the Agents dock. Missing checkout context
+Computer use offers Picture in Picture show/hide for its live activity card
+that floats over the main conversation. The Browser's live preview is separate:
+it follows the thread's Browser, not this control (see
+[Workspace](docs/design/workspace.md#tool-lifecycles)). Neither preview occupies
+Environment, and hiding one never stops its session. Computer-use approval and
+stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
 
 The Board is an operational reading surface with four fixed,
@@ -1378,6 +1576,16 @@ and Tooltip. Composition rules:
   panels stay anchored in the surface; `OctantDialog` would add a backdrop,
   focus trap, and portal. The recipe owners (`OctantAlert`, `OctantToast`,
   `OctantApprovalCard`, `FieldError`, and `ShellState`) set the role themselves.
+- A lost host connection is one condition with one voice. A Chat thread shows a
+  single `OctantAlert` in plain words ("Can't reach the host" with Retry now),
+  above its transcript in the thread's own measure; it becomes a success alert,
+  "Reconnected", for a few seconds when the host answers, then goes quiet. The
+  thread's other surfaces (the subagent card, the message queue, the composer's
+  status line) never repeat the loss: they dim and disable their controls. Use
+  no other wording for it, and never show internal vocabulary such as "the
+  authoritative transcript". A failure unrelated to the connection keeps its own
+  alert. Work and Code threads keep their own connection messages until they
+  adopt this notice.
 - Product notices use `OctantToast`: a semantic icon, short title, supporting
   detail, and an explicit Dismiss button. An optional inline action can open the
   relevant destination without implicitly dismissing the notice. Success and

@@ -42,6 +42,7 @@ import {
   defaultCheckpointLabel,
   describeAgentGoal,
   paletteFor,
+  retryFooterText,
   statusLineFrom,
   tasksFrom,
   transcriptFrom,
@@ -669,7 +670,8 @@ class AgentScreen {
     this.#noteText.content =
       this.#note.length === 0 ? t`${dim(fg(p.muted)(HINT))}` : t`${fg(p.warning)(this.#note)}`;
     const detail = session?.session.detail;
-    this.#footer.content = t`${dim(fg(p.muted)(statusLineFrom(this.#thread, session)))}${detail === undefined ? "" : fg(p.warning)(`  ${detail}`)}`;
+    const retrying = retryFooterText(session, Date.now());
+    this.#footer.content = t`${dim(fg(p.muted)(statusLineFrom(this.#thread, session)))}${retrying === undefined ? "" : dim(fg(p.muted)(`  ${retrying}`))}${detail === undefined ? "" : fg(p.warning)(`  ${detail}`)}`;
     this.#renderer.requestRender();
   }
 

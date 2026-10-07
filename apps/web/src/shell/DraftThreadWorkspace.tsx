@@ -84,6 +84,7 @@ import { HostSelector } from "./HostSelector";
 import { HomeStart, type HomeAction } from "./HomeStart";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { HomeDashboard } from "../home/HomeDashboard";
+import type { HomeComposerTabsSlot } from "../home/HomeComposerTabs";
 import type { HomeCardDefinition } from "../home/homeCards";
 import type { OctantHostBridge } from "./hostBridge";
 import { WorkKindSwitch } from "./WorkKindSwitch";
@@ -218,6 +219,8 @@ export interface DraftThreadWorkspaceProps {
     readonly cards?: ReadonlyArray<HomeCardDefinition>;
     readonly cardCustomization: HomeCardCustomization;
     readonly onCardCustomizationChange: (next: HomeCardCustomization) => void;
+    /** The Running tab above the composer; absent leaves the composer on its own. */
+    readonly composerTabs?: HomeComposerTabsSlot;
     /** Code only: a shell at the selected Project's root. Work has no shell. */
     readonly onOpenTerminal?: (projectId: ProjectId) => void;
   };
@@ -554,9 +557,14 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const homeStartNode = (() => {
     const home = props.homeStart;
-    if (home === undefined || (props.mode !== "code" && props.mode !== "work")) return undefined;
+    if (home === undefined) return undefined;
+    // Chat has no folder, terminal, or review to offer: its start screen
+    // carries the card area alone.
     const actions: HomeAction[] = [];
-    if (props.onCreateProject !== undefined || props.onAttachFolder !== undefined) {
+    if (
+      props.mode !== "chat" &&
+      (props.onCreateProject !== undefined || props.onAttachFolder !== undefined)
+    ) {
       actions.push({
         id: "add-folder",
         title: "Add a folder",
@@ -741,6 +749,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           runningCount={props.homeStart?.runningCount}
           suggestions={CODE_SUGGESTIONS}
           {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
+          {...(props.homeStart?.composerTabs === undefined
+            ? {}
+            : { composerTabs: props.homeStart.composerTabs })}
           {...(beneath === undefined ? {} : { beneath })}
           {...(promptRequest === undefined ? {} : { promptRequest })}
           {...hostSelectorBinding}
@@ -860,6 +871,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           reviewCount={props.homeStart?.reviewCount}
           runningCount={props.homeStart?.runningCount}
           {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
+          {...(props.homeStart?.composerTabs === undefined
+            ? {}
+            : { composerTabs: props.homeStart.composerTabs })}
           {...hostSelectorBinding}
           {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
@@ -1189,6 +1203,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             Press Enter to start · Shift+Enter for a new line · Escape to close
           </p>
         </div>
+
+        {homeStartNode}
 
         {(props.recentThreads?.length ?? 0) === 0 ? (
           <div className="draft-thread__intent-cards" role="group" aria-label="Suggested actions">

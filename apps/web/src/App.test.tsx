@@ -819,6 +819,39 @@ describe("App", () => {
     expect(screen.queryByRole("combobox", { name: "Search commands" })).not.toBeInTheDocument();
   });
 
+  it("opens the Review page from the command palette and leaves it with Back", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+    await screen.findByRole("region", { name: "Chat welcome" });
+
+    await user.keyboard("{Control>}k{/Control}");
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Search commands" })).toHaveFocus(),
+    );
+    await user.keyboard("review finished");
+    await user.keyboard("{Enter}");
+
+    // Nothing in this fixture is waiting, and the tile says the same.
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "To review · 0 finished threads" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "To review, 0" })).toBeVisible();
+    expect(screen.getByText("Nothing waiting for review")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Back to workspace" }));
+    expect(screen.queryByRole("heading", { name: /^To review ·/ })).toBeNull();
+    expect(await screen.findByRole("region", { name: "Chat welcome" })).toBeVisible();
+  });
+
   it("keeps a fresh wide workspace focused until a utility is chosen", async () => {
     render(
       <App
@@ -3379,6 +3412,35 @@ describe("App", () => {
     expect(
       screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
     ).toBeVisible();
+  });
+
+  it("shows the sidebar's own Running count on the start screen's Running tab and lists that thread there", async () => {
+    const user = userEvent.setup();
+    const codeApi = codes();
+    const listed = await codeApi.navigation();
+    vi.mocked(codeApi.navigation).mockResolvedValue({
+      ...listed,
+      runtime: [{ threadId: codeThreadId, executing: true }],
+    } as never);
+    render(
+      <App
+        codeClient={codeApi}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects({ ...projectBootstrap(), availability: [] })}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "New task" }));
+    const tile = await screen.findByRole("button", { name: "Running, 1" });
+    const tab = await screen.findByRole("tab", { name: "Running 1" });
+    expect(tile).toBeVisible();
+
+    await user.click(tab);
+    const list = await screen.findByRole("list", { name: "Running now" });
+    expect(within(list).getByText("Controller foundation")).toBeVisible();
   });
 
   it("keeps the threads to continue on screen when a new task starts over", async () => {

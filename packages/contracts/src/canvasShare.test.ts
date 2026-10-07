@@ -219,6 +219,63 @@ describe("Canvas share contracts", () => {
     expect(() => decodeCanvasStaticExportDocument({ ...document, blocks })).toThrow();
   });
 
+  it("round-trips entity-relationship, swimlane, and mind map blocks in a static export document", () => {
+    const blocks = [
+      {
+        blockId: "order-schema",
+        schemaVersion: 8,
+        kind: "er",
+        entities: [
+          {
+            entityId: "person",
+            label: "Person",
+            attributes: [{ attributeId: "person-id", name: "id", type: "uuid", key: true }],
+          },
+          {
+            entityId: "order",
+            label: "Order",
+            attributes: [{ attributeId: "order-id", name: "id", type: "uuid", key: true }],
+          },
+        ],
+        relationships: [
+          {
+            relationshipId: "person-places-order",
+            source: "person",
+            target: "order",
+            sourceCardinality: "one",
+            targetCardinality: "many",
+            label: "places",
+          },
+        ],
+      },
+      {
+        blockId: "support-flow",
+        schemaVersion: 8,
+        kind: "swimlane",
+        lanes: [
+          { laneId: "customer", label: "Customer", kind: "actor" },
+          { laneId: "support", label: "Support", kind: "team" },
+        ],
+        steps: [
+          { stepId: "report", laneId: "customer", label: "Report" },
+          { stepId: "triage", laneId: "support", label: "Is it a defect?", decision: true },
+        ],
+        connections: [{ connectionId: "report-triage", source: "report", target: "triage" }],
+      },
+      {
+        blockId: "release-mindmap",
+        schemaVersion: 8,
+        kind: "mindmap",
+        nodes: [
+          { nodeId: "release", label: "Release" },
+          { nodeId: "tests", label: "Tests", parentId: "release", note: "green on head" },
+        ],
+      },
+    ];
+    const exported = { ...document, blocks };
+    expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+  });
+
   it("round-trips pie, donut, stacked-bar, grouped-bar, and bar-line charts in a static export document", () => {
     const quarters = (id: string, values: ReadonlyArray<number>, mark?: "bar" | "line") => ({
       seriesId: id,
@@ -292,6 +349,27 @@ describe("Canvas share contracts", () => {
       const exported = { ...document, blocks: [block] };
       expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
     }
+  });
+
+  it("shares a metric with its number format, sparkline, direction, and caption", () => {
+    const exported = {
+      ...document,
+      blocks: [
+        {
+          blockId: "metric-trend",
+          schemaVersion: 1,
+          kind: "metric",
+          label: "Lines of code",
+          value: 1_360_000,
+          format: "compact",
+          delta: 12_400,
+          goodDirection: "up",
+          sparkline: [1.2, 1.24, 1.27, 1.3],
+          caption: "since last release",
+        },
+      ],
+    };
+    expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
   });
 
   it("rejects secret-bearing export text and credential query URLs at decode time", () => {

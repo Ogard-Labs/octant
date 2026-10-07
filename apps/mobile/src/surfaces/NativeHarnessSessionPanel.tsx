@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  harnessRetryStatusText,
   nativeHarnessSessionHeld,
   nativeHarnessStatusLabel,
   sessionStatsInputOf,
@@ -39,6 +40,7 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   const [preview, setPreview] = useState<NativeHarnessFollowUpPreview>();
   const [note, setNote] = useState<string>();
   const [answer, setAnswer] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     try {
@@ -55,12 +57,22 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
 
   useEffect(() => {
     void load();
-    const interval = setInterval(() => {
-      // A phone in a pocket does not need a session refresh.
-      if (AppState.currentState === "active") void load();
-    }, props.refreshIntervalMs ?? 8_000);
+    const interval = setInterval(
+      () => {
+        // A phone in a pocket does not need a session refresh. A running turn
+        // is read more often so a short retry is not missed.
+        if (AppState.currentState === "active") void load();
+      },
+      props.refreshIntervalMs ?? (view?.session.status === "running" ? 1_000 : 8_000),
+    );
     return () => clearInterval(interval);
-  }, [load, props.refreshIntervalMs]);
+  }, [load, props.refreshIntervalMs, view?.session.status]);
+
+  useEffect(() => {
+    if (view?.retrying === undefined) return;
+    const timer = setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [view?.retrying]);
 
   if (view === undefined || view === null) return null;
   const pendingQuestion = view.questions.find((question) => question.status === "pending");
@@ -149,6 +161,14 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
       {view.session.detail === undefined ? null : (
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
           {view.session.detail}
+        </Text>
+      )}
+      {view.retrying === undefined ? null : (
+        <Text
+          style={[mobileTypography.caption, { color: colors.textSecondary }]}
+          testID="mobile-native-harness-retry"
+        >
+          {harnessRetryStatusText(view.retrying, nowMs)}
         </Text>
       )}
       {pendingApproval === undefined ? null : (

@@ -23,6 +23,40 @@ describe("theme semantic token catalog", () => {
     expect(categories).toContain("status");
     expect(categories).toContain("diff");
     expect(categories).toContain("palette");
+    expect(categories).toContain("chart");
+  });
+
+  it("keeps every chart scale step clear of the workspace it is drawn on", () => {
+    // A scale step is a graphical mark, so it carries the 3:1 non-text
+    // contract, not the text one. The workspace is the stricter ground in both
+    // modes, so a step that clears it clears every surface a chart sits on.
+    const chartRoleIds = THEME_TOKEN_ROLES.filter((role) => role.category === "chart").map(
+      (role) => role.id,
+    );
+    expect(chartRoleIds).toEqual([
+      "chart-sequential-1",
+      "chart-sequential-2",
+      "chart-sequential-3",
+      "chart-sequential-4",
+      "chart-sequential-5",
+      "chart-diverging-1",
+      "chart-diverging-2",
+      "chart-diverging-3",
+      "chart-diverging-4",
+      "chart-diverging-5",
+    ]);
+    for (const role of THEME_TOKEN_ROLES.filter((item) => item.category === "chart")) {
+      expect(
+        meetsContrast(
+          role.defaultLight,
+          DEFAULT_LIGHT_TOKENS["workspace"] ?? "#ffffff",
+          "non-text",
+        ),
+      ).toBe(true);
+      expect(
+        meetsContrast(role.defaultDark, DEFAULT_DARK_TOKENS["workspace"] ?? "#1a1a1a", "non-text"),
+      ).toBe(true);
+    }
   });
 
   it("covers application foundation, navigation, editor, terminal, diff, focus, and status surfaces", () => {
