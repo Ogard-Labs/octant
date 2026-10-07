@@ -113,9 +113,11 @@ cross-mode, or cross-host placement is refused or offered in a new window.
 
 ## Start-screen cards
 
-Under the composer, the Work and Code start screens carry a card area: a
-**Customize** control on the right, then cards in a grid (two columns, one at
-phone width). The composer paints first; the area mounts on the frame after the
+Under the composer, every start screen carries a card area: Chat, Work, and
+Code, in each variant a mode has, including the Chat screen that also lists the
+threads to continue. It is the same area with the same stored setting on all of
+them; Chat has no folder tiles. The area is a **Customize** control on the
+right, then cards in a grid (two columns, one at phone width). The composer paints first; the area mounts on the frame after the
 first commit, and each card begins its reads only then, so a start screen never
 waits on a card. A card that is off or unavailable is never mounted and reads
 nothing.
@@ -205,6 +207,30 @@ Project and branch, with the failing check and a bounded excerpt of whatever
 failure text the refresh recorded already written in. It does not start a
 turn; the person sends it. Opening the card reads the same cached snapshot
 Pull requests reads and adds no poll.
+
+**Needs you** surfaces (a start-screen card, answering from Board cards, the
+command palette) read one host list of the approvals and
+questions this window can answer, across Chat, Work, and Code and across
+Projects, oldest waiting first. Each item names its mode, Project, thread and
+title, kind, text, options where the mode has them, and when it was asked, and
+carries the handle that mode's own answer command takes, so a surface answers
+in place through the commands the open thread already uses. The list is re-read
+on the Machine change feed's Chat, Work, and Code navigation topics and never
+on a timer; an answered or ended request is gone from the next read. It is read
+at a local window only, so a remote window has no Needs you source. What it
+includes and leaves out is in
+[Architecture: pending requests across modes](../architecture.md#security-and-authority).
+
+The command palette opens on a **Needs you** group when this window can read
+that list. It has one row per waiting thread, titled with the thread and
+detailed with its mode, what it waits on, and how long, and Enter opens the
+thread. Each approval also gets **Approve** and **Deny** commands, so typing
+"approve" finds them; they answer through the mode's own command
+(`resolve-work-request`, `answer-provider-approval`) without opening the thread,
+and a refusal shows as a notice. A question's choices are not listed, so its row
+opens the thread. The palette reads the list each time it opens and never on a
+timer. With nothing waiting, or at a remote window, the group is absent, and the
+composer `/` list never carries it.
 
 ## Tool lifecycles
 
@@ -403,15 +429,21 @@ Under the composer of every thread, in Chat, Work, and Code and for every provid
 quiet stats line states what the thread used: input and output tokens, the cache
 hit, output speed, time to first token, and cost. It reads the host's recorded
 turns and is worded by one shared module in `packages/domain`
-(`turnMetricsDisplay.ts`), which the composer, the Octant Harness session card, the
-terminal footer, and the phone's session panel all call, so the rules cannot
-drift. A figure the provider did not report, or whose denominator is zero, is
+(`turnMetricsDisplay.ts`), which the composer, the usage page, the Octant Harness
+session card, the terminal footer, and the phone's session panel all call, so
+the rules cannot drift. A figure the provider did not report, or whose denominator is zero, is
 absent; a provider that reported no usage shows no line. A cache hit is never
 rounded up to a whole; an approximate speed carries a tilde and a tooltip that it
 is per turn and includes some tool time; a cost says "est." unless the provider
 reported it and is absent when the model has no price. Clicking the line, or
 **Turn details** in the context meter's popover, opens one turn at a time (tokens,
-timing, retries, cost). The line is on by default; `showThreadStats` in the shell
+timing, retries, cost). The usage page's per-thread rows and the turn drill-in
+under each row call this same module, so a thread shows the same cache, speed,
+first-token, and cost figures there as under its composer. Those columns are
+left out when no row can state them. The rows read `turnMetrics` on the existing
+usage query; they do not add a second accounting path. A reading of one thread
+uses that thread's totals. A reading that mixes threads and has scrolled past
+the latest turns says those rows cover only the turns still listed. The line is on by default; `showThreadStats` in the shell
 settings is the one shared preference, set from the eye button on the line, the
 switch in the context meter's popover, and Settings › Appearance › Reading. Off hides
 only the line; the details stay reachable.

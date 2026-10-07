@@ -32,6 +32,7 @@ import {
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { sendWithEndpointRetry } from "./endpointRetry";
 import { runProviderEffect } from "./runProviderEffect";
+import { capabilityEchoToolDefinition, isCapabilityEchoToolCall } from "./openAiToolEncoding";
 import {
   directEndpointRequestResolver,
   honestDirectEndpointCapabilities,
@@ -141,6 +142,10 @@ export function makeAnthropicCompatibleDriver(
                 gate.kind === "oauth",
               );
               const result = await probeAnthropicModels(endpoint);
+              // A person's tool verification outlives routine probes, which
+              // run no generating request of their own.
+              const priorVerified =
+                options.runtimeRegistry.observedState(instanceId)?.verifiedToolModelIds;
               const probe = decodeProviderObservedState({
                 instanceId,
                 readiness: result.readiness,
@@ -150,12 +155,62 @@ export function makeAnthropicCompatibleDriver(
                   : {}),
                 models: result.models,
                 capabilities: initialCapabilities,
+                ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
                 ...(result.failure === undefined ? {} : { message: result.failure.message }),
                 lastSuccessfulProbeAt: observedAt,
                 observedAt,
               });
               options.runtimeRegistry.setObservedState(probe);
               return probe;
+            },
+            catch: sanitizeFailure,
+          }),
+    verifyToolCapability: ({ instanceId, modelId }) =>
+      instanceId !== options.instanceId
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : Effect.tryPromise({
+            try: async () => {
+              const observedAt = clock();
+              const gate = await inspectDirectEndpointCredential({
+                authentication: options.configuration.authentication,
+                expectedDescriptorId: options.configuration.oauthDescriptorId,
+                credentialResolver: options.credentialResolver,
+                instanceId,
+                host: options.subscriptionOAuth,
+                now: () => Date.parse(observedAt),
+                baseUrl: options.configuration.baseUrl,
+              });
+              if (gate.kind === "report") throw failure(gate.readiness, gate.message);
+              const endpoint = endpointFor(
+                options,
+                gate.kind === "oauth"
+                  ? directEndpointRequestResolver(anthropicOAuthInput(options, clock))
+                  : options.credentialResolver,
+                gate.kind === "oauth",
+              );
+              // One forced tool call proves the model answers with a tool use.
+              // Transport failures (auth, timeout, provider error) propagate so
+              // the person sees the real error instead of a false "unsupported".
+              const result = await runProviderEffect(
+                sendAnthropicMessagesTurn({
+                  endpoint,
+                  modelId,
+                  history: [],
+                  prompt: "echo ready",
+                  tools: [capabilityEchoToolDefinition()],
+                  toolChoice: "required",
+                  maxTokens: 256,
+                }),
+              );
+              return {
+                instanceId,
+                modelId,
+                appManagedTools: result.toolCalls.some((call) =>
+                  isCapabilityEchoToolCall(call.toolName),
+                )
+                  ? ("supported" as const)
+                  : ("unsupported" as const),
+              };
             },
             catch: sanitizeFailure,
           }),
@@ -342,6 +397,9 @@ function recordObservedTurn(
       usage: result.usage === undefined ? "unavailable" : "supported",
     },
     ...(current?.message === undefined ? {} : { message: current.message }),
+    ...(current?.verifiedToolModelIds === undefined
+      ? {}
+      : { verifiedToolModelIds: current.verifiedToolModelIds }),
     ...(current?.lastSuccessfulProbeAt === undefined
       ? {}
       : { lastSuccessfulProbeAt: current.lastSuccessfulProbeAt }),

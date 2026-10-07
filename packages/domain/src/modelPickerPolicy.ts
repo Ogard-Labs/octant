@@ -85,7 +85,8 @@ export function modelBadges(
     (model.capabilityEvidence ?? []).filter(({ capability }) => capability === "tool-calling"),
   );
   const providerVerified =
-    driverKind === "azure-foundry" &&
+    driverKind !== undefined &&
+    isNativeHarnessDriverKind(driverKind) &&
     verifiedToolModelIds.some((id) => String(id) === String(model.id));
   if (
     (toolSupport === "supported" || providerVerified) &&
@@ -121,6 +122,14 @@ export interface PickerModel {
   readonly model: ProviderModel;
   readonly badges: ReadonlyArray<ModelBadge>;
   readonly toolCapable: boolean;
+  /**
+   * The model is Chat-only for Octant tools today, and a person can prove
+   * otherwise: Octant drives this endpoint itself, so one explicit paid
+   * request ("Verify tools") records whether the model calls a tool. Absent
+   * for models that are already tool-capable and for runtimes that supply
+   * their own tools.
+   */
+  readonly toolsVerifiable?: true;
   readonly unavailableReason?: string;
   /**
    * The upstream catalog the model came from, when the provider namespaces its
@@ -367,6 +376,7 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       input.mode,
       instance.driverKind,
       observed.verifiedToolModelIds ?? [],
+      observed.capabilities.appManagedTools === "supported",
     );
     const currentSelection = input.currentSelection;
     const hiddenCurrentModel =
@@ -383,6 +393,7 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
             input.mode,
             instance.driverKind,
             observed.verifiedToolModelIds ?? [],
+            observed.capabilities.appManagedTools === "supported",
           )
             .flatMap((section) => section.models)
             .at(0);
@@ -437,21 +448,26 @@ function sectionModels(
   mode: OctantMode,
   driverKind: ProviderDriverKind,
   verifiedToolModelIds: ReadonlyArray<ProviderModelId>,
+  providerCarriesTools: boolean,
 ): ReadonlyArray<PickerSection> {
   if (mode === "chat") {
-    const allModels = models.map((model) => toPickerModel(model, driverKind, verifiedToolModelIds));
+    // A Chat turn on a provider that already carries Octant tools needs no
+    // per-model proof, so only the others are offered one.
+    const allModels = models.map((model) =>
+      toPickerModel(model, driverKind, verifiedToolModelIds, providerCarriesTools),
+    );
     return allModels.length === 0 ? [] : [{ id: "all-models", label: "Models", models: allModels }];
   }
   const toolCapable: PickerModel[] = [];
   const chatOnly: PickerModel[] = [];
   for (const model of models) {
-    const picker = toPickerModel(model, driverKind, verifiedToolModelIds);
+    const picker = toPickerModel(model, driverKind, verifiedToolModelIds, false);
     if (picker.toolCapable) {
       toolCapable.push(picker);
     } else {
       chatOnly.push({
         ...picker,
-        unavailableReason: chatOnlyReason(model),
+        unavailableReason: chatOnlyReason(model, picker.toolsVerifiable === true),
       });
     }
   }
@@ -473,27 +489,38 @@ function toPickerModel(
   model: ProviderModel,
   driverKind: ProviderDriverKind,
   verifiedToolModelIds: ReadonlyArray<ProviderModelId>,
+  providerCarriesTools: boolean,
 ): PickerModel {
   const catalog = modelCatalog(model.id);
+  const toolCapable = hasWorkToolAuthority(driverKind, model, verifiedToolModelIds);
   return {
     model,
     badges: modelBadges(model, driverKind, verifiedToolModelIds),
-    toolCapable: hasWorkToolAuthority(driverKind, model, verifiedToolModelIds),
+    toolCapable,
+    ...(!toolCapable && !providerCarriesTools && isNativeHarnessDriverKind(driverKind)
+      ? { toolsVerifiable: true as const }
+      : {}),
     ...(catalog === undefined ? {} : { catalog }),
   };
 }
 
-function chatOnlyReason(model: ProviderModel): string {
+function chatOnlyReason(model: ProviderModel, verifiable: boolean): string {
   const toolSupport = resolveCapabilitySupport(
     (model.capabilityEvidence ?? []).filter(({ capability }) => capability === "tool-calling"),
   );
   if (toolSupport === "unsupported") {
-    return "This model does not support tool calling. It can chat and analyze, but cannot execute Code or Work tools.";
+    return verifiable
+      ? "This model was reported without tool calling. It can chat and analyze; verify tools to check it yourself."
+      : "This model does not support tool calling. It can chat and analyze, but cannot execute Code or Work tools.";
   }
   if (toolSupport === "unavailable") {
-    return "Tool calling has not been verified for this model. Run a capability check before using it for tool work.";
+    return verifiable
+      ? "Chat only: tool calling has not been verified for this model. Verify tools to use it for Code or Work."
+      : "Tool calling has not been verified for this model. Run a capability check before using it for tool work.";
   }
-  return "Tool calling is not verified for this provider instance. It can chat and analyze only.";
+  return verifiable
+    ? "Chat only: tool calling is not verified for this model. Verify tools to use it for Code or Work."
+    : "Tool calling is not verified for this provider instance. It can chat and analyze only.";
 }
 
 function unavailableCurrentModel(
@@ -602,6 +629,22 @@ export function pickerGroupCarriesAppManagedTools(
   return (
     group.appManagedTools === "supported" ||
     (group.verifiedToolModelIds?.some((id) => String(id) === String(selection.modelId)) ?? false)
+  );
+}
+
+/**
+ * Whether Octant will send tools to this model: the provider carries them for
+ * every model, or a person verified this one. The same rule the server applies
+ * when a turn ships tools, so a settings page can say "Chat only" before the
+ * agent finds out.
+ */
+export function modelCarriesAppManagedTools(
+  observed: Pick<ProviderObservedState, "capabilities" | "verifiedToolModelIds">,
+  modelId: ProviderModelId,
+): boolean {
+  return (
+    observed.capabilities.appManagedTools === "supported" ||
+    (observed.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false)
   );
 }
 
