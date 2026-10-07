@@ -25,6 +25,17 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+The Add folder browser reads one directory at a time from the confined home root.
+Because a filesystem call on a cloud-synced or network-mounted entry can block
+indefinitely, the host checks a few entries at a time, bounds each entry's checks
+and the whole listing, and lists an entry it cannot verify within the budget as a
+plain folder. Such an entry carries only its unresolved name: binding it, or
+choosing it as an export folder, measures the path again and refuses it when that
+fails, stalls, or resolves outside the root. The client's request budget also
+covers reading the response body. A browse that fails returns an explicit
+failure the picker shows with Retry, and Retry re-issues the same folder and
+search rather than restarting at the root.
+
 The Project tree places each active thread under its listed Project or under
 **No project**, never both. No project is a collapsible folder row following
 the Projects with no horizontal divider or separate section heading. It is
@@ -305,8 +316,11 @@ Subagents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every
 other AgentRun control stay. A compact, collapsible Subagents card sits above
-the composer in normal layout. Its counts keep failures, waits and unreviewed
-results visible while collapsed; expansion previews up to three active or
+the composer in normal layout, as wide as the message surface. Its head counts each
+state (failed, waiting, to review, working, done) and keeps failures, waits and
+unreviewed results first while collapsed; a result the parent already received is
+done, not to review. While a Chat thread's host connection is lost it dims and
+withholds Stop without repeating the connection notice; expansion previews up to three active or
 unresolved children. Rows open the corresponding detail in Agents, and View all
 keeps completed history reachable. Provider-observed children carry an explicit
 observation-only label and no managed controls. Task-plan progress remains a
@@ -317,7 +331,8 @@ without starting them: only the thread's agent starts one, through the Octant
 Harness `delegate` tool, and collects its result. The list has one title, then
 Working and Finished sections of one-button rows —
 status icon, task, and state, role, model, and age in words — with finished
-rows newest first and an unreviewed result marked "Needs review". A row opens
+rows newest first and an unreviewed result marked "Needs review" unless the
+parent already received it. A row opens
 that subagent's page in place of the list, with a back control: its task as
 the title, a status line, and a small transcript that starts with the task as
 the brief, then the replies as rendered Markdown and status events as quiet

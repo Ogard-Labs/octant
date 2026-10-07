@@ -158,4 +158,46 @@ describe("the folder export destination", () => {
     expect(readdirSync(folder)).toEqual(["etc passwd.md"]);
     expect(statSync(join(folder, "etc passwd.md")).isFile()).toBe(true);
   });
+
+  it("writes beside a file that appeared after the card said none was there", async () => {
+    const folder = privateFolder();
+    const target = folderTarget(() => ({ kind: "ready", folder }));
+    const output = document({});
+
+    // The card named this file and said it would be written new, so approving
+    // it is not a confirmation to replace anything. A file that appears at the
+    // name before the approval is answered was never named to the person.
+    const described = target.describeDestination?.(output);
+    expect(described).toEqual({ path: join(folder, "Launch plan.md"), replacesExisting: false });
+    writeFileSync(join(folder, "Launch plan.md"), "what the person kept", "utf8");
+
+    const delivery = await target.exportDocument(output, described);
+
+    expect(delivery).toMatchObject({ kind: "receipt" });
+    expect(readFileSync(join(folder, "Launch plan.md"), "utf8")).toBe("what the person kept");
+    expect(readFileSync(join(folder, "Launch plan (2).md"), "utf8")).toBe(output.body);
+  });
+
+  it("refuses to write into a folder the approval card never named", async () => {
+    const approved = privateFolder();
+    const chosen = privateFolder();
+    let availability: FolderExportAvailability = { kind: "ready", folder: approved };
+    const target = folderTarget(() => availability);
+    const output = document({});
+    const described = target.describeDestination?.(output);
+    expect(described?.path).toBe(join(approved, "Launch plan.md"));
+
+    // The person picked a different folder while the card was open.
+    availability = { kind: "ready", folder: chosen };
+
+    const delivery = await target.exportDocument(output, described);
+
+    expect(delivery).toEqual({
+      kind: "refused",
+      code: "refused",
+      message: "The export folder changed after this export was approved.",
+    });
+    expect(readdirSync(approved)).toEqual([]);
+    expect(readdirSync(chosen)).toEqual([]);
+  });
 });
