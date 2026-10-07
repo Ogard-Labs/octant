@@ -6,6 +6,7 @@ import {
   decideReplicaRevocation,
   replicaJoinRequestIsFresh,
   replicaMembershipAcceptsKey,
+  revocationCut,
   REPLICA_JOIN_REQUEST_TTL_MS,
   type ReplicaMembershipFacts,
 } from "./replicaMembershipPolicy";
@@ -67,7 +68,7 @@ describe("replica membership policy", () => {
 
   it("refuses to approve a join request from a revoked identity", () => {
     const decision = decideReplicaJoinApproval({
-      facts: membership({ revocations: [ids.revoked] }),
+      facts: membership({ revocations: [{ instanceId: ids.revoked, lastAcceptedSequence: 0 }] }),
       joinRequest: {
         origin: { instanceId: ids.revoked, displayName: "Old PC" },
         subject: ids.revoked,
@@ -96,21 +97,35 @@ describe("replica membership policy", () => {
 
   it("revokes a member and keeps it revoked", () => {
     expect(decideReplicaRevocation(membership(), ids.local)).toEqual({ status: "revoked" });
-    expect(decideReplicaRevocation(membership({ revocations: [ids.local] }), ids.local)).toEqual({
+    expect(
+      decideReplicaRevocation(
+        membership({ revocations: [{ instanceId: ids.local, lastAcceptedSequence: 0 }] }),
+        ids.local,
+      ),
+    ).toEqual({
       status: "refused",
       reason: "revoked-instance",
     });
   });
 
-  it("accepts a member key and refuses the same key after revocation", () => {
-    expect(replicaMembershipAcceptsKey(membership(), ids.local, "pub-macbook")).toBe(true);
-    expect(
-      replicaMembershipAcceptsKey(
-        membership({ revocations: [ids.local] }),
-        ids.local,
-        "pub-macbook",
-      ),
-    ).toBe(false);
+  it("accepts a member key, and after a revocation only for entries up to its cut", () => {
+    expect(replicaMembershipAcceptsKey(membership(), ids.local, "pub-macbook", 7)).toBe(true);
+    const revoked = membership({
+      revocations: [{ instanceId: ids.local, lastAcceptedSequence: 3 }],
+    });
+    expect(replicaMembershipAcceptsKey(revoked, ids.local, "pub-macbook", 3)).toBe(true);
+    expect(replicaMembershipAcceptsKey(revoked, ids.local, "pub-macbook", 4)).toBe(false);
+  });
+
+  it("takes the earliest cut when two members revoke the same instance", () => {
+    const facts = membership({
+      revocations: [
+        { instanceId: ids.local, lastAcceptedSequence: 5 },
+        { instanceId: ids.local, lastAcceptedSequence: 2 },
+      ],
+    });
+    expect(revocationCut(facts, ids.local)).toBe(2);
+    expect(replicaMembershipAcceptsKey(facts, ids.local, "pub-macbook", 3)).toBe(false);
   });
 
   it("does not offer a join request past its freshness window", () => {

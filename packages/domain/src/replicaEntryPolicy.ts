@@ -59,10 +59,17 @@ export type ReplicaReconcileOutcome =
 type OverwriteName = Extract<(typeof REPLICA_RECONCILE_OUTCOMES)[number], "replace" | "overwrite">;
 export const replicaReconcileCannotOverwrite: [OverwriteName] extends [never] ? true : never = true;
 
-export interface ReplicaInstanceMembership {
-  readonly instanceId: ReplicaInstanceId;
-  readonly status: "member" | "revoked";
-}
+/**
+ * A revoked instance carries the cut its revocation named: entries it signed
+ * at or before that sequence keep counting, and later ones are refused.
+ */
+export type ReplicaInstanceMembership =
+  | { readonly instanceId: ReplicaInstanceId; readonly status: "member" }
+  | {
+      readonly instanceId: ReplicaInstanceId;
+      readonly status: "revoked";
+      readonly lastAcceptedSequence: number;
+    };
 
 export interface ReplicaAppliedEntry {
   readonly instanceId: ReplicaInstanceId;
@@ -114,16 +121,28 @@ function refuse(reason: ReplicaRefusalReason): ReplicaReconcileOutcome {
   return { outcome: "refused", reason };
 }
 
+/**
+ * Standing of an instance. With `sequence`, it is the standing of the entry
+ * that instance signed at that sequence: at or before every cut that names it,
+ * a revoked instance's entry still counts as a member's.
+ */
 function membership(
   state: ReplicaLocalState,
   instanceId: ReplicaInstanceId,
+  sequence?: number,
 ): "unknown" | "member" | "revoked" {
   const records = state.instances.filter(
     (instance) => String(instance.instanceId) === String(instanceId),
   );
   if (records.length === 0) return "unknown";
-  if (records.some((instance) => instance.status === "revoked")) return "revoked";
-  return "member";
+  const cuts = records.flatMap((instance) =>
+    instance.status === "revoked" ? [instance.lastAcceptedSequence] : [],
+  );
+  if (cuts.length === 0) return "member";
+  if (sequence !== undefined && sequence <= Math.min(...cuts)) {
+    return records.some((instance) => instance.status === "member") ? "member" : "revoked";
+  }
+  return "revoked";
 }
 
 function highestApplied(state: ReplicaLocalState, instanceId: ReplicaInstanceId): number {
@@ -228,7 +247,7 @@ function artifactOutcome(
     }
     return refuse("hash-mismatch");
   }
-  const standing = membership(state, entry.origin.instanceId);
+  const standing = membership(state, entry.origin.instanceId, entry.origin.sequence);
   if (standing === "unknown") return refuse("unknown-instance");
   if (standing === "revoked") return refuse("revoked-instance");
   if (behindSequence(state, entry)) return refuse("sequence-gap");
@@ -277,7 +296,7 @@ function membershipOutcome(
     // The sequence was written once. A different record cannot take its place.
     return refuse("membership-conflict");
   }
-  const wrote = membership(state, entry.origin.instanceId);
+  const wrote = membership(state, entry.origin.instanceId, entry.origin.sequence);
   if (entry.kind !== "join-request") {
     // A sequence-1 self-approval proves only that its writer holds the key the
     // record names, and any computer that can write to the store can mint

@@ -1,9 +1,11 @@
 /**
  * The device signing key for one replica store instance.
  *
- * The private half never leaves the host credential store (macOS Keychain or
- * Secret Service); only the public key, its fingerprint, and signatures are
- * exposed. Entries a computer publishes are signed here, and a membership
+ * The private half never leaves the host. It is kept in its own namespace of
+ * the host credential store (a separate macOS Keychain service, or a separate
+ * Secret Service attribute), which the provider credential routes cannot
+ * reach, and it is read into this process only to sign. Only the public key,
+ * its fingerprint, and signatures go anywhere else. Entries a computer publishes are signed here, and a membership
  * record binds the instance to the public key other computers verify against.
  */
 
@@ -19,7 +21,7 @@ import type { CredentialStore } from "@octant/host-runtime";
 
 /** Ed25519 keys are small and verification is fast on every supported host. */
 export const REPLICA_DEVICE_KEY_TYPE = "ed25519" as const;
-/** The credential store keys by UUID and is already scoped per host data store. */
+/** The device-key namespace keys by instance UUID and is scoped per host data store. */
 export const REPLICA_DEVICE_KEY_CREDENTIAL_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 

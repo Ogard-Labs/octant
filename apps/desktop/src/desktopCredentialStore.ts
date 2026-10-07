@@ -15,21 +15,27 @@ export type DesktopCredentialBackend =
       readonly kind: "keychain";
       readonly store: CredentialStore;
       readonly purgeStore: CredentialPurgeStore;
+      /** Replica device signing keys, in their own Keychain service. */
+      readonly replicaDeviceKeys: CredentialStore;
     }
   | {
       readonly kind: "secret-service";
       readonly store: CredentialStore;
       readonly purgeStore?: undefined;
+      /** Replica device signing keys, under their own Secret Service attribute. */
+      readonly replicaDeviceKeys: CredentialStore;
     }
   | {
       readonly kind: "credential-manager";
       readonly store: CredentialStore;
       readonly purgeStore?: undefined;
+      readonly replicaDeviceKeys?: undefined;
     }
   | {
       readonly kind: "unavailable";
       readonly store?: undefined;
       readonly purgeStore?: undefined;
+      readonly replicaDeviceKeys?: undefined;
     };
 
 /**
@@ -54,6 +60,10 @@ export async function resolveDesktopCredentialBackend(options: {
       purgeStore: makeKeychainCredentialPurgeStore(options.keychainHelperPath, {
         storeScope: options.storeScope,
       }),
+      replicaDeviceKeys: makeKeychainCredentialStore(options.keychainHelperPath, {
+        storeScope: options.storeScope,
+        namespace: "replica-device-key",
+      }),
     };
   }
   if (options.platform === "linux") {
@@ -62,6 +72,7 @@ export async function resolveDesktopCredentialBackend(options: {
     return {
       kind: "secret-service",
       store: makeSecretServiceCredentialStore(),
+      replicaDeviceKeys: makeSecretServiceCredentialStore({ namespace: "replica-device-key" }),
     };
   }
   if (options.platform === "win32") {

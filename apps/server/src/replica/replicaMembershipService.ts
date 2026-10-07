@@ -40,6 +40,7 @@ import {
   decideReplicaRevocation,
   replicaJoinRequestIsFresh,
   replicaMembershipAcceptsKey,
+  revocationCut,
   type ReplicaJoinRequestFacts,
   type ReplicaMembershipFacts,
 } from "@octant/domain/replica-membership-policy";
@@ -387,6 +388,14 @@ export class ReplicaMembershipService {
         subject,
       );
     }
+    if (keyBelongsToRevoked(state, deviceKey)) {
+      return this.#refuse(
+        "approve-join",
+        "revoked-instance",
+        "That device key belongs to a revoked computer.",
+        subject,
+      );
+    }
     const decision = decideReplicaJoinApproval({
       facts: domainFacts(state, local),
       joinRequest: {
@@ -598,6 +607,9 @@ export class ReplicaMembershipService {
         origin: { instanceId: local.instanceId, displayName: local.displayName, sequence },
         subject,
         subjectDisplayName: member.displayName,
+        // The cut: what this computer accepted from the revoked one. Every
+        // entry it signed later is refused everywhere.
+        lastAcceptedSequence: highestApplied(state, subject),
       }),
     );
     if (publish.status === "stopped") return publish.outcome;
@@ -647,6 +659,20 @@ export class ReplicaMembershipService {
       applied += walk.applied;
       if (walk.refused !== undefined) refused.push(walk.refused);
       if (walk.held !== undefined) held.push(walk.held);
+    }
+    // A revocation read later in this pull, or in an earlier one, cuts entries
+    // already applied from the revoked instance: those past the cut are
+    // refused now, and membership no longer counts them.
+    for (const entry of this.#ports.state().applied) {
+      const cut = revocationCut(this.#ports.state(), entry.instanceId);
+      if (cut === undefined || entry.sequence <= cut) continue;
+      const refusal: ReplicaReadRefusal = {
+        instanceId: entry.instanceId,
+        sequence: entry.sequence,
+        reason: "revoked-instance",
+      };
+      if (this.#ports.state().refusalRecorded(refusal)) continue;
+      refused.push(this.#refuseRead(refusal));
     }
     const now = this.#ports.clock();
     const after = this.#ports.state();
@@ -735,22 +761,42 @@ export class ReplicaMembershipService {
   ): ReturnType<typeof reconcileReplicaEntry> {
     const entry = read.entry;
     const origin = entry.origin.instanceId;
-    if (isRevoked(state, origin)) return { outcome: "refused", reason: "revoked-instance" };
+    const sequence = entry.origin.sequence;
+    const cut = revocationCut(state, origin);
+    if (cut !== undefined && sequence > cut) {
+      return { outcome: "refused", reason: "revoked-instance" };
+    }
     const facts = domainFacts(state, local);
     const member = state.members.find((m) => String(m.instanceId) === String(origin));
     let key: string | undefined;
-    if (member !== undefined && replicaMembershipAcceptsKey(facts, origin, member.publicKey)) {
+    if (
+      member !== undefined &&
+      replicaMembershipAcceptsKey(facts, origin, member.publicKey, sequence)
+    ) {
       key = member.publicKey;
     } else if (entry.kind === "join-request") {
       key = entry.subjectDeviceKey;
     }
     if (key === undefined) return { outcome: "refused", reason: "unknown-instance" };
+    // A new identity carrying a revoked computer's key is that computer back
+    // under another name, so its request or approval is refused.
+    if (
+      (entry.kind === "join-request" || entry.kind === "join-approved") &&
+      entry.subjectDeviceKey !== undefined &&
+      keyBelongsToRevoked(state, entry.subjectDeviceKey)
+    ) {
+      return { outcome: "refused", reason: "revoked-instance" };
+    }
     const localState: ReplicaLocalState = {
       localHostId: this.#ports.localHostId,
       localInstanceId: local.instanceId,
       instances: [
         ...state.members.map((m) => ({ instanceId: m.instanceId, status: "member" as const })),
-        ...state.revocations.map((id) => ({ instanceId: id, status: "revoked" as const })),
+        ...state.revocations.map((revoked) => ({
+          instanceId: revoked.instanceId,
+          status: "revoked" as const,
+          lastAcceptedSequence: revoked.lastAcceptedSequence,
+        })),
       ],
       applied: state.applied,
       // Artifact entries are held, not applied, so no local artifact facts
@@ -895,8 +941,13 @@ export class ReplicaMembershipService {
     store: ReplicaStore,
     command: "write-join-request" | "approve-join" | "revoke",
   ): Promise<ReplicaMembershipOutcome | undefined> {
-    const entry = this.#ports.state().pending;
+    const state = this.#ports.state();
+    const entry = state.pending;
     if (entry === undefined) return undefined;
+    // A revoked identity's stopped publish is dropped, not finished: its
+    // signature would be one the other computers refuse anyway, and the slot
+    // belongs to an identity this computer no longer writes as.
+    if (state.local === undefined || isRevoked(state, state.local.instanceId)) return undefined;
     const encoded = encoder.encode(encodeReplicaEntry(entry));
     let signature: string;
     try {
@@ -967,6 +1018,7 @@ export class ReplicaMembershipService {
         revoker: entry.origin.instanceId,
         sequence,
         subject: entry.subject,
+        lastAcceptedSequence: entry.lastAcceptedSequence ?? 0,
       });
     }
   }
@@ -1112,7 +1164,13 @@ function isMember(state: ReplicaMembershipState, instanceId: ReplicaInstanceId):
 }
 
 function isRevoked(state: ReplicaMembershipState, instanceId: ReplicaInstanceId): boolean {
-  return state.revocations.some((revoked) => String(revoked) === String(instanceId));
+  return state.revocations.some((revoked) => String(revoked.instanceId) === String(instanceId));
+}
+
+function keyBelongsToRevoked(state: ReplicaMembershipState, publicKey: string): boolean {
+  return state.members.some(
+    (member) => member.publicKey === publicKey && isRevoked(state, member.instanceId),
+  );
 }
 
 function highestApplied(state: ReplicaMembershipState, instanceId: ReplicaInstanceId): number {

@@ -8,6 +8,11 @@ const execFileAsync = promisify(execFile);
 export const SECRET_TOOL_PATH = "/usr/bin/secret-tool";
 export const SECRET_SERVICE_BUSCTL_PATH = "/usr/bin/busctl";
 export const SECRET_SERVICE_ATTRIBUTE = "octant";
+/**
+ * Replica device signing keys carry their own `service` attribute, so a
+ * provider credential lookup naming the same instance UUID never matches one.
+ */
+export const SECRET_SERVICE_REPLICA_DEVICE_KEY_ATTRIBUTE = "octant.replica-device-keys.v1";
 const DEFAULT_TIMEOUT_MS = 2_000;
 const MAX_OUTPUT_BYTES = 16 * 1_024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -68,6 +73,7 @@ export async function probeSecretService(
 export interface MakeSecretServiceCredentialStoreOptions {
   readonly execute?: SecretToolCommandExecutor;
   readonly timeoutMs?: number;
+  readonly namespace?: "provider" | "replica-device-key";
 }
 
 export function makeSecretServiceCredentialStore(
@@ -81,6 +87,11 @@ export function makeSecretServiceCredentialStore(
   if (!isAbsolute(SECRET_TOOL_PATH) || limits.timeoutMs <= 0) {
     throw new CredentialStoreFailure("invalid");
   }
+  const deviceKeys = options.namespace === "replica-device-key";
+  const serviceAttribute = deviceKeys
+    ? SECRET_SERVICE_REPLICA_DEVICE_KEY_ATTRIBUTE
+    : SECRET_SERVICE_ATTRIBUTE;
+  const label = deviceKeys ? "Octant replica device key" : "Octant provider credential";
 
   const invoke = async (
     operation: "set" | "has" | "resolve" | "delete",
@@ -95,14 +106,7 @@ export function makeSecretServiceCredentialStore(
       }
       spec = {
         command: SECRET_TOOL_PATH,
-        args: [
-          "store",
-          "--label=Octant provider credential",
-          "service",
-          SECRET_SERVICE_ATTRIBUTE,
-          "account",
-          normalizedId,
-        ],
+        args: ["store", `--label=${label}`, "service", serviceAttribute, "account", normalizedId],
         // secret-tool store reads until EOF; a trailing newline would be stored.
         stdin: credential,
       };
@@ -112,7 +116,7 @@ export function makeSecretServiceCredentialStore(
         args: [
           operation === "delete" ? "clear" : "lookup",
           "service",
-          SECRET_SERVICE_ATTRIBUTE,
+          serviceAttribute,
           "account",
           normalizedId,
         ],

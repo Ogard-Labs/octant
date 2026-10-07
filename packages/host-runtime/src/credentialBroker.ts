@@ -27,6 +27,10 @@ const ROUTES = new Set([
   "/v1/credentials/set",
   "/v1/credentials/delete",
   "/v1/credentials/purge",
+  "/v1/replica-device-keys/has",
+  "/v1/replica-device-keys/resolve",
+  "/v1/replica-device-keys/set",
+  "/v1/replica-device-keys/delete",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
@@ -56,6 +60,13 @@ export async function startCredentialBroker(
     readonly timeoutMs?: number;
     readonly sleep?: (ms: number) => Promise<void>;
   },
+  /**
+   * Replica device signing keys, in their own credential namespace. They are
+   * served only on `/v1/replica-device-keys/*`; the provider routes reach a
+   * different store, so a provider instance with the same UUID can never
+   * read, replace, or delete one.
+   */
+  replicaDeviceKeys?: CredentialStore,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -67,7 +78,15 @@ export async function startCredentialBroker(
   });
   let brokerUrl: string | undefined;
   const server = createServer((incoming, outgoing) => {
-    void handleIncoming(incoming, brokerUrl, token, store, purgeStore, runtime).then(
+    void handleIncoming(
+      incoming,
+      brokerUrl,
+      token,
+      store,
+      purgeStore,
+      runtime,
+      replicaDeviceKeys,
+    ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
         response.headers.forEach((value, name) => {
@@ -127,7 +146,15 @@ export async function startCredentialBroker(
     token,
     close,
     fetchForTest: (request: Request, peerAddress = "127.0.0.1") =>
-      handleBrokerRequest(request, peerAddress, token, store, purgeStore, runtime),
+      handleBrokerRequest(
+        request,
+        peerAddress,
+        token,
+        store,
+        purgeStore,
+        runtime,
+        replicaDeviceKeys,
+      ),
   });
 }
 
@@ -138,6 +165,7 @@ async function handleIncoming(
   store: CredentialStore,
   purgeStore: CredentialPurgeStore | undefined,
   runtime: HostOAuthRuntime,
+  replicaDeviceKeys: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -167,6 +195,7 @@ async function handleIncoming(
         store,
         purgeStore,
         runtime,
+        replicaDeviceKeys,
       ),
     ),
   };
@@ -179,6 +208,7 @@ async function handleBrokerRequest(
   store: CredentialStore,
   purgeStore: CredentialPurgeStore | undefined,
   runtime: HostOAuthRuntime,
+  replicaDeviceKeys: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -196,6 +226,11 @@ async function handleBrokerRequest(
 
   if (url.pathname.startsWith("/v1/oauth/")) {
     return handleHostOAuthBrokerRoute(url.pathname, request, runtime);
+  }
+
+  if (url.pathname.startsWith("/v1/replica-device-keys/")) {
+    if (replicaDeviceKeys === undefined) return failure("not-found", 404);
+    return handleReplicaDeviceKeyRoute(url.pathname, request, replicaDeviceKeys);
   }
 
   if (url.pathname === "/v1/credentials/purge") {
@@ -225,7 +260,7 @@ async function handleBrokerRequest(
     if (decoded.kind === "too-large") return failure("too-large", 413);
     if (decoded.kind === "invalid") return failure("invalid-request", 400);
     try {
-      await store.set(decoded.providerInstanceId, decoded.credential);
+      await store.set(decoded.id, decoded.credential);
       return Response.json({ stored: true });
     } catch (error) {
       return credentialStoreFailure(error);
@@ -238,15 +273,52 @@ async function handleBrokerRequest(
 
   try {
     if (url.pathname === "/v1/credentials/has") {
-      return Response.json({ present: await store.has(decoded.providerInstanceId) });
+      return Response.json({ present: await store.has(decoded.id) });
     }
     if (url.pathname === "/v1/credentials/delete") {
-      await store.delete(decoded.providerInstanceId);
+      await store.delete(decoded.id);
       return Response.json({ deleted: true });
     }
-    const credential = await store.resolve(decoded.providerInstanceId);
+    const credential = await store.resolve(decoded.id);
     if (isHostOAuthGrantMaterial(credential)) return failure("oauth-material", 403);
     return Response.json({ credential });
+  } catch (error) {
+    return credentialStoreFailure(error);
+  }
+}
+
+/**
+ * The device-key routes reach only the device-key store and name the replica
+ * instance, never a provider instance.
+ */
+async function handleReplicaDeviceKeyRoute(
+  pathname: string,
+  request: Request,
+  store: CredentialStore,
+): Promise<Response> {
+  if (pathname === "/v1/replica-device-keys/set") {
+    const decoded = await readSetJson(request, "instanceId");
+    if (decoded.kind === "too-large") return failure("too-large", 413);
+    if (decoded.kind === "invalid") return failure("invalid-request", 400);
+    try {
+      await store.set(decoded.id, decoded.credential);
+      return Response.json({ stored: true });
+    } catch (error) {
+      return credentialStoreFailure(error);
+    }
+  }
+  const decoded = await readJson(request, "instanceId");
+  if (decoded.kind === "too-large") return failure("too-large", 413);
+  if (decoded.kind === "invalid") return failure("invalid-request", 400);
+  try {
+    if (pathname === "/v1/replica-device-keys/has") {
+      return Response.json({ present: await store.has(decoded.id) });
+    }
+    if (pathname === "/v1/replica-device-keys/delete") {
+      await store.delete(decoded.id);
+      return Response.json({ deleted: true });
+    }
+    return Response.json({ credential: await store.resolve(decoded.id) });
   } catch (error) {
     return credentialStoreFailure(error);
   }
@@ -281,10 +353,9 @@ function isLoopbackPeer(address: string): boolean {
 
 async function readSetJson(
   request: Request,
+  field: "providerInstanceId" | "instanceId" = "providerInstanceId",
 ): Promise<
-  | { kind: "ok"; providerInstanceId: string; credential: string }
-  | { kind: "invalid" }
-  | { kind: "too-large" }
+  { kind: "ok"; id: string; credential: string } | { kind: "invalid" } | { kind: "too-large" }
 > {
   const declared = request.headers.get("content-length");
   if (declared !== null && /^\d+$/.test(declared) && BigInt(declared) > BigInt(BODY_LIMIT)) {
@@ -295,20 +366,17 @@ async function readSetJson(
   try {
     const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     if (!isRecord(value) || Object.keys(value).length !== 2) return { kind: "invalid" };
+    const id = value[field];
     if (
-      typeof value.providerInstanceId !== "string" ||
-      !UUID_PATTERN.test(value.providerInstanceId) ||
+      typeof id !== "string" ||
+      !UUID_PATTERN.test(id) ||
       typeof value.credential !== "string" ||
       value.credential.length === 0 ||
       Buffer.byteLength(value.credential, "utf8") > MAX_CREDENTIAL_BYTES
     ) {
       return { kind: "invalid" };
     }
-    return {
-      kind: "ok",
-      providerInstanceId: value.providerInstanceId,
-      credential: value.credential,
-    };
+    return { kind: "ok", id, credential: value.credential };
   } catch {
     return { kind: "invalid" };
   }
@@ -316,9 +384,8 @@ async function readSetJson(
 
 async function readJson(
   request: Request,
-): Promise<
-  { kind: "ok"; providerInstanceId: string } | { kind: "invalid" } | { kind: "too-large" }
-> {
+  field: "providerInstanceId" | "instanceId" = "providerInstanceId",
+): Promise<{ kind: "ok"; id: string } | { kind: "invalid" } | { kind: "too-large" }> {
   const declared = request.headers.get("content-length");
   if (declared !== null && /^\d+$/.test(declared) && BigInt(declared) > BigInt(BODY_LIMIT)) {
     return { kind: "too-large" };
@@ -328,13 +395,11 @@ async function readJson(
   try {
     const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     if (!isRecord(value) || Object.keys(value).length !== 1) return { kind: "invalid" };
-    if (
-      typeof value.providerInstanceId !== "string" ||
-      !UUID_PATTERN.test(value.providerInstanceId)
-    ) {
+    const id = value[field];
+    if (typeof id !== "string" || !UUID_PATTERN.test(id)) {
       return { kind: "invalid" };
     }
-    return { kind: "ok", providerInstanceId: value.providerInstanceId };
+    return { kind: "ok", id };
   } catch {
     return { kind: "invalid" };
   }

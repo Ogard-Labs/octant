@@ -1317,18 +1317,44 @@ flowchart LR
   Each entry is verified against the device key the journal holds for its
   origin; only a join request, the one record a computer that is not yet a
   member may write, is verified against the key it names. A bad or missing
-  signature, an unknown or revoked origin, a body whose origin is not its path,
-  an unreadable file, a gap, or a rewritten sequence is refused and journaled
-  before anything from that entry is applied, and the walk for that instance
-  stops there. A refusal is journaled once, not on every pull. Once a computer
-  has applied a revocation, it refuses every entry from the revoked instance
-  it has not already applied. Computers share no clock, so a reader cannot
-  tell whether such an entry was signed before or after the revocation; entries
-  it applied earlier stay applied. A revoked computer that joins again does so
-  as a new instance with its own sequence. Device signing
-  keys live per replica instance in the host credential store, reached through
-  the credential broker. The membership service asks Settings › Sync's store
-  selection for its store on every command. Two things are not wired: artifact
+  signature, an unknown or revoked origin, a new identity carrying a revoked
+  computer's key, a body whose origin is not its path, an unreadable file, or
+  a gap is refused and journaled before anything from that entry is applied,
+  and the walk for that instance stops there. A refusal is journaled once, not
+  on every pull. A sequence a computer has already applied is not read again,
+  so a file rewritten in that slot later is ignored, not detected. Anyone who
+  can write to the store can also put a file into a member's next free slot
+  first: that member's next publish then fails as slot-occupied, and nothing
+  it writes later can land, because the store is write-once and Octant never
+  deletes from it. A person recovers by deleting that file with the storage
+  provider's own tools, revoking the store credentials that wrote it, or
+  moving to a new store. A revoked identity's stopped publish is dropped, not
+  finished. A revocation is
+  a cut: it names the last sequence of the revoked instance that the revoker
+  accepted (what the revoker had read from it, so a person pulls before
+  revoking to keep that computer's earlier approvals). Every entry the revoked
+  instance signed after the cut is refused on every computer, and approvals it
+  made at or before the cut stay valid. Membership is worked out from all the
+  approvals and revocations a computer holds rather than in the order a pull
+  read them: a member is one admitted by an approval its approver signed
+  within every cut on that approver, and a revocation counts when its revoker
+  signed it the same way. When revocations cut each other's revokers, every
+  one that could be valid is honoured, so two computers that revoked each
+  other without seeing the other's record both stay revoked. An entry already
+  applied that falls past a cut read later is refused then, and a computer
+  admitted only through it is not a member. When two members cut the same
+  instance, the earlier cut wins. A revoked computer that joins again does so
+  as a new instance with its own sequence, and a new identity carrying a
+  revoked computer's key is refused. Device signing
+  keys live per replica instance in their own namespace of the host credential
+  store — a separate macOS Keychain service, `app.octant.replica-device-keys.v1`,
+  or a separate Secret Service attribute — reached through the credential
+  broker's device-key routes. The provider credential routes reach a different
+  namespace, so a provider instance created with the same UUID cannot read,
+  replace, or delete a device key; a key is written once and never replaced,
+  and the private half never leaves the host.
+  The membership service asks Settings › Sync's store selection for its store
+  on every command. Two things are not wired: artifact
   versions are neither published nor imported — a pull stops at a verified
   artifact entry and reads it again later, rather than marking it applied — and
   no surface creates a replica, joins, or revokes. A person can choose a store
@@ -1342,9 +1368,12 @@ flowchart LR
   folder arrives as a candidate from the host's folder browser, which the host
   resolves and judges inside home, never as a path. A bucket's settings carry
   no secret: the access key and secret travel once, in the command that saves
-  them, into the host credential store through the credential broker, and the
-  settings hold only an opaque reference to that entry, which is removed when
-  another store is chosen. The choice is journaled whole as one host settings
+  them, into the host credential store, and the settings hold only an opaque
+  reference to that entry, which is removed when another store is chosen. That
+  key pair belongs in a credential namespace of its own that no provider
+  instance id reaches, as the device keys have; the broker does not serve one
+  yet, so saving a bucket is refused as `credential-store-unavailable` and only
+  a folder can be chosen today. The choice is journaled whole as one host settings
   aggregate, rebuilt on every start, and versioned, so two windows cannot
   overwrite each other. Choosing or changing the store turns sync off, so the
   person reads Settings' statement that the provider can read the files again
@@ -2626,8 +2655,8 @@ mechanisms are:
   journaled with its principal.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
-  replica instance, in its own credential store — not a paired client's device
-  key. There is no replica key. An entry from an
+  replica instance, in a credential namespace of its own that provider
+  credentials cannot reach — not a paired client's device key. There is no replica key. An entry from an
   unknown or revoked host, or one that fails verification, is refused and
   journaled. A new computer joins by writing a join request into the store,
   signed over the time it was written; a request older than a day is not

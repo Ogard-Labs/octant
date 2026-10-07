@@ -47,15 +47,31 @@ export type KeychainHelperExecutor = (
   limits: KeychainHelperLimits,
 ) => Promise<KeychainHelperResult>;
 
+/**
+ * Which Keychain service an item lives in. Replica device signing keys have
+ * their own, so a provider credential request naming the same instance UUID
+ * can never read, replace, or delete one.
+ */
+export type KeychainCredentialNamespace = "provider" | "replica-device-key";
+
 export function keychainHelperSpec(
   helperPath: string,
   request: KeychainHelperRequest,
   storeScope: string,
+  namespace: KeychainCredentialNamespace = "provider",
 ): KeychainHelperSpec {
+  if (namespace === "provider") {
+    return {
+      command: helperPath,
+      args: [],
+      stdin: `${JSON.stringify({ version: 1, storeScope, ...request })}\n`,
+    };
+  }
+  const { providerInstanceId, ...rest } = request;
   return {
     command: helperPath,
     args: [],
-    stdin: `${JSON.stringify({ version: 1, storeScope, ...request })}\n`,
+    stdin: `${JSON.stringify({ version: 1, storeScope, namespace, instanceId: providerInstanceId, ...rest })}\n`,
   };
 }
 
@@ -64,6 +80,7 @@ interface MakeKeychainCredentialStoreOptions {
   /** Opaque host-derived identity for the selected local data store. */
   readonly storeScope: string;
   readonly timeoutMs?: number;
+  readonly namespace?: KeychainCredentialNamespace;
 }
 
 export function makeKeychainCredentialStore(
@@ -91,7 +108,12 @@ export function makeKeychainCredentialStore(
     }
 
     const normalizedRequest = { ...request, providerInstanceId };
-    const spec = keychainHelperSpec(helperPath, normalizedRequest, options.storeScope);
+    const spec = keychainHelperSpec(
+      helperPath,
+      normalizedRequest,
+      options.storeScope,
+      options.namespace,
+    );
     if (Buffer.byteLength(spec.stdin) > KEYCHAIN_HELPER_MAX_BYTES) {
       throw new CredentialStoreFailure("invalid");
     }

@@ -158,6 +158,13 @@ const ReplicaMembershipEntryFields = {
    * join request carries it.
    */
   requestedAt: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /**
+   * The last sequence of the revoked instance that the revoker accepts; 0 when
+   * it accepted none. Every entry that instance signed after it is refused on
+   * every computer, whatever order a pull reads the logs in. Only a revocation
+   * carries it, and the signature covers it.
+   */
+  lastAcceptedSequence: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
 } as const;
 
 export const ReplicaMembershipEntry = Schema.Struct(ReplicaMembershipEntryFields)
@@ -169,17 +176,26 @@ export const ReplicaMembershipEntry = Schema.Struct(ReplicaMembershipEntryFields
           return (
             String(entry.subject) === String(entry.origin.instanceId) &&
             entry.subjectDeviceKey !== undefined &&
-            entry.requestedAt !== undefined
+            entry.requestedAt !== undefined &&
+            entry.lastAcceptedSequence === undefined
           );
         }
         if (entry.kind === "join-approved") {
-          return entry.subjectDeviceKey !== undefined && entry.requestedAt === undefined;
+          return (
+            entry.subjectDeviceKey !== undefined &&
+            entry.requestedAt === undefined &&
+            entry.lastAcceptedSequence === undefined
+          );
         }
-        return entry.subjectDeviceKey === undefined && entry.requestedAt === undefined;
+        return (
+          entry.subjectDeviceKey === undefined &&
+          entry.requestedAt === undefined &&
+          entry.lastAcceptedSequence !== undefined
+        );
       },
       {
         message: () =>
-          "A join request names the instance that wrote it, carries its device key, and says when it was written; an approval carries the approved device key; a revocation carries neither key nor time.",
+          "A join request names the instance that wrote it, carries its device key, and says when it was written; an approval carries the approved device key; a revocation carries the last accepted sequence and neither key nor time.",
       },
     ),
   );
@@ -277,6 +293,9 @@ export function encodeReplicaEntry(entry: ReplicaEntry): string {
           ? {}
           : { subjectDeviceKey: entry.subjectDeviceKey }),
         ...(entry.requestedAt === undefined ? {} : { requestedAt: entry.requestedAt }),
+        ...(entry.lastAcceptedSequence === undefined
+          ? {}
+          : { lastAcceptedSequence: entry.lastAcceptedSequence }),
       }
     : {
         format: entry.format,

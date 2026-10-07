@@ -5,6 +5,7 @@ import {
   probeSecretService,
   SECRET_SERVICE_ATTRIBUTE,
   SECRET_SERVICE_BUSCTL_PATH,
+  SECRET_SERVICE_REPLICA_DEVICE_KEY_ATTRIBUTE,
   SECRET_TOOL_PATH,
   type SecretToolCommandExecutor,
   type SecretToolCommandResult,
@@ -19,6 +20,26 @@ function result(overrides: Partial<SecretToolCommandResult> = {}): SecretToolCom
 }
 
 describe("Secret Service credential store", () => {
+  it("files replica device keys under their own service attribute", async () => {
+    const commands: Array<{ readonly args: readonly string[] }> = [];
+    const execute: SecretToolCommandExecutor = async (spec) => {
+      commands.push(spec);
+      return result({ stdout: spec.args[0] === "lookup" ? "device-private" : "" });
+    };
+    const deviceKeys = makeSecretServiceCredentialStore({
+      execute,
+      namespace: "replica-device-key",
+    });
+    await deviceKeys.set(providerInstanceId, "device-private");
+    await deviceKeys.resolve(providerInstanceId);
+    await deviceKeys.delete(providerInstanceId);
+    for (const command of commands) {
+      const service = command.args[command.args.indexOf("service") + 1];
+      expect(service).toBe(SECRET_SERVICE_REPLICA_DEVICE_KEY_ATTRIBUTE);
+      expect(service).not.toBe(SECRET_SERVICE_ATTRIBUTE);
+    }
+  });
+
   it("round-trips credentials through secret-tool stdin and fixed attributes", async () => {
     const values = new Map<string, string>();
     const commands: Array<{ command: string; args: readonly string[]; stdin?: string }> = [];

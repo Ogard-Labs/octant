@@ -35,11 +35,21 @@ export interface ReplicaMembershipMember {
   readonly publicKey: string;
 }
 
+/**
+ * A revocation the host applied. It is a cut: the revoked instance's entries
+ * at or before `lastAcceptedSequence` keep counting, and every later one is
+ * refused.
+ */
+export interface ReplicaRevocationCut {
+  readonly instanceId: ReplicaInstanceId;
+  readonly lastAcceptedSequence: number;
+}
+
 export interface ReplicaMembershipFacts {
   readonly localInstanceId: ReplicaInstanceId;
   readonly members: ReadonlyArray<ReplicaMembershipMember>;
-  /** Revocations the host has applied, in application order. */
-  readonly revocations: ReadonlyArray<ReplicaInstanceId>;
+  /** Revocations the host has applied. */
+  readonly revocations: ReadonlyArray<ReplicaRevocationCut>;
 }
 
 export interface ReplicaJoinRequestFacts {
@@ -145,10 +155,29 @@ export function replicaMembershipAcceptsKey(
   facts: ReplicaMembershipFacts,
   instanceId: ReplicaInstanceId,
   publicKey: string,
+  /** The sequence of the entry the key would verify. */
+  sequence: number,
 ): boolean {
-  if (isRevoked(facts, instanceId)) return false;
+  const cut = revocationCut(facts, instanceId);
+  if (cut !== undefined && sequence > cut) return false;
   const member = membershipRecord(facts, instanceId);
   return member !== undefined && member.publicKey === publicKey;
+}
+
+/** The earliest cut any applied revocation names for an instance. */
+export function revocationCut(
+  facts: Pick<ReplicaMembershipFacts, "revocations">,
+  instanceId: ReplicaInstanceId,
+): number | undefined {
+  let cut: number | undefined;
+  for (const revocation of facts.revocations) {
+    if (String(revocation.instanceId) !== String(instanceId)) continue;
+    cut =
+      cut === undefined
+        ? revocation.lastAcceptedSequence
+        : Math.min(cut, revocation.lastAcceptedSequence);
+  }
+  return cut;
 }
 
 function isMember(facts: ReplicaMembershipFacts, instanceId: ReplicaInstanceId): boolean {
@@ -156,7 +185,7 @@ function isMember(facts: ReplicaMembershipFacts, instanceId: ReplicaInstanceId):
 }
 
 function isRevoked(facts: ReplicaMembershipFacts, instanceId: ReplicaInstanceId): boolean {
-  return facts.revocations.some((revoked) => String(revoked) === String(instanceId));
+  return facts.revocations.some((revoked) => String(revoked.instanceId) === String(instanceId));
 }
 
 function hasMembershipRecord(

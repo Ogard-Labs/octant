@@ -468,6 +468,7 @@ import { makeAnthropicCompatibleDriver } from "./providers/anthropicCompatibleDr
 import { makeAzureFoundryDriver } from "./providers/azureFoundryDriver";
 import {
   makeCredentialBrokerClient,
+  makeReplicaDeviceKeyBrokerClient,
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
 import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
@@ -9948,15 +9949,15 @@ export function startOctantServer(
       }),
     });
     // Replica membership reads its facts from the journal and keeps device
-    // signing keys - and a bucket's access key pair - in the host credential
-    // store (Keychain on macOS, Secret Service on Linux) through the
-    // credential broker. Settings › Sync chooses the store; with sync off or
-    // no store chosen, every command answers `not-configured` and makes no
-    // store call.
-    const replicaCredentials =
+    // signing keys in their own namespace of the host credential store
+    // (Keychain on macOS, Secret Service on Linux), reached through the
+    // credential broker's device-key routes, never its provider routes.
+    // Settings › Sync chooses the store; with sync off or no store chosen,
+    // every command answers `not-configured` and makes no store call.
+    const replicaDeviceKeys =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
-        : makeCredentialBrokerClient({
+        : makeReplicaDeviceKeyBrokerClient({
             url: options.credentialBrokerUrl,
             token: options.credentialBrokerToken,
           });
@@ -9969,7 +9970,11 @@ export function startOctantServer(
       // The access-outside-project grant has no surface yet, so a sync folder
       // outside home fails closed, the same as the artifact mirror's folder.
       standingOutsideApproval: false,
-      credentials: replicaCredentials,
+      // A bucket's key pair needs a credential namespace of its own that no
+      // provider instance id can reach, as the device keys have. Until the
+      // broker serves one, no key pair is saved here: an S3-compatible store
+      // is refused rather than kept beside provider credentials.
+      credentials: undefined,
     });
     const replicaStoreSettingsRoutes = createReplicaStoreSettingsRouteHandler({
       service: replicaStoreSettingsService,
@@ -9981,12 +9986,12 @@ export function startOctantServer(
       store: () => replicaStoreSettingsService.selection(),
       credentials: {
         ensure: async (instanceId) => {
-          if (replicaCredentials === undefined) throw new Error("credential store unavailable");
-          return ensureReplicaDeviceKey(replicaCredentials, instanceId);
+          if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
+          return ensureReplicaDeviceKey(replicaDeviceKeys, instanceId);
         },
         sign: async (instanceId, payload) => {
-          if (replicaCredentials === undefined) throw new Error("credential store unavailable");
-          return makeReplicaDeviceSigner(replicaCredentials, instanceId).sign(payload);
+          if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
+          return makeReplicaDeviceSigner(replicaDeviceKeys, instanceId).sign(payload);
         },
       },
       journal: createReplicaMembershipJournal({

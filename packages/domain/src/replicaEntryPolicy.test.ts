@@ -222,6 +222,7 @@ function membershipEntry(
     readonly subjectDisplayName?: string;
     readonly subjectDeviceKey?: string;
     readonly requestedAt?: number;
+    readonly lastAcceptedSequence?: number;
   } = {},
 ): ReplicaMembershipEntry {
   const origin = {
@@ -242,6 +243,7 @@ function membershipEntry(
         }
       : {}),
     ...(kind === "join-request" ? { requestedAt: options.requestedAt ?? 0 } : {}),
+    ...(kind === "revocation" ? { lastAcceptedSequence: options.lastAcceptedSequence ?? 0 } : {}),
   });
 }
 
@@ -308,7 +310,7 @@ describe("reconciling a replica entry", () => {
       instances: [
         { instanceId: ids.local, status: "member" },
         { instanceId: ids.north, status: "member" },
-        { instanceId: ids.revoked, status: "revoked" },
+        { instanceId: ids.revoked, status: "revoked", lastAcceptedSequence: 0 },
       ],
     });
     expect(reconcileReplicaEntry(revoked, value)).toEqual({
@@ -476,7 +478,7 @@ describe("reconciling replica membership", () => {
     const revoked = state({
       instances: [
         { instanceId: ids.local, status: "member" },
-        { instanceId: ids.revoked, status: "revoked" },
+        { instanceId: ids.revoked, status: "revoked", lastAcceptedSequence: 0 },
       ],
     });
     expect(reconcileReplicaEntry(revoked, request)).toEqual({
@@ -520,7 +522,7 @@ describe("reconciling replica membership", () => {
       instances: [
         { instanceId: ids.local, status: "member" },
         { instanceId: ids.north, status: "member" },
-        { instanceId: ids.revoked, status: "revoked" },
+        { instanceId: ids.revoked, status: "revoked", lastAcceptedSequence: 0 },
       ],
     });
     expect(reconcileReplicaEntry(revoked, approval)).toEqual({
@@ -597,5 +599,41 @@ describe("reconciling replica membership", () => {
       ],
     });
     expect(reconcileReplicaEntry(joinerState, founding)).toEqual({ outcome: "already-present" });
+  });
+
+  it("keeps a revoked instance's entries up to its cut and refuses the ones after", () => {
+    const local = state({
+      instances: [
+        { instanceId: ids.local, status: "member" },
+        { instanceId: ids.north, status: "member" },
+        { instanceId: ids.north, status: "revoked", lastAcceptedSequence: 2 },
+      ],
+      applied: [{ instanceId: ids.north, sequence: 1, kind: "join-approved", subject: ids.north }],
+    });
+    const atCut = membershipEntry({
+      kind: "join-approved",
+      sequence: 2,
+      subject: ids.stranger,
+      subjectDisplayName: "Stranger",
+    });
+    expect(reconcileReplicaEntry(local, atCut)).toEqual({ outcome: "member-added" });
+    const afterCut = membershipEntry({
+      kind: "join-approved",
+      sequence: 2,
+      subject: ids.stranger,
+      subjectDisplayName: "Stranger",
+    });
+    const pastCut = state({
+      instances: [
+        { instanceId: ids.local, status: "member" },
+        { instanceId: ids.north, status: "member" },
+        { instanceId: ids.north, status: "revoked", lastAcceptedSequence: 1 },
+      ],
+      applied: [{ instanceId: ids.north, sequence: 1, kind: "join-approved", subject: ids.north }],
+    });
+    expect(reconcileReplicaEntry(pastCut, afterCut)).toEqual({
+      outcome: "refused",
+      reason: "revoked-instance",
+    });
   });
 });

@@ -28,7 +28,8 @@ browser cannot change it. Choose one store:
   only inside an `Octant Sync` folder in it. The folder must be inside your home
   folder.
 - **S3-compatible bucket.** Enter the connection details described
-  [below](#an-s3-compatible-bucket), then **Save**.
+  [below](#an-s3-compatible-bucket), then **Save**. This preview cannot save a
+  bucket's access key yet, so Settings shows the form but refuses to save it.
 - **None.** No store, and nothing is reachable.
 
 Changing the store turns sync off, so you read the fact above the switch again
@@ -71,8 +72,8 @@ the mirror folder is not this sync.
 An S3-compatible bucket needs its endpoint address, region, bucket name, an
 optional folder prefix, and whether the provider uses path-style or
 virtual-host addressing. The access key and secret are kept in your computer's
-Keychain (macOS) or Secret Service (Linux) — the same place your model provider
-credentials live. Octant never writes them to a store entry, to your journal,
+Keychain (macOS) or Secret Service (Linux), in an entry of their own that
+your model provider credentials cannot reach. Octant never writes them to a store entry, to your journal,
 or to a log. It contacts only the endpoint you configured, and only while sync
 is on. The endpoint must be an `https` address; a plain one is refused, and no
 credential is sent on it.
@@ -94,9 +95,12 @@ same six-digit code. You approve only if the codes match, then confirm on the
 new computer. The code is a check that both screens mean the same two
 computers; it is not a password, and nothing secret passes through the store.
 
-Revoking a computer writes a signed record. After your other computers read
-it, they refuse anything that computer writes. A revoked computer that wants
-back in joins again as a new computer.
+Revoking a computer writes a signed record that marks the last of its entries
+you accept. After your other computers read it, they refuse anything that
+computer wrote after that point, including computers it approved afterwards.
+Approvals it made before that point still stand, so read the store before you
+revoke if you want to keep a computer it already brought in. A revoked
+computer that wants back in joins again as a new computer, with a new key.
 
 ## Turning sync off
 
