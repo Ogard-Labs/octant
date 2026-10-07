@@ -4353,6 +4353,20 @@ function LaunchedShell(
           machineChanges.codeNavigation,
         now: minuteNow.getTime(),
         onClose: () => setReviewOpen(false),
+        codeProjectAccess: {
+          boundProjectId:
+            controller.boundCodeProjectId === undefined
+              ? undefined
+              : String(controller.boundCodeProjectId),
+          onOpenProject: (entry: ReviewEntry) => {
+            const project = projectController.allProjects.find(
+              (candidate) => String(candidate.id) === entry.projectId,
+            );
+            if (project === undefined || project.lifecycle !== "active") return;
+            // Binds the window without closing the page, so the person stays in review.
+            void controller.openProject(project.id, "code", project.name);
+          },
+        },
         onOpen: (entry: ReviewEntry) => {
           if (entry.mode === "chat") selectChatThread(entry.threadId);
           else if (entry.mode === "work") selectWorkThread(entry.threadId);

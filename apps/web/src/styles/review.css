@@ -188,6 +188,11 @@
   margin: 0;
 }
 
+/* The Open Project action keeps its own width instead of the grid's full row. */
+.review-section--closed {
+  justify-items: start;
+}
+
 .review-reply {
   min-width: 0;
   overflow-wrap: anywhere;

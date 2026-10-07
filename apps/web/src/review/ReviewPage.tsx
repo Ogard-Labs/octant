@@ -50,6 +50,16 @@ export interface ReviewPageProps {
   readonly onSnooze: (entry: ReviewEntry, until: string) => Promise<ReviewActionOutcome>;
   readonly onSendBack: (entry: ReviewEntry, prompt: string) => Promise<ReviewActionOutcome>;
   readonly onMarkSeen: (entry: ReviewEntry) => void;
+  /**
+   * The host lets a window read a Code thread only in the one Code Project the
+   * window is bound to, and the list spans every Project. Without this the page
+   * read threads elsewhere and showed the host's refusal ("Code thread is
+   * unauthorized") as their reply and changes.
+   */
+  readonly codeProjectAccess?: {
+    readonly boundProjectId: string | undefined;
+    readonly onOpenProject: (entry: ReviewEntry) => void;
+  };
   /** Injected in tests; otherwise the window's own keybindings. */
   readonly keybindings?: OctantKeybindings;
 }
@@ -217,16 +227,24 @@ export function ReviewPage(props: ReviewPageProps) {
     rootRef.current?.focus({ preventScroll: true });
   }, []);
 
-  const reply = useLoaded<ReviewReply | undefined>(selectedEntryKey, (signal) =>
+  const access = props.codeProjectAccess;
+  const projectClosed =
+    access !== undefined &&
+    selected?.mode === "code" &&
+    (selected.projectId === undefined ||
+      access.boundProjectId === undefined ||
+      String(selected.projectId) !== String(access.boundProjectId));
+  const readKey = projectClosed ? undefined : selectedEntryKey;
+  const reply = useLoaded<ReviewReply | undefined>(readKey, (signal) =>
     selected === undefined ? Promise.resolve(undefined) : props.source.loadReply(selected, signal),
   );
   // The checks and the diff need the checkout the board named, so they wait for
   // the facts read to settle, and read again when a thread whose facts had not
   // arrived yet (one that just finished) gets them.
   const detailKey =
-    selectedEntryKey === undefined || facts.status !== "ready"
+    readKey === undefined || facts.status !== "ready"
       ? undefined
-      : `${selectedEntryKey}:${String(selectedFacts?.checkoutId ?? "")}`;
+      : `${readKey}:${String(selectedFacts?.checkoutId ?? "")}`;
   const octantCheck = useLoaded<ReviewOctantCheck | undefined>(detailKey, async (signal) =>
     selected === undefined || props.source.loadOctantCheck === undefined
       ? undefined
@@ -550,23 +568,47 @@ export function ReviewPage(props: ReviewPageProps) {
                   </OctantAlert>
                 )}
               </header>
-              <LastReply reply={reply} />
-              {selected.mode === "chat" ? null : (
-                <Checks facts={selectedFacts} octant={octantCheck} />
+              {projectClosed && access !== undefined ? (
+                <section
+                  aria-label="Project not open"
+                  className="review-section review-section--closed"
+                >
+                  <p className="oct-meta">
+                    This thread is in {selected.projectName}. Open that Project to see its reply,
+                    checks and changes.
+                  </p>
+                  <OctantButton
+                    onClick={() => access.onOpenProject(selected)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Open {selected.projectName}
+                  </OctantButton>
+                </section>
+              ) : (
+                <>
+                  <LastReply reply={reply} />
+                  {selected.mode === "chat" ? null : (
+                    <Checks facts={selectedFacts} octant={octantCheck} />
+                  )}
+                  <ChangedFiles
+                    diff={diff}
+                    fileId={
+                      fileId !== undefined && fileId.key === selectedEntryKey
+                        ? fileId.id
+                        : undefined
+                    }
+                    onSelectFile={(id) =>
+                      selectedEntryKey === undefined
+                        ? undefined
+                        : setFileId({ key: selectedEntryKey, id })
+                    }
+                    reply={reply}
+                    workPaths={selected.mode === "work"}
+                  />
+                </>
               )}
-              <ChangedFiles
-                diff={diff}
-                fileId={
-                  fileId !== undefined && fileId.key === selectedEntryKey ? fileId.id : undefined
-                }
-                onSelectFile={(id) =>
-                  selectedEntryKey === undefined
-                    ? undefined
-                    : setFileId({ key: selectedEntryKey, id })
-                }
-                reply={reply}
-                workPaths={selected.mode === "work"}
-              />
             </section>
           </>
         )}

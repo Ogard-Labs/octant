@@ -1089,6 +1089,8 @@ export function useShellController(options: ShellControllerOptions) {
   return {
     activatePane,
     announcement: announcementEvent.message,
+    // The host reads a window's Code threads only in this Project.
+    boundCodeProjectId: authoritative?.workspace.contextByMode.code.projectId ?? undefined,
     announcementSequence: announcementEvent.sequence,
     availableSurfaces,
     clearFocus,

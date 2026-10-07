@@ -94,6 +94,46 @@ function current() {
 }
 
 describe("ReviewPage", () => {
+  it("asks to open a Code thread's Project instead of reading what the window may not read", async () => {
+    const elsewhere: ReviewEntry = { ...first, projectId: "p2", projectName: "Billing" };
+    const source = makeSource();
+    const onOpenProject = vi.fn();
+    const view = render(
+      <ReviewPage
+        {...props({
+          entries: [elsewhere],
+          source,
+          codeProjectAccess: { boundProjectId: "p1", onOpenProject },
+        })}
+      />,
+    );
+
+    expect(
+      await within(current()).findByText(
+        "This thread is in Billing. Open that Project to see its reply, checks and changes.",
+      ),
+    ).toBeInTheDocument();
+    expect(source.loadReply).not.toHaveBeenCalled();
+    expect(source.loadDiff).not.toHaveBeenCalled();
+    expect(within(current()).queryByText("Code thread is unauthorized.")).toBeNull();
+
+    await userEvent.click(within(current()).getByRole("button", { name: "Open Billing" }));
+    expect(onOpenProject).toHaveBeenCalledWith(elsewhere);
+
+    view.rerender(
+      <ReviewPage
+        {...props({
+          entries: [elsewhere],
+          source,
+          codeProjectAccess: { boundProjectId: "p2", onOpenProject },
+        })}
+      />,
+    );
+    expect(
+      await within(current()).findByText("Reply for Fix the sidebar clip"),
+    ).toBeInTheDocument();
+  });
+
   it("lists the finished threads oldest first with what changed and whether it worked", async () => {
     render(<ReviewPage {...props()} />);
 
