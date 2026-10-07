@@ -838,6 +838,7 @@ import {
   createHostControlRouteHandler,
   type HostControlServicePolicyPort,
 } from "./hostControlRoutes";
+import { createHostResourceRouteHandler } from "./hostResourceRoutes";
 import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
 import { createLiveHostExportService } from "./hostExportService";
@@ -9600,6 +9601,7 @@ export function startOctantServer(
     // gives this chain a loopback-shaped internal request; individual handlers
     // resolve the bound context through principalRouteContext before effects.
     const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
+      (await hostResourceRoutes(request)) ??
       (await projectBindingRoutes(request)) ??
       (await launchSessionRoutes(request)) ??
       (await machineChangeRoutes(request)) ??
@@ -9860,6 +9862,11 @@ export function startOctantServer(
     });
     const hostRuntimePlatform =
       process.platform === "darwin" || process.platform === "linux" ? process.platform : undefined;
+    const hostResourceRoutes = createHostResourceRouteHandler({
+      windowAuthorityStore,
+      dataDirectory: persistence.dataDirectory,
+      hostId: () => readHostIdentity(persistence.connection)?.host_id,
+    });
     const hostControlRoutes = createHostControlRouteHandler({
       windowAuthorityStore,
       diagnostics: composeHostDiagnostics,

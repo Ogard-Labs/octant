@@ -552,3 +552,110 @@
   min-height: 0;
   padding-inline: 0;
 }
+
+/* ── Computers ────────────────────────────────────────────────────────── */
+
+.computers-card__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.computers-card__row {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: var(--oct-space-2) var(--oct-space-1);
+}
+
+.computers-card__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.computers-card__dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--oct-fg-2);
+  border-radius: 50%;
+  background: transparent;
+}
+
+.computers-card__dot[data-connection="connected"] {
+  background: var(--oct-fg-2);
+}
+
+.computers-card__dot[data-connection="reconnecting"] {
+  background: transparent;
+}
+
+.computers-card__dot[data-connection="offline"] {
+  background: transparent;
+  border-style: dashed;
+}
+
+.computers-card__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.computers-card__state,
+.computers-card__capacity,
+.computers-card__seen {
+  flex: 0 0 auto;
+}
+
+.computers-card__bars {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.computers-card__meter {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 4.5rem minmax(0, 1fr) 2.5rem;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.computers-card__track {
+  display: block;
+  min-width: 0;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+}
+
+.computers-card__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--oct-fg-2);
+}
+
+.computers-card__percent {
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.computers-card__agents.computers-card__agents,
+.computers-card__more.computers-card__more {
+  justify-self: start;
+  height: auto;
+  min-height: 0;
+  padding-inline: 0;
+}
+
+@media (max-width: 390px) {
+  .computers-card__meter {
+    grid-template-columns: 3.25rem minmax(0, 1fr) 2.25rem;
+  }
+}

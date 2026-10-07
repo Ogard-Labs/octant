@@ -445,6 +445,9 @@ import { createWorkingNowCard, type WorkingNowCardSource } from "./home/WorkingN
 import { createNeedsYouCard } from "./home/NeedsYouCard";
 import { createPullRequestsCard } from "./home/PullRequestsCard";
 import { createCiFailuresCard } from "./home/CiFailuresCard";
+import { createComputersCard } from "./home/ComputersCard";
+import { computerConnection, sameHostOrigin } from "./home/computers";
+import { decodeHostResourceSnapshot } from "@octant/contracts/host-resources";
 import { currentCodeProjectBranches } from "./home/ciFailures";
 import {
   pullRequestCardAvailable,
@@ -1433,6 +1436,7 @@ function LaunchedShell(
     goalClient,
     goalLoopClient,
     hostClient,
+    hostResourceClient,
     pendingRequestClient,
     projectBrowserClient,
     projectTerminalClient,
@@ -1730,7 +1734,9 @@ function LaunchedShell(
     ],
   );
   const observedHosts = useHostObservation(hostClient);
-  const hostFederationLifecycle = useHostFederationLifecycle();
+  const federation = useHostFederationLifecycle();
+  const hostFederationLifecycle = federation?.lifecycle;
+  const hostFederationTransports = federation?.transports;
   const [federationRevision, setFederationRevision] = useState(0);
   useEffect(() => {
     if (hostFederationLifecycle === undefined) return;
@@ -4206,6 +4212,56 @@ function LaunchedShell(
   // question journals on its own mode's navigation topic.
   const pendingRequestFeedRevision =
     machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
+  const computerSnapshots = hostFederationLifecycle?.list() ?? [];
+  const computerLaunchHostId =
+    props.hostBridge !== undefined
+      ? String(LOCAL_HOST_ID)
+      : String(
+          computerSnapshots.find(
+            (snapshot) =>
+              snapshot.origin !== undefined &&
+              sameHostOrigin(snapshot.origin, props.launch.serverUrl),
+          )?.hostId ?? LOCAL_HOST_ID,
+        );
+  const computerHosts =
+    computerSnapshots.length === 0
+      ? [
+          {
+            hostId: String(LOCAL_HOST_ID),
+            name: localHostDisplayName(),
+            connection: "connected" as const,
+            figuresAllowed: props.hostBridge !== undefined,
+          },
+        ]
+      : computerSnapshots.map((snapshot) => {
+          const connection = computerConnection(snapshot.state);
+          return {
+            hostId: String(snapshot.hostId),
+            name: snapshot.displayName,
+            connection: connection.connection,
+            figuresAllowed: connection.figuresAllowed,
+            ...(snapshot.lastReadyAt === undefined ? {} : { lastSeenAt: snapshot.lastReadyAt }),
+          };
+        });
+  const readComputerResources = async (hostId: string) => {
+    if (hostId === computerLaunchHostId) return hostResourceClient.read();
+    const transport = hostFederationTransports?.remoteTransportFor(hostId);
+    if (transport === undefined) return { status: "refused" as const };
+    try {
+      const response = await transport.authenticatedFetch({
+        method: "GET",
+        path: "/api/host/resources",
+      });
+      if (response.status === 401 || response.status === 403) return { status: "refused" as const };
+      if (!response.ok) return { status: "unavailable" as const };
+      return {
+        status: "ready" as const,
+        snapshot: decodeHostResourceSnapshot(await response.json()),
+      };
+    } catch {
+      return { status: "unavailable" as const };
+    }
+  };
   // The card list is rebuilt each render and is cheap: each card's own rows are
   // memoized from the inputs above, which keep their identity between renders.
   const workingNowSource: WorkingNowCardSource = {
@@ -4313,6 +4369,26 @@ function LaunchedShell(
         setPendingDraftBranch(fix.branch);
         setDraftProjectSelection((current) => ({ ...current, code: fix.projectId }));
         void controller.openDraftThread("code", fix.projectId);
+      },
+    }),
+    createComputersCard({
+      hosts: computerHosts,
+      launchHostId: computerLaunchHostId,
+      agentRunClient,
+      runRevision:
+        machineChanges.chatNavigation +
+        machineChanges.workNavigation +
+        machineChanges.codeNavigation,
+      now: minuteNow.getTime(),
+      readResources: readComputerResources,
+      onOpenRunning: (hostId) => {
+        setEnvironmentSelection({ kind: "some", hostIds: new Set([hostId]) });
+        if (activeMode === "chat") {
+          openSidebarList("activity");
+          return;
+        }
+        pluginSidebarDestinationActionContext.closeOverlays();
+        pluginSidebarDestinationActionContext.openThreadBoard();
       },
     }),
   ];

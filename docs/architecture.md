@@ -199,6 +199,21 @@ that file and continues, and it checks the socket is still absent before the
 move so a peer that bound in the meantime keeps the secret it just wrote. An
 ownership failure names the code, the artifact path, and the next step.
 
+**Host resources.** `GET /api/host/resources` is a read-only snapshot of this
+host's load: CPU use averaged over a short sample of the process's CPU times,
+used and total memory, the core count, and used and free space on the volume
+that holds the data directory. The disk figures are omitted when that volume
+cannot be read. The snapshot names no path, no user, and no process. The server
+keeps one snapshot for about five seconds. The local owner always receives it.
+A paired remote device with an active session receives it under the same
+`project.overview.read` action as the Project overview reads; an
+unauthenticated caller is refused, with no figures in the refusal. The route
+also compares the device's host identity with this host's, but every paired
+device row on a host carries that host's own identity, so the comparison does
+not separate one paired device from another. The Computers card
+reads the route only while the card is on screen and the window is in front,
+about every ten seconds, and does not poll in the background.
+
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
 `@octant/client-runtime` and never holds authority of its own. In development
