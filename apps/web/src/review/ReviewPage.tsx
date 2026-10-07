@@ -227,6 +227,20 @@ export function ReviewPage(props: ReviewPageProps) {
     rootRef.current?.focus({ preventScroll: true });
   }, []);
 
+  // A control holding focus can leave with the thread it belonged to (a
+  // completed thread's row), which drops focus to the body. The page takes it
+  // back so its keys keep working. Focus that left the page first (a click
+  // elsewhere in the window) clears the record on blur, so it stays there.
+  const lastFocusedRef = useRef<Element | null>(null);
+  useEffect(() => {
+    const last = lastFocusedRef.current;
+    if (last === null || last.isConnected) return;
+    lastFocusedRef.current = null;
+    if (document.activeElement === null || document.activeElement === document.body) {
+      rootRef.current?.focus({ preventScroll: true });
+    }
+  });
+
   const access = props.codeProjectAccess;
   const projectClosed =
     access !== undefined &&
@@ -327,15 +341,9 @@ export function ReviewPage(props: ReviewPageProps) {
       if (isTypingTarget(target)) return;
       // Bare keys are safe only because the page owns them while it has focus:
       // a C pressed on a sidebar row must not complete the thread selected
-      // here. Focus that fell to the body, because the control holding it left
-      // with the thread it belonged to, still counts as the page.
+      // here, nor one pressed after a click left focus on the body.
       const page = rootRef.current?.closest(".review-page");
-      if (
-        target !== document.body &&
-        !(target instanceof Node && page?.contains(target) === true)
-      ) {
-        return;
-      }
+      if (!(target instanceof Node && page?.contains(target) === true)) return;
       // A menu, popover, or dialog owns its own keys while it is open.
       if (
         target instanceof HTMLElement &&
@@ -417,6 +425,20 @@ export function ReviewPage(props: ReviewPageProps) {
       <section
         aria-label="Review finished threads"
         className="review-page__body"
+        onBlur={(event) => {
+          const next = event.relatedTarget;
+          if (next instanceof Node && rootRef.current?.contains(next) === true) return;
+          // Focus leaving the page forgets the control, so a later removal of
+          // it does not pull focus back. A removal itself may also blur with
+          // no next target; the control is gone by then, so it is kept.
+          const left = event.target;
+          queueMicrotask(() => {
+            if (left.isConnected && lastFocusedRef.current === left) lastFocusedRef.current = null;
+          });
+        }}
+        onFocus={(event) => {
+          lastFocusedRef.current = event.target;
+        }}
         ref={rootRef}
         tabIndex={-1}
       >

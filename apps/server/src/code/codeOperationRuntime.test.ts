@@ -1250,6 +1250,68 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("refuses an answer to a turn that was cancelled while it waited, naming why", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(16);
+
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "approval-request",
+          requestId: "provider-approval-1",
+          action: "write",
+          description: "Modify src/a.ts",
+        }),
+      ),
+    );
+    let approvalId: string | undefined;
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+      const requested = frames.find((frame) => frame.event.kind === "approval-requested");
+      expect(requested?.event.kind).toBe("approval-requested");
+      if (requested?.event.kind === "approval-requested") approvalId = requested.event.approvalId;
+    });
+    if (approvalId === undefined) throw new Error("The turn never asked for approval.");
+    await fixture.runtime.execute(windowId, {
+      kind: "cancel-provider-turn",
+      operationId: operationId(17),
+      threadId,
+      checkoutId,
+    });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(18),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision: "approved",
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "interrupted",
+      failure: {
+        category: "failed",
+        message: "The turn that asked has ended. Send a new message to continue.",
+      },
+    });
+    await fixture.runtime.close();
+    fixture.close();
+  });
+
   it("shows the answer choices a provider offers on a question, and none when it offers none", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -1475,7 +1537,7 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("stops a provider turn whose tool requests were denied for the third time", async () => {
+  it("stops a provider turn on its third denied tool request and reports that denial as delivered", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const fixture = runtimeFixture({
@@ -1547,7 +1609,11 @@ describe("CodeOperationRuntime", () => {
         approvalId: approvals[2]!.event.approvalId,
         decision: "denied",
       }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    ).resolves.toEqual({
+      kind: "provider-turn-state",
+      operationId: operationId(133),
+      state: "interrupted",
+    });
 
     expect(connection.answerApproval).toHaveBeenCalledTimes(3);
     expect(connection.answerApproval).toHaveBeenLastCalledWith({
@@ -3825,7 +3891,15 @@ it("settles an answer to an approval a host exit left waiting as interrupted", a
         approvalId: "90000000-0000-4000-8000-000000000094",
         decision: "approved",
       }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    ).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "interrupted",
+      failure: {
+        category: "failed",
+        message:
+          "The provider session that asked ended when Octant stopped. Send a new message to continue.",
+      },
+    });
 
     const replay = fixture.operationEvents.replay({
       threadId,
@@ -3886,7 +3960,15 @@ it("settles an answer to a provider question a host exit left waiting as interru
         requestId: "provider-question-1",
         response: fixture.response,
       }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    ).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "interrupted",
+      failure: {
+        category: "failed",
+        message:
+          "The provider session that asked ended when Octant stopped. Send a new message to continue.",
+      },
+    });
 
     const replay = fixture.operationEvents.replay({
       threadId,

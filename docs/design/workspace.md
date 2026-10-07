@@ -84,7 +84,9 @@ never count toward To review and never list here; the page's Work wiring
 mode's existing commands and show the host's refusal in one line; mark-seen
 moves the read cursor. Its single-key commands are page-scoped keybindings: they
 may be a bare key because only the focused page dispatches them, and the
-window-level listeners never run them. The page holds no pull-request action
+window-level listeners never run them. Focus left on the window's body is not
+the page; when the control holding focus leaves with its thread, the page takes
+focus back so its keys keep working. The page holds no pull-request action
 and no destructive one. The To review tile, Code's **Review N changes** tile and
 the command palette open it.
 
@@ -296,11 +298,16 @@ it, such as one in Plan mode, an unreachable host) shows one quiet line in the
 row saying why, and then the card re-reads; a row the host no longer lists stays
 until the next read or the next minute so the line can be seen. A Code answer
 counts as refused when the host says `operation-failed` or reports the turn
-`failed` or `interrupted`; the command palette reads Code answers the same way.
-The card reads the list when it mounts, on the navigation topics named below,
-and when the shell settings or the window workspace change (neither has a feed
-topic). Signals that arrive while a read is in flight become one more read once
-it lands, so a streaming reply does not start a host read per delta.
+`failed`, or `interrupted` with a reason. A bare `interrupted` is the third
+denial in one turn: the provider received that Deny and the host then stopped
+the turn, so it counts as answered. The command palette and the open Code
+thread read Code answers the same way, and the open thread keeps a refused
+request and adds the host's reason to its waiting line.
+The card reads the list when it mounts, on the Machine change feed's Chat,
+Work, and Code navigation topics, and when the shell settings or the window
+workspace change (neither has a feed topic). Signals that arrive while a read
+is in flight become one more read once it lands, so a streaming reply does not
+start a host read per delta.
 
 **Pull requests** follows Running services, on by default, and only on a Code
 start screen. It is hidden — and left out of Customize — unless the Pull requests
@@ -375,16 +382,14 @@ while it is visible and the window is in front, about every ten seconds, and
 stops when the window is hidden. It never polls in the background.
 
 **Needs you** surfaces (a start-screen card, answering from Board cards, the
-command palette) read one host list of the approvals and
-questions this window can answer, across Chat, Work, and Code and across
-Projects, oldest waiting first. Each item names its mode, Project, thread and
-title, kind, text, options where the mode has them, and when it was asked, and
-carries the handle that mode's own answer command takes, so a surface answers
-in place through the commands the open thread already uses. The list is re-read
-on the Machine change feed's Chat, Work, and Code navigation topics and never
-on a timer; an answered or ended request is gone from the next read. It is read
-at a local window only, so a remote window has no Needs you source. What it
-includes and leaves out is in
+command palette) each read the same host list described with the Needs you
+card above (the `pendingRequests` read); each surface's own paragraph says when
+it reads. Each item names its mode, Project, thread and title, kind, text,
+options where the mode has them, and when it was asked, and carries the handle
+that mode's own answer command takes, so a surface answers in place through the
+commands the open thread already uses. An answered or ended request is gone
+from the host's next list. The list is read at a local window only, so a
+remote window has no Needs you source. What it includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
 
 The command palette opens on a **Needs you** group when this window can read
@@ -562,8 +567,9 @@ the open request (Work) rather than from the turn's running record. Those are
 the requests the `pendingRequests` read lists, so the board read that follows an
 answer already files the thread back under In progress. Other work still running beside a parked turn (a
 terminal, a child run) keeps the thread In progress. A card with no listed
-request is drawn as before. A thread with several requests shows the oldest and **+N more
-waiting**, which opens the thread. Answers use each mode's existing command
+request is drawn as before. A thread with several requests shows the oldest
+the host still lists (a refused one it has dropped shows only while nothing
+newer waits) and **+N more waiting**, which opens the thread. Answers use each mode's existing command
 through the listed handle and hold no new authority. A refused answer shows one
 line on the card, and the card does not move: it changes column only when the
 host's next board read says so, and the board re-reads when the set of waiting
