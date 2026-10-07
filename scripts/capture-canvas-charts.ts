@@ -111,7 +111,9 @@ try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } });
   page.setDefaultTimeout(15_000);
   await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("main[data-canvas-chart-evidence='all'] .canvas-block__chart");
+  await page.waitForSelector(
+    "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap",
+  );
   await Bun.$`mkdir -p ${evidenceDir}`.quiet();
 
   for (const scenario of SCENARIOS) {

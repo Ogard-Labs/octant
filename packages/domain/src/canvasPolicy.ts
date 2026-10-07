@@ -3,6 +3,11 @@ import {
   CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_DEPTH,
+  CANVAS_MAX_HEATMAP_CELLS,
+  CANVAS_MAX_HEATMAP_COLUMNS,
+  CANVAS_MAX_HEATMAP_DAYS,
+  CANVAS_MAX_HEATMAP_NOTE_LENGTH,
+  CANVAS_MAX_HEATMAP_ROWS,
   CANVAS_MAX_IMAGES,
   CANVAS_MAX_MOCKUP_DEPTH,
   CANVAS_MAX_MOCKUP_NODES,
@@ -13,6 +18,7 @@ import {
   CANVAS_MAX_TEXT_BYTES,
   CANVAS_MAX_TREEMAP_DEPTH,
   CANVAS_MAX_TREEMAP_LEAVES,
+  CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_MOCKUP_SCHEMA_VERSION,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
@@ -35,6 +41,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   2,
   3,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
+  CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -45,6 +52,7 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
   [
     { kind: "mockup", since: CANVAS_MOCKUP_SCHEMA_VERSION },
     { kind: "treemap", since: CANVAS_TREEMAP_SCHEMA_VERSION },
+    { kind: "heatmap", since: CANVAS_HEATMAP_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -89,7 +97,18 @@ export type CanvasPolicyRejectionCode =
   | "treemap-nesting-cycle"
   | "dangling-treemap-parent"
   | "treemap-value-placement"
-  | "treemap-negative-value";
+  | "treemap-negative-value"
+  | "duplicate-heatmap-row-id"
+  | "duplicate-heatmap-column-id"
+  | "unknown-heatmap-row"
+  | "unknown-heatmap-column"
+  | "duplicate-heatmap-cell"
+  | "duplicate-heatmap-date"
+  | "heatmap-rows-budget-exceeded"
+  | "heatmap-columns-budget-exceeded"
+  | "heatmap-cells-budget-exceeded"
+  | "heatmap-days-budget-exceeded"
+  | "heatmap-note-budget-exceeded";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -366,6 +385,9 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       states?: unknown;
       transitions?: unknown;
       title?: unknown;
+      columns?: unknown;
+      cells?: unknown;
+      days?: unknown;
     };
     if (block.kind === "image") imageCount += 1;
     if (
@@ -423,6 +445,31 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       block.nodes.length > CANVAS_MAX_TREEMAP_LEAVES
     ) {
       return "node-budget-exceeded";
+    }
+    if (block.kind === "heatmap") {
+      if (Array.isArray(block.rows) && block.rows.length > CANVAS_MAX_HEATMAP_ROWS) {
+        return "heatmap-rows-budget-exceeded";
+      }
+      if (Array.isArray(block.columns) && block.columns.length > CANVAS_MAX_HEATMAP_COLUMNS) {
+        return "heatmap-columns-budget-exceeded";
+      }
+      if (Array.isArray(block.cells) && block.cells.length > CANVAS_MAX_HEATMAP_CELLS) {
+        return "heatmap-cells-budget-exceeded";
+      }
+      if (Array.isArray(block.days) && block.days.length > CANVAS_MAX_HEATMAP_DAYS) {
+        return "heatmap-days-budget-exceeded";
+      }
+      const noted = [
+        ...(Array.isArray(block.cells) ? block.cells : []),
+        ...(Array.isArray(block.days) ? block.days : []),
+      ];
+      for (const entry of noted) {
+        if (typeof entry !== "object" || entry === null) continue;
+        const note = (entry as { note?: unknown }).note;
+        if (typeof note === "string" && note.length > CANVAS_MAX_HEATMAP_NOTE_LENGTH) {
+          return "heatmap-note-budget-exceeded";
+        }
+      }
     }
   }
   if (imageCount > CANVAS_MAX_IMAGES) return "image-budget-exceeded";
@@ -523,6 +570,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "state") validateState(block);
     if (block.kind === "mockup") validateMockup(block);
     if (block.kind === "treemap") validateTreemap(block);
+    if (block.kind === "heatmap") validateHeatmap(block);
   }
 }
 
@@ -915,6 +963,118 @@ function validateTreemap(block: Extract<CanvasBlock, { readonly kind: "treemap" 
           `Canvas treemap ${block.blockId} has a leaf missing a declared measure.`,
         );
       }
+    }
+  }
+}
+
+/**
+ * A heatmap's cells name their row and column by id, and a calendar lists one
+ * reading per date. A cell on a missing axis, a coordinate listed twice, a
+ * repeated date, a note past its length, or a grid past its row, column, cell,
+ * or day budget would each draw a picture the data does not support.
+ */
+function validateHeatmap(block: Extract<CanvasBlock, { readonly kind: "heatmap" }>): void {
+  if (block.layout === "matrix") {
+    if (block.rows.length > CANVAS_MAX_HEATMAP_ROWS) {
+      reject(
+        "heatmap-rows-budget-exceeded",
+        `Canvas heatmap ${block.blockId} has more than ${String(CANVAS_MAX_HEATMAP_ROWS)} rows.`,
+      );
+    }
+    if (block.columns.length > CANVAS_MAX_HEATMAP_COLUMNS) {
+      reject(
+        "heatmap-columns-budget-exceeded",
+        `Canvas heatmap ${block.blockId} has more than ${String(CANVAS_MAX_HEATMAP_COLUMNS)} columns.`,
+      );
+    }
+    if (block.cells.length > CANVAS_MAX_HEATMAP_CELLS) {
+      reject(
+        "heatmap-cells-budget-exceeded",
+        `Canvas heatmap ${block.blockId} has more than ${String(CANVAS_MAX_HEATMAP_CELLS)} cells.`,
+      );
+    }
+    const rows = new Set<string>();
+    for (const row of block.rows) {
+      const id = String(row.rowId);
+      if (rows.has(id)) {
+        reject("duplicate-heatmap-row-id", `Canvas heatmap ${block.blockId} repeats a row.`);
+      }
+      rows.add(id);
+    }
+    const columns = new Set<string>();
+    for (const column of block.columns) {
+      const id = String(column.columnId);
+      if (columns.has(id)) {
+        reject("duplicate-heatmap-column-id", `Canvas heatmap ${block.blockId} repeats a column.`);
+      }
+      columns.add(id);
+    }
+    const coordinates = new Set<string>();
+    for (const cell of block.cells) {
+      if (!rows.has(String(cell.rowId))) {
+        reject(
+          "unknown-heatmap-row",
+          `Canvas heatmap ${block.blockId} has a cell on a row it does not hold.`,
+        );
+      }
+      if (!columns.has(String(cell.columnId))) {
+        reject(
+          "unknown-heatmap-column",
+          `Canvas heatmap ${block.blockId} has a cell on a column it does not hold.`,
+        );
+      }
+      const coordinate = `${String(cell.rowId)}\u0000${String(cell.columnId)}`;
+      if (coordinates.has(coordinate)) {
+        reject(
+          "duplicate-heatmap-cell",
+          `Canvas heatmap ${block.blockId} lists one coordinate more than once.`,
+        );
+      }
+      coordinates.add(coordinate);
+      if (cell.note !== undefined && cell.note.length > CANVAS_MAX_HEATMAP_NOTE_LENGTH) {
+        reject(
+          "heatmap-note-budget-exceeded",
+          `Canvas heatmap ${block.blockId} has a note longer than ${String(CANVAS_MAX_HEATMAP_NOTE_LENGTH)} characters.`,
+        );
+      }
+    }
+    return;
+  }
+
+  if (block.days.length > CANVAS_MAX_HEATMAP_DAYS) {
+    reject(
+      "heatmap-days-budget-exceeded",
+      `Canvas heatmap ${block.blockId} has more than ${String(CANVAS_MAX_HEATMAP_DAYS)} days.`,
+    );
+  }
+  const orderedDates = block.days.map((day) => day.date).sort();
+  const firstDate = orderedDates[0];
+  const lastDate = orderedDates[orderedDates.length - 1];
+  if (firstDate !== undefined && lastDate !== undefined) {
+    // The picture fills the days between the first and last reading, so a span
+    // past the day budget would draw more days than the block may declare.
+    const span =
+      (Date.parse(`${lastDate}T00:00:00.000Z`) - Date.parse(`${firstDate}T00:00:00.000Z`)) /
+        86_400_000 +
+      1;
+    if (span > CANVAS_MAX_HEATMAP_DAYS) {
+      reject(
+        "heatmap-days-budget-exceeded",
+        `Canvas heatmap ${block.blockId} spans more than ${String(CANVAS_MAX_HEATMAP_DAYS)} days.`,
+      );
+    }
+  }
+  const dates = new Set<string>();
+  for (const day of block.days) {
+    if (dates.has(day.date)) {
+      reject("duplicate-heatmap-date", `Canvas heatmap ${block.blockId} repeats a date.`);
+    }
+    dates.add(day.date);
+    if (day.note !== undefined && day.note.length > CANVAS_MAX_HEATMAP_NOTE_LENGTH) {
+      reject(
+        "heatmap-note-budget-exceeded",
+        `Canvas heatmap ${block.blockId} has a note longer than ${String(CANVAS_MAX_HEATMAP_NOTE_LENGTH)} characters.`,
+      );
     }
   }
 }

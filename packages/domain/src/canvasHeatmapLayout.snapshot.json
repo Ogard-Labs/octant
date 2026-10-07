@@ -1,0 +1,447 @@
+{
+  "matrix": {
+    "width": 420,
+    "height": 120,
+    "grid": {
+      "x": 96,
+      "y": 20,
+      "width": 324,
+      "height": 100
+    },
+    "rows": [
+      {
+        "rowId": "mon",
+        "label": "Mon",
+        "total": 17,
+        "y": 20,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "tue",
+        "label": "Tue",
+        "total": 14,
+        "y": 53.333333333333336,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "wed",
+        "label": "Wed",
+        "total": 20,
+        "y": 86.66666666666667,
+        "height": 33.333333333333336
+      }
+    ],
+    "columns": [
+      {
+        "columnId": "h09",
+        "label": "09",
+        "total": 9,
+        "x": 96,
+        "width": 64.8
+      },
+      {
+        "columnId": "h10",
+        "label": "10",
+        "total": 11,
+        "x": 160.8,
+        "width": 64.8
+      },
+      {
+        "columnId": "h11",
+        "label": "11",
+        "total": 14,
+        "x": 225.6,
+        "width": 64.8
+      },
+      {
+        "columnId": "h14",
+        "label": "14",
+        "total": 10,
+        "x": 290.4,
+        "width": 64.8
+      },
+      {
+        "columnId": "h15",
+        "label": "15",
+        "total": 7,
+        "x": 355.2,
+        "width": 64.8
+      }
+    ],
+    "cells": [
+      {
+        "rowId": "mon",
+        "columnId": "h09",
+        "rowIndex": 0,
+        "columnIndex": 0,
+        "value": 3,
+        "x": 96,
+        "y": 20,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "mon",
+        "columnId": "h10",
+        "rowIndex": 0,
+        "columnIndex": 1,
+        "value": 7,
+        "x": 160.8,
+        "y": 20,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "mon",
+        "columnId": "h11",
+        "rowIndex": 0,
+        "columnIndex": 2,
+        "value": 5,
+        "x": 225.6,
+        "y": 20,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "mon",
+        "columnId": "h14",
+        "rowIndex": 0,
+        "columnIndex": 3,
+        "value": 2,
+        "note": "After the review",
+        "x": 290.4,
+        "y": 20,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "mon",
+        "columnId": "h15",
+        "rowIndex": 0,
+        "columnIndex": 4,
+        "x": 355.2,
+        "y": 20,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "tue",
+        "columnId": "h09",
+        "rowIndex": 1,
+        "columnIndex": 0,
+        "x": 96,
+        "y": 53.333333333333336,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "tue",
+        "columnId": "h10",
+        "rowIndex": 1,
+        "columnIndex": 1,
+        "value": 4,
+        "x": 160.8,
+        "y": 53.333333333333336,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "tue",
+        "columnId": "h11",
+        "rowIndex": 1,
+        "columnIndex": 2,
+        "value": 9,
+        "x": 225.6,
+        "y": 53.333333333333336,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "tue",
+        "columnId": "h14",
+        "rowIndex": 1,
+        "columnIndex": 3,
+        "x": 290.4,
+        "y": 53.333333333333336,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "tue",
+        "columnId": "h15",
+        "rowIndex": 1,
+        "columnIndex": 4,
+        "value": 1,
+        "x": 355.2,
+        "y": 53.333333333333336,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "wed",
+        "columnId": "h09",
+        "rowIndex": 2,
+        "columnIndex": 0,
+        "value": 6,
+        "x": 96,
+        "y": 86.66666666666667,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "wed",
+        "columnId": "h10",
+        "rowIndex": 2,
+        "columnIndex": 1,
+        "x": 160.8,
+        "y": 86.66666666666667,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "wed",
+        "columnId": "h11",
+        "rowIndex": 2,
+        "columnIndex": 2,
+        "x": 225.6,
+        "y": 86.66666666666667,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "wed",
+        "columnId": "h14",
+        "rowIndex": 2,
+        "columnIndex": 3,
+        "value": 8,
+        "x": 290.4,
+        "y": 86.66666666666667,
+        "width": 64.8,
+        "height": 33.333333333333336
+      },
+      {
+        "rowId": "wed",
+        "columnId": "h15",
+        "rowIndex": 2,
+        "columnIndex": 4,
+        "value": 6,
+        "x": 355.2,
+        "y": 86.66666666666667,
+        "width": 64.8,
+        "height": 33.333333333333336
+      }
+    ],
+    "domain": {
+      "min": 1,
+      "max": 9
+    }
+  },
+  "calendar": {
+    "width": 73,
+    "height": 121,
+    "weekStartsOn": 1,
+    "weeks": 3,
+    "days": [
+      {
+        "date": "2026-09-01",
+        "value": 0,
+        "weekday": 1,
+        "week": 0,
+        "x": 28,
+        "y": 31,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-02",
+        "value": 2,
+        "weekday": 2,
+        "week": 0,
+        "x": 28,
+        "y": 46,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-03",
+        "value": 1,
+        "weekday": 3,
+        "week": 0,
+        "x": 28,
+        "y": 61,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-04",
+        "value": 0,
+        "weekday": 4,
+        "week": 0,
+        "x": 28,
+        "y": 76,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-05",
+        "weekday": 5,
+        "week": 0,
+        "x": 28,
+        "y": 91,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-06",
+        "weekday": 6,
+        "week": 0,
+        "x": 28,
+        "y": 106,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-07",
+        "value": 5,
+        "note": "Flaky suite",
+        "weekday": 0,
+        "week": 1,
+        "x": 43,
+        "y": 16,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-08",
+        "value": 3,
+        "weekday": 1,
+        "week": 1,
+        "x": 43,
+        "y": 31,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-09",
+        "value": 0,
+        "weekday": 2,
+        "week": 1,
+        "x": 43,
+        "y": 46,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-10",
+        "value": 4,
+        "weekday": 3,
+        "week": 1,
+        "x": 43,
+        "y": 61,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-11",
+        "value": 1,
+        "weekday": 4,
+        "week": 1,
+        "x": 43,
+        "y": 76,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-12",
+        "weekday": 5,
+        "week": 1,
+        "x": 43,
+        "y": 91,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-13",
+        "weekday": 6,
+        "week": 1,
+        "x": 43,
+        "y": 106,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-14",
+        "value": 0,
+        "weekday": 0,
+        "week": 2,
+        "x": 58,
+        "y": 16,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-15",
+        "value": 6,
+        "weekday": 1,
+        "week": 2,
+        "x": 58,
+        "y": 31,
+        "width": 12,
+        "height": 12
+      },
+      {
+        "date": "2026-09-16",
+        "value": 2,
+        "weekday": 2,
+        "week": 2,
+        "x": 58,
+        "y": 46,
+        "width": 12,
+        "height": 12
+      }
+    ],
+    "weekdayRows": [
+      {
+        "label": "Mo",
+        "y": 22
+      },
+      {
+        "label": "Tu",
+        "y": 37
+      },
+      {
+        "label": "We",
+        "y": 52
+      },
+      {
+        "label": "Th",
+        "y": 67
+      },
+      {
+        "label": "Fr",
+        "y": 82
+      },
+      {
+        "label": "Sa",
+        "y": 97
+      },
+      {
+        "label": "Su",
+        "y": 112
+      }
+    ],
+    "monthLabels": [
+      {
+        "week": 0,
+        "label": "Sep",
+        "x": 28
+      }
+    ],
+    "domain": {
+      "min": 0,
+      "max": 6
+    },
+    "startDate": "2026-09-01",
+    "endDate": "2026-09-16"
+  }
+}
