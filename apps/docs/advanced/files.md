@@ -163,8 +163,8 @@ one size, phone, tablet, desktop, or slide, and its screens sit side by side
 in the Canvas, numbered in order.
 
 - **Play** opens the design at full size. Click its links and buttons to move
-  between screens. **Restart** goes back to the first screen. Click a screen to
-  play from that one.
+  between screens. Click a screen to play from that one. **Restart** goes back
+  to the screen you started from.
 - A deck shows **Present** instead. Use the arrow buttons, or the left and
   right arrow keys, to move between slides.
 - Some designs react to taps without changing screen, such as a card you can
