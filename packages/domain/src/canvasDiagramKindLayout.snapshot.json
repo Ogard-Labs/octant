@@ -1,0 +1,476 @@
+{
+  "er": {
+    "width": 638,
+    "height": 272,
+    "entities": [
+      {
+        "entityId": "person",
+        "label": "Person",
+        "x": 24,
+        "y": 24,
+        "width": 220,
+        "height": 74,
+        "headerHeight": 28,
+        "attributes": [
+          {
+            "attributeId": "person-id",
+            "name": "id",
+            "type": "uuid",
+            "key": true,
+            "x": 30,
+            "y": 52,
+            "width": 208,
+            "height": 20
+          },
+          {
+            "attributeId": "person-email",
+            "name": "email",
+            "type": "text",
+            "key": false,
+            "x": 30,
+            "y": 72,
+            "width": 208,
+            "height": 20
+          }
+        ]
+      },
+      {
+        "entityId": "order",
+        "label": "Order",
+        "x": 394,
+        "y": 24,
+        "width": 220,
+        "height": 94,
+        "headerHeight": 28,
+        "attributes": [
+          {
+            "attributeId": "order-id",
+            "name": "id",
+            "type": "uuid",
+            "key": true,
+            "x": 400,
+            "y": 52,
+            "width": 208,
+            "height": 20
+          },
+          {
+            "attributeId": "order-total",
+            "name": "total",
+            "type": "money",
+            "key": false,
+            "x": 400,
+            "y": 72,
+            "width": 208,
+            "height": 20
+          },
+          {
+            "attributeId": "order-person",
+            "name": "person_id",
+            "type": "uuid",
+            "key": false,
+            "x": 400,
+            "y": 92,
+            "width": 208,
+            "height": 20
+          }
+        ]
+      },
+      {
+        "entityId": "payment",
+        "label": "Payment",
+        "x": 24,
+        "y": 174,
+        "width": 220,
+        "height": 74,
+        "headerHeight": 28,
+        "attributes": [
+          {
+            "attributeId": "payment-id",
+            "name": "id",
+            "type": "uuid",
+            "key": true,
+            "x": 30,
+            "y": 202,
+            "width": 208,
+            "height": 20
+          },
+          {
+            "attributeId": "payment-order",
+            "name": "order_id",
+            "type": "uuid",
+            "key": false,
+            "x": 30,
+            "y": 222,
+            "width": 208,
+            "height": 20
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "relationshipId": "person-places-order",
+        "label": "places",
+        "sourceCardinality": "one",
+        "targetCardinality": "many",
+        "points": [
+          {
+            "x": 244,
+            "y": 64
+          },
+          {
+            "x": 394,
+            "y": 68
+          }
+        ],
+        "labelX": 319,
+        "labelY": 58,
+        "labelAnchor": "middle",
+        "sourceCardinalityAt": {
+          "x": 250,
+          "y": 78,
+          "anchor": "start"
+        },
+        "targetCardinalityAt": {
+          "x": 388,
+          "y": 82,
+          "anchor": "end"
+        }
+      },
+      {
+        "relationshipId": "order-pays-payment",
+        "sourceCardinality": "zero-or-one",
+        "targetCardinality": "one",
+        "points": [
+          {
+            "x": 394,
+            "y": 113
+          },
+          {
+            "x": 232,
+            "y": 174
+          }
+        ],
+        "labelX": 313,
+        "labelY": 136,
+        "labelAnchor": "middle",
+        "sourceCardinalityAt": {
+          "x": 388,
+          "y": 107,
+          "anchor": "end"
+        },
+        "targetCardinalityAt": {
+          "x": 226,
+          "y": 168,
+          "anchor": "end"
+        }
+      }
+    ]
+  },
+  "swimlane": {
+    "width": 740,
+    "height": 240,
+    "lanes": [
+      {
+        "laneId": "customer",
+        "label": "Customer",
+        "kind": "actor",
+        "x": 24,
+        "y": 24,
+        "width": 692,
+        "height": 64,
+        "headerWidth": 132
+      },
+      {
+        "laneId": "support",
+        "label": "Support",
+        "kind": "team",
+        "x": 24,
+        "y": 88,
+        "width": 692,
+        "height": 64,
+        "headerWidth": 132
+      },
+      {
+        "laneId": "engineering",
+        "label": "Engineering",
+        "kind": "team",
+        "x": 24,
+        "y": 152,
+        "width": 692,
+        "height": 64,
+        "headerWidth": 132
+      }
+    ],
+    "steps": [
+      {
+        "stepId": "report",
+        "laneId": "customer",
+        "label": "Report a problem",
+        "decision": false,
+        "x": 168,
+        "y": 36,
+        "width": 160,
+        "height": 40
+      },
+      {
+        "stepId": "triage",
+        "laneId": "support",
+        "label": "Is it a defect?",
+        "decision": true,
+        "x": 168,
+        "y": 100,
+        "width": 160,
+        "height": 40
+      },
+      {
+        "stepId": "answer",
+        "laneId": "support",
+        "label": "Answer the question",
+        "decision": false,
+        "x": 356,
+        "y": 100,
+        "width": 160,
+        "height": 40
+      },
+      {
+        "stepId": "close",
+        "laneId": "support",
+        "label": "Close the ticket",
+        "decision": false,
+        "x": 544,
+        "y": 100,
+        "width": 160,
+        "height": 40
+      },
+      {
+        "stepId": "fix",
+        "laneId": "engineering",
+        "label": "Fix the defect",
+        "decision": false,
+        "x": 168,
+        "y": 164,
+        "width": 160,
+        "height": 40
+      }
+    ],
+    "connections": [
+      {
+        "connectionId": "report-triage",
+        "points": [
+          {
+            "x": 248,
+            "y": 76
+          },
+          {
+            "x": 248,
+            "y": 100
+          }
+        ],
+        "labelX": 248,
+        "labelY": 80
+      },
+      {
+        "connectionId": "triage-answer",
+        "label": "no",
+        "points": [
+          {
+            "x": 328,
+            "y": 120
+          },
+          {
+            "x": 356,
+            "y": 120
+          }
+        ],
+        "labelX": 342,
+        "labelY": 112
+      },
+      {
+        "connectionId": "triage-fix",
+        "label": "yes",
+        "points": [
+          {
+            "x": 248,
+            "y": 140
+          },
+          {
+            "x": 248,
+            "y": 164
+          }
+        ],
+        "labelX": 248,
+        "labelY": 144
+      },
+      {
+        "connectionId": "fix-close",
+        "points": [
+          {
+            "x": 328,
+            "y": 170
+          },
+          {
+            "x": 544,
+            "y": 134
+          }
+        ],
+        "labelX": 436,
+        "labelY": 144
+      },
+      {
+        "connectionId": "answer-close",
+        "points": [
+          {
+            "x": 516,
+            "y": 120
+          },
+          {
+            "x": 544,
+            "y": 120
+          }
+        ],
+        "labelX": 530,
+        "labelY": 112
+      }
+    ]
+  },
+  "mindmap": {
+    "width": 680,
+    "height": 242,
+    "nodes": [
+      {
+        "nodeId": "release",
+        "label": "Release readiness",
+        "root": true,
+        "depth": 0,
+        "x": 24,
+        "y": 108,
+        "width": 168,
+        "height": 34
+      },
+      {
+        "nodeId": "tests",
+        "label": "Test coverage",
+        "note": "Unit and integration green on the head commit",
+        "root": false,
+        "depth": 1,
+        "x": 256,
+        "y": 24,
+        "width": 168,
+        "height": 50
+      },
+      {
+        "nodeId": "docs",
+        "label": "Documentation",
+        "root": false,
+        "depth": 1,
+        "x": 256,
+        "y": 112,
+        "width": 168,
+        "height": 34
+      },
+      {
+        "nodeId": "architecture",
+        "label": "Architecture",
+        "root": false,
+        "depth": 2,
+        "x": 488,
+        "y": 88,
+        "width": 168,
+        "height": 34
+      },
+      {
+        "nodeId": "guide",
+        "label": "User guide",
+        "root": false,
+        "depth": 2,
+        "x": 488,
+        "y": 136,
+        "width": 168,
+        "height": 34
+      },
+      {
+        "nodeId": "packaging",
+        "label": "Packaging",
+        "root": false,
+        "depth": 1,
+        "x": 256,
+        "y": 184,
+        "width": 168,
+        "height": 34
+      }
+    ],
+    "edges": [
+      {
+        "parentId": "release",
+        "childId": "tests",
+        "points": [
+          {
+            "x": 192,
+            "y": 125
+          },
+          {
+            "x": 256,
+            "y": 49
+          }
+        ]
+      },
+      {
+        "parentId": "release",
+        "childId": "docs",
+        "points": [
+          {
+            "x": 192,
+            "y": 125
+          },
+          {
+            "x": 256,
+            "y": 129
+          }
+        ]
+      },
+      {
+        "parentId": "docs",
+        "childId": "architecture",
+        "points": [
+          {
+            "x": 424,
+            "y": 129
+          },
+          {
+            "x": 488,
+            "y": 105
+          }
+        ]
+      },
+      {
+        "parentId": "docs",
+        "childId": "guide",
+        "points": [
+          {
+            "x": 424,
+            "y": 129
+          },
+          {
+            "x": 488,
+            "y": 153
+          }
+        ]
+      },
+      {
+        "parentId": "release",
+        "childId": "packaging",
+        "points": [
+          {
+            "x": 192,
+            "y": 125
+          },
+          {
+            "x": 256,
+            "y": 201
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -166,6 +166,65 @@ describe("Canvas share policy", () => {
     ]);
   });
 
+  it("round-trips entity-relationship, swimlane, and mind map blocks through the static export", () => {
+    const blocks = [
+      {
+        blockId: "order-schema",
+        schemaVersion: 8,
+        kind: "er",
+        entities: [
+          {
+            entityId: "person",
+            label: "Person",
+            attributes: [{ attributeId: "person-id", name: "id", type: "uuid", key: true }],
+          },
+          {
+            entityId: "order",
+            label: "Order",
+            attributes: [{ attributeId: "order-id", name: "id", type: "uuid", key: true }],
+          },
+        ],
+        relationships: [
+          {
+            relationshipId: "person-places-order",
+            source: "person",
+            target: "order",
+            sourceCardinality: "one",
+            targetCardinality: "many",
+            label: "places",
+          },
+        ],
+      },
+      {
+        blockId: "support-flow",
+        schemaVersion: 8,
+        kind: "swimlane",
+        lanes: [{ laneId: "support", label: "Support", kind: "team" }],
+        steps: [{ stepId: "triage", laneId: "support", label: "Is it a defect?", decision: true }],
+        connections: [],
+      },
+      {
+        blockId: "release-mindmap",
+        schemaVersion: 8,
+        kind: "mindmap",
+        nodes: [
+          { nodeId: "release", label: "Release" },
+          { nodeId: "tests", label: "Tests", parentId: "release", note: "green on head" },
+        ],
+      },
+    ];
+    const receipt = buildCanvasStaticExportReceipt({
+      request,
+      current: {
+        ...current,
+        schemaVersion: 8,
+        definition: { ...current.definition, schemaVersion: 8, blocks },
+      },
+      context,
+    });
+    expect(receipt.document.blocks).toEqual(blocks);
+  });
+
   it("excludes board comments from a static export by default", () => {
     const comment = decodeCanvasComment({
       commentId: "88888888-8888-4888-8888-888888888888",

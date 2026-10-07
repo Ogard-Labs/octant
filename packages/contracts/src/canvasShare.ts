@@ -492,6 +492,73 @@ export const CanvasStaticExportBlock = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,
+    kind: Schema.Literal("er"),
+    entities: Schema.Array(
+      Schema.Struct({
+        entityId: boundedToken("CanvasNodeId"),
+        label: ExportLabel,
+        attributes: Schema.Array(
+          Schema.Struct({
+            attributeId: boundedToken("CanvasErAttributeId"),
+            name: ExportLabel,
+            type: ExportLabel,
+            key: Schema.optional(Schema.Literal(true)),
+          }).annotations(strict),
+        ).pipe(Schema.maxItems(64)),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(512)),
+    relationships: Schema.Array(
+      Schema.Struct({
+        relationshipId: boundedToken("CanvasEdgeId"),
+        source: boundedToken("CanvasNodeId"),
+        target: boundedToken("CanvasNodeId"),
+        sourceCardinality: Schema.Literal("one", "zero-or-one", "many", "one-or-many"),
+        targetCardinality: Schema.Literal("one", "zero-or-one", "many", "one-or-many"),
+        label: Schema.optional(ExportLabel),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(1_024)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("swimlane"),
+    lanes: Schema.NonEmptyArray(
+      Schema.Struct({
+        laneId: boundedToken("CanvasSwimlaneLaneId"),
+        label: ExportLabel,
+        kind: Schema.optional(Schema.Literal("actor", "team")),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(32)),
+    steps: Schema.Array(
+      Schema.Struct({
+        stepId: boundedToken("CanvasNodeId"),
+        laneId: boundedToken("CanvasSwimlaneLaneId"),
+        label: ExportLabel,
+        decision: Schema.optional(Schema.Literal(true)),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(512)),
+    connections: Schema.Array(
+      Schema.Struct({
+        connectionId: boundedToken("CanvasEdgeId"),
+        source: boundedToken("CanvasNodeId"),
+        target: boundedToken("CanvasNodeId"),
+        label: Schema.optional(ExportLabel),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(1_024)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("mindmap"),
+    nodes: Schema.Array(
+      Schema.Struct({
+        nodeId: boundedToken("CanvasNodeId"),
+        label: ExportLabel,
+        parentId: Schema.optional(boundedToken("CanvasNodeId")),
+        note: Schema.optional(ExportText),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(512)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
     kind: Schema.Literal("mockup"),
     device: Schema.Literal("desktop", "tablet", "phone"),
     title: boundedNonEmptyText(120),

@@ -219,6 +219,63 @@ describe("Canvas share contracts", () => {
     expect(() => decodeCanvasStaticExportDocument({ ...document, blocks })).toThrow();
   });
 
+  it("round-trips entity-relationship, swimlane, and mind map blocks in a static export document", () => {
+    const blocks = [
+      {
+        blockId: "order-schema",
+        schemaVersion: 8,
+        kind: "er",
+        entities: [
+          {
+            entityId: "person",
+            label: "Person",
+            attributes: [{ attributeId: "person-id", name: "id", type: "uuid", key: true }],
+          },
+          {
+            entityId: "order",
+            label: "Order",
+            attributes: [{ attributeId: "order-id", name: "id", type: "uuid", key: true }],
+          },
+        ],
+        relationships: [
+          {
+            relationshipId: "person-places-order",
+            source: "person",
+            target: "order",
+            sourceCardinality: "one",
+            targetCardinality: "many",
+            label: "places",
+          },
+        ],
+      },
+      {
+        blockId: "support-flow",
+        schemaVersion: 8,
+        kind: "swimlane",
+        lanes: [
+          { laneId: "customer", label: "Customer", kind: "actor" },
+          { laneId: "support", label: "Support", kind: "team" },
+        ],
+        steps: [
+          { stepId: "report", laneId: "customer", label: "Report" },
+          { stepId: "triage", laneId: "support", label: "Is it a defect?", decision: true },
+        ],
+        connections: [{ connectionId: "report-triage", source: "report", target: "triage" }],
+      },
+      {
+        blockId: "release-mindmap",
+        schemaVersion: 8,
+        kind: "mindmap",
+        nodes: [
+          { nodeId: "release", label: "Release" },
+          { nodeId: "tests", label: "Tests", parentId: "release", note: "green on head" },
+        ],
+      },
+    ];
+    const exported = { ...document, blocks };
+    expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+  });
+
   it("round-trips pie, donut, stacked-bar, grouped-bar, and bar-line charts in a static export document", () => {
     const quarters = (id: string, values: ReadonlyArray<number>, mark?: "bar" | "line") => ({
       seriesId: id,

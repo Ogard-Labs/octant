@@ -28,6 +28,9 @@ import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
 import {
   loginSequenceExample,
   orderStateExample,
+  orderSchemaExample,
+  supportFlowExample,
+  releaseMindmapExample,
   chartExamples,
   settingsScreenExample,
   treemapExamples,
@@ -241,6 +244,9 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
   for (const kind of kinds) {
     if (kind === "sequence") examples.push(loginSequenceExample);
     if (kind === "state") examples.push(orderStateExample);
+    if (kind === "er") examples.push(orderSchemaExample);
+    if (kind === "swimlane") examples.push(supportFlowExample);
+    if (kind === "mindmap") examples.push(releaseMindmapExample);
     if (kind === "chart") examples.push(...chartExamples);
     if (kind === "mockup") examples.push(settingsScreenExample);
     if (kind === "treemap") examples.push(...treemapExamples);
@@ -338,7 +344,7 @@ function toolDescription(
     "Start with describe to see the block kinds, the document recipes, and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, and "summarise research" uses research-brief. Describe with no block kinds lists every offered recipe and its skeleton; fill those roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.',
     "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
-    "A login or request flow is a sequence block: participants, ordered messages, activations, and notes. A lifecycle such as an order is a state block: states that may nest, labeled transitions, and an initial and a final state. Use diagram for a generic graph of nodes and edges. Describe sequence or state to get an example.",
+    "A login or request flow is a sequence block: participants, ordered messages, activations, and notes. A lifecycle such as an order is a state block: states that may nest, labeled transitions, and an initial and a final state. A data model is an er block: entities with named, typed attributes, and relationships with a cardinality at each end. A process handed between people or teams is a swimlane block: ordered lanes, the steps each lane owns (a decision step is flagged), and labeled connections. A topic and its branches is a mindmap block: one root topic, children that name their parent, and an optional note per topic. Use diagram for a generic graph of nodes and edges. Describe sequence, state, er, swimlane, or mindmap to get an example.",
     "A share of a whole is a pie or a donut: one series of labeled slices whose values are not negative. Comparing series across the same categories is a stacked-bar or a grouped-bar; every series lists those categories in the same order, and a stacked bar's values are not negative. A bar-line pairs bar series and line series on those categories, and each series names its mark. Describe chart to get an example of each.",
     "A screen is a mockup: a device of desktop, tablet, or phone, and a tree of window, header, sidebar, list, list row, form field, button, toggle, tabs, card, image placeholder, and text. Nodes name a parent rather than nesting. The controls are drawn, not live. Describe mockup to get a settings screen.",
     "A hierarchy is a treemap: nodes that name a parent (one root, no cycles), a list of measures with ids, labels, and optional number formats, a default sizeBy and colorBy, and a colour scale of sequential, diverging, or categorical by top-level group. Values sit on leaves; a group sums its children, so give values only to leaves and never to a group. A leaf may name a manifest source id, which offers Open file through the allowlisted open-source action. The person can switch size and colour and zoom into a group without revising the Canvas; use startNodeId to open a static export at a chosen node. Describe treemap to get a repository map sized by lines of code and coloured by recent edits.",

@@ -105,6 +105,20 @@ const inTreeCanvasDocumentRecipeDocuments = [
       { kind: "rich-text", role: "What stands out, and what to look at next." },
     ],
   },
+  {
+    id: "data-model",
+    title: "Data model",
+    whenToUse: "When someone asks to model data, diagram a schema, or describe how records relate.",
+    skeleton: [
+      { kind: "heading", role: "Overview" },
+      { kind: "rich-text", role: "What the model covers." },
+      {
+        kind: "er",
+        role: "Entities with their named, typed attributes, and relationships with a cardinality at each end.",
+      },
+      { kind: "rich-text", role: "What is deliberately out of scope." },
+    ],
+  },
 ] as const;
 
 const inTreeRecipes = inTreeCanvasDocumentRecipeDocuments.map((recipe) =>

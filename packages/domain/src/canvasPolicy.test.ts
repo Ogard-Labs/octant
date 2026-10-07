@@ -4,12 +4,15 @@ import {
   CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_NODES,
+  CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY,
   CANVAS_MAX_IMAGES,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
+  CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_MOCKUP_DEPTH,
   CANVAS_MAX_MOCKUP_NODES,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_SERIES,
+  CANVAS_MAX_SWIMLANE_LANES,
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
   CANVAS_MAX_TREEMAP_DEPTH,
@@ -20,7 +23,13 @@ import {
   decodeCanvasDefinition,
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
-import { loginSequenceExample, orderStateExample } from "./canvasDiagramExamples";
+import {
+  loginSequenceExample,
+  orderSchemaExample,
+  orderStateExample,
+  releaseMindmapExample,
+  supportFlowExample,
+} from "./canvasDiagramExamples";
 import {
   CanvasPolicyRejected,
   measureCanvasBudget,
@@ -1254,6 +1263,184 @@ describe("metric validation", () => {
           ]),
         ),
       "metric-sparkline-budget-exceeded",
+    );
+  });
+});
+
+describe("entity-relationship, swimlane, and mind map validation", () => {
+  it("accepts the entity-relationship, swimlane, and mind map examples", () => {
+    for (const block of [orderSchemaExample, supportFlowExample, releaseMindmapExample]) {
+      expect(() => validateCanvasDefinition(withBlocks([block]))).not.toThrow();
+    }
+  });
+
+  it("rejects an entity-relationship that names an entity it does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...orderSchemaExample,
+              relationships: [{ ...orderSchemaExample.relationships[0], target: "missing" }],
+            },
+          ]),
+        ),
+      "dangling-edge",
+    );
+  });
+
+  it("rejects an entity-relationship with more attributes than an entity may carry", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...orderSchemaExample,
+              entities: [
+                {
+                  ...orderSchemaExample.entities[0],
+                  attributes: Array.from(
+                    { length: CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY + 1 },
+                    (_value, index) => ({
+                      attributeId: `a-${String(index)}`,
+                      name: `field_${String(index)}`,
+                      type: "text",
+                    }),
+                  ),
+                },
+              ],
+            },
+          ]),
+        ),
+      "er-attribute-budget-exceeded",
+    );
+  });
+
+  it("rejects a swimlane step placed in a lane the block does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...supportFlowExample,
+              steps: [{ stepId: "orphan", laneId: "nowhere", label: "Lost" }],
+            },
+          ]),
+        ),
+      "unknown-swimlane-lane",
+    );
+  });
+
+  it("rejects a swimlane connection to a step the block does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...supportFlowExample,
+              connections: [{ connectionId: "gap", source: "report", target: "missing" }],
+            },
+          ]),
+        ),
+      "dangling-edge",
+    );
+  });
+
+  it("rejects a swimlane with more lanes than the lane budget", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...supportFlowExample,
+              lanes: Array.from({ length: CANVAS_MAX_SWIMLANE_LANES + 1 }, (_value, index) => ({
+                laneId: `lane-${String(index)}`,
+                label: `Lane ${String(index)}`,
+              })),
+              steps: [],
+              connections: [],
+            },
+          ]),
+        ),
+      "swimlane-lanes-budget-exceeded",
+    );
+  });
+
+  it("rejects a mind map that nests a topic inside itself", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...releaseMindmapExample,
+              nodes: [
+                { nodeId: "root", label: "Root" },
+                { nodeId: "a", label: "A", parentId: "b" },
+                { nodeId: "b", label: "B", parentId: "a" },
+              ],
+            },
+          ]),
+        ),
+      "mindmap-nesting-cycle",
+    );
+  });
+
+  it("rejects a mind map with more than one root topic", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...releaseMindmapExample,
+              nodes: [
+                { nodeId: "one", label: "One" },
+                { nodeId: "two", label: "Two" },
+              ],
+            },
+          ]),
+        ),
+      "mindmap-roots",
+    );
+  });
+
+  it("rejects a mind map topic that names a parent it does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...releaseMindmapExample,
+              nodes: [
+                { nodeId: "root", label: "Root" },
+                { nodeId: "leaf", label: "Leaf", parentId: "ghost" },
+              ],
+            },
+          ]),
+        ),
+      "dangling-mindmap-parent",
+    );
+  });
+
+  it("rejects a mind map note past its length", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...releaseMindmapExample,
+              nodes: [
+                { nodeId: "root", label: "Root" },
+                {
+                  nodeId: "leaf",
+                  label: "Leaf",
+                  parentId: "root",
+                  note: "x".repeat(CANVAS_MAX_MINDMAP_NOTE_LENGTH + 1),
+                },
+              ],
+            },
+          ]),
+        ),
+      "mindmap-note-budget-exceeded",
     );
   });
 });
