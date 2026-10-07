@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createBrowserActivityAnnouncementStore,
   decideBrowserActivityReveal,
+  threadHasBrowserSurface,
 } from "./browserActivityReveal";
 
 describe("browser activity reveal", () => {
@@ -54,5 +55,34 @@ describe("browser activity reveal", () => {
     });
     expect(first.decision).toBe("ignore");
     expect([...first.nextAnnouncedSessionIds]).toEqual(["session-1"]);
+  });
+
+  it("counts a pane showing the thread's shared Browser but not one bound to a link or local server", () => {
+    const pane = (surface: object) => ({ kind: "pane", paneId: "pane", surface });
+    const workspace = (surface: object) =>
+      ({
+        layouts: {
+          chat: pane({ kind: "welcome" }),
+          work: pane({ kind: "welcome" }),
+          code: {
+            kind: "split",
+            first: pane({ kind: "welcome" }),
+            second: pane(surface),
+          },
+        },
+      }) as never;
+
+    expect(
+      threadHasBrowserSurface(workspace({ kind: "browser", threadId: "thread-a" }), "thread-a"),
+    ).toBe(true);
+    expect(
+      threadHasBrowserSurface(workspace({ kind: "browser", threadId: "thread-b" }), "thread-a"),
+    ).toBe(false);
+    expect(
+      threadHasBrowserSurface(
+        workspace({ kind: "browser", threadId: "thread-a", contextId: "dedicated" }),
+        "thread-a",
+      ),
+    ).toBe(false);
   });
 });

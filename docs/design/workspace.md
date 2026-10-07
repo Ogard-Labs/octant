@@ -265,8 +265,9 @@ session is live and the thread's Browser is out of sight, a small live preview
 of its active page floats over the thread: about 264px wide, resting in one of
 the four corners of the thread frame (top right by default), draggable between
 them with an arrow-key twin, and remembered per client. Out of sight means no
-pane shows the thread's Browser and neither the dock nor the bottom panel has it
-as its active tool; the preview leaves as soon as the Browser appears and returns
+pane shows the thread's shared Browser and neither the dock nor the bottom panel
+has it as its active tool (a tab bound to one link or local server is a page of
+its own and does not count); the preview leaves as soon as the Browser appears and returns
 when it closes. Clicking it shows the Browser (the dock when the thread is the
 dock's subject, else the pane), the close control hides it for that session, and
 the page's title or host shows only under the pointer or focus. A bottom corner

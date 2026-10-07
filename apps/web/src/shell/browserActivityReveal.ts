@@ -49,7 +49,11 @@ export function decideBrowserActivityReveal(input: {
   return { decision: overlap ? "ignore" : "reveal", nextAnnouncedSessionIds };
 }
 
-/** Whether some pane of the workspace shows a Browser surface bound to this thread. */
+/**
+ * Whether some pane of the workspace shows this thread's shared Browser. A pane
+ * bound to one host-opened context (a link or a local server) is a view of its
+ * own page, not of the agent's session, so it does not count.
+ */
 export function threadHasBrowserSurface(workspace: WindowWorkspace, threadId: string): boolean {
   return (["chat", "work", "code"] as const).some((mode) =>
     layoutHasThreadBrowser(workspace.layouts[mode], threadId),
@@ -60,6 +64,7 @@ function layoutHasThreadBrowser(layout: WorkspaceLayoutNode, threadId: string): 
   if (layout.kind === "pane") {
     return (
       layout.surface.kind === "browser" &&
+      layout.surface.contextId === undefined &&
       layout.surface.threadId !== undefined &&
       String(layout.surface.threadId) === String(threadId)
     );
