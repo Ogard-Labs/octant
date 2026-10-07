@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { memo, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type {
   CanvasHeatmapBlock,
   CanvasHeatmapScale,
@@ -114,8 +114,13 @@ function MatrixHeatmap({
   }, [block, sort]);
 
   const cells = layout.cells;
-  const activeCell =
-    active === undefined ? undefined : cells.find((cell) => cellKey(cell) === active);
+  // Every lookup by coordinate goes through this map: a scan per table cell
+  // made each render, including every hover, quadratic in the cell count.
+  const cellByKey = useMemo(
+    () => new Map(layout.cells.map((cell) => [cellKey(cell), cell])),
+    [layout],
+  );
+  const activeCell = active === undefined ? undefined : cellByKey.get(active);
 
   const show = (cell: CanvasHeatmapCellBox) => {
     setActive(cellKey(cell));
@@ -268,52 +273,66 @@ function MatrixHeatmap({
         <ChartTooltip anchor={anchor} />
       </div>
       <HeatmapLegend block={block} domain={layout.domain} scale={scale} />
-      <details className="canvas-block__heatmap-data">
-        <summary>View heatmap data</summary>
-        <div
-          aria-label="Heatmap data"
-          className="canvas-block__heatmap-table"
-          role="region"
-          tabIndex={0}
-        >
-          <table aria-label="Heatmap readings" className="ds-table">
-            <thead>
-              <tr>
-                <th scope="col">Row</th>
-                {layout.columns.map((column) => (
-                  <th key={column.columnId} scope="col">
-                    {column.label}
-                  </th>
-                ))}
-                <th scope="col">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {layout.rows.map((row) => (
-                <tr key={row.rowId}>
-                  <th scope="row">{row.label}</th>
-                  {layout.columns.map((column) => {
-                    const cell = cells.find(
-                      (entry) => entry.rowId === row.rowId && entry.columnId === column.columnId,
-                    );
-                    return (
-                      <td key={column.columnId}>
-                        {cell?.value === undefined
-                          ? "—"
-                          : formatCanvasValue(cell.value, block.format)}
-                      </td>
-                    );
-                  })}
-                  <td>{formatCanvasValue(row.total, block.format)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
+      <MatrixTable cellByKey={cellByKey} format={block.format} layout={layout} />
     </>
   );
 }
+
+/**
+ * The disclosed table of a matrix. It depends only on the layout, so a hover
+ * or a keyboard move does not rebuild it.
+ */
+const MatrixTable = memo(function MatrixTable({
+  layout,
+  cellByKey,
+  format,
+}: {
+  readonly layout: CanvasHeatmapMatrixLayout;
+  readonly cellByKey: ReadonlyMap<string, CanvasHeatmapCellBox>;
+  readonly format: CanvasNumberFormat | undefined;
+}) {
+  return (
+    <details className="canvas-block__heatmap-data">
+      <summary>View heatmap data</summary>
+      <div
+        aria-label="Heatmap data"
+        className="canvas-block__heatmap-table"
+        role="region"
+        tabIndex={0}
+      >
+        <table aria-label="Heatmap readings" className="ds-table">
+          <thead>
+            <tr>
+              <th scope="col">Row</th>
+              {layout.columns.map((column) => (
+                <th key={column.columnId} scope="col">
+                  {column.label}
+                </th>
+              ))}
+              <th scope="col">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {layout.rows.map((row) => (
+              <tr key={row.rowId}>
+                <th scope="row">{row.label}</th>
+                {layout.columns.map((column) => {
+                  const cell = cellByKey.get(coordinateKey(row.rowId, column.columnId));
+                  return (
+                    <td key={column.columnId}>
+                      {cell?.value === undefined ? "—" : formatCanvasValue(cell.value, format)}
+                    </td>
+                  );
+                })}
+                <td>{formatCanvasValue(row.total, format)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+});
 
 function CalendarHeatmap({
   block,
@@ -521,7 +540,11 @@ function HeatmapLegend({
 }
 
 function cellKey(cell: CanvasHeatmapCellBox): string {
-  return `${cell.rowId}\u0000${cell.columnId}`;
+  return coordinateKey(cell.rowId, cell.columnId);
+}
+
+function coordinateKey(rowId: string, columnId: string): string {
+  return `${rowId}\u0000${columnId}`;
 }
 
 function clamp01(value: number): number {
