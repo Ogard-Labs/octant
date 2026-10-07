@@ -29,6 +29,8 @@ Chat Projects are virtual, memory-scoped containers with no implicit filesystem 
 
 The native selection stays in Electron main. The renderer receives an opaque, single-use receipt rather than the selected path. Paths that are not directories are denied before creation.
 
+When a host has no native picker, the host folder browser lists the folders it can reach. A folder the host cannot read in time is listed as a plain folder, and a browse that fails shows an error you can retry without losing the folder or search you were on.
+
 ## Project operations
 
 Projects support the following operations:

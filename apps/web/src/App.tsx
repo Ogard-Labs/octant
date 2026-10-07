@@ -432,6 +432,7 @@ import type {
 } from "./shell/navigationModel";
 import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
 import { createWorkingNowCard } from "./home/WorkingNowCard";
+import { createNeedsYouCard } from "./home/NeedsYouCard";
 import { createPullRequestsCard } from "./home/PullRequestsCard";
 import {
   pullRequestCardAvailable,
@@ -439,7 +440,12 @@ import {
   type PullRequestCardCapability,
   type PullRequestCardRow,
 } from "./home/pullRequests";
-import { boardFactsByThread, remoteHostLabel, type WorkingNowThread } from "./home/workingNow";
+import {
+  boardFactsByThread,
+  remoteHostLabel,
+  threadProvider,
+  type WorkingNowThread,
+} from "./home/workingNow";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
@@ -3799,6 +3805,16 @@ function LaunchedShell(
       ),
     [providerController.instances],
   );
+  // The provider of every thread this start screen could name, by thread id,
+  // for the Needs you card: a waiting request carries a thread, not a provider.
+  const needsYouThreadProviders = useMemo(() => {
+    const byThread = new Map<string, ThreadProviderIdentity>();
+    for (const { thread } of workingNowThreads) {
+      const provider = threadProvider(thread, workingNowProviders);
+      if (provider !== undefined) byThread.set(thread.threadId, provider);
+    }
+    return byThread;
+  }, [workingNowProviders, workingNowThreads]);
   const workingNowBoardFacts = useMemo(
     () =>
       continueCards.kind === "ready" && activeMode === "code"
@@ -4088,6 +4104,27 @@ function LaunchedShell(
   // The card list is rebuilt each render and is cheap: each card's own rows are
   // memoized from the inputs above, which keep their identity between renders.
   const homeCards = [
+    createNeedsYouCard({
+      answerClients: { chatClient, codeClient, workRequestClient },
+      feedRevision:
+        machineChanges.chatNavigation +
+        machineChanges.workNavigation +
+        machineChanges.codeNavigation,
+      modes: workingNowModes,
+      now: minuteNow.getTime(),
+      onOpenInbox: openInbox,
+      onOpenThread: (request) => {
+        pluginSidebarDestinationActionContext.closeOverlays();
+        if (request.mode === "chat") selectChatThread(String(request.threadId));
+        else if (request.mode === "work") selectWorkThread(String(request.threadId));
+        else selectCodeThread(String(request.threadId));
+      },
+      pendingRequestClient,
+      projectNames: workingNowProjectNames,
+      settings: controller.settings,
+      threadProviders: needsYouThreadProviders,
+      workspace: controller.workspace,
+    }),
     createWorkingNowCard({
       agentRunClient,
       boardFacts: workingNowBoardFacts,

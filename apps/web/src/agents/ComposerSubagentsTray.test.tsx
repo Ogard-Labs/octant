@@ -71,7 +71,7 @@ describe("SubagentsTray", () => {
       storage: memoryStorage(),
     });
     const toggle = screen.getByRole("button", { name: /Subagents,/ });
-    expect(toggle).toHaveTextContent("1 listed · 1 failed");
+    expect(toggle).toHaveTextContent("1 failed · earlier ones not retained");
     expect(screen.getByText(/Earlier observed children/)).toBeVisible();
     await user.click(toggle);
     await user.click(
@@ -113,8 +113,7 @@ describe("SubagentsTray", () => {
     const rows = within(tray).getAllByRole("button", { name: /Opens it in Agents/ });
     expect(rows).toHaveLength(3);
     const toggle = within(tray).getByRole("button", { name: /Subagents,/ });
-    expect(toggle).toHaveTextContent("5 total");
-    expect(toggle).toHaveTextContent("1 failed · 1 waiting · 2 need review");
+    expect(toggle).toHaveTextContent("1 failed · 1 waiting · 1 to review · 1 working · 1 done");
     expect(screen.getByRole("button", { name: "View all 5 subagents in Agents" })).toBeVisible();
     expect(within(tray).queryByText("Task e")).not.toBeInTheDocument();
   });
@@ -131,10 +130,61 @@ describe("SubagentsTray", () => {
 
     const toggle = screen.getByRole("button", { name: /Subagents,/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(toggle).toHaveTextContent("1 needs review");
+    expect(toggle).toHaveTextContent("1 to review · 1 done");
     expect(screen.queryByRole("button", { name: /Opens it in Agents/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "View all 2 subagents in Agents" }));
     expect(onOpenSubagent).toHaveBeenCalledWith();
+  });
+
+  it("lists a failed child with the host's reason, so the head never counts one it hides", () => {
+    renderTray([
+      {
+        ...entry("a", "failed"),
+        recoveryReason: "Claude authentication is required.",
+      },
+      entry("b", "completed"),
+    ]);
+
+    expect(screen.getByRole("button", { name: /Subagents,/ })).toHaveTextContent(
+      "1 failed · 1 done",
+    );
+    expect(screen.getByText("Claude authentication is required.")).toBeVisible();
+    expect(screen.queryByText("Task b")).not.toBeInTheDocument();
+  });
+
+  it("asks for no review of a result the parent already received", () => {
+    renderTray(
+      [
+        { ...entry("a", "completed", { required: true }), resultDeliveryOutcome: "consumed" },
+        { ...entry("b", "completed", { required: true }), resultDeliveryOutcome: "delivered" },
+      ],
+      { storage: memoryStorage() },
+    );
+
+    const toggle = screen.getByRole("button", { name: /Subagents,/ });
+    expect(toggle).toHaveTextContent("2 done");
+    expect(toggle).not.toHaveTextContent(/review/);
+  });
+
+  it("still asks for review of a result the parent never received", () => {
+    renderTray(
+      [{ ...entry("a", "completed", { required: true }), resultDeliveryOutcome: "failed" }],
+      { storage: memoryStorage() },
+    );
+
+    expect(screen.getByRole("button", { name: /Subagents,/ })).toHaveTextContent("1 to review");
+  });
+
+  it("dims and withholds Stop while the connection is lost, without saying so again", async () => {
+    const user = userEvent.setup();
+    const { onStop } = renderTray([entry("a", "running")], { reconnecting: true });
+
+    expect(screen.getByRole("group", { name: "Subagents" })).toHaveAttribute("data-stale", "true");
+    expect(screen.queryByText(/Reconnecting|last status/)).not.toBeInTheDocument();
+    const stop = screen.getByRole("button", { name: "Stop subagent: Task a" });
+    expect(stop).toBeDisabled();
+    await user.click(stop);
+    expect(onStop).not.toHaveBeenCalled();
   });
 
   it("omits the tray when the host reports no children", () => {

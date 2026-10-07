@@ -51,6 +51,8 @@ import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { CodeCheckoutBar } from "./CodeCheckoutBar";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
+import { ChildResultCards } from "../agents/ChildResultCards";
+import { isChildResultDelivery } from "../agents/childResultDelivery";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
 import { useThreadPlan } from "../plan/ThreadPlanContext";
 import type { ThreadTaskChangedFiles } from "../plan/ThreadTaskViewer";
@@ -1279,6 +1281,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   threadId={message.sourceThreadId ?? props.threadId}
                 />
               );
+            // Code's conversation turns do not carry the delivery mark, so the
+            // host's own delivery wording is what says this is a subagent's
+            // result and not something the person typed.
+            const delivered = message.role === "user" && isChildResultDelivery(message.text);
             const workedFor =
               message.role === "assistant" &&
               message.status === "completed" &&
@@ -1306,8 +1312,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   </OctantSeparatorWithLabel>
                 ) : null}
                 <article
-                  aria-label={message.role === "user" ? "Your message" : "Assistant message"}
-                  className={`code-thread-workspace__message ${message.role === "user" ? "turn-user" : "turn-agent"}`}
+                  aria-label={
+                    delivered
+                      ? "Subagent results"
+                      : message.role === "user"
+                        ? "Your message"
+                        : "Assistant message"
+                  }
+                  className={`code-thread-workspace__message ${delivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
                 >
                   <TurnActionMenu
                     actions={codeTurnActions({
@@ -1355,7 +1367,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       }
                     }}
                   >
-                    {message.role === "user" ? (
+                    {delivered ? (
+                      <ChildResultCards providerGroups={providerGroups} text={message.text} />
+                    ) : message.role === "user" ? (
                       <>
                         {/* What the user typed stays exactly as they typed it,
                             in the shared bubble, with the time beneath it. */}

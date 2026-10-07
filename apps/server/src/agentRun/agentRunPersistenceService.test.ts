@@ -287,6 +287,43 @@ describe("AgentRunPersistenceService", () => {
     expect(summary[0]?.runId).toBe(ids.run);
   });
 
+  it("tells the parent's surfaces how a finished result reached it, and nothing while delivery is owed", () => {
+    const { service } = createHarness();
+    const accepted = service.requestRun({
+      command: requestCommand(),
+      parentAuthority,
+      confirmed: true,
+    });
+    if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
+    const runId = accepted.run.id;
+    const apply = (command: Parameters<typeof service.applyCommand>[0]) => {
+      expect(service.applyCommand(command).kind).toBe("run-updated");
+    };
+    const version = () => {
+      const run = service.getById(runId);
+      if (run === undefined) throw new Error("Missing run");
+      return run.version;
+    };
+    apply({ kind: "start-agent-run", runId, expectedVersion: version() });
+    apply({ kind: "mark-agent-run-running", runId, expectedVersion: version() });
+    apply({
+      kind: "complete-agent-run",
+      runId,
+      expectedVersion: version(),
+      result: { reference: `octant://agent-run/${runId}/result`, truncated: false },
+      resultText: "Done.",
+    });
+    expect(service.parentSummary(ids.thread)[0]?.resultDeliveryOutcome).toBeUndefined();
+
+    apply({
+      kind: "settle-agent-run-result-delivery",
+      runId,
+      expectedVersion: version(),
+      outcome: "delivered",
+    });
+    expect(service.parentSummary(ids.thread)[0]?.resultDeliveryOutcome).toBe("delivered");
+  });
+
   it("journals a Work binding receipt and rebuilds it on replay", () => {
     const first = createHarness();
     const workRouting = { ...routingReceipt, mode: "work" as const };
