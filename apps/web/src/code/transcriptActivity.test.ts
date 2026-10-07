@@ -49,6 +49,39 @@ describe("transcript activity", () => {
     expect(applyActivityEvent(waiting, content).retrying).toBeUndefined();
   });
 
+  it("stops showing an endpoint retry once the turn fails or ends without content", () => {
+    const waiting = applyActivityEvent(
+      EMPTY_TURN_ACTIVITY,
+      decodeCodeOperationEvent({
+        kind: "provider-retry",
+        attempt: 5,
+        maxAttempts: 5,
+        delayMs: 4_000,
+        reason: "unavailable",
+        announcedAt: decodeUtcTimestamp("2026-10-06T12:00:00.000Z"),
+      }),
+    );
+    const operationId = "89000000-0000-4000-8000-000000000031";
+    const failed = decodeCodeOperationEvent({
+      kind: "operation-state",
+      state: "failed",
+      failure: { category: "unavailable", message: "The provider stayed busy." },
+    });
+    const refused = decodeCodeOperationEvent({
+      kind: "operation-result",
+      result: {
+        kind: "operation-failed",
+        operationId,
+        failure: { category: "failed", message: "The turn could not finish." },
+      },
+    });
+    const stillRunning = decodeCodeOperationEvent({ kind: "operation-state", state: "running" });
+
+    expect(applyActivityEvent(waiting, failed).retrying).toBeUndefined();
+    expect(applyActivityEvent(waiting, refused).retrying).toBeUndefined();
+    expect(applyActivityEvent(waiting, stillRunning).retrying).toBeDefined();
+  });
+
   it("remembers the files a turn created or rewrote and forgets one it deleted", () => {
     const change = (path: string, kind: "created" | "modified" | "deleted"): CodeOperationEvent =>
       ({ kind: "file-change", path, change: kind, reconciled: true }) as CodeOperationEvent;

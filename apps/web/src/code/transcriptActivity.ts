@@ -44,7 +44,7 @@ export interface CodeTurnActivity {
    * tool and reasoning steps, so a reopened thread offers nothing here.
    */
   readonly writtenPaths?: ReadonlyArray<string>;
-  /** The endpoint retry in progress, cleared by the next content event. */
+  /** The endpoint retry in progress, cleared by the next content or the turn settling. */
   readonly retrying?: HarnessRetryNotice;
 }
 
@@ -162,7 +162,15 @@ export function applyActivityEvent(
       },
     };
   }
-  if (event.kind === "provider-content") {
+  // Content ends the wait; so does the turn settling, parking, or failing
+  // without content, or a failed attempt would keep "retrying 5/5 in 0 s".
+  if (
+    event.kind === "provider-content" ||
+    (event.kind === "operation-state" && event.state !== "running") ||
+    (event.kind === "operation-result" &&
+      (event.result.kind === "operation-failed" ||
+        (event.result.kind === "provider-turn-state" && event.result.state !== "running")))
+  ) {
     if (activity.retrying === undefined) return activity;
     const { retrying: _cleared, ...rest } = activity;
     return rest;

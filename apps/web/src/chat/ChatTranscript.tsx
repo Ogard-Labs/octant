@@ -680,7 +680,9 @@ const AttemptBlock = memo(function AttemptBlock(props: {
         />
         <HarnessRetryStatus
           events={
-            props.attempt.harnessRetry === undefined
+            // Only a running attempt can still be waiting to send again.
+            props.attempt.harnessRetry === undefined ||
+            (props.attempt.outcome !== "queued" && props.attempt.outcome !== "streaming")
               ? []
               : [
                   {
