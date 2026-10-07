@@ -109,6 +109,34 @@ describe("treemap block", () => {
     expect(screen.getByRole("navigation", { name: "Zoom path" })).toBeVisible();
   });
 
+  it("reports a keyboard-selected group's summed readings in its tooltip", () => {
+    render(<CanvasView input={definition()} />);
+
+    fireEvent.keyDown(plot(), { key: "ArrowRight" });
+
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Lines of code: 306");
+    expect(tooltip).toHaveTextContent("Edits: 19");
+  });
+
+  it("keeps a hovered leaf's Open file control after the pointer leaves the cell", async () => {
+    const user = userEvent.setup();
+    const actionRuntime = runtime();
+    render(<CanvasView input={definition()} actionRuntime={actionRuntime} />);
+
+    const cell = document.querySelector("[data-node-id='web'] .canvas-block__treemap-mark");
+    if (cell === null) throw new Error("The web cell was not drawn.");
+    fireEvent.pointerEnter(cell);
+    fireEvent.pointerLeave(cell);
+
+    const plotControl = document.querySelector<HTMLElement>(
+      ".canvas-block__treemap > .canvas-block__treemap-open",
+    );
+    if (plotControl === null) throw new Error("Open file left with the pointer.");
+    await user.click(plotControl);
+    expect(actionRuntime.onExecute).toHaveBeenCalledTimes(1);
+  });
+
   it("offers Open file for a leaf that names a source and dispatches it", async () => {
     const user = userEvent.setup();
     const actionRuntime = runtime();
