@@ -62,6 +62,7 @@ import {
   useThreadMentionTypeahead,
 } from "../../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../../chat/useThreadMentions";
+import { useComposerThreadDropRegistration } from "../../chat/composerThreadDrop";
 import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type { MentionableThreadId } from "@octant/contracts";
 import { WorkKindSwitch } from "../../shell/WorkKindSwitch";
@@ -199,6 +200,11 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
     ...(props.creating === true ? { disabled: true } : {}),
+  });
+  const threadDropKey = useComposerThreadDropRegistration({
+    enabled: threadMentions.composer !== undefined,
+    onDraftChange: (next) => setPrompt(next),
+    attachDroppedThread: threadMentions.attachDroppedThread,
   });
   const trimmed = prompt.trim();
   const hasFolder = props.projectId !== undefined;
@@ -370,6 +376,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         <HomeComposerTabs slot={props.composerTabs}>
           <div className="composer-stack">
             <ThreadComposer
+              {...(threadDropKey === undefined ? {} : { threadDropKey })}
               startContext={
                 <div className="composer-tray composer-tray--inside" aria-label="Thread context">
                   <div className="composer-tray__leading">

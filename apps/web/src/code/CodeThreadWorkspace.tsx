@@ -73,9 +73,11 @@ import {
   useThreadMentionTypeahead,
 } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
+import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
+import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
@@ -489,6 +491,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       props.controller.setPendingDraft?.(next, caretIndex);
     },
     textarea: () => textareaRef.current,
+  });
+  const threadDropKey = useComposerThreadDropRegistration({
+    enabled: threadMentions.composer !== undefined,
+    currentThreadId: String(props.threadId),
+    onDraftChange: (next, caretIndex) => {
+      draftRevisionRef.current += 1;
+      setDraft(next);
+      props.controller.setPendingDraft?.(next, caretIndex);
+    },
+    attachDroppedThread: threadMentions.attachDroppedThread,
   });
   const mentionListId = `code-thread-mentions-${String(props.threadId)}`;
 
@@ -1405,6 +1417,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                               })}
                           {...(message.at === undefined ? {} : { at: message.at })}
                         />
+                        {activity?.retrying === undefined ? null : (
+                          <HarnessRetryStatus
+                            events={[
+                              {
+                                kind: "retrying",
+                                attempt: activity.retrying.attempt,
+                                maxAttempts: activity.retrying.maxAttempts,
+                                delayMs: activity.retrying.delayMs,
+                                reason: activity.retrying.reason,
+                                announcedAt: activity.retrying.announcedAt,
+                              },
+                            ]}
+                          />
+                        )}
                         {gallery}
                         {activity === undefined ? null : (
                           <CodeTranscriptRow
@@ -1607,6 +1633,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       <ThreadComposer
         queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
         presentation="follow-up"
+        {...(threadDropKey === undefined ? {} : { threadDropKey })}
         context={
           <CodeCheckoutBar
             {...(props.onCreatePullRequest === undefined

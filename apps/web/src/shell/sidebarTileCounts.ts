@@ -1,4 +1,5 @@
 import { threadRowActivity, type ChatThreadNavigationItem } from "./navigationModel";
+import { isWaitingForReview } from "./runningNow";
 
 export interface SidebarTileCounts {
   /** Threads the host projects as executing right now. */
@@ -31,9 +32,8 @@ export function countSidebarTiles(
       continue;
     }
     if (thread.shelf !== undefined) continue;
-    const activity = threadRowActivity(thread);
-    if (activity === "working") running += 1;
-    else if (thread.unread === true) toReview += 1;
+    if (threadRowActivity(thread) === "working") running += 1;
+    else if (isWaitingForReview(thread)) toReview += 1;
   }
   return { running, toReview, doneToday };
 }

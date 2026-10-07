@@ -1,3 +1,4 @@
+import { HarnessRetryNotice } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import {
@@ -294,6 +295,12 @@ export const ChatAttempt = Schema.Struct({
    * still owes the person the provider's reason and reset time.
    */
   usageLimit: Schema.optional(ProviderUsageLimit),
+  /**
+   * Set while a direct endpoint is sending the request again. Cleared by the
+   * next content or by the attempt settling, so a finished, failed, or
+   * cancelled attempt does not keep a stale wait.
+   */
+  harnessRetry: Schema.optional(HarnessRetryNotice),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 })

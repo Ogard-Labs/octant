@@ -546,6 +546,18 @@ describe("mapCodexMessage", () => {
     ).toMatchObject([{ kind: "event", event: { kind: "completed" } }]);
   });
 
+  it("leaves the stop reason off a completed turn because the protocol does not say the output was cut off", () => {
+    const [result] = map(
+      context(),
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed" as const },
+      }),
+    );
+    expect(result).toMatchObject({ kind: "event", event: { kind: "completed" } });
+    expect(result?.kind === "event" ? result.event : undefined).not.toHaveProperty("stopReason");
+  });
+
   it("ignores item types Octant does not model instead of failing the turn", () => {
     const results = map(
       context(),

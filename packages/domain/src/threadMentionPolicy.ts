@@ -261,6 +261,88 @@ export function formatThreadMentionContext(
   ].join("\n\n");
 }
 
+export type ComposerThreadDropRefusal =
+  | "duplicate"
+  | "full"
+  | "self"
+  | "unavailable"
+  | "unsupported";
+
+/**
+ * Local reasons a composer drop cannot become a mention, before the host is
+ * asked. A missing id is not a thread. The composer's own thread is not
+ * context for itself. A chip already carried is not attached again, and the
+ * per-turn cap is the same bound an explicit selection is reconciled to.
+ * Anything else still has to come back from the host's openable set.
+ */
+export function composerThreadDropLocalRefusal(input: {
+  readonly payloadThreadId: string | undefined;
+  readonly currentThreadId?: string;
+  readonly existingThreadIds: ReadonlyArray<string>;
+  readonly mentionCount: number;
+}): ComposerThreadDropRefusal | undefined {
+  if (input.payloadThreadId === undefined || input.payloadThreadId.trim().length === 0) {
+    return "unsupported";
+  }
+  if (input.currentThreadId !== undefined && input.currentThreadId === input.payloadThreadId) {
+    return "self";
+  }
+  if (input.existingThreadIds.some((threadId) => threadId === input.payloadThreadId)) {
+    return "duplicate";
+  }
+  if (input.mentionCount >= MAX_THREAD_MENTIONS_PER_TURN) return "full";
+  return undefined;
+}
+
+/**
+ * The host candidate a drop may attach, or `undefined` when that id is not in
+ * the openable set the mention search already returned. The sidebar title is
+ * not a substitute: a thread the host did not offer contributes no chip.
+ */
+export function composerThreadDropCandidate(
+  payloadThreadId: string,
+  openable: ReadonlyArray<ThreadMentionCandidate>,
+): ThreadMentionCandidate | undefined {
+  return openable.find((candidate) => String(candidate.threadId) === payloadThreadId);
+}
+
+/** Words for a drop that did not become a chip. Never includes thread content. */
+export function composerThreadDropMessage(
+  reason: ComposerThreadDropRefusal | "attached" | "unreadable",
+): string {
+  switch (reason) {
+    case "attached":
+      return "Attached as context. The draft was not sent.";
+    case "duplicate":
+      return "That thread is already attached.";
+    case "full":
+      return "This message already has as many thread references as it can carry.";
+    case "self":
+      return "This composer is already that thread. Nothing was attached.";
+    case "unavailable":
+      return "That thread cannot be mentioned. Nothing was attached.";
+    case "unsupported":
+      return "That drop is not a thread. The draft was kept.";
+    case "unreadable":
+      return "Mentioned threads could not be read. Nothing was included.";
+  }
+}
+
+/**
+ * Append a chosen chip at the end of the draft. A drop has no `#` token under
+ * the caret, so it cannot reuse the typeahead replacement, but the text it
+ * writes is the same `#[Title]` token an explicit selection inserts.
+ */
+export function appendThreadMentionChip(
+  draft: string,
+  title: string,
+): { readonly draft: string; readonly caretIndex: number } {
+  const chip = `${formatThreadMentionChip(title)} `;
+  const separator = draft.length === 0 || /\s$/.test(draft) ? "" : " ";
+  const next = `${draft}${separator}${chip}`;
+  return { draft: next, caretIndex: next.length };
+}
+
 /**
  * Title a Side Chat sidecar as being *about* its source thread, so the sidecar
  * reads as a question lane rather than a duplicate of the source conversation.

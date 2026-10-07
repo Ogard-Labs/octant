@@ -42,6 +42,35 @@ export interface ChartScaleSteps {
   readonly diverging: ReadonlyArray<string>;
 }
 
+export type ChartScaleKind = keyof ChartScaleSteps;
+
+export interface ChartScaleDomain {
+  readonly min: number;
+  readonly max: number;
+}
+
+/**
+ * Which step of a scale a value reads at, from 0 (low) to `steps - 1` (high).
+ *
+ * A domain with no span reads at its middle, so a flat measure does not paint
+ * every cell the same extreme. The reading is clamped at both ends so a value
+ * on or past the edge keeps the last step rather than falling off the scale.
+ */
+export function chartScaleStep(value: number, domain: ChartScaleDomain, steps: number): number {
+  if (steps <= 1) return 0;
+  if (!(domain.max > domain.min)) return Math.floor((steps - 1) / 2);
+  const position = (value - domain.min) / (domain.max - domain.min);
+  const clamped = Math.min(1, Math.max(0, position));
+  return Math.min(steps - 1, Math.floor(clamped * steps));
+}
+
+/** The theme role id for a step of a scale; step 0 is the first role. */
+export function chartScaleRoleId(kind: ChartScaleKind, step: number): string {
+  const ids = kind === "sequential" ? CHART_SEQUENTIAL_ROLE_IDS : CHART_DIVERGING_ROLE_IDS;
+  const index = Math.min(ids.length - 1, Math.max(0, step));
+  return ids[index] ?? ids[0] ?? "chart-sequential-1";
+}
+
 /** The palette roles each scale family is drawn from. */
 const SEQUENTIAL_PALETTE_ROLE = "palette-teal";
 const NEGATIVE_PALETTE_ROLE = "palette-red";

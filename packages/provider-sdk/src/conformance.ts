@@ -324,6 +324,10 @@ export async function runProviderConformance(
           "streamed-in-order evidence requires normalized text output",
         );
 
+        // A cancel keeps the session live (a send continues it); resume needs
+        // the session released, so stop it before asking to resume.
+        yield* connection.stop(fixture.sessionStart.sessionId);
+
         const resumeExit = yield* Effect.exit(connection.resume(fixture.resume));
         const resumed = assertSupportedOperation("resume", probe.capabilities.resume, resumeExit);
         if (probe.capabilities.resume === "supported") {
@@ -372,8 +376,6 @@ export async function runProviderConformance(
           yield* Effect.exit(connection.answerUserInput(fixture.unknownUserInput)),
           "protocol",
         );
-
-        yield* connection.stop(fixture.sessionStart.sessionId);
 
         return {
           probed: true,

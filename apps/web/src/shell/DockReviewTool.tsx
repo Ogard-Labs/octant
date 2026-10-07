@@ -1,19 +1,15 @@
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "@octant/contracts/code";
-import type { CodeOperationResult } from "@octant/contracts/code-operations";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CodeDiffPane, type CodeDiffProjection } from "../code/CodeDiffPane";
 import type { MonacoDiffRuntime } from "../code/MonacoEditorAdapter";
 import { nativeCodeWorkspaceApprovals } from "../code/codeWorkspaceApprovals";
+import { observeCodeThreadDiff } from "../code/observeCodeThreadDiff";
 import { useCodeFileChangeWatch } from "../code/useCodeFileChangeWatch";
 import type { CodeController } from "../code/useCodeController";
 import { ShellState } from "./ShellState";
 import type { OctantHostBridge } from "./hostBridge";
-
-type RunReviewed = Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>;
-
-const MAX_DIFF_BYTES = 1024 * 1024;
 
 export interface DockReviewToolProps {
   readonly controller?: CodeController;
@@ -94,41 +90,7 @@ function BoundReview(props: {
   const observe = useCallback(async () => {
     setStale(false);
     setProjection({ state: "loading" });
-    try {
-      const checkout = await props.controller.client.executeOperation({
-        kind: "observe-git",
-        operationId: nextUuid() as never,
-        gitOperationId: nextUuid() as never,
-        maxDiffBytes: MAX_DIFF_BYTES,
-        ...scope,
-      });
-      if (checkout.kind === "operation-failed") {
-        setProjection({ state: "unavailable", message: checkout.failure.message });
-        return;
-      }
-      if (checkout.kind !== "git-observed") {
-        setProjection({
-          state: "unavailable",
-          message: "Git observation returned no authoritative checkout state.",
-        });
-        return;
-      }
-      if (checkout.changedPaths.length > 0) {
-        setProjection({ state: "available", observation: checkout, ...scope });
-        return;
-      }
-      const run = await readRunReview(props.controller.client, nextUuid, scope);
-      if (run !== undefined && run.outcome.changedPaths.length > 0) {
-        setProjection({ state: "run", run, ...scope });
-        return;
-      }
-      setProjection({ state: "available", observation: checkout, ...scope });
-    } catch {
-      setProjection({
-        state: "unavailable",
-        message: "Git observation is unavailable. Reconnect and retry.",
-      });
-    }
+    setProjection(await observeCodeThreadDiff(props.controller.client, nextUuid, scope));
   }, [nextUuid, props.controller.client, scope]);
 
   useEffect(() => {
@@ -184,23 +146,4 @@ function BoundReview(props: {
         : {})}
     />
   );
-}
-
-async function readRunReview(
-  client: Pick<CodeClient, "executeOperation">,
-  nextUuid: () => string,
-  scope: { readonly checkoutId: CodeCheckoutId; readonly threadId: CodeThreadId },
-): Promise<RunReviewed | undefined> {
-  try {
-    const result = await client.executeOperation({
-      kind: "review-run",
-      operationId: nextUuid() as never,
-      gitOperationId: nextUuid() as never,
-      maxDiffBytes: MAX_DIFF_BYTES,
-      ...scope,
-    });
-    return result.kind === "run-reviewed" ? result : undefined;
-  } catch {
-    return undefined;
-  }
 }

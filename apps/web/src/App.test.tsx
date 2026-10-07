@@ -819,6 +819,39 @@ describe("App", () => {
     expect(screen.queryByRole("combobox", { name: "Search commands" })).not.toBeInTheDocument();
   });
 
+  it("opens the Review page from the command palette and leaves it with Back", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+    await screen.findByRole("region", { name: "Chat welcome" });
+
+    await user.keyboard("{Control>}k{/Control}");
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Search commands" })).toHaveFocus(),
+    );
+    await user.keyboard("review finished");
+    await user.keyboard("{Enter}");
+
+    // Nothing in this fixture is waiting, and the tile says the same.
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "To review · 0 finished threads" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "To review, 0" })).toBeVisible();
+    expect(screen.getByText("Nothing waiting for review")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Back to workspace" }));
+    expect(screen.queryByRole("heading", { name: /^To review ·/ })).toBeNull();
+    expect(await screen.findByRole("region", { name: "Chat welcome" })).toBeVisible();
+  });
+
   it("keeps a fresh wide workspace focused until a utility is chosen", async () => {
     render(
       <App

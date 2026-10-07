@@ -72,6 +72,22 @@ for never), re-deciding against each mode's authoritative record and
 journaling the ordinary thread update as the `system` actor. It archives only;
 see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-completed-and-snoozed-threads.md).
 
+The **Review page** lists the threads the sidebar's To review count counts, by
+the same predicate (`isWaitingForReview`: unread, not working, not on a shelf),
+so the tile's number and the page's rows never disagree. Rows run oldest
+first, by the host's reported finish time where it has one. The detail panel
+reads the thread's last reply, the Code board's check facts, an Octant-run
+check after the last turn where one exists, and the checkout's diff; Chat rows
+show the reply only. Work navigation projects no unread flag, so Work threads
+never count toward To review and never list here; the page's Work wiring
+(send-back refuses and points at the thread's composer) waits for that flag. Complete, Snooze and send-back go through each
+mode's existing commands and show the host's refusal in one line; mark-seen
+moves the read cursor. Its single-key commands are page-scoped keybindings: they
+may be a bare key because only the focused page dispatches them, and the
+window-level listeners never run them. The page holds no pull-request action
+and no destructive one. The To review tile, Code's **Review N changes** tile and
+the command palette open it.
+
 A thread stopped on a provider usage limit that disclosed a reset can also be
 hidden until that reset — a distinct command whose wake time the host derives
 from the journaled limit fact, never from the caller, and refuses when no such
@@ -121,6 +137,19 @@ accessible active state. Completed layout operations go through
 server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
+
+Dragging a sidebar thread onto a Chat, Work, or Code composer attaches that
+thread as context. The drop uses the same mention path as typing `#` and
+choosing a thread: the host decides whether this window can Open it, the
+chip is a bounded reference, and the draft is not sent. The source thread
+is not moved or opened. While the pointer is over the composer, the
+composer itself is the drop target, not the pane behind it. The row menu's
+**Attach as context** does the same thing for the composer that has focus,
+or the only composer when one is open. Dropping the composer's own thread,
+a thread already attached, something that is not a thread, or a thread this
+window cannot Open leaves the draft unchanged and says so without reading
+the thread. Image and file drops, and dropping a thread on a pane rather
+than its composer, stay pane and attachment behaviour.
 
 ## Start-screen cards
 
@@ -411,6 +440,29 @@ host restart and is cleared when GitHub authority is revoked (see
 [decisions/0064-pull-request-observation-cadence.md](../decisions/0064-pull-request-observation-cadence.md)
 and
 [decisions/0076-pull-request-snapshot-survives-restart.md](../decisions/0076-pull-request-snapshot-survives-restart.md)).
+
+**Answering from a Board card.** A Work or Code card whose thread waits on the
+person shows what it asks and the answers, so a column of waiting cards is
+cleared without opening threads. The card carries the Needs you row
+(`PendingRequestRow`, embedded: the card already names the thread, so the row
+keeps the wait, the text clamped to two lines, and the answers): **Approve** and
+**Deny**, one numbered button per choice, or **Reply…**, which opens the thread.
+The board reads the same host list as the Needs you card (the `pendingRequests`
+read) once for the whole board, only while the board is mounted, on the same
+change-feed, settings, and workspace signals, and never on a timer. A card is
+matched to its request by thread and mode, whichever column the board files it
+in: a Code thread parked on a tool approval still counts as executing while its
+turn runs, so its card sits in In progress, and it carries the request all the
+same. A card with no listed request is drawn as before. A thread with several requests shows the oldest and **+N more
+waiting**, which opens the thread. Answers use each mode's existing command
+through the listed handle and hold no new authority. A refused answer shows one
+line on the card, and the card does not move: it changes column only when the
+host's next board read says so, and the board re-reads when the set of waiting
+requests changes (answered here or elsewhere, or newly raised). With Status
+grouping the Waiting column lists the oldest waiting request first, then cards
+with no listed request in their usual order. The list layout (narrow width, or
+Code's List view) carries the same actions in its rows. A window with no
+pending-request reader (a remote window) draws cards exactly as before.
 
 **GitHub issue browser.** The first-party GitHub plugin contributes a second
 `sidebar.destination` (`github-issues`) that opens a host-scoped, read-only
