@@ -168,14 +168,15 @@ earlier beta build, which discovery still accepts as a fallback and shows as
 **OpenCode 2 preview**. When both names are installed, discovery prefers
 `opencode`. Which routes run is selected by the installed binary's version,
 not by that name: a 1.x binary keeps the legacy session API, and a 2.x binary
-lists providers and models from its HTTP catalogue and runs Code turns under
-the thread's approval setting, which Octant writes into OpenCode's private
+lists providers and models from its HTTP catalogue and runs Code turns outside
+Plan under the thread's approval setting, which Octant writes into OpenCode's private
 configuration: edits and shell commands ask unless the setting allows them,
 and other providers' tools and skills are refused. 2.x runs turns without
 Octant's app tools until Octant registers them through the 2.x MCP API: with
-OpenCode 2.0.22 they are reported as unsupported. OpenCode 2 resolves a project
-inside a Git work tree by starting Git, which the Chat, Plan, and Work jail
-does not allow, so those turns are refused, and a runtime whose confined
+OpenCode 2.0.22 they are reported as unsupported. Approval requests reach
+you as usual; questions from the agent are not supported yet and end the
+turn. OpenCode 2 resolves a project inside a Git work tree by starting Git,
+which the Chat, Plan, and Work jail does not allow, so those turns are refused, and a runtime whose confined
 server cannot answer for a work tree is shown as **Incompatible**: its models
 are listed and no turn is offered. Octant never falls back to an unconfined
 session or treats the 2.x version as the legacy runtime.

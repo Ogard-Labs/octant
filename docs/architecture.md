@@ -1283,11 +1283,16 @@ modelId }`, and the model picker is provider-first. Discovery can find
   registers app-managed tools through the 1.x MCP route, which 2.0.22 does
   not serve (it lists `/api/experimental/mcp/{server}` instead), so the probe
   reports app-managed tools unsupported and 2.x runs turns without Octant's
-  app tools until registration supports the 2.x MCP API. 2.x offers Code turns only, because project resolution
-  starts Git, which the Chat, Plan, and Work jail refuses. Approvals and
-  questions map through the v2 routes; resume, interruption, and tool activity
-  are reported; a file change that no allowed or approved edit preceded fails
-  the turn; and anything not mapped fails closed. The probe also asks the
+  app tools until registration supports the 2.x MCP API. 2.x offers Code
+  turns outside Plan only, because project resolution starts Git, which every
+  jail that denies process execution refuses: Chat, Work, and Plan. Approvals
+  map through 2.0.22's `permission.asked` event and its reply route, whose
+  body is `{decision}`; a 2.x reject settles every pending request in the
+  session, so each settled request is forgotten. Questions are unsupported:
+  2.0.22 serves no question routes and asks through forms, which are not
+  mapped, so a question fails the turn. Resume, interruption, and tool
+  activity are reported; a file change that no allowed or approved edit
+  preceded fails the turn; and anything not mapped fails closed. The probe also asks the
   confined 2.x server to answer for a directory carrying a Git marker, made in
   the launch's own scratch directory because every launch profile denies the
   host temporary directory beneath `/private`; a runtime that cannot answer

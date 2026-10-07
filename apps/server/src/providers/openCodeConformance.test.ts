@@ -259,13 +259,12 @@ describe("OpenCode provider conformance", () => {
         "diff",
         "task-progress",
         "approval-request",
-        "user-input-request",
         "interrupted",
       ],
       expectedFailureCategories: {
         staleResume: "stale-resume",
         unknownApproval: "protocol",
-        unknownUserInput: "protocol",
+        unknownUserInput: "unsupported",
       },
       isReleased: codeDriver.isReleased,
     });
@@ -606,20 +605,6 @@ function recordedBetaTurn(sourceId: string): ReadonlyArray<Event> {
         sessionID: sourceId,
         action: "edit",
         resources: ["*"],
-      },
-    },
-    {
-      type: "question.v2.asked",
-      properties: {
-        id: "question",
-        sessionID: sourceId,
-        questions: [
-          {
-            question: "Continue?",
-            header: "Continue",
-            options: [{ label: "Yes", description: "Continue" }],
-          },
-        ],
       },
     },
   ] as unknown as ReadonlyArray<Event>;

@@ -390,11 +390,12 @@ describe("official OpenCode client routing", () => {
     ).toBe(true);
   });
 
-  it("maps 2.x approval and question replies through the v2 session routes", async () => {
+  it("replies to 2.x approvals with the decision body 2.0.22 requires and refuses 2.x questions", async () => {
     const requests: Request[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (request: Request) => {
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
         requests.push(request.clone());
         return new Response(null, { status: 204 });
       }),
@@ -412,18 +413,18 @@ describe("official OpenCode client routing", () => {
 
     await client.replyPermission("ses_1", "req-1", "once");
     await client.replyPermission("ses_1", "req-2", "reject");
-    await client.replyQuestion("ses_1", "q-1", ["Yes", "No"]);
+    await expect(client.replyQuestion("ses_1", "q-1", ["Yes"])).rejects.toMatchObject({
+      category: "unsupported",
+    });
 
     expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
       ["POST", "/api/session/ses_1/permission/req-1/reply"],
       ["POST", "/api/session/ses_1/permission/req-2/reply"],
-      ["POST", "/api/session/ses_1/question/q-1/reply"],
     ]);
-    expect(await requests[0]?.json()).toEqual({ reply: "once" });
-    expect(await requests[1]?.json()).toEqual({ reply: "reject" });
-    expect(await requests[2]?.json()).toEqual({
-      answers: [["Yes"], ["No"]],
-    });
+    // 2.0.22 answers the SDK's `{reply}` body with 400.
+    expect(await requests[0]?.json()).toEqual({ decision: "once" });
+    expect(await requests[1]?.json()).toEqual({ decision: "reject" });
+    expect(requests[0]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
   });
 
   it("registers and disconnects app-managed MCP servers on the 2.x API", async () => {
