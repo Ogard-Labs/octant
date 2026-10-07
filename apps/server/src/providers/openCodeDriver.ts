@@ -303,7 +303,7 @@ const BETA_API_TIMEOUT_MS = 5_000;
 const BETA_MUTATION_TIMEOUT_MS = 10_000;
 const MCP_PROBE_TIMEOUT_MS = 5_000;
 const BETA_WRITE_REFUSAL_MESSAGE =
-  "OpenCode 2 cannot enforce session permission rules, so Work and Code writes are refused.";
+  "OpenCode 2 reported a file change that no approval or setting allowed, so the turn was stopped.";
 
 /**
  * OpenCode applies the last matching rule. An allow on edit or the wildcard
@@ -1811,36 +1811,45 @@ function makeConnection(
                 ? Effect.fail(fail("unauthorized", "Plan mode cannot approve provider actions."))
                 : !state.approvals.has(input.requestId)
                   ? Effect.fail(fail("protocol", "Provider approval request is not pending."))
-                  : request(() =>
-                      activeClient.replyPermission(
-                        source,
-                        input.requestId,
-                        // On 2.x `always` saves a project grant in OpenCode's
-                        // own data directory, shared with the person's OpenCode
-                        // use, outside Octant's revocation, and it also settles
-                        // other pending requests it covers. Octant keeps its
-                        // own remembered approvals, so 2.x is only answered once.
-                        input.approved
-                          ? runtimeKind !== "beta" &&
-                            (options.permissionPersistence?.() ?? "current-session") ===
-                              "project-default"
-                            ? "always"
-                            : "once"
-                          : "reject",
-                      ),
-                    ).pipe(
-                      Effect.tap(() =>
-                        Effect.sync(() => {
-                          // A rejected edit withdraws the grant, so a file change
-                          // reported after it fails the turn again.
-                          if (state.approvalActions.get(input.requestId) === "edit") {
-                            state.grantedEdits = input.approved;
-                          }
-                          state.approvalActions.delete(input.requestId);
-                          state.approvals.delete(input.requestId);
-                        }),
-                      ),
-                    );
+                  : Effect.suspend(() => {
+                      // Settle the edit grant before replying: OpenCode runs the
+                      // approved edit, and announces the request as settled, on
+                      // its event stream, which can arrive before this reply's
+                      // response. A failed reply restores the earlier grant.
+                      const action = state.approvalActions.get(input.requestId);
+                      const priorGrant = state.grantedEdits;
+                      if (action === "edit") state.grantedEdits = input.approved;
+                      return request(() =>
+                        activeClient.replyPermission(
+                          source,
+                          input.requestId,
+                          // On 2.x `always` saves a project grant in OpenCode's
+                          // own data directory, shared with the person's OpenCode
+                          // use, outside Octant's revocation, and it also settles
+                          // other pending requests it covers. Octant keeps its
+                          // own remembered approvals, so 2.x is only answered once.
+                          input.approved
+                            ? runtimeKind !== "beta" &&
+                              (options.permissionPersistence?.() ?? "current-session") ===
+                                "project-default"
+                              ? "always"
+                              : "once"
+                            : "reject",
+                        ),
+                      ).pipe(
+                        Effect.tapError(() =>
+                          Effect.sync(() => {
+                            if (action === "edit") state.grantedEdits = priorGrant;
+                          }),
+                        ),
+                        Effect.tap(() =>
+                          Effect.sync(() => {
+                            state.approvalActions.delete(input.requestId);
+                            state.approvals.delete(input.requestId);
+                          }),
+                        ),
+                      );
+                    });
           }),
         ),
       answerUserInput: (input) =>
