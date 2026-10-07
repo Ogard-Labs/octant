@@ -409,6 +409,43 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByText("Latency telemetry")).toBeVisible();
   });
 
+  it.each([
+    ["work", workProjectId],
+    ["code", codeProjectId],
+  ] as const)(
+    "keeps a half-written %s task when the person looks at the Running tab and comes back",
+    async (mode, projectId) => {
+      const user = userEvent.setup();
+      render(
+        <DraftThreadWorkspace
+          {...baseProps}
+          homeStart={{
+            reviewCount: 0,
+            runningCount: 0,
+            cardCustomization: { order: [], visibility: [] },
+            onCardCustomizationChange: vi.fn(),
+            composerTabs: { runningCount: 2, running: <p>Two things are running.</p> },
+          }}
+          mode={mode}
+          onAttachFolder={vi.fn()}
+          projectId={projectId}
+          projects={projects}
+        />,
+      );
+
+      const composer = screen.getByRole("textbox", { name: /message|prompt|describe/i });
+      await user.type(composer, "Tidy the release notes");
+      await user.click(screen.getByRole("tab", { name: "Running 2" }));
+      expect(screen.getByText("Two things are running.")).toBeVisible();
+      expect(composer).not.toBeVisible();
+
+      await user.click(screen.getByRole("tab", { name: "New task" }));
+      expect(screen.getByRole("textbox", { name: /message|prompt|describe/i })).toHaveValue(
+        "Tidy the release notes",
+      );
+    },
+  );
+
   it("renders intent cards for the active mode", () => {
     const { container } = render(<DraftThreadWorkspace {...baseProps} />);
     expect(screen.getByRole("group", { name: "Suggested actions" })).toBeVisible();

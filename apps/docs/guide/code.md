@@ -146,7 +146,8 @@ Local servers are compact rows grouped by process and port, with this checkout
 separated from other classified leftovers. **Open** stays on a usable listener.
 Copy URL and details live in that row's menu. **Stop** appears only for an
 Octant-owned safe stop, or for a classified leftover after confirmation.
-Unmanaged processes say so and have no fake Stop control. Files, Plan,
+Unmanaged processes say so and have no fake Stop control. The same servers,
+across every Project, are on the start screen's **Running services** card. Files, Plan,
 Delivery, Agents, Browser, Review, iOS Simulator, and Android emulator stay in
 the dock.
 
@@ -166,7 +167,7 @@ Code exposes repository-valid engineering surfaces:
 - Files/Explorer, which follows the checkout live: when the agent or anything else changes a file, the tree relists and an open editor reloads. A file you have edited but not saved is never overwritten — Octant reports the external change as a conflict instead.
 - Review, beside the thread, including discarding a tracked file's uncommitted changes (asked about every time outside Full access, because nothing can restore them)
 - Git surfaces
-- Side Chat, a Chat-mode lane that can ask about this thread without interrupting its Lead turn. It reads the thread's conversation, branch and changes, files, and subagent results, and cannot change any of them. Type `#` in the composer to mention another thread as read-only context; `@` names a file in this checkout.
+- Side Chat, a Chat-mode lane that can ask about this thread without interrupting its Lead turn. It reads the thread's conversation, branch and changes, files, and subagent results, and cannot change any of them. Type `#` in the composer to mention another thread as read-only context, or drag a sidebar thread onto the composer, or choose **Attach as context** from that row's menu. `@` names a file in this checkout.
 - Browser surfaces
 - iOS Simulator and Android emulator device panes, when the host has those destinations
 - Extension-contributed surfaces approved by effective activation policy

@@ -27,6 +27,7 @@ import type { BrowserAutomationClient } from "@octant/client-runtime/browser-aut
 import type { HostClient } from "@octant/client-runtime/host-client";
 import type { NavigatorAssistantClient } from "@octant/client-runtime/navigator-assistant-client";
 import {
+  createLocalServerClient,
   isRemotePairingOrigin,
   localHostDisplayName,
   readPairingFragment,
@@ -97,6 +98,8 @@ import type {
   CodeProjectPullRequestMergeMethod,
   CodeProjectPullRequestMergeOutcome,
   CodeProjectPullRequestRow,
+  LocalServerOpenTarget,
+  RunningService,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import { type PaneId, type WindowId } from "@octant/contracts/shell";
@@ -340,6 +343,7 @@ import {
 } from "./shell/rightUtilityDockSelection";
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { threadDragSurface } from "./shell/threadDragSurface";
+import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
 import {
   RemotePairingView,
   UsageWorkspace,
@@ -431,7 +435,13 @@ import type {
   ThreadProviderIdentity,
 } from "./shell/navigationModel";
 import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
-import { createWorkingNowCard } from "./home/WorkingNowCard";
+import { RunningTab } from "./home/RunningTab";
+import { stopRunningRow } from "./home/stopRunningRow";
+import { createRunningServicesCard } from "./home/RunningServicesCard";
+import { buildReviewEntries, type ReviewEntry } from "./review/reviewModel";
+import { createReviewSource } from "./review/reviewSource";
+import type { ReviewActionOutcome, ReviewPageProps } from "./review/ReviewPage";
+import { createWorkingNowCard, type WorkingNowCardSource } from "./home/WorkingNowCard";
 import { createNeedsYouCard } from "./home/NeedsYouCard";
 import { createPullRequestsCard } from "./home/PullRequestsCard";
 import { createCiFailuresCard } from "./home/CiFailuresCard";
@@ -926,6 +936,10 @@ function LaunchedShell(
   // Deliberately not cleared on mode switch: what waits on the user spans
   // every mode, so the Inbox survives moving between them.
   const [inboxOpen, setInboxOpen] = useState(false);
+  // Like the Inbox, what finished and waits for a look spans the window, so
+  // moving between modes keeps the page; its list follows the active mode's
+  // To review count.
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [projectsListOpen, setProjectsListOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
   const [pendingIssue, setPendingIssue] = useState<RepositoryIssueRow>();
@@ -1298,6 +1312,20 @@ function LaunchedShell(
     onDrop: (source, destination) => {
       const row = sidebarDragRows.current.get(source.dragKey);
       sidebarDragRows.current.delete(source.dragKey);
+      if (destination.kind === "composer") {
+        if (row === undefined || row.threadId.trim().length === 0) {
+          void deliverComposerThreadDrop({
+            composerKey: destination.composerKey,
+            threadId: "",
+          });
+          return;
+        }
+        void deliverComposerThreadDrop({
+          composerKey: destination.composerKey,
+          threadId: row.threadId,
+        });
+        return;
+      }
       void controller.dropSurface(
         source.surface,
         destination,
@@ -1550,6 +1578,19 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
+  // The host-wide Running services read. A base URL the client refuses (a
+  // plain-HTTP remote host) leaves the card unoffered rather than broken.
+  const runningServicesClient = useMemo(() => {
+    try {
+      return createLocalServerClient({
+        baseUrl: props.launch.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: props.projectWindowCapability,
+      });
+    } catch {
+      return undefined;
+    }
+  }, [props.launch.serverUrl, props.projectWindowCapability]);
   const threadHandOffClient = useMemo(
     () =>
       resolveThreadHandOffClient({
@@ -2584,6 +2625,21 @@ function LaunchedShell(
       dockTabs.length > 0 ||
       launchableDockSurfaces.length > 0);
   const dockOpen = dockVisible && dockAvailable;
+  // A Browser tab bound to one host-opened context (a link or a local server)
+  // is not the thread's shared Browser, so it does not stand in for the agent's
+  // session: only a tab with no context of its own counts as that view.
+  const sharedBrowserInDock =
+    dockOpen &&
+    displayedDockState.tabs.some(
+      (tab) =>
+        tab.id === displayedDockState.active &&
+        tab.surface === "browser" &&
+        tab.browserContextId === undefined,
+    );
+  const sharedBrowserInBottomPanel =
+    bottomPanelOpen &&
+    activeBottomSurface?.id === "browser" &&
+    activeBottomTab?.browserContextId === undefined;
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
@@ -3377,6 +3433,38 @@ function LaunchedShell(
     }
   }
   /**
+   * Shows a running service's page. A service attributed to a thread's own
+   * worktree opens as a Browser tab of that thread, confined to the one origin
+   * the host prepared; the rest open in this computer's own browser, which is
+   * only right when the window is reading this computer. Either failure is
+   * thrown to the row, never answered by opening a loopback address that
+   * belongs to some other computer.
+   */
+  async function openRunningService(
+    service: RunningService,
+    target: LocalServerOpenTarget,
+  ): Promise<void> {
+    const client = browserAutomationClient;
+    const paneId = activePaneId;
+    if (service.thread !== undefined && client !== undefined && paneId !== undefined) {
+      const threadId = decodeBrowserThreadId(service.thread.threadId);
+      const contextId = await openDedicatedBrowserContext(client, threadId, "code", {
+        allowedOrigin: target.allowedOrigin,
+        url: String(target.url),
+        ...(target.acceptsLocalCertificate ? { acceptsLocalCertificate: true } : {}),
+      });
+      const adopted = await controller.openSurfaceInSplit("browser", paneId, contextId);
+      if (adopted) return;
+      await releaseBrowserContext(client, threadId, contextId);
+      throw new Error("No Browser tab adopted the context opened for this server.");
+    }
+    if (workingNowHost === undefined) {
+      openExternalUrl(props.hostBridge, String(target.url));
+      return;
+    }
+    throw new Error("This server runs on another computer.");
+  }
+  /**
    * Takes the reader to the degraded Project. Context usage lives on that
    * Project's thread composer, so activating the Project is the honest
    * destination — a dock panel about someone else's context is not.
@@ -3785,6 +3873,27 @@ function LaunchedShell(
     () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
     [projectController.projects],
   );
+  // The To review count's own rows: the same threads the tile counted, so the
+  // page and the number cannot disagree.
+  const reviewEntries = useMemo(
+    () =>
+      buildReviewEntries({
+        threads: workingNowThreads,
+        projectNames: workingNowProjectNames,
+        unfiledLabel: "No project",
+      }),
+    [workingNowProjectNames, workingNowThreads],
+  );
+  const reviewSource = useMemo(
+    () =>
+      createReviewSource({
+        code: codeClient,
+        work: workThreadClient,
+        workTurns: workTurnClient,
+        chat: chatClient,
+      }),
+    [chatClient, codeClient, workThreadClient, workTurnClient],
+  );
   const workingNowProviders = useMemo(
     () =>
       new Map(
@@ -3869,6 +3978,7 @@ function LaunchedShell(
     projectsListOpen,
     selectedProjectTabId ?? "",
     inboxOpen,
+    reviewOpen,
     workBoardOpen,
     codeBoardOpen,
     codePullRequestsOpen,
@@ -4062,6 +4172,7 @@ function LaunchedShell(
     codeBoardOpen ||
     codePullRequestsOpen ||
     inboxOpen ||
+    reviewOpen ||
     githubIssuesOpen ||
     linearIssuesOpen ||
     workBoardOpen ||
@@ -4091,15 +4202,44 @@ function LaunchedShell(
     props.hostBridge === undefined
       ? remoteHostLabel(props.launch.serverUrl, localHost?.displayName)
       : undefined;
+  // What moves the pending-request read: a thread raising or clearing a
+  // question journals on its own mode's navigation topic.
+  const pendingRequestFeedRevision =
+    machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
   // The card list is rebuilt each render and is cheap: each card's own rows are
   // memoized from the inputs above, which keep their identity between renders.
+  const workingNowSource: WorkingNowCardSource = {
+    agentRunClient,
+    boardFacts: workingNowBoardFacts,
+    ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
+    modes: workingNowModes,
+    now: minuteNow.getTime(),
+    onOpenRow: (row) => {
+      pluginSidebarDestinationActionContext.closeOverlays();
+      if (row.mode === "chat") selectChatThread(row.threadId);
+      else if (row.mode === "work") selectWorkThread(row.threadId);
+      else selectCodeThread(row.threadId);
+    },
+    // The same place the sidebar's Running tile goes: Chat has no board, so
+    // its running threads lead the Activity feed instead.
+    onOpenRunning: () => {
+      if (activeMode === "chat") {
+        openSidebarList("activity");
+        return;
+      }
+      pluginSidebarDestinationActionContext.closeOverlays();
+      pluginSidebarDestinationActionContext.openThreadBoard();
+    },
+    projectNames: workingNowProjectNames,
+    providers: workingNowProviders,
+    runRevision:
+      machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation,
+    threads: workingNowThreads,
+  };
   const homeCards = [
     createNeedsYouCard({
       answerClients: { chatClient, codeClient, workRequestClient },
-      feedRevision:
-        machineChanges.chatNavigation +
-        machineChanges.workNavigation +
-        machineChanges.codeNavigation,
+      feedRevision: pendingRequestFeedRevision,
       modes: workingNowModes,
       now: minuteNow.getTime(),
       onOpenInbox: openInbox,
@@ -4115,35 +4255,18 @@ function LaunchedShell(
       threadProviders: needsYouThreadProviders,
       workspace: controller.workspace,
     }),
-    createWorkingNowCard({
-      agentRunClient,
-      boardFacts: workingNowBoardFacts,
+    createWorkingNowCard(workingNowSource),
+    createRunningServicesCard({
+      client: runningServicesClient,
       ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
-      modes: workingNowModes,
-      now: minuteNow.getTime(),
-      onOpenRow: (row) => {
-        pluginSidebarDestinationActionContext.closeOverlays();
-        if (row.mode === "chat") selectChatThread(row.threadId);
-        else if (row.mode === "work") selectWorkThread(row.threadId);
-        else selectCodeThread(row.threadId);
-      },
-      // The same place the sidebar's Running tile goes: Chat has no board, so
-      // its running threads lead the Activity feed instead.
-      onOpenRunning: () => {
-        if (activeMode === "chat") {
-          openSidebarList("activity");
-          return;
-        }
-        pluginSidebarDestinationActionContext.closeOverlays();
-        pluginSidebarDestinationActionContext.openThreadBoard();
-      },
-      projectNames: workingNowProjectNames,
-      providers: workingNowProviders,
-      runRevision:
-        machineChanges.chatNavigation +
-        machineChanges.workNavigation +
-        machineChanges.codeNavigation,
-      threads: workingNowThreads,
+      // A service on another computer opens only as that thread's Browser tab,
+      // which the host itself shows; this window's own browser cannot reach it.
+      canOpen: (service) =>
+        workingNowHost === undefined ||
+        (service.thread !== undefined &&
+          browserAutomationClient !== undefined &&
+          activePaneId !== undefined),
+      onOpenTarget: openRunningService,
     }),
     createPullRequestsCard({
       available: pullRequestCardAvailable({
@@ -4193,12 +4316,26 @@ function LaunchedShell(
       },
     }),
   ];
+  // The Running tab lists the card's own rows and shows the sidebar's own
+  // Running count, so the three never disagree.
+  const composerTabs = {
+    runningCount: sidebarTileCounts.running,
+    running: (
+      <RunningTab
+        onStop={(row) =>
+          stopRunningRow({ agentRunClient, chatClient, codeClient, workTurnClient }, row)
+        }
+        source={workingNowSource}
+      />
+    ),
+  };
   const homeStart: DraftThreadWorkspaceProps["homeStart"] =
     activeMode === "chat"
       ? {
           reviewCount: 0,
           runningCount: 0,
           cards: homeCards,
+          composerTabs,
           cardCustomization: controller.settings.homeCards,
           onCardCustomizationChange: (homeCardChoice) =>
             void controller.updateSettings({ homeCards: homeCardChoice }),
@@ -4214,8 +4351,9 @@ function LaunchedShell(
                   ? continueCards.runningTotal
                   : 0
                 : runningThreadCount(workProjectThreads),
-            onReview: openInbox,
+            onReview: openReview,
             cards: homeCards,
+            composerTabs,
             cardCustomization: controller.settings.homeCards,
             onCardCustomizationChange: (homeCardChoice) =>
               void controller.updateSettings({ homeCards: homeCardChoice }),
@@ -4336,6 +4474,9 @@ function LaunchedShell(
     onMarkThreadRead: (threadId) => codeController.markThreadRead(decodeCodeThreadId(threadId)),
     onMarkThreadUnread: (threadId) => codeReadCursorStore.unmark(decodeCodeThreadId(threadId)),
     onPinInPane: pinCodeThreadInPane,
+    onAttachAsContext: (threadId) => {
+      void deliverComposerThreadDrop({ threadId });
+    },
     onPinThread: (threadId, pinned) =>
       void codeController.pinThread(decodeCodeThreadId(threadId), pinned),
     onOpenPullRequest: selectProjectPullRequestIdentity,
@@ -4369,34 +4510,51 @@ function LaunchedShell(
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
     onPinInPane: pinChatThreadInPane,
+    onAttachAsContext: (threadId) => {
+      void deliverComposerThreadDrop({ threadId });
+    },
   };
   // Work has no controller of its own for thread metadata: a rest command
   // goes straight to the client with the version the sidebar last saw, and
   // the host's answer is folded back into the navigation list.
-  const runWorkRestCommand = async (
+  const tryWorkRestCommand = async (
     threadId: string,
     command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
-  ): Promise<void> => {
+  ): Promise<ReviewActionOutcome> => {
     const thread = workNavigation.bootstrap?.threads.find(
       (candidate) => String(candidate.id) === threadId,
     );
-    if (thread === undefined) return;
+    if (thread === undefined) {
+      return { status: "refused", message: "This thread is no longer in the list." };
+    }
     try {
       const result = await workThreadClient.execute(command(thread.version));
       if ("kind" in result && result.kind === "thread-updated") {
         workNavigation.applyThread(result.thread);
       }
+      return { status: "ok" };
     } catch (error) {
       // The host refused (a running turn, a wake time already gone) or the
-      // row was stale: say so where thread notices already appear, and read
-      // the list again so the row shows the thread as the host has it.
-      setThreadExportNotice(
-        error instanceof Error && error.message.trim() !== ""
-          ? error.message
-          : "The host could not change this thread.",
-      );
+      // row was stale: read the list again so the row shows the thread as the
+      // host has it, and hand the reason to whoever acted.
       void workNavigation.refresh();
+      return {
+        status: "refused",
+        message:
+          error instanceof Error && error.message.trim() !== ""
+            ? error.message
+            : "The host could not change this thread.",
+      };
     }
+  };
+  // A sidebar row has nowhere of its own to report a refusal, so its answer
+  // reads where thread notices already appear.
+  const runWorkRestCommand = async (
+    threadId: string,
+    command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
+  ): Promise<void> => {
+    const outcome = await tryWorkRestCommand(threadId, command);
+    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
   };
   const workThreadRowActions: ThreadRowActions = {
     ...(exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread }),
@@ -4427,7 +4585,94 @@ function LaunchedShell(
         expectedVersion,
       })),
     onPinInPane: pinWorkThreadInPane,
+    onAttachAsContext: (threadId) => {
+      void deliverComposerThreadDrop({ threadId });
+    },
   };
+
+  // The Review page acts through each thread's own host command, the same one
+  // its sidebar row uses, but asks for the host's answer as a value: the page
+  // shows a refusal beside the thread it concerns instead of in a shared
+  // notice. Each mode keeps its own command, so a Chat thread never reaches a
+  // Work or Code command.
+  const reviewPageProps: ReviewPageProps | undefined = reviewOpen
+    ? {
+        entries: reviewEntries,
+        source: reviewSource,
+        changeRevision:
+          machineChanges.chatNavigation +
+          machineChanges.workNavigation +
+          machineChanges.codeNavigation,
+        now: minuteNow.getTime(),
+        onClose: () => setReviewOpen(false),
+        codeProjectAccess: {
+          boundProjectId:
+            controller.boundCodeProjectId === undefined
+              ? undefined
+              : String(controller.boundCodeProjectId),
+          onOpenProject: (entry: ReviewEntry) => {
+            const project = projectController.allProjects.find(
+              (candidate) => String(candidate.id) === entry.projectId,
+            );
+            if (project === undefined || project.lifecycle !== "active") return;
+            // Binds the window without closing the page, so the person stays in review.
+            void controller.openProject(project.id, "code", project.name);
+          },
+        },
+        onOpen: (entry: ReviewEntry) => {
+          if (entry.mode === "chat") selectChatThread(entry.threadId);
+          else if (entry.mode === "work") selectWorkThread(entry.threadId);
+          else selectCodeThread(entry.threadId);
+        },
+        onComplete: (entry: ReviewEntry): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.completeThread(decodeCodeThreadId(entry.threadId));
+          }
+          if (entry.mode === "chat") {
+            return chatController.completeThread(decodeChatThreadId(entry.threadId));
+          }
+          return tryWorkRestCommand(entry.threadId, (expectedVersion) => ({
+            kind: "complete-work-thread",
+            threadId: decodeWorkThreadId(entry.threadId),
+            expectedVersion,
+          }));
+        },
+        onSnooze: (entry: ReviewEntry, until: string): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.snoozeThread(decodeCodeThreadId(entry.threadId), until);
+          }
+          if (entry.mode === "chat") {
+            return chatController.snoozeThread(decodeChatThreadId(entry.threadId), until);
+          }
+          return tryWorkRestCommand(entry.threadId, (expectedVersion) => ({
+            kind: "snooze-work-thread",
+            threadId: decodeWorkThreadId(entry.threadId),
+            expectedVersion,
+            until: decodeUtcTimestamp(until),
+          }));
+        },
+        onSendBack: (entry: ReviewEntry, prompt: string): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.sendBackTurn(decodeCodeThreadId(entry.threadId), prompt);
+          }
+          if (entry.mode === "chat") {
+            return chatController.sendBackTurn(decodeChatThreadId(entry.threadId), prompt);
+          }
+          return Promise.resolve({
+            status: "refused",
+            message:
+              "A Work thread takes its follow-up from its own composer. Open it to continue.",
+          });
+        },
+        onMarkSeen: (entry: ReviewEntry) => {
+          if (entry.mode === "code")
+            codeController.markThreadRead(decodeCodeThreadId(entry.threadId));
+          else if (entry.mode === "chat") {
+            chatController.markThreadRead(decodeChatThreadId(entry.threadId));
+          }
+        },
+      }
+    : undefined;
 
   // One thread-selection handler per mode. The sidebar and every Project
   // Overview call the same one, so a row opens the same thread wherever it is
@@ -4593,6 +4838,7 @@ function LaunchedShell(
     projectsListOpen ||
     railPlaceholder !== undefined ||
     inboxOpen ||
+    reviewOpen ||
     codeBoardOpen ||
     workBoardOpen ||
     codePullRequestsOpen ||
@@ -4771,6 +5017,7 @@ function LaunchedShell(
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
     setInboxOpen(false);
+    setReviewOpen(false);
     setGithubIssuesOpen(false);
     setLinearIssuesOpen(false);
     setArchiveOpen(false);
@@ -4957,6 +5204,13 @@ function LaunchedShell(
   function openInbox() {
     pluginSidebarDestinationActionContext.closeOverlays();
     setInboxOpen(true);
+  }
+
+  // The To review tile, the start screen's review card, and the palette all
+  // land on the one page that lists the threads the tile counted.
+  function openReview() {
+    pluginSidebarDestinationActionContext.closeOverlays();
+    setReviewOpen(true);
   }
 
   const pluginSidebarDestinationActions: Record<string, () => void> = {};
@@ -5855,6 +6109,7 @@ function LaunchedShell(
     onNewThread: () => void controller.openDraftThread(activeMode),
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
+    onOpenReview: openReview,
     onOpenZen: () => {
       if (zen.active) zen.exitZen();
       else void zen.enterZen();
@@ -6366,7 +6621,7 @@ function LaunchedShell(
               ...(activeMode === "chat"
                 ? { onOpenRunning: () => openSidebarList("activity") }
                 : {}),
-              onOpenReview: () => openSidebarList("activity"),
+              onOpenReview: openReview,
               onOpenDone: () => openSidebarList("completed"),
             }}
             {...(sidebarRail
@@ -6579,6 +6834,7 @@ function LaunchedShell(
                 {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
                 onDismissRailPlaceholder={() => setRailPlaceholder(undefined)}
                 inboxOpen={inboxOpen}
+                {...(reviewPageProps === undefined ? {} : { reviewPage: reviewPageProps })}
                 onCloseInbox={() => setInboxOpen(false)}
                 inboxAttentionItems={inboxAttentionItems}
                 onOpenInboxThread={(signal) => {
@@ -6680,6 +6936,14 @@ function LaunchedShell(
                     ),
                   )
                 }
+                boardPendingRequests={{
+                  answerClients: { chatClient, codeClient, workRequestClient },
+                  feedRevision: pendingRequestFeedRevision,
+                  now: minuteNow.getTime(),
+                  pendingRequestClient,
+                  settings: controller.settings,
+                  workspace: controller.workspace,
+                }}
                 providerKinds={
                   new Map(
                     (activeMode === "work" ? workProviderGroups : codeProviderGroups).map(
@@ -6959,6 +7223,7 @@ function LaunchedShell(
                           codeBoardOpen ||
                           codePullRequestsOpen ||
                           inboxOpen ||
+                          reviewOpen ||
                           githubIssuesOpen ||
                           linearIssuesOpen ||
                           workBoardOpen ||
@@ -7111,6 +7376,11 @@ function LaunchedShell(
                           controller.openSurface(surface, paneId, browserContextId)
                         }
                         onRevealBrowserActivity={(input) => controller.revealBrowserActivity(input)}
+                        onOpenThreadBrowser={(input) => controller.openThreadBrowser(input)}
+                        {...(dockThreadId === undefined ||
+                        !(sharedBrowserInDock || sharedBrowserInBottomPanel)
+                          ? {}
+                          : { browserToolThreadId: String(dockThreadId) })}
                         {...(browserAutomationClient === undefined
                           ? {}
                           : { onOpenLink: (request) => void openLinkInApp(request) })}

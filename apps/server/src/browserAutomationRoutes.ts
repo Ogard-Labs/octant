@@ -7,6 +7,7 @@ import {
   decodeBrowserContextStopCommand,
   decodeBrowserThreadScope,
   decodeBrowserThreadContextCommand,
+  decodeBrowserThreadInspectCommand,
   decodeBrowserThreadScopeRequest,
   decodeBrowserToolApprovalDecision,
   type BrowserToolApproval,
@@ -201,7 +202,7 @@ export function createBrowserAutomationRouteHandler(
         );
       }
       if (url.pathname === "/api/browser/contexts/current") {
-        const input = decodeBrowserThreadContextCommand(decoded.value);
+        const input = decodeBrowserThreadInspectCommand(decoded.value);
         if (
           !BROWSER_MODES.some((mode) =>
             dependencies.authority.canAccessWindow(windowId, input.threadId, mode),
@@ -216,7 +217,7 @@ export function createBrowserAutomationRouteHandler(
         // The preview polls this route, so it is where a page the person
         // drives gets its picture refreshed.
         const snapshot =
-          dependencies.service.peekThread === undefined
+          dependencies.service.peekThread === undefined || input.freshPicture === false
             ? dependencies.service.inspectThread(windowId, input.threadId)
             : await dependencies.service.peekThread(windowId, input.threadId, request.signal);
         return success(decodeBrowserAutomationSnapshot(snapshot), origin);

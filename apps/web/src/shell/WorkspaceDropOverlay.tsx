@@ -7,7 +7,13 @@ export function WorkspaceDropOverlay(props: {
   readonly targetPaneId: string;
 }) {
   const destination = props.destination;
-  if (destination === null || String(destination.targetPaneId) !== props.targetPaneId) return null;
+  if (
+    destination === null ||
+    destination.kind === "composer" ||
+    String(destination.targetPaneId) !== props.targetPaneId
+  ) {
+    return null;
+  }
   const label = destination.kind === "edge" ? `Split ${destination.edge}` : "Open in this pane";
   return (
     <div
@@ -26,9 +32,11 @@ export function WorkspaceDragStatus(props: { readonly drag: WorkspaceSurfaceDrag
   const message =
     destination === null
       ? `Dragging ${props.drag.source.title}. No drop target.`
-      : destination.kind === "edge"
-        ? `Split ${destination.edge} and open ${props.drag.source.title}.`
-        : `Open ${props.drag.source.title} in this pane.`;
+      : destination.kind === "composer"
+        ? `Attach ${props.drag.source.title} as context. The draft will not be sent.`
+        : destination.kind === "edge"
+          ? `Split ${destination.edge} and open ${props.drag.source.title}.`
+          : `Open ${props.drag.source.title} in this pane.`;
   return (
     <>
       <div aria-live="polite" className="sr-only" role="status">
