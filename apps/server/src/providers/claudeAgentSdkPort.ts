@@ -6,6 +6,7 @@ import {
   type McpSetServersResult,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
+  ProviderContextBreakdown,
   ProviderExecutionPolicy,
   ProviderFailure,
   ProviderToolDefinition,
@@ -15,6 +16,8 @@ import { Effect, Stream, type Scope } from "effect";
 
 import {
   decodeAccount,
+  decodeAutoCompactThreshold,
+  decodeContextBreakdown,
   decodeInitialization,
   type ClaudeDecodePhase,
   decodeInterruptReceipt,
@@ -139,6 +142,11 @@ export interface ClaudeAccountState {
 export interface ClaudeInitialization {
   readonly models: readonly ClaudeModelInfo[];
   readonly account: ClaudeAccountState;
+  /**
+   * Where the runtime compacts the session by itself, in tokens, when it said
+   * compaction is on. Absent when it said nothing usable.
+   */
+  readonly autoCompactThreshold?: number;
 }
 
 export interface ClaudeSessionMetadata {
@@ -264,6 +272,12 @@ export type ClaudeDecodedMessage =
       readonly usage: ClaudeUsage;
       /** What Claude says this turn cost, in US dollars. */
       readonly totalCostUsd?: number;
+      /**
+       * What the runtime says fills the window as the turn ends, when it
+       * answered. The stream attaches it; the decoder never reads it from the
+       * result message itself.
+       */
+      readonly contextBreakdown?: ProviderContextBreakdown;
       readonly permissionDenials: readonly {
         readonly toolName: string;
         readonly toolUseId: string;
@@ -450,6 +464,8 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
   readonly interrupt: () => Promise<unknown>;
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Promise<void>;
   readonly initializationResult: () => Promise<unknown>;
+  /** The runtime's own account of its window; older runtimes do not answer. */
+  readonly getContextUsage?: () => Promise<unknown>;
   readonly supportedModels: () => Promise<unknown>;
   readonly accountInfo: () => Promise<unknown>;
   readonly close: () => void;
@@ -467,6 +483,50 @@ export interface ClaudeAgentSdkPortOptions {
 }
 
 const DEFAULT_INPUT_CAPACITY = 1;
+/** The answer is a local control request; one that takes longer is not coming. */
+const CONTEXT_USAGE_TIMEOUT_MS = 3_000;
+/**
+ * A turn's result waits for this answer, so a runtime that is slow to give it
+ * costs every turn this long. It is shorter than the session-open wait, and a
+ * session stops asking after its first miss.
+ */
+const TURN_CONTEXT_USAGE_TIMEOUT_MS = 1_500;
+
+function compactionPoint(autoCompactThreshold: number | undefined) {
+  return autoCompactThreshold === undefined ? {} : { autoCompactThreshold };
+}
+
+/**
+ * Asks the runtime for its own account of its window. Whatever is read from it
+ * is the runtime's figure or nothing: a runtime that does not answer, answers
+ * late, or throws leaves the caller with no answer rather than a guessed one.
+ */
+async function askContextUsage(
+  query: ClaudeAgentSdkQueryLike,
+  timeoutMs: number,
+): Promise<unknown> {
+  if (query.getContextUsage === undefined) return undefined;
+  let timer: number | undefined;
+  try {
+    return await Promise.race([
+      query.getContextUsage(),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } catch {
+    return undefined;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** Where the runtime compacts the session, or nothing when it did not say. */
+async function askAutoCompactThreshold(
+  query: ClaudeAgentSdkQueryLike,
+): Promise<number | undefined> {
+  return decodeAutoCompactThreshold(await askContextUsage(query, CONTEXT_USAGE_TIMEOUT_MS));
+}
 const SANDBOX_KEYS = [
   "allowUnsandboxedCommands",
   "autoAllowBashIfSandboxed",
@@ -796,7 +856,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
             };
             query = sdk.query({ prompt, options: invocationOptions });
-            const initialization = decodeInitialization(await query.initializationResult());
+            const initialization = {
+              ...decodeInitialization(await query.initializationResult()),
+              ...compactionPoint(await askAutoCompactThreshold(query)),
+            };
             // The runtime echoes the model an alias such as `sonnet` resolved
             // to, so the initialized message is checked against the resolved
             // id its own catalogue declares for the requested model.
@@ -911,7 +974,23 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 }),
               ),
               Stream.filter((message): message is ClaudeDecodedMessage => message !== undefined),
+              // The window's make-up is asked for where a turn settles. The
+              // answer is the runtime's, so it rides on the result that carries
+              // the turn's usage and nowhere else.
+              Stream.mapEffect((message) =>
+                message.kind === "result" && !contextUsageUnavailable
+                  ? Effect.promise(async () => {
+                      const answer = await askContextUsage(query!, TURN_CONTEXT_USAGE_TIMEOUT_MS);
+                      if (answer === undefined) contextUsageUnavailable = true;
+                      const contextBreakdown = decodeContextBreakdown(answer);
+                      return contextBreakdown === undefined
+                        ? message
+                        : { ...message, contextBreakdown };
+                    })
+                  : Effect.succeed(message),
+              ),
             );
+            let contextUsageUnavailable = false;
             let messageStreamClaimed = false;
             const messages = Stream.unwrap(
               Effect.sync(() => {

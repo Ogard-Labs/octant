@@ -1,4 +1,8 @@
-import type { CanvasBlock } from "@octant/contracts/canvas";
+import {
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasBlock,
+  type CanvasBlock,
+} from "@octant/contracts/canvas";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { describe, expect, it } from "vitest";
 import { renderArtifactHtml, renderArtifactMarkdown } from "./artifactDocumentRender";
@@ -126,9 +130,9 @@ describe("rendering a canvas as a document", () => {
   });
 
   it("writes a treemap as an indented table of every measure", () => {
-    const treemap = {
+    const treemap = decodeCanvasBlock({
       blockId: "map-1",
-      schemaVersion: 4,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
       kind: "treemap",
       measures: [
         { measureId: "loc", label: "Lines of code" },
@@ -141,7 +145,7 @@ describe("rendering a canvas as a document", () => {
         { nodeId: "a", label: "A", parentId: "root", values: { loc: 10, edits: 2 } },
         { nodeId: "b", label: "B", parentId: "root", values: { loc: 30, edits: 5 } },
       ],
-    } as unknown as CanvasBlock;
+    });
 
     const rendered = renderArtifactMarkdown(definition([treemap]));
 

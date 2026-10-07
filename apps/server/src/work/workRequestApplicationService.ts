@@ -1,5 +1,6 @@
 import {
   decodeWorkRequestList,
+  type PendingRequest,
   type WorkRequest,
   type WorkRequestCommand,
   type WorkRequestCommandResult,
@@ -12,15 +13,21 @@ import type { WorkRequestService, WorkRequestServiceResult } from "./workRequest
 
 const MAX_WORK_REQUEST_LIST_LIMIT = 128;
 
+type WorkProjectBootstrap = {
+  readonly active: ReadonlyArray<{ readonly id: ProjectId; readonly type: string }>;
+};
+
 export interface WorkRequestApplicationProjectsPort {
-  bootstrap(
-    windowId: WindowId,
-  ): Promise<{ readonly active: ReadonlyArray<{ readonly id: ProjectId; readonly type: string }> }>;
+  bootstrap(windowId: WindowId): Promise<WorkProjectBootstrap>;
 }
 
 export interface WorkRequestApplicationThreadsPort {
   bootstrap(windowId: WindowId): Promise<{
-    readonly threads: ReadonlyArray<{ readonly id: WorkThreadId; readonly projectId: ProjectId }>;
+    readonly threads: ReadonlyArray<{
+      readonly id: WorkThreadId;
+      readonly projectId: ProjectId;
+      readonly title: string;
+    }>;
   }>;
 }
 
@@ -88,6 +95,33 @@ export class WorkRequestApplicationService {
     return decodeWorkRequestList({ requests: boundWorkRequestList(requests) });
   }
 
+  /**
+   * Every pending request this window could answer through `execute`, across
+   * its Work Projects: the same Project access `execute` checks, narrowed to
+   * threads the window's thread list holds, so a request on a thread it
+   * cannot open is never offered. The caller orders and bounds the result.
+   */
+  async listPendingForWindow(windowId: WindowId): Promise<ReadonlyArray<PendingRequest>> {
+    const [projects, { threads }] = await Promise.all([
+      this.#projects.bootstrap(windowId),
+      this.#threads.bootstrap(windowId),
+    ]);
+    const pending: PendingRequest[] = [];
+    for (const project of projects.active) {
+      if (!isWorkProjectOf(projects, project.id)) continue;
+      for (const request of this.#requests.listPending(project.id)) {
+        const thread = threads.find(
+          (candidate) =>
+            String(candidate.id) === String(request.threadId) &&
+            String(candidate.projectId) === String(request.projectId),
+        );
+        if (thread === undefined) continue;
+        pending.push(pendingRequestFrom(request, thread.title));
+      }
+    }
+    return pending;
+  }
+
   async execute(
     windowId: WindowId,
     command: WorkRequestCommand,
@@ -105,17 +139,37 @@ export class WorkRequestApplicationService {
   }
 
   async #assertWorkProjectAccess(windowId: WindowId, projectId: ProjectId): Promise<void> {
-    const bootstrap = await this.#projects.bootstrap(windowId);
-    const project = bootstrap.active.find(
-      (candidate) => String(candidate.id) === String(projectId),
-    );
-    if (project === undefined || project.type !== "work") {
+    if (!isWorkProjectOf(await this.#projects.bootstrap(windowId), projectId)) {
       throw new WorkRequestApplicationError(
         "unauthorized",
         "Work request access is unauthorized for this Project.",
       );
     }
   }
+}
+
+function isWorkProjectOf(bootstrap: WorkProjectBootstrap, projectId: ProjectId): boolean {
+  const project = bootstrap.active.find((candidate) => String(candidate.id) === String(projectId));
+  return project !== undefined && project.type === "work";
+}
+
+function pendingRequestFrom(request: WorkRequest, threadTitle: string): PendingRequest {
+  const shared = {
+    mode: "work",
+    projectId: request.projectId,
+    threadId: request.threadId,
+    threadTitle,
+    requestedAt: request.requestedAt,
+    answer: { requestId: request.requestId, expectedVersion: request.version },
+  } as const;
+  return request.detail.kind === "approval"
+    ? { ...shared, kind: "approval", text: request.detail.description }
+    : {
+        ...shared,
+        kind: "question",
+        text: request.detail.prompt,
+        options: request.detail.options.map((label) => ({ label })),
+      };
 }
 
 function unwrap(

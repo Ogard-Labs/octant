@@ -124,6 +124,8 @@ import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
 import type { DraftRecentThread } from "./DraftThreadWorkspace";
 import type { OctantMode } from "@octant/contracts/modes";
 import { AgentModeWelcome } from "./AgentModeWelcome";
+import { HomeStart } from "./HomeStart";
+import { HomeDashboard } from "../home/HomeDashboard";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
@@ -1980,9 +1982,26 @@ function renderNonCodeTab(
   }
   if (tab.mode === "chat") {
     const recentThreads = draftRecentThreads("chat", props);
+    const home = props.homeStart;
     return (
       <ChatWelcome
         greetingName={props.greetingName}
+        {...(home?.cards === undefined
+          ? {}
+          : {
+              homeStart: (
+                <HomeStart
+                  actions={[]}
+                  dashboard={
+                    <HomeDashboard
+                      cards={home.cards}
+                      customization={home.cardCustomization}
+                      onCustomizationChange={home.onCardCustomizationChange}
+                    />
+                  }
+                />
+              ),
+            })}
         {...(recentThreads.length === 0 ? {} : { recentThreads })}
         {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
         {...(props.selectedCreateHostId === undefined
