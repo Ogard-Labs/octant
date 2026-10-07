@@ -45,7 +45,7 @@ Chat has no board.
 
 ### Home cards
 
-Under the composer on a new Work or Code task, a few cards show what is
+Under the composer on a new chat or a new Work or Code task, a few cards show what is
 happening now. **Working now** lists what is running across your Projects:
 each row has the provider mark, the thread's title, a line saying what it is
 doing, and a time. A command or tool shows as it runs, such as `Command: bun run
@@ -113,7 +113,7 @@ pull request and check already written in; you send it. The card is not shown wi
 storage is insecure. It reads the same list Pull requests keeps, so it does
 not ask again on its own.
 
-**Computers**, on a new Work or Code task, lists the computers this window is
+**Computers**, on a new chat or a new Work or Code task, lists the computers this window is
 connected to: this computer, and any paired computer, devbox, or server. Each
 row says whether it is connected, reconnecting, or offline. When this window
 may see that computer's load, the row shows how many cores and how much memory
@@ -124,7 +124,7 @@ seen, and no bars. If the load cannot be read for a moment, the bars go away
 until it can. For the computer this window was opened from, the number of agents
 running there opens Running filtered to that computer; other computers do not
 report it, so they show no number. Up to four computers show, then **+N more**. The card asks for
-the load only while you are looking at it and the window is in front, about
+the load only while you are looking at it and the window is not hidden, about
 every ten seconds, and stops when the window is hidden.
 
 **Customize**, on the right under the composer, turns each card on or off and

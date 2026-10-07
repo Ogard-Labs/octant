@@ -352,7 +352,7 @@ Start a fix, since its branch is not in the Project. It does not start a turn; t
 it. Opening the card reads the same cached snapshot
 Pull requests reads and adds no poll.
 
-**Computers** is the next card, on by default, on Work and Code. It lists every
+**Computers** is the next card, on by default, on Chat, Work, and Code. It lists every
 host this window is connected to: this computer, paired remote hosts, devboxes,
 and servers. A row names the host and says whether it is connected,
 reconnecting, or offline — the word, not colour alone. A connected or
@@ -366,8 +366,12 @@ figures as current. The host this window was opened from reports how many
 agents run there, and that count opens Running with the environment filter set
 to the host; any other host does not report one, so its row shows no count.
 At most four hosts show, then **+N more**. The card reads each host's load only
-while it is visible and the window is in front, about every ten seconds, and
-stops when the window is hidden. It never polls in the background.
+while it is mounted and the window is visible (not minimised, on another space,
+or behind another tab), about every ten seconds, and stops when the window is
+hidden; a window that is visible but not focused still reads. It never polls in
+the background. A host whose last read has not answered is not asked again, a
+read that takes longer than five seconds is abandoned and leaves that host
+without figures, and leaving the start screen cancels the reads in flight.
 
 **Needs you** surfaces (a start-screen card, answering from Board cards, the
 command palette) read one host list of the approvals and

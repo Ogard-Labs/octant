@@ -4243,14 +4243,15 @@ function LaunchedShell(
             ...(snapshot.lastReadyAt === undefined ? {} : { lastSeenAt: snapshot.lastReadyAt }),
           };
         });
-  const readComputerResources = async (hostId: string) => {
-    if (hostId === computerLaunchHostId) return hostResourceClient.read();
+  const readComputerResources = async (hostId: string, signal: AbortSignal) => {
+    if (hostId === computerLaunchHostId) return hostResourceClient.read(signal);
     const transport = hostFederationTransports?.remoteTransportFor(hostId);
     if (transport === undefined) return { status: "refused" as const };
     try {
       const response = await transport.authenticatedFetch({
         method: "GET",
         path: "/api/host/resources",
+        signal,
       });
       if (response.status === 401 || response.status === 403) return { status: "refused" as const };
       if (!response.ok) return { status: "unavailable" as const };
