@@ -213,6 +213,7 @@ import {
   clearLaunchTokenFragment,
   isProjectWindowCapability,
   launchFromLocation,
+  tabLaunchMemory,
   type ShellLaunch,
 } from "./shell/shellLaunch";
 import {
@@ -285,6 +286,7 @@ import { OctantToast } from "./ui/base/OctantToast";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import { useProviderController } from "./providers/useProviderController";
+import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
@@ -432,6 +434,13 @@ import { buildReviewEntries, type ReviewEntry } from "./review/reviewModel";
 import { createReviewSource } from "./review/reviewSource";
 import type { ReviewActionOutcome, ReviewPageProps } from "./review/ReviewPage";
 import { createWorkingNowCard } from "./home/WorkingNowCard";
+import { createPullRequestsCard } from "./home/PullRequestsCard";
+import {
+  pullRequestCardAvailable,
+  pullRequestCardCapability,
+  type PullRequestCardCapability,
+  type PullRequestCardRow,
+} from "./home/pullRequests";
 import { boardFactsByThread, remoteHostLabel, type WorkingNowThread } from "./home/workingNow";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
@@ -492,7 +501,9 @@ const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 const NO_VOICE_SETTINGS: VoiceSettings = {};
 
 export function App(props: AppProps) {
-  const [locationLaunch] = useState(() => launchFromLocation(window.location.href));
+  const [locationLaunch] = useState(() =>
+    launchFromLocation(window.location.href, tabLaunchMemory()),
+  );
   const launch =
     props.launch ?? (locationLaunch.status === "accepted" ? locationLaunch.launch : undefined);
   const initialInjectedCapability =
@@ -912,6 +923,8 @@ function LaunchedShell(
   // in, and the person sends it like any new thread.
   const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
+  const [githubPullRequestCapability, setGithubPullRequestCapability] =
+    useState<PullRequestCardCapability>({ readable: false });
   const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
   const [linearIssuesRead, setLinearIssuesRead] = useState(false);
   const linearAvailabilityGenerationRef = useRef(0);
@@ -1477,10 +1490,19 @@ function LaunchedShell(
     navigationRefreshMs: 0,
     changeRevision: machineChanges.workNavigation,
   });
-  const githubClient = useMemo(
-    () => withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable),
-    [githubTransport],
-  );
+  const githubClient = useMemo(() => {
+    const synced = withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable);
+    return {
+      ...synced,
+      executeAuthenticationCommand: async (
+        command: Parameters<typeof synced.executeAuthenticationCommand>[0],
+      ) => {
+        const snapshot = await synced.executeAuthenticationCommand(command);
+        setGithubPullRequestCapability(pullRequestCardCapability(snapshot));
+        return snapshot;
+      },
+    };
+  }, [githubTransport]);
   const linearClient = useMemo(
     () =>
       withLinearIssuesReadSync(linearTransport, (available) => {
@@ -1506,6 +1528,11 @@ function LaunchedShell(
     (query: CodeBoardQuery) => codeClient.queryBoard(query),
     [codeClient],
   );
+  const loadHomePullRequests = useCallback(
+    (query: Parameters<typeof codeClient.queryProjectPullRequests>[0]) =>
+      codeClient.queryProjectPullRequests(query),
+    [codeClient],
+  );
   // Continue names the window's own threads, so the window reads them. The
   // draft screen that shows them is remounted whenever a new task starts, and
   // a read held down there began again — and emptied the section — on every
@@ -1522,9 +1549,13 @@ function LaunchedShell(
       .then((snapshot) => {
         if (cancelled) return;
         setGithubIssuesReadAvailable(snapshotAllowsGithubIssuesRead(snapshot));
+        setGithubPullRequestCapability(pullRequestCardCapability(snapshot));
       })
       .catch(() => {
-        if (!cancelled) setGithubIssuesReadAvailable(false);
+        if (!cancelled) {
+          setGithubIssuesReadAvailable(false);
+          setGithubPullRequestCapability({ readable: false });
+        }
       });
     return () => {
       cancelled = true;
@@ -2559,9 +2590,8 @@ function LaunchedShell(
   );
   const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery);
   const recordFirstRunOutcome = useCallback(
-    async (outcome: FirstRunOnboardingOutcome) => {
-      await controller.updateSettings({ firstRunOnboarding: outcome });
-    },
+    (outcome: FirstRunOnboardingOutcome) =>
+      controller.updateSettings({ firstRunOnboarding: outcome }),
     [controller],
   );
   const saveUserProfile = useCallback(
@@ -4034,6 +4064,28 @@ function LaunchedShell(
         machineChanges.workNavigation +
         machineChanges.codeNavigation,
       threads: workingNowThreads,
+    }),
+    createPullRequestsCard({
+      available: pullRequestCardAvailable({
+        mode: activeMode,
+        pluginEffective: FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true,
+        capability: githubPullRequestCapability,
+      }),
+      viewerLogin: githubPullRequestCapability.login ?? "",
+      load: loadHomePullRequests,
+      onOpenRow: (row: PullRequestCardRow) => {
+        closeWorkspaceReaders();
+        selectProjectPullRequestIdentity({
+          projectId: row.projectId,
+          repositoryOwner: row.repositoryOwner,
+          repositoryName: row.repositoryName,
+          number: row.number,
+        });
+      },
+      onOpenAll: () => {
+        closeWorkspaceReaders();
+        setCodePullRequestsOpen(true);
+      },
     }),
   ];
   const homeStart: DraftThreadWorkspaceProps["homeStart"] =
@@ -5897,6 +5949,7 @@ function LaunchedShell(
         isNarrow={isNarrow}
         onBack={() => setUsageOpen(false)}
         {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}
+        usageQuery={usageClient}
       />
     </Suspense>
   );
@@ -7618,7 +7671,11 @@ function LaunchedShell(
                     external open and copy rather than a dead anchor. */}
                     <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
                       <WorkKindChoiceContext.Provider value={workKindChoice}>
-                        {shell}
+                        <ModelToolVerificationContext.Provider
+                          value={providerController.verifyModelTools}
+                        >
+                          {shell}
+                        </ModelToolVerificationContext.Provider>
                       </WorkKindChoiceContext.Provider>
                     </MarkdownLinkActionsContext.Provider>
                   </StreamRepliesContext.Provider>

@@ -79,7 +79,8 @@ import {
 import { Data, Effect, Schema, Scope } from "effect";
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
 import { assistantTranscript } from "./chat/assistantTranscript";
-import { ChatService, ChatServiceError } from "./chat/chatService";
+import { createChatAgentResultDeliveryPort } from "./chat/chatAgentResultDeliveryPort";
+import { ChatService } from "./chat/chatService";
 import { UsageResumeService } from "./usage/usageResumeService";
 import { createUsageResumePorts } from "./usage/usageResumePorts";
 import { ThreadMessageQueueService } from "./messageQueue/threadMessageQueueService";
@@ -7418,55 +7419,10 @@ export function startOctantServer(
       agentRuns: agentRunPersistence,
       clock: () => new Date(),
       ports: {
-        chat: {
-          inspect: async (run) =>
-            persistence.readChatThread(decodeChatThreadId(String(run.parentThreadId))) === undefined
-              ? { kind: "invalid", detail: "The parent Chat thread is gone." }
-              : { kind: "ready" },
-          dispatch: async (runs) => {
-            const run = runs[0];
-            if (run === undefined)
-              return { kind: "refused", detail: "No child results were supplied." };
-            const delivery = {
-              kind: "agent-result" as const,
-              runId: run.id,
-              runIds: runs.map((child) => child.id),
-              runGenerations: runs.map((child) => ({
-                runId: child.id,
-                generation: child.generation ?? 1,
-              })),
-            };
-            const thread = persistence.readChatThread(
-              decodeChatThreadId(String(run.parentThreadId)),
-            );
-            if (thread === undefined) {
-              return { kind: "refused", detail: "The parent Chat thread is gone." };
-            }
-            try {
-              const result = await chatService.execute({
-                kind: "deliver-chat-agent-result",
-                threadId: thread.id,
-                expectedVersion: thread.version,
-                runId: delivery.runId,
-                runIds: delivery.runIds,
-                runGenerations: delivery.runGenerations,
-              });
-              return agentResultDeliveryReceipt(
-                delivery,
-                result.kind === "turn-created" ? result.turn.delivery : undefined,
-              );
-            } catch (error) {
-              if (error instanceof ChatServiceError && error.failure.category === "waiting") {
-                return { kind: "deferred", detail: "The parent Chat thread is mid-turn." };
-              }
-              return {
-                kind: "refused",
-                detail:
-                  error instanceof Error ? error.message : "The delivery could not be admitted.",
-              };
-            }
-          },
-        },
+        chat: createChatAgentResultDeliveryPort({
+          readThread: (threadId) => persistence.readChatThread(threadId),
+          chat: chatService,
+        }),
         work: {
           inspect: async (run) =>
             workThreadProjection.read(decodeWorkThreadId(String(run.parentThreadId))) === undefined

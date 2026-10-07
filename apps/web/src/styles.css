@@ -4344,6 +4344,20 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex: 0 0 auto;
 }
 
+/* The Chat-only note and its action sit on a line under the model, spanning
+   the name and star columns, so the disabled row keeps its dimmed look. */
+.composer-model-picker__verify {
+  display: flex;
+  grid-row: 2;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-2) var(--oct-space-1);
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .composer-model-picker__star {
   display: grid;
   width: 24px;
