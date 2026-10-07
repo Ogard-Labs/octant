@@ -1268,7 +1268,7 @@ describe("OpenCode driver", () => {
     },
   );
 
-  it("reports 2.x resume, interruption, and tool activity with approvals and questions mapped", async () => {
+  it("reports 2.x resume, interruption, tool activity, and approvals, and questions as unsupported", async () => {
     const fixture = driverFixture({
       process: {
         start: () =>
@@ -1294,7 +1294,7 @@ describe("OpenCode driver", () => {
       interruption: "supported",
       toolActivity: "supported",
       approvals: "supported",
-      userQuestions: "supported",
+      userQuestions: "unsupported",
       fileChanges: "unsupported",
     });
   });
@@ -1427,6 +1427,24 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.filter((call) => call === "session.create:ask")).toHaveLength(1);
   });
 
+  it("reads 2.0.22's permission.asked and permission.replied events as 2.x permission events", () => {
+    expect(
+      adaptBetaOpenCodeEvent({
+        type: "permission.asked",
+        data: { id: "per_1", sessionID: "ses_1", action: "edit", resources: ["a.ts"] },
+      }),
+    ).toEqual({
+      type: "permission.v2.asked",
+      properties: { id: "per_1", sessionID: "ses_1", action: "edit", resources: ["a.ts"] },
+    });
+    expect(
+      adaptBetaOpenCodeEvent({
+        type: "permission.replied",
+        data: { sessionID: "ses_1", requestID: "per_1", reply: "reject" },
+      }),
+    ).toMatchObject({ type: "permission.v2.replied" });
+  });
+
   it("adapts a 2.x event from data when properties is empty", () => {
     expect(
       adaptBetaOpenCodeEvent({
@@ -1507,16 +1525,16 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.some((call) => call.startsWith("permission.reply:"))).toBe(false);
   });
 
-  it("rejects a 2.x Plan write without asking the user", async () => {
+  it("rejects a 2.x request the posture denies without asking the user", async () => {
     const fixture = betaDriver({
       events: [
         {
           type: "permission.v2.asked",
           properties: {
-            id: "perm-plan",
+            id: "perm-outside",
             sessionID: "provider-session",
-            action: "edit",
-            resources: ["*"],
+            action: "external_directory",
+            resources: ["/etc/hosts"],
           },
         } as unknown as Event,
         {
@@ -1536,7 +1554,7 @@ describe("OpenCode driver", () => {
                   stream.pipe(Stream.takeUntil((event) => event.kind === "completed")),
                 ),
               );
-              yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
               return yield* Fiber.join(collector);
             }),
           ),
@@ -1545,6 +1563,66 @@ describe("OpenCode driver", () => {
     );
     expect(fixture.calls).toContain("permission.reply:reject");
     expect(Array.from(output).some((event) => event.kind === "approval-request")).toBe(false);
+  });
+
+  it("offers a 2.x Code turn under Plan, whose jail serves Git through the stand-in", async () => {
+    const fixture = betaDriver();
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver
+          .acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+            ),
+          ),
+      ),
+    );
+    expect(fixture.calls).toContain("session.create:ask");
+  });
+
+  it("forgets a 2.x approval that OpenCode settled when it rejected another request", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "permission.v2.asked",
+          properties: {
+            id: "perm-edit",
+            sessionID: "provider-session",
+            action: "edit",
+            resources: ["/tmp/project/a.ts"],
+          },
+        } as unknown as Event,
+        {
+          type: "permission.v2.replied",
+          properties: { sessionID: "provider-session", requestID: "perm-edit", reply: "reject" },
+        } as unknown as Event,
+      ],
+    });
+    const answer = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(Stream.takeUntil((event) => event.kind === "approval-request")),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              yield* Fiber.join(collector);
+              yield* Effect.sleep("20 millis");
+              return yield* Effect.exit(
+                connection.answerApproval({ sessionId, requestId: "perm-edit", approved: true }),
+              );
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(String(answer)).toContain("not pending");
+    expect(fixture.calls.some((call) => call.startsWith("permission.reply:"))).toBe(false);
   });
 
   it("allows a 2.x edit under auto-accept without asking, and reports the file change", async () => {
@@ -1649,7 +1727,7 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.some((call) => call.startsWith("permission.reply:"))).toBe(false);
   });
 
-  it("maps a 2.x question.v2.asked event to a user input request and replies through the v2 route", async () => {
+  it("fails a 2.x question closed, because 2.0.22 asks through forms that are not mapped", async () => {
     const fixture = betaDriver({
       events: [
         {
@@ -1668,23 +1746,33 @@ describe("OpenCode driver", () => {
         } as unknown as Event,
       ],
     });
-    await Effect.runPromise(
+    const output = await Effect.runPromise(
       Effect.scoped(
         fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
           Effect.flatMap((connection) =>
-            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
-              Effect.tap(() =>
-                connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
-              ),
-              Effect.tap(() =>
-                connection.answerUserInput({ sessionId, requestId: "q-1", answer: "Yes" }),
-              ),
-            ),
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              return yield* Fiber.join(collector);
+            }),
           ),
         ),
       ),
     );
-    expect(fixture.calls).toContain("question.reply:Yes");
+    const events = Array.from(output);
+    expect(events.some((event) => event.kind === "user-input-request")).toBe(false);
+    expect(
+      events.some((event) => event.kind === "failed" && event.failure.category === "unsupported"),
+    ).toBe(true);
   });
 
   it("registers app-managed MCP tools over the 2.x API in Code mode", async () => {
