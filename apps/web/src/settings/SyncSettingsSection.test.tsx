@@ -119,6 +119,19 @@ describe("SyncSettingsSection", () => {
     });
   });
 
+  it("says a bucket cannot be saved on a host with no credential store, and keeps Save off", async () => {
+    const user = userEvent.setup();
+    const { fake } = client(view({ credentialStore: "unavailable" }));
+    render(<SyncSettingsSection client={fake} folderBrowse={folderBrowse} />);
+
+    await user.click(await screen.findByRole("combobox", { name: "Store" }));
+    await user.click(await screen.findByRole("option", { name: "S3-compatible bucket" }));
+    expect(
+      screen.getByText(/cannot reach a Keychain or Secret Service on this computer/),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
   it("saves a bucket with its key pair and lets go of the secret afterwards", async () => {
     const user = userEvent.setup();
     const saved = view({

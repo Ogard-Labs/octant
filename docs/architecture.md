@@ -1303,7 +1303,8 @@ flowchart LR
   only while sync is on. Its settings are the endpoint URL, region, bucket,
   optional key prefix, and path-style or virtual-host addressing. The access key
   and secret live in the host credential store — macOS Keychain or freedesktop
-  Secret Service — and are never journaled. A plaintext endpoint is refused and
+  Secret Service — in the bucket-key namespace described under replica store
+  selection, and are never journaled. A plaintext endpoint is refused and
   no credential is sent on it. A publish uses a conditional create
   (`If-None-Match: *`); a provider that does not enforce it is configured to
   fall back to HEAD-then-PUT, where a key is already unique to one host's
@@ -1399,11 +1400,17 @@ flowchart LR
   resolves and judges inside home, never as a path. A bucket's settings carry
   no secret: the access key and secret travel once, in the command that saves
   them, into the host credential store, and the settings hold only an opaque
-  reference to that entry, which is removed when another store is chosen. That
-  key pair belongs in a credential namespace of its own that no provider
-  instance id reaches, as the device keys have; the broker does not serve one
-  yet, so saving a bucket is refused as `credential-store-unavailable` and only
-  a folder can be chosen today. The choice is journaled whole as one host settings
+  reference to that entry, which is removed when another store is chosen. The
+  key pair lives in a namespace of its own, keyed by that reference — a
+  separate macOS Keychain service, `app.octant.replica-store-credentials.v1`,
+  or a separate Secret Service attribute, `octant.replica-store-credentials.v1`
+  — reached only through the credential broker's bucket-key routes. Neither the
+  provider credential routes nor the device-key routes reach it, so a provider
+  instance or device key with the same UUID cannot read, replace, or delete a
+  key pair. Unlike a device key, a key pair is replaced when the person enters
+  a new one. A host with no credential broker cannot keep one, so saving a
+  bucket there is refused as `credential-store-unavailable` and only a folder
+  can be chosen. The choice is journaled whole as one host settings
   aggregate, rebuilt on every start, and versioned, so two windows cannot
   overwrite each other. Choosing or changing the store turns sync off, so the
   person reads Settings' statement that the provider can read the files again

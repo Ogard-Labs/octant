@@ -28,8 +28,10 @@ browser cannot change it. Choose one store:
   only inside an `Octant Sync` folder in it. The folder must be inside your home
   folder.
 - **S3-compatible bucket.** Enter the connection details described
-  [below](#an-s3-compatible-bucket), then **Save**. This preview cannot save a
-  bucket's access key yet, so Settings shows the form but refuses to save it.
+  [below](#an-s3-compatible-bucket), then **Save**. Entering a new access key
+  and secret later replaces the saved ones. A bucket needs your computer's
+  Keychain or Secret Service; where Octant cannot reach one, Settings says so
+  and refuses to save the bucket.
 - **None.** No store, and nothing is reachable.
 
 Changing the store turns sync off, so you read the fact above the switch again
@@ -72,9 +74,13 @@ the mirror folder is not this sync.
 An S3-compatible bucket needs its endpoint address, region, bucket name, an
 optional folder prefix, and whether the provider uses path-style or
 virtual-host addressing. The access key and secret are kept in your computer's
-Keychain (macOS) or Secret Service (Linux), in an entry of their own that
-your model provider credentials cannot reach. Octant never writes them to a store entry, to your journal,
-or to a log. It contacts only the endpoint you configured, and only while sync
+Keychain (macOS, under the service `app.octant.replica-store-credentials.v1`)
+or Secret Service (Linux, under the service attribute
+`octant.replica-store-credentials.v1`). Your model provider credentials and
+this computer's signing key live in other entries and cannot read, replace, or
+delete them. The bucket's other settings are kept in Octant's journal. Octant
+never writes the access key or secret to a store entry, to your journal, or to
+a log. It contacts only the endpoint you configured, and only while sync
 is on. The endpoint must be an `https` address; a plain one is refused, and no
 credential is sent on it.
 

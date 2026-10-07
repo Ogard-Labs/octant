@@ -477,7 +477,8 @@ function BucketForm(props: {
       </label>
       {props.credentialStoreAvailable ? null : (
         <p className="provider-settings__field-guidance">
-          This host cannot keep a bucket&apos;s access key yet, so a bucket cannot be saved here.
+          Octant cannot reach a Keychain or Secret Service on this computer to keep a bucket&apos;s
+          access key in, so a bucket cannot be saved here. A synced folder still works.
         </p>
       )}
       {problem === undefined ? null : (
