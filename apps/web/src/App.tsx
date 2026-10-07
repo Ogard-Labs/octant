@@ -452,6 +452,7 @@ import { currentCodeProjectBranches } from "./home/ciFailures";
 import {
   pullRequestCardAvailable,
   pullRequestCardCapability,
+  sharePullRequestRead,
   type PullRequestCardCapability,
   type PullRequestCardRow,
 } from "./home/pullRequests";
@@ -1645,9 +1646,10 @@ function LaunchedShell(
     (query: CodeBoardQuery) => codeClient.queryBoard(query),
     [codeClient],
   );
-  const loadHomePullRequests = useCallback(
-    (query: Parameters<typeof codeClient.queryProjectPullRequests>[0]) =>
-      codeClient.queryProjectPullRequests(query),
+  // Pull requests and CI failures mount together and read the same snapshot;
+  // sharing the read in flight makes that one host query, not two.
+  const loadHomePullRequests = useMemo(
+    () => sharePullRequestRead((query) => codeClient.queryProjectPullRequests(query)),
     [codeClient],
   );
   // Continue names the window's own threads, so the window reads them. The
@@ -4332,6 +4334,7 @@ function LaunchedShell(
       }),
       viewerLogin: githubPullRequestCapability.login ?? "",
       load: loadHomePullRequests,
+      now: minuteNow.getTime(),
       onOpenRow: (row: PullRequestCardRow) => {
         closeWorkspaceReaders();
         selectProjectPullRequestIdentity({
