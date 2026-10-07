@@ -1,5 +1,9 @@
 import { decodeArtifactLibraryEntry } from "@octant/contracts/artifact-library";
-import type { CanvasBlock } from "@octant/contracts/canvas";
+import {
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasBlock,
+  type CanvasBlock,
+} from "@octant/contracts/canvas";
 import { describe, expect, it } from "vitest";
 import { renderArtifactThumbnail } from "./artifactRender";
 
@@ -24,7 +28,41 @@ const chart = {
   ],
 } as unknown as CanvasBlock;
 
+const treemap = decodeCanvasBlock({
+  blockId: "map-1",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "treemap",
+  measures: [
+    { measureId: "loc", label: "Lines of code" },
+    { measureId: "edits", label: "Edits" },
+  ],
+  sizeBy: "loc",
+  colorBy: "edits",
+  nodes: [
+    { nodeId: "root", label: "Root" },
+    { nodeId: "a", label: "A", parentId: "root", values: { loc: 10, edits: 2 } },
+    { nodeId: "b", label: "B", parentId: "root", values: { loc: 30, edits: 5 } },
+  ],
+});
+
 describe("drawing a preview of an artifact", () => {
+  it("draws a treemap from the shared squarified layout, with no script", () => {
+    const markup = renderArtifactThumbnail(definition([treemap]));
+
+    expect(markup.startsWith("<svg")).toBe(true);
+    expect(markup).not.toMatch(/<\s*script/i);
+    // A group frame plus one cell per leaf.
+    expect((markup.match(/<rect/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("starts a treemap export from the node the author chose", () => {
+    const fromLeaf = decodeCanvasBlock({ ...treemap, startNodeId: "a" });
+    const whole = (renderArtifactThumbnail(definition([treemap])).match(/<rect/g) ?? []).length;
+    const zoomed = (renderArtifactThumbnail(definition([fromLeaf])).match(/<rect/g) ?? []).length;
+
+    expect(zoomed).toBeLessThan(whole);
+  });
+
   it("draws a self-contained picture with no script and no external references", () => {
     const markup = renderArtifactThumbnail(definition([chart]));
 

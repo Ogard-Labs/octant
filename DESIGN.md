@@ -763,6 +763,19 @@ entrance motion.
 **Path labels.** A file label is read from the right: the directory is dimmed and
 the file name is at full ink, in the code font.
 
+**Treemap.** A hierarchy is drawn as squarified rectangles
+(`packages/domain/src/canvasTreemapLayout.ts`): each leaf's area is a size
+measure and its colour is a colour measure, and a group's reading is the sum of
+its children, so the picture never states a total the leaves do not. The screen
+renderer and the static SVG export draw the same deterministic layout. The size
+and colour measures are switches in the block header; those switches, and a zoom
+into a group (by click, breadcrumb, Escape, or right-click; arrow keys move
+between cells and Enter zooms in), are view state and revise nothing. A colour
+scale is sequential, diverging (centred on the mid-point of the colour domain),
+or categorical by top-level group, and reads through the shared scale roles.
+Cell labels are drawn only where they fit, and the disclosed table is the
+accessible reading, sortable by each measure.
+
 **Motion.** A chart transitions only on a state change — a legend toggle, a zoom
 — never on entrance. A transition lasts at most 200ms and is off under
 `prefers-reduced-motion: reduce` and when the workspace sets
