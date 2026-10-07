@@ -134,6 +134,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const [resolving, setResolving] = useState(false);
   const unsettledWrites = useRef<Array<Promise<boolean>>>([]);
   const answerLost = useRef(false);
+  const [answerRefused, setAnswerRefused] = useState(false);
   const nameField = useRef<HTMLInputElement>(null);
   const providerAction = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -227,6 +228,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   }
 
   function track(write: Promise<boolean>): void {
+    setAnswerRefused(false);
     unsettledWrites.current.push(write.catch(() => false));
   }
 
@@ -239,7 +241,8 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
    * rejection leaves behind is the refusal itself: only the footer is disabled
    * while this runs, so a field settled during the wait appends its write
    * afterwards, and clicking again without answering again must not read the
-   * emptied list as consent. The outcome waits for an answer that is accepted.
+   * emptied list as consent until the user has been told (`resolveWith` does
+   * that, once).
    */
   async function settleWrites(): Promise<boolean> {
     let settled = false;
@@ -296,8 +299,10 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   // accepted. A rejected write is recovered by reloading the host, which
   // leaves the surface able to record an outcome against state that never
   // took the answer — and because the outcome is durable, the user would
-  // never be asked again. Leaving first run pending is the honest result:
-  // the surface returns on the next launch, still holding the question.
+  // never be asked again. So the first press that meets a rejected answer says
+  // so and records nothing; the user may answer again or press once more to go
+  // on without it. Refusing every press silently left Skip setup dead for as
+  // long as the host kept refusing, with no way out and no reason given.
   function finish() {
     if (!handoffOpen) {
       openHandoff();
@@ -323,7 +328,15 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     setResolving(true);
     const accepted = await settleWrites();
     setResolving(false);
-    if (!accepted) return;
+    if (!accepted) {
+      // Said once, then let go: the host already reloaded past the refused
+      // answer, so what this surface shows is what it holds, and a button that
+      // refuses again with no reason is a dead end. The next press is the
+      // user choosing to go on without that answer.
+      answerLost.current = false;
+      setAnswerRefused(true);
+      return;
+    }
     record();
     after?.();
   }
@@ -521,6 +534,17 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
         {controller.blockedMessage === undefined ? null : (
           <OctantAlert className="first-run__notice" tone="warning">
             {controller.blockedMessage}
+          </OctantAlert>
+        )}
+        {controller.blockedMessage !== undefined || !answerRefused ? null : (
+          <OctantAlert className="first-run__notice" tone="warning">
+            The host did not keep one of your answers, so setup shows what it holds. Answer again,
+            or press the button again to continue without it.
+          </OctantAlert>
+        )}
+        {controller.blockedMessage !== undefined || !controller.refused ? null : (
+          <OctantAlert className="first-run__notice" tone="warning">
+            The host did not record that. Press the button again; setup is still open until it does.
           </OctantAlert>
         )}
 
