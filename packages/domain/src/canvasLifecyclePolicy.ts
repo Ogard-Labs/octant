@@ -56,8 +56,8 @@ export function assertCanvasCreate(canvasId: CanvasId, versionInput: CanvasVersi
 /**
  * Validate a subsequent Canvas version emitted by a `canvas.version-appended@1`
  * event against the current head version. The next sequence must increment by
- * exactly one, the canvas identity must match, the schema version must agree,
- * and the versionId must be a new immutable identity.
+ * exactly one, the canvas identity must match, the schema version must not move
+ * backward, and the versionId must be a new immutable identity.
  */
 export function assertCanvasVersionAppend(
   canvasId: CanvasId,
@@ -68,10 +68,13 @@ export function assertCanvasVersionAppend(
   if (!sameId(next.canvasId, canvasId) || !sameId(next.canvasId, current.canvasId)) {
     reject("canvas-id-mismatch", "Canvas version append must match the current canvas identity.");
   }
-  if (next.schemaVersion !== current.schemaVersion) {
+  // An authored revision declares the runtime's current version, so a head
+  // written under an earlier one moves forward with it; without this, every
+  // Canvas older than the latest version bump could never be revised again.
+  if (next.schemaVersion < current.schemaVersion) {
     reject(
       "schema-version-mismatch",
-      "Canvas version append must share the current schema version.",
+      "Canvas version append cannot move to an older schema version.",
     );
   }
   if (next.sequence !== current.sequence + 1) {

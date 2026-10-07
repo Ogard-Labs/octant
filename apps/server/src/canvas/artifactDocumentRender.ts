@@ -360,6 +360,13 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
         },
       ];
     }
+    case "design":
+      // The reading form names each screen or slide. Its markup is drawn only
+      // inside Octant's sandboxed frame, so it never travels in an export.
+      return [
+        { kind: "heading", level: 2, text: reading(block.title) },
+        { kind: "ordered", items: block.frames.map((frame) => reading(frame.title)) },
+      ];
     case "bar-list": {
       // The ranking as a table in the order the screen and the preview draw
       // it, largest first through the shared layout, carrying every row the

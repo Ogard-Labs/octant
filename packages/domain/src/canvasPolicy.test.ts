@@ -23,6 +23,7 @@ import {
   decodeCanvasDefinition,
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
+import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
 import {
   loginSequenceExample,
   orderSchemaExample,
@@ -685,6 +686,220 @@ describe("mockup limits", () => {
         ),
       "mockup-text-budget-exceeded",
     );
+  });
+});
+
+function design(frames: ReadonlyArray<{ frameId: string; html: string }>, styles?: string) {
+  return {
+    blockId: "design",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "design" as const,
+    title: "Checkout",
+    size: "phone" as const,
+    ...(styles === undefined ? {} : { styles }),
+    frames: frames.map((frame) => ({ ...frame, title: frame.frameId })),
+  };
+}
+
+function refusalOf(block: unknown): string {
+  try {
+    validateCanvasDefinition(withBlocks([block]));
+  } catch (error) {
+    if (error instanceof CanvasPolicyRejected) return `${error.code}: ${error.message}`;
+    throw error;
+  }
+  return "accepted";
+}
+
+describe("design frames", () => {
+  it("accepts the examples an agent is taught from", () => {
+    expect(() =>
+      validateCanvasDefinition(withBlocks([onboardingFlowExample, launchDeckExample])),
+    ).not.toThrow();
+  });
+
+  it("refuses a design block inside a document declaring an older schema version", () => {
+    // A design arrived at version 9, after every earlier block kind and hint.
+    for (const schemaVersion of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      expect(() =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion,
+          blocks: [onboardingFlowExample],
+        }),
+      ).toThrow(expect.objectContaining({ code: "unsupported-schema-version" }));
+    }
+  });
+
+  it("refuses markup that would need a script, naming the frame", () => {
+    expect(
+      refusalOf(design([{ frameId: "pay", html: "<p>Hi</p><script>alert(1)</script>" }])),
+    ).toBe(
+      "design-markup-refused: Canvas design design frame pay uses a <script> element; design frames run no script and load no other document.",
+    );
+    expect(
+      refusalOf(design([{ frameId: "pay", html: '<button onclick="go()">Pay</button>' }])),
+    ).toContain("has an onclick handler");
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "pay",
+            html: '<svg><a href="#x"><set attributeName="href" to="https://x.test"/></a></svg>',
+          },
+        ]),
+      ),
+    ).toContain("uses a <set> element");
+  });
+
+  it("refuses every link that would leave the design, however it is spelled", () => {
+    for (const html of [
+      '<a href="https://example.test">Shop</a>',
+      "<a href=//example.test>Shop</a>",
+      '<a HREF="&#104;ttps://example.test">Shop</a>',
+      '<a href="javascript:void(0)">Shop</a>',
+      '<a href="https://example.test>Shop</a>',
+      '<svg><a xlink:href="https://example.test"><text>Shop</text></a></svg>',
+      // A quote inside an attribute name is still an attribute to a browser, so
+      // the link after it is real. An empty or quote-led address resolves
+      // against Octant's own page and would load it into the frame.
+      '<a x"y href="">Shop</a>',
+      '<a x"y href>Shop</a>',
+      '<a x"y href=>Shop</a>',
+      `<a x"y href="'//example.test/a">Shop</a>`,
+      // An empty fragment clears the shown frame, so Play falls back to the
+      // first screen instead of the top of this one.
+      '<a href="#">Top</a>',
+    ]) {
+      expect(refusalOf(design([{ frameId: "home", html }]))).toMatch(
+        /^design-markup-refused: .*(links to|leaves the design)/,
+      );
+    }
+  });
+
+  it("reads a frame full of unclosed tags in about the time it takes to read it once", () => {
+    const started = performance.now();
+    expect(refusalOf(design([{ frameId: "home", html: "<a ".repeat(10_000) }]))).toBe("accepted");
+    // A pattern that paired quotes across the whole frame took over a second
+    // here, and every renderer validates a Canvas when it draws one.
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
+  it("keeps links between frames and sections, and the attributes that only look like them", () => {
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "home",
+            html: '<a href="#pay">Pay</a><details open><summary>More</summary></details><div data-href="x"></div>',
+          },
+          { frameId: "pay", html: '<a href="#home">Back</a>' },
+        ]),
+      ),
+    ).toBe("accepted");
+  });
+
+  it("refuses a remote stylesheet or image however its CSS escapes spell it", () => {
+    const home = [{ frameId: "home", html: "<p>Hi</p>" }];
+    for (const styles of [
+      String.raw`@\69mport "https://fonts.test/a.css";`,
+      String.raw`@\49 MPORT url(https://fonts.test/a.css);`,
+      String.raw`@i\mport "https://fonts.test/a.css";`,
+    ]) {
+      expect(refusalOf(design(home, styles))).toContain("stylesheet imports a stylesheet");
+    }
+    for (const styles of [
+      String.raw`.hero { background: u\72l(https://x.test/a.png); }`,
+      String.raw`.hero { background: \75 \72 \6c (https://x.test/a.png); }`,
+      String.raw`.hero { background: url("\68ttps://x.test/a.png"); }`,
+    ]) {
+      expect(refusalOf(design(home, styles))).toContain("loads a file with url()");
+    }
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "home",
+            html: String.raw`<div style="background:u\72l(https://x.test/a.png)"></div>`,
+          },
+        ]),
+      ),
+    ).toContain("loads a file with url()");
+    // An escaped character that is not a load stays as written.
+    expect(refusalOf(design(home, String.raw`.a::before { content: "\2014"; }`))).toBe("accepted");
+  });
+
+  it("reads a long run of CSS escapes in about the time it takes to read it once", () => {
+    const started = performance.now();
+    expect(
+      refusalOf(
+        design([{ frameId: "home", html: "<p>Hi</p>" }], `.a{content:"${"\\41 ".repeat(5_000)}"}`),
+      ),
+    ).toBe("accepted");
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
+  it("refuses remote images and stylesheets but keeps inline ones", () => {
+    expect(
+      refusalOf(
+        design([{ frameId: "home", html: '<img src="https://example.test/a.png" alt="">' }]),
+      ),
+    ).toContain("images must be data:image URLs");
+    // A browser may pick any candidate of a srcset, so every one must be inline.
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "home",
+            html: '<img srcset="data:image/png;base64,AA,BB 1x, https://example.test/a.png 2x" alt="">',
+          },
+        ]),
+      ),
+    ).toContain("images must be data:image URLs");
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "home",
+            html: '<img srcset="data:image/png;base64,AA,BB 1x,data:image/png;base64,CC 2x" alt="">',
+          },
+        ]),
+      ),
+    ).toBe("accepted");
+    expect(
+      refusalOf(
+        design([{ frameId: "home", html: "<p>Hi</p>" }], "@import url(https://fonts.test/a.css);"),
+      ),
+    ).toContain("stylesheet imports a stylesheet");
+    expect(
+      refusalOf(
+        design([
+          { frameId: "home", html: '<div style="background:url(https://x.test/a.png)"></div>' },
+        ]),
+      ),
+    ).toContain("loads a file with url()");
+    expect(
+      refusalOf(design([{ frameId: "home", html: "<p>Hi</p>" }], "</style><p>out</p>")),
+    ).toContain("closes its own style element");
+    expect(
+      refusalOf(
+        design(
+          [{ frameId: "home", html: '<img src="data:image/png;base64,AAAA" alt="">' }],
+          ".hero { background: url(data:image/png;base64,AAAA); }",
+        ),
+      ),
+    ).toBe("accepted");
+  });
+
+  it("refuses two frames with one id, since a link could only reach the first", () => {
+    expect(
+      refusalOf(
+        design([
+          { frameId: "home", html: "<p>A</p>" },
+          { frameId: "home", html: "<p>B</p>" },
+        ]),
+      ),
+    ).toMatch(/^duplicate-design-frame-id:/);
   });
 });
 

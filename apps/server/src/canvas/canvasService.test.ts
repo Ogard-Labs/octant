@@ -642,6 +642,79 @@ describe("CanvasService", () => {
     });
   });
 
+  it("keeps an agent-written design that follows the frame rules and tells the agent why one does not", async () => {
+    const { service } = createService();
+    const tools = createCanvasAgentTools({
+      windowId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
+      thread: {
+        id: ids.thread,
+        projectId: ids.project,
+        providerInstanceId: ids.provider,
+        modelId: "octant-test-model",
+      } as never,
+      port: {
+        activeContext: () => ({ mode: "chat", projectId: ids.project }),
+        project: async () => ({ id: ids.project, type: "chat", lifecycle: "active" }),
+        canvas: service,
+        uuid: () => crypto.randomUUID(),
+        hostId: "local" as never,
+      },
+    });
+    const design = (html: string) => ({
+      blockId: "checkout",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design",
+      title: "Checkout",
+      size: "phone",
+      frames: [
+        { frameId: "cart", title: "Cart", html },
+        { frameId: "paid", title: "Paid", html: '<a href="#cart">Back</a>' },
+      ],
+    });
+
+    const kept = await tools.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Checkout",
+        presentation: "inline",
+        blocks: [design('<h1>Cart</h1><a href="#paid">Pay</a>')],
+      }),
+    });
+    expect(kept.isError).toBeUndefined();
+    expect(kept.result).toMatchObject({
+      presentation: "sidebar",
+      presentationNote: expect.stringContaining("design"),
+    });
+
+    const refused = await tools.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Checkout",
+        blocks: [design('<button onclick="pay()">Pay</button>')],
+      }),
+    });
+    expect(refused).toMatchObject({
+      isError: true,
+      result: { error: expect.stringContaining("frame cart has an onclick handler") },
+    });
+
+    const revised = await tools.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId: (kept.result as { canvasId: string }).canvasId,
+        expectedSequence: 1,
+        blocks: [design('<a href="https://shop.example">Pay</a>')],
+      }),
+    });
+    expect(revised).toMatchObject({
+      isError: true,
+      result: { error: expect.stringContaining('frame cart links to "https://shop.example"') },
+    });
+  });
+
   it("records a managed child as the author when the host stamps that run", () => {
     const { service, projection } = createService();
     const child = decodeCanvasActor({ kind: "agent", actorId: ids.actor });

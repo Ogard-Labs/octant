@@ -59,6 +59,7 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
     case "mindmap":
       return "Mind map";
     case "mockup":
+    case "design":
       return block.title;
     case "plan":
       return block.title;

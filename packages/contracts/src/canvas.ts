@@ -27,9 +27,10 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // policy have been reviewed together. The current schema version is declared
 // in `canvasIdentity.ts`: version 3 added the mockup block, version 4 the
 // thread presentation, version 5 the treemap block, version 6 the heatmap
-// block, version 7 the ranked bar-list block, and version 8 the
-// entity-relationship, swimlane, and mind map diagram kinds, which the
-// definition filters below admit only under those declared versions.
+// block, version 7 the ranked bar-list block, version 8 the
+// entity-relationship, swimlane, and mind map diagram kinds, and version 9 the
+// design block, which the definition filters below admit only under those
+// declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -71,6 +72,8 @@ export const CANVAS_MAX_HEATMAP_CELLS = 16_384;
 // truncation.
 export const CANVAS_MAX_HEATMAP_DAYS = 3 * 366;
 export const CANVAS_MAX_HEATMAP_NOTE_LENGTH = 120;
+export const CANVAS_MAX_DESIGN_FRAMES = 24;
+export const CANVAS_MAX_DESIGN_MARKUP_LENGTH = 32_768;
 // A ranked list is read, not scrolled: the cap is what keeps a "hottest files"
 // list from becoming the whole repository. The renderer shows a shorter top N
 // and offers Show all up to this bound.
@@ -99,6 +102,7 @@ export const CANVAS_BAR_LIST_SCHEMA_VERSION = 7;
 // The three remaining diagram kinds shipped as one slice and share a floor:
 // they arrive together in the block catalog, so one bump admits them all.
 export const CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION = 8;
+export const CANVAS_DESIGN_SCHEMA_VERSION = 9;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -292,6 +296,7 @@ export const CanvasBlockKind = Schema.Literal(
   "mockup",
   "treemap",
   "heatmap",
+  "design",
   "bar-list",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
@@ -1292,6 +1297,56 @@ export const CanvasMockupBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
 
+/**
+ * The viewport a design frame is drawn at, in CSS pixels: a phone, a tablet,
+ * a desktop window or web page, or a 16:9 slide.
+ */
+export const CanvasDesignSize = Schema.Literal("phone", "tablet", "desktop", "slide");
+export type CanvasDesignSize = typeof CanvasDesignSize.Type;
+
+/** The CSS viewport each size is drawn at. Authors lay frames out against it. */
+export const CANVAS_DESIGN_VIEWPORT: Readonly<
+  Record<CanvasDesignSize, { readonly width: number; readonly height: number }>
+> = {
+  phone: { width: 390, height: 844 },
+  tablet: { width: 820, height: 1180 },
+  desktop: { width: 1440, height: 900 },
+  slide: { width: 1920, height: 1080 },
+};
+
+const CanvasDesignFrameId = boundedToken("CanvasDesignFrameId");
+const CanvasDesignMarkup = boundedText(CANVAS_MAX_DESIGN_MARKUP_LENGTH);
+
+/**
+ * One screen or slide. `html` is the body of a static page and `frameId` is
+ * the fragment other frames link to (`href="#checkout"`). The markup is drawn
+ * in a sandboxed frame that runs no script and loads nothing from the network;
+ * the domain policy refuses markup that would need either.
+ */
+export const CanvasDesignFrame = Schema.Struct({
+  frameId: CanvasDesignFrameId,
+  title: CanvasMockupText,
+  html: CanvasDesignMarkup,
+}).annotations(strict);
+export type CanvasDesignFrame = typeof CanvasDesignFrame.Type;
+
+/**
+ * Screens of an app or site, or the slides of a deck, written as HTML and CSS.
+ * `styles` is one stylesheet every frame shares.
+ */
+export const CanvasDesignBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("design"),
+  title: CanvasMockupText,
+  size: CanvasDesignSize,
+  styles: Schema.optional(CanvasDesignMarkup),
+  frames: Schema.Array(CanvasDesignFrame).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(CANVAS_MAX_DESIGN_FRAMES),
+  ),
+}).annotations(strict);
+export type CanvasDesignBlock = typeof CanvasDesignBlock.Type;
+
 export const CanvasPlanBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("plan"),
@@ -1380,6 +1435,7 @@ export const CanvasBlock = Schema.Union(
   CanvasEvidenceReferenceBlock,
   CanvasImageBlock,
   CanvasMockupBlock,
+  CanvasDesignBlock,
   CanvasPlanBlock,
   CanvasTreemapBlock,
   // A heatmap has two layouts with different shapes, so both structs join the
@@ -1420,7 +1476,8 @@ export const CanvasDefinition = Schema.Struct({
   .pipe(
     // Version-gated blocks and hints: a mockup is admitted from version 3, the
     // thread presentation from version 4, a treemap from version 5, a heatmap
-    // from version 6, and a bar list and the metric trend fields from version 7. A
+    // from version 6, a bar list and the metric trend fields from version 7, and
+    // a design from version 9. A
     // rolled-back runtime that never learned a kind or hint must see a document
     // carrying it as a declared future version, not as a document that failed
     // to decode. Each keeps its own floor so an earlier document stays valid.
@@ -1489,6 +1546,15 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `A metric sparkline, goodDirection, or caption requires Canvas schema version ${String(CANVAS_METRIC_TREND_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DESIGN_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "design"),
+      {
+        message: () =>
+          `Design blocks require Canvas schema version ${String(CANVAS_DESIGN_SCHEMA_VERSION)}.`,
       },
     ),
   );

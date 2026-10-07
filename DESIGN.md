@@ -932,7 +932,10 @@ wireframe of one screen, in a desktop, tablet, or phone frame. It draws only
 the closed catalog — window, header, sidebar, list, list row, form field,
 button, toggle, tabs, card, image placeholder, and text — and those controls
 are inert. In the Default style the wireframe uses neutral ink, hairline, and
-surface, never a hue.
+surface, never a hue. A design is the author's own screens or slides: Octant draws
+only the frame around them (a hairline, the surface behind, and a numbered
+caption) and never restyles what is inside. Its player is a near-full-window
+dialog that scales the screen to fit with the stage padding around it.
 
 ## Spacing, shapes, and depth
 

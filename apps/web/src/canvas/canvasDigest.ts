@@ -79,6 +79,22 @@ export function canvasDigest(definition: CanvasDefinition): CanvasDigest {
   ) {
     return { kind: "diagram", label: "Diagram", facts: [] };
   }
+  const design = blocks.find(
+    (block): block is Extract<Block, { kind: "design" }> => block.kind === "design",
+  );
+  if (design !== undefined) {
+    const count = design.frames.length;
+    const slides = design.size === "slide";
+    return {
+      kind: "mockup",
+      label: slides ? "Slides" : "Design",
+      facts: [
+        slides
+          ? `${String(count)} ${count === 1 ? "slide" : "slides"}`
+          : `${String(count)} ${design.size} ${count === 1 ? "screen" : "screens"}`,
+      ],
+    };
+  }
   const mockup = blocks.find(
     (block): block is Extract<Block, { kind: "mockup" }> => block.kind === "mockup",
   );
