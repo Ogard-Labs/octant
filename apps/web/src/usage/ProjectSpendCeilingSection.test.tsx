@@ -100,4 +100,96 @@ describe("ProjectSpendCeilingSection", () => {
     );
     expect(await screen.findByText("1h 15m of 2h agent run time remaining this day")).toBeVisible();
   });
+
+  it("sets a monthly Project money ceiling in whole cents and says it is checked between turns", async () => {
+    const user = userEvent.setup();
+    const projectId = "00000000-0000-4000-8000-000000000201";
+    const ceiling = {
+      scope: { kind: "project" as const, projectId },
+      window: { kind: "calendar" as const, period: "month" as const, timeZone: "UTC" },
+      policy: { costBudgetUsdCents: 25_40 },
+      version: 1,
+      setAt: "2026-09-17T00:00:00.000Z",
+      setBy: { kind: "local-user" as const, actorId: "host" },
+    };
+    const execute = vi.fn(async () => ({ kind: "set" as const, ceiling }));
+    const snapshot = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({
+        project: ceiling,
+        projectRemaining: {
+          ceilingUsdCents: 25_40,
+          usedUsdCents: 10_80,
+          remainingUsdCents: 14_60,
+          window: ceiling.window,
+          version: 1,
+        },
+      });
+    render(
+      <ProjectSpendCeilingSection client={{ snapshot, execute } as never} projectId={projectId} />,
+    );
+    await screen.findByText(/No spend ceiling is set on this Project/i);
+    await user.type(screen.getByLabelText("Project money ceiling in US dollars"), "$25.40");
+    await user.click(screen.getByRole("button", { name: "Set Project ceiling" }));
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "set-spend-ceiling",
+        policy: { costBudgetUsdCents: 25_40 },
+      }),
+    );
+    expect(await screen.findByText("$14.60 of $25.40 remaining this month")).toBeVisible();
+    expect(screen.getByText(/checked between turns/i)).toBeVisible();
+  });
+
+  it("refuses to round a money budget finer than a cent", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn();
+    const snapshot = vi.fn().mockResolvedValue({});
+    render(
+      <ProjectSpendCeilingSection
+        client={{ snapshot, execute } as never}
+        projectId="00000000-0000-4000-8000-000000000201"
+      />,
+    );
+    await screen.findByText(/No spend ceiling is set on this Project/i);
+    await user.type(screen.getByLabelText("Project money ceiling in US dollars"), "25.405");
+    await user.type(screen.getByLabelText("Project turn ceiling"), "10");
+    await user.click(screen.getByRole("button", { name: "Set Project ceiling" }));
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ policy: { turnBudget: 10 } }));
+  });
+
+  it("shows the Project's unpriced money refusal instead of an empty reading", async () => {
+    const projectId = "00000000-0000-4000-8000-000000000201";
+    const window = { kind: "calendar" as const, period: "month" as const, timeZone: "UTC" };
+    const snapshot = vi.fn().mockResolvedValue({
+      project: {
+        scope: { kind: "project", projectId },
+        window,
+        policy: { costBudgetUsdCents: 25_00 },
+        version: 1,
+        setAt: "2026-09-17T00:00:00.000Z",
+        setBy: { kind: "local-user", actorId: "host" },
+      },
+      projectRemaining: { window, version: 1 },
+      refusal: {
+        kind: "unknown-spend",
+        scopeKind: "project",
+        scopeId: projectId,
+        dimension: "monetary",
+        ceilingUsdCents: 25_00,
+        recovery: ["raise-ceiling", "clear-ceiling", "open-usage", "pause-work"],
+        message:
+          "This Project's money ceiling cannot be checked because some of its usage in this window has no price.",
+      },
+    });
+    render(
+      <ProjectSpendCeilingSection
+        client={{ snapshot, execute: vi.fn() } as never}
+        projectId={projectId}
+      />,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("has no price");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
 });

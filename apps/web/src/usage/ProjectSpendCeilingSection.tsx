@@ -5,7 +5,12 @@ import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { spendCeilingLimits, spendCeilingRemainingPhrases } from "./spendCeilingLimits";
+import {
+  MONEY_CEILING_NOTE,
+  hasMoneyCeiling,
+  spendCeilingLimits,
+  spendCeilingRemainingPhrases,
+} from "./spendCeilingLimits";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 type CalendarPeriod = "day" | "week" | "month";
@@ -28,6 +33,7 @@ export function ProjectSpendCeilingSection(props: {
   const [budget, setBudget] = useState("");
   const [turns, setTurns] = useState("");
   const [hours, setHours] = useState("");
+  const [dollars, setDollars] = useState("");
   const [period, setPeriod] = useState<CalendarPeriod>("month");
   const [message, setMessage] = useState<string | undefined>(undefined);
   const scope = { kind: "project" as const, projectId: decodeProjectId(props.projectId) };
@@ -53,9 +59,11 @@ export function ProjectSpendCeilingSection(props: {
   const version = snapshot?.project?.version ?? 0;
   const window = remaining?.window;
   const windowPeriod = window?.kind === "calendar" ? window.period : period;
+  const phrases = remaining === undefined ? [] : spendCeilingRemainingPhrases([remaining]);
+  const refusal = snapshot?.refusal;
 
   async function submit(kind: "set" | "raise" | "clear"): Promise<void> {
-    const limits = spendCeilingLimits({ tokens: budget, turns, hours });
+    const limits = spendCeilingLimits({ tokens: budget, turns, hours, dollars });
     const expectedVersion = decodeAggregateVersion(version);
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const command =
@@ -94,16 +102,14 @@ export function ProjectSpendCeilingSection(props: {
       {remaining === undefined ? (
         <p role="note">
           No spend ceiling is set on this Project. A turn must also stay under any thread ceiling.
-          Setting one is a host owner command. Tokens, turns, and total agent run time each count
-          over the calendar window you choose.
+          Setting one is a host owner command. Tokens, turns, total agent run time, and money each
+          count over the calendar window you choose.
         </p>
-      ) : (
-        <p role="status">
-          {spendCeilingRemainingPhrases([remaining])
-            .map((phrase) => `${phrase} this ${windowPeriod}`)
-            .join(" · ")}
-        </p>
+      ) : phrases.length === 0 ? null : (
+        <p role="status">{phrases.map((phrase) => `${phrase} this ${windowPeriod}`).join(" · ")}</p>
       )}
+      {refusal === undefined ? null : <OctantAlert tone="warning">{refusal.message}</OctantAlert>}
+      {hasMoneyCeiling([snapshot?.project]) ? <p role="note">{MONEY_CEILING_NOTE}</p> : null}
       <form
         noValidate
         onSubmit={(event) => {
@@ -131,6 +137,13 @@ export function ProjectSpendCeilingSection(props: {
           onChange={(event) => setHours(event.target.value)}
           placeholder="Hours of agent run time"
           value={hours}
+        />
+        <OctantInput
+          aria-label="Project money ceiling in US dollars"
+          inputMode="decimal"
+          onChange={(event) => setDollars(event.target.value)}
+          placeholder="US dollars"
+          value={dollars}
         />
         {ceilingSet ? null : (
           <OctantSelectField

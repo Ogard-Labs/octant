@@ -288,6 +288,81 @@ describe("ChatTurnRunner", () => {
     expect(settle).toHaveBeenCalledExactlyOnceWith({ reservationId: String(reservation) });
   });
 
+  it("tells the transcript which ceiling refused the turn, in the refusal's own words", async () => {
+    const message =
+      "This thread's money ceiling cannot be checked because some of its usage in this window has no price.";
+    const acquire = vi.fn(() => Effect.die(new Error("A refused turn never reaches the provider")));
+    const updates: ChatAttempt[] = [];
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      spendCeiling: {
+        admit: () => ({
+          status: "refused",
+          refusal: {
+            kind: "unknown-spend",
+            scopeKind: "thread",
+            scopeId: "82000000-0000-4000-8000-000000000001",
+            dimension: "monetary",
+            ceilingUsdCents: 25_00,
+            recovery: ["raise-ceiling", "clear-ceiling", "open-usage", "pause-work"],
+            message,
+          },
+        }),
+        settle: vi.fn(),
+      },
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    const result = await Effect.runPromiseExit(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { kind: "codex", probe: () => Effect.die(new Error("unused")), acquire },
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: false,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+              digest: "a".repeat(64),
+              byteLength: 5,
+            }),
+        }),
+      ),
+    );
+
+    expect(result._tag).toBe("Failure");
+    expect(acquire).not.toHaveBeenCalled();
+    expect(updates.at(-1)).toMatchObject({
+      outcome: "interrupted",
+      failure: { code: "unknown-spend", message },
+    });
+  });
+
   it("fails closed when a provider completes without non-whitespace assistant content", async () => {
     const updates: ChatAttempt[] = [];
     const persistResponse = vi.fn(() =>

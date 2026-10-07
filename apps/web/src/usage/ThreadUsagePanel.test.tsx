@@ -248,6 +248,76 @@ describe("ThreadUsagePanel", () => {
     });
   });
 
+  it("raises a money ceiling in whole cents and reads what is left in dollars", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const execute = vi.fn().mockResolvedValue({ kind: "raised" });
+    const snapshot = vi.fn().mockResolvedValue({
+      thread: { version: 2, policy: { costBudgetUsdCents: 25_00 } },
+      threadRemaining: {
+        ceilingUsdCents: 25_00,
+        usedUsdCents: 10_40,
+        remainingUsdCents: 14_60,
+        window: { kind: "lifetime" },
+        version: 2,
+      },
+    });
+    await renderOpen(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute } as never}
+        subjectId="73000000-0000-4000-8000-000000000001"
+        subjectType="chat-thread"
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("$14.60 of $25 remaining"),
+    );
+    expect(screen.getByText(/checked between turns/i)).toBeVisible();
+    await userEvent.type(screen.getByLabelText("Money ceiling in US dollars"), "40.5");
+    await userEvent.click(screen.getByRole("button", { name: "Raise spend ceiling" }));
+    await waitFor(() => expect(execute).toHaveBeenCalled());
+    expect(execute.mock.calls[0]![0]).toEqual({
+      kind: "raise-spend-ceiling",
+      scope: {
+        kind: "thread",
+        threadType: "chat-thread",
+        threadId: "73000000-0000-4000-8000-000000000001",
+      },
+      expectedVersion: 2,
+      costBudgetUsdCents: 40_50,
+    });
+  });
+
+  it("says a money ceiling cannot be measured when usage has no price, in the refusal's words", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const message =
+      "This thread's money ceiling cannot be checked because some of its usage in this window has no price: the provider reported no cost and Octant has no rate for the model, or the provider reported no usage. Raise or clear the ceiling, open Usage for this thread, or pause work.";
+    const snapshot = vi.fn().mockResolvedValue({
+      thread: { version: 1, policy: { costBudgetUsdCents: 25_00 } },
+      threadRemaining: { window: { kind: "lifetime" }, version: 1 },
+      refusal: {
+        kind: "unknown-spend",
+        scopeKind: "thread",
+        scopeId: "73000000-0000-4000-8000-000000000001",
+        dimension: "monetary",
+        ceilingUsdCents: 25_00,
+        recovery: ["raise-ceiling", "clear-ceiling", "open-usage", "pause-work"],
+        message,
+      },
+    });
+    await renderOpen(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        subjectId="73000000-0000-4000-8000-000000000001"
+        subjectType="chat-thread"
+      />,
+    );
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("has no price"));
+    expect(screen.getByRole("status")).toHaveTextContent("Cannot be measured");
+    expect(screen.queryByText("None")).not.toBeInTheDocument();
+  });
+
   it("reports a host failure instead of an empty total", async () => {
     const load = vi.fn().mockRejectedValue(new UsageDashboardClientFailure("Host is down.", 0));
     await renderOpen(

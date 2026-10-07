@@ -8,7 +8,12 @@ import {
 } from "@octant/contracts";
 import type { UsageDashboardClient } from "@octant/client-runtime";
 import type { SpendCeilingClient } from "@octant/client-runtime/spend-ceiling-client";
-import { spendCeilingLimits, spendCeilingRemainingPhrases } from "./spendCeilingLimits";
+import {
+  MONEY_CEILING_NOTE,
+  hasMoneyCeiling,
+  spendCeilingLimits,
+  spendCeilingRemainingPhrases,
+} from "./spendCeilingLimits";
 import { useEffect, useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -173,6 +178,7 @@ function SpendCeilingControls(props: {
   const [budget, setBudget] = useState("");
   const [turns, setTurns] = useState("");
   const [hours, setHours] = useState("");
+  const [dollars, setDollars] = useState("");
   const [message, setMessage] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -210,7 +216,7 @@ function SpendCeilingControls(props: {
 
   async function submit(kind: "set" | "raise" | "clear"): Promise<void> {
     if (scope === undefined) return;
-    const limits = spendCeilingLimits({ tokens: budget, turns, hours });
+    const limits = spendCeilingLimits({ tokens: budget, turns, hours, dollars });
     const expectedVersion = decodeAggregateVersion(version);
     const command =
       kind === "clear"
@@ -256,6 +262,12 @@ function SpendCeilingControls(props: {
           <p className="thread-usage__ceiling-value" role="note">
             None
           </p>
+        ) : remaining.length === 0 ? (
+          // A ceiling is set but none of its dimensions can be measured; the
+          // refusal below says why, and "None" would claim there is no ceiling.
+          <p className="thread-usage__ceiling-value" role="status">
+            Cannot be measured
+          </p>
         ) : (
           <p className="thread-usage__ceiling-value" role="status">
             {remaining.join(" · ")}
@@ -299,6 +311,13 @@ function SpendCeilingControls(props: {
             placeholder="Hours"
             value={hours}
           />
+          <OctantInput
+            aria-label="Money ceiling in US dollars"
+            inputMode="decimal"
+            onChange={(event) => setDollars(event.target.value)}
+            placeholder="$"
+            value={dollars}
+          />
           <OctantButton
             aria-label={threadCeilingSet ? "Raise spend ceiling" : "Set spend ceiling"}
             size="sm"
@@ -320,6 +339,11 @@ function SpendCeilingControls(props: {
           ) : null}
         </form>
       )}
+      {hasMoneyCeiling([snapshot?.thread, snapshot?.project]) ? (
+        <p className="thread-usage__ceiling-note" role="note">
+          {MONEY_CEILING_NOTE}
+        </p>
+      ) : null}
       {message === undefined ? null : (
         <OctantAlert className="thread-usage__status" tone="warning">
           {message}

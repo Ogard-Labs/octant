@@ -412,8 +412,11 @@ export class ChatTurnRunner {
         turnUpperBoundTokens: input.estimatedTokens,
       });
       if (spendAdmission?.status === "refused") {
+        // The refusal names the ceiling and dimension that refused and what to
+        // do; the bare code would leave the transcript a generic sentence.
         yield* persistOutcome("interrupted", {
           code: decodeDiagnosticFailureCode(spendAdmission.refusal.kind),
+          message: spendAdmission.refusal.message,
         });
         terminalOutcome = "interrupted";
         capacityScheduler.recordTerminal({

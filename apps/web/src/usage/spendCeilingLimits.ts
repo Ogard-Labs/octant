@@ -1,16 +1,21 @@
 import type { SpendCeilingRemaining } from "@octant/contracts";
-import { formatSpendCeilingRunTime } from "@octant/domain/spend-ceiling-policy";
+import {
+  formatSpendCeilingRunTime,
+  formatSpendCeilingUsd,
+} from "@octant/domain/spend-ceiling-policy";
 
 export interface SpendCeilingLimitInput {
   readonly tokens: string;
   readonly turns: string;
   readonly hours: string;
+  readonly dollars: string;
 }
 
 export interface SpendCeilingLimits {
   readonly tokenBudget?: number;
   readonly turnBudget?: number;
   readonly runTimeBudgetSeconds?: number;
+  readonly costBudgetUsdCents?: number;
 }
 
 function positiveInteger(text: string): number | undefined {
@@ -26,15 +31,29 @@ function runTimeSeconds(text: string): number | undefined {
   return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : undefined;
 }
 
+/**
+ * Dollars ("25", "25.4", "$25.40") as whole cents. A money budget is whole
+ * cents on the host, so a figure with finer precision sets no budget rather
+ * than a rounded one the person did not type.
+ */
+function usdCents(text: string): number | undefined {
+  const match = /^\$?\s*(\d+)(?:\.(\d{1,2}))?$/.exec(text.trim());
+  if (match === null) return undefined;
+  const cents = Number(match[1] ?? "0") * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  return Number.isSafeInteger(cents) && cents > 0 ? cents : undefined;
+}
+
 /** The budgets a person filled in; blank fields set no dimension. */
 export function spendCeilingLimits(input: SpendCeilingLimitInput): SpendCeilingLimits {
   const tokenBudget = positiveInteger(input.tokens);
   const turnBudget = positiveInteger(input.turns);
   const runTimeBudgetSeconds = runTimeSeconds(input.hours);
+  const costBudgetUsdCents = usdCents(input.dollars);
   return {
     ...(tokenBudget === undefined ? {} : { tokenBudget }),
     ...(turnBudget === undefined ? {} : { turnBudget }),
     ...(runTimeBudgetSeconds === undefined ? {} : { runTimeBudgetSeconds }),
+    ...(costBudgetUsdCents === undefined ? {} : { costBudgetUsdCents }),
   };
 }
 
@@ -81,5 +100,28 @@ export function spendCeilingRemainingPhrases(
       `${formatSpendCeilingRunTime(runTime.remainingRunTimeSeconds)} of ${formatSpendCeilingRunTime(runTime.ceilingRunTimeSeconds)} agent run time remaining`,
     );
   }
+  const money = tighter(remainings, (remaining) => remaining.remainingUsdCents);
+  if (money?.remainingUsdCents !== undefined && money.ceilingUsdCents !== undefined) {
+    phrases.push(
+      `${formatSpendCeilingUsd(money.remainingUsdCents)} of ${formatSpendCeilingUsd(money.ceilingUsdCents)} remaining`,
+    );
+  }
   return phrases;
 }
+
+/**
+ * Whether either ceiling has a money budget. Money is only known once a
+ * provider reports a turn, so it is checked between turns and the surfaces
+ * say so wherever a money budget is in force.
+ */
+export function hasMoneyCeiling(
+  ceilings: ReadonlyArray<
+    | { readonly policy?: { readonly costBudgetUsdCents?: number | undefined } | undefined }
+    | undefined
+  >,
+): boolean {
+  return ceilings.some((ceiling) => ceiling?.policy?.costBudgetUsdCents !== undefined);
+}
+
+export const MONEY_CEILING_NOTE =
+  "Money counts settled, priced usage and is checked between turns, so a running turn can finish over it. Usage with no price refuses the next turn.";
