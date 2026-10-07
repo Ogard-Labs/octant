@@ -88,8 +88,30 @@ describe("connecting Claude for helpers", () => {
 
   it("reads a token split across output chunks", () => {
     const output = FRAMES.join("");
+    const end = output.indexOf(TOKEN) + TOKEN.length;
     expect(readSetupTokenOutput(output.slice(0, output.indexOf(TOKEN) + 10))).toBeUndefined();
+    // A prefix long enough to pass for a token is not one until the line ends.
+    expect(readSetupTokenOutput(output.slice(0, output.indexOf(TOKEN) + 20))).toBeUndefined();
+    expect(readSetupTokenOutput(output.slice(0, end))).toBeUndefined();
+    // Half of the colour reset that follows the token is not part of it.
+    expect(readSetupTokenOutput(output.slice(0, end + 3))).toBeUndefined();
     expect(readSetupTokenOutput(output)).toBe(TOKEN);
+  });
+
+  it("keeps the whole token when the terminal delivers it in pieces", async () => {
+    const fake = fakeTerminal();
+    const outcome = runClaudeSetupToken({
+      binaryPath: "/usr/local/bin/claude",
+      cwd: "/tmp/connect",
+      environment: {},
+      spawn: fake.spawn,
+    });
+    const output = FRAMES.join("");
+    const cut = output.indexOf(TOKEN) + 20;
+    fake.write(output.slice(0, cut));
+    fake.write(output.slice(cut));
+
+    await expect(outcome).resolves.toEqual({ kind: "captured", token: TOKEN });
   });
 
   it("reports a sign-in that ended without a token and never echoes the program's output", async () => {

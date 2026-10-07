@@ -47,7 +47,10 @@ const TERMINAL_ROWS = 200;
 const ESCAPE_SEQUENCES =
   // eslint-disable-next-line no-control-regex
   /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-_]/g;
-const TOKEN_LINE = /Your OAuth token \(valid for[^)]*\):\s*(\S+)/;
+// The token counts only once whitespace follows it: a pseudo-terminal can hand
+// the line over in pieces, and a piece that ends mid-token, or mid-way through
+// the colour reset after it, would otherwise read as a whole, wrong token.
+const TOKEN_LINE = /Your OAuth token \(valid for[^)]*\):\s*(\S+)\s/;
 
 /** The token in the program's printed output, or `undefined` while it is not there yet. */
 export function readSetupTokenOutput(output: string): string | undefined {
@@ -105,7 +108,8 @@ export function runClaudeSetupToken(input: {
     );
     cleanups.push(
       started.onExit(() => {
-        const token = readSetupTokenOutput(output);
+        // The program has finished, so the end of its output ends the token.
+        const token = readSetupTokenOutput(`${output}\n`);
         settle(
           token === undefined
             ? { kind: "refused", reason: "Claude did not finish connecting. Try again." }
