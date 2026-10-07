@@ -7,6 +7,7 @@ import {
   decodeBrowserContextStopCommand,
   decodeBrowserThreadScope,
   decodeBrowserThreadContextCommand,
+  decodeBrowserThreadInspectCommand,
   decodeBrowserThreadScopeRequest,
   type BrowserActionCommand,
   type BrowserAutomationSnapshot,
@@ -16,6 +17,7 @@ import {
   type BrowserContextStopCommand,
   type BrowserThreadScope,
   type BrowserThreadContextCommand,
+  type BrowserThreadInspectCommand,
   type BrowserThreadScopeRequest,
   decodeBrowserToolApprovalDecision,
   decodeBrowserToolApprovalList,
@@ -44,7 +46,7 @@ export interface BrowserAutomationClient {
     signal?: AbortSignal,
   ): Promise<BrowserAutomationSnapshot>;
   inspectThread(
-    input: BrowserThreadContextCommand,
+    input: BrowserThreadInspectCommand,
     signal?: AbortSignal,
   ): Promise<BrowserAutomationSnapshot>;
   releaseThread(
@@ -108,7 +110,7 @@ export function createBrowserAutomationClient(
       post(
         options,
         "/api/browser/contexts/current",
-        decodeBrowserThreadContextCommand(input),
+        decodeBrowserThreadInspectCommand(input),
         decodeBrowserAutomationSnapshot,
         signal,
       ),

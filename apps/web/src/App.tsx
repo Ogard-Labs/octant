@@ -340,6 +340,7 @@ import {
 } from "./shell/rightUtilityDockSelection";
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { threadDragSurface } from "./shell/threadDragSurface";
+import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
 import {
   RemotePairingView,
   UsageWorkspace,
@@ -396,6 +397,7 @@ import { runningNowThreads } from "./shell/dockThreadOverviewModel";
 import { ComposerContextMeterProvider } from "./context/composerContextMeterScope";
 import { ThreadStatsDetailDialog } from "./threadStats/ThreadStatsDetail";
 import { ThreadStatsProvider } from "./threadStats/threadStatsScope";
+import { OutputLimitContinueProvider } from "./transcript/outputLimitNote";
 import { useThreadTurnMetrics } from "./threadStats/useThreadTurnMetrics";
 import { useContextController } from "./context/useContextController";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
@@ -430,7 +432,11 @@ import type {
   ThreadProviderIdentity,
 } from "./shell/navigationModel";
 import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
+import { buildReviewEntries, type ReviewEntry } from "./review/reviewModel";
+import { createReviewSource } from "./review/reviewSource";
+import type { ReviewActionOutcome, ReviewPageProps } from "./review/ReviewPage";
 import { createWorkingNowCard } from "./home/WorkingNowCard";
+import { createNeedsYouCard } from "./home/NeedsYouCard";
 import { createPullRequestsCard } from "./home/PullRequestsCard";
 import {
   pullRequestCardAvailable,
@@ -438,7 +444,12 @@ import {
   type PullRequestCardCapability,
   type PullRequestCardRow,
 } from "./home/pullRequests";
-import { boardFactsByThread, remoteHostLabel, type WorkingNowThread } from "./home/workingNow";
+import {
+  boardFactsByThread,
+  remoteHostLabel,
+  threadProvider,
+  type WorkingNowThread,
+} from "./home/workingNow";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
@@ -916,6 +927,10 @@ function LaunchedShell(
   // Deliberately not cleared on mode switch: what waits on the user spans
   // every mode, so the Inbox survives moving between them.
   const [inboxOpen, setInboxOpen] = useState(false);
+  // Like the Inbox, what finished and waits for a look spans the window, so
+  // moving between modes keeps the page; its list follows the active mode's
+  // To review count.
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [projectsListOpen, setProjectsListOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
   const [pendingIssue, setPendingIssue] = useState<RepositoryIssueRow>();
@@ -1287,6 +1302,20 @@ function LaunchedShell(
     onDrop: (source, destination) => {
       const row = sidebarDragRows.current.get(source.dragKey);
       sidebarDragRows.current.delete(source.dragKey);
+      if (destination.kind === "composer") {
+        if (row === undefined || row.threadId.trim().length === 0) {
+          void deliverComposerThreadDrop({
+            composerKey: destination.composerKey,
+            threadId: "",
+          });
+          return;
+        }
+        void deliverComposerThreadDrop({
+          composerKey: destination.composerKey,
+          threadId: row.threadId,
+        });
+        return;
+      }
       void controller.dropSurface(
         source.surface,
         destination,
@@ -2573,6 +2602,21 @@ function LaunchedShell(
       dockTabs.length > 0 ||
       launchableDockSurfaces.length > 0);
   const dockOpen = dockVisible && dockAvailable;
+  // A Browser tab bound to one host-opened context (a link or a local server)
+  // is not the thread's shared Browser, so it does not stand in for the agent's
+  // session: only a tab with no context of its own counts as that view.
+  const sharedBrowserInDock =
+    dockOpen &&
+    displayedDockState.tabs.some(
+      (tab) =>
+        tab.id === displayedDockState.active &&
+        tab.surface === "browser" &&
+        tab.browserContextId === undefined,
+    );
+  const sharedBrowserInBottomPanel =
+    bottomPanelOpen &&
+    activeBottomSurface?.id === "browser" &&
+    activeBottomTab?.browserContextId === undefined;
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
@@ -3774,6 +3818,27 @@ function LaunchedShell(
     () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
     [projectController.projects],
   );
+  // The To review count's own rows: the same threads the tile counted, so the
+  // page and the number cannot disagree.
+  const reviewEntries = useMemo(
+    () =>
+      buildReviewEntries({
+        threads: workingNowThreads,
+        projectNames: workingNowProjectNames,
+        unfiledLabel: "No project",
+      }),
+    [workingNowProjectNames, workingNowThreads],
+  );
+  const reviewSource = useMemo(
+    () =>
+      createReviewSource({
+        code: codeClient,
+        work: workThreadClient,
+        workTurns: workTurnClient,
+        chat: chatClient,
+      }),
+    [chatClient, codeClient, workThreadClient, workTurnClient],
+  );
   const workingNowProviders = useMemo(
     () =>
       new Map(
@@ -3784,6 +3849,16 @@ function LaunchedShell(
       ),
     [providerController.instances],
   );
+  // The provider of every thread this start screen could name, by thread id,
+  // for the Needs you card: a waiting request carries a thread, not a provider.
+  const needsYouThreadProviders = useMemo(() => {
+    const byThread = new Map<string, ThreadProviderIdentity>();
+    for (const { thread } of workingNowThreads) {
+      const provider = threadProvider(thread, workingNowProviders);
+      if (provider !== undefined) byThread.set(thread.threadId, provider);
+    }
+    return byThread;
+  }, [workingNowProviders, workingNowThreads]);
   const workingNowBoardFacts = useMemo(
     () =>
       continueCards.kind === "ready" && activeMode === "code"
@@ -3848,6 +3923,7 @@ function LaunchedShell(
     projectsListOpen,
     selectedProjectTabId ?? "",
     inboxOpen,
+    reviewOpen,
     workBoardOpen,
     codeBoardOpen,
     codePullRequestsOpen,
@@ -4041,6 +4117,7 @@ function LaunchedShell(
     codeBoardOpen ||
     codePullRequestsOpen ||
     inboxOpen ||
+    reviewOpen ||
     githubIssuesOpen ||
     linearIssuesOpen ||
     workBoardOpen ||
@@ -4070,9 +4147,31 @@ function LaunchedShell(
     props.hostBridge === undefined
       ? remoteHostLabel(props.launch.serverUrl, localHost?.displayName)
       : undefined;
+  // What moves the pending-request read: a thread raising or clearing a
+  // question journals on its own mode's navigation topic.
+  const pendingRequestFeedRevision =
+    machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
   // The card list is rebuilt each render and is cheap: each card's own rows are
   // memoized from the inputs above, which keep their identity between renders.
   const homeCards = [
+    createNeedsYouCard({
+      answerClients: { chatClient, codeClient, workRequestClient },
+      feedRevision: pendingRequestFeedRevision,
+      modes: workingNowModes,
+      now: minuteNow.getTime(),
+      onOpenInbox: openInbox,
+      onOpenThread: (request) => {
+        pluginSidebarDestinationActionContext.closeOverlays();
+        if (request.mode === "chat") selectChatThread(String(request.threadId));
+        else if (request.mode === "work") selectWorkThread(String(request.threadId));
+        else selectCodeThread(String(request.threadId));
+      },
+      pendingRequestClient,
+      projectNames: workingNowProjectNames,
+      settings: controller.settings,
+      threadProviders: needsYouThreadProviders,
+      workspace: controller.workspace,
+    }),
     createWorkingNowCard({
       agentRunClient,
       boardFacts: workingNowBoardFacts,
@@ -4147,7 +4246,7 @@ function LaunchedShell(
                   ? continueCards.runningTotal
                   : 0
                 : runningThreadCount(workProjectThreads),
-            onReview: openInbox,
+            onReview: openReview,
             cards: homeCards,
             cardCustomization: controller.settings.homeCards,
             onCardCustomizationChange: (homeCardChoice) =>
@@ -4269,6 +4368,9 @@ function LaunchedShell(
     onMarkThreadRead: (threadId) => codeController.markThreadRead(decodeCodeThreadId(threadId)),
     onMarkThreadUnread: (threadId) => codeReadCursorStore.unmark(decodeCodeThreadId(threadId)),
     onPinInPane: pinCodeThreadInPane,
+    onAttachAsContext: (threadId) => {
+      void deliverComposerThreadDrop({ threadId });
+    },
     onPinThread: (threadId, pinned) =>
       void codeController.pinThread(decodeCodeThreadId(threadId), pinned),
     onOpenPullRequest: selectProjectPullRequestIdentity,
@@ -4302,34 +4404,51 @@ function LaunchedShell(
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
     onPinInPane: pinChatThreadInPane,
+    onAttachAsContext: (threadId) => {
+      void deliverComposerThreadDrop({ threadId });
+    },
   };
   // Work has no controller of its own for thread metadata: a rest command
   // goes straight to the client with the version the sidebar last saw, and
   // the host's answer is folded back into the navigation list.
-  const runWorkRestCommand = async (
+  const tryWorkRestCommand = async (
     threadId: string,
     command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
-  ): Promise<void> => {
+  ): Promise<ReviewActionOutcome> => {
     const thread = workNavigation.bootstrap?.threads.find(
       (candidate) => String(candidate.id) === threadId,
     );
-    if (thread === undefined) return;
+    if (thread === undefined) {
+      return { status: "refused", message: "This thread is no longer in the list." };
+    }
     try {
       const result = await workThreadClient.execute(command(thread.version));
       if ("kind" in result && result.kind === "thread-updated") {
         workNavigation.applyThread(result.thread);
       }
+      return { status: "ok" };
     } catch (error) {
       // The host refused (a running turn, a wake time already gone) or the
-      // row was stale: say so where thread notices already appear, and read
-      // the list again so the row shows the thread as the host has it.
-      setThreadExportNotice(
-        error instanceof Error && error.message.trim() !== ""
-          ? error.message
-          : "The host could not change this thread.",
-      );
+      // row was stale: read the list again so the row shows the thread as the
+      // host has it, and hand the reason to whoever acted.
       void workNavigation.refresh();
+      return {
+        status: "refused",
+        message:
+          error instanceof Error && error.message.trim() !== ""
+            ? error.message
+            : "The host could not change this thread.",
+      };
     }
+  };
+  // A sidebar row has nowhere of its own to report a refusal, so its answer
+  // reads where thread notices already appear.
+  const runWorkRestCommand = async (
+    threadId: string,
+    command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
+  ): Promise<void> => {
+    const outcome = await tryWorkRestCommand(threadId, command);
+    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
   };
   const workThreadRowActions: ThreadRowActions = {
     ...(exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread }),
@@ -4360,7 +4479,94 @@ function LaunchedShell(
         expectedVersion,
       })),
     onPinInPane: pinWorkThreadInPane,
+    onAttachAsContext: (threadId) => {
+      void deliverComposerThreadDrop({ threadId });
+    },
   };
+
+  // The Review page acts through each thread's own host command, the same one
+  // its sidebar row uses, but asks for the host's answer as a value: the page
+  // shows a refusal beside the thread it concerns instead of in a shared
+  // notice. Each mode keeps its own command, so a Chat thread never reaches a
+  // Work or Code command.
+  const reviewPageProps: ReviewPageProps | undefined = reviewOpen
+    ? {
+        entries: reviewEntries,
+        source: reviewSource,
+        changeRevision:
+          machineChanges.chatNavigation +
+          machineChanges.workNavigation +
+          machineChanges.codeNavigation,
+        now: minuteNow.getTime(),
+        onClose: () => setReviewOpen(false),
+        codeProjectAccess: {
+          boundProjectId:
+            controller.boundCodeProjectId === undefined
+              ? undefined
+              : String(controller.boundCodeProjectId),
+          onOpenProject: (entry: ReviewEntry) => {
+            const project = projectController.allProjects.find(
+              (candidate) => String(candidate.id) === entry.projectId,
+            );
+            if (project === undefined || project.lifecycle !== "active") return;
+            // Binds the window without closing the page, so the person stays in review.
+            void controller.openProject(project.id, "code", project.name);
+          },
+        },
+        onOpen: (entry: ReviewEntry) => {
+          if (entry.mode === "chat") selectChatThread(entry.threadId);
+          else if (entry.mode === "work") selectWorkThread(entry.threadId);
+          else selectCodeThread(entry.threadId);
+        },
+        onComplete: (entry: ReviewEntry): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.completeThread(decodeCodeThreadId(entry.threadId));
+          }
+          if (entry.mode === "chat") {
+            return chatController.completeThread(decodeChatThreadId(entry.threadId));
+          }
+          return tryWorkRestCommand(entry.threadId, (expectedVersion) => ({
+            kind: "complete-work-thread",
+            threadId: decodeWorkThreadId(entry.threadId),
+            expectedVersion,
+          }));
+        },
+        onSnooze: (entry: ReviewEntry, until: string): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.snoozeThread(decodeCodeThreadId(entry.threadId), until);
+          }
+          if (entry.mode === "chat") {
+            return chatController.snoozeThread(decodeChatThreadId(entry.threadId), until);
+          }
+          return tryWorkRestCommand(entry.threadId, (expectedVersion) => ({
+            kind: "snooze-work-thread",
+            threadId: decodeWorkThreadId(entry.threadId),
+            expectedVersion,
+            until: decodeUtcTimestamp(until),
+          }));
+        },
+        onSendBack: (entry: ReviewEntry, prompt: string): Promise<ReviewActionOutcome> => {
+          if (entry.mode === "code") {
+            return codeController.sendBackTurn(decodeCodeThreadId(entry.threadId), prompt);
+          }
+          if (entry.mode === "chat") {
+            return chatController.sendBackTurn(decodeChatThreadId(entry.threadId), prompt);
+          }
+          return Promise.resolve({
+            status: "refused",
+            message:
+              "A Work thread takes its follow-up from its own composer. Open it to continue.",
+          });
+        },
+        onMarkSeen: (entry: ReviewEntry) => {
+          if (entry.mode === "code")
+            codeController.markThreadRead(decodeCodeThreadId(entry.threadId));
+          else if (entry.mode === "chat") {
+            chatController.markThreadRead(decodeChatThreadId(entry.threadId));
+          }
+        },
+      }
+    : undefined;
 
   // One thread-selection handler per mode. The sidebar and every Project
   // Overview call the same one, so a row opens the same thread wherever it is
@@ -4526,6 +4732,7 @@ function LaunchedShell(
     projectsListOpen ||
     railPlaceholder !== undefined ||
     inboxOpen ||
+    reviewOpen ||
     codeBoardOpen ||
     workBoardOpen ||
     codePullRequestsOpen ||
@@ -4704,6 +4911,7 @@ function LaunchedShell(
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
     setInboxOpen(false);
+    setReviewOpen(false);
     setGithubIssuesOpen(false);
     setLinearIssuesOpen(false);
     setArchiveOpen(false);
@@ -4890,6 +5098,13 @@ function LaunchedShell(
   function openInbox() {
     pluginSidebarDestinationActionContext.closeOverlays();
     setInboxOpen(true);
+  }
+
+  // The To review tile, the start screen's review card, and the palette all
+  // land on the one page that lists the threads the tile counted.
+  function openReview() {
+    pluginSidebarDestinationActionContext.closeOverlays();
+    setReviewOpen(true);
   }
 
   const pluginSidebarDestinationActions: Record<string, () => void> = {};
@@ -5785,6 +6000,7 @@ function LaunchedShell(
     onNewThread: () => void controller.openDraftThread(activeMode),
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
+    onOpenReview: openReview,
     onOpenZen: () => {
       if (zen.active) zen.exitZen();
       else void zen.enterZen();
@@ -6296,7 +6512,7 @@ function LaunchedShell(
               ...(activeMode === "chat"
                 ? { onOpenRunning: () => openSidebarList("activity") }
                 : {}),
-              onOpenReview: () => openSidebarList("activity"),
+              onOpenReview: openReview,
               onOpenDone: () => openSidebarList("completed"),
             }}
             {...(sidebarRail
@@ -6509,6 +6725,7 @@ function LaunchedShell(
                 {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
                 onDismissRailPlaceholder={() => setRailPlaceholder(undefined)}
                 inboxOpen={inboxOpen}
+                {...(reviewPageProps === undefined ? {} : { reviewPage: reviewPageProps })}
                 onCloseInbox={() => setInboxOpen(false)}
                 inboxAttentionItems={inboxAttentionItems}
                 onOpenInboxThread={(signal) => {
@@ -6610,6 +6827,14 @@ function LaunchedShell(
                     ),
                   )
                 }
+                boardPendingRequests={{
+                  answerClients: { chatClient, codeClient, workRequestClient },
+                  feedRevision: pendingRequestFeedRevision,
+                  now: minuteNow.getTime(),
+                  pendingRequestClient,
+                  settings: controller.settings,
+                  workspace: controller.workspace,
+                }}
                 providerKinds={
                   new Map(
                     (activeMode === "work" ? workProviderGroups : codeProviderGroups).map(
@@ -6739,467 +6964,484 @@ function LaunchedShell(
                   subjectKey={contextSubject?.aggregateId}
                   summary={threadStatsSummary}
                 >
-                  <ComposerContextMeterProvider
-                    busy={contextController.status === "updating"}
-                    onOpenUsage={() => void controller.openSettings({ section: "usage" })}
-                    onRebuild={() => void contextController.rebuild()}
-                    onSetExcluded={(entryId, excluded) =>
-                      void contextController.setExcluded(entryId, excluded)
+                  <OutputLimitContinueProvider
+                    mode={
+                      activeMode === "chat" || activeMode === "work" || activeMode === "code"
+                        ? activeMode
+                        : undefined
                     }
-                    onSetPinned={(entryId, pinned) =>
-                      void contextController.setPinned(entryId, pinned)
-                    }
-                    status={contextController.status}
-                    {...(activeMode !== "code" || activeCodeThreadUsageFallback === undefined
-                      ? {}
-                      : { fallback: activeCodeThreadUsageFallback })}
-                    {...(contextController.snapshot === undefined
-                      ? {}
-                      : { snapshot: contextController.snapshot })}
-                    {...(contextSubject === undefined
-                      ? {}
-                      : {
-                          subjectKey: `${contextSubject.aggregateType}:${contextSubject.aggregateId}`,
-                        })}
+                    threadId={contextSubject?.aggregateId}
                   >
-                    <ComposerContextMeterShortcut />
-                    <ThreadStatsDetailDialog />
-                    <WorkspaceView
-                      {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
-                      followUpSuggestions={{
-                        client: followUpSuggestionClient,
-                        sideTaskClient,
-                        onCreated: openCreatedFollowUp,
-                      }}
-                      greetingName={controller.settings?.userProfile.displayName}
-                      draftResetRevision={draftResetRevision}
-                      draftProjectSelection={draftProjectSelection}
-                      onDraftSelectProject={(mode, projectId) => {
-                        // Choosing a folder in the composer is the authority
-                        // transition, not a renderer preference: the window is
-                        // refused every Code command about a Project its
-                        // persisted workspace does not name. Re-opening the draft
-                        // with the Project records it on the surface the server
-                        // reads.
-                        const binding = controller
-                          .openDraftThread(mode, projectId)
-                          .then((accepted) => {
-                            if (accepted) {
-                              if (mode === "code") setDraftPermissionPersistence(undefined);
-                              setDraftProjectSelection((current) => ({
-                                ...current,
-                                [mode]: projectId,
-                              }));
-                            }
-                          });
-                        draftProjectBinding.current = binding;
-                        void binding.catch(() => undefined);
-                      }}
-                      onDraftSelectUnfiled={(mode) => {
-                        if (mode !== "chat") return;
-                        const binding = controller
-                          .openDraftThread("chat", undefined, { unfiled: true })
-                          .then((accepted) => {
-                            if (accepted) {
-                              setDraftProjectSelection(({ chat: _drop, ...rest }) => rest);
-                            }
-                          });
-                        draftProjectBinding.current = binding;
-                        void binding.catch(() => undefined);
-                      }}
-                      onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
-                      appleToolchainClient={appleToolchainClient}
-                      agentRunClient={agentRunClient}
-                      nativeHarnessClient={nativeHarnessClient}
-                      onOpenSubagent={openSubagent}
-                      onOpenAgents={openSubagent}
-                      chatClient={chatClient}
-                      chatController={chatController}
-                      chatReadCursorStore={chatReadCursorStore}
-                      {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
-                      onPinTerminal={(request) => void zen.pinTerminal(request)}
-                      onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
-                      onStartPlanTask={(request) => {
-                        closeWorkspaceReaders();
-                        setDraftError(undefined);
-                        setDraftPendingMessage(undefined);
-                        resetNewTaskDraft(request.mode);
-                        setPendingDraftPrompt(request.prompt);
-                        void controller.openDraftThread(request.mode, request.projectId);
-                      }}
-                      {...(pendingDraftPrompt === undefined
+                    <ComposerContextMeterProvider
+                      busy={contextController.status === "updating"}
+                      onOpenUsage={() => void controller.openSettings({ section: "usage" })}
+                      onRebuild={() => void contextController.rebuild()}
+                      onSetExcluded={(entryId, excluded) =>
+                        void contextController.setExcluded(entryId, excluded)
+                      }
+                      onSetPinned={(entryId, pinned) =>
+                        void contextController.setPinned(entryId, pinned)
+                      }
+                      status={contextController.status}
+                      {...(activeMode !== "code" || activeCodeThreadUsageFallback === undefined
                         ? {}
-                        : { draftPendingPrompt: pendingDraftPrompt })}
-                      onDraftPendingPromptConsumed={() => setPendingDraftPrompt(undefined)}
-                      onDockResearch={(request) =>
-                        void zen.dockResearch({
-                          thread: {
-                            threadId:
-                              request.mode === "code"
-                                ? decodeCodeThreadId(request.threadId)
-                                : decodeWorkThreadId(request.threadId),
-                            mode: request.mode,
-                          },
-                        })
-                      }
-                      codeController={codeController}
-                      codeControllers={codeThreadControllers}
-                      extensionClient={extensionClient}
-                      workPromotionController={workPromotionController}
-                      codeProviderChoices={codeProviderChoices}
-                      openInApplications={controller.settings.openInApplications}
-                      hosts={hosts}
-                      selectedCreateHostId={createHostId}
-                      createHostViewScope={createHostViewScope}
-                      {...(lastSelectedHealthyHostId === undefined
+                        : { fallback: activeCodeThreadUsageFallback })}
+                      {...(contextController.snapshot === undefined
                         ? {}
-                        : { lastSelectedHealthyHostId })}
-                      onSelectCreateHost={handleSelectCreateHost}
-                      {...(controller.workspace.focusedPaneId === undefined
-                        ? {}
-                        : { focusedPaneId: controller.workspace.focusedPaneId })}
-                      drag={workspaceDrag}
-                      layout={controller.presentedLayout}
-                      memoryRevision={projectController.memoryRevision}
-                      onMemoryChanged={projectController.touchMemoryRevision}
-                      availabilityByProject={projectController.availabilityByProject}
-                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                      folderBrowseClient={folderBrowseClient}
-                      githubClient={githubClient}
-                      githubCloneClient={githubCloneClient}
-                      hostId={createHostId}
-                      hidden={
-                        projectsListOpen ||
-                        railPlaceholder !== undefined ||
-                        codeBoardOpen ||
-                        codePullRequestsOpen ||
-                        inboxOpen ||
-                        githubIssuesOpen ||
-                        linearIssuesOpen ||
-                        workBoardOpen ||
-                        archiveOpen ||
-                        automationCenterVisible ||
-                        agentsCenterVisible ||
-                        // These two cover the workspace like every page above, but
-                        // were left out of this list, so the thread underneath
-                        // stayed in the tab order and the page had two h1s.
-                        artifactLibraryOpen ||
-                        imageLibraryOpen
-                      }
-                      onActivatePane={(paneId) => void controller.activatePane(paneId)}
-                      tabActivation={controller.tabActivation}
-                      onClearFocus={() => void controller.clearFocus()}
-                      contentTabs={controller.contentTabs}
-                      onActivateContentTab={(paneId, tabId) =>
-                        void controller.activateContentTab(paneId, tabId)
-                      }
-                      onCloseContentTab={(paneId, tabId) =>
-                        void controller.closeContentTab(paneId, tabId)
-                      }
-                      onClosePane={controller.closePane}
-                      onCommitResize={controller.commitSplitResize}
-                      onCreateChat={createChat}
-                      onCreateChatProjectThread={handleCreateChatProjectThread}
-                      onOpenChatThread={(threadId, title, projectId) => {
-                        // A thread this window's sidebar controller has never seen
-                        // (a branch minted from a tab's own controller) must reach
-                        // navigation the same way a draft-created thread does:
-                        // through an authoritative bootstrap reload.
-                        if (
-                          !chatController.navigation.some(
-                            (item) => item.threadId === String(threadId),
-                          )
-                        ) {
-                          void chatController.refreshNavigation();
-                        }
-                        void controller.openChatThread(threadId, title, projectId);
-                      }}
-                      onViewAllChatProjectThreads={viewAllChatProjectThreads}
-                      onOpenSideChat={(sidecar) => void controller.openSideChat(sidecar)}
-                      {...(activeMode === "chat" && draftCreating
-                        ? { chatWelcomeCreating: true }
-                        : {})}
-                      {...(activeMode === "chat" && draftError !== undefined
-                        ? { chatWelcomeError: draftError }
-                        : {})}
-                      providerReady={providerReady}
-                      {...(discoveryController.message === undefined
-                        ? {}
-                        : { providerBootstrapMessage: discoveryController.message })}
-                      onOpenDraftThread={(mode) => void controller.openDraftThread(mode)}
-                      workCreateThreadAvailable={workCreateThreadAvailable}
-                      workMutationClient={workMutationClient}
-                      workThreadClient={workThreadClient}
-                      workThreads={workNavigation.bootstrap?.threads ?? []}
-                      onWorkThreadUpdated={workNavigation.applyThread}
-                      workTurnClient={workTurnClient}
-                      workChangeRevision={machineChanges.workNavigation}
-                      workRequestClient={workRequestClient}
-                      workOverviewClient={workOverviewClient}
-                      workResearchClient={workResearchClient}
-                      goalClient={goalClient}
-                      goalLoopClient={goalLoopClient}
-                      planClient={planClient}
-                      onOpenCodeFile={({ threadId, relativePath }) => {
-                        void controller.openCodeSurface({
-                          kind: "code-file",
-                          threadId,
-                          title: relativePath,
-                          relativePath,
-                        });
-                      }}
-                      usageDashboardClient={usageDashboardClient}
-                      spendCeilingClient={spendCeilingClient}
-                      onOpenUsageDashboard={(filter) => {
-                        setPendingUsageFilter(filter);
-                        setUsageOpen(true);
-                      }}
-                      browserAutomationClient={browserAutomationClient}
-                      computerUseClient={computerUseClient}
-                      onComputerUseSessionChange={onComputerUseSessionChange}
-                      isNarrow={isNarrow}
-                      onFocus={(paneId) => void controller.focusPane(paneId)}
-                      onCreateWorkThread={(projectId, draft, images, modelOptionValues) =>
-                        handleCreateWorkThread(
-                          projectId,
-                          draft,
-                          images,
-                          undefined,
-                          modelOptionValues,
-                        )
-                      }
-                      onOpenWorkThread={(threadId, projectId) => {
-                        const thread = workNavigation.navigation.find(
-                          (candidate) => candidate.threadId === String(threadId),
-                        );
-                        void controller.openWorkThread(
-                          threadId,
-                          thread?.title ?? "Task",
-                          undefined,
-                          projectId,
-                        );
-                      }}
-                      onArchiveProject={(projectId) =>
-                        void projectController.setArchived(projectId, true)
-                      }
-                      onOpenCodeThread={(threadId, title, projectId) =>
-                        void controller.openCodeThread(threadId, title, undefined, projectId)
-                      }
-                      onOpenReview={(threadId) => openReviewForThread(String(threadId))}
-                      onSelectPullRequest={selectProjectPullRequestIdentity}
-                      onOpenPullRequests={() => setCodePullRequestsOpen(true)}
-                      onOpenCodeSurface={(kind, threadId, title, terminalId) =>
-                        void controller.openCodeSurface(
-                          kind === "code-terminal"
-                            ? {
-                                kind,
-                                threadId,
-                                title,
-                                ...(terminalId === undefined ? {} : { terminalId }),
-                              }
-                            : { kind, threadId, title },
-                        )
-                      }
-                      onPreviewResize={controller.previewSplitResize}
-                      onRelinkProject={projectController.relink}
-                      onRenameProject={projectController.rename}
-                      onProjectColorChange={projectController.setColor}
-                      onProviderPolicyChange={projectController.setProviderPolicy}
-                      onSplitPane={(paneId, orientation, placement) =>
-                        void controller.splitPane(paneId, orientation, placement)
-                      }
-                      projects={projectController.allProjects}
-                      providerController={providerController}
-                      workspace={controller.workspace}
-                      mode={controller.workspace.activeMode}
-                      {...(controller.crossContextOffer === undefined
+                        : { snapshot: contextController.snapshot })}
+                      {...(contextSubject === undefined
                         ? {}
                         : {
-                            crossContextOffer: {
-                              message: controller.crossContextOffer.message,
-                              canOpenInNewWindow:
-                                controller.crossContextOffer.newWindowProjectId !== undefined &&
-                                controller.canOpenCrossContextInNewWindow,
-                            },
+                            subjectKey: `${contextSubject.aggregateType}:${contextSubject.aggregateId}`,
                           })}
-                      onOpenSurface={(surface, paneId, browserContextId) =>
-                        controller.openSurface(surface, paneId, browserContextId)
-                      }
-                      onRevealBrowserActivity={(input) => controller.revealBrowserActivity(input)}
-                      {...(browserAutomationClient === undefined
-                        ? {}
-                        : { onOpenLink: (request) => void openLinkInApp(request) })}
-                      environmentDockOpen={dockOpen && dockSurface === "environment"}
-                      onDismissCrossContextOffer={controller.dismissCrossContextOffer}
-                      onOpenCrossContextInNewWindow={() =>
-                        void controller.openCrossContextInNewWindow()
-                      }
-                      projectClient={projectController.client}
-                      projectServerUrl={props.launch.serverUrl}
-                      {...(props.projectWindowCapability === undefined
-                        ? {}
-                        : { projectWindowCapability: props.projectWindowCapability })}
-                      previewClient={previewClient}
-                      canvasClient={canvasClient}
-                      imageGenerationClient={imageGenerationClient}
-                      onOpenCanvasInSidebar={openCanvasInSidebar}
-                      onOpenCanvasReference={(card) => {
-                        const projectId = card.scope.workspace.projectId;
-                        if (projectId === null) return;
-                        void controller.openCanvas({
-                          mode: card.scope.mode,
-                          title: card.title,
-                          canvasId: card.canvasId,
-                          projectId,
-                        });
-                      }}
-                      onCanvasReferencesObserved={noteCanvasReferences}
-                      onThreadHandedOff={(threadId: string, outcome: ThreadHandOffOutcome) => {
-                        if (outcome.kind === "handed-off") {
-                          noteHandedOffDocument("chat", threadId, outcome.canvasId);
+                    >
+                      <ComposerContextMeterShortcut />
+                      <ThreadStatsDetailDialog />
+                      <WorkspaceView
+                        {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
+                        followUpSuggestions={{
+                          client: followUpSuggestionClient,
+                          sideTaskClient,
+                          onCreated: openCreatedFollowUp,
+                        }}
+                        greetingName={controller.settings?.userProfile.displayName}
+                        draftResetRevision={draftResetRevision}
+                        draftProjectSelection={draftProjectSelection}
+                        onDraftSelectProject={(mode, projectId) => {
+                          // Choosing a folder in the composer is the authority
+                          // transition, not a renderer preference: the window is
+                          // refused every Code command about a Project its
+                          // persisted workspace does not name. Re-opening the draft
+                          // with the Project records it on the surface the server
+                          // reads.
+                          const binding = controller
+                            .openDraftThread(mode, projectId)
+                            .then((accepted) => {
+                              if (accepted) {
+                                if (mode === "code") setDraftPermissionPersistence(undefined);
+                                setDraftProjectSelection((current) => ({
+                                  ...current,
+                                  [mode]: projectId,
+                                }));
+                              }
+                            });
+                          draftProjectBinding.current = binding;
+                          void binding.catch(() => undefined);
+                        }}
+                        onDraftSelectUnfiled={(mode) => {
+                          if (mode !== "chat") return;
+                          const binding = controller
+                            .openDraftThread("chat", undefined, { unfiled: true })
+                            .then((accepted) => {
+                              if (accepted) {
+                                setDraftProjectSelection(({ chat: _drop, ...rest }) => rest);
+                              }
+                            });
+                          draftProjectBinding.current = binding;
+                          void binding.catch(() => undefined);
+                        }}
+                        onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
+                        appleToolchainClient={appleToolchainClient}
+                        agentRunClient={agentRunClient}
+                        nativeHarnessClient={nativeHarnessClient}
+                        onOpenSubagent={openSubagent}
+                        onOpenAgents={openSubagent}
+                        chatClient={chatClient}
+                        chatController={chatController}
+                        chatReadCursorStore={chatReadCursorStore}
+                        {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
+                        onPinTerminal={(request) => void zen.pinTerminal(request)}
+                        onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
+                        onStartPlanTask={(request) => {
+                          closeWorkspaceReaders();
+                          setDraftError(undefined);
+                          setDraftPendingMessage(undefined);
+                          resetNewTaskDraft(request.mode);
+                          setPendingDraftPrompt(request.prompt);
+                          void controller.openDraftThread(request.mode, request.projectId);
+                        }}
+                        {...(pendingDraftPrompt === undefined
+                          ? {}
+                          : { draftPendingPrompt: pendingDraftPrompt })}
+                        onDraftPendingPromptConsumed={() => setPendingDraftPrompt(undefined)}
+                        onDockResearch={(request) =>
+                          void zen.dockResearch({
+                            thread: {
+                              threadId:
+                                request.mode === "code"
+                                  ? decodeCodeThreadId(request.threadId)
+                                  : decodeWorkThreadId(request.threadId),
+                              mode: request.mode,
+                            },
+                          })
                         }
-                      }}
-                      onOpenCanvas={(entry) =>
-                        void controller.openCanvas({
-                          mode: entry.mode,
-                          title: entry.title,
-                          canvasId: entry.canvasId,
-                          projectId: entry.projectId,
-                        })
-                      }
-                      draftProviderGroups={draftProviderGroups}
-                      codeProviderGroups={codeProviderGroups}
-                      workProviderGroups={workProviderGroups}
-                      providerByThreadId={providerByThreadId}
-                      runningThreadIds={runningThreadIds}
-                      showProviderIcons={controller.settings.showThreadProviderIcons}
-                      environmentNames={environmentNames}
-                      {...(projectController.activeProject === undefined
-                        ? {}
-                        : { draftProjectName: projectController.activeProject.name })}
-                      {...(effectiveDraftProviderInstanceId === undefined
-                        ? {}
-                        : { draftSelectedProviderInstanceId: effectiveDraftProviderInstanceId })}
-                      {...(effectiveDraftModelId === undefined
-                        ? {}
-                        : { draftSelectedModelId: effectiveDraftModelId })}
-                      {...(activeMode === "code"
-                        ? {
-                            draftDefaultExecutionPolicy:
-                              draftExecutionPolicy ?? codeDefaultExecutionPolicy,
-                            draftDefaultPermissionPersistence:
-                              draftPermissionPersistence ??
-                              codeController.bootstrap?.settings.defaultPermissionPersistence ??
-                              "current-session",
+                        codeController={codeController}
+                        codeControllers={codeThreadControllers}
+                        extensionClient={extensionClient}
+                        workPromotionController={workPromotionController}
+                        codeProviderChoices={codeProviderChoices}
+                        openInApplications={controller.settings.openInApplications}
+                        hosts={hosts}
+                        selectedCreateHostId={createHostId}
+                        createHostViewScope={createHostViewScope}
+                        {...(lastSelectedHealthyHostId === undefined
+                          ? {}
+                          : { lastSelectedHealthyHostId })}
+                        onSelectCreateHost={handleSelectCreateHost}
+                        {...(controller.workspace.focusedPaneId === undefined
+                          ? {}
+                          : { focusedPaneId: controller.workspace.focusedPaneId })}
+                        drag={workspaceDrag}
+                        layout={controller.presentedLayout}
+                        memoryRevision={projectController.memoryRevision}
+                        onMemoryChanged={projectController.touchMemoryRevision}
+                        availabilityByProject={projectController.availabilityByProject}
+                        {...(props.hostBridge === undefined
+                          ? {}
+                          : { hostBridge: props.hostBridge })}
+                        folderBrowseClient={folderBrowseClient}
+                        githubClient={githubClient}
+                        githubCloneClient={githubCloneClient}
+                        hostId={createHostId}
+                        hidden={
+                          projectsListOpen ||
+                          railPlaceholder !== undefined ||
+                          codeBoardOpen ||
+                          codePullRequestsOpen ||
+                          inboxOpen ||
+                          reviewOpen ||
+                          githubIssuesOpen ||
+                          linearIssuesOpen ||
+                          workBoardOpen ||
+                          archiveOpen ||
+                          automationCenterVisible ||
+                          agentsCenterVisible ||
+                          // These two cover the workspace like every page above, but
+                          // were left out of this list, so the thread underneath
+                          // stayed in the tab order and the page had two h1s.
+                          artifactLibraryOpen ||
+                          imageLibraryOpen
+                        }
+                        onActivatePane={(paneId) => void controller.activatePane(paneId)}
+                        tabActivation={controller.tabActivation}
+                        onClearFocus={() => void controller.clearFocus()}
+                        contentTabs={controller.contentTabs}
+                        onActivateContentTab={(paneId, tabId) =>
+                          void controller.activateContentTab(paneId, tabId)
+                        }
+                        onCloseContentTab={(paneId, tabId) =>
+                          void controller.closeContentTab(paneId, tabId)
+                        }
+                        onClosePane={controller.closePane}
+                        onCommitResize={controller.commitSplitResize}
+                        onCreateChat={createChat}
+                        onCreateChatProjectThread={handleCreateChatProjectThread}
+                        onOpenChatThread={(threadId, title, projectId) => {
+                          // A thread this window's sidebar controller has never seen
+                          // (a branch minted from a tab's own controller) must reach
+                          // navigation the same way a draft-created thread does:
+                          // through an authoritative bootstrap reload.
+                          if (
+                            !chatController.navigation.some(
+                              (item) => item.threadId === String(threadId),
+                            )
+                          ) {
+                            void chatController.refreshNavigation();
                           }
-                        : {})}
-                      onDraftSelectProvider={(selection) => {
-                        setDraftProviderInstanceId(selection.providerInstanceId);
-                        setDraftModelId(selection.modelId);
-                        if (activeMode === "work") {
-                          setWorkComposerSelection({
-                            providerInstanceId: selection.providerInstanceId,
-                            modelId: selection.modelId,
+                          void controller.openChatThread(threadId, title, projectId);
+                        }}
+                        onViewAllChatProjectThreads={viewAllChatProjectThreads}
+                        onOpenSideChat={(sidecar) => void controller.openSideChat(sidecar)}
+                        {...(activeMode === "chat" && draftCreating
+                          ? { chatWelcomeCreating: true }
+                          : {})}
+                        {...(activeMode === "chat" && draftError !== undefined
+                          ? { chatWelcomeError: draftError }
+                          : {})}
+                        providerReady={providerReady}
+                        {...(discoveryController.message === undefined
+                          ? {}
+                          : { providerBootstrapMessage: discoveryController.message })}
+                        onOpenDraftThread={(mode) => void controller.openDraftThread(mode)}
+                        workCreateThreadAvailable={workCreateThreadAvailable}
+                        workMutationClient={workMutationClient}
+                        workThreadClient={workThreadClient}
+                        workThreads={workNavigation.bootstrap?.threads ?? []}
+                        onWorkThreadUpdated={workNavigation.applyThread}
+                        workTurnClient={workTurnClient}
+                        workChangeRevision={machineChanges.workNavigation}
+                        workRequestClient={workRequestClient}
+                        workOverviewClient={workOverviewClient}
+                        workResearchClient={workResearchClient}
+                        goalClient={goalClient}
+                        goalLoopClient={goalLoopClient}
+                        planClient={planClient}
+                        onOpenCodeFile={({ threadId, relativePath }) => {
+                          void controller.openCodeSurface({
+                            kind: "code-file",
+                            threadId,
+                            title: relativePath,
+                            relativePath,
                           });
-                        }
-                      }}
-                      onDraftExecutionPolicyChange={(policy, persistence) => {
-                        setDraftExecutionPolicy(policy);
-                        setDraftPermissionPersistence(persistence);
-                      }}
-                      onDraftCreateThread={handleDraftCreateThread}
-                      githubPluginEnabled={
-                        FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true
-                      }
-                      linearClient={linearClient}
-                      {...(homeStart === undefined ? {} : { homeStart })}
-                      codeHome={{
-                        continueCards,
-                        ...(pendingIssue === undefined ? {} : { pendingIssue }),
-                        onPendingIssueConsumed: () => setPendingIssue(undefined),
-                        loadAssignedLinearIssues,
-                        loadOpenLinearIssues,
-                        projectNames: new Map(
-                          codeBoardProjects.map((project) => [String(project.id), project.name]),
-                        ),
-                        providerLabels: new Map(
-                          codeProviderGroups.map((group) => [
-                            String(group.instance.id),
-                            group.instance.displayName,
-                          ]),
-                        ),
-                        onOpenThread: (target) => {
-                          const thread = codeController.bootstrap?.threads.find(
-                            (candidate) => String(candidate.id) === String(target.threadId),
-                          );
-                          void controller.openCodeThread(
-                            target.threadId,
-                            thread?.title ?? "Code thread",
+                        }}
+                        usageDashboardClient={usageDashboardClient}
+                        spendCeilingClient={spendCeilingClient}
+                        onOpenUsageDashboard={(filter) => {
+                          setPendingUsageFilter(filter);
+                          setUsageOpen(true);
+                        }}
+                        browserAutomationClient={browserAutomationClient}
+                        computerUseClient={computerUseClient}
+                        onComputerUseSessionChange={onComputerUseSessionChange}
+                        isNarrow={isNarrow}
+                        onFocus={(paneId) => void controller.focusPane(paneId)}
+                        onCreateWorkThread={(projectId, draft, images, modelOptionValues) =>
+                          handleCreateWorkThread(
+                            projectId,
+                            draft,
+                            images,
                             undefined,
-                            target.projectId,
+                            modelOptionValues,
+                          )
+                        }
+                        onOpenWorkThread={(threadId, projectId) => {
+                          const thread = workNavigation.navigation.find(
+                            (candidate) => candidate.threadId === String(threadId),
                           );
-                        },
-                        onOpenInbox: openInbox,
-                        onOpenIssues: () => setGithubIssuesOpen(true),
-                      }}
-                      linearPluginEnabled={
-                        FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true
-                      }
-                      onDraftCreateCodeThread={handleDraftCreateCodeThread}
-                      onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}
-                      draftCodeExecute={codeController.execute}
-                      onCreateProject={(mode, name, receiptId, initializeGit) => {
-                        const destinationHostId = refuseUnlessCreatableDestination({
-                          action: "create-project",
-                          requiredCapability: mode,
-                          onRefuse: (reason) => setDraftError(reason),
-                        });
-                        if (destinationHostId === undefined) {
-                          return Promise.resolve(undefined);
+                          void controller.openWorkThread(
+                            threadId,
+                            thread?.title ?? "Task",
+                            undefined,
+                            projectId,
+                          );
+                        }}
+                        onArchiveProject={(projectId) =>
+                          void projectController.setArchived(projectId, true)
                         }
-                        return projectController.create(
-                          mode,
-                          name,
-                          receiptId,
-                          destinationHostId,
-                          initializeGit,
-                        );
-                      }}
-                      {...(controller.settings?.defaultFolder === undefined
-                        ? {}
-                        : { defaultFolder: controller.settings.defaultFolder })}
-                      codeDefaultFolderThreads={
-                        codeController.bootstrap?.settings.allowDefaultFolderThreads === true
-                      }
-                      onEnsureDefaultProject={(mode) => {
-                        const destinationHostId = refuseUnlessCreatableDestination({
-                          action: "create-project",
-                          requiredCapability: mode,
-                          onRefuse: (reason) => setDraftError(reason),
-                        });
-                        if (destinationHostId === undefined) {
-                          return Promise.resolve(undefined);
+                        onOpenCodeThread={(threadId, title, projectId) =>
+                          void controller.openCodeThread(threadId, title, undefined, projectId)
                         }
-                        return projectController.ensureDefault(mode, destinationHostId);
-                      }}
-                      {...(draftCreating ? { onDraftCreating: true } : {})}
-                      {...(draftError === undefined ? {} : { onDraftError: draftError })}
-                      {...(draftPendingMessage === undefined
-                        ? {}
-                        : { onDraftPendingMessage: draftPendingMessage })}
-                      onAttachFolder={() => openProjectCreate()}
-                      onOpenCodeSettings={() =>
-                        void controller.openSettings({
-                          section: "code",
-                          setting: "code-default-folder-threads",
-                        })
-                      }
-                      onOpenProviderSettings={() =>
-                        void controller.openSettings({ section: "providers" })
-                      }
-                      onOpenSettings={() => void controller.openSettings()}
-                    />
-                  </ComposerContextMeterProvider>
+                        onOpenReview={(threadId) => openReviewForThread(String(threadId))}
+                        onSelectPullRequest={selectProjectPullRequestIdentity}
+                        onOpenPullRequests={() => setCodePullRequestsOpen(true)}
+                        onOpenCodeSurface={(kind, threadId, title, terminalId) =>
+                          void controller.openCodeSurface(
+                            kind === "code-terminal"
+                              ? {
+                                  kind,
+                                  threadId,
+                                  title,
+                                  ...(terminalId === undefined ? {} : { terminalId }),
+                                }
+                              : { kind, threadId, title },
+                          )
+                        }
+                        onPreviewResize={controller.previewSplitResize}
+                        onRelinkProject={projectController.relink}
+                        onRenameProject={projectController.rename}
+                        onProjectColorChange={projectController.setColor}
+                        onProviderPolicyChange={projectController.setProviderPolicy}
+                        onSplitPane={(paneId, orientation, placement) =>
+                          void controller.splitPane(paneId, orientation, placement)
+                        }
+                        projects={projectController.allProjects}
+                        providerController={providerController}
+                        workspace={controller.workspace}
+                        mode={controller.workspace.activeMode}
+                        {...(controller.crossContextOffer === undefined
+                          ? {}
+                          : {
+                              crossContextOffer: {
+                                message: controller.crossContextOffer.message,
+                                canOpenInNewWindow:
+                                  controller.crossContextOffer.newWindowProjectId !== undefined &&
+                                  controller.canOpenCrossContextInNewWindow,
+                              },
+                            })}
+                        onOpenSurface={(surface, paneId, browserContextId) =>
+                          controller.openSurface(surface, paneId, browserContextId)
+                        }
+                        onRevealBrowserActivity={(input) => controller.revealBrowserActivity(input)}
+                        onOpenThreadBrowser={(input) => controller.openThreadBrowser(input)}
+                        {...(dockThreadId === undefined ||
+                        !(sharedBrowserInDock || sharedBrowserInBottomPanel)
+                          ? {}
+                          : { browserToolThreadId: String(dockThreadId) })}
+                        {...(browserAutomationClient === undefined
+                          ? {}
+                          : { onOpenLink: (request) => void openLinkInApp(request) })}
+                        environmentDockOpen={dockOpen && dockSurface === "environment"}
+                        onDismissCrossContextOffer={controller.dismissCrossContextOffer}
+                        onOpenCrossContextInNewWindow={() =>
+                          void controller.openCrossContextInNewWindow()
+                        }
+                        projectClient={projectController.client}
+                        projectServerUrl={props.launch.serverUrl}
+                        {...(props.projectWindowCapability === undefined
+                          ? {}
+                          : { projectWindowCapability: props.projectWindowCapability })}
+                        previewClient={previewClient}
+                        canvasClient={canvasClient}
+                        imageGenerationClient={imageGenerationClient}
+                        onOpenCanvasInSidebar={openCanvasInSidebar}
+                        onOpenCanvasReference={(card) => {
+                          const projectId = card.scope.workspace.projectId;
+                          if (projectId === null) return;
+                          void controller.openCanvas({
+                            mode: card.scope.mode,
+                            title: card.title,
+                            canvasId: card.canvasId,
+                            projectId,
+                          });
+                        }}
+                        onCanvasReferencesObserved={noteCanvasReferences}
+                        onThreadHandedOff={(threadId: string, outcome: ThreadHandOffOutcome) => {
+                          if (outcome.kind === "handed-off") {
+                            noteHandedOffDocument("chat", threadId, outcome.canvasId);
+                          }
+                        }}
+                        onOpenCanvas={(entry) =>
+                          void controller.openCanvas({
+                            mode: entry.mode,
+                            title: entry.title,
+                            canvasId: entry.canvasId,
+                            projectId: entry.projectId,
+                          })
+                        }
+                        draftProviderGroups={draftProviderGroups}
+                        codeProviderGroups={codeProviderGroups}
+                        workProviderGroups={workProviderGroups}
+                        providerByThreadId={providerByThreadId}
+                        runningThreadIds={runningThreadIds}
+                        showProviderIcons={controller.settings.showThreadProviderIcons}
+                        environmentNames={environmentNames}
+                        {...(projectController.activeProject === undefined
+                          ? {}
+                          : { draftProjectName: projectController.activeProject.name })}
+                        {...(effectiveDraftProviderInstanceId === undefined
+                          ? {}
+                          : { draftSelectedProviderInstanceId: effectiveDraftProviderInstanceId })}
+                        {...(effectiveDraftModelId === undefined
+                          ? {}
+                          : { draftSelectedModelId: effectiveDraftModelId })}
+                        {...(activeMode === "code"
+                          ? {
+                              draftDefaultExecutionPolicy:
+                                draftExecutionPolicy ?? codeDefaultExecutionPolicy,
+                              draftDefaultPermissionPersistence:
+                                draftPermissionPersistence ??
+                                codeController.bootstrap?.settings.defaultPermissionPersistence ??
+                                "current-session",
+                            }
+                          : {})}
+                        onDraftSelectProvider={(selection) => {
+                          setDraftProviderInstanceId(selection.providerInstanceId);
+                          setDraftModelId(selection.modelId);
+                          if (activeMode === "work") {
+                            setWorkComposerSelection({
+                              providerInstanceId: selection.providerInstanceId,
+                              modelId: selection.modelId,
+                            });
+                          }
+                        }}
+                        onDraftExecutionPolicyChange={(policy, persistence) => {
+                          setDraftExecutionPolicy(policy);
+                          setDraftPermissionPersistence(persistence);
+                        }}
+                        onDraftCreateThread={handleDraftCreateThread}
+                        githubPluginEnabled={
+                          FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true
+                        }
+                        linearClient={linearClient}
+                        {...(homeStart === undefined ? {} : { homeStart })}
+                        codeHome={{
+                          continueCards,
+                          ...(pendingIssue === undefined ? {} : { pendingIssue }),
+                          onPendingIssueConsumed: () => setPendingIssue(undefined),
+                          loadAssignedLinearIssues,
+                          loadOpenLinearIssues,
+                          projectNames: new Map(
+                            codeBoardProjects.map((project) => [String(project.id), project.name]),
+                          ),
+                          providerLabels: new Map(
+                            codeProviderGroups.map((group) => [
+                              String(group.instance.id),
+                              group.instance.displayName,
+                            ]),
+                          ),
+                          onOpenThread: (target) => {
+                            const thread = codeController.bootstrap?.threads.find(
+                              (candidate) => String(candidate.id) === String(target.threadId),
+                            );
+                            void controller.openCodeThread(
+                              target.threadId,
+                              thread?.title ?? "Code thread",
+                              undefined,
+                              target.projectId,
+                            );
+                          },
+                          onOpenInbox: openInbox,
+                          onOpenIssues: () => setGithubIssuesOpen(true),
+                        }}
+                        linearPluginEnabled={
+                          FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true
+                        }
+                        onDraftCreateCodeThread={handleDraftCreateCodeThread}
+                        onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}
+                        draftCodeExecute={codeController.execute}
+                        onCreateProject={(mode, name, receiptId, initializeGit) => {
+                          const destinationHostId = refuseUnlessCreatableDestination({
+                            action: "create-project",
+                            requiredCapability: mode,
+                            onRefuse: (reason) => setDraftError(reason),
+                          });
+                          if (destinationHostId === undefined) {
+                            return Promise.resolve(undefined);
+                          }
+                          return projectController.create(
+                            mode,
+                            name,
+                            receiptId,
+                            destinationHostId,
+                            initializeGit,
+                          );
+                        }}
+                        {...(controller.settings?.defaultFolder === undefined
+                          ? {}
+                          : { defaultFolder: controller.settings.defaultFolder })}
+                        codeDefaultFolderThreads={
+                          codeController.bootstrap?.settings.allowDefaultFolderThreads === true
+                        }
+                        onEnsureDefaultProject={(mode) => {
+                          const destinationHostId = refuseUnlessCreatableDestination({
+                            action: "create-project",
+                            requiredCapability: mode,
+                            onRefuse: (reason) => setDraftError(reason),
+                          });
+                          if (destinationHostId === undefined) {
+                            return Promise.resolve(undefined);
+                          }
+                          return projectController.ensureDefault(mode, destinationHostId);
+                        }}
+                        {...(draftCreating ? { onDraftCreating: true } : {})}
+                        {...(draftError === undefined ? {} : { onDraftError: draftError })}
+                        {...(draftPendingMessage === undefined
+                          ? {}
+                          : { onDraftPendingMessage: draftPendingMessage })}
+                        onAttachFolder={() => openProjectCreate()}
+                        onOpenCodeSettings={() =>
+                          void controller.openSettings({
+                            section: "code",
+                            setting: "code-default-folder-threads",
+                          })
+                        }
+                        onOpenProviderSettings={() =>
+                          void controller.openSettings({ section: "providers" })
+                        }
+                        onOpenSettings={() => void controller.openSettings()}
+                      />
+                    </ComposerContextMeterProvider>
+                  </OutputLimitContinueProvider>
                 </ThreadStatsProvider>
               </AgentProfileNamesProvider>
             </div>

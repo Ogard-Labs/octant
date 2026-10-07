@@ -531,6 +531,7 @@ function controller(): CodeController {
     reopenThread: vi.fn(async () => ({ status: "ok" }) as const),
     snoozeThread: vi.fn(async () => ({ status: "ok" }) as const),
     wakeThread: vi.fn(async () => ({ status: "ok" }) as const),
+    sendBackTurn: vi.fn(async () => ({ status: "ok" }) as const),
     threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     restoreUndo: undefined,
     noteRestoreUndo: vi.fn(),

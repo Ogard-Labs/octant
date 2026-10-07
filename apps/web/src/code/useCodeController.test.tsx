@@ -3304,6 +3304,52 @@ describe("useCodeController", () => {
     });
   });
 
+  it("sends a finished thread another turn without opening it and reports a refusal in the host's words", async () => {
+    const operationId = "70000000-0000-4000-8000-00000000000a";
+    const executeOperation = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "provider-turn-state", operationId, state: "running" })
+      .mockResolvedValueOnce({
+        kind: "operation-failed",
+        failure: { category: "conflict", message: "A turn is already running on this thread." },
+      });
+    const putEvidence = vi.fn(async () => ({
+      contentId: "80000000-0000-4000-8000-000000000001",
+      digest: "a".repeat(64),
+      byteLength: 6,
+    }));
+    const client = fakeClient({
+      executeOperation: executeOperation as never,
+      putEvidence: putEvidence as never,
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let sent: Awaited<ReturnType<typeof result.current.sendBackTurn>> | undefined;
+    await act(async () => {
+      sent = await result.current.sendBackTurn(ids.thread, "  add tests  ");
+    });
+    expect(sent).toEqual({ status: "ok" });
+    expect(putEvidence).toHaveBeenCalledWith(ids.thread, "add tests");
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "start-provider-turn",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+      }),
+    );
+    // No thread is open, so nothing about the window's own turn state moved.
+    expect(result.current.turnStatus).toBe("idle");
+
+    await act(async () => {
+      sent = await result.current.sendBackTurn(ids.thread, "again");
+    });
+    expect(sent).toEqual({
+      status: "refused",
+      message: "A turn is already running on this thread.",
+    });
+  });
+
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {
     const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({

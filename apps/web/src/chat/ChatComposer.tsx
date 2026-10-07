@@ -172,6 +172,8 @@ export interface ChatComposerProps {
   readonly pendingExtensionSelections?: ReadonlyArray<ChatComposerExtensionSelection>;
   readonly onRemoveExtensionSelection?: (reference: string) => void;
   readonly threadMentions?: ChatComposerThreadMentions;
+  /** Registered composer drop zone. Absent when mentions are unreachable. */
+  readonly threadDropKey?: string;
   /** Compact opt-in multi-model pool control, rendered by the caller. */
   readonly poolControl?: ReactNode;
   /** Model options declared by the selected model, rendered beside the picker. */
@@ -863,6 +865,7 @@ export function ChatComposer(props: ChatComposerProps) {
       ariaLabel="Chat composer"
       chips={chips}
       className={`thread-composer chat-composer thread-column${props.isSending ? " chat-composer--running" : ""}`}
+      {...(props.threadDropKey === undefined ? {} : { threadDropKey: props.threadDropKey })}
       footer={
         <div
           aria-live="polite"

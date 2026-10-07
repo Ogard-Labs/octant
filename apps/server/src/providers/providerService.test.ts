@@ -2120,12 +2120,29 @@ describe("ProviderService", () => {
     expect(clearRuntimeUsageLimits).toHaveBeenCalledWith(instanceId);
   });
 
+  it("removes the Claude for helpers sign-in with the Claude provider that held it", async () => {
+    const clearClaudeHelperSignIn = vi.fn(async () => undefined);
+    const fixture = serviceFixture({ instances: [claudeProvider()], clearClaudeHelperSignIn });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId,
+        expectedVersion: 1,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-removed", instanceId });
+
+    expect(clearClaudeHelperSignIn).toHaveBeenCalledWith(instanceId);
+  });
+
   it("preserves Claude resume identities when durable provider removal fails", async () => {
     const clearResumeIdentities = vi.fn(async () => undefined);
+    const clearClaudeHelperSignIn = vi.fn(async () => undefined);
     const fixture = serviceFixture({
       instances: [claudeProvider()],
       appendError: new Error("journal unavailable"),
       clearResumeIdentities,
+      clearClaudeHelperSignIn,
     });
 
     await expect(
@@ -2136,6 +2153,7 @@ describe("ProviderService", () => {
       }),
     ).rejects.toBeDefined();
     expect(clearResumeIdentities).not.toHaveBeenCalled();
+    expect(clearClaudeHelperSignIn).not.toHaveBeenCalled();
     expect(fixture.persistence.readProviderInstance(instanceId)).toBeDefined();
   });
 
@@ -3435,6 +3453,7 @@ function serviceFixture(
     readonly probe?: (instance: ProviderInstance) => Promise<unknown>;
     readonly driver?: NonNullable<ProviderServiceOptions["driver"]>;
     readonly clearResumeIdentities?: (providerId: typeof instanceId) => Promise<void>;
+    readonly clearClaudeHelperSignIn?: (providerId: typeof instanceId) => Promise<void>;
     readonly clearRuntimeUsageLimits?: (providerId: typeof instanceId) => void;
     readonly withCatalogPersistence?: boolean;
     readonly initialCatalog?: ProviderCatalogSnapshot;
@@ -3513,6 +3532,9 @@ function serviceFixture(
       ...(options.clearResumeIdentities === undefined
         ? {}
         : { clearResumeIdentities: options.clearResumeIdentities }),
+      ...(options.clearClaudeHelperSignIn === undefined
+        ? {}
+        : { clearClaudeHelperSignIn: options.clearClaudeHelperSignIn }),
       ...(options.clearRuntimeUsageLimits === undefined
         ? {}
         : { clearRuntimeUsageLimits: options.clearRuntimeUsageLimits }),

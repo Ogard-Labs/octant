@@ -48,6 +48,7 @@ describe("Code host queue", () => {
             updatedAt: "2026-08-15T09:00:00.000Z",
           }),
         ]),
+        searchThread: vi.fn(async () => []),
         resolve: vi.fn(() => resolution.promise),
         openSideChat: vi.fn(),
         execute: vi.fn(),

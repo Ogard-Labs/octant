@@ -107,8 +107,17 @@ export const SessionMetrics = Schema.Struct({
   );
 export type SessionMetrics = typeof SessionMetrics.Type;
 
-/** Why a turn ended: the provider finished, a person stopped it, it failed, or its outcome is unknown. */
-export const TurnStopReason = Schema.Literal("end-of-turn", "cancelled", "failed", "waiting");
+/**
+ * Why a turn ended: the provider finished, the reply was cut off at the output
+ * limit, a person stopped it, it failed, or its outcome is unknown.
+ */
+export const TurnStopReason = Schema.Literal(
+  "end-of-turn",
+  "max-tokens",
+  "cancelled",
+  "failed",
+  "waiting",
+);
 export type TurnStopReason = typeof TurnStopReason.Type;
 
 /**

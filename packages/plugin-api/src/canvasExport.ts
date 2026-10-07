@@ -23,6 +23,7 @@ export type {
   CanvasExportTargetId,
   CanvasExportTargetOffer,
   CanvasExportTargetStatus,
+  CanvasExportVisibility,
 } from "@octant/contracts/canvas-export";
 
 export {
@@ -37,22 +38,34 @@ import type {
   CanvasExportContribution,
   CanvasExportDelivery,
   CanvasExportRenderedOutput,
+  CanvasExportVisibility,
 } from "@octant/contracts/canvas-export";
 
 /**
- * The exact file a destination plans to write for one document.
+ * What a destination plans to do with one document, described while the
+ * approval card is built.
  *
- * A local destination writes a file the person then goes looking for, so the
- * host has to be able to name it before the person approves anything. Naming it
- * is also what makes the approval a confirmation: the host passes the approved
- * destination back to `exportDocument`, and a target replaces an existing file
- * only when that confirmation names the very file it is about to write.
+ * A local destination names the file it writes, because a file the person goes
+ * looking for has to be named before they approve anything, and naming it is
+ * also what makes the approval a confirmation to replace what is there. A
+ * remote destination names the account it acts as and the audience the result
+ * will have, so the person approves those, not the destination's reputation.
+ *
+ * Every string here is shown verbatim on the card, so it is bounded and free
+ * of paths and secrets by the card's own schema; an unsafe value fails the
+ * card rather than reaching the person.
  */
 export interface CanvasExportDestination {
-  /** The absolute path the person will find the file at. */
-  readonly path: string;
-  /** Whether a file is already there, so the approval card can say so. */
-  readonly replacesExisting: boolean;
+  /** The absolute file a local destination writes, when it writes one. */
+  readonly path?: string;
+  /** Whether a file is already at `path` and will be replaced. */
+  readonly replacesExisting?: boolean;
+  /** The account this export will act as, when the destination acts as one. */
+  readonly account?: string;
+  /** Whether the result is visible to anyone, or only to `account`. */
+  readonly visibility?: CanvasExportVisibility;
+  /** The destination's own plain note about this export, shown on the card. */
+  readonly note?: string;
 }
 
 /**
@@ -64,22 +77,23 @@ export interface CanvasExportDestination {
 export interface CanvasExportTarget {
   readonly contribution: CanvasExportContribution;
   /**
-   * Where this target would put this document, called while the approval card
-   * is built so the card can name the file — and so the person approves a
-   * place, not a destination's reputation.
+   * How this target would act on this document, called while the approval card
+   * is built so the card can name the file, the account, and the audience — and
+   * so the person approves those, not a destination's reputation.
    *
-   * Optional, and synchronous on purpose: a destination with nowhere local to
-   * point (a link, a remote id) has no path to name and omits this. A target
-   * that cannot describe its destination is invoked without a confirmation and
-   * must not replace an existing file.
+   * Optional, and synchronous on purpose: the offer list and the card cannot
+   * wait on I/O. A destination with nothing to describe omits this and is
+   * invoked without a confirmation; a target that names no file must not
+   * replace an existing one.
    */
   readonly describeDestination?: (
     output: CanvasExportRenderedOutput,
   ) => CanvasExportDestination | undefined;
   /**
    * Perform the export. `confirmed` is the destination the approval card named
-   * and the person approved; when it is absent the target has no confirmation
-   * and writes alongside an existing file instead of over it.
+   * — including the audience the person chose — and the person approved; when
+   * it is absent the target has no confirmation and, for a local destination,
+   * writes alongside an existing file instead of over it.
    */
   readonly exportDocument: (
     output: CanvasExportRenderedOutput,

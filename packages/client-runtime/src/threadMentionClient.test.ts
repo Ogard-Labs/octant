@@ -64,6 +64,25 @@ describe("createThreadMentionClient", () => {
     });
   });
 
+  it("asks the host for one thread by id rather than by a ranked query", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ kind: "mentions-searched", requestId, candidates: [candidate] }),
+      );
+
+    const candidates = await client(fetchImpl as never).searchThread(requestId, threadId);
+
+    expect(candidates.map((found) => String(found.threadId))).toEqual([String(threadId)]);
+    const init = fetchImpl.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({
+      kind: "search-mentions",
+      requestId,
+      query: "",
+      threadId,
+    });
+  });
+
   it("resolves nothing locally when the thread id list is empty", async () => {
     const fetchImpl = vi.fn();
 

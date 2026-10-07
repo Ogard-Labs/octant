@@ -130,6 +130,7 @@ import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
 import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivityPictureInPicture";
+import { threadHasBrowserSurface } from "./browserActivityReveal";
 import type { ThreadProviderIdentity } from "./navigationModel";
 
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
@@ -312,6 +313,19 @@ export interface WorkspaceViewProps {
     readonly sessionIds: ReadonlyArray<string>;
     readonly threadId: string;
   }) => void;
+  /**
+   * Shows the thread's Browser on a person's request: the picture-in-picture
+   * opens it by this. Unlike an offer it is never remembered away.
+   */
+  readonly onOpenThreadBrowser?: (input: {
+    readonly paneId: PaneId;
+    readonly threadId: string;
+  }) => void;
+  /**
+   * The thread whose Browser the dock or bottom panel is showing right now, so
+   * its preview stays out of the way of the page it would repeat.
+   */
+  readonly browserToolThreadId?: string;
   /**
    * Opens a link from a pane's conversation in this thread's own isolated
    * Browser context — the right dock when the pane's thread is the dock's
@@ -1074,6 +1088,7 @@ function renderCodeTab(
             ? {}
             : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
           {...threadBrowserReveal(props.onRevealBrowserActivity, paneId, String(tab.threadId))}
+          {...threadBrowserPreview(props, paneId, String(tab.threadId))}
           threadId={tab.threadId as never}
         >
           <CodeThreadEnvironment
@@ -1555,6 +1570,7 @@ function renderNonCodeTab(
                 ? {}
                 : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
               {...threadBrowserReveal(props.onRevealBrowserActivity, paneId, String(tab.threadId))}
+              {...threadBrowserPreview(props, paneId, String(tab.threadId))}
               threadId={tab.threadId as never}
             >
               <WorkThreadWorkspace
@@ -2135,6 +2151,28 @@ function resolveCodeTabCheckoutId(
 
 function paneIsActive(props: WorkspaceViewProps, paneId: PaneId): boolean {
   return paneId === (props.focusedPaneId ?? props.workspace.activePaneIds[props.mode]);
+}
+
+/**
+ * What a thread's Browser preview needs from the shell: whether the Browser is
+ * already on screen for this thread (a pane, or the dock or bottom panel
+ * showing it), and how to bring it up.
+ */
+function threadBrowserPreview(
+  props: WorkspaceViewProps,
+  paneId: PaneId,
+  threadId: string,
+): {
+  readonly browserVisible: boolean;
+  readonly onShowBrowser?: () => void;
+} {
+  const browserVisible =
+    props.browserToolThreadId === threadId || threadHasBrowserSurface(props.workspace, threadId);
+  const open = props.onOpenThreadBrowser;
+  return {
+    browserVisible,
+    ...(open === undefined ? {} : { onShowBrowser: () => open({ paneId, threadId }) }),
+  };
 }
 
 function threadBrowserReveal(

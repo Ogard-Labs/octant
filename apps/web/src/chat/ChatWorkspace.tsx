@@ -18,6 +18,7 @@ import {
 import { pastedImageName } from "./composerImagePaste";
 import { COMPOSER_STAGED_DROPPED_NOTE } from "../composer/composerThreadDraftStore";
 import { useThreadMentions } from "./useThreadMentions";
+import { useComposerThreadDropRegistration } from "./composerThreadDrop";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/contracts/providers";
@@ -78,6 +79,10 @@ import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApproval
 import { ShellState } from "../shell/ShellState";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import {
+  ThreadConnectionLostContext,
+  ThreadConnectionNotice,
+} from "../transcript/ThreadConnectionNotice";
 
 export interface ChatWorkspaceProps {
   readonly controller: ChatController;
@@ -358,6 +363,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ...(props.onOpenSideChat === undefined ? {} : { onSideChatOpened: props.onOpenSideChat }),
   });
   threadMentionChipsRef.current = threadMentions.chips;
+  const threadDropKey = useComposerThreadDropRegistration({
+    enabled: threadMentions.composer !== undefined,
+    ...(activeThreadId === undefined ? {} : { currentThreadId: String(activeThreadId) }),
+    onDraftChange: (draft, caretIndex) => {
+      draftEditRevisionRef.current += 1;
+      props.controller.setPendingDraft(draft, caretIndex);
+    },
+    attachDroppedThread: threadMentions.attachDroppedThread,
+  });
   const parallelReview = useLinkedThreadParallelReview({
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
@@ -411,6 +425,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     );
   }
   const thread = view.thread;
+  const connectionLost = props.controller.status === "disconnected";
   const canvasClient = props.canvasClient;
   const canvasPlacement = placeThreadCanvases(
     threadTurnSpans(
@@ -794,699 +809,716 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   };
 
   return (
-    <section aria-label="Chat workspace" className="chat-workspace">
-      {props.controller.errorMessage === undefined ? null : (
-        <OctantAlert className="chat-workspace__error" tone="danger">
-          {props.controller.errorMessage}
-        </OctantAlert>
-      )}
-      <div className="chat-workspace__conversation">
-        <header className="chat-workspace__header">
-          <h1 className="sr-only">{view.thread.title}</h1>
-          <ChatThreadActionsMenu
-            connectionStatus={
-              props.controller.status === "disconnected" ? "disconnected" : "connected"
-            }
-            {...(props.onThreadHandedOff === undefined
-              ? {}
-              : {
-                  onHandedOff: (outcome: ThreadHandOffOutcome) =>
-                    props.onThreadHandedOff?.(String(view.thread.id), outcome),
-                })}
-            view={view}
-            {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-            {...(props.windowCapability === undefined
-              ? {}
-              : { windowCapability: props.windowCapability })}
-            {...(props.canvasClient === undefined
-              ? {}
-              : {
-                  canvas: {
-                    open: canvasPanelOpen,
-                    onToggle: () => setCanvasPanelOpen((current) => !current),
-                  },
-                })}
-          />
-        </header>
-        {props.canvasClient === undefined || !canvasPanelOpen ? null : (
-          <section
-            aria-label="Canvas tools"
-            className="chat-workspace__canvas thread-column"
-            id={canvasPanelId}
-          >
-            <CanvasCreatePanel
-              client={props.canvasClient}
-              context={buildCanvasCreationContext({
-                hostId: props.hostId ?? ("local" as HostId),
-                mode: "chat",
-                originThreadId: thread.id,
-                projectId: thread.projectId ?? null,
-              })}
-              onCreated={() => {
-                setCanvasRefreshKey((current) => current + 1);
-                setCanvasPanelOpen(false);
-              }}
-            />
-            <CanvasThreadReferenceCardList
-              cards={threadCanvases.cards.filter(
-                (card) => !canvasPlacement.placed.has(String(card.canvasId)),
-              )}
-              error={threadCanvases.error}
-              {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
-            />
-          </section>
+    <ThreadConnectionLostContext value={connectionLost}>
+      <section aria-label="Chat workspace" className="chat-workspace">
+        <ThreadConnectionNotice connected={!connectionLost} onRetry={props.controller.retry} />
+        {/* While the connection is lost, the failure the controller recorded is
+          that loss, which the notice above already says. */}
+        {props.controller.errorMessage === undefined || connectionLost ? null : (
+          <OctantAlert className="chat-workspace__error" tone="danger">
+            {props.controller.errorMessage}
+          </OctantAlert>
         )}
-        {props.imageGenerationClient === undefined ? null : (
-          <GeneratedImageList
-            client={props.imageGenerationClient}
-            onAttach={(file) => {
-              const displayName = file.name;
-              const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
-              const threadId = view.thread.id;
-              void (async () => {
-                try {
-                  const buffer = await file.arrayBuffer();
-                  if (!mountedRef.current || activeThreadIdRef.current !== String(threadId)) {
-                    return;
-                  }
-                  await props.controller.upload({
-                    threadId,
-                    attachmentId,
-                    displayName,
-                    mediaType: file.type || "image/png",
-                    bytes: new Uint8Array(buffer),
-                  });
-                  if (!mountedRef.current || activeThreadIdRef.current !== String(threadId)) {
+        <div className="chat-workspace__conversation">
+          <header className="chat-workspace__header">
+            <h1 className="sr-only">{view.thread.title}</h1>
+            <ChatThreadActionsMenu
+              connectionStatus={
+                props.controller.status === "disconnected" ? "disconnected" : "connected"
+              }
+              {...(props.onThreadHandedOff === undefined
+                ? {}
+                : {
+                    onHandedOff: (outcome: ThreadHandOffOutcome) =>
+                      props.onThreadHandedOff?.(String(view.thread.id), outcome),
+                  })}
+              view={view}
+              {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+              {...(props.windowCapability === undefined
+                ? {}
+                : { windowCapability: props.windowCapability })}
+              {...(props.canvasClient === undefined
+                ? {}
+                : {
+                    canvas: {
+                      open: canvasPanelOpen,
+                      onToggle: () => setCanvasPanelOpen((current) => !current),
+                    },
+                  })}
+            />
+          </header>
+          {props.canvasClient === undefined || !canvasPanelOpen ? null : (
+            <section
+              aria-label="Canvas tools"
+              className="chat-workspace__canvas thread-column"
+              id={canvasPanelId}
+            >
+              <CanvasCreatePanel
+                client={props.canvasClient}
+                context={buildCanvasCreationContext({
+                  hostId: props.hostId ?? ("local" as HostId),
+                  mode: "chat",
+                  originThreadId: thread.id,
+                  projectId: thread.projectId ?? null,
+                })}
+                onCreated={() => {
+                  setCanvasRefreshKey((current) => current + 1);
+                  setCanvasPanelOpen(false);
+                }}
+              />
+              <CanvasThreadReferenceCardList
+                cards={threadCanvases.cards.filter(
+                  (card) => !canvasPlacement.placed.has(String(card.canvasId)),
+                )}
+                error={threadCanvases.error}
+                {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
+              />
+            </section>
+          )}
+          {props.imageGenerationClient === undefined ? null : (
+            <GeneratedImageList
+              client={props.imageGenerationClient}
+              onAttach={(file) => {
+                const displayName = file.name;
+                const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
+                const threadId = view.thread.id;
+                void (async () => {
+                  try {
+                    const buffer = await file.arrayBuffer();
+                    if (!mountedRef.current || activeThreadIdRef.current !== String(threadId)) {
+                      return;
+                    }
+                    await props.controller.upload({
+                      threadId,
+                      attachmentId,
+                      displayName,
+                      mediaType: file.type || "image/png",
+                      bytes: new Uint8Array(buffer),
+                    });
+                    if (!mountedRef.current || activeThreadIdRef.current !== String(threadId)) {
+                      await discardAttachmentRef
+                        .current({ threadId, attachmentId })
+                        .catch(() => undefined);
+                      return;
+                    }
+                    appendPendingAttachment({ id: attachmentId, displayName });
+                  } catch {
                     await discardAttachmentRef
                       .current({ threadId, attachmentId })
                       .catch(() => undefined);
-                    return;
+                    if (mountedRef.current && activeThreadIdRef.current === String(threadId)) {
+                      setAttachmentStatus({
+                        kind: "failed",
+                        message: `${displayName} could not be attached. Try again.`,
+                      });
+                    }
                   }
-                  appendPendingAttachment({ id: attachmentId, displayName });
-                } catch {
-                  await discardAttachmentRef
-                    .current({ threadId, attachmentId })
-                    .catch(() => undefined);
-                  if (mountedRef.current && activeThreadIdRef.current === String(threadId)) {
-                    setAttachmentStatus({
-                      kind: "failed",
-                      message: `${displayName} could not be attached. Try again.`,
-                    });
-                  }
+                })();
+              }}
+              profiles={listEligibleImageProfiles(props.providerSnapshot?.instances ?? [])}
+              scopeId={decodeImageGenerationScopeId(String(thread.id))}
+              threadKind="chat-thread"
+            />
+          )}
+          <ChatTranscript
+            {...(canvasClient === undefined
+              ? {}
+              : {
+                  afterTurn: (turn: ChatThreadView["turns"][number]) => (
+                    <ThreadCanvases
+                      cards={canvasPlacement.byRow.get(String(turn.id))}
+                      client={canvasClient}
+                      // Chat has no dock, so the Canvas opens as a tab beside the thread.
+                      {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
+                      openLabel="Open Canvas"
+                    />
+                  ),
+                })}
+            busy={isSending || branchPending}
+            {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
+            {...(checkpoints.available
+              ? {
+                  checkpoints: {
+                    byTurnId: checkpoints.byAnchor,
+                    busy: checkpoints.busy,
+                    ...(checkpoints.message === undefined ? {} : { message: checkpoints.message }),
+                    onForget: (checkpoint) => void checkpoints.forget(checkpoint),
+                    onMark: (turnId, label) =>
+                      void checkpoints.mark(
+                        { mode: "chat", threadId: view.thread.id, turnId },
+                        label,
+                      ),
+                    onRestore: (checkpoint, title) => {
+                      void (async () => {
+                        const restored = await checkpoints.restore(checkpoint, title);
+                        // The host owns the new thread; refreshing navigation is
+                        // what puts it in front of the user rather than leaving it
+                        // somewhere only the journal knows about.
+                        if (restored !== undefined) await props.controller.refreshNavigation();
+                      })();
+                    },
+                  },
+                }
+              : {})}
+            {...(props.providerGroups === undefined
+              ? {}
+              : { providerGroups: props.providerGroups })}
+            onQuoteSelection={({ turnId, text }) => {
+              setPendingQuotes((current) => [
+                ...current,
+                {
+                  id: crypto.randomUUID(),
+                  turnId: String(turnId),
+                  text,
+                },
+              ]);
+            }}
+            onBranchTurn={(turnId) => {
+              if (branchPending) return;
+              setBranchPending(true);
+              void (async () => {
+                try {
+                  const result = await props.controller.execute({
+                    kind: "branch-chat-thread",
+                    threadId: view.thread.id,
+                    expectedVersion: view.thread.version,
+                    turnId,
+                    title: branchTitle(view.thread.title),
+                  });
+                  // The server owns the branch; opening it is the only honest
+                  // acknowledgement — silence here left the thread invisible.
+                  if (result?.kind === "thread-created") props.onThreadBranched?.(result.thread);
+                } finally {
+                  if (mountedRef.current) setBranchPending(false);
                 }
               })();
             }}
-            profiles={listEligibleImageProfiles(props.providerSnapshot?.instances ?? [])}
-            scopeId={decodeImageGenerationScopeId(String(thread.id))}
-            threadKind="chat-thread"
+            onEditTurn={(turnId, prompt) => {
+              // Behind the same queue as a model or option change: an edit sent on
+              // the rendered version while one of those is settling is refused as
+              // stale, and the person's revision is lost with no second chance.
+              void enqueueThreadCommand(async (previous) => {
+                const result = await props.controller.execute({
+                  kind: "edit-chat-turn",
+                  threadId: view.thread.id,
+                  expectedVersion: queuedVersion(previous),
+                  turnId,
+                  prompt,
+                });
+                return { value: undefined, base: baseFromResult(result) };
+              }).catch(() => undefined);
+            }}
+            onRetryAttempt={(turnId, attemptId) => {
+              void enqueueThreadCommand(async (previous) => {
+                const result = await props.controller.execute({
+                  kind: "retry-chat-turn",
+                  threadId: view.thread.id,
+                  expectedVersion: queuedVersion(previous),
+                  turnId,
+                  attemptId,
+                });
+                return { value: undefined, base: baseFromResult(result) };
+              }).catch(() => undefined);
+            }}
+            onScheduleUsageResume={(turnId, attemptId) => {
+              void enqueueThreadCommand(async (previous) => {
+                const result = await props.controller.execute({
+                  kind: "schedule-chat-usage-resume",
+                  threadId: view.thread.id,
+                  expectedVersion: queuedVersion(previous),
+                  turnId,
+                  attemptId,
+                });
+                return { value: undefined, base: baseFromResult(result) };
+              }).catch(() => undefined);
+            }}
+            onCancelUsageResume={() => {
+              void enqueueThreadCommand(async (previous) => {
+                const result = await props.controller.execute({
+                  kind: "cancel-chat-usage-resume",
+                  threadId: view.thread.id,
+                  expectedVersion: queuedVersion(previous),
+                });
+                return { value: undefined, base: baseFromResult(result) };
+              }).catch(() => undefined);
+            }}
+            onSnoozeAtUsageReset={() => {
+              void enqueueThreadCommand(async (previous) => {
+                const result = await props.controller.execute({
+                  kind: "snooze-chat-thread-at-usage-reset",
+                  threadId: view.thread.id,
+                  expectedVersion: queuedVersion(previous),
+                });
+                return { value: undefined, base: baseFromResult(result) };
+              }).catch(() => undefined);
+            }}
+            onAnswerQuestion={({ turnId, attemptId, requestId, answer }) => {
+              void enqueueThreadCommand(async (previous) => {
+                const result = await props.controller.execute({
+                  kind: "answer-chat-turn-question",
+                  threadId: view.thread.id,
+                  expectedVersion: queuedVersion(previous),
+                  turnId,
+                  attemptId,
+                  requestId,
+                  answer,
+                });
+                return { value: undefined, base: baseFromResult(result) };
+              }).catch(() => undefined);
+            }}
+            onDismissQuestion={(turnId, attemptId) => {
+              void enqueueThreadCommand(async (previous) => {
+                const result = await props.controller.execute({
+                  kind: "interrupt-chat-turn",
+                  threadId: view.thread.id,
+                  expectedVersion: queuedVersion(previous),
+                  turnId,
+                  attemptId,
+                });
+                return { value: undefined, base: baseFromResult(result) };
+              }).catch(() => undefined);
+            }}
+            view={view}
+          />
+        </div>
+        {view.workItems.length === 0 && view.followUp?.state !== "open" ? null : (
+          <ThreadWorkShelf
+            aggregateVersion={view.workListVersion}
+            followUpVersion={view.followUpVersion}
+            {...(view.followUp === undefined ? {} : { followUp: view.followUp })}
+            items={view.workItems}
+            {...(props.narrow === undefined ? {} : { narrow: props.narrow })}
+            onCancel={(command) => void props.controller.execute(command)}
+            onComplete={(command) => void props.controller.execute(command)}
+            onCompleteFollowUp={(command) => void props.controller.execute(command)}
+            onEdit={(command) => void props.controller.execute(command)}
           />
         )}
-        <ChatTranscript
-          {...(canvasClient === undefined
+        <ExtensionToolApprovalPrompt
+          className="chat-workspace__tool-approval thread-column"
+          client={props.extensionClient}
+          threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
+          turnActive={turnActive}
+        />
+        {pendingBrowserApproval === undefined ? null : (
+          <OctantApprovalCard
+            actions={
+              <>
+                <OctantButton
+                  disabled={toolApprovalBusy}
+                  onClick={() => void decideBrowserApproval("approved")}
+                  size="sm"
+                  type="button"
+                >
+                  Approve once
+                </OctantButton>
+                <OctantButton
+                  disabled={toolApprovalBusy}
+                  onClick={() => void decideBrowserApproval("denied")}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Deny
+                </OctantButton>
+              </>
+            }
+            className="chat-workspace__tool-approval thread-column"
+            detail="Shell and file access stay unchanged"
+            error={browserApprovalMessage}
+            label="Browser origin approval"
+            summary={`Allow Browser to open ${pendingBrowserApproval.origin}?`}
+          />
+        )}
+        <ChatComposer
+          key={String(thread.id)}
+          attachment={attachmentCapability}
+          attachmentBusy={uploadingMessage !== undefined || attachmentStatus.kind === "removing"}
+          {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+          {...(props.providerSnapshot === undefined || props.imageGenerationClient === undefined
             ? {}
             : {
-                afterTurn: (turn: ChatThreadView["turns"][number]) => (
-                  <ThreadCanvases
-                    cards={canvasPlacement.byRow.get(String(turn.id))}
-                    client={canvasClient}
-                    // Chat has no dock, so the Canvas opens as a tab beside the thread.
-                    {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
-                    openLabel="Open Canvas"
-                  />
-                ),
-              })}
-          busy={isSending || branchPending}
-          {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
-          {...(checkpoints.available
-            ? {
-                checkpoints: {
-                  byTurnId: checkpoints.byAnchor,
-                  busy: checkpoints.busy,
-                  ...(checkpoints.message === undefined ? {} : { message: checkpoints.message }),
-                  onForget: (checkpoint) => void checkpoints.forget(checkpoint),
-                  onMark: (turnId, label) =>
-                    void checkpoints.mark(
-                      { mode: "chat", threadId: view.thread.id, turnId },
-                      label,
-                    ),
-                  onRestore: (checkpoint, title) => {
-                    void (async () => {
-                      const restored = await checkpoints.restore(checkpoint, title);
-                      // The host owns the new thread; refreshing navigation is
-                      // what puts it in front of the user rather than leaving it
-                      // somewhere only the journal knows about.
-                      if (restored !== undefined) await props.controller.refreshNavigation();
-                    })();
-                  },
+                imageGeneration: {
+                  profiles: listEligibleImageProfiles(props.providerSnapshot.instances),
+                  scopeId: decodeImageGenerationScopeId(String(thread.id)),
+                  client: props.imageGenerationClient,
+                  ...(props.onOpenSettings === undefined
+                    ? {}
+                    : { onOpenSettings: props.onOpenSettings }),
                 },
-              }
-            : {})}
-          connectionStatus={
-            props.controller.status === "disconnected" ? "disconnected" : "connected"
+              })}
+          draft={props.controller.pendingDraft}
+          caretRestoreKey={String(thread.id)}
+          {...(props.controller.pendingDraftCaret === undefined
+            ? {}
+            : { caretIndex: props.controller.pendingDraftCaret })}
+          {...(props.controller.setPendingDraftCaret === undefined
+            ? {}
+            : { onCaretIndexChange: props.controller.setPendingDraftCaret })}
+          isSending={isSending}
+          queueing={queueFollowUp}
+          queue={
+            <ThreadMessageQueue
+              connectionLost={connectionLost}
+              queue={messageQueue}
+              showUnavailable={queueFollowUp}
+            />
           }
-          {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
-          onQuoteSelection={({ turnId, text }) => {
-            setPendingQuotes((current) => [
-              ...current,
-              {
-                id: crypto.randomUUID(),
-                turnId: String(turnId),
-                text,
-              },
-            ]);
+          model={{
+            // Without picker groups there is no ownership to reason about, so a
+            // started thread's fallback keeps only its own model.
+            options: chatStarted
+              ? providerState.modelOptions.filter(
+                  (option) => option.id === String(view.thread.modelId),
+                )
+              : providerState.modelOptions,
+            value: view.thread.modelId,
           }}
-          onBranchTurn={(turnId) => {
-            if (branchPending) return;
-            setBranchPending(true);
+          onDraftChange={(draft, caretIndex) => {
+            draftEditRevisionRef.current += 1;
+            props.controller.setPendingDraft(draft, caretIndex);
+          }}
+          imageAttachment={imageAttachmentCapability}
+          onImagePasteRejected={(reason) =>
+            setAttachmentStatus({ kind: "failed", message: reason })
+          }
+          {...(threadMentions.composer === undefined
+            ? {}
+            : { threadMentions: threadMentions.composer })}
+          {...(threadDropKey === undefined ? {} : { threadDropKey })}
+          onFileSelected={(file) => {
+            // A pasted image usually has no file name; name it once so the chip,
+            // its remove control, and any failure message all agree.
+            const displayName = pastedImageName(file);
+            if (!supportsAttachmentFile(providerState.observation, view.thread.modelId, file)) {
+              setAttachmentStatus({
+                kind: "failed",
+                message: `${displayName} is unavailable to the selected provider and model.`,
+              });
+              return;
+            }
+            const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
+            // A new attempt supersedes whatever an earlier one reported; a
+            // sibling upload's failure in this batch is set after this point and
+            // therefore survives until the batch drains.
+            setAttachmentStatus({ kind: "idle" });
+            setUploadingAttachments((current) => [...current, { id: attachmentId, displayName }]);
+            const settleUpload = () =>
+              setUploadingAttachments((current) =>
+                current.filter((upload) => upload.id !== attachmentId),
+              );
             void (async () => {
               try {
-                const result = await props.controller.execute({
-                  kind: "branch-chat-thread",
+                const buffer = await file.arrayBuffer();
+                if (
+                  !mountedRef.current ||
+                  activeThreadIdRef.current !== String(view.thread.id) ||
+                  cancelledUploadsRef.current.has(String(attachmentId))
+                ) {
+                  cancelledUploadsRef.current.delete(String(attachmentId));
+                  settleUpload();
+                  await discardAttachmentRef
+                    .current({ threadId: view.thread.id, attachmentId })
+                    .catch(() => undefined);
+                  return;
+                }
+                await props.controller.upload({
                   threadId: view.thread.id,
-                  expectedVersion: view.thread.version,
-                  turnId,
-                  title: branchTitle(view.thread.title),
+                  attachmentId,
+                  displayName,
+                  mediaType: file.type,
+                  bytes: new Uint8Array(buffer),
                 });
-                // The server owns the branch; opening it is the only honest
-                // acknowledgement — silence here left the thread invisible.
-                if (result?.kind === "thread-created") props.onThreadBranched?.(result.thread);
-              } finally {
-                if (mountedRef.current) setBranchPending(false);
+                if (
+                  !mountedRef.current ||
+                  activeThreadIdRef.current !== String(view.thread.id) ||
+                  cancelledUploadsRef.current.has(String(attachmentId))
+                ) {
+                  cancelledUploadsRef.current.delete(String(attachmentId));
+                  settleUpload();
+                  await discardAttachmentRef
+                    .current({ threadId: view.thread.id, attachmentId })
+                    .catch(() => undefined);
+                  return;
+                }
+                appendPendingAttachment({ id: attachmentId, displayName });
+                settleUpload();
+              } catch {
+                settleUpload();
+                await discardAttachmentRef
+                  .current({ threadId: view.thread.id, attachmentId })
+                  .catch(() => undefined);
+                if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id)) {
+                  setAttachmentStatus({
+                    kind: "failed",
+                    message: `${displayName} could not be attached. Paste or choose it again to retry.`,
+                  });
+                }
               }
             })();
           }}
-          onEditTurn={(turnId, prompt) => {
-            // Behind the same queue as a model or option change: an edit sent on
-            // the rendered version while one of those is settling is refused as
-            // stale, and the person's revision is lost with no second chance.
-            void enqueueThreadCommand(async (previous) => {
-              const result = await props.controller.execute({
-                kind: "edit-chat-turn",
-                threadId: view.thread.id,
-                expectedVersion: queuedVersion(previous),
-                turnId,
-                prompt,
-              });
-              return { value: undefined, base: baseFromResult(result) };
-            }).catch(() => undefined);
-          }}
-          onRetryAttempt={(turnId, attemptId) => {
-            void enqueueThreadCommand(async (previous) => {
-              const result = await props.controller.execute({
-                kind: "retry-chat-turn",
-                threadId: view.thread.id,
-                expectedVersion: queuedVersion(previous),
-                turnId,
-                attemptId,
-              });
-              return { value: undefined, base: baseFromResult(result) };
-            }).catch(() => undefined);
-          }}
-          onScheduleUsageResume={(turnId, attemptId) => {
-            void enqueueThreadCommand(async (previous) => {
-              const result = await props.controller.execute({
-                kind: "schedule-chat-usage-resume",
-                threadId: view.thread.id,
-                expectedVersion: queuedVersion(previous),
-                turnId,
-                attemptId,
-              });
-              return { value: undefined, base: baseFromResult(result) };
-            }).catch(() => undefined);
-          }}
-          onCancelUsageResume={() => {
-            void enqueueThreadCommand(async (previous) => {
-              const result = await props.controller.execute({
-                kind: "cancel-chat-usage-resume",
-                threadId: view.thread.id,
-                expectedVersion: queuedVersion(previous),
-              });
-              return { value: undefined, base: baseFromResult(result) };
-            }).catch(() => undefined);
-          }}
-          onSnoozeAtUsageReset={() => {
-            void enqueueThreadCommand(async (previous) => {
-              const result = await props.controller.execute({
-                kind: "snooze-chat-thread-at-usage-reset",
-                threadId: view.thread.id,
-                expectedVersion: queuedVersion(previous),
-              });
-              return { value: undefined, base: baseFromResult(result) };
-            }).catch(() => undefined);
-          }}
-          onAnswerQuestion={({ turnId, attemptId, requestId, answer }) => {
-            void enqueueThreadCommand(async (previous) => {
-              const result = await props.controller.execute({
-                kind: "answer-chat-turn-question",
-                threadId: view.thread.id,
-                expectedVersion: queuedVersion(previous),
-                turnId,
-                attemptId,
-                requestId,
-                answer,
-              });
-              return { value: undefined, base: baseFromResult(result) };
-            }).catch(() => undefined);
-          }}
-          onDismissQuestion={(turnId, attemptId) => {
-            void enqueueThreadCommand(async (previous) => {
-              const result = await props.controller.execute({
-                kind: "interrupt-chat-turn",
-                threadId: view.thread.id,
-                expectedVersion: queuedVersion(previous),
-                turnId,
-                attemptId,
-              });
-              return { value: undefined, base: baseFromResult(result) };
-            }).catch(() => undefined);
-          }}
-          view={view}
-        />
-      </div>
-      {view.workItems.length === 0 && view.followUp?.state !== "open" ? null : (
-        <ThreadWorkShelf
-          aggregateVersion={view.workListVersion}
-          followUpVersion={view.followUpVersion}
-          {...(view.followUp === undefined ? {} : { followUp: view.followUp })}
-          items={view.workItems}
-          {...(props.narrow === undefined ? {} : { narrow: props.narrow })}
-          onCancel={(command) => void props.controller.execute(command)}
-          onComplete={(command) => void props.controller.execute(command)}
-          onCompleteFollowUp={(command) => void props.controller.execute(command)}
-          onEdit={(command) => void props.controller.execute(command)}
-        />
-      )}
-      <ExtensionToolApprovalPrompt
-        className="chat-workspace__tool-approval thread-column"
-        client={props.extensionClient}
-        threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
-        turnActive={turnActive}
-      />
-      {pendingBrowserApproval === undefined ? null : (
-        <OctantApprovalCard
-          actions={
-            <>
-              <OctantButton
-                disabled={toolApprovalBusy}
-                onClick={() => void decideBrowserApproval("approved")}
-                size="sm"
-                type="button"
-              >
-                Approve once
-              </OctantButton>
-              <OctantButton
-                disabled={toolApprovalBusy}
-                onClick={() => void decideBrowserApproval("denied")}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Deny
-              </OctantButton>
-            </>
-          }
-          className="chat-workspace__tool-approval thread-column"
-          detail="Shell and file access stay unchanged"
-          error={browserApprovalMessage}
-          label="Browser origin approval"
-          summary={`Allow Browser to open ${pendingBrowserApproval.origin}?`}
-        />
-      )}
-      <ChatComposer
-        key={String(thread.id)}
-        attachment={attachmentCapability}
-        attachmentBusy={uploadingMessage !== undefined || attachmentStatus.kind === "removing"}
-        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-        {...(props.providerSnapshot === undefined || props.imageGenerationClient === undefined
-          ? {}
-          : {
-              imageGeneration: {
-                profiles: listEligibleImageProfiles(props.providerSnapshot.instances),
-                scopeId: decodeImageGenerationScopeId(String(thread.id)),
-                client: props.imageGenerationClient,
-                ...(props.onOpenSettings === undefined
-                  ? {}
-                  : { onOpenSettings: props.onOpenSettings }),
-              },
-            })}
-        draft={props.controller.pendingDraft}
-        caretRestoreKey={String(thread.id)}
-        {...(props.controller.pendingDraftCaret === undefined
-          ? {}
-          : { caretIndex: props.controller.pendingDraftCaret })}
-        {...(props.controller.setPendingDraftCaret === undefined
-          ? {}
-          : { onCaretIndexChange: props.controller.setPendingDraftCaret })}
-        isSending={isSending}
-        queueing={queueFollowUp}
-        queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
-        model={{
-          // Without picker groups there is no ownership to reason about, so a
-          // started thread's fallback keeps only its own model.
-          options: chatStarted
-            ? providerState.modelOptions.filter(
-                (option) => option.id === String(view.thread.modelId),
-              )
-            : providerState.modelOptions,
-          value: view.thread.modelId,
-        }}
-        onDraftChange={(draft, caretIndex) => {
-          draftEditRevisionRef.current += 1;
-          props.controller.setPendingDraft(draft, caretIndex);
-        }}
-        imageAttachment={imageAttachmentCapability}
-        onImagePasteRejected={(reason) => setAttachmentStatus({ kind: "failed", message: reason })}
-        {...(threadMentions.composer === undefined
-          ? {}
-          : { threadMentions: threadMentions.composer })}
-        onFileSelected={(file) => {
-          // A pasted image usually has no file name; name it once so the chip,
-          // its remove control, and any failure message all agree.
-          const displayName = pastedImageName(file);
-          if (!supportsAttachmentFile(providerState.observation, view.thread.modelId, file)) {
-            setAttachmentStatus({
-              kind: "failed",
-              message: `${displayName} is unavailable to the selected provider and model.`,
+          onModelChange={(modelId) => {
+            // The same queue as the picker rail's selection: a model switch the
+            // queue cannot see is one an option change cannot know it has to
+            // stand down for.
+            selectProviderModel({
+              providerInstanceId: view.thread.providerInstanceId,
+              modelId: decodeProviderModelId(modelId),
             });
-            return;
-          }
-          const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
-          // A new attempt supersedes whatever an earlier one reported; a
-          // sibling upload's failure in this batch is set after this point and
-          // therefore survives until the batch drains.
-          setAttachmentStatus({ kind: "idle" });
-          setUploadingAttachments((current) => [...current, { id: attachmentId, displayName }]);
-          const settleUpload = () =>
-            setUploadingAttachments((current) =>
-              current.filter((upload) => upload.id !== attachmentId),
+          }}
+          modelOptions={providerState.declaredModelOptions}
+          onModelOptionChange={changeModelOption}
+          {...(props.providerGroups === undefined
+            ? {}
+            : {
+                // Any earlier attempt ties the thread to its provider kind: the
+                // host checks the latest attempt whatever its outcome. See
+                // startedConversationPickerGroups for which moves stay open.
+                providerGroups: chatStarted
+                  ? startedConversationPickerGroups(props.providerGroups, {
+                      providerInstanceId: view.thread.providerInstanceId,
+                      modelId: view.thread.modelId,
+                    })
+                  : props.providerGroups,
+                selectedProviderInstanceId: view.thread.providerInstanceId,
+                selectedModelId: view.thread.modelId,
+                onSelectModel: (selection: {
+                  readonly providerInstanceId: (typeof view.thread)["providerInstanceId"];
+                  readonly modelId: (typeof view.thread)["modelId"];
+                  readonly modelOptionValues?: ProviderModelOptionValues;
+                }) => selectProviderModel(selection),
+              })}
+          onProviderChange={(providerId) => {
+            const selection = providerState.available.find(
+              (candidate) => String(candidate.instance.id) === providerId,
             );
-          void (async () => {
-            try {
-              const buffer = await file.arrayBuffer();
-              if (
-                !mountedRef.current ||
-                activeThreadIdRef.current !== String(view.thread.id) ||
-                cancelledUploadsRef.current.has(String(attachmentId))
-              ) {
-                cancelledUploadsRef.current.delete(String(attachmentId));
-                settleUpload();
-                await discardAttachmentRef
-                  .current({ threadId: view.thread.id, attachmentId })
-                  .catch(() => undefined);
-                return;
-              }
-              await props.controller.upload({
-                threadId: view.thread.id,
-                attachmentId,
-                displayName,
-                mediaType: file.type,
-                bytes: new Uint8Array(buffer),
-              });
-              if (
-                !mountedRef.current ||
-                activeThreadIdRef.current !== String(view.thread.id) ||
-                cancelledUploadsRef.current.has(String(attachmentId))
-              ) {
-                cancelledUploadsRef.current.delete(String(attachmentId));
-                settleUpload();
-                await discardAttachmentRef
-                  .current({ threadId: view.thread.id, attachmentId })
-                  .catch(() => undefined);
-                return;
-              }
-              appendPendingAttachment({ id: attachmentId, displayName });
-              settleUpload();
-            } catch {
-              settleUpload();
-              await discardAttachmentRef
-                .current({ threadId: view.thread.id, attachmentId })
-                .catch(() => undefined);
-              if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id)) {
-                setAttachmentStatus({
-                  kind: "failed",
-                  message: `${displayName} could not be attached. Paste or choose it again to retry.`,
-                });
-              }
+            const model = selection?.observation.models[0];
+            if (selection === undefined || model === undefined) return;
+            selectProviderModel({
+              providerInstanceId: selection.instance.id,
+              modelId: model.id,
+            });
+          }}
+          onResearchEnabledChange={(enabled) =>
+            void changeResearch({ enabled, routing: view.thread.researchRouting })
+          }
+          onResearchRoutingChange={(routing) =>
+            void changeResearch({ enabled: view.thread.researchEnabled, routing })
+          }
+          onSend={async (draft) => {
+            if (!queueFollowUp) return await submitTurn(draft);
+            if (!messageQueue.available || messageQueue.busy || messageQueue.uncertain)
+              return false;
+            const revision = draftEditRevisionRef.current;
+            const origin = String(view.thread.id);
+            const claimed = [...pendingAttachmentsRef.current];
+            const context = {
+              attachmentIds: claimed.map((attachment) => attachment.id),
+              previewSelections: [...pendingPreviewRef.current],
+              canvasSelections: [...pendingCanvasRef.current],
+              quotes: [...pendingQuotesRef.current],
+              extensionReceipts: [...pendingExtensionRef.current],
+              threadMentionChips: [...threadMentions.chips],
+            };
+            const extensionSelections = context.extensionReceipts.flatMap((receipt) =>
+              receipt.selection === undefined ? [] : [receipt.selection],
+            );
+            const unattached = unattachedCapabilityMentions(draft, extensionSelections);
+            if (unattached.length > 0) {
+              setSendNotice(unattachedCapabilityMentionCopy(unattached));
+              return false;
             }
-          })();
-        }}
-        onModelChange={(modelId) => {
-          // The same queue as the picker rail's selection: a model switch the
-          // queue cannot see is one an option change cannot know it has to
-          // stand down for.
-          selectProviderModel({
-            providerInstanceId: view.thread.providerInstanceId,
-            modelId: decodeProviderModelId(modelId),
-          });
-        }}
-        modelOptions={providerState.declaredModelOptions}
-        onModelOptionChange={changeModelOption}
-        {...(props.providerGroups === undefined
-          ? {}
-          : {
-              // Any earlier attempt ties the thread to its provider kind: the
-              // host checks the latest attempt whatever its outcome. See
-              // startedConversationPickerGroups for which moves stay open.
-              providerGroups: chatStarted
-                ? startedConversationPickerGroups(props.providerGroups, {
-                    providerInstanceId: view.thread.providerInstanceId,
-                    modelId: view.thread.modelId,
-                  })
-                : props.providerGroups,
-              selectedProviderInstanceId: view.thread.providerInstanceId,
-              selectedModelId: view.thread.modelId,
-              onSelectModel: (selection: {
-                readonly providerInstanceId: (typeof view.thread)["providerInstanceId"];
-                readonly modelId: (typeof view.thread)["modelId"];
-                readonly modelOptionValues?: ProviderModelOptionValues;
-              }) => selectProviderModel(selection),
-            })}
-        onProviderChange={(providerId) => {
-          const selection = providerState.available.find(
-            (candidate) => String(candidate.instance.id) === providerId,
-          );
-          const model = selection?.observation.models[0];
-          if (selection === undefined || model === undefined) return;
-          selectProviderModel({
-            providerInstanceId: selection.instance.id,
-            modelId: model.id,
-          });
-        }}
-        onResearchEnabledChange={(enabled) =>
-          void changeResearch({ enabled, routing: view.thread.researchRouting })
-        }
-        onResearchRoutingChange={(routing) =>
-          void changeResearch({ enabled: view.thread.researchEnabled, routing })
-        }
-        onSend={async (draft) => {
-          if (!queueFollowUp) return await submitTurn(draft);
-          if (!messageQueue.available || messageQueue.busy || messageQueue.uncertain) return false;
-          const revision = draftEditRevisionRef.current;
-          const origin = String(view.thread.id);
-          const claimed = [...pendingAttachmentsRef.current];
-          const context = {
-            attachmentIds: claimed.map((attachment) => attachment.id),
-            previewSelections: [...pendingPreviewRef.current],
-            canvasSelections: [...pendingCanvasRef.current],
-            quotes: [...pendingQuotesRef.current],
-            extensionReceipts: [...pendingExtensionRef.current],
-            threadMentionChips: [...threadMentions.chips],
-          };
-          const extensionSelections = context.extensionReceipts.flatMap((receipt) =>
-            receipt.selection === undefined ? [] : [receipt.selection],
-          );
-          const unattached = unattachedCapabilityMentions(draft, extensionSelections);
-          if (unattached.length > 0) {
-            setSendNotice(unattachedCapabilityMentionCopy(unattached));
-            return false;
-          }
-          pendingAttachmentsRef.current = [];
-          deferredAttachmentsRef.current = claimed;
-          const releaseClaim = () => {
-            const ids = new Set(claimed.map((entry) => String(entry.id)));
-            deferredAttachmentsRef.current = deferredAttachmentsRef.current.filter(
-              (entry) => !ids.has(String(entry.id)),
-            );
-          };
-          const restoreClaim = () => {
-            releaseClaim();
-            recoverClaimedAttachments(
-              claimed,
-              mountedRef.current && activeThreadIdRef.current === origin,
-              view.thread.id,
-              pendingAttachmentsRef,
-              discardAttachmentRef,
-            );
-          };
-          try {
-            const threadMentionIds = await threadMentions.resolveForSend();
-            if (!mountedRef.current || activeThreadIdRef.current !== origin) {
+            pendingAttachmentsRef.current = [];
+            deferredAttachmentsRef.current = claimed;
+            const releaseClaim = () => {
+              const ids = new Set(claimed.map((entry) => String(entry.id)));
+              deferredAttachmentsRef.current = deferredAttachmentsRef.current.filter(
+                (entry) => !ids.has(String(entry.id)),
+              );
+            };
+            const restoreClaim = () => {
+              releaseClaim();
+              recoverClaimedAttachments(
+                claimed,
+                mountedRef.current && activeThreadIdRef.current === origin,
+                view.thread.id,
+                pendingAttachmentsRef,
+                discardAttachmentRef,
+              );
+            };
+            try {
+              const threadMentionIds = await threadMentions.resolveForSend();
+              if (!mountedRef.current || activeThreadIdRef.current !== origin) {
+                restoreClaim();
+                return false;
+              }
+              const result = await messageQueue.enqueue(
+                {
+                  mode: "chat",
+                  prompt: formatOutgoingMessageWithQuotes({ draft, quotes: context.quotes }),
+                  attachmentIds: context.attachmentIds,
+                  previewSelections: context.previewSelections,
+                  canvasSelections: context.canvasSelections,
+                  extensionSelections,
+                  threadMentionIds,
+                },
+                () => {
+                  releaseClaim();
+                  if (!mountedRef.current || activeThreadIdRef.current !== origin) return;
+                  consumeContext({ ...context, threadMentionIds });
+                  if (draftEditRevisionRef.current === revision)
+                    props.controller.setPendingDraft("");
+                },
+                restoreClaim,
+                { text: draft, revision },
+              );
+              return result === "accepted";
+            } catch {
               restoreClaim();
               return false;
             }
-            const result = await messageQueue.enqueue(
-              {
-                mode: "chat",
-                prompt: formatOutgoingMessageWithQuotes({ draft, quotes: context.quotes }),
-                attachmentIds: context.attachmentIds,
-                previewSelections: context.previewSelections,
-                canvasSelections: context.canvasSelections,
-                extensionSelections,
-                threadMentionIds,
-              },
-              () => {
-                releaseClaim();
-                if (!mountedRef.current || activeThreadIdRef.current !== origin) return;
-                consumeContext({ ...context, threadMentionIds });
-                if (draftEditRevisionRef.current === revision) props.controller.setPendingDraft("");
-              },
-              restoreClaim,
-              { text: draft, revision },
+          }}
+          pendingCanvasSelections={pendingCanvasSelections}
+          pendingAttachments={pendingAttachments}
+          attachmentRemovalDisabled={messageQueue.busy || messageQueue.uncertain}
+          pendingPreviewSelections={pendingPreviewSelections}
+          pendingQuotes={pendingQuotes}
+          pendingExtensionSelections={pendingExtensionSelections}
+          {...(!queueFollowUp ||
+          (messageQueue.available && !messageQueue.uncertain && !messageQueue.busy)
+            ? {}
+            : {
+                sendDisabledReason: !messageQueue.available
+                  ? connectionLost
+                    ? "Waiting for the host to reconnect."
+                    : "The host message queue is unavailable."
+                  : messageQueue.uncertain
+                    ? "Check the previous queue change before sending another message."
+                    : "Waiting for the host queue…",
+              })}
+          onRemoveExtensionSelection={removeExtensionSelection}
+          onRemoveQuote={(quoteId) => {
+            setPendingQuotes((current) => current.filter((quote) => quote.id !== quoteId));
+          }}
+          onRemoveAttachment={(attachmentId) => {
+            const attachment = pendingAttachmentsRef.current.find(
+              (candidate) => candidate.id === attachmentId,
             );
-            return result === "accepted";
-          } catch {
-            restoreClaim();
-            return false;
-          }
-        }}
-        pendingCanvasSelections={pendingCanvasSelections}
-        pendingAttachments={pendingAttachments}
-        attachmentRemovalDisabled={messageQueue.busy || messageQueue.uncertain}
-        pendingPreviewSelections={pendingPreviewSelections}
-        pendingQuotes={pendingQuotes}
-        pendingExtensionSelections={pendingExtensionSelections}
-        {...(!queueFollowUp ||
-        (messageQueue.available && !messageQueue.uncertain && !messageQueue.busy)
-          ? {}
-          : {
-              sendDisabledReason: !messageQueue.available
-                ? "The host message queue is unavailable."
-                : messageQueue.uncertain
-                  ? "Check the previous queue change before sending another message."
-                  : "Waiting for the host queue…",
-            })}
-        onRemoveExtensionSelection={removeExtensionSelection}
-        onRemoveQuote={(quoteId) => {
-          setPendingQuotes((current) => current.filter((quote) => quote.id !== quoteId));
-        }}
-        onRemoveAttachment={(attachmentId) => {
-          const attachment = pendingAttachmentsRef.current.find(
-            (candidate) => candidate.id === attachmentId,
-          );
-          if (attachment === undefined) return;
-          setAttachmentStatus({ kind: "removing", fileName: attachment.displayName });
-          void props.controller
-            .discard({ threadId: view.thread.id, attachmentId })
-            .then(() => {
-              setPendingAttachments((current) => {
-                const next = current.filter((candidate) => candidate.id !== attachmentId);
-                pendingAttachmentsRef.current = next;
-                return next;
-              });
-              setAttachmentStatus({ kind: "idle" });
-            })
-            .catch(() => {
-              setAttachmentStatus({
-                kind: "failed",
-                message: `${attachment.displayName} could not be removed. Try again.`,
-              });
-            });
-        }}
-        onResolveExtensionReference={async (draft) => {
-          if (isReviewInParallelReference(draft)) {
-            const started = await parallelReview.startFromDraft(draft);
-            if (started) props.controller.setPendingDraft("");
-            return started;
-          }
-          const resolved = await extensionDraft.resolveReference(draft);
-          if (resolved) props.controller.setPendingDraft("");
-          return resolved;
-        }}
-        onRemoveCanvasSelection={
-          props.onRemoveCanvasSelection ??
-          ((selectionId) =>
-            setLocalCanvasSelections((current) =>
-              current.filter((selection) => selection.id !== selectionId),
-            ))
-        }
-        onRemovePreviewSelection={(selectionId) =>
-          setPendingPreviewSelections((current) =>
-            current.filter((selection) => selection.id !== selectionId),
-          )
-        }
-        {...(activeAttempt === undefined
-          ? {}
-          : {
-              onStop: () => {
-                void props.controller.execute({
-                  kind: "interrupt-chat-turn",
-                  threadId: view.thread.id,
-                  expectedVersion: view.thread.version,
-                  turnId: activeAttempt.turnId,
-                  attemptId: activeAttempt.id,
+            if (attachment === undefined) return;
+            setAttachmentStatus({ kind: "removing", fileName: attachment.displayName });
+            void props.controller
+              .discard({ threadId: view.thread.id, attachmentId })
+              .then(() => {
+                setPendingAttachments((current) => {
+                  const next = current.filter((candidate) => candidate.id !== attachmentId);
+                  pendingAttachmentsRef.current = next;
+                  return next;
                 });
-              },
-            })}
-        poolControl={
-          <ComposerPoolControl
-            model={composerPoolModel}
-            onApply={async (pool) =>
-              await enqueueThreadCommand(async (previous) => {
-                const result = await props.controller.execute({
-                  kind: "select-chat-multi-model-pool",
-                  threadId: view.thread.id,
-                  expectedVersion: queuedVersion(previous),
-                  pool,
+                setAttachmentStatus({ kind: "idle" });
+              })
+              .catch(() => {
+                setAttachmentStatus({
+                  kind: "failed",
+                  message: `${attachment.displayName} could not be removed. Try again.`,
                 });
-                return {
-                  value: result?.kind === "thread-updated",
-                  base: baseFromResult(result),
-                };
-              }).catch(() => false)
+              });
+          }}
+          onResolveExtensionReference={async (draft) => {
+            if (isReviewInParallelReference(draft)) {
+              const started = await parallelReview.startFromDraft(draft);
+              if (started) props.controller.setPendingDraft("");
+              return started;
             }
-            pool={view.thread.multiModelPool}
-          />
-        }
-        provider={{
-          options: chatStarted
-            ? providerState.providerOptions.filter(
-                (option) => option.id === String(view.thread.providerInstanceId),
-              )
-            : providerState.providerOptions,
-          value: String(view.thread.providerInstanceId),
-        }}
-        research={{
-          backend: researchBackend(props.controller, providerState.observation, view),
-          enabled: view.thread.researchEnabled,
-          routing: view.thread.researchRouting,
-        }}
-        {...(providerState.selectionReady
-          ? uploadingMessage !== undefined
-            ? { sendDisabledReason: uploadingMessage }
-            : attachmentStatus.kind === "removing"
-              ? { sendDisabledReason: `Removing ${attachmentStatus.fileName}.` }
-              : attachmentStatus.kind === "failed" || sendNotice !== undefined
-                ? {
-                    statusMessage: composeComposerNotice(
-                      attachmentStatus.kind === "failed" ? attachmentStatus.message : sendNotice,
+            const resolved = await extensionDraft.resolveReference(draft);
+            if (resolved) props.controller.setPendingDraft("");
+            return resolved;
+          }}
+          onRemoveCanvasSelection={
+            props.onRemoveCanvasSelection ??
+            ((selectionId) =>
+              setLocalCanvasSelections((current) =>
+                current.filter((selection) => selection.id !== selectionId),
+              ))
+          }
+          onRemovePreviewSelection={(selectionId) =>
+            setPendingPreviewSelections((current) =>
+              current.filter((selection) => selection.id !== selectionId),
+            )
+          }
+          {...(activeAttempt === undefined
+            ? {}
+            : {
+                onStop: () => {
+                  void props.controller.execute({
+                    kind: "interrupt-chat-turn",
+                    threadId: view.thread.id,
+                    expectedVersion: view.thread.version,
+                    turnId: activeAttempt.turnId,
+                    attemptId: activeAttempt.id,
+                  });
+                },
+              })}
+          poolControl={
+            <ComposerPoolControl
+              model={composerPoolModel}
+              onApply={async (pool) =>
+                await enqueueThreadCommand(async (previous) => {
+                  const result = await props.controller.execute({
+                    kind: "select-chat-multi-model-pool",
+                    threadId: view.thread.id,
+                    expectedVersion: queuedVersion(previous),
+                    pool,
+                  });
+                  return {
+                    value: result?.kind === "thread-updated",
+                    base: baseFromResult(result),
+                  };
+                }).catch(() => false)
+              }
+              pool={view.thread.multiModelPool}
+            />
+          }
+          provider={{
+            options: chatStarted
+              ? providerState.providerOptions.filter(
+                  (option) => option.id === String(view.thread.providerInstanceId),
+                )
+              : providerState.providerOptions,
+            value: String(view.thread.providerInstanceId),
+          }}
+          research={{
+            backend: researchBackend(props.controller, providerState.observation, view),
+            enabled: view.thread.researchEnabled,
+            routing: view.thread.researchRouting,
+          }}
+          {...(providerState.selectionReady
+            ? uploadingMessage !== undefined
+              ? { sendDisabledReason: uploadingMessage }
+              : attachmentStatus.kind === "removing"
+                ? { sendDisabledReason: `Removing ${attachmentStatus.fileName}.` }
+                : attachmentStatus.kind === "failed" || sendNotice !== undefined
+                  ? {
+                      statusMessage: composeComposerNotice(
+                        attachmentStatus.kind === "failed" ? attachmentStatus.message : sendNotice,
+                        props.controller.draftStagedDropped,
+                        props.controller.draftPersistError,
+                      ),
+                    }
+                  : composerNoticeProps(
                       props.controller.draftStagedDropped,
                       props.controller.draftPersistError,
-                    ),
-                  }
-                : composerNoticeProps(
-                    props.controller.draftStagedDropped,
-                    props.controller.draftPersistError,
-                  )
-          : { sendDisabledReason: "Choose an available provider and model before sending." })}
-      />
-      <LinkedThreadParallelReviewFlow
-        controller={parallelReview}
-        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-        {...(props.windowCapability === undefined
-          ? {}
-          : { windowCapability: props.windowCapability })}
-      />
-    </section>
+                    )
+            : { sendDisabledReason: "Choose an available provider and model before sending." })}
+        />
+        <LinkedThreadParallelReviewFlow
+          controller={parallelReview}
+          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+          {...(props.windowCapability === undefined
+            ? {}
+            : { windowCapability: props.windowCapability })}
+        />
+      </section>
+    </ThreadConnectionLostContext>
   );
 }
 
