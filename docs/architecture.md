@@ -1279,15 +1279,18 @@ modelId }`, and the model picker is provider-first. Discovery can find
   connection's app-managed tool bridge allowed — into the private
   configuration, where OpenCode appends it after every agent's built-in rules
   (its default agent otherwise allows everything); a launch that names no
-  posture denies all. 2.x offers Code turns only, because project resolution
-  starts Git, which the Chat, Plan, and Work jail refuses. Approvals and
-  questions map through the v2 routes; resume, interruption, and tool activity
-  are reported; a file change that no allowed or approved edit preceded fails
-  the turn; and anything not mapped fails closed. The probe also asks the
-  confined 2.x server to answer for a directory carrying a Git marker, made in
-  the launch's own scratch directory because every launch profile denies the
-  host temporary directory beneath `/private`; a runtime that cannot answer
-  (observed with 2.0.22 on macOS as HTTP 500) reports `incompatible` with its
+  posture denies all. Project resolution starts Git, which the Chat, Plan, and
+  Work jail refuses; on macOS those launches get the failing `git` stand-in
+  described under [Security and authority](#security-and-authority), so 2.x
+  offers turns in every mode there; on Linux the probe fails closed and the
+  runtime is listed without turns. Approvals and questions map through the v2
+  routes; resume, interruption, and tool activity are reported; a file change
+  that no allowed or approved edit preceded fails the turn; and anything not
+  mapped fails closed. The probe also asks the confined 2.x server to answer
+  for a directory carrying a Git marker, made in the launch's own scratch
+  directory because every launch profile denies the host temporary directory
+  beneath `/private`; a runtime that cannot answer (observed with 2.0.22 on
+  macOS as HTTP 500 without the stand-in) reports `incompatible` with its
   models listed and every capability unsupported, and no turn is offered. fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable; see
   [fx-acp-compatibility.md](fx-acp-compatibility.md) and
