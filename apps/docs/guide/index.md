@@ -71,6 +71,16 @@ listening**. The card refreshes about every five seconds while the window is
 showing, and not at all when it is hidden or turned off. When the window shows
 another computer's work, the row names that computer.
 
+Above the composer, two tabs sit on its top-left edge: **New task**, which is the
+composer, and **Running**, with the number of threads running now (the same
+number the sidebar's Running tile shows). Running lists every running row, not
+just five, each with **Open** and **Stop**. Stop asks "Stop this turn?" first,
+or "Stop this agent run?" on an agent run's row; choose **Stop** to end it or
+**Keep running** to leave it. Switching tabs never
+loses what you were typing: the draft, Project, and model are kept while you
+look. The tabs work from the keyboard: arrow keys move between them, and Enter
+chooses.
+
 **Needs you** comes first and appears only while an agent is waiting on you. It
 lists every approval and question across your Projects, oldest first: the
 provider mark, the thread's title, how long it has waited, and what it asked.

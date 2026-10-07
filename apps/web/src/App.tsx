@@ -435,11 +435,13 @@ import type {
   ThreadProviderIdentity,
 } from "./shell/navigationModel";
 import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
+import { RunningTab } from "./home/RunningTab";
+import { stopRunningRow } from "./home/stopRunningRow";
 import { createRunningServicesCard } from "./home/RunningServicesCard";
 import { buildReviewEntries, type ReviewEntry } from "./review/reviewModel";
 import { createReviewSource } from "./review/reviewSource";
 import type { ReviewActionOutcome, ReviewPageProps } from "./review/ReviewPage";
-import { createWorkingNowCard } from "./home/WorkingNowCard";
+import { createWorkingNowCard, type WorkingNowCardSource } from "./home/WorkingNowCard";
 import { createNeedsYouCard } from "./home/NeedsYouCard";
 import { createPullRequestsCard } from "./home/PullRequestsCard";
 import {
@@ -4202,6 +4204,34 @@ function LaunchedShell(
     machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
   // The card list is rebuilt each render and is cheap: each card's own rows are
   // memoized from the inputs above, which keep their identity between renders.
+  const workingNowSource: WorkingNowCardSource = {
+    agentRunClient,
+    boardFacts: workingNowBoardFacts,
+    ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
+    modes: workingNowModes,
+    now: minuteNow.getTime(),
+    onOpenRow: (row) => {
+      pluginSidebarDestinationActionContext.closeOverlays();
+      if (row.mode === "chat") selectChatThread(row.threadId);
+      else if (row.mode === "work") selectWorkThread(row.threadId);
+      else selectCodeThread(row.threadId);
+    },
+    // The same place the sidebar's Running tile goes: Chat has no board, so
+    // its running threads lead the Activity feed instead.
+    onOpenRunning: () => {
+      if (activeMode === "chat") {
+        openSidebarList("activity");
+        return;
+      }
+      pluginSidebarDestinationActionContext.closeOverlays();
+      pluginSidebarDestinationActionContext.openThreadBoard();
+    },
+    projectNames: workingNowProjectNames,
+    providers: workingNowProviders,
+    runRevision:
+      machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation,
+    threads: workingNowThreads,
+  };
   const homeCards = [
     createNeedsYouCard({
       answerClients: { chatClient, codeClient, workRequestClient },
@@ -4221,36 +4251,7 @@ function LaunchedShell(
       threadProviders: needsYouThreadProviders,
       workspace: controller.workspace,
     }),
-    createWorkingNowCard({
-      agentRunClient,
-      boardFacts: workingNowBoardFacts,
-      ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
-      modes: workingNowModes,
-      now: minuteNow.getTime(),
-      onOpenRow: (row) => {
-        pluginSidebarDestinationActionContext.closeOverlays();
-        if (row.mode === "chat") selectChatThread(row.threadId);
-        else if (row.mode === "work") selectWorkThread(row.threadId);
-        else selectCodeThread(row.threadId);
-      },
-      // The same place the sidebar's Running tile goes: Chat has no board, so
-      // its running threads lead the Activity feed instead.
-      onOpenRunning: () => {
-        if (activeMode === "chat") {
-          openSidebarList("activity");
-          return;
-        }
-        pluginSidebarDestinationActionContext.closeOverlays();
-        pluginSidebarDestinationActionContext.openThreadBoard();
-      },
-      projectNames: workingNowProjectNames,
-      providers: workingNowProviders,
-      runRevision:
-        machineChanges.chatNavigation +
-        machineChanges.workNavigation +
-        machineChanges.codeNavigation,
-      threads: workingNowThreads,
-    }),
+    createWorkingNowCard(workingNowSource),
     createRunningServicesCard({
       client: runningServicesClient,
       ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
@@ -4286,12 +4287,26 @@ function LaunchedShell(
       },
     }),
   ];
+  // The Running tab lists the card's own rows and shows the sidebar's own
+  // Running count, so the three never disagree.
+  const composerTabs = {
+    runningCount: sidebarTileCounts.running,
+    running: (
+      <RunningTab
+        onStop={(row) =>
+          stopRunningRow({ agentRunClient, chatClient, codeClient, workTurnClient }, row)
+        }
+        source={workingNowSource}
+      />
+    ),
+  };
   const homeStart: DraftThreadWorkspaceProps["homeStart"] =
     activeMode === "chat"
       ? {
           reviewCount: 0,
           runningCount: 0,
           cards: homeCards,
+          composerTabs,
           cardCustomization: controller.settings.homeCards,
           onCardCustomizationChange: (homeCardChoice) =>
             void controller.updateSettings({ homeCards: homeCardChoice }),
@@ -4309,6 +4324,7 @@ function LaunchedShell(
                 : runningThreadCount(workProjectThreads),
             onReview: openReview,
             cards: homeCards,
+            composerTabs,
             cardCustomization: controller.settings.homeCards,
             onCardCustomizationChange: (homeCardChoice) =>
               void controller.updateSettings({ homeCards: homeCardChoice }),

@@ -394,6 +394,16 @@ Zen, the only place one lives. Work offers the same tiles without a terminal,
 because Work has no shell. Review opens the Review page. The tiles leave when they
 have nothing to show.
 
+Above the composer, the two start-screen tabs (**New task**, **Running** with
+the sidebar's count as tabular meta text) use the plain-text underline tabs
+(`surface-tabs`) on the composer's top-left edge. They never wrap, and the
+selected tab is carried by ink and the underline, with no fill or hue. The
+Running tab's body is one hairline-ringed list on the card fill: each row is the
+Working now row face with **Open** and **Stop** ghost buttons at the extra-small
+step, and the stop question takes its own line under the row with a destructive
+**Stop** and a ghost **Keep running**. See
+[Workspace](docs/design/workspace.md#start-screen-cards) for behavior.
+
 The card area is a ghost **Customize** button right-aligned under the tiles
 (icon at the 14px step and the label), then a grid of cards, two columns and one
 under 560px. A card uses the card recipe (`OctantCard`: hairline ring, no

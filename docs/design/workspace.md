@@ -243,6 +243,32 @@ the host cannot scan, the card says it could not check rather than that nothing
 is running, and a refused refresh keeps the last listing. A window with no Code
 Project sees an empty card.
 
+Above the composer the same screens carry two tabs on its top-left edge,
+**New task** and **Running**. New task is selected first and is the composer as
+it was: the Running tab never takes the focus the composer takes on arrival. The
+Running label carries the sidebar's own Running count for the current mode, read
+from the same place as the tile (nothing is added at zero), so the two cannot
+disagree; the list can run longer by an agent run whose thread is resting, which
+the sidebar does not count either. The tabs are a tablist: Arrow keys move
+between them, Enter or Space chooses, and Tab goes on to the composer. Choosing
+Running hides the composer without unmounting it, so the draft, the chosen
+Project, model, and attachments are all there when New task comes back; the list
+mounts, and reads, only while it is open. It shows the Working now rows
+without the five-row limit, compact, each with **Open** (the thread, as a Working
+now row does) and **Stop**. A start screen has no thread open, and the
+navigation rows carry no turn or attempt identity, so Stop sends the command its
+mode already uses for the Stop control inside the thread (interrupt a Chat
+attempt, cancel a Work turn, cancel a Code provider turn, or cancel an agent run
+for a row that is only a run). Chat and Work first read the thread's running
+turn and send nothing when there is none. Code has no turn to name: its host
+cancels only the turn it is running for that thread and answers a cancel it had
+no turn for with a failed turn state and no reason, which counts as nothing
+running. It asks first, in the row: "Stop this turn?" ("Stop this agent run?"
+on a row that is only a run) with **Stop** and **Keep running**, the safe
+answer holding the focus. In every mode a turn that finished
+meanwhile is reported ("Already finished.") and never cancelled twice, and a
+host refusal shows in the row in the host's words. The tabs and list add no persisted state or authority.
+
 **Needs you** is the card before Working now, on by default. It lists the
 approvals and questions a provider is waiting on, from one host list of every
 approval and question this window can answer across Chat, Work, and Code and
