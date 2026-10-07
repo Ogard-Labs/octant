@@ -1287,10 +1287,14 @@ modelId }`, and the model picker is provider-first. Discovery can find
   turns outside Plan only, because project resolution starts Git, which every
   jail that denies process execution refuses: Chat, Work, and Plan. Approvals
   map through 2.0.22's `permission.asked` event and its reply route, whose
-  body is `{decision}`; a 2.x reject settles every pending request in the
-  session, so each settled request is forgotten. Questions are unsupported:
-  2.0.22 serves no question routes and asks through forms, which are not
-  mapped, so a question fails the turn. Resume, interruption, and tool
+  body is `{decision}`. An approval is answered `once`, never `always`, even
+  when approvals are remembered for the Project: `always` would save a grant
+  in OpenCode's data directory, which it shares with the person's own use,
+  outside Octant's revocation. A 2.x reject settles every pending request in
+  the session, so each settled request is forgotten. Questions are
+  unsupported: 2.0.22 serves no question routes and asks through forms, which
+  are not mapped, so the written posture denies `question` and a form that
+  still arrives fails the turn. Resume, interruption, and tool
   activity are reported; a file change that no allowed or approved edit
   preceded fails the turn; and anything not mapped fails closed. The probe also asks the
   confined 2.x server to answer for a directory carrying a Git marker, made in

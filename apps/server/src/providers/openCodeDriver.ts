@@ -1783,9 +1783,15 @@ function makeConnection(
                       activeClient.replyPermission(
                         source,
                         input.requestId,
+                        // On 2.x `always` saves a project grant in OpenCode's
+                        // own data directory, shared with the person's OpenCode
+                        // use, outside Octant's revocation, and it also settles
+                        // other pending requests it covers. Octant keeps its
+                        // own remembered approvals, so 2.x is only answered once.
                         input.approved
-                          ? (options.permissionPersistence?.() ?? "current-session") ===
-                            "project-default"
+                          ? runtimeKind !== "beta" &&
+                            (options.permissionPersistence?.() ?? "current-session") ===
+                              "project-default"
                             ? "always"
                             : "once"
                           : "reject",
@@ -1994,6 +2000,13 @@ function mapAndOffer(
   },
 ): void {
   if (state.terminal) return;
+  // 2.0.22 asks its questions through forms, which are not mapped; a turn
+  // waiting on an unanswerable form would hang, so it fails instead.
+  if (beta !== undefined && String(event.type) === "form.created") {
+    offer(unmappedBetaFailure(state, instanceId, clock, "OpenCode 2 questions are not mapped."));
+    retire(state);
+    return;
+  }
   // A 2.x reject settles every pending request in the session, observed with
   // 2.0.22, and each settled request is announced. Forget each one so a later
   // answer to it is refused as not pending instead of failing at the server.
@@ -2229,8 +2242,9 @@ export function betaAgentPermissionRules(
 
 /**
  * The whole 2.x ruleset a process serves, in the same order as the 1.x
- * session ruleset: the posture, then every namespaced tool and skill denied,
- * then only this connection's app-managed tool bridge allowed.
+ * session ruleset: the posture, then every namespaced tool, skill, and
+ * question denied, then only this connection's app-managed tool bridge
+ * allowed. These come after the posture's catch-all so they still apply.
  */
 export function betaSessionPermissionRules(
   policy: ProviderExecutionPolicy,
@@ -2241,6 +2255,9 @@ export function betaSessionPermissionRules(
     ...betaAgentPermissionRules(policy, mode),
     { action: "*_*", resource: "*", effect: "deny" },
     { action: "skill", resource: "*", effect: "deny" },
+    // 2.0.22's question tool asks for this permission and then publishes a
+    // form, which Octant does not map; its default agent allows it.
+    { action: "question", resource: "*", effect: "deny" },
   ];
   if (managedToolServerName !== undefined) {
     rules.push({ action: `${managedToolServerName}_*`, resource: "*", effect: "allow" });
@@ -2341,9 +2358,15 @@ export function providerFailure(error: unknown): ProviderFailure {
 }
 
 export function sourceSessionId(event: Event): string | undefined {
-  const properties = event.properties as { readonly sessionID?: unknown };
+  const properties = event.properties as {
+    readonly sessionID?: unknown;
+    readonly form?: { readonly sessionID?: unknown };
+  };
   if (typeof properties.sessionID === "string" && properties.sessionID.length > 0)
     return properties.sessionID;
+  // 2.0.22 publishes `form.created` with the session inside the form.
+  const formSession = properties.form?.sessionID;
+  if (typeof formSession === "string" && formSession.length > 0) return formSession;
   // Earlier runtimes put the session identity inside the message or part.
   const nested =
     event.type === "message.part.updated"
