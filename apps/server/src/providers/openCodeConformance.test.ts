@@ -95,6 +95,7 @@ describe("OpenCode provider conformance", () => {
       },
       replyPermission: async () => undefined,
       replyQuestion: async () => undefined,
+      deleteSession: async () => undefined,
     };
     const driver = makeOpenCodeDriver({
       instanceId,
@@ -658,6 +659,7 @@ function makeBetaHarnessDriver(
     },
     replyPermission: async () => undefined,
     replyQuestion: async () => undefined,
+    deleteSession: async () => undefined,
   };
   return {
     isReleased: () => released,

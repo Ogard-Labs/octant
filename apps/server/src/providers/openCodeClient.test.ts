@@ -461,6 +461,34 @@ describe("official OpenCode client routing", () => {
     expect(requests[0]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
   });
 
+  it("deletes a 2.x session through the v2 session route", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        requests.push(request.clone());
+        return new Response(null, { status: 204 });
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode v2.0.22",
+        url: new URL("http://127.0.0.1:41731/"),
+      },
+      "/tmp/project",
+    );
+    await client.deleteSession("ses_1");
+    expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
+      ["DELETE", "/api/session/ses_1"],
+    ]);
+    expect(requests[0]?.headers.get("authorization")).toBe("Basic redacted");
+    expect(requests[0]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
+  });
+
   it("sends a flat prompt body to the 2.x session prompt route", async () => {
     const requests: Request[] = [];
     vi.stubGlobal(

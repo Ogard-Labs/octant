@@ -62,6 +62,8 @@ export interface OpenCodeClientPort {
     readonly model?: { readonly providerId: string; readonly modelId: string };
   }) => Promise<OpenCodeSessionRecord>;
   readonly getSession: (sessionId: string) => Promise<OpenCodeSessionRecord>;
+  /** Removes a session and its history from the provider's own store. */
+  readonly deleteSession: (sessionId: string) => Promise<void>;
   readonly prompt: (input: {
     readonly sessionId: string;
     readonly providerId: string;
@@ -630,6 +632,31 @@ export function makeOfficialOpenCodeClient(
             ),
           )
         : resultData(await client.session.get({ sessionID: sessionId }, { throwOnError: true })),
+    deleteSession: async (sessionId) => {
+      if (!beta) {
+        await client.session.delete(
+          { sessionID: sessionId, directory: projectRoot },
+          { throwOnError: true, signal: AbortSignal.timeout(10_000) },
+        );
+        return;
+      }
+      // The pinned SDK 1.18.0 has no v2 session delete; 2.0.22 serves
+      // `DELETE /api/session/{sessionID}` and answers 204.
+      const response = await fetch(
+        new URL(`/api/session/${encodeURIComponent(sessionId)}`, server.url).toString(),
+        {
+          method: "DELETE",
+          headers: {
+            authorization: server.authorization,
+            "x-opencode-directory": encodeURIComponent(projectRoot),
+          },
+          signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`OpenCode 2 session delete failed with status ${response.status}.`);
+      }
+    },
     prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [], permission }) => {
       if (beta) {
         await client.v2.session.switchModel(
@@ -829,6 +856,16 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                             permission: [{ permission: "*", pattern: "*", action: "ask" }],
                           }),
                         ).pipe(
+                          // OpenCode keeps sessions in the data directory it
+                          // shares with the person's own use, where its auth
+                          // lives too. Remove the attestation session; a
+                          // failed delete leaves one empty session behind and
+                          // does not change what the create attested.
+                          Effect.tap((session) =>
+                            Effect.promise(() =>
+                              markerClient.deleteSession(session.id).catch(() => undefined),
+                            ),
+                          ),
                           Effect.as(true),
                           Effect.orElseSucceed(() => false),
                         );

@@ -1294,7 +1294,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   closed. The probe also asks the confined 2.x server to answer for a
   directory carrying a Git marker, made in the launch's own scratch directory
   because every launch profile denies the host temporary directory beneath
-  `/private`. A runtime that cannot answer (observed
+  `/private`; it attests by creating a session there and then deletes that
+  session, best effort, because OpenCode keeps sessions in the data directory
+  it shares with the person's own use and their provider credentials. A
+  failed delete leaves one empty session and does not change the result. A
+  runtime that cannot answer (observed
   with 2.0.22 on macOS as HTTP 500 without the stand-in) reports
   `incompatible` with its models listed and every capability unsupported, and
   no turn is offered. fx runs in a per-instance managed

@@ -1326,6 +1326,27 @@ describe("OpenCode driver", () => {
     expect(existsSync(marker ?? "")).toBe(false);
   });
 
+  it("deletes the session it created to attest a 2.x Git work tree", async () => {
+    const fixture = betaDriver();
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("ready");
+    expect(fixture.calls).toContain("session.delete:provider-session");
+  });
+
+  it("keeps a 2.x attestation when deleting its session fails, and deletes nothing it did not create", async () => {
+    const leftBehind = betaDriver({ sessionDelete: "refused" });
+    const ready = await Effect.runPromise(Effect.scoped(leftBehind.driver.probe({ instanceId })));
+    expect(ready.readiness).toBe("ready");
+    expect(leftBehind.calls).toContain("session.delete:provider-session");
+
+    const refused = betaDriver({ worktreeSessionCreate: "refused" });
+    const incompatible = await Effect.runPromise(
+      Effect.scoped(refused.driver.probe({ instanceId })),
+    );
+    expect(incompatible.readiness).toBe("incompatible");
+    expect(refused.calls.some((call) => call.startsWith("session.delete:"))).toBe(false);
+  });
+
   it("lists a 2.x runtime without offering turns when its launch reports no readable scratch directory", async () => {
     const fixture = betaDriver({ launchScratch: "unreported" });
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
@@ -1822,6 +1843,7 @@ function betaDriver(
   options: {
     readonly worktreeProviders?: "refused";
     readonly worktreeSessionCreate?: "refused";
+    readonly sessionDelete?: "refused";
     readonly events?: ReadonlyArray<Event>;
     readonly launchScratch?: "unreported";
   } = {},
@@ -1879,6 +1901,8 @@ function driverFixture(
     readonly worktreeProviders?: "refused";
     /** The confined server refuses session create for a directory inside a Git work tree. */
     readonly worktreeSessionCreate?: "refused";
+    /** The server refuses to delete a session. */
+    readonly sessionDelete?: "refused";
   } = {},
 ) {
   const calls: string[] = [];
@@ -1981,6 +2005,10 @@ function driverFixture(
     },
     replyQuestion: async (_sessionId, _id, answers) => {
       calls.push(`question.reply:${answers.join("|")}`);
+    },
+    deleteSession: async (id) => {
+      calls.push(`session.delete:${id}`);
+      if (options.sessionDelete === "refused") throw new Error("session delete -> 500");
     },
   };
   return {
