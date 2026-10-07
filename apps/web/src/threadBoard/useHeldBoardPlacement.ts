@@ -1,5 +1,8 @@
 import { useState, type PointerEvent } from "react";
 
+/** The card slots a hold pins to their height, in the column and list layouts. */
+const CARD_SLOTS = ".board-col-body > li, .issuelist > li";
+
 interface HeldCard {
   readonly threadId: unknown;
 }
@@ -22,6 +25,11 @@ interface HeldColumn<TCard extends HeldCard> {
  * joins the end of its column, so nothing already on screen shifts. Leaving the
  * board applies the host's placement.
  *
+ * Each slot also keeps at least the height it had when the pointer arrived:
+ * an answered card loses its request row on the next read, and a card that
+ * shrinks pulls the one below it up under the cursor just as a re-sort does
+ * (seen live: the next card rose 84px after an Approve).
+ *
  * Touch has no hover, so the hold never starts for it and the board behaves as
  * the host reports. Keyboard users never point, so the same holds for them.
  */
@@ -31,7 +39,7 @@ export function useHeldBoardPlacement<TCard extends HeldCard, TColumn extends He
   readonly columns: ReadonlyArray<TColumn>;
   readonly pointerHandlers: {
     readonly onPointerEnter: (event: PointerEvent) => void;
-    readonly onPointerLeave: () => void;
+    readonly onPointerLeave: (event: PointerEvent) => void;
   };
 } {
   const [held, setHeld] = useState<ReadonlyArray<TColumn> | undefined>(undefined);
@@ -40,9 +48,13 @@ export function useHeldBoardPlacement<TCard extends HeldCard, TColumn extends He
     pointerHandlers: {
       onPointerEnter: (event) => {
         if (event.pointerType === "touch") return;
+        pinSlotHeights(event.currentTarget);
         setHeld((current) => current ?? columns);
       },
-      onPointerLeave: () => setHeld(undefined),
+      onPointerLeave: (event) => {
+        releaseSlotHeights(event.currentTarget);
+        setHeld(undefined);
+      },
     },
   };
 }
@@ -77,4 +89,20 @@ function holdPlacement<TCard extends HeldCard, TColumn extends HeldColumn<TCard>
       cards: column.cards.filter((card) => !heldIds.has(String(card.threadId))),
     }));
   return [...placed, ...unseen];
+}
+
+// The slots carry no React style of their own, so setting it here is never
+// overwritten by a render and is cleared exactly when the hold ends.
+function pinSlotHeights(board: EventTarget): void {
+  if (!(board instanceof HTMLElement)) return;
+  for (const slot of board.querySelectorAll<HTMLElement>(CARD_SLOTS)) {
+    if (slot.style.minHeight === "") slot.style.minHeight = `${String(slot.offsetHeight)}px`;
+  }
+}
+
+function releaseSlotHeights(board: EventTarget): void {
+  if (!(board instanceof HTMLElement)) return;
+  for (const slot of board.querySelectorAll<HTMLElement>(CARD_SLOTS)) {
+    slot.style.minHeight = "";
+  }
 }

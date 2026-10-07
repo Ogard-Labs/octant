@@ -16,7 +16,7 @@ function Board(props: { readonly columns: ReadonlyArray<Column> }) {
   return (
     <div data-testid="board" {...held.pointerHandlers}>
       {held.columns.map((column) => (
-        <ul aria-label={column.key} key={column.key}>
+        <ul aria-label={column.key} className="board-col-body" key={column.key}>
           {column.cards.map((card) => (
             <li key={card.threadId}>{`${card.threadId}: ${card.line}`}</li>
           ))}
@@ -67,6 +67,29 @@ describe("useHeldBoardPlacement", () => {
 
     fireEvent.pointerLeave(screen.getByTestId("board"), { pointerType: "mouse" });
     expect(listed("waiting")).toEqual(["b: asking"]);
+  });
+
+  it("keeps each card at least as tall as it was while the pointer is on the board", () => {
+    // jsdom lays nothing out, so give every slot the height a real card had.
+    const height = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get: () => 120,
+    });
+    try {
+      render(<Board columns={[waiting(card("a"), card("b"))]} />);
+      const slots = () =>
+        Array.from(screen.getByRole("list", { name: "waiting" }).querySelectorAll("li"));
+
+      fireEvent.pointerEnter(screen.getByTestId("board"), { pointerType: "mouse" });
+      expect(slots().map((slot) => slot.style.minHeight)).toEqual(["120px", "120px"]);
+
+      fireEvent.pointerLeave(screen.getByTestId("board"), { pointerType: "mouse" });
+      expect(slots().map((slot) => slot.style.minHeight)).toEqual(["", ""]);
+    } finally {
+      if (height !== undefined)
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", height);
+    }
   });
 
   it("adds a newly listed card to the end of its column without moving the others", () => {
