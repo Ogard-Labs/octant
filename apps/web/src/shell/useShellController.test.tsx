@@ -824,6 +824,24 @@ describe("useShellController", () => {
     ).toHaveLength(1);
   });
 
+  it("opens the thread Browser again when the person asks for it, even for an announced session", async () => {
+    const openDockBrowser = vi.fn(() => true);
+    const { result, threadId } = await readyBoundCodeShell(windowId, { openDockBrowser });
+    const paneId = firstPane(result.current.workspace!.layouts.code).paneId;
+    const sessionIds = ["30000000-0000-4000-8000-000000000001"];
+
+    await act(async () =>
+      result.current.revealBrowserActivity({ paneId, threadId: String(threadId), sessionIds }),
+    );
+    await act(async () =>
+      result.current.revealBrowserActivity({ paneId, threadId: String(threadId), sessionIds }),
+    );
+    expect(openDockBrowser).toHaveBeenCalledOnce();
+
+    await act(async () => result.current.openThreadBrowser({ paneId, threadId: String(threadId) }));
+    expect(openDockBrowser).toHaveBeenCalledTimes(2);
+  });
+
   it("does not reopen the same session after the thread returns to the pane", async () => {
     const { result, server, threadId } = await readyBoundCodeShell();
     const paneId = firstPane(result.current.workspace!.layouts.code).paneId;
