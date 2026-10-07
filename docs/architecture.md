@@ -293,7 +293,7 @@ data and creates no artifact.
 schema version 4. An older runtime refuses a version-4 document as a future
 version and does not report it corrupt.
 The pure `canvasInlineRefusal` policy admits `inline` only for at most 12 blocks
-with no `diagram`, `plan` or `mockup`. When an author asks for `inline` over
+with no `diagram`, `plan`, `mockup` or `design`. When an author asks for `inline` over
 that bound, the host records `sidebar` and returns the reason as
 `presentationNote`.
 A revise without a choice keeps the current presentation.
@@ -454,6 +454,31 @@ stamps that author (and a resolve's or delete's actor) itself and ignores the
 actor the request names, so a renderer can never author a comment as an agent. Shared
 snapshots serialise the definition and so never carry comments
 ([decisions/0052-canvas-boards.md](decisions/0052-canvas-boards.md)).
+
+A `design` block (Canvas schema version 9) is the one block whose content is
+markup: the frames of one design at one size, `phone` (390×844), `tablet`
+(820×1180), `desktop` (1440×900), or `slide` (1920×1080), each a page of
+static HTML, plus one shared stylesheet. The renderer draws each frame in an
+`iframe` with an empty `sandbox` and a `srcdoc` page whose policy loads nothing
+but inline styles and `data:` images and fonts, on top of the app policy the
+page inherits. No script runs, nothing submits, and the page has no access to
+Octant. Frames link by fragment; Play draws every frame in one page so a link
+shows its frame through `:target`, and the renderer writes each fragment
+against the page's own address because a `srcdoc` page resolves a bare one
+against its parent. The pure `canvasDesignMarkupRefusal` policy refuses a
+script, an event handler, an embedded document, a remote image, stylesheet,
+or font, and any link that is not a fragment, naming the frame and the
+construct; the event store and revise policy return that reason to the
+author rather than a generic failure. The sandbox is the boundary and the
+link rule is part of it, because a link is the one way a page with no script
+can leave. A static share refuses a design, and Markdown or HTML export writes
+frame titles, not markup. A design is always a sidebar Canvas. An authored
+revision declares the current schema version on the version and its
+definition, so a Canvas written under an earlier version moves forward and can
+gain a design; a version append never moves a Canvas back. Agents writing
+a design can be silent for minutes while composing the tool call, so Chat and Work
+wait five minutes for a provider event before cutting a turn off, as Code does
+([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
 
 The local-server provider adapter owns a separate process for each acquired
 connection and allows one live session per connection. Its MCP protocol does

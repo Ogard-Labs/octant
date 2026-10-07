@@ -24,7 +24,11 @@ import {
   type EventEnvelope,
   type UtcTimestamp,
 } from "@octant/contracts";
-import { assertCanvasCreate, assertCanvasVersionAppend } from "@octant/domain";
+import {
+  assertCanvasCreate,
+  assertCanvasVersionAppend,
+  CanvasPolicyRejected,
+} from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict, DuplicateEventIdentity } from "../persistence/journalErrors";
@@ -145,8 +149,11 @@ export class CanvasEventStore {
       eventId = decodeEventId(this.#uuid());
       correlationId = decodeCorrelationId(this.#uuid());
       payload = decodeCanvasCreated({ canvasId, version });
-    } catch {
-      throw new CanvasEventStoreError("invalid", "Canvas create append is invalid.");
+    } catch (error) {
+      throw new CanvasEventStoreError(
+        "invalid",
+        policyReason(error, "Canvas create append is invalid."),
+      );
     }
 
     let committed;
@@ -202,8 +209,11 @@ export class CanvasEventStore {
       if (next.sequence !== expectedVersion + 1) {
         throw new Error("version sequence must be one greater than expected head");
       }
-    } catch {
-      throw new CanvasEventStoreError("invalid", "Canvas version append is invalid.");
+    } catch (error) {
+      throw new CanvasEventStoreError(
+        "invalid",
+        policyReason(error, "Canvas version append is invalid."),
+      );
     }
 
     let committed;
@@ -504,4 +514,13 @@ function isCanvasAggregate(envelope: EventEnvelope, canvasId: CanvasId): boolean
     envelope.aggregateType === CANVAS_AGGREGATE_TYPE &&
     String(envelope.aggregateId) === String(canvasId)
   );
+}
+
+/**
+ * A policy refusal names what the author wrote wrong, such as a design frame
+ * with a script; the author can only fix it if the reason reaches them. Any
+ * other failure keeps the generic message.
+ */
+function policyReason(error: unknown, fallback: string): string {
+  return error instanceof CanvasPolicyRejected ? error.message : fallback;
 }

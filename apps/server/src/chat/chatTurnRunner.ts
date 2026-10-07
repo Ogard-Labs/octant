@@ -48,8 +48,11 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
 const DEFAULT_MAX_EVENTS = 4_096;
 // Inactivity window: a turn is cut off after this long without any provider
-// event, not after this much total wall time.
-const DEFAULT_IDLE_TIMEOUT_MS = 2 * 60_000;
+// event, not after this much total wall time. A provider can stay silent while
+// the model writes one long tool call: Codex sent nothing for over two minutes
+// while a model wrote a three-screen Canvas design, so Chat waits as long as
+// Code does.
+const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 // A question record holds at most this many options, matching the attempt
 // contract; longer option lists are cut, not refused.
 const MAX_ATTEMPT_QUESTION_OPTIONS = 8;

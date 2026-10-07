@@ -10,6 +10,8 @@ import {
   CANVAS_MAX_HEATMAP_DAYS,
   CANVAS_MAX_HEATMAP_NOTE_LENGTH,
   CANVAS_MAX_HEATMAP_ROWS,
+  CANVAS_MAX_DESIGN_FRAMES,
+  CANVAS_MAX_DESIGN_MARKUP_LENGTH,
   CANVAS_MAX_IMAGES,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MINDMAP_NOTE_LENGTH,
@@ -31,6 +33,7 @@ import {
   CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
+  CANVAS_DESIGN_SCHEMA_VERSION,
   CanvasBlock,
   CanvasDefinition,
   CanvasVersion,
@@ -39,6 +42,7 @@ import {
   decodeCanvasVersion,
   type CanvasSourceId,
 } from "@octant/contracts/canvas";
+import { canvasDesignMarkupRefusal, canvasDesignStylesheetRefusal } from "./canvasDesignPolicy";
 
 const encoder = new TextEncoder();
 
@@ -53,6 +57,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_BAR_LIST_SCHEMA_VERSION,
+  CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -68,6 +73,7 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "er", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
     { kind: "swimlane", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
     { kind: "mindmap", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
+    { kind: "design", since: CANVAS_DESIGN_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -124,6 +130,10 @@ export type CanvasPolicyRejectionCode =
   | "heatmap-cells-budget-exceeded"
   | "heatmap-days-budget-exceeded"
   | "heatmap-note-budget-exceeded"
+  | "design-frame-budget-exceeded"
+  | "design-markup-budget-exceeded"
+  | "duplicate-design-frame-id"
+  | "design-markup-refused"
   | "bar-list-rows-budget-exceeded"
   | "duplicate-bar-list-label"
   | "bar-list-negative-value"
@@ -336,7 +346,8 @@ function calculateBudgetUsage(
 /**
  * A document a newer runtime declared with a version this runtime has never
  * seen — either a future schema version or a version-gated field (a mockup
- * block from version 3, a thread presentation from version 4) inside a
+ * block from version 3, a thread presentation from version 4, a treemap from
+ * version 5, a heatmap from version 6, a design block from version 7) inside a
  * document that declares an older version — must fail closed as an
  * unsupported schema version, before any content is read, rather than
  * collapsing into a generic "corrupt" decode failure. Works on both a
@@ -436,6 +447,8 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       columns?: unknown;
       cells?: unknown;
       days?: unknown;
+      frames?: unknown;
+      styles?: unknown;
       sparkline?: unknown;
     };
     if (block.kind === "image") imageCount += 1;
@@ -469,6 +482,26 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       }
       if (Array.isArray(edges) && edges.length > CANVAS_MAX_DIAGRAM_EDGES) {
         return "edge-budget-exceeded";
+      }
+    }
+    if (block.kind === "design") {
+      if (Array.isArray(block.frames) && block.frames.length > CANVAS_MAX_DESIGN_FRAMES) {
+        return "design-frame-budget-exceeded";
+      }
+      if (
+        typeof block.styles === "string" &&
+        block.styles.length > CANVAS_MAX_DESIGN_MARKUP_LENGTH
+      ) {
+        return "design-markup-budget-exceeded";
+      }
+      if (Array.isArray(block.frames)) {
+        for (const frame of block.frames) {
+          if (typeof frame !== "object" || frame === null) continue;
+          const html = (frame as { html?: unknown }).html;
+          if (typeof html === "string" && html.length > CANVAS_MAX_DESIGN_MARKUP_LENGTH) {
+            return "design-markup-budget-exceeded";
+          }
+        }
       }
     }
     if (block.kind === "er") {
@@ -683,10 +716,41 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "swimlane") validateSwimlane(block);
     if (block.kind === "mindmap") validateMindmap(block);
     if (block.kind === "mockup") validateMockup(block);
+    if (block.kind === "design") validateDesign(block);
     if (block.kind === "treemap") validateTreemap(block);
     if (block.kind === "heatmap") validateHeatmap(block);
     if (block.kind === "bar-list") validateBarList(block);
     if (block.kind === "metric") validateMetric(block);
+  }
+}
+
+/**
+ * Frames are linked by id, so two frames sharing one would make a link land
+ * on whichever came first. Markup a sandboxed frame could not draw as written
+ * is refused with the reason, so the author can fix it rather than ship a
+ * broken screen.
+ */
+function validateDesign(block: Extract<CanvasBlock, { readonly kind: "design" }>): void {
+  if (block.styles !== undefined) {
+    const refusal = canvasDesignStylesheetRefusal(block.styles);
+    if (refusal !== undefined) {
+      reject("design-markup-refused", `Canvas design ${block.blockId} stylesheet ${refusal}`);
+    }
+  }
+  const frameIds = new Set<string>();
+  for (const frame of block.frames) {
+    const id = String(frame.frameId);
+    if (frameIds.has(id)) {
+      reject(
+        "duplicate-design-frame-id",
+        `Canvas design ${block.blockId} has two frames with the id ${id}.`,
+      );
+    }
+    frameIds.add(id);
+    const refusal = canvasDesignMarkupRefusal(frame.html);
+    if (refusal !== undefined) {
+      reject("design-markup-refused", `Canvas design ${block.blockId} frame ${id} ${refusal}`);
+    }
   }
 }
 
