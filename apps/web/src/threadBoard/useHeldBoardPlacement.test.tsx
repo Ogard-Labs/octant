@@ -41,11 +41,7 @@ describe("useHeldBoardPlacement", () => {
     const { rerender } = render(<Board columns={[waiting(card("a"), card("b")), progress()]} />);
     fireEvent.pointerEnter(screen.getByTestId("board"), { pointerType: "mouse" });
 
-    rerender(
-      <Board
-        columns={[waiting(card("b")), progress(card("a", "working"))]}
-      />,
-    );
+    rerender(<Board columns={[waiting(card("b")), progress(card("a", "working"))]} />);
 
     expect(listed("waiting")).toEqual(["a: working", "b: asking"]);
     expect(listed("in-progress")).toEqual([]);
