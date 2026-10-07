@@ -18,43 +18,91 @@ export interface SpendCeilingLimits {
   readonly costBudgetUsdCents?: number;
 }
 
-function positiveInteger(text: string): number | undefined {
-  const value = Number.parseInt(text, 10);
-  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+/**
+ * What the form says once it is read. A field that is filled but cannot be
+ * read refuses the whole form: setting the other budgets and dropping that one
+ * would set a different ceiling than the person typed.
+ */
+export type SpendCeilingLimitsReading =
+  | { readonly status: "ready"; readonly limits: SpendCeilingLimits }
+  | { readonly status: "refused"; readonly message: string };
+
+type FieldReading =
+  | { readonly status: "blank" }
+  | { readonly status: "read"; readonly value: number }
+  | { readonly status: "refused"; readonly message: string };
+
+function wholeNumber(text: string, refusal: string): FieldReading {
+  const trimmed = text.trim();
+  if (trimmed === "") return { status: "blank" };
+  const value = /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN;
+  return Number.isSafeInteger(value) && value > 0
+    ? { status: "read", value }
+    : { status: "refused", message: refusal };
 }
 
 /** Hours may be fractional ("1.5"); the budget is whole seconds. */
-function runTimeSeconds(text: string): number | undefined {
-  const hours = Number.parseFloat(text);
-  if (!Number.isFinite(hours) || hours <= 0) return undefined;
-  const seconds = Math.round(hours * 3_600);
-  return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : undefined;
+function runTimeSeconds(text: string): FieldReading {
+  const trimmed = text.trim();
+  if (trimmed === "") return { status: "blank" };
+  const refused = {
+    status: "refused",
+    message: "Hours of agent run time must be a number, for example 1.5.",
+  } as const;
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) return refused;
+  const seconds = Math.round(Number(trimmed) * 3_600);
+  return Number.isSafeInteger(seconds) && seconds > 0
+    ? { status: "read", value: seconds }
+    : refused;
 }
 
 /**
  * Dollars ("25", "25.4", "$25.40") as whole cents. A money budget is whole
- * cents on the host, so a figure with finer precision sets no budget rather
- * than a rounded one the person did not type.
+ * cents on the host, so finer precision is refused rather than rounded, and a
+ * comma is refused rather than guessed at: nothing else in Octant reads a
+ * locale's decimal separator, and "25,40" could mean either.
  */
-function usdCents(text: string): number | undefined {
-  const match = /^\$?\s*(\d+)(?:\.(\d{1,2}))?$/.exec(text.trim());
-  if (match === null) return undefined;
-  const cents = Number(match[1] ?? "0") * 100 + Number((match[2] ?? "").padEnd(2, "0"));
-  return Number.isSafeInteger(cents) && cents > 0 ? cents : undefined;
+function usdCents(text: string): FieldReading {
+  const trimmed = text.trim();
+  if (trimmed === "") return { status: "blank" };
+  if (trimmed.includes(",")) {
+    return { status: "refused", message: "Use a dot for cents in US dollars, for example 25.40." };
+  }
+  if (/^\$?\s*\d+\.\d{3,}$/.test(trimmed)) {
+    return {
+      status: "refused",
+      message: "A money budget is whole cents: use at most two decimals, for example 25.40.",
+    };
+  }
+  const match = /^\$?\s*(\d+)(?:\.(\d{1,2}))?$/.exec(trimmed);
+  const cents =
+    match === null
+      ? Number.NaN
+      : Number(match[1] ?? "0") * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  return Number.isSafeInteger(cents) && cents > 0
+    ? { status: "read", value: cents }
+    : { status: "refused", message: "US dollars must be an amount, for example 25 or 25.40." };
 }
 
 /** The budgets a person filled in; blank fields set no dimension. */
-export function spendCeilingLimits(input: SpendCeilingLimitInput): SpendCeilingLimits {
-  const tokenBudget = positiveInteger(input.tokens);
-  const turnBudget = positiveInteger(input.turns);
-  const runTimeBudgetSeconds = runTimeSeconds(input.hours);
-  const costBudgetUsdCents = usdCents(input.dollars);
-  return {
-    ...(tokenBudget === undefined ? {} : { tokenBudget }),
-    ...(turnBudget === undefined ? {} : { turnBudget }),
-    ...(runTimeBudgetSeconds === undefined ? {} : { runTimeBudgetSeconds }),
-    ...(costBudgetUsdCents === undefined ? {} : { costBudgetUsdCents }),
+export function spendCeilingLimits(input: SpendCeilingLimitInput): SpendCeilingLimitsReading {
+  const tokens = wholeNumber(input.tokens, "Tokens must be a whole number, for example 200000.");
+  const turns = wholeNumber(input.turns, "Turns must be a whole number, for example 40.");
+  const hours = runTimeSeconds(input.hours);
+  const dollars = usdCents(input.dollars);
+  for (const field of [tokens, turns, hours, dollars]) {
+    if (field.status === "refused") return field;
+  }
+  const limits: SpendCeilingLimits = {
+    ...(tokens.status === "read" ? { tokenBudget: tokens.value } : {}),
+    ...(turns.status === "read" ? { turnBudget: turns.value } : {}),
+    ...(hours.status === "read" ? { runTimeBudgetSeconds: hours.value } : {}),
+    ...(dollars.status === "read" ? { costBudgetUsdCents: dollars.value } : {}),
   };
+  if (Object.keys(limits).length === 0) {
+    return { status: "refused", message: "Enter at least one budget." };
+  }
+  return { status: "ready", limits };
 }
 
 function tighter(

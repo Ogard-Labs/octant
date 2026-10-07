@@ -63,7 +63,13 @@ export function ProjectSpendCeilingSection(props: {
   const refusal = snapshot?.refusal;
 
   async function submit(kind: "set" | "raise" | "clear"): Promise<void> {
-    const limits = spendCeilingLimits({ tokens: budget, turns, hours, dollars });
+    const reading =
+      kind === "clear" ? undefined : spendCeilingLimits({ tokens: budget, turns, hours, dollars });
+    if (reading?.status === "refused") {
+      setMessage(reading.message);
+      return;
+    }
+    const limits = reading?.limits ?? {};
     const expectedVersion = decodeAggregateVersion(version);
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const command =

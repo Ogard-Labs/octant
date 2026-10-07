@@ -216,7 +216,13 @@ function SpendCeilingControls(props: {
 
   async function submit(kind: "set" | "raise" | "clear"): Promise<void> {
     if (scope === undefined) return;
-    const limits = spendCeilingLimits({ tokens: budget, turns, hours, dollars });
+    const reading =
+      kind === "clear" ? undefined : spendCeilingLimits({ tokens: budget, turns, hours, dollars });
+    if (reading?.status === "refused") {
+      setMessage(reading.message);
+      return;
+    }
+    const limits = reading?.limits ?? {};
     const expectedVersion = decodeAggregateVersion(version);
     const command =
       kind === "clear"

@@ -142,7 +142,11 @@ describe("ProjectSpendCeilingSection", () => {
     expect(screen.getByText(/checked between turns/i)).toBeVisible();
   });
 
-  it("refuses to round a money budget finer than a cent", async () => {
+  it.each([
+    ["25.405", "use at most two decimals"],
+    ["25,40", "Use a dot for cents"],
+    ["twenty", "must be an amount"],
+  ])("refuses a money budget of %s and sets nothing, saying why", async (dollars, reason) => {
     const user = userEvent.setup();
     const execute = vi.fn();
     const snapshot = vi.fn().mockResolvedValue({});
@@ -153,10 +157,26 @@ describe("ProjectSpendCeilingSection", () => {
       />,
     );
     await screen.findByText(/No spend ceiling is set on this Project/i);
-    await user.type(screen.getByLabelText("Project money ceiling in US dollars"), "25.405");
+    await user.type(screen.getByLabelText("Project money ceiling in US dollars"), dollars);
     await user.type(screen.getByLabelText("Project turn ceiling"), "10");
     await user.click(screen.getByRole("button", { name: "Set Project ceiling" }));
-    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ policy: { turnBudget: 10 } }));
+    expect(execute).not.toHaveBeenCalled();
+    expect(await screen.findByRole("alert")).toHaveTextContent(reason);
+  });
+
+  it("asks for a budget instead of sending an empty ceiling", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn();
+    render(
+      <ProjectSpendCeilingSection
+        client={{ snapshot: vi.fn().mockResolvedValue({}), execute } as never}
+        projectId="00000000-0000-4000-8000-000000000201"
+      />,
+    );
+    await screen.findByText(/No spend ceiling is set on this Project/i);
+    await user.click(screen.getByRole("button", { name: "Set Project ceiling" }));
+    expect(execute).not.toHaveBeenCalled();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter at least one budget.");
   });
 
   it("shows the Project's unpriced money refusal instead of an empty reading", async () => {
