@@ -43,9 +43,14 @@ Connection Check probes readiness without sending a prompt.
 
 Where a provider runtime supports OAuth or subscription login, Octant
 delegates that login to the provider's own CLI or SDK. Octant never
-stores, refreshes, or journals those tokens. Auto-registration of a
-detected local runtime never enables the provider, never stores
-credentials, and never logs in.
+stores, refreshes, or journals those tokens, with one exception you opt
+into: if you choose **Connect Claude for helpers**, Octant keeps the
+long-lived token Claude's own `claude setup-token` prints in its credential
+store and hands it only to the confined Claude runtime that signs in with it,
+which presents it to Anthropic. See the
+[privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it).
+Auto-registration of a detected local runtime never enables the provider,
+never stores credentials, and never logs in.
 
 The session that follows still runs on your host against that provider's
 runtime. The provider remains a party you brought, not a party Octant
@@ -83,7 +88,9 @@ makes on its own, or because you asked, are different relationships:
 - **Gravatar** is contacted only if you press the profile button after
   typing an address.
 - **Git remotes, GitHub, browser destinations, and remote clients** are
-  endpoints you pointed Octant at.
+  endpoints you pointed Octant at. That includes a Canvas export to a GitHub
+  Gist: once you approve it, GitHub receives the exported Markdown as the
+  account you approved. See [Privacy notice](/advanced/privacy-notice#destinations-you-choose).
 
 Whether any of those parties is a processor, a sub-processor, or neither
 is a legal question this draft does not close. The product fact is that

@@ -10,7 +10,8 @@ analytics, crash reporting, or cloud dependency** by default, and no
 credential storage inside the event store.
 
 Most network traffic is yours to configure: provider API requests for Chat,
-Work, and Code, and remote access when you enable pairing. Two HTTPS calls
+Work, and Code, a Canvas export to a GitHub Gist that you approve, and remote
+access when you enable pairing. Two HTTPS calls
 Octant makes on its own behalf are the exception: [update checks](/guide/installation#updates)
 and [marketplace fetches](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 Neither is a telemetry channel. This page states the posture of those two
@@ -85,8 +86,9 @@ Provider credentials are write-only and stored as **indirect references in
 the macOS Keychain** — never returned to the interface, never journaled,
 never placed in process arguments, never exported, and never included in
 diagnostics. Provider OAuth and subscription login are delegated to the
-provider's own runtime; those tokens are never stored, rendered, exported,
-or journaled. Secrets Octant holds for an integration follow the same
+provider's own runtime, and Octant does not store, render, export, or journal
+those logins, with one opt-in exception described below: Claude for helpers.
+Secrets Octant holds for an integration follow the same
 Keychain path: the host keeps an opaque reference, plugins and the
 interface never receive the raw token, and nothing is journaled, exported,
 or included in diagnostics. Remote keys, session secrets, and raw headers
@@ -99,6 +101,24 @@ immediately after reading it, the ticket is in-memory only with a five-minute
 TTL, and the secret never enters the database, journal, logs, exports,
 screenshots, or diagnostics. See [Remote access](/advanced/remote-access)
 for the full lifecycle.
+
+**Claude for helpers** is the one provider sign-in Octant keeps, and only if
+you connect it under **Settings → Providers → Claude Code**. A Plan turn and
+every Chat subagent runs confined, away from the keychain where Claude keeps
+its subscription sign-in, so Octant runs Claude's own `claude setup-token` on
+this host after one browser approval and stores the long-lived token it
+prints in the credential store, under that provider, behind an opaque
+reference. The token reaches only the confined Claude runtime started for that
+provider, as `CLAUDE_CODE_OAUTH_TOKEN` in that launch's environment until the
+launch ends; inside the launch it has the reach an API key given to a launch
+has. Turns that are not confined, and every other provider, never receive it.
+The settings route returns state only, never the token, and only a window on
+the host can connect or disconnect. Octant never logs it, places it in a process argument, journals it,
+exports it, or includes it in diagnostics. **Disconnect**, or removing the
+provider, deletes it from the store. That removes Octant's copy only: Octant
+cannot revoke the token with Anthropic. The
+[privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it)
+states what is stored, where, and who receives it.
 
 ## Approvals
 
@@ -157,7 +177,7 @@ identity. See [Remote access](/advanced/remote-access) for the full model.
 ## Host-initiated network
 
 These two calls are the only traffic Octant originates without a provider,
-remote listener, or other integration you turned on.
+remote listener, approved export, or other integration you turned on.
 
 ### Update checks
 

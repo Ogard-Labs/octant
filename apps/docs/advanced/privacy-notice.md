@@ -43,6 +43,10 @@ On the host, Octant holds:
   and authorizes nothing.
 - **Credential references** — opaque Keychain pointers, never the secret
   values.
+- **Secrets in the credential store** — the API keys you entered and, only
+  if you connected it, the Claude for helpers token. They sit in the macOS
+  Keychain (the Secret Service on Linux) behind those references, never in
+  the journal.
 - **Installed extension packages** under the host data directory.
 - **Logs** under the host logs directory.
 
@@ -80,7 +84,41 @@ and capabilities without sending a prompt. See
 [Sub-processors](/advanced/sub-processors).
 
 Provider OAuth and subscription login stay in the provider's own runtime.
-Octant never stores, refreshes, or journals those tokens.
+Octant never stores, refreshes, or journals those tokens, with one exception
+you opt into:
+[Claude for helpers](#claude-for-helpers-only-if-you-connect-it).
+
+### Claude for helpers, only if you connect it
+
+Claude Code on a Claude subscription signs in through Claude's own runtime,
+and Octant never holds that login. A Plan turn, and every Chat subagent, runs
+confined, away from the keychain where that login lives.
+**Settings → Providers → Claude Code → Connect Claude for helpers** gives
+those runs a sign-in of their own. It is the one provider token Octant
+stores, and it exists only if you press the button.
+
+- **What is stored.** The long-lived token that Claude's own
+  `claude setup-token` prints after you approve once in a browser window.
+  Octant runs that command on this Mac and reads the token from memory, so
+  you never copy it. It is never logged, placed in a process argument, or
+  written to the journal, an export, or diagnostics.
+- **Where.** In the host's credential store — the macOS Keychain, or the
+  Secret Service on Linux — under that Claude Code provider, reached through
+  the credential broker by an opaque reference. Settings shows whether the
+  token is connected, connecting, or expired, never the token.
+- **Who receives it.** Only the confined Claude runtime that Octant starts
+  for a Plan turn or Chat subagent on that provider. The token reaches it as
+  the `CLAUDE_CODE_OAUTH_TOKEN` environment variable for as long as that
+  launch lives, and the runtime presents it to Anthropic to sign in. Turns
+  that are not confined, and every other provider, never receive it, and no
+  Octant-operated service does.
+- **How to remove it.** Press **Disconnect**, or remove the Claude Code
+  provider; either deletes the token from the credential store. A token
+  Claude refuses is replaced by an expired marker, and Settings asks you to
+  connect again. Only a window on this Mac can connect or disconnect; a
+  paired device cannot. Removing it deletes Octant's copy only. Octant cannot
+  revoke the token with Anthropic, so the token itself stays valid there
+  until it expires or is revoked outside Octant.
 
 ### Update checks
 
@@ -142,9 +180,23 @@ gravatar.com again on its own.
 ### Destinations you choose
 
 Git remotes, GitHub when a Project is connected, browser and computer-use
-destinations, and remote access you enable are traffic you pointed Octant
-at. Remote access is off by default. See
+destinations, a Canvas export to a GitHub Gist, and remote access you enable
+are traffic you pointed Octant at. Remote access is off by default. See
 [Remote access](/advanced/remote-access).
+
+A Canvas export to a GitHub Gist publishes content to GitHub. It posts the
+rendered Markdown of one Canvas, with the Canvas title as the gist
+description, to github.com through the GitHub connection this host already
+has; Octant never reads that token. Nothing is sent until you approve a card
+that shows the exact text, the GitHub account it posts as, and who can see
+it. **Secret**, the default, is unlisted: it appears on no profile and in no
+search, but anyone with the link can read it. **Public** is readable by
+anyone on the internet. The text passes the same check as every other
+export, so absolute paths and secret-shaped values are refused rather than
+posted. The journal keeps the receipt, the gist's address and id. Octant
+does not delete a gist afterward; take it down on GitHub. A folder export
+makes no network call. See
+[Export a Canvas or artifact](/guide/export#export-to-a-github-gist).
 
 ## What never leaves
 
@@ -220,6 +272,12 @@ by opaque reference. They are never returned to the interface, never
 journaled, never placed in process arguments, never exported, and never
 included in diagnostics. Headless or non-macOS sessions report Keychain
 cleanup as not integrated rather than writing secrets to disk.
+
+The Claude for helpers token, if you connect one, is held the same way and
+is never returned to the interface, journaled, exported, or included in
+diagnostics. See
+[Claude for helpers](#claude-for-helpers-only-if-you-connect-it) for who
+receives it and how to remove it.
 
 ## Next steps
 

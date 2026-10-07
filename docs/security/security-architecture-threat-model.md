@@ -51,7 +51,8 @@ implementation backlog this design gates; nothing here weakens an existing contr
 - The bound Work project root and Code repository root (filesystem contents and integrity).
 - Provider credentials and OAuth sessions (Keychain / secret-store material as
   opaque broker refs; never journaled, never rendered). Delegated provider-runtime
-  OAuth stays out of Octant storage (0005); host-driven `subscription-oauth`
+  OAuth stays out of Octant storage (0005), except the opt-in Claude for helpers
+  token held as a broker ref (see the confined-runtime notes below); host-driven `subscription-oauth`
   refresh and access live only as 0054 broker refs (0111).
 - Host identity keys, remote device credentials, and pairing secrets.
 - The append-only event journal: integrity of recorded tool calls, approvals, and authority
@@ -366,7 +367,9 @@ window, or approves an action class the host policy reserves for the local user.
   the confined launch can read the token from the runtime's environment, which is the same reach
   an API-key launch already gives its key; the token is scoped to inference, and a refused token
   is marked expired rather than retried. Disconnect, or removing that Claude Code provider, deletes
-  it from the broker; an API-key launch never reads the envelope as its key.
+  it from the broker; Octant has no call that revokes it with Anthropic, so a copy taken from a
+  launch's environment stays valid there until it expires or is revoked outside Octant. An
+  API-key launch never reads the envelope as its key.
 - Vibe disables its keyring lookup in the confined launch and receives its Mistral API key through
   Octant's `api-key` authentication instead.
 - **Version reads are confined; three readiness probes are not.** Every `--version` read prepares
