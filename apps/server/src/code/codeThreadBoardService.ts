@@ -83,9 +83,14 @@ export interface CodeBoardRuntimeSource {
  * different — restart reconciliation marks every non-provider work interrupted
  * because its process is gone, so only the latest provider turn can hold the
  * thread in Waiting from that state.
+ *
+ * `turnParkedOnPerson` is the live-turn fact that the latest running turn is
+ * waiting on an approval or a question; it files the thread Waiting instead of
+ * In progress until the agent shows progress again.
  */
 export function boardRuntimeActivityFromWorks(
   works: ReadonlyArray<ProjectedCodeRuntimeWork>,
+  live: { readonly turnParkedOnPerson?: boolean } = {},
 ): CodeBoardRuntimeActivity {
   // The latest turn is the one that started last, read from the durable
   // chronology the projection assigns each record. `updatedAt` cannot answer
@@ -102,8 +107,18 @@ export function boardRuntimeActivityFromWorks(
   const contributing = works.filter(
     (entry) => entry.work.kind !== "provider-turn" || entry === latestTurn,
   );
-  const executing = contributing.some((entry) => entry.work.state === "running");
-  const asking = contributing.some((entry) => entry.work.state === "waiting");
+  // A turn waiting on an approval or a question keeps its `running` record:
+  // the provider session is still open, so the work journal cannot tell it
+  // from a turn that is thinking. The live-turn registry can, and a parked
+  // turn is owed by the person, not executing.
+  const parked =
+    live.turnParkedOnPerson === true &&
+    latestTurn !== undefined &&
+    latestTurn.work.state === "running";
+  const executing = contributing.some(
+    (entry) => entry.work.state === "running" && !(parked && entry === latestTurn),
+  );
+  const asking = parked || contributing.some((entry) => entry.work.state === "waiting");
   const unconfirmed = contributing.some((entry) => entry.work.state === "ambiguous");
   const awaitingInput = asking || unconfirmed;
   const interrupted = latestTurn !== undefined && latestTurn.work.state === "interrupted";

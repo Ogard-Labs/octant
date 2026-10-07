@@ -5222,7 +5222,10 @@ export function startOctantServer(
           metadata: codeThreadMetadataService,
           runtime: {
             observe: (threadId) =>
-              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId)),
+              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
+                turnParkedOnPerson:
+                  liveTurns.read(String(threadId))?.liveStep?.kind === "waiting",
+              }),
           },
           pullRequests: {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
