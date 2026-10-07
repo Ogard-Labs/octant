@@ -127,6 +127,16 @@ export function TableBlock({ block }: { readonly block: TableBlockShape }) {
   };
 
   const toggleColumn = (columnId: ColumnId) => {
+    // Hiding the sorted column also drops the sort: its header carries the only
+    // aria-sort and sort mark, so a hidden sort would order rows unexplained.
+    const hiding = !hidden.has(columnId) && block.columns.length - hidden.size > 1;
+    if (hiding) {
+      setSort((current) =>
+        current !== undefined && String(current.columnId) === String(columnId)
+          ? undefined
+          : current,
+      );
+    }
     setHidden((current) => {
       const next = new Set(current);
       if (next.has(columnId)) {

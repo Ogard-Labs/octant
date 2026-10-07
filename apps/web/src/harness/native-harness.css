@@ -60,6 +60,13 @@
   margin-top: 0.5rem;
 }
 
+.native-harness-candidate__tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .native-harness-card {
   display: flex;
   flex-direction: column;
@@ -124,6 +131,18 @@
 
 .native-harness-card__facts dd {
   margin: 0;
+}
+
+.native-harness-card__facts dd.native-harness-card__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.native-harness-card__stats [data-hinted="true"] {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 
 .native-harness-card__list {

@@ -4,6 +4,7 @@ import type {
   ProviderInstanceId,
   ProviderModelId,
   ProviderRuntimeEvent,
+  ProviderSessionId,
   ProviderToolDefinition,
   ProviderToolImage,
   ProviderTurnInput,
@@ -79,6 +80,12 @@ export type NativeHarnessStreamEvent =
 
 /** Everything one model request is made of. */
 export interface NativeHarnessRequest {
+  /**
+   * The harness session's stable identity. A provider that caches by request
+   * routes on it, so every step of one conversation reaches the same cache
+   * while a different session never shares one.
+   */
+  readonly sessionId: ProviderSessionId;
   readonly modelId: ProviderModelId;
   /** Stable instructions, sent where the protocol keeps a system prompt so its cache survives. */
   readonly system: string | undefined;

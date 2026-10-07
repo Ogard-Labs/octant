@@ -1226,6 +1226,20 @@ describe("metric validation", () => {
     expect(() => validateCanvasDefinition(withBlocks([metric()]))).not.toThrow();
   });
 
+  it("refuses the new metric fields inside a document declaring an older schema version", () => {
+    // A sparkline, a direction, and a caption arrived at version 7; a v6
+    // document carrying one fails closed as a declared future version.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION,
+          blocks: [metric({ schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION })],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
   it("rejects a sparkline longer than the budget", () => {
     expectPolicyCode(
       () =>

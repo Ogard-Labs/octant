@@ -6,7 +6,7 @@ import type {
   UtcTimestamp,
 } from "@octant/contracts";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
-import { resolveLocalUsageCost, type PricingUsageRecord } from "./localUsagePricing";
+import { resolveLocalUsageCost, type PricingUsageRecord } from "@octant/domain/local-usage-pricing";
 
 interface CodexUsageSnapshot {
   readonly inputTokens: number;

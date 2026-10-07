@@ -92,6 +92,8 @@ export interface AnthropicMessagesTurnInput {
   /** A stable system prompt, sent as a cached system block when present. */
   readonly system?: string;
   readonly tools?: readonly ProviderToolDefinition[];
+  /** "required" makes the model answer with a tool call; a capability probe needs that. */
+  readonly toolChoice?: "auto" | "required";
   /** Answers to the previous turn's tool calls, when this request continues a tool loop. */
   readonly toolAnswers?: readonly ProviderToolAnswer[];
   readonly sequenceStart?: number;
@@ -101,6 +103,20 @@ export interface AnthropicMessagesTurnInput {
 }
 
 const DEFAULT_MAX_TOKENS = 8192;
+
+/**
+ * The one breakpoint shape Anthropic serves an unchanged prefix from. A
+ * request may carry at most four; the system block holds one and the moving
+ * message breakpoint holds one more, well inside the limit.
+ */
+const EPHEMERAL_CACHE_CONTROL = { type: "ephemeral" } as const;
+
+/** One message as the Messages API reads it: text, or an array of blocks. */
+interface AnthropicWireMessage {
+  readonly role: "user" | "assistant";
+  content: string | AnthropicContentBlock[];
+}
+type AnthropicContentBlock = Record<string, unknown>;
 
 interface StreamState {
   accepted: boolean;
@@ -133,10 +149,17 @@ interface TrackedContentBlock {
 export function buildAnthropicMessagesBody(
   input: Pick<
     AnthropicMessagesTurnInput,
-    "modelId" | "history" | "prompt" | "system" | "tools" | "toolAnswers" | "maxTokens"
+    | "modelId"
+    | "history"
+    | "prompt"
+    | "system"
+    | "tools"
+    | "toolChoice"
+    | "toolAnswers"
+    | "maxTokens"
   >,
 ): Record<string, unknown> {
-  const messages: Record<string, unknown>[] = [];
+  const messages: AnthropicWireMessage[] = [];
   for (const entry of input.history) {
     if (entry.toolResults !== undefined && entry.toolCalls === undefined) {
       messages.push({
@@ -167,8 +190,13 @@ export function buildAnthropicMessagesBody(
       ],
     });
   }
+  // The history ends at the newest stable message; the prompt or tool answers
+  // that follow it are this request's new, unstable tail. Marking the last
+  // history message each step lets the next step read everything so far from
+  // cache without ever changing an earlier message.
+  markCacheBreakpoint(messages);
   const answers = input.toolAnswers ?? [];
-  const finalContent: Record<string, unknown>[] = [
+  const finalContent: AnthropicContentBlock[] = [
     ...answers.map((answer) => ({
       type: "tool_result",
       tool_use_id: answer.requestId,
@@ -190,7 +218,7 @@ export function buildAnthropicMessagesBody(
       : {
           // The system prompt is the stable prefix; marking it lets the
           // endpoint serve it from cache on every following turn.
-          system: [{ type: "text", text: input.system, cache_control: { type: "ephemeral" } }],
+          system: [{ type: "text", text: input.system, cache_control: EPHEMERAL_CACHE_CONTROL }],
         }),
     messages,
     max_tokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
@@ -203,8 +231,31 @@ export function buildAnthropicMessagesBody(
             ...(tool.description === undefined ? {} : { description: tool.description }),
             input_schema: tool.inputSchema,
           })),
+          ...(input.toolChoice === "required" ? { tool_choice: { type: "any" } } : {}),
         }),
   };
+}
+
+/**
+ * Marks the last message of the stable history so the endpoint caches
+ * everything up to it. Each turn the breakpoint moves to the newest stable
+ * message and later requests read the earlier prefix from cache; the new
+ * prompt or tool answers that follow it stay unmarked. Anthropic allows four
+ * breakpoints per request, so the system block plus this one is well inside
+ * the limit.
+ */
+function markCacheBreakpoint(messages: AnthropicWireMessage[]): void {
+  const last = messages.at(-1);
+  if (last === undefined) return;
+  if (typeof last.content === "string") {
+    // A plain-text message must become a block to carry the breakpoint.
+    if (last.content.length === 0) return;
+    last.content = [{ type: "text", text: last.content, cache_control: EPHEMERAL_CACHE_CONTROL }];
+    return;
+  }
+  const block = last.content.at(-1);
+  if (block === undefined) return;
+  last.content[last.content.length - 1] = { ...block, cache_control: EPHEMERAL_CACHE_CONTROL };
 }
 
 function parseArguments(argumentsJson: string): unknown {

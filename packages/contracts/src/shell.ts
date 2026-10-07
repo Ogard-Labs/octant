@@ -231,6 +231,49 @@ export const SidebarDestinationCustomization = Schema.Struct({
 export type SidebarDestinationCustomization = typeof SidebarDestinationCustomization.Type;
 
 /**
+ * A card on the Work and Code start screens. An open vocabulary on purpose:
+ * the renderer's card registry owns which cards exist, so adding a card never
+ * touches this contract, and a card an older client does not know is simply
+ * ignored by it.
+ */
+export const HomeCardId = Schema.String.pipe(
+  Schema.pattern(/^[a-z][a-z0-9-]*$/),
+  Schema.maxLength(48),
+);
+export type HomeCardId = typeof HomeCardId.Type;
+
+export const HomeCardPreference = Schema.Struct({
+  id: HomeCardId,
+  visible: Schema.Boolean,
+}).annotations(strict);
+export type HomeCardPreference = typeof HomeCardPreference.Type;
+
+/** More than any registry will hold; keeps a hostile or corrupt store bounded. */
+export const MAX_HOME_CARDS = 32;
+
+/**
+ * How the person reordered and switched the start-screen cards. `order` lists
+ * cards in the requested order; cards it does not name follow in the
+ * registry's own order. A visibility entry exists only where the person moved
+ * away from a card's default, so a card shipped later arrives with its own
+ * default instead of being switched off by an old choice.
+ */
+export const HomeCardCustomization = Schema.Struct({
+  order: Schema.Array(HomeCardId).pipe(Schema.maxItems(MAX_HOME_CARDS)),
+  visibility: Schema.Array(HomeCardPreference).pipe(Schema.maxItems(MAX_HOME_CARDS)),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (customization) =>
+        new Set(customization.order).size === customization.order.length &&
+        new Set(customization.visibility.map((entry) => entry.id)).size ===
+          customization.visibility.length,
+    ),
+  );
+export type HomeCardCustomization = typeof HomeCardCustomization.Type;
+
+/**
  * Which of the facts a sidebar thread row can carry beside its title are
  * shown, for one sidebar view.
  *
@@ -561,6 +604,20 @@ export const ShellSettings = Schema.Struct({
     default: () => "narrow" as const,
   }),
   showThreadProviderIcons: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
+   * Whether the quiet stats line (tokens, cache hit, speed, first-token time,
+   * cost) sits under the composer of every thread. Off hides only the line:
+   * the per-turn detail stays reachable from the context meter. A store
+   * persisted before the line shipped decodes to on.
+   */
+  showThreadStats: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
+   * Which start-screen cards show and in what order, per device. A store
+   * persisted before the cards shipped decodes to the registry's own defaults.
+   */
+  homeCards: Schema.optionalWith(HomeCardCustomization, {
+    default: () => ({ order: [], visibility: [] }),
+  }),
   /**
    * Which facts each sidebar view's thread rows show. A store persisted before
    * this shipped decodes to each view's own defaults — exactly what those rows

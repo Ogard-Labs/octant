@@ -66,6 +66,9 @@ export function TreemapBlock({
   const [colorBy, setColorBy] = useState(() => String(block.colorBy));
   const [focusId, setFocusId] = useState(() => startingFocus(block, rootId));
   const [activeId, setActiveId] = useState<string | undefined>(undefined);
+  // The cell whose Open file control is offered. It outlives the hover so the
+  // pointer can travel from the cell to the control without it unmounting.
+  const [offeredId, setOfferedId] = useState<string | undefined>(undefined);
   const [anchor, setAnchor] = useState<ChartTooltipAnchor | undefined>(undefined);
   const [sort, setSort] = useState<TreemapSort | undefined>(undefined);
 
@@ -128,7 +131,8 @@ export function TreemapBlock({
     const rect = rectById.get(nodeId);
     if (rect === undefined) return;
     setActiveId(nodeId);
-    setAnchor(anchorFor(block, nodeId, rect));
+    setOfferedId(nodeId);
+    setAnchor(anchorFor(block, nodeId, rect, totalsByMeasure));
   };
 
   const moveActive = (delta: number) => {
@@ -151,6 +155,7 @@ export function TreemapBlock({
     if (parent === undefined) return;
     setFocusId(parent);
     setActiveId(undefined);
+    setOfferedId(undefined);
     setAnchor(undefined);
   };
 
@@ -158,6 +163,7 @@ export function TreemapBlock({
     if ((childrenOf.get(nodeId)?.length ?? 0) === 0) return;
     setFocusId(nodeId);
     setActiveId(undefined);
+    setOfferedId(undefined);
     setAnchor(undefined);
   };
 
@@ -194,9 +200,9 @@ export function TreemapBlock({
   }));
 
   const activeLeaf =
-    activeId === undefined
+    offeredId === undefined
       ? undefined
-      : block.nodes.find((node) => String(node.nodeId) === activeId);
+      : block.nodes.find((node) => String(node.nodeId) === offeredId);
   const activeSource =
     activeLeaf !== undefined && activeLeaf.sourceId !== undefined && actionRuntime !== undefined
       ? { leaf: activeLeaf, sourceId: String(activeLeaf.sourceId) }
@@ -236,6 +242,7 @@ export function TreemapBlock({
         onFocus={(nodeId) => {
           setFocusId(nodeId);
           setActiveId(undefined);
+          setOfferedId(undefined);
           setAnchor(undefined);
         }}
       />
@@ -335,11 +342,14 @@ function anchorFor(
   block: CanvasTreemapBlock,
   nodeId: string,
   rect: CanvasTreemapRect,
+  totals: ReadonlyMap<string, ReadonlyMap<string, number>>,
 ): ChartTooltipAnchor {
   const path = treemapPath(block, nodeId);
+  // A group has no reading of its own; the keyboard reaches groups, so the
+  // tooltip reads the same summed totals the disclosed table shows.
   const readings = block.measures
     .map((measure) => {
-      const value = treemapLeafReading(block, nodeId, String(measure.measureId));
+      const value = totals.get(String(measure.measureId))?.get(nodeId) ?? 0;
       return `${measure.label}: ${formatCanvasValue(value, measure.format)}`;
     })
     .join(" · ");

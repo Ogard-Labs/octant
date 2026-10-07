@@ -54,6 +54,13 @@ const DEFAULT_SHELL_TIMEOUT_MS = 120_000;
 const GOAL_CHECK_TIMEOUT_MS = 600_000;
 const MAX_FETCH_TEXT_BYTES = 128 * 1024;
 const DEFAULT_DELEGATE_WAIT_MS = 60_000;
+/**
+ * Read by the model and relayed to the person, so it says what changed rather
+ * than leaving them a bare code. A retry cannot renew the grant; it returns
+ * only when the thread can act again.
+ */
+const STALE_AUTHORITY_MESSAGE =
+  "This thread can no longer use tools: it was archived or deleted, its folder or Project changed, or its provider was turned off. Do not retry. Tell the person what you would have done, and that they can reopen the thread or start a new one.";
 
 export interface NativeHarnessShellRun {
   readonly status: "ran" | "timed-out" | "cancelled" | "unavailable";
@@ -302,7 +309,7 @@ export function createNativeHarnessTools(
       return refused("invalid-tool-input", `The ${name} arguments do not match the tool's schema.`);
     }
     const authority = options.resolveAuthority();
-    if (authority === undefined) return refused("tool-authority-stale");
+    if (authority === undefined) return refused("tool-authority-stale", STALE_AUTHORITY_MESSAGE);
     const capabilityId = nativeHarnessToolCapabilityId(name);
     // The command a person approves is fixed here, before any wait, and is
     // the only one the check may run.
@@ -326,7 +333,7 @@ export function createNativeHarnessTools(
         approval: { kind: "not-required" },
       });
     } catch {
-      return refused("tool-authority-stale");
+      return refused("tool-authority-stale", STALE_AUTHORITY_MESSAGE);
     }
     const decision = options.authority.authorize({
       threadId: options.threadId,
