@@ -1270,11 +1270,18 @@ flowchart LR
   never part of the store learns who the members are and later applies the
   founder's revocations. A founding self-approval counts only as the start of
   such a chain; if the store holds a second founder that also reaches the
-  approver, joining is refused. A pull walks each instance's entries in
-  sequence order from the start, because the sequence is per instance and a
-  host that joins in the middle cannot have seen anything earlier. A member's
-  revocation is an entry the member writes; it is refused for a revoked
-  instance rather than re-admitting it, because re-joining is a new identity.
+  approver, joining is refused. The matching code covers the approver's device
+  key and the founder's id and key as well as the join request: the approver
+  computes it from what it holds and the joining computer from the chain it
+  read, so a chain that someone with write access to the store forged for the
+  approver, or one that starts at a founder they substituted, gives a different
+  code and the confirmation is refused. A confirmation through an approval
+  that a revocation already in the store cuts is refused too, rather than
+  reported as confirmed until the first pull. A pull walks each instance's
+  entries in sequence order from the start, because the sequence is per
+  instance and a host that joins in the middle cannot have seen anything
+  earlier. A member's revocation is an entry the member writes; re-joining is
+  a new identity, never the revoked one back.
 - **Artifact replica store.** A replica-store contribution offers list, get, and
   put-if-absent. put-if-absent returns already-exists and leaves the existing
   bytes unchanged. The store's status is ready, not-connected, or refused. A
@@ -1319,11 +1326,14 @@ flowchart LR
   Each entry is verified against the device key the journal holds for its
   origin; only a join request, the one record a computer that is not yet a
   member may write, is verified against the key it names. A bad or missing
-  signature, an unknown or revoked origin, a new identity carrying a revoked
-  computer's key, a body whose origin is not its path, an unreadable file, or
-  a gap is refused and journaled before anything from that entry is applied,
-  and the walk for that instance stops there. A refusal is journaled once, not
-  on every pull. A sequence a computer has already applied is not read again,
+  signature, an unknown origin, an artifact entry past a cut on its origin, a
+  join request from a new identity carrying a revoked computer's key, a body
+  whose origin is not its path, an unreadable file, or a gap is refused before
+  anything from that entry is applied, and the walk for that instance stops
+  there. A pull walks the logs again while a walk still applies something, so
+  an origin it learns about from a log it reads later is not refused for the
+  order the store listed the logs in; only what is still refused at the end is
+  journaled, and a refusal is journaled once, not on every pull. A sequence a computer has already applied is not read again,
   so a file rewritten in that slot later is ignored, not detected. Anyone who
   can write to the store can also put a file into a member's next free slot
   first: that member's next publish then fails as slot-occupied, and nothing
@@ -1331,23 +1341,36 @@ flowchart LR
   deletes from it. A person recovers by deleting that file with the storage
   provider's own tools, revoking the store credentials that wrote it, or
   moving to a new store. A revoked identity's stopped publish is dropped, not
-  finished. A revocation is
-  a cut: it names the last sequence of the revoked instance that the revoker
-  accepted (what the revoker had read from it, so a person pulls before
-  revoking to keep that computer's earlier approvals). Every entry the revoked
-  instance signed after the cut is refused on every computer, and approvals it
-  made at or before the cut stay valid. Membership is worked out from all the
-  approvals and revocations a computer holds rather than in the order a pull
-  read them: a member is one admitted by an approval its approver signed
-  within every cut on that approver, and a revocation counts when its revoker
-  signed it the same way. When revocations cut each other's revokers, every
-  one that could be valid is honoured, so two computers that revoked each
-  other without seeing the other's record both stay revoked. An entry already
-  applied that falls past a cut read later is refused then, and a computer
-  admitted only through it is not a member. When two members cut the same
-  instance, the earlier cut wins. A revoked computer that joins again does so
-  as a new instance with its own sequence, and a new identity carrying a
-  revoked computer's key is refused. Device signing
+  finished. A revocation is a cut: it names the last sequence of the revoked
+  instance that the revoker holds - what it applied from it, and any approval
+  it holds through the chain it joined by - so the cut never falls before the
+  approval that admitted the revoker. A person still pulls before revoking to
+  keep approvals the revoked computer made that this computer has not read.
+  Every entry the revoked instance signed after the cut stops counting on
+  every computer, and approvals it made at or before the cut stay valid. A
+  pull keeps every approval and revocation that verifies against its origin's
+  key - one past a cut, and an approval of a computer revoked later, included -
+  so the walk of an honest member's log never stops on them. Membership is
+  then worked out from everything a computer holds rather than in the order a
+  pull read it: a member is one admitted by an approval its approver signed
+  within every counted cut on that approver, and when two approvals name the
+  same instance with different keys, the one nearer the founder wins, then the
+  lower approver id and sequence. A revocation never counts when its cut
+  removes its own revoker's admission, or when it answers a revocation by one
+  of its revoker's ancestors - the computer that approved it, up to the
+  founder, along the approvals that admitted each one - by revoking that
+  ancestor: whoever brought a computer in can take it out, and that computer
+  cannot remove it in return. The remaining revocations can cut each other's
+  revokers, and every one that could be valid is honoured, so two computers
+  that are not each other's ancestors and revoked each other without seeing
+  the other's record both stay revoked. An entry applied past a cut is
+  reported refused once, and a computer admitted only through it is not a
+  member. When two members cut the same instance, the earlier cut wins. A
+  revoked computer, or one whose admitting approval a cut removed, joins again
+  as a new instance with its own sequence; a join request from a new identity
+  carrying a revoked computer's key is refused on read and on approve. An
+  approval of such a request that a member wrote before it read the
+  revocation is kept, like any approval. Device signing
   keys live per replica instance in their own namespace of the host credential
   store — a separate macOS Keychain service, `app.octant.replica-device-keys.v1`,
   or a separate Secret Service attribute — reached through the credential

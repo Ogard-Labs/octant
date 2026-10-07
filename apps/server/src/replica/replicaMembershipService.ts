@@ -38,11 +38,13 @@ import {
   buildReplicaJoinMatchingPreimage,
   decideReplicaJoinApproval,
   decideReplicaRevocation,
+  deriveReplicaMembership,
   replicaJoinRequestIsFresh,
-  replicaMembershipAcceptsKey,
   revocationCut,
+  type ReplicaAdmissionRecord,
   type ReplicaJoinRequestFacts,
   type ReplicaMembershipFacts,
+  type ReplicaRevocationRecord,
 } from "@octant/domain/replica-membership-policy";
 import type { ReplicaStore } from "@octant/plugin-api/replica-store";
 import { Schema } from "effect";
@@ -98,24 +100,34 @@ const decodeInstanceId = Schema.decodeUnknownSync(ReplicaInstanceId);
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+/** An instance and the device key it signs with. */
+interface KeyedInstance {
+  readonly instanceId: ReplicaInstanceId;
+  readonly publicKey: string;
+}
+
 /**
  * The six-digit code a person compares between the joining computer and the
  * approving one.
  *
  * It is a SHA-256 digest, reduced to six digits, of the joiner's instance id,
- * name, and device public key, and the approver's instance id. Equal codes mean
- * both screens describe the same join request and the same approver, so a
- * person notices a request from a different computer - or an approval by a
- * different member - before it takes effect. It is not a secret and proves
- * nothing by itself: anyone who can read the store can compute it, and six
- * digits leave room for a party that can also write the store to search keys
- * offline until one collides. What makes the approval authoritative is the
- * joiner's signature on the stored request and the approver's signature on the
- * approval; the code only binds a person's comparison to those two records.
+ * name, and device public key, the approver's instance id and device key, and
+ * the founder's instance id and key. The approver computes it from what it
+ * holds; the joining computer computes it from the chain of signed approvals
+ * it reads from the store. Equal codes mean both screens describe the same
+ * join request, the same approver key, and the same founder, so a person
+ * notices a request from a different computer - or a chain someone with write
+ * access to the store forged for the approver - before it takes effect. It is
+ * not a secret and proves nothing by itself: anyone who can read the store can
+ * compute it, and six digits leave room for a party that can also write the
+ * store to search keys offline until one collides. What makes the approval
+ * authoritative is the signatures on the stored records; the code binds a
+ * person's comparison to them.
  */
 export function deriveReplicaJoinMatchingCode(input: {
   readonly joinRequest: ReplicaMembershipEntry;
-  readonly approverInstanceId: ReplicaInstanceId;
+  readonly approver: KeyedInstance;
+  readonly founder: KeyedInstance;
 }): string {
   const deviceKey = input.joinRequest.subjectDeviceKey;
   if (deviceKey === undefined) {
@@ -130,15 +142,17 @@ export function deriveReplicaJoinMatchingCode(input: {
       subject: input.joinRequest.subject,
       publicKey: deviceKey,
     },
-    input.approverInstanceId,
+    input.approver,
+    input.founder,
   );
 }
 
 function matchingCode(
   joinRequest: ReplicaJoinRequestFacts,
-  approverInstanceId: ReplicaInstanceId,
+  approver: KeyedInstance,
+  founder: KeyedInstance,
 ): string {
-  const preimage = buildReplicaJoinMatchingPreimage({ joinRequest, approverInstanceId });
+  const preimage = buildReplicaJoinMatchingPreimage({ joinRequest, approver, founder });
   const digest = createHash("sha256").update(preimage, "utf8").digest();
   const value = digest.readUInt32BE(0) % 1_000_000;
   return String(value).padStart(6, "0");
@@ -218,8 +232,8 @@ export class ReplicaMembershipService {
     displayName: string,
   ): Promise<ReplicaMembershipOutcome> {
     const state = this.#ports.state();
-    // A revoked identity is finished; starting over is a new identity.
-    if (state.local !== undefined && !isRevoked(state, state.local.instanceId)) {
+    // A finished identity cannot come back; starting over is a new identity.
+    if (state.local !== undefined && !identityFinished(state)) {
       return this.#refuse(
         "create-replica",
         "already-member",
@@ -256,9 +270,11 @@ export class ReplicaMembershipService {
   ): Promise<ReplicaMembershipOutcome> {
     const state = this.#ports.state();
     const local = state.local;
-    // Re-joining after a revocation is a new identity, not the old one back,
-    // so a revoked computer falls through to a fresh instance below.
-    if (local !== undefined && !isRevoked(state, local.instanceId)) {
+    // Re-joining after a revocation, or after a cut removed the approval that
+    // admitted this computer, is a new identity, not the old one back. The old
+    // identity's log may hold entries every reader refuses, and a request
+    // written behind them would never be read.
+    if (local !== undefined && !identityFinished(state)) {
       if (isMember(state, local.instanceId)) {
         return this.#refuse(
           "write-join-request",
@@ -388,7 +404,7 @@ export class ReplicaMembershipService {
         subject,
       );
     }
-    if (keyBelongsToRevoked(state, deviceKey)) {
+    if (keyBelongsToAnotherRevoked(state, deviceKey, subject)) {
       return this.#refuse(
         "approve-join",
         "revoked-instance",
@@ -417,10 +433,16 @@ export class ReplicaMembershipService {
         subject,
       );
     }
-    const expected = deriveReplicaJoinMatchingCode({
-      joinRequest,
-      approverInstanceId: local.instanceId,
-    });
+    const founder = state.founder;
+    if (founder === undefined) {
+      return this.#refuse(
+        "approve-join",
+        "not-a-member",
+        "This computer holds no founder to name in the matching code.",
+        subject,
+      );
+    }
+    const expected = deriveReplicaJoinMatchingCode({ joinRequest, approver: local, founder });
     if (confirmationCode !== expected) {
       return this.#refuse(
         "approve-join",
@@ -464,11 +486,11 @@ export class ReplicaMembershipService {
         approver,
       );
     }
-    if (isRevoked(state, local.instanceId)) {
+    if (identityFinished(state)) {
       return this.#refuse(
         "confirm-join",
         "revoked-instance",
-        "This instance was revoked and cannot rejoin.",
+        "This identity is no longer a member and cannot rejoin; ask to join again.",
         approver,
       );
     }
@@ -485,22 +507,6 @@ export class ReplicaMembershipService {
         "confirm-join",
         "unknown-instance",
         "That computer cannot approve this one.",
-        approver,
-      );
-    }
-    const expected = matchingCode(
-      {
-        origin: { instanceId: local.instanceId, displayName: local.displayName },
-        subject: local.instanceId,
-        publicKey: local.publicKey,
-      },
-      approver,
-    );
-    if (confirmationCode !== expected) {
-      return this.#refuse(
-        "confirm-join",
-        "code-mismatch",
-        "The matching codes do not agree.",
         approver,
       );
     }
@@ -528,6 +534,34 @@ export class ReplicaMembershipService {
     if (chain === undefined) {
       throw new Error("A single founder chain was counted but not found.");
     }
+    // The code names the approver's key and the founder as this computer read
+    // them from the chain. The approver computed its code from its own key
+    // and founder, so a chain someone forged in the store gives another code.
+    const expected = matchingCode(
+      {
+        origin: { instanceId: local.instanceId, displayName: local.displayName },
+        subject: local.instanceId,
+        publicKey: local.publicKey,
+      },
+      { instanceId: approver, publicKey: chain.approverKey },
+      chain.founder,
+    );
+    if (confirmationCode !== expected) {
+      return this.#refuse(
+        "confirm-join",
+        "code-mismatch",
+        "The matching codes do not agree.",
+        approver,
+      );
+    }
+    if (!chain.admitsLocal) {
+      return this.#refuse(
+        "confirm-join",
+        "revoked-instance",
+        "A revocation in the store cuts the approval that would admit this computer.",
+        approver,
+      );
+    }
     const final = chain.links.at(-1);
     if (final === undefined) throw new Error("A founder chain without its final approval.");
     this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.joinConfirmed, {
@@ -541,7 +575,7 @@ export class ReplicaMembershipService {
     return { kind: "join-confirmed", approver };
   }
 
-  /** Every instance's verifiable-in-principle membership records, by instance and sequence. */
+  /** Every instance's approvals and revocations, read in sequence order up to the first gap. */
   async #readMembershipLogs(
     store: ReplicaStore,
   ): Promise<ReadonlyArray<MembershipRecord> | undefined> {
@@ -557,7 +591,9 @@ export class ReplicaMembershipService {
         if (read.status === "unavailable") return undefined;
         if (read.status !== "ready") break;
         const entry = read.entry;
-        if (entry.kind === "join-approved") records.push({ entry, read });
+        if (entry.kind === "join-approved" || entry.kind === "revocation") {
+          records.push({ entry, read });
+        }
       }
     }
     return records;
@@ -599,9 +635,11 @@ export class ReplicaMembershipService {
         origin: { instanceId: local.instanceId, displayName: local.displayName, sequence },
         subject,
         subjectDisplayName: member.displayName,
-        // The cut: what this computer accepted from the revoked one. Every
-        // entry it signed later is refused everywhere.
-        lastAcceptedSequence: highestApplied(state, subject),
+        // The cut: the last of the revoked computer's entries this one holds -
+        // what it applied, and any approval it holds through the chain it
+        // joined by - so the cut never falls before the approval that admitted
+        // this computer. Every entry it signed later stops counting everywhere.
+        lastAcceptedSequence: state.heldSequence(subject),
       }),
     );
     if (publish.status === "stopped") return publish.outcome;
@@ -616,10 +654,17 @@ export class ReplicaMembershipService {
    * holds as a member here - a key the journal recorded, never one the entry
    * names for itself, except a join request, which is the one record a
    * computer that is not yet a member may sign with its own key. A bad or
-   * missing signature, an unknown or revoked origin, a body whose origin is
-   * not its path, a gap, or a rewritten sequence is refused and journaled, and
-   * the walk for that instance stops there: nothing later from it is applied
+   * missing signature, an unknown origin, a body whose origin is not its
+   * path, a gap, or a rewritten sequence is refused and journaled, and the
+   * walk for that instance stops there: nothing later from it is applied
    * while an earlier entry is missing or refused.
+   *
+   * An approval or revocation from a known origin is kept even past a cut on
+   * that origin; membership weighs every record it holds, and one past a cut
+   * does not count. Logs are walked again while a walk still applies
+   * something, so an origin this host only learns about from a log it reads
+   * later in the same pull is not refused for the order the store listed it
+   * in. Only what is still refused when nothing more applies is journaled.
    */
   async #pull(store: ReplicaStore): Promise<ReplicaMembershipOutcome> {
     const initial = this.#ports.state();
@@ -635,26 +680,39 @@ export class ReplicaMembershipService {
     if (listing === undefined) {
       return this.#refuse("pull", "store-unavailable", "The replica store cannot be listed.");
     }
+    const instances = [...listing.keys()].sort().filter((id) => id !== String(local.instanceId));
     let applied = 0;
+    let stopped: ReadonlyArray<{
+      readonly refused?: ReplicaReadRefusal;
+      readonly held?: { readonly instanceId: ReplicaInstanceId; readonly sequence: number };
+    }> = [];
+    // Each pass that applies something adds a record, so the passes end.
+    for (let pass = 0; pass <= instances.length; pass += 1) {
+      let progress = 0;
+      const walks = [];
+      for (const id of instances) {
+        const sequences = listing.get(id);
+        if (sequences === undefined) continue;
+        const walk = await this.#walkInstance(store, decodeInstanceId(id), sequences, local);
+        if (walk.status === "unavailable") {
+          return this.#refuse("pull", "store-unavailable", "The replica store cannot be read.");
+        }
+        progress += walk.applied;
+        walks.push(walk);
+      }
+      applied += progress;
+      stopped = walks;
+      if (progress === 0) break;
+    }
     const refused: ReplicaReadRefusal[] = [];
     const held: { instanceId: ReplicaInstanceId; sequence: number }[] = [];
-    const instances = [...listing.keys()].sort();
-    for (const id of instances) {
-      if (id === String(local.instanceId)) continue;
-      const sequences = listing.get(id);
-      if (sequences === undefined) continue;
-      const instanceId = decodeInstanceId(id);
-      const walk = await this.#walkInstance(store, instanceId, sequences, local);
-      if (walk.status === "unavailable") {
-        return this.#refuse("pull", "store-unavailable", "The replica store cannot be read.");
-      }
-      applied += walk.applied;
-      if (walk.refused !== undefined) refused.push(walk.refused);
+    for (const walk of stopped) {
+      if (walk.refused !== undefined) refused.push(this.#refuseRead(walk.refused));
       if (walk.held !== undefined) held.push(walk.held);
     }
-    // A revocation read later in this pull, or in an earlier one, cuts entries
-    // already applied from the revoked instance: those past the cut are
-    // refused now, and membership no longer counts them.
+    // An entry applied from an instance that a revocation cuts - read later in
+    // this pull, or in an earlier one - does not count past that cut. It is
+    // reported refused once, and membership no longer counts it.
     for (const entry of this.#ports.state().applied) {
       const cut = revocationCut(this.#ports.state(), entry.instanceId);
       if (cut === undefined || entry.sequence <= cut) continue;
@@ -678,6 +736,7 @@ export class ReplicaMembershipService {
     return { kind: "pulled", applied, refused, held, joinRequests };
   }
 
+  /** Walk one instance's log; a refusal it ends on is returned, not journaled. */
   async #walkInstance(
     store: ReplicaStore,
     instanceId: ReplicaInstanceId,
@@ -702,7 +761,7 @@ export class ReplicaMembershipService {
         return {
           status: "walked",
           applied,
-          refused: this.#refuseRead({ instanceId, sequence: next, reason: "sequence-gap" }),
+          refused: { instanceId, sequence: next, reason: "sequence-gap" },
         };
       }
       const read = await this.#readSigned(store, instanceId, sequence);
@@ -712,7 +771,7 @@ export class ReplicaMembershipService {
         return {
           status: "walked",
           applied,
-          refused: this.#refuseRead({ instanceId, sequence, reason: read.status }),
+          refused: { instanceId, sequence, reason: read.status },
         };
       }
       const state = this.#ports.state();
@@ -721,7 +780,7 @@ export class ReplicaMembershipService {
         return {
           status: "walked",
           applied,
-          refused: this.#refuseRead({ instanceId, sequence, reason: decision.reason }),
+          refused: { instanceId, sequence, reason: decision.reason },
         };
       }
       const entry = read.entry;
@@ -753,29 +812,19 @@ export class ReplicaMembershipService {
   ): ReturnType<typeof reconcileReplicaEntry> {
     const entry = read.entry;
     const origin = entry.origin.instanceId;
-    const sequence = entry.origin.sequence;
-    const cut = revocationCut(state, origin);
-    if (cut !== undefined && sequence > cut) {
-      return { outcome: "refused", reason: "revoked-instance" };
-    }
-    const facts = domainFacts(state, local);
+    // The key the journal holds for the origin verifies its entries, whether
+    // or not a cut stops them counting; the reconcile policy refuses an
+    // artifact entry past a cut, and membership weighs a membership record.
     const member = state.members.find((m) => String(m.instanceId) === String(origin));
-    let key: string | undefined;
-    if (
-      member !== undefined &&
-      replicaMembershipAcceptsKey(facts, origin, member.publicKey, sequence)
-    ) {
-      key = member.publicKey;
-    } else if (entry.kind === "join-request") {
-      key = entry.subjectDeviceKey;
-    }
+    let key: string | undefined = member?.publicKey;
+    if (key === undefined && entry.kind === "join-request") key = entry.subjectDeviceKey;
     if (key === undefined) return { outcome: "refused", reason: "unknown-instance" };
-    // A new identity carrying a revoked computer's key is that computer back
-    // under another name, so its request or approval is refused.
+    // A new identity asking with a revoked computer's key is that computer
+    // back under another name. Its own records keep their key.
     if (
-      (entry.kind === "join-request" || entry.kind === "join-approved") &&
+      entry.kind === "join-request" &&
       entry.subjectDeviceKey !== undefined &&
-      keyBelongsToRevoked(state, entry.subjectDeviceKey)
+      keyBelongsToAnotherRevoked(state, entry.subjectDeviceKey, entry.subject)
     ) {
       return { outcome: "refused", reason: "revoked-instance" };
     }
@@ -939,7 +988,7 @@ export class ReplicaMembershipService {
     // A revoked identity's stopped publish is dropped, not finished: its
     // signature would be one the other computers refuse anyway, and the slot
     // belongs to an identity this computer no longer writes as.
-    if (state.local === undefined || isRevoked(state, state.local.instanceId)) return undefined;
+    if (state.local === undefined || identityFinished(state)) return undefined;
     const encoded = encoder.encode(encodeReplicaEntry(entry));
     let signature: string;
     try {
@@ -1098,6 +1147,12 @@ interface FounderChain {
   readonly approverKey: string;
   /** Founder to approver, then the approver's approval of this computer. */
   readonly links: ReadonlyArray<FounderChainLink>;
+  /**
+   * Whether this computer is a member once every verified approval and
+   * revocation in the store under this founder is weighed - false when a
+   * revocation already cuts an approval the chain depends on.
+   */
+  readonly admitsLocal: boolean;
 }
 
 /**
@@ -1112,6 +1167,11 @@ interface FounderChain {
  * chain is kept per founder; a caller refuses when more than one founder
  * reaches the approver, because a second founding record is what a stranger
  * with write access to the store would add.
+ *
+ * Revocations signed by an instance the chain reaches are verified the same
+ * way and weighed with every reached approval, as a pull would weigh them, so
+ * a join through an approval a revocation already cut is not reported as
+ * confirmed.
  */
 function founderChainsTo(
   records: ReadonlyArray<MembershipRecord>,
@@ -1150,6 +1210,7 @@ function founderChainsTo(
       for (const approval of records) {
         const subjectKey = approval.entry.subjectDeviceKey;
         if (
+          approval.entry.kind !== "join-approved" ||
           String(approval.entry.origin.instanceId) !== current ||
           String(approval.entry.subject) === current ||
           subjectKey === undefined ||
@@ -1179,13 +1240,49 @@ function founderChainsTo(
     if (atApprover === undefined) continue;
     const approval = records.find(
       (record) =>
+        record.entry.kind === "join-approved" &&
         String(record.entry.origin.instanceId) === String(approver) &&
         String(record.entry.subject) === String(local.instanceId) &&
         record.entry.subjectDeviceKey === local.publicKey &&
         verdictFor(atApprover.key, record.read) === "verified",
     );
     if (approval === undefined) continue;
+    const admissions: ReplicaAdmissionRecord[] = [];
+    const revocations: ReplicaRevocationRecord[] = [];
+    for (const record of records) {
+      const { entry } = record;
+      const signer = reached.get(String(entry.origin.instanceId));
+      if (signer === undefined || verdictFor(signer.key, record.read) !== "verified") continue;
+      if (entry.kind === "revocation") {
+        revocations.push({
+          revoker: entry.origin.instanceId,
+          revokerSequence: entry.origin.sequence,
+          cut: { instanceId: entry.subject, lastAcceptedSequence: entry.lastAcceptedSequence ?? 0 },
+        });
+      } else if (
+        entry.subjectDeviceKey !== undefined &&
+        String(entry.subject) !== String(entry.origin.instanceId)
+      ) {
+        admissions.push({
+          approver: entry.origin.instanceId,
+          approverSequence: entry.origin.sequence,
+          member: {
+            instanceId: entry.subject,
+            displayName: entry.subjectDisplayName,
+            publicKey: entry.subjectDeviceKey,
+          },
+        });
+      }
+    }
+    const derived = deriveReplicaMembership({ roots: [founder], admissions, revocations });
+    const admitsLocal =
+      derived.members.some(
+        (member) =>
+          String(member.instanceId) === String(local.instanceId) &&
+          member.publicKey === local.publicKey,
+      ) && !derived.cuts.some((cut) => String(cut.instanceId) === String(local.instanceId));
     chains.push({
+      admitsLocal,
       founder,
       approverDisplayName: atApprover.name,
       approverKey: atApprover.key,
@@ -1288,10 +1385,30 @@ function isRevoked(state: ReplicaMembershipState, instanceId: ReplicaInstanceId)
   return state.revocations.some((revoked) => String(revoked.instanceId) === String(instanceId));
 }
 
-function keyBelongsToRevoked(state: ReplicaMembershipState, publicKey: string): boolean {
+/**
+ * Whether a revoked computer other than `subject` holds this key: a new
+ * identity carrying it is that computer back under another name. The revoked
+ * computer's own records keep its key and are not refused for it.
+ */
+function keyBelongsToAnotherRevoked(
+  state: ReplicaMembershipState,
+  publicKey: string,
+  subject: ReplicaInstanceId,
+): boolean {
   return state.members.some(
-    (member) => member.publicKey === publicKey && isRevoked(state, member.instanceId),
+    (member) =>
+      member.publicKey === publicKey &&
+      String(member.instanceId) !== String(subject) &&
+      isRevoked(state, member.instanceId),
   );
+}
+
+/** This computer's identity was revoked, or was admitted and is no longer a member. */
+function identityFinished(state: ReplicaMembershipState): boolean {
+  const local = state.local;
+  if (local === undefined) return false;
+  if (isRevoked(state, local.instanceId)) return true;
+  return state.localAdmitted && !isMember(state, local.instanceId);
 }
 
 function highestApplied(state: ReplicaMembershipState, instanceId: ReplicaInstanceId): number {
