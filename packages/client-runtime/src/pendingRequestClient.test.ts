@@ -52,6 +52,20 @@ describe("createPendingRequestClient", () => {
     await expect(client.list()).rejects.toMatchObject({ code: "unavailable" });
   });
 
+  it("reads from an IPv6 loopback host the server also treats as local", async () => {
+    const fetch = vi.fn(async () => Response.json(list));
+    const client = createPendingRequestClient({
+      baseUrl: "http://[::1]:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    await expect(client.list()).resolves.toEqual(list);
+    expect(fetch).toHaveBeenCalledWith("http://[::1]:13773/api/pending-requests", {
+      method: "GET",
+      headers: { "x-octant-window-capability": capability },
+    });
+  });
+
   it("refuses to be created for a host that is not on loopback", () => {
     expect(() =>
       createPendingRequestClient({

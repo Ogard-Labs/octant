@@ -346,6 +346,12 @@ window, or approves an action class the host policy reserves for the local user.
   launch sets it, and the severity table's "reading Keychain material" still describes reading the
   store rather than this lookup. Which service name a given runtime takes was not measured on the
   authoring host, so both the modern and legacy entry points are opened.
+- **The keychain stays closed to a confined runtime.** Measured on macOS 27, the Claude runtime
+  reads its subscription sign-in by running `/usr/bin/security`, which opens the login keychain
+  file itself, so the lookup above does not sign a confined launch in: a Claude Plan launch on
+  subscription sign-in, Chat children included, reports itself signed out. Opening the tool and
+  the keychain file was rejected, because the tool returns any item whose access list trusts it,
+  such as tokens other command-line programs store through it. A confined launch may run neither.
 - Vibe disables its keyring lookup in the confined launch and receives its Mistral API key through
   Octant's `api-key` authentication instead.
 - **Version reads are confined; three readiness probes are not.** Every `--version` read prepares

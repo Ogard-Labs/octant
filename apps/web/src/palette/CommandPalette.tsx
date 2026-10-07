@@ -11,8 +11,9 @@ import { useKeybindings } from "../keybindings/useKeybindings";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { keybindingActionForCommand } from "./commandKeybinding";
-import { useOctantCommands } from "./CommandRegistry";
+import { useNeedsYou, useOctantCommands } from "./CommandRegistry";
 import { filterOctantCommands, groupOctantCommands, type OctantCommand } from "./commandModel";
+import { buildNeedsYouCommands } from "./needsYouCommands";
 
 const RESULTS_ID = "command-palette-results";
 
@@ -48,7 +49,9 @@ export function isCommandPaletteEvent(
  * Keyboard operation is the whole contract. The combobox keeps focus while
  * Up/Down/Home/End move an active option, Enter runs it, and Escape dismisses;
  * the dialog traps focus while open and returns it to the element that was
- * focused when the chord fired. The active row is marked by `aria-selected` and
+ * focused when the chord fired. When the host can list what is waiting on the
+ * person, a Needs you group comes first and the list is read again each time
+ * the palette opens. The active row is marked by `aria-selected` and
  * `aria-activedescendant` for assistive technology, and by a fill *and* a
  * visible `Enter` affordance on screen, so its state never rests on colour.
  */
@@ -58,6 +61,9 @@ export function CommandPalette() {
     () => registryCommands.filter((command) => command.action.kind === "run"),
     [registryCommands],
   );
+  const needsYou = useNeedsYou();
+  const refreshNeedsYou = useRef(needsYou?.refresh);
+  refreshNeedsYou.current = needsYou?.refresh;
   const { keybindings } = useKeybindings();
   const apple = isApplePlatform();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -81,10 +87,24 @@ export function CommandPalette() {
       setQuery("");
       setActiveIndex(0);
       setOpen(true);
+      refreshNeedsYou.current?.();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [available, keybindings, open]);
+
+  const waitingCommands = useMemo(
+    () =>
+      !open || needsYou === undefined
+        ? []
+        : buildNeedsYouCommands({
+            requests: needsYou.requests,
+            nowMs: Date.now(),
+            onOpenThread: needsYou.onOpenThread,
+            onAnswerApproval: needsYou.onAnswerApproval,
+          }),
+    [needsYou, open],
+  );
 
   // One order for everything. Grouping is the palette's affordance — a query
   // that matches a Project and a thread says so — but it reorders the ranked
@@ -99,14 +119,16 @@ export function CommandPalette() {
         indexOfCommand: new Map<string, number>(),
       };
     }
-    const nextGroups = groupOctantCommands(filterOctantCommands(commands, query));
+    const nextGroups = groupOctantCommands(
+      filterOctantCommands([...waitingCommands, ...commands], query),
+    );
     const nextResults = nextGroups.flatMap((group) => group.commands);
     return {
       groups: nextGroups,
       results: nextResults,
       indexOfCommand: new Map(nextResults.map((command, index) => [command.id, index])),
     };
-  }, [commands, open, query]);
+  }, [commands, open, query, waitingCommands]);
 
   if (!open) return null;
 

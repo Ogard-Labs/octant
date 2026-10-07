@@ -931,7 +931,7 @@ describe("CodeTurnRunner", () => {
             kind: "user-input-request",
             requestId: "question-1",
             prompt: "Choose a target",
-            options: ["A", "B"],
+            options: [{ label: "A" }, { label: "B", description: "The other one" }],
           }),
           event({
             kind: "usage",
@@ -991,6 +991,7 @@ describe("CodeTurnRunner", () => {
       cacheReadInputTokens: 7,
       cacheWriteInputTokens: 2,
     });
+    expect(observed.find((entry) => entry.category === "question")?.options).toEqual(["A", "B"]);
     expect(observed[1]).toMatchObject({
       executionPolicy: "plan",
       permissionPersistence: "current-session",
