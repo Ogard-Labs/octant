@@ -1516,6 +1516,148 @@ describe("OpenCode driver", () => {
     expect(events.some((event) => event.kind === "failed")).toBe(false);
   });
 
+  it("fails a 2.x turn when a file changes beyond what the approved edit named", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "permission.v2.asked",
+          properties: {
+            id: "perm-edit",
+            sessionID: "provider-session",
+            action: "edit",
+            resources: ["/tmp/project/a.ts", "/tmp/project/b.ts"],
+          },
+        } as unknown as Event,
+      ],
+      eventsOnReply: [
+        {
+          type: "permission.v2.replied",
+          properties: { sessionID: "provider-session", requestID: "perm-edit", reply: "once" },
+        } as unknown as Event,
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
+        } as unknown as Event,
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/b.ts" },
+        } as unknown as Event,
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/c.ts" },
+        } as unknown as Event,
+        { type: "session.idle", properties: { sessionID: "provider-session" } } as unknown as Event,
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              yield* Effect.sleep("20 millis");
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: "perm-edit",
+                approved: true,
+              });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(events.flatMap((event) => (event.kind === "file-change" ? [event.path] : []))).toEqual([
+      "/tmp/project/a.ts",
+      "/tmp/project/b.ts",
+    ]);
+    expect(events.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: { category: "unsupported" },
+    });
+  });
+
+  it("keeps a 2.x approved edit when the user rejects another edit before it is reported", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "permission.v2.asked",
+          properties: {
+            id: "perm-a",
+            sessionID: "provider-session",
+            action: "edit",
+            resources: ["/tmp/project/a.ts"],
+          },
+        } as unknown as Event,
+        {
+          type: "permission.v2.asked",
+          properties: {
+            id: "perm-b",
+            sessionID: "provider-session",
+            action: "edit",
+            resources: ["/tmp/project/b.ts"],
+          },
+        } as unknown as Event,
+      ],
+      eventsOnReply: (requestId) =>
+        requestId === "perm-b"
+          ? [
+              {
+                type: "permission.v2.replied",
+                properties: { sessionID: "provider-session", requestID: "perm-b", reply: "reject" },
+              } as unknown as Event,
+              {
+                type: "file.edited",
+                properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
+              } as unknown as Event,
+              {
+                type: "session.idle",
+                properties: { sessionID: "provider-session" },
+              } as unknown as Event,
+            ]
+          : [],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              yield* Effect.sleep("20 millis");
+              yield* connection.answerApproval({ sessionId, requestId: "perm-a", approved: true });
+              yield* connection.answerApproval({ sessionId, requestId: "perm-b", approved: false });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(events.some((event) => event.kind === "file-change")).toBe(true);
+    expect(events.some((event) => event.kind === "failed")).toBe(false);
+  });
+
   it("answers a 2.x approval once even when approvals are remembered for the project", async () => {
     const fixture = betaDriver({
       permissionPersistence: "project-default",
@@ -2042,7 +2184,7 @@ function betaDriver(
     readonly events?: ReadonlyArray<Event>;
     readonly launchScratch?: "unreported";
     readonly permissionPersistence?: "project-default";
-    readonly eventsOnReply?: ReadonlyArray<Event>;
+    readonly eventsOnReply?: ReadonlyArray<Event> | ((requestId: string) => ReadonlyArray<Event>);
   } = {},
 ) {
   const launchScratch = launchScratchDirectory();
@@ -2101,7 +2243,7 @@ function driverFixture(
     /** The server refuses to delete a session. */
     readonly sessionDelete?: "refused";
     /** Streamed after an approval reply is sent and before that reply resolves. */
-    readonly eventsOnReply?: ReadonlyArray<Event>;
+    readonly eventsOnReply?: ReadonlyArray<Event> | ((requestId: string) => ReadonlyArray<Event>);
   } = {},
 ) {
   const calls: string[] = [];
@@ -2202,10 +2344,14 @@ function driverFixture(
     abort: async () => {
       calls.push("session.abort");
     },
-    replyPermission: async (_sessionId, _id, reply) => {
+    replyPermission: async (_sessionId, id, reply) => {
       calls.push(`permission.reply:${reply}`);
       if (options.eventsOnReply === undefined) return;
-      late.push(options.eventsOnReply);
+      late.push(
+        typeof options.eventsOnReply === "function"
+          ? options.eventsOnReply(id)
+          : options.eventsOnReply,
+      );
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
     },
     replyQuestion: async (_sessionId, _id, answers) => {

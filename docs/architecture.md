@@ -1471,8 +1471,10 @@ modelId }`, and the model picker is provider-first. Discovery can find
   unsupported: 2.0.22 serves no question routes and asks through forms, which
   are not mapped, so the written posture denies `question` and a form that
   still arrives fails the turn. Resume,
-  interruption, and tool activity are reported; a file change that no allowed
-  or approved edit preceded fails the turn; and anything not mapped fails
+  interruption, and tool activity are reported; each allowed or approved edit
+  request admits one reported file change per file it names, rejecting one
+  request never withdraws another's grant, and a file change no remaining
+  grant covers fails the turn; and anything not mapped fails
   closed. The probe also asks the confined 2.x server to answer for a
   directory carrying a Git marker, made in the launch's own scratch directory
   because every launch profile denies the host temporary directory beneath

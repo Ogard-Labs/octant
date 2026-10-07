@@ -115,10 +115,14 @@ interface SessionState {
   sourceId: string | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvals: Set<string>;
-  /** Action named by each pending approval, so a granted edit can release a later file change. */
-  readonly approvalActions: Map<string, string>;
-  /** Set when this session's posture or an approval has allowed an edit to run. */
-  grantedEdits: boolean;
+  /** File changes each pending 2.x edit request would admit if the user approves it. */
+  readonly pendingEditGrants: Map<string, number>;
+  /**
+   * File changes that allowed or approved 2.x edit requests may still report.
+   * Each reported change spends one, so an approval never admits a later,
+   * unapproved write, and rejecting one request never withdraws another's.
+   */
+  unreportedEditGrants: number;
   readonly questions: Map<
     string,
     {
@@ -1100,7 +1104,7 @@ function makeConnection(
       state.terminal = true;
       cancelPendingTools(state);
       state.approvals.clear();
-      state.approvalActions.clear();
+      state.pendingEditGrants.clear();
       state.questions.clear();
       state.questionAnswers.clear();
       deactivate(state);
@@ -1812,13 +1816,14 @@ function makeConnection(
                 : !state.approvals.has(input.requestId)
                   ? Effect.fail(fail("protocol", "Provider approval request is not pending."))
                   : Effect.suspend(() => {
-                      // Settle the edit grant before replying: OpenCode runs the
+                      // Grant the edit before replying: OpenCode runs the
                       // approved edit, and announces the request as settled, on
                       // its event stream, which can arrive before this reply's
-                      // response. A failed reply restores the earlier grant.
-                      const action = state.approvalActions.get(input.requestId);
-                      const priorGrant = state.grantedEdits;
-                      if (action === "edit") state.grantedEdits = input.approved;
+                      // response. A failed reply takes the grant back.
+                      const grant = input.approved
+                        ? (state.pendingEditGrants.get(input.requestId) ?? 0)
+                        : 0;
+                      state.unreportedEditGrants += grant;
                       return request(() =>
                         activeClient.replyPermission(
                           source,
@@ -1839,12 +1844,15 @@ function makeConnection(
                       ).pipe(
                         Effect.tapError(() =>
                           Effect.sync(() => {
-                            if (action === "edit") state.grantedEdits = priorGrant;
+                            state.unreportedEditGrants = Math.max(
+                              0,
+                              state.unreportedEditGrants - grant,
+                            );
                           }),
                         ),
                         Effect.tap(() =>
                           Effect.sync(() => {
-                            state.approvalActions.delete(input.requestId);
+                            state.pendingEditGrants.delete(input.requestId);
                             state.approvals.delete(input.requestId);
                           }),
                         ),
@@ -1945,8 +1953,8 @@ function newSessionState(
     sourceId: undefined,
     executionPolicy,
     approvals: new Set(),
-    approvalActions: new Map(),
-    grantedEdits: false,
+    pendingEditGrants: new Map(),
+    unreportedEditGrants: 0,
     questions: new Map(),
     questionAnswers: new Map(),
     toolNames: new Set(tools.map((tool) => tool.name)),
@@ -2014,7 +2022,11 @@ function failClosedBetaEvent(
   const edit = betaPermissionEffect(betaAgentPermissionRules(state.executionPolicy, mode), "edit");
   // An edit the posture allows, or one the user already approved, may be
   // reported. Any other file change ran without a grant, so the turn fails.
-  if (edit === "allow" || state.grantedEdits) return event;
+  if (edit === "allow") return event;
+  if (state.unreportedEditGrants > 0) {
+    state.unreportedEditGrants -= 1;
+    return event;
+  }
   return {
     kind: "failed",
     instanceId: event.instanceId,
@@ -2055,7 +2067,7 @@ function mapAndOffer(
   if (beta !== undefined && event.type === "permission.v2.replied") {
     const settled = textProperty(event.properties, "requestID");
     state.approvals.delete(settled);
-    state.approvalActions.delete(settled);
+    state.pendingEditGrants.delete(settled);
     return;
   }
   if (beta !== undefined && event.type === "permission.v2.asked") {
@@ -2089,10 +2101,11 @@ function mapAndOffer(
       return;
     }
     if (effect === "allow") {
-      if (action === "edit") state.grantedEdits = true;
+      if (action === "edit") state.unreportedEditGrants += editGrantSize(event.properties);
       beta.reply(requestId, "once");
       return;
     }
+    if (action === "edit") state.pendingEditGrants.set(requestId, editGrantSize(event.properties));
   }
   let mapped: ReadonlyArray<ProviderRuntimeEvent>;
   try {
@@ -2148,7 +2161,6 @@ function mapAndOffer(
     }
     if (normalized.kind === "approval-request") {
       state.approvals.add(normalized.requestId);
-      state.approvalActions.set(normalized.requestId, normalized.action);
     }
     if (normalized.kind === "user-input-request") {
       const providerRequestId = normalized.requestId;
@@ -2331,6 +2343,16 @@ function betaActionMatches(pattern: string, action: string): boolean {
     .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&"))
     .join(".*")}$`;
   return new RegExp(source).test(action);
+}
+
+/**
+ * File changes one 2.x edit request admits: one per file it names, at least
+ * one, so a request that names several files admits each of their changes.
+ */
+function editGrantSize(properties: unknown): number {
+  if (typeof properties !== "object" || properties === null) return 1;
+  const resources: unknown = Reflect.get(properties, "resources");
+  return Array.isArray(resources) ? Math.max(1, resources.length) : 1;
 }
 
 function textProperty(value: unknown, key: string): string {
