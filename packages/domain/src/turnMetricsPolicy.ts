@@ -383,6 +383,28 @@ export function addTurnUsage(total: TurnUsage | undefined, turn: TurnUsage): Tur
 }
 
 /**
+ * A turn's usage so far, for the ledger and spend ceilings. A report that
+ * names when its one request was sent covers that request only, so those add
+ * up; a report without it covers the whole turn so far and replaces what came
+ * before, the rule `finishTurnMetrics` applies. Keeping only the latest
+ * report instead lost every request but the last of a turn that failed or was
+ * cancelled before its whole total arrived. Cost is a total only when every
+ * request in it reported one: a sum with a hole in it would read as the whole
+ * charge.
+ */
+export function accumulateTurnUsage(
+  total: TurnUsage | undefined,
+  report: Extract<ProviderRuntimeEvent, { kind: "usage" }>,
+): TurnUsage {
+  const usage = usageOf(report);
+  if (report.requestStartedAt === undefined || total === undefined) return usage;
+  const summed = addTurnUsage(total, usage);
+  if (total.costUsd !== undefined && usage.costUsd !== undefined) return summed;
+  const { costUsd: _partial, ...withoutCost } = summed;
+  return withoutCost;
+}
+
+/**
  * The share of all input that came from the prompt cache, as a fraction.
  * `inputTokens` already counts cache reads and writes, so it is the whole
  * denominator. Hidden when the provider reported no cache figure, when nothing

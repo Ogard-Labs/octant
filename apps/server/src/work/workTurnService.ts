@@ -24,7 +24,7 @@ import {
   decodeStartWorkThreadTurnCommand,
   type ContextInspectorSnapshot,
   type MentionableThreadId,
-  type ProviderRuntimeEvent,
+  type TurnUsage,
   type WorkAttachmentId,
   type WorkAttachmentMediaType,
   type WorkAttachmentReference,
@@ -67,6 +67,7 @@ import type {
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
+  accumulateTurnUsage,
   decideWorkTurnAuthority,
   assertProviderAllowedByProjectPolicy,
   ProjectProviderPolicyRejected,
@@ -141,6 +142,13 @@ export class WorkTurnServiceError extends Error {
   constructor(readonly failure: WorkTurnFailure) {
     super(failure.message);
   }
+}
+
+/** What the turn's latest usage report said about the window and model time. */
+interface WorkUsageFacts {
+  readonly contextTokens?: number | undefined;
+  readonly contextWindow?: number | undefined;
+  readonly providerExecutionDurationMs?: number | undefined;
 }
 
 export interface WorkTurnServiceDependencies {
@@ -1147,14 +1155,16 @@ export class WorkTurnService {
           };
     if (harnessScope !== undefined) this.#nativeHarness?.turnStarted(harnessScope);
     let endedTurn: TurnEndSummary | undefined;
-    // A usage report covers the whole turn so far and a later one replaces it,
-    // so the turn is reconciled once, with its latest report. Reconciling each
-    // report as it arrived recorded every step again beside the turn's total
-    // (a Claude turn's per-message reports and its final result), counting
-    // its tokens and cost twice.
-    let latestUsage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }> | undefined;
+    // The turn is reconciled once, when it ends, with what it used in all.
+    // Reconciling each report as it arrived recorded a Claude turn's per-call
+    // reports again beside its final total. Per-request reports add up and a
+    // whole-turn report replaces them, so a turn that failed or was cancelled
+    // before its total arrived still counts every request it made.
+    let turnUsage: TurnUsage | undefined;
+    let usageFacts: WorkUsageFacts = {};
+    let promptSent = false;
+    let runOutcome: WorkTurnRuntimeOutcome | undefined;
     try {
-      let usageReported = false;
       if (input.access !== undefined) {
         this.#runningAccess.set(String(input.command.threadId), {
           requestId: String(input.command.requestId),
@@ -1240,7 +1250,20 @@ export class WorkTurnService {
           : {
               liveTurn: this.#liveTurns.tracker(String(input.command.threadId), "work-navigation"),
             }),
+        onPromptSent: () => {
+          promptSent = true;
+        },
         onUsage: (usage) => {
+          // What the turn cost counts even when its report arrives after a
+          // cancel: a cancelled Claude turn's total comes in its result, after
+          // the abort, and dropping it charged the turn nothing.
+          turnUsage = accumulateTurnUsage(turnUsage, usage);
+          usageFacts = {
+            contextTokens: usage.contextTokens ?? usageFacts.contextTokens,
+            contextWindow: usage.contextWindow ?? usageFacts.contextWindow,
+            providerExecutionDurationMs:
+              usage.providerExecutionDurationMs ?? usageFacts.providerExecutionDurationMs,
+          };
           const projected = this.#projection.lookup(input.command.requestId);
           if (
             input.signal.aborted ||
@@ -1252,8 +1275,6 @@ export class WorkTurnService {
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
           });
-          usageReported = true;
-          latestUsage = usage;
         },
         onChildActivity: (event) => {
           if (input.signal.aborted) return;
@@ -1277,6 +1298,7 @@ export class WorkTurnService {
           this.#liveUpdates.appendTasks(input.command.threadId, input.command.requestId, tasks);
         },
       });
+      runOutcome = outcome;
       const wroteFiles = observation?.finish();
       const latest = this.#projection.lookup(input.command.requestId);
       if (latest === undefined) return;
@@ -1320,36 +1342,20 @@ export class WorkTurnService {
         wroteFiles,
         this.#liveTasks.get(String(input.command.requestId)),
       );
-      if (
-        outcome.kind === "completed" &&
-        !usageReported &&
-        published !== undefined &&
-        this.#contextHarness !== undefined
-      ) {
-        const snapshot = published.snapshot;
-        try {
-          this.#contextHarness.reconcileUsage({
-            subject: snapshot.subject,
-            planId: snapshot.next.plan.id,
-            requestShape: "work-turn",
-            actualInputTokens: 0,
-            actualOutputTokens: 0,
-            providerReported: false,
-            currentVarianceReserve: snapshot.next.plan.reserves.variance,
-            maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
-          });
-        } catch {
-          // Usage reconciliation is best-effort after a completed Work turn.
-        }
-      }
       if (outcome.kind === "completed" && wroteFiles !== undefined) {
         await this.#backfillStatus(input.projectCanonicalRoot, input.thread, wroteFiles);
       }
       const settled = this.#projection.lookup(input.command.requestId);
       if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
     } finally {
-      if (latestUsage !== undefined && published !== undefined) {
-        this.#reconcileWorkUsage(published.snapshot, latestUsage);
+      // Every turn that reached the provider leaves a ledger row, whatever its
+      // outcome: one that reported nothing is recorded as unreported, so a
+      // spend ceiling refuses rather than counting it as free. A completed
+      // turn reached the provider even when the runtime did not say so.
+      const reachedProvider =
+        promptSent || turnUsage !== undefined || runOutcome?.kind === "completed";
+      if (reachedProvider && published !== undefined) {
+        this.#reconcileWorkUsage(published.snapshot, turnUsage, usageFacts);
       }
       // A completed turn closed itself above; this closes one that did not.
       if (harnessScope !== undefined) this.#nativeHarness?.turnEnded?.(harnessScope, endedTurn);
@@ -1358,7 +1364,8 @@ export class WorkTurnService {
 
   #reconcileWorkUsage(
     snapshot: ContextInspectorSnapshot,
-    usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>,
+    usage: TurnUsage | undefined,
+    facts: WorkUsageFacts,
   ): void {
     if (this.#contextHarness === undefined) return;
     try {
@@ -1366,21 +1373,22 @@ export class WorkTurnService {
         subject: snapshot.subject,
         planId: snapshot.next.plan.id,
         requestShape: "work-turn",
-        actualInputTokens: usage.inputTokens,
-        actualOutputTokens: usage.outputTokens,
-        ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
-        ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
-        ...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
-        ...(usage.cacheReadInputTokens === undefined
+        actualInputTokens: usage?.inputTokens ?? 0,
+        actualOutputTokens: usage?.outputTokens ?? 0,
+        ...(usage === undefined ? { providerReported: false } : {}),
+        ...(facts.contextTokens === undefined ? {} : { contextTokens: facts.contextTokens }),
+        ...(facts.contextWindow === undefined ? {} : { contextWindow: facts.contextWindow }),
+        ...(usage?.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
+        ...(usage?.cacheReadInputTokens === undefined
           ? {}
           : { cacheReadInputTokens: usage.cacheReadInputTokens }),
-        ...(usage.cacheWriteInputTokens === undefined
+        ...(usage?.cacheWriteInputTokens === undefined
           ? {}
           : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
-        ...(usage.providerExecutionDurationMs === undefined
+        ...(facts.providerExecutionDurationMs === undefined
           ? {}
-          : { providerExecutionDurationMs: usage.providerExecutionDurationMs }),
-        ...(usage.costUsd === undefined ? {} : { costUsd: usage.costUsd }),
+          : { providerExecutionDurationMs: facts.providerExecutionDurationMs }),
+        ...(usage?.costUsd === undefined ? {} : { costUsd: usage.costUsd }),
         currentVarianceReserve: snapshot.next.plan.reserves.variance,
         maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
       });

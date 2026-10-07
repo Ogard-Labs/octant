@@ -470,6 +470,199 @@ describe("WorkTurnService", () => {
     }
   });
 
+  describe("what a Work turn that did not complete leaves in the usage ledger", () => {
+    type Run = Parameters<WorkTurnRuntimePort["run"]>[0];
+    type Outcome = Awaited<ReturnType<WorkTurnRuntimePort["run"]>>;
+    type Report = (fields: Record<string, number | string>) => void;
+
+    /**
+     * Runs one Work turn whose provider `script` reports usage, and returns the
+     * ledger rows it left. `cancel` is resolved once the person has cancelled.
+     */
+    async function ledgerAfterTurn(
+      script: (input: Run, report: Report, cancelled: Promise<void>) => Promise<Outcome>,
+      options: { readonly cancel?: boolean } = {},
+    ) {
+      const root = await mkdtemp(join(tmpdir(), "octant-work-ledger-"));
+      attachmentRoots.push(root);
+      const connection = openSqlite(join(root, "context.sqlite3"));
+      try {
+        applyMigrations(connection, MIGRATIONS, () => now);
+        const registries = createPhase1RuntimeRegistries();
+        const journal = new Journal({
+          connection,
+          registry: registries.events,
+          projections: registries.projections,
+          clock: () => now,
+        });
+        let sequence = 0;
+        const contextHarness = new ContextHarnessService({
+          persistence: {
+            connection,
+            journal,
+            status: () => ({ state: "current", integrity: "ok" }),
+          },
+          uuid: () => `84000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+          clock: () => now,
+        });
+        const cancelled = deferred<void>();
+        const reachedScript = deferred<void>();
+        const run = vi.fn(async (input: Run) => {
+          let reportSequence = 0;
+          const report: Report = (fields) => {
+            const usage = decodeProviderRuntimeEvent({
+              instanceId: ids.provider,
+              sessionId: input.providerSessionId,
+              sequence: ++reportSequence,
+              correlationId: ids.request,
+              occurredAt: now,
+              kind: "usage",
+              ...fields,
+            });
+            if (usage.kind !== "usage") throw new Error("Expected usage fixture");
+            input.onUsage?.(usage);
+          };
+          reachedScript.resolve();
+          return script(input, report, cancelled.promise);
+        });
+        const fixture = serviceFixture({
+          contextHarness,
+          turnRuntime: { run },
+          contextFacts: {
+            observeModelLimits: () =>
+              Effect.succeed([
+                {
+                  providerInstanceId: decodeProviderInstanceId(ids.provider),
+                  modelId: decodeProviderModelId("model-a"),
+                  contextWindow: 1000,
+                  maxOutput: 20,
+                  source: "runtime-reported",
+                  confidence: "high",
+                  observedAt: now,
+                },
+              ]),
+            observeServiceLimits: () =>
+              Effect.succeed(
+                unavailableProviderServiceLimits(
+                  decodeProviderInstanceId(ids.provider),
+                  now,
+                  "runtime-reported",
+                ),
+              ),
+          },
+        });
+        await fixture.service.startFirstTurn(ids.window, startCommand());
+        if (options.cancel === true) {
+          await reachedScript.promise;
+          await fixture.service.cancelFirstTurn(ids.window, {
+            kind: "cancel-work-turn",
+            requestId: ids.request,
+            threadId: ids.thread,
+            turnId: ids.turn,
+          });
+          cancelled.resolve();
+        }
+        await fixture.waitForIdle();
+        const rows = () =>
+          connection
+            .prepare(
+              `SELECT input_tokens, output_tokens, quality, cost_usd_micros, cost_kind
+              FROM usage_record_projection WHERE subject_type = 'work-thread' AND subject_id = ?`,
+            )
+            .all(String(ids.thread));
+        // A cancel settles the turn before its provider run has unwound, so
+        // the run's own end is what records the row.
+        if (options.cancel === true) await vi.waitFor(() => expect(rows()).not.toEqual([]));
+        return rows();
+      } finally {
+        connection.close();
+      }
+    }
+
+    const priced = {
+      input_tokens: 280,
+      output_tokens: 12,
+      cost_usd_micros: 30_000,
+      cost_kind: "provider-recorded",
+    };
+    const failed = {
+      kind: "failed" as const,
+      failure: { category: "failed" as const, message: "Provider failed." },
+    };
+
+    it("counts every request of a harness turn that failed before its total", async () => {
+      const rows = await ledgerAfterTurn(async (input, report) => {
+        input.onPromptSent?.();
+        report({ requestStartedAt: now, inputTokens: 100, outputTokens: 4, costUsd: 0.01 });
+        report({ requestStartedAt: now, inputTokens: 180, outputTokens: 8, costUsd: 0.02 });
+        return failed;
+      });
+      expect(rows).toEqual([expect.objectContaining(priced)]);
+    });
+
+    it("counts every request of a harness turn that was cancelled", async () => {
+      const rows = await ledgerAfterTurn(
+        async (input, report, cancelled) => {
+          input.onPromptSent?.();
+          report({ requestStartedAt: now, inputTokens: 100, outputTokens: 4, costUsd: 0.01 });
+          report({ requestStartedAt: now, inputTokens: 180, outputTokens: 8, costUsd: 0.02 });
+          await cancelled;
+          return { kind: "cancelled" };
+        },
+        { cancel: true },
+      );
+      expect(rows).toEqual([expect.objectContaining(priced)]);
+    });
+
+    it("charges a failed Claude turn its result's total", async () => {
+      const rows = await ledgerAfterTurn(async (input, report) => {
+        input.onPromptSent?.();
+        // Claude reports the turn so far after each call, then its result.
+        report({ inputTokens: 100, outputTokens: 4 });
+        report({ inputTokens: 280, outputTokens: 12 });
+        report({ inputTokens: 280, outputTokens: 12, costUsd: 0.03 });
+        return failed;
+      });
+      expect(rows).toEqual([expect.objectContaining(priced)]);
+    });
+
+    it("charges a cancelled Claude turn the total its result reports after the abort", async () => {
+      const rows = await ledgerAfterTurn(
+        async (input, report, cancelled) => {
+          input.onPromptSent?.();
+          report({ inputTokens: 100, outputTokens: 4 });
+          report({ inputTokens: 280, outputTokens: 12 });
+          await cancelled;
+          expect(input.signal.aborted).toBe(true);
+          report({ inputTokens: 280, outputTokens: 12, costUsd: 0.03 });
+          return { kind: "cancelled" };
+        },
+        { cancel: true },
+      );
+      expect(rows).toEqual([expect.objectContaining(priced)]);
+    });
+
+    it("records a turn that reached the provider and reported nothing as unreported and unpriced", async () => {
+      const rows = await ledgerAfterTurn(async (input) => {
+        input.onPromptSent?.();
+        return failed;
+      });
+      expect(rows).toEqual([
+        {
+          input_tokens: 0,
+          output_tokens: 0,
+          quality: "unavailable",
+          cost_usd_micros: null,
+          cost_kind: null,
+        },
+      ]);
+    });
+
+    it("leaves no row for a turn that failed before it reached the provider", async () => {
+      expect(await ledgerAfterTurn(async () => failed)).toEqual([]);
+    });
+  });
+
   it("keeps a Work turn completed when usage reconciliation refuses the report", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
     attachmentRoots.push(root);

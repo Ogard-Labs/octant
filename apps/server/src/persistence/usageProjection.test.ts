@@ -281,6 +281,65 @@ describe("UsageProjection", () => {
     connection.close();
   });
 
+  it("records a Code turn that ended without reporting usage as unreported and unpriced", () => {
+    const { connection, journal } = openDatabase();
+    const turn = (operationId: string, events: ReadonlyArray<object>) =>
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 0,
+        events: events.map((event, index) =>
+          pending("code.operation-event-recorded@1", {
+            threadId: ids.aggregate,
+            operationId,
+            cursor: index + 1,
+            occurredAt: now,
+            event,
+          }),
+        ),
+      });
+    const started = {
+      kind: "conversation-turn-started",
+      providerInstanceId: ids.provider,
+      modelId: "acp-agent",
+      sessionId: ids.entry,
+      prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+    };
+    turn(ids.usage, [started, { kind: "operation-state", state: "failed" }]);
+    turn(ids.usage2, [
+      started,
+      { kind: "usage", inputTokens: 30, outputTokens: 6, costUsd: 0.01 },
+      { kind: "operation-state", state: "completed" },
+    ]);
+
+    const rows = () =>
+      connection
+        .prepare(
+          `SELECT reconciliation_id, quality, input_tokens, cost_usd_micros
+          FROM usage_record_projection ORDER BY last_sequence`,
+        )
+        .all();
+    const expected = [
+      {
+        reconciliation_id: ids.usage,
+        quality: "unavailable",
+        input_tokens: 0,
+        cost_usd_micros: null,
+      },
+      {
+        reconciliation_id: ids.usage2,
+        quality: "exact",
+        input_tokens: 30,
+        cost_usd_micros: 10_000,
+      },
+    ];
+    expect(rows()).toEqual(expected);
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(rows()).toEqual(expected);
+    connection.close();
+  });
+
   it("keeps a completed request without provider usage as unavailable, not zero", () => {
     const { connection, journal } = openDatabase();
     appendFullUsageCycle(journal, {
