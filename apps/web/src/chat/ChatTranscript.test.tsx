@@ -394,12 +394,44 @@ describe("ChatTranscript", () => {
       ],
     });
 
-    render(<ChatTranscript view={view} connectionStatus="disconnected" />);
+    render(<ChatTranscript view={view} />);
 
     expect(screen.getByRole("alert")).toHaveTextContent("Response content is unavailable.");
-    expect(screen.getByRole("status")).toHaveTextContent("Disconnected");
     expect(screen.getByText("Untrusted source · Provider-native source unavailable")).toBeVisible();
     expect(screen.queryByRole("link", { name: /Untrusted source/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a delivered subagent result as an attributed card, not as the person's message", () => {
+    const delivered = [
+      "A subagent you delegated has finished.",
+      "",
+      "Subagent: research (20000000-0000-4000-8000-000000000001/haiku)",
+      "Run: 0b9d3f40-5a52-4a1e-8c11-111111111111 (generation 1)",
+      "Task: Measure the cache.",
+      "",
+      "Result:",
+      "MATRIX-A3",
+    ].join("\n");
+    const base = viewFixture();
+    const view = decodeChatThreadView({
+      ...base,
+      turns: base.turns.map((turn) => ({
+        ...turn,
+        delivery: { kind: "agent-result", runId: "0b9d3f40-5a52-4a1e-8c11-111111111111" },
+      })),
+      contents: base.contents.map((content) =>
+        content.role === "user" ? { ...content, body: delivered } : content,
+      ),
+    });
+
+    render(<ChatTranscript onEditTurn={vi.fn()} view={view} />);
+
+    expect(screen.queryByRole("article", { name: "Your message" })).not.toBeInTheDocument();
+    const card = screen.getByRole("article", { name: "Research subagent finished" });
+    expect(card).toHaveTextContent("MATRIX-A3");
+    expect(card).not.toHaveTextContent("0b9d3f40-5a52-4a1e-8c11-111111111111");
+    // The person wrote nothing here, so there is nothing of theirs to revise.
+    expect(screen.queryByRole("menuitem", { name: /Edit/ })).not.toBeInTheDocument();
   });
 
   it("uses visible text for every durable attempt state", () => {

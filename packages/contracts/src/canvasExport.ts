@@ -113,6 +113,17 @@ export type CanvasExportContribution = typeof CanvasExportContribution.Type;
 export const CanvasExportTargetStatus = Schema.Literal("not-connected", "ready", "refused");
 export type CanvasExportTargetStatus = typeof CanvasExportTargetStatus.Type;
 
+/**
+ * Who can see a remote export, when the destination keeps one.
+ *
+ * `secret` keeps the result unlisted — it appears on no profile or search, but
+ * anyone holding its link can open it; `public` is listed and visible to
+ * anyone, which is a thing to say plainly before it happens. A destination with
+ * no audience — a file on this Mac — declares neither.
+ */
+export const CanvasExportVisibility = Schema.Literal("secret", "public");
+export type CanvasExportVisibility = typeof CanvasExportVisibility.Type;
+
 export const CanvasExportTargetOffer = Schema.Struct({
   targetId: CanvasExportTargetId,
   label: safeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
@@ -207,8 +218,27 @@ export const CanvasExportFilePath = Schema.NonEmptyTrimmedString.pipe(
 );
 export type CanvasExportFilePath = typeof CanvasExportFilePath.Type;
 
+/**
+ * A stable id a remote destination assigned to what it created. Bounded and
+ * scanned like every exported string, because it is echoed back to the person.
+ */
+const exportRemoteId = boundedText(128).pipe(
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  Schema.filter((value) => isCanvasShareSafeText(value), {
+    message: () => "An export remote id must not contain a secret.",
+  }),
+);
+
 export const CanvasExportReceipt = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("link"), href: exportUrl }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("link"),
+    href: exportUrl,
+    /**
+     * The remote id of what the link points at, when the destination reports
+     * one. A gist's URL and id are one receipt, not two.
+     */
+    remoteId: Schema.optional(exportRemoteId),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("path"),
     /** The file a local destination wrote, named the way the person will open it. */
@@ -216,12 +246,7 @@ export const CanvasExportReceipt = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("remote-id"),
-    remoteId: boundedText(128).pipe(
-      Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-      Schema.filter((value) => isCanvasShareSafeText(value), {
-        message: () => "An export remote id must not contain a secret.",
-      }),
-    ),
+    remoteId: exportRemoteId,
   }).annotations(strict),
 );
 export type CanvasExportReceipt = typeof CanvasExportReceipt.Type;
@@ -277,6 +302,24 @@ export const CanvasExportApprovalCard = Schema.Struct({
   destinationPath: Schema.optional(CanvasExportFilePath),
   /** Whether a file is already at `destinationPath` and will be replaced. */
   replacesExisting: Schema.optional(Schema.Boolean),
+  /**
+   * The account this export will act as, when the destination acts as one.
+   * Shown verbatim so the person knows whose name it goes out under.
+   */
+  destinationAccount: Schema.optional(safeBounded(128)),
+  /**
+   * The audience the destination offered for this export. `secret` is visible
+   * only to the account; `public` is visible to anyone, which
+   * `destinationNote` is expected to say plainly. Absent for a destination
+   * with no audience.
+   */
+  destinationVisibility: Schema.optional(CanvasExportVisibility),
+  /**
+   * The destination's own note about this export, shown verbatim — for example
+   * that a public result is visible to anyone. Bounded and free of paths and
+   * secrets like every other exported string.
+   */
+  destinationNote: Schema.optional(CanvasExportMessage),
   /** The rendered document the person is approving. Not a summary of it. */
   payload: exportBody,
   payloadDigest: CanvasExportPayloadDigest,
@@ -330,6 +373,12 @@ export const CanvasExportDecideRequest = Schema.Struct({
   canvasId: CanvasId,
   approvalId: CanvasExportApprovalId,
   decision: CanvasExportDecision,
+  /**
+   * The audience the person chose when the approval card offered one. Absent
+   * means the destination's own default, which the card showed and the person
+   * approved.
+   */
+  visibility: Schema.optional(CanvasExportVisibility),
 }).annotations(strict);
 export type CanvasExportDecideRequest = typeof CanvasExportDecideRequest.Type;
 

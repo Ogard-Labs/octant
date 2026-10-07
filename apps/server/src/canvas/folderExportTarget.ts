@@ -72,16 +72,25 @@ export function createFolderExportTarget(
       }
       if (availability.kind === "refused") return refused("refused", availability.reason);
       const planned = canvasExportPlannedName(output.title, output.format);
+      const plannedPath = join(availability.folder, planned);
+      // The person approved the place the card named. A confirmed destination
+      // that points somewhere else means the folder changed while the card was
+      // open, so this delivery is refused rather than written to a folder the
+      // person never approved.
+      if (confirmed?.path !== undefined && confirmed.path !== plannedPath) {
+        return refused("refused", "The export folder changed after this export was approved.");
+      }
       const fileName = planCanvasExportFileName({
         title: output.title,
         format: output.format,
         taken: (candidate) => dependencies.files.existsIn(availability.folder, candidate),
-        // Only the path the approval card named counts as confirmed: the person
-        // approved a place, so writing there replaces whatever is in it. A call
-        // with no confirmation — a destination reached outside a card — writes
-        // a numbered copy beside an existing file instead.
-        replacesConfirmed:
-          confirmed !== undefined && confirmed.path === join(availability.folder, planned),
+        // Only a card that said a file was already there counts as confirmed:
+        // the person approved a replacement, not just a path. A file that
+        // appeared at the name after the card was built was never named to the
+        // person, so it gets the numbered copy instead. A call with no
+        // confirmation — a destination reached outside a card — writes a
+        // numbered copy beside an existing file too.
+        replacesConfirmed: confirmed?.path === plannedPath && confirmed.replacesExisting === true,
       });
       if (fileName === undefined) {
         return refused("refused", "There is no free name to write this export to.");
