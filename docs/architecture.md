@@ -295,7 +295,7 @@ version and does not report it corrupt.
 A treemap block is gated the same way at Canvas schema version 5 and a heatmap
 block at version 6, so a document that declares an earlier version and carries
 one is refused as a declared future version. The optional table column
-`display` and the chart and table `format` fields are the one ungated
+`display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
 version, but the strict definition schema refuses an unknown field, so a
 runtime rolled back past them refuses a document that uses them rather than
