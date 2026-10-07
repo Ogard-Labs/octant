@@ -2094,6 +2094,33 @@ mechanisms are:
   Three provider tool requests denied in one Code turn end it as
   interrupted, with the reason journaled, so a provider cannot loop a
   person's refusals.
+- **Pending requests across modes.** `GET /api/pending-requests` returns every
+  approval and question the calling window can answer, oldest waiting first,
+  at most 128 with a `truncated` flag. It adds no authority: each mode lists
+  only what its existing answer command would admit for that window. Work uses
+  the Work request service's Project check (an active Work Project) and lists a
+  request only on a thread the window's Work thread list holds; Code passes each
+  request through the scope `answer-provider-approval` and
+  `answer-provider-input` pass first (thread and checkout identity, the window's
+  bound Code Project, an available checkout, an active thread); Chat lists a
+  question on an active, listed thread filed under no Project or an active Chat
+  Project. A disabled Chat or Work mode is not asked. Each item carries the
+  handle its mode's existing answer command takes; there is no new answer route.
+  Only requests a live turn in this host can deliver are listed: a Code or Chat
+  request journaled by a turn that died with the process is left out, because
+  answering it settles the turn interrupted. Excluded: Chat approvals (Chat
+  declines every provider approval), hidden Side Chats, browser tool approvals
+  (`/api/browser/approvals`), Computer Use approvals, extension tool approvals,
+  and native-harness session approvals; a native-harness question raised on a
+  Code turn is a Code question and is listed. Text keeps
+  each mode's own bounds and sanitization. The read is local-window only: its
+  path is outside every prefix the remote listener forwards, the remote action
+  classifier names no action for it, and the route refuses a paired device's
+  principal. Freshness rides the Machine change feed: a Work request's
+  transitions and a Chat attempt's question are journaled, a Code request's ask,
+  answer, and turn end are journaled stream events, and a Code browser-origin
+  approval that expires or is abandoned — which journals nothing — publishes
+  `code-navigation` itself.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap

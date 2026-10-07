@@ -74,6 +74,7 @@ import {
   type ProviderObservedState,
   type ProviderProbeResult,
   type MentionableThreadId,
+  type PendingRequest,
   type ProviderServiceLimits,
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
@@ -764,6 +765,11 @@ function hasAttemptInFlight(view: ChatThreadView | undefined): boolean {
   );
 }
 
+/** The question an attempt is parked on, if it is waiting for the person's answer. */
+function openQuestion(attempt: ChatAttempt): ChatAttempt["pendingQuestion"] {
+  return attempt.outcome === "waiting" ? attempt.pendingQuestion : undefined;
+}
+
 export interface ChatSubscribeOptions {
   /** Put the body behind each streamed delta on its `attempt-updated` frame. */
   readonly contents?: boolean;
@@ -1174,6 +1180,55 @@ export class ChatService {
       ...view,
       thread: this.#withAggregateHeadVersion(view.thread),
     };
+  }
+
+  /**
+   * Questions running attempts in this host are parked on, each with what
+   * `answer-chat-turn-question` needs. Only threads the Chat listing shows
+   * qualify — active, not a hidden sidecar, filed under no Project or an
+   * active Chat Project — and only attempts this process still runs, because
+   * an answer to any other is refused and settles the attempt interrupted.
+   * Whether Chat mode is enabled is the caller's check.
+   */
+  listPendingQuestions(): ReadonlyArray<PendingRequest> {
+    this.#assertReady();
+    const hidden = this.#hiddenThreadIds();
+    const pending: PendingRequest[] = [];
+    for (const threadId of this.#activeThreadExecutions) {
+      if (hidden.has(threadId)) continue;
+      const thread = this.#persistence.readChatThread(decodeChatThreadId(threadId));
+      if (thread === undefined || thread.lifecycle !== "active") continue;
+      if (thread.projectId !== undefined && !this.#isActiveChatProject(thread.projectId)) continue;
+      const view = this.#persistence.readChatThreadView(thread.id);
+      if (view === undefined) continue;
+      const expectedVersion = this.#withAggregateHeadVersion(thread).version;
+      for (const turn of view.turns) {
+        for (const attempt of turn.attempts) {
+          const question = openQuestion(attempt);
+          if (question === undefined || !this.#activeAttempts.has(String(attempt.id))) continue;
+          pending.push({
+            mode: "chat",
+            kind: "question",
+            ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+            threadId: thread.id,
+            threadTitle: thread.title,
+            text: question.prompt,
+            options: question.options,
+            // A question carries no time of its own; journaling it is the
+            // attempt's last update while the turn stays parked on it.
+            requestedAt: attempt.updatedAt,
+            answer: {
+              threadId: thread.id,
+              expectedVersion,
+              turnId: turn.id,
+              attemptId: attempt.id,
+              requestId: question.requestId,
+            },
+          });
+        }
+      }
+    }
+    return pending;
   }
 
   async execute(
@@ -3286,12 +3341,12 @@ export class ChatService {
     const attempt = turn?.attempts.find(
       (candidate) => String(candidate.id) === String(command.attemptId),
     );
+    const question = attempt === undefined ? undefined : openQuestion(attempt);
     if (
       attempt === undefined ||
+      question === undefined ||
       String(attempt.turnId) !== String(command.turnId) ||
-      attempt.outcome !== "waiting" ||
-      attempt.pendingQuestion === undefined ||
-      String(attempt.pendingQuestion.requestId) !== String(command.requestId)
+      String(question.requestId) !== String(command.requestId)
     ) {
       throw new ChatServiceError({
         category: "invalid",
@@ -5569,9 +5624,13 @@ export class ChatService {
     }
   }
 
-  #assertActiveChatProject(projectId: Parameters<PersistenceService["readProject"]>[0]): void {
+  #isActiveChatProject(projectId: Parameters<PersistenceService["readProject"]>[0]): boolean {
     const project = this.#persistence.readProject(projectId);
-    if (project === undefined || project.lifecycle !== "active" || project.type !== "chat") {
+    return project !== undefined && project.lifecycle === "active" && project.type === "chat";
+  }
+
+  #assertActiveChatProject(projectId: Parameters<PersistenceService["readProject"]>[0]): void {
+    if (!this.#isActiveChatProject(projectId)) {
       throw new ChatServiceError({
         category: "invalid",
         message: "Chat project membership is invalid.",

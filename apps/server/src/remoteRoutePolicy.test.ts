@@ -227,6 +227,9 @@ describe("remote route policy", () => {
     ]) {
       expect((await fixture.route(request(path, { method: "POST" }))).status).toBe(404);
     }
+    // Every approval and question across the host's Projects is a local-window
+    // read; the remote listener never forwards it.
+    expect((await fixture.route(request("/api/pending-requests"))).status).toBe(404);
 
     expect(fixture.webAssets).not.toHaveBeenCalled();
     expect(fixture.preAuth).not.toHaveBeenCalled();

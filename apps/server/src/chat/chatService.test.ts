@@ -5774,6 +5774,60 @@ describe("ChatService", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
+  it("lists a question a running turn is parked on and answers it with the listed handle", async () => {
+    const sent: Array<SentTurn> = [];
+    const answered: Array<{ requestId: string; answer: string }> = [];
+    const { service } = openFixture({ driver: questionDriver(sent, answered) });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Provider question",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    expect(service.listPendingQuestions()).toEqual([]);
+    const sendPromise = service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Ask me anything",
+    });
+    await until(() => service.listPendingQuestions().length === 1);
+
+    const [listed] = service.listPendingQuestions();
+    if (listed?.mode !== "chat") throw new Error("Expected a Chat question.");
+    expect(listed).toMatchObject({
+      kind: "question",
+      threadId: created.thread.id,
+      threadTitle: "Provider question",
+      text: "How should I proceed?",
+      options: [{ label: "Yes" }, { label: "No" }],
+      answer: { threadId: created.thread.id, requestId: "q-first" },
+    });
+    expect(listed).not.toHaveProperty("projectId");
+
+    await expect(
+      service.execute({ kind: "answer-chat-turn-question", ...listed.answer, answer: "Yes" }),
+    ).resolves.toMatchObject({ kind: "attempt-updated" });
+    // The set's second question is a new request; the answered one is gone.
+    await until(() => {
+      const [next] = service.listPendingQuestions();
+      return next?.mode === "chat" && next.answer.requestId === "q-second";
+    });
+    const [second] = service.listPendingQuestions();
+    if (second?.mode !== "chat") throw new Error("Expected a Chat question.");
+    await service.execute({
+      kind: "answer-chat-turn-question",
+      ...second.answer,
+      answer: "Resolve",
+    });
+    await sendPromise;
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+    );
+    expect(service.listPendingQuestions()).toEqual([]);
+    expect(answered.map((answer) => answer.requestId)).toEqual(["q-first", "q-second"]);
+  });
+
   it("retries failed attempts with a fresh provider session", async () => {
     const failQueue = Effect.runSync(Queue.unbounded<never>());
     const successQueue = Effect.runSync(Queue.unbounded<never>());

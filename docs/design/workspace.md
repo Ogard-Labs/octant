@@ -189,6 +189,19 @@ more**, which opens Pull requests. A row opens that pull request's existing
 review for its Project. The read is one query of the window's authorized
 snapshot, so a remote window sees only the Projects it was granted.
 
+**Needs you** surfaces (a start-screen card, answering from Board cards, the
+command palette; none is built yet) read one host list of the approvals and
+questions this window can answer, across Chat, Work, and Code and across
+Projects, oldest waiting first. Each item names its mode, Project, thread and
+title, kind, text, options where the mode has them, and when it was asked, and
+carries the handle that mode's own answer command takes, so a surface answers
+in place through the commands the open thread already uses. The list is re-read
+on the Machine change feed's Chat, Work, and Code navigation topics and never
+on a timer; an answered or ended request is gone from the next read. It is read
+at a local window only, so a remote window has no Needs you source. What it
+includes and leaves out is in
+[Architecture: pending requests across modes](../architecture.md#security-and-authority).
+
 ## Tool lifecycles
 
 Thread utilities live in the Right Utility Dock outside the split tree.
