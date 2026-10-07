@@ -154,7 +154,7 @@ so a card shipped later arrives with its own default). Ids are an open
 vocabulary: an id the registry does not know is ignored, and adding a card never
 changes the contract. A store from before the cards decodes to the defaults.
 
-**Working now** is the first card, on by default, never unavailable. It lists
+**Working now** follows Needs you, on by default, never unavailable. It lists
 the threads executing now (the navigation rows the host projects as `working`,
 the sidebar's Running rule, so a snoozed or completed row is never listed) and
 the agent runs in progress from the AgentRun projection, most recently moved
@@ -180,6 +180,38 @@ start and step ride on the same navigation rows as the executing flag (see
 [Architecture: persistence](../architecture.md#persistence), fast thread
 reads), so a remote window sees them for exactly the threads it can already
 list.
+
+**Needs you** is the card before Working now, on by default. It lists the
+approvals and questions a provider is waiting on, from one host list of every
+approval and question this window can answer across Chat, Work, and Code and
+across Projects, oldest waiting first. Work's start screen shows Chat and Work
+requests, Code's shows Code's. A row (`PendingRequestRow`, reused by other
+surfaces) shows the provider mark when the shell knows the thread's provider and
+its mode's glyph when it does not, the thread title (which opens the thread),
+the Project, how long it has waited (minute resolution from the shell's
+once-a-minute clock), and the text clamped to two lines. An approval offers
+**Approve** and **Deny**. A question offers one numbered button per choice (the
+matching number key picks it while the row has focus) and **Reply…**, which
+opens the thread so the answer is typed in its composer; a question without
+choices offers Reply… alone. At most five rows show, then **+N more**, which
+opens the Inbox. The card is hidden while nothing waits, and unavailable where
+this window has no reader (a remote window).
+
+The card holds no authority. An answer goes through the mode's own command with
+the handle the host listed: `resolve-work-request`, `answer-provider-approval`,
+`answer-provider-input` (the response is kept as evidence first, with a fresh
+operation id), or `answer-chat-turn-question`, the same calls the open thread
+makes. After an answer the card re-reads and the row leaves with the next read.
+A refused answer (a stale version, a turn that ended, a turn that cannot take
+it, such as one in Plan mode, an unreachable host) shows one quiet line in the
+row saying why, and then the card re-reads; a row the host no longer lists stays
+until the next read or the next minute so the line can be seen. A Code answer
+counts as refused when the host says `operation-failed` or reports the turn
+`failed` or `interrupted`; the command palette reads Code answers the same way.
+The card reads the list when it mounts, on the navigation topics named below,
+and when the shell settings or the window workspace change (neither has a feed
+topic). Signals that arrive while a read is in flight become one more read once
+it lands, so a streaming reply does not start a host read per delta.
 
 **Pull requests** is the next card, on by default, and only on a Code start
 screen. It is hidden — and left out of Customize — unless the Pull requests
