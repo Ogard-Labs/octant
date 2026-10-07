@@ -1,4 +1,5 @@
 import type { CanvasBlock } from "@octant/contracts/canvas";
+import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { describe, expect, it } from "vitest";
 import { renderArtifactHtml, renderArtifactMarkdown } from "./artifactDocumentRender";
 
@@ -100,5 +101,27 @@ describe("rendering a canvas as a document", () => {
     if (markdown.kind !== "rendered") return;
     expect(markdown.body).toContain("[redacted]");
     expect(markdown.body).not.toContain("sk-proj-");
+  });
+
+  it("reads an exported number through the format the block names", () => {
+    // The document a destination receives is the same reading the screen
+    // shows, so a named format is applied on export too, not only in the app.
+    const formatted = renderArtifactMarkdown(
+      definition([
+        {
+          blockId: "metric-format",
+          schemaVersion: 1,
+          kind: "metric",
+          label: "Requests",
+          value: 1_360_000,
+          format: "compact",
+        } as unknown as CanvasBlock,
+      ]),
+    );
+
+    expect(formatted.kind).toBe("rendered");
+    if (formatted.kind !== "rendered") return;
+    expect(formatted.body).toContain(`Requests: ${formatCanvasNumber(1_360_000, "compact")}`);
+    expect(formatted.body).not.toContain("1360000");
   });
 });

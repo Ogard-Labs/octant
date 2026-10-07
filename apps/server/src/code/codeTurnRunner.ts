@@ -103,6 +103,8 @@ export interface CodeTurnEvent {
   readonly occurredAt: ProviderRuntimeEvent["occurredAt"];
   readonly text?: string;
   readonly requestId?: string;
+  /** The labels a provider question offers; absent on every other category. */
+  readonly options?: ReadonlyArray<string>;
   readonly toolCallId?: string;
   readonly toolName?: string;
   readonly status?: string;
@@ -722,6 +724,7 @@ function normalizeProviderEvent(
         category: "question",
         requestId: text(event.requestId),
         text: text(event.prompt),
+        options: event.options.map((option) => text(option.label)),
       });
     case "tool-request":
       return Effect.succeed({

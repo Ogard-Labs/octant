@@ -10,6 +10,8 @@ import {
   WorkRequestApplicationError,
   WorkRequestApplicationService,
 } from "./workRequestApplicationService";
+import { WorkRequestProjection } from "./workRequestProjection";
+import { WorkRequestService } from "./workRequestService";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000801");
 const projectId = decodeProjectId("00000000-0000-4000-8000-000000000901");
@@ -33,7 +35,7 @@ const pendingRequest = decodeWorkRequest({
 function fixture(
   overrides: {
     activeProjects?: ReadonlyArray<{ id: unknown; type: string }>;
-    threads?: ReadonlyArray<{ id: unknown; projectId: unknown }>;
+    threads?: ReadonlyArray<{ id: unknown; projectId: unknown; title?: string }>;
     requestsOverride?: Record<string, unknown>;
   } = {},
 ) {
@@ -191,6 +193,97 @@ describe("WorkRequestApplicationService.execute", () => {
         expectedVersion: pendingRequest.version,
       }),
     ).rejects.toMatchObject({ failure: { code: "conflict" } });
+  });
+});
+
+describe("WorkRequestApplicationService.listPendingForWindow", () => {
+  it("lists the pending requests of every Work Project and thread the window can open", async () => {
+    const { service } = fixture({ threads: [{ id: threadId, projectId, title: "Report" }] });
+    expect(await service.listPendingForWindow(windowId)).toEqual([
+      {
+        mode: "work",
+        kind: "approval",
+        projectId,
+        threadId,
+        threadTitle: "Report",
+        text: "Run `bun install`.",
+        requestedAt: pendingRequest.requestedAt,
+        answer: { requestId, expectedVersion: 1 },
+      },
+    ]);
+  });
+
+  it("omits a Project the window cannot access and one that is not a Work Project", async () => {
+    const { service, requests } = fixture({
+      activeProjects: [{ id: otherProjectId, type: "chat" }],
+      threads: [{ id: threadId, projectId, title: "Report" }],
+    });
+    expect(await service.listPendingForWindow(windowId)).toEqual([]);
+    expect(requests.listPending).not.toHaveBeenCalled();
+  });
+
+  it("omits a request on a thread the window's thread list does not hold", async () => {
+    const { service } = fixture({
+      threads: [{ id: threadId, projectId: otherProjectId, title: "Elsewhere" }],
+    });
+    expect(await service.listPendingForWindow(windowId)).toEqual([]);
+  });
+
+  it("answers through resolve-work-request with the listed handle, then lists it no more", async () => {
+    const projection = new WorkRequestProjection();
+    const frames: unknown[] = [];
+    const requests = new WorkRequestService({
+      projects: {
+        projectType: () => "work",
+        isActiveWorkProject: (id: unknown) => String(id) === String(projectId),
+        workCanonicalRoot: () => "/work",
+        threadProjectId: () => projectId,
+        threadProviderInstanceId: () => pendingRequest.providerInstanceId,
+      },
+      projection,
+      eventStore: {
+        append: (input: { frame: unknown }) => {
+          frames.push(input.frame);
+          return input.frame;
+        },
+        replayAll: () => ({ status: "ok", frames }),
+      },
+      actor: { kind: "local-user", actorId: "55555555-5555-4555-8555-555555555555" },
+      clock: () => "2026-08-10T08:00:00.000Z",
+    } as never);
+    requests.record({
+      requestId,
+      projectId,
+      threadId,
+      providerInstanceId: pendingRequest.providerInstanceId,
+      providerSessionId: pendingRequest.providerSessionId,
+      providerCallbackId: "provider-req-1",
+      detail: { kind: "user-input", prompt: "Which format?", options: ["PDF", "DOCX"] },
+    });
+    const service = new WorkRequestApplicationService({
+      requests,
+      projects: {
+        bootstrap: async () => ({ active: [{ id: projectId, type: "work" }] }),
+      },
+      threads: {
+        bootstrap: async () => ({ threads: [{ id: threadId, projectId, title: "Report" }] }),
+      },
+    });
+
+    const [listed] = await service.listPendingForWindow(windowId);
+    if (listed?.mode !== "work" || listed.kind !== "question") {
+      throw new Error("Expected a Work question.");
+    }
+    expect(listed.options).toEqual([{ label: "PDF" }, { label: "DOCX" }]);
+    await expect(
+      service.execute(windowId, {
+        kind: "resolve-work-request",
+        requestId: listed.answer.requestId,
+        expectedVersion: listed.answer.expectedVersion,
+        resolution: { kind: "user-input", answer: "PDF" },
+      }),
+    ).resolves.toMatchObject({ kind: "work-request-resolved" });
+    expect(await service.listPendingForWindow(windowId)).toEqual([]);
   });
 });
 

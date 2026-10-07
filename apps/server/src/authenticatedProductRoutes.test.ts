@@ -184,6 +184,19 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("refuses a paired device the cross-mode pending request read before the route sees it", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    expect(
+      classifyProductAction(new Request("https://octant.example/api/pending-requests")),
+    ).toBeUndefined();
+    const response = await product(handoff("/api/pending-requests"));
+
+    expect(response?.status).toBe(403);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("refuses a paired device a Project browser before the route sees it", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });
