@@ -1453,6 +1453,64 @@ describe("OpenCode driver", () => {
     });
   });
 
+  it("keeps a 2.x approved edit when OpenCode settles it and reports the change before the reply returns", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "permission.v2.asked",
+          properties: {
+            id: "perm-edit",
+            sessionID: "provider-session",
+            action: "edit",
+            resources: ["/tmp/project/a.ts"],
+          },
+        } as unknown as Event,
+      ],
+      eventsOnReply: [
+        {
+          type: "permission.v2.replied",
+          properties: { sessionID: "provider-session", requestID: "perm-edit", reply: "once" },
+        } as unknown as Event,
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
+        } as unknown as Event,
+        { type: "session.idle", properties: { sessionID: "provider-session" } } as unknown as Event,
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              yield* Effect.sleep("20 millis");
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: "perm-edit",
+                approved: true,
+              });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(events.some((event) => event.kind === "file-change")).toBe(true);
+    expect(events.some((event) => event.kind === "failed")).toBe(false);
+  });
+
   it("answers a 2.x approval once even when approvals are remembered for the project", async () => {
     const fixture = betaDriver({
       permissionPersistence: "project-default",
@@ -1980,6 +2038,7 @@ function betaDriver(
     readonly events?: ReadonlyArray<Event>;
     readonly launchScratch?: "unreported";
     readonly permissionPersistence?: "project-default";
+    readonly eventsOnReply?: ReadonlyArray<Event>;
   } = {},
 ) {
   const launchScratch = launchScratchDirectory();
@@ -2033,9 +2092,12 @@ function driverFixture(
     readonly streamEnd?: "hang" | "eof" | "throw";
     /** The confined server answers 500 for a directory inside a Git work tree. */
     readonly worktreeProviders?: "refused";
+    /** Streamed after an approval reply is sent and before that reply resolves. */
+    readonly eventsOnReply?: ReadonlyArray<Event>;
   } = {},
 ) {
   const calls: string[] = [];
+  const late = lateEvents();
   const catalogueRoots: string[] = [];
   const processInputs: OpenCodeProcessStartInput[] = [];
   const createdPermissions: PermissionRuleset[] = [];
@@ -2066,7 +2128,9 @@ function driverFixture(
     providers: async () => providerList(),
     subscribe: async (signal) => {
       calls.push("event.subscribe");
-      return asyncIterable(options.events ?? [], signal, options.streamEnd ?? "hang");
+      return options.eventsOnReply === undefined
+        ? asyncIterable(options.events ?? [], signal, options.streamEnd ?? "hang")
+        : lateIterable(options.events ?? [], signal, late);
     },
     createSession: async ({ permission }) => {
       createdPermissions.push(permission);
@@ -2123,6 +2187,9 @@ function driverFixture(
     },
     replyPermission: async (_sessionId, _id, reply) => {
       calls.push(`permission.reply:${reply}`);
+      if (options.eventsOnReply === undefined) return;
+      late.push(options.eventsOnReply);
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
     },
     replyQuestion: async (_sessionId, _id, answers) => {
       calls.push(`question.reply:${answers.join("|")}`);
@@ -2215,6 +2282,34 @@ function providerSession(directory: string): Session {
     time: { created: 1, updated: 1 },
   };
 }
+function lateEvents() {
+  const queued: Event[] = [];
+  let wake: (() => void) | undefined;
+  return {
+    push: (events: ReadonlyArray<Event>) => {
+      queued.push(...events);
+      wake?.();
+    },
+    take: () => queued.splice(0),
+    next: () => new Promise<void>((resolve) => (wake = resolve)),
+  };
+}
+
+async function* lateIterable(
+  events: ReadonlyArray<Event>,
+  signal: AbortSignal,
+  late: ReturnType<typeof lateEvents>,
+) {
+  for (const event of events) yield event;
+  const aborted = new Promise<void>((resolve) =>
+    signal.addEventListener("abort", () => resolve(), { once: true }),
+  );
+  while (!signal.aborted) {
+    for (const event of late.take()) yield event;
+    await Promise.race([late.next(), aborted]);
+  }
+}
+
 async function* asyncIterable(
   events: ReadonlyArray<Event>,
   signal: AbortSignal,
