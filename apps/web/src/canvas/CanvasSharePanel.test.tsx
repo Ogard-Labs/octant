@@ -4,6 +4,7 @@ import type {
   CanvasShareResult,
   CanvasShareSnapshotRequest,
 } from "@octant/contracts/canvas-share-snapshot";
+import { commitsByHourExample, hottestFilesExample, repositoryMapExample } from "@octant/domain";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -213,6 +214,32 @@ describe("CanvasSharePanel", () => {
 
     fireEvent.click(screen.getByTestId("canvas-share-snapshot-close"));
     expect(screen.queryByTestId("canvas-share-snapshot-view")).toBeNull();
+  });
+
+  it("draws a shared treemap, heatmap, and bar list in the opened snapshot", async () => {
+    const onOpen = vi.fn(
+      async () =>
+        ({
+          kind: "allowed",
+          document: {
+            ...exportDocument(),
+            schemaVersion: 3,
+            blocks: [repositoryMapExample, commitsByHourExample, hottestFilesExample],
+          },
+          event: { eventId: "x" },
+        }) as never,
+    );
+    renderPanel({ overview: overview({ snapshots: [activeSnapshot()] }), onOpen });
+
+    fireEvent.click(screen.getByTestId(`canvas-share-open-${snapshotId}`));
+
+    const view = await screen.findByTestId("canvas-share-snapshot-view");
+    for (const kind of ["treemap", "heatmap", "bar-list"]) {
+      expect(view.querySelector(`[data-block-kind="${kind}"]`)).not.toBeNull();
+    }
+    expect(view).toHaveTextContent("Lines of code");
+    expect(view).toHaveTextContent("Commits");
+    expect(view).toHaveTextContent("packages/domain/src/canvasPolicy.ts");
   });
 
   it("fails closed when an allowed open serves a document that is not the sanitized contract", async () => {

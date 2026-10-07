@@ -339,7 +339,7 @@ labeled non-negative slices. Stacked, grouped, and bar-and-line charts share
 categories across series; a bar-and-line series names itself as a bar or a line.
 The accessible table lists every reading. A pie or donut legend toggles at most
 24 slices; the rest stay in the picture and the table. A shared snapshot keeps
-the chart and drops no series mark.
+the chart, its number format, and every series mark.
 A treemap is a hierarchy drawn as squarified rectangles: nodes name a parent,
 one root, values sit on leaves, and a group's reading is the sum of its
 children. A leaf carries a value for every declared measure and may name a
@@ -353,7 +353,8 @@ journaled. The domain policy refuses a second root, a cycle, a dangling parent,
 a group that carries its own value or a leaf that does not, a value that is
 negative, a measure that is not declared, and a hierarchy past the depth, node,
 measure, or label budget. The accessible fallback is a hierarchical table
-sortable by each measure.
+sortable by each measure. A shared snapshot keeps the hierarchy, its measures,
+and every reading, and drops each leaf's source id.
 A heatmap is a grid coloured by value. A matrix names its rows and columns and
 carries a cell per coordinate with a value and an optional short note; a cell on
 a coordinate the block does not hold, a repeated row, column, or coordinate, and
@@ -366,7 +367,7 @@ preview SVG, and the Markdown and HTML export all draw the same cells. The perso
 can sort a matrix's rows by their total and walk the cells with the arrow keys;
 these are view state and are never journaled. The accessible fallback is a table
 of every coordinate and its total for a matrix, or of every dated reading for a
-calendar.
+calendar. A shared snapshot keeps the grid, its readings, and their notes.
 A bar list is a ranking of magnitudes (`packages/domain/src/canvasBarListLayout.ts`):
 each row is a label, a value, an optional second value, and an optional manifest
 source. Rows sort largest first with a stable tie-break by the author's order,
@@ -380,13 +381,21 @@ which the host reauthorizes. The pure, deterministic layout is shared by the
 screen, the artifact preview SVG, and the Markdown and HTML export. The domain
 policy refuses a repeated label, a negative or non-finite value, a list past the
 row budget, and a source the manifest does not hold; the accessible fallback is a
-table of every row. A metric block may carry a `format`, a `delta`, a
+table of every row. A shared snapshot keeps every row and reading and drops each
+row's source id. A metric block may carry a `format`, a `delta`, a
 `goodDirection` of `up`, `down`, or `neutral` so a delta's tone is never guessed,
 a `sparkline` of at most 256 readings, and a short `caption`; consecutive metric
 blocks are gathered into one responsive row of two to four tiles. The bar list
 and the metric's direction, sparkline, and caption arrive with Canvas schema
 version 7, so a document declaring an older version that carries any of them is
 refused as a future version; a static export carries the same metric fields.
+A share carries every block kind and field a Canvas holds except source ids
+and the design and action blocks it refuses (see the `design` block). A table
+column keeps its number format and display, and a board keeps its own layout.
+Share documents version independently of Canvas documents: a treemap, a
+heatmap, a bar list, a chart's or a table column's number format, a table
+column's display, and a board's layout arrive with share version 3, so a share
+that declares an older version and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -471,8 +480,12 @@ or font, and any link that is not a fragment, naming the frame and the
 construct; the event store and revise policy return that reason to the
 author rather than a generic failure. The sandbox is the boundary and the
 link rule is part of it, because a link is the one way a page with no script
-can leave. A static share refuses a design, and Markdown or HTML export writes
-frame titles, not markup. A design is always a sidebar Canvas. An authored
+can leave. A share refuses a design, and Markdown or HTML export writes
+frame titles, not markup. A share also refuses an action block, whose command
+runs only on this host. Both refusals, and any block or field the share
+contract does not carry, are checked before the snapshot is journaled and
+reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not
+a malformed request. A design is always a sidebar Canvas. An authored
 revision declares the current schema version on the version and its
 definition, so a Canvas written under an earlier version moves forward and can
 gain a design; a version append never moves a Canvas back. Agents writing
