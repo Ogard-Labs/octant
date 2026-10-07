@@ -84,7 +84,7 @@ import { HostSelector } from "./HostSelector";
 import { HomeStart, type HomeAction } from "./HomeStart";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { HomeDashboard } from "../home/HomeDashboard";
-import type { HomeComposerTabsSlot } from "../home/HomeComposerTabs";
+import { HomeComposerTabs, type HomeComposerTabsSlot } from "../home/HomeComposerTabs";
 import type { HomeCardDefinition } from "../home/homeCards";
 import type { OctantHostBridge } from "./hostBridge";
 import { WorkKindSwitch } from "./WorkKindSwitch";
@@ -1089,120 +1089,122 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           />
         </div>
 
-        <div className="draft-thread__composer composer-stack">
-          {createFromControl}
-          <ThreadComposer
-            startContext={
-              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
-                {props.mode === "chat" ? <WorkKindSwitch /> : null}
-                <DraftContextStrip
-                  mode={props.mode}
-                  {...hostSelectorBinding}
-                  {...(props.approvalLabel === undefined
-                    ? {}
-                    : { approvalLabel: props.approvalLabel })}
-                  {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
-                  {...(props.mode === "chat" || props.projectName === undefined
-                    ? {}
-                    : { projectName: props.projectName })}
-                  {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+        <HomeComposerTabs slot={props.homeStart?.composerTabs}>
+          <div className="draft-thread__composer composer-stack">
+            {createFromControl}
+            <ThreadComposer
+              startContext={
+                <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                  {props.mode === "chat" ? <WorkKindSwitch /> : null}
+                  <DraftContextStrip
+                    mode={props.mode}
+                    {...hostSelectorBinding}
+                    {...(props.approvalLabel === undefined
+                      ? {}
+                      : { approvalLabel: props.approvalLabel })}
+                    {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
+                    {...(props.mode === "chat" || props.projectName === undefined
+                      ? {}
+                      : { projectName: props.projectName })}
+                    {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+                  />
+                </div>
+              }
+              chips={<ComputerUseMention controller={computer} surface="chips" />}
+              typeahead={
+                slash.open ? (
+                  <ComposerSlashTypeahead controller={slash} />
+                ) : (
+                  <ComputerUseMention controller={computer} surface="typeahead" />
+                )
+              }
+              input={
+                <OctantTextarea
+                  aria-label="First message"
+                  aria-autocomplete="list"
+                  aria-expanded={computer.open || slash.open}
+                  aria-controls={
+                    computer.open ? computer.listId : slash.open ? slash.listId : undefined
+                  }
+                  aria-activedescendant={
+                    computer.open
+                      ? `${computer.listId}-computer`
+                      : slash.active === undefined
+                        ? undefined
+                        : `${slash.listId}-${slash.active.id}`
+                  }
+                  autoFocus
+                  className="composer-input"
+                  disabled={props.creating}
+                  onChange={(event) => {
+                    setPrompt(event.target.value);
+                    computer.sync(event.target.value, event.currentTarget.selectionStart);
+                    slash.sync(event.target.value, event.currentTarget.selectionStart);
+                  }}
+                  onClick={(event) => {
+                    slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  }}
+                  onSelect={(event) => {
+                    slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  }}
+                  onKeyDown={handleKeyDown}
+                  placeholder={presentation.composerPlaceholder}
+                  ref={textareaRef}
+                  rows={3}
+                  value={prompt}
                 />
-              </div>
-            }
-            chips={<ComputerUseMention controller={computer} surface="chips" />}
-            typeahead={
-              slash.open ? (
-                <ComposerSlashTypeahead controller={slash} />
-              ) : (
-                <ComputerUseMention controller={computer} surface="typeahead" />
-              )
-            }
-            input={
-              <OctantTextarea
-                aria-label="First message"
-                aria-autocomplete="list"
-                aria-expanded={computer.open || slash.open}
-                aria-controls={
-                  computer.open ? computer.listId : slash.open ? slash.listId : undefined
-                }
-                aria-activedescendant={
-                  computer.open
-                    ? `${computer.listId}-computer`
-                    : slash.active === undefined
-                      ? undefined
-                      : `${slash.listId}-${slash.active.id}`
-                }
-                autoFocus
-                className="composer-input"
-                disabled={props.creating}
-                onChange={(event) => {
-                  setPrompt(event.target.value);
-                  computer.sync(event.target.value, event.currentTarget.selectionStart);
-                  slash.sync(event.target.value, event.currentTarget.selectionStart);
-                }}
-                onClick={(event) => {
-                  slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                }}
-                onSelect={(event) => {
-                  slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                }}
-                onKeyDown={handleKeyDown}
-                placeholder={presentation.composerPlaceholder}
-                ref={textareaRef}
-                rows={3}
-                value={prompt}
-              />
-            }
-            row={{
-              leading: (
-                <>
-                  {folderControl}
-                  <ComposerVoiceButton
-                    disabled={props.creating}
-                    onTranscript={(transcript) =>
-                      setPrompt((current) => appendTranscript(current, transcript))
-                    }
-                  />
-                  <span className="composer-gap" aria-hidden="true" />
-                  <ComposerModelPicker
-                    ariaLabel="Provider and model"
-                    menuSide="bottom"
-                    groups={props.providerGroups}
-                    modelOptionValues={modelOptionValues}
-                    onModelOptionChange={(id, value) => {
-                      const rest = Object.fromEntries(
-                        Object.entries(modelOptionValues).filter(([key]) => key !== id),
-                      );
-                      setModelChoice({
-                        key: modelKey,
-                        values: value === undefined ? rest : { ...rest, [id]: value },
-                      });
-                    }}
-                    onSelect={props.onSelectProvider}
-                    {...(props.selectedModelId === undefined
-                      ? {}
-                      : { selectedModelId: props.selectedModelId })}
-                    {...(props.selectedProviderInstanceId === undefined
-                      ? {}
-                      : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                  />
-                </>
-              ),
-              actions: {
-                kind: "send",
-                send: { ariaLabel: "Create thread", disabled: !canSubmit, onSend: submit },
-              },
-            }}
-          />
-          {props.errorMessage === undefined ? null : (
-            <OctantAlert className="draft-thread__error" tone="danger">
-              {props.errorMessage}
-            </OctantAlert>
-          )}
-          <p className="draft-thread__hint">
-            Press Enter to start · Shift+Enter for a new line · Escape to close
-          </p>
-        </div>
+              }
+              row={{
+                leading: (
+                  <>
+                    {folderControl}
+                    <ComposerVoiceButton
+                      disabled={props.creating}
+                      onTranscript={(transcript) =>
+                        setPrompt((current) => appendTranscript(current, transcript))
+                      }
+                    />
+                    <span className="composer-gap" aria-hidden="true" />
+                    <ComposerModelPicker
+                      ariaLabel="Provider and model"
+                      menuSide="bottom"
+                      groups={props.providerGroups}
+                      modelOptionValues={modelOptionValues}
+                      onModelOptionChange={(id, value) => {
+                        const rest = Object.fromEntries(
+                          Object.entries(modelOptionValues).filter(([key]) => key !== id),
+                        );
+                        setModelChoice({
+                          key: modelKey,
+                          values: value === undefined ? rest : { ...rest, [id]: value },
+                        });
+                      }}
+                      onSelect={props.onSelectProvider}
+                      {...(props.selectedModelId === undefined
+                        ? {}
+                        : { selectedModelId: props.selectedModelId })}
+                      {...(props.selectedProviderInstanceId === undefined
+                        ? {}
+                        : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                    />
+                  </>
+                ),
+                actions: {
+                  kind: "send",
+                  send: { ariaLabel: "Create thread", disabled: !canSubmit, onSend: submit },
+                },
+              }}
+            />
+            {props.errorMessage === undefined ? null : (
+              <OctantAlert className="draft-thread__error" tone="danger">
+                {props.errorMessage}
+              </OctantAlert>
+            )}
+            <p className="draft-thread__hint">
+              Press Enter to start · Shift+Enter for a new line · Escape to close
+            </p>
+          </div>
+        </HomeComposerTabs>
 
         {homeStartNode}
 

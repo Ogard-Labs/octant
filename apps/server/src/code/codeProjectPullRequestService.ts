@@ -957,6 +957,7 @@ export class CodeProjectPullRequestService {
               ...(check.completedAt === undefined ? {} : { completedAt: check.completedAt }),
             })),
           }),
+      ...(row.crossRepository ? { crossRepository: true } : {}),
       linkedThreads: matchLinkedThreadsToPullRequest({
         pullRequest: {
           repository: { owner: project.repositoryOwner, name: project.repositoryName },

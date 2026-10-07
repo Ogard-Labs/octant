@@ -207,7 +207,10 @@ thread is resting. At most five rows show, then **+N more**, which opens the
 Running view (the Board; Chat's Running tile opens Activity). A row opens its
 thread. The card reads what the window's controllers already hold; the run list
 is one read when the card mounts and again when the thread lists change, so it
-adds no timer, and a window sees only what its own authority returns. The turn
+adds no timer, and a window sees only what its own authority returns. Working
+now, the Running tab, and the Computers card share that one read: at most one is
+in flight, and the changes that arrive meanwhile (a streaming Chat reply moves
+the thread lists on every delta) become one more read once it lands. The turn
 start and step ride on the same navigation rows as the executing flag (see
 [Architecture: persistence](../architecture.md#persistence), fast thread
 reads), so a remote window sees them for exactly the threads it can already
@@ -246,8 +249,9 @@ the host cannot scan, the card says it could not check rather than that nothing
 is running, and a refused refresh keeps the last listing. A window with no Code
 Project sees an empty card.
 
-Above the composer the same screens carry two tabs on its top-left edge,
-**New task** and **Running**. New task is selected first and is the composer as
+Above the composer the same screens, the Chat screen that lists the threads to
+continue among them, carry two tabs on its top-left edge, **New task** and
+**Running**. New task is selected first and is the composer as
 it was: the Running tab never takes the focus the composer takes on arrival. The
 Running label carries the sidebar's own Running count for the current mode, read
 from the same place as the tile (nothing is added at zero), so the two cannot
@@ -347,7 +351,9 @@ storage, or a missing pull-request capability hides it and leaves it out of
 Customize. It lists failing checks the pull-request refresh already recorded,
 on the signed-in person's open pull requests and on the current branches of
 Code Projects. A current branch is the branch of an active thread's available
-checkout; the card does not observe checkouts itself. A failing check that is
+checkout; the card does not observe checkouts itself. A pull request from a fork
+(the list read's `isCrossRepository`) never matches a current branch: its head
+branch is a branch of the fork, whatever its name. A failing check that is
 neither is left out. A row shows the check name, the repository and number
 when the pull request is the person's (`repo#12`) or the branch when it is
 only a current checkout, and how long ago the check finished failing. The
@@ -360,11 +366,14 @@ its workspace, since the current checkout may be on another branch; the
 checkout's head does not replace that branch. The pull request, check, branch,
 and repository are already written in; the rollup carries no failure text, so
 the draft quotes none. Sending, switching the draft's Project, or starting a
-new draft lets go of that branch. It does not start a turn; the person sends
+new draft lets go of that branch, wherever the new draft is started: the
+sidebar's New task, the command palette, thread search, or the menu bar's Start
+new agent all start the same clean draft. A pull request from a fork offers no
+Start a fix, since its branch is not in the Project. It does not start a turn; the person sends
 it. Opening the card reads the same cached snapshot
 Pull requests reads and adds no poll.
 
-**Computers** follows CI failures, on by default, on Work and Code. It lists every
+**Computers** follows CI failures, on by default, on Chat, Work, and Code. It lists every
 host this window is connected to: this computer, paired remote hosts, devboxes,
 and servers. A row names the host and says whether it is connected,
 reconnecting, or offline — the word, not colour alone. A connected or
@@ -378,8 +387,12 @@ figures as current. The host this window was opened from reports how many
 agents run there, and that count opens Running with the environment filter set
 to the host; any other host does not report one, so its row shows no count.
 At most four hosts show, then **+N more**. The card reads each host's load only
-while it is visible and the window is in front, about every ten seconds, and
-stops when the window is hidden. It never polls in the background.
+while it is mounted and the window is visible (not minimised, on another space,
+or behind another tab), about every ten seconds, and stops when the window is
+hidden; a window that is visible but not focused still reads. It never polls in
+the background. A host whose last read has not answered is not asked again, a
+read that takes longer than five seconds is abandoned and leaves that host
+without figures, and leaving the start screen cancels the reads in flight.
 
 **Needs you** surfaces (a start-screen card, answering from Board cards, the
 command palette) each read the same host list described with the Needs you

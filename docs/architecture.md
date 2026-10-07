@@ -211,8 +211,9 @@ unauthenticated caller is refused, with no figures in the refusal. The route
 also compares the device's host identity with this host's, but every paired
 device row on a host carries that host's own identity, so the comparison does
 not separate one paired device from another. The Computers card
-reads the route only while the card is on screen and the window is in front,
-about every ten seconds, and does not poll in the background.
+reads the route only while the card is on screen and the window is visible,
+about every ten seconds, at most one read per host at a time and each abandoned
+after five seconds, and does not poll in the background.
 
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through

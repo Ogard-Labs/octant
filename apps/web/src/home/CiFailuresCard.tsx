@@ -118,16 +118,18 @@ function FailureRows(props: {
                 </span>
               )}
             </span>
-            <OctantButton
-              aria-label={`Start a fix for ${row.checkName} on ${row.place}`}
-              className="ci-failures-card__fix window-no-drag"
-              onClick={() => props.onStartFix(row)}
-              size="sm"
-              type="button"
-              variant="link"
-            >
-              Start a fix
-            </OctantButton>
+            {row.branch === undefined ? null : (
+              <OctantButton
+                aria-label={`Start a fix for ${row.checkName} on ${row.place}`}
+                className="ci-failures-card__fix window-no-drag"
+                onClick={() => props.onStartFix(row)}
+                size="sm"
+                type="button"
+                variant="link"
+              >
+                Start a fix
+              </OctantButton>
+            )}
           </div>
         </li>
       ))}

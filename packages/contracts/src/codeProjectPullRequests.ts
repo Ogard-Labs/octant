@@ -283,6 +283,13 @@ export const CodeProjectPullRequestRow = Schema.Struct({
       Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS),
     ),
   ),
+  /**
+   * Present, and true, only when the head branch lives in a fork: `headBranch`
+   * then names a branch of another repository, so it says nothing about this
+   * Project's checkouts. Absent on a same-repository row and on a snapshot
+   * taken before that fact was recorded.
+   */
+  crossRepository: Schema.optional(Schema.Literal(true)),
   linkedThreads: Schema.Array(CodeProjectPullRequestLinkedThread).pipe(
     Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS),
   ),

@@ -45,7 +45,7 @@ Chat has no board.
 
 ### Home cards
 
-Under the composer on a new Work or Code task, a few cards show what is
+Under the composer on a new chat or a new Work or Code task, a few cards show what is
 happening now. **Working now** lists what is running across your Projects:
 each row has the provider mark, the thread's title, a line saying what it is
 doing, and a time. A command or tool shows as it runs, such as `Command: bun run
@@ -111,14 +111,15 @@ at all, the card says so.
 
 **CI failures**, on a new Code task, lists checks that failed on pull requests
 you opened and on the branch a Code Project is on now. A row shows the check,
-the repository or the branch, and how long ago it failed. Up to five rows
-show. When nothing is failing, the card is not shown. **Start a fix** opens a
+the repository or the branch, and how long ago it failed. A pull request from
+a fork is listed only when you opened it, and offers no **Start a fix**, since
+its branch is not in your Project. Up to five rows show. When nothing is failing, the card is not shown. **Start a fix** opens a
 new Code task that starts a new worktree from the failing branch, with the
 pull request and check already written in; you send it. The card is not shown without a connection, or when credential
 storage is insecure. It reads the same list Pull requests keeps, at the same
 moment, so the two cards ask once between them and not again on their own.
 
-**Computers**, on a new Work or Code task, lists the computers this window is
+**Computers**, on a new chat or a new Work or Code task, lists the computers this window is
 connected to: this computer, and any paired computer, devbox, or server. Each
 row says whether it is connected, reconnecting, or offline. When this window
 may see that computer's load, the row shows how many cores and how much memory
@@ -129,7 +130,7 @@ seen, and no bars. If the load cannot be read for a moment, the bars go away
 until it can. For the computer this window was opened from, the number of agents
 running there opens Running filtered to that computer; other computers do not
 report it, so they show no number. Up to four computers show, then **+N more**. The card asks for
-the load only while you are looking at it and the window is in front, about
+the load only while you are looking at it and the window is not hidden, about
 every ten seconds, and stops when the window is hidden.
 
 **Customize**, on the right under the composer, turns each card on or off and
