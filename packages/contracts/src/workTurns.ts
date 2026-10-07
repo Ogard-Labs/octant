@@ -1,3 +1,4 @@
+import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark } from "./agentRun";
@@ -336,6 +337,14 @@ export const WorkTurnStreamFrame = Schema.Union(
     threadId: WorkThreadId,
     turn: WorkTurnState,
   }).annotations(strict),
+  Schema.Struct({
+    ...HarnessRetryEventFields,
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+  })
+    .annotations(strict)
+    .pipe(Schema.filter((frame) => frame.attempt <= frame.maxAttempts)),
   Schema.Struct({
     kind: Schema.Literal("snapshot-required"),
     sequence: Schema.Int.pipe(Schema.nonNegative()),

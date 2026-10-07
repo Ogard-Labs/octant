@@ -31,7 +31,13 @@ export type WorkspaceSurfaceDropDestination =
       readonly kind: "edge";
       readonly targetPaneId: PaneId;
       readonly edge: WorkspaceSurfaceDropEdge;
-    };
+    }
+  | { readonly kind: "composer"; readonly composerKey: string };
+
+export interface ComposerThreadDropZone {
+  readonly key: string;
+  readonly rect: WorkspaceDragRect;
+}
 
 /**
  * What is being dragged: a surface value, plus the pane it is leaving when the
@@ -132,4 +138,19 @@ function canUseEdge(
   return edge === "left" || edge === "right"
     ? target.rect.width >= MIN_WORKSPACE_DOCKED_PANE_WIDTH * 2
     : target.rect.height >= MIN_WORKSPACE_DOCKED_PANE_HEIGHT * 2;
+}
+
+/**
+ * A sidebar thread dropped on a composer attaches context instead of opening
+ * a pane. A pane grip keeps the pane destination even when the pointer is
+ * over a composer, so moving a pane is unchanged.
+ */
+export function resolveSidebarComposerDrop(input: {
+  readonly point: WorkspaceDragPoint;
+  readonly source: WorkspaceSurfaceDragSource;
+  readonly composerZones: ReadonlyArray<ComposerThreadDropZone>;
+}): WorkspaceSurfaceDropDestination | null {
+  if (input.source.paneId !== undefined) return null;
+  const zone = input.composerZones.find((candidate) => containsPoint(candidate.rect, input.point));
+  return zone === undefined ? null : { kind: "composer", composerKey: zone.key };
 }

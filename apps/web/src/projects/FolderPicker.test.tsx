@@ -226,6 +226,51 @@ describe("FolderPicker", () => {
     await waitFor(() => expect(onCancel).toHaveBeenCalled());
   });
 
+  it("shows an error with Retry that re-issues the failed search", async () => {
+    const user = userEvent.setup();
+    let failedOnce = false;
+    const browse = vi.fn(async (input: FolderBrowseRequest) => {
+      if (input.search === "alp") {
+        if (!failedOnce) {
+          failedOnce = true;
+          throw new Error("Folder browse service is unavailable.");
+        }
+        return browseResult({
+          candidates: [
+            candidate({
+              candidateId: alphaCandidateId,
+              displayName: "alpha",
+              isGitRepository: false,
+              isSelectable: true,
+            }),
+          ],
+        });
+      }
+      return browseResult({
+        breadcrumbs: [{ label: "example" }],
+        candidates: [
+          candidate({
+            candidateId: projectsCandidateId,
+            displayName: "projects",
+            isGitRepository: false,
+            isSelectable: true,
+          }),
+        ],
+      });
+    });
+
+    renderPicker(browse);
+    expect(await screen.findByText("projects")).toBeVisible();
+
+    await user.type(screen.getByRole("searchbox", { name: "Search folders" }), "alp");
+    expect(await screen.findByText("Folder browse service is unavailable.")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("alpha")).toBeVisible();
+    expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({ search: "alp" }));
+  });
+
   it("dismisses the Add folder dialog when the user presses Escape", async () => {
     const user = userEvent.setup();
     const onCancel = vi.fn();

@@ -39,6 +39,7 @@ import {
   type AgentRun,
   type AgentRunId,
   type WorkTurnStreamFrame,
+  type HarnessRetryNotice,
   type Project,
   type ProjectId,
   type ProviderAttachmentInput,
@@ -62,6 +63,7 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
   decideWorkTurnAuthority,
   assertProviderAllowedByProjectPolicy,
@@ -254,6 +256,8 @@ export interface WorkTurnServiceDependencies {
         readonly turn?: TurnEndSummary;
       },
     ) => Promise<void>;
+    readonly noteRetry?: (scope: NativeHarnessTurnScope, notice: HarnessRetryNotice) => void;
+    readonly clearRetry?: (scope: NativeHarnessTurnScope) => void;
   };
   /**
    * Watches the bound folder for the length of a turn. Absent on a host that
@@ -306,6 +310,8 @@ export interface WorkTurnServiceDependencies {
    * waiting on the turn (the goal loop) reads its figures from here.
    */
   readonly usageStore?: WorkTurnUsageStore;
+  /** Where a running turn's start time and latest step are kept for the navigation read. */
+  readonly liveTurns?: LiveTurnRegistry;
   /**
    * Read access to journaled subagent runs. A turn that claims to carry a
    * finished run's result is verified here — parent thread, terminal
@@ -363,6 +369,7 @@ export class WorkTurnService {
   readonly #safeInputBudgetTokens: number;
   readonly #liveUpdates: WorkTurnLiveStore;
   readonly #usageStore: WorkTurnUsageStore | undefined;
+  readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #agentRuns: WorkTurnServiceDependencies["agentRuns"];
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
@@ -408,6 +415,7 @@ export class WorkTurnService {
     this.#safeInputBudgetTokens = dependencies.safeInputBudgetTokens ?? WORK_TURN_SAFE_INPUT_TOKENS;
     this.#liveUpdates = dependencies.liveUpdates ?? new WorkTurnLiveStore();
     this.#usageStore = dependencies.usageStore;
+    this.#liveTurns = dependencies.liveTurns;
     this.#agentRuns = dependencies.agentRuns;
   }
 
@@ -1192,12 +1200,38 @@ export class WorkTurnService {
           const delta = response.startsWith(previous) ? response.slice(previous.length) : response;
           this.#liveUpdates.appendResponse(input.command.threadId, input.command.requestId, delta);
         },
+        onRetrying: (event) => {
+          if (harnessScope !== undefined) {
+            this.#nativeHarness?.noteRetry?.(harnessScope, {
+              attempt: event.attempt,
+              maxAttempts: event.maxAttempts,
+              delayMs: event.delayMs,
+              reason: event.reason,
+              announcedAt: event.occurredAt,
+            });
+          }
+          this.#liveUpdates.appendRetry(input.command.threadId, input.command.requestId, {
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            delayMs: event.delayMs,
+            reason: event.reason,
+            announcedAt: event.occurredAt,
+          });
+        },
+        onRetryCleared: () => {
+          if (harnessScope !== undefined) this.#nativeHarness?.clearRetry?.(harnessScope);
+        },
         ...(this.#onRequestSettled === undefined
           ? {}
           : { onRequestSettled: this.#onRequestSettled }),
         onTurnEnded: (ended) => {
           endedTurn = ended;
         },
+        ...(this.#liveTurns === undefined
+          ? {}
+          : {
+              liveTurn: this.#liveTurns.tracker(String(input.command.threadId), "work-navigation"),
+            }),
         onUsage: (usage) => {
           const projected = this.#projection.lookup(input.command.requestId);
           if (

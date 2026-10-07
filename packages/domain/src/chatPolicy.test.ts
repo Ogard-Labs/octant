@@ -570,6 +570,30 @@ describe("chat turn and attempt policy", () => {
     expect(cancelled.pendingQuestion).toBeUndefined();
   });
 
+  it("drops a retry wait when the attempt fails, is cancelled, or completes", () => {
+    const retrying = decodeChatAttempt({
+      ...makeAttempt("streaming"),
+      harnessRetry: {
+        attempt: 5,
+        maxAttempts: 5,
+        delayMs: 4_000,
+        reason: "unavailable",
+        announcedAt: now,
+      },
+    });
+    const failed = transitionChatAttempt(retrying, {
+      outcome: "failed",
+      updatedAt: later,
+      failure: { code: "unavailable" as never },
+    });
+    const cancelled = transitionChatAttempt(retrying, { outcome: "cancelled", updatedAt: later });
+    const completed = transitionChatAttempt(retrying, { outcome: "completed", updatedAt: later });
+
+    expect(failed.harnessRetry).toBeUndefined();
+    expect(cancelled.harnessRetry).toBeUndefined();
+    expect(completed.harnessRetry).toBeUndefined();
+  });
+
   it("carries a usage-limit fact onto the parked attempt and drops it when the turn resumes", () => {
     const limited = transitionChatAttempt(makeAttempt("streaming"), {
       outcome: "waiting",

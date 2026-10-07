@@ -46,6 +46,7 @@ import {
   type ChatEventFrame,
   type ChatFailure,
   type ChatHandoffWarning,
+  type HarnessRetryNotice,
   type ChatSettings,
   type ChatThread,
   type ChatThreadId,
@@ -74,6 +75,7 @@ import {
   type ProviderObservedState,
   type ProviderProbeResult,
   type MentionableThreadId,
+  type PendingRequest,
   type ProviderServiceLimits,
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
@@ -207,6 +209,7 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 import { SearxngEndpointRejected, validateSearxngEndpoint } from "./research/searxngEndpoint";
 import {
@@ -218,7 +221,16 @@ import { MultiModelRouteService } from "./multiModelRouteService";
 
 const RESEARCH_TOOL_NAME = "octant_web_research";
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
-const FALLBACK_CHAT_CONTEXT_WINDOW = 4_096;
+/**
+ * What a turn is planned against when neither the provider nor the reviewed
+ * catalog named the model's window. It is an estimate, journaled as the
+ * `conservative-fallback` source and never shown as the model's window. A floor
+ * of a few thousand tokens left a thread's earlier turns out, or summarised
+ * them, after a few messages, and blocked a request that alone passed it, on
+ * models with room for far more. A window this size admits an ordinary thread
+ * whole and leaves a model with a smaller window to say so itself.
+ */
+const FALLBACK_CHAT_CONTEXT_WINDOW = 256_000;
 const FALLBACK_CHAT_MAX_OUTPUT = 1_024;
 
 type ConfiguredChatSettings = ChatSettings & {
@@ -503,6 +515,8 @@ interface PreparedChatContent {
 }
 
 export interface ChatServiceOptions {
+  /** Where a running turn's start time and latest step are kept for the navigation read. */
+  readonly liveTurns?: LiveTurnRegistry;
   readonly attachmentStore?: ChatAttachmentStore;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly persistence: PersistenceService;
@@ -582,6 +596,8 @@ export interface ChatServiceOptions {
         readonly contextSubject?: ContextSubjectRef;
       },
     ) => Promise<void>;
+    readonly noteRetry?: (scope: NativeHarnessTurnScope, notice: HarnessRetryNotice) => void;
+    readonly clearRetry?: (scope: NativeHarnessTurnScope) => void;
   };
   /**
    * Chat threads that are hidden sidecars. A Side Chat sidecar is an
@@ -752,6 +768,11 @@ function hasAttemptInFlight(view: ChatThreadView | undefined): boolean {
   );
 }
 
+/** The question an attempt is parked on, if it is waiting for the person's answer. */
+function openQuestion(attempt: ChatAttempt): ChatAttempt["pendingQuestion"] {
+  return attempt.outcome === "waiting" ? attempt.pendingQuestion : undefined;
+}
+
 export interface ChatSubscribeOptions {
   /** Put the body behind each streamed delta on its `attempt-updated` frame. */
   readonly contents?: boolean;
@@ -773,6 +794,7 @@ export class ChatService {
   readonly #beforeAttachmentPurge: ChatServiceOptions["beforeAttachmentPurge"];
   readonly #scratchStore: ChatScratchStore;
   readonly #turnRunner: ChatTurnRunner;
+  readonly #liveTurns?: LiveTurnRegistry;
   readonly #researchRouter: ResearchRouter;
   readonly #contextMaintenanceTimeoutMs?: number;
   readonly #contextMaintenanceShutdownTimeoutMs?: number;
@@ -828,6 +850,7 @@ export class ChatService {
       options.attachmentStore ?? new ChatAttachmentStore(options.dataDirectory);
     this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
+    if (options.liveTurns !== undefined) this.#liveTurns = options.liveTurns;
     this.#researchRouter = options.researchRouter;
     if (options.providerRuntimeRegistry !== undefined) {
       this.#providerRuntimeRegistry = options.providerRuntimeRegistry;
@@ -1104,7 +1127,13 @@ export class ChatService {
       threads: this.#persistence
         .readChatNavigation()
         .filter((thread) => !hidden.has(String(thread.id)))
-        .slice(0, MAX_CHAT_NAVIGATION_THREADS),
+        .slice(0, MAX_CHAT_NAVIGATION_THREADS)
+        .map((thread) => {
+          // Only a row projected as executing speaks for a live turn; a stale
+          // registry entry can never make an idle row look busy.
+          const live = thread.executing ? this.#liveTurns?.read(String(thread.id)) : undefined;
+          return live === undefined ? thread : { ...thread, ...live };
+        }),
     };
   }
 
@@ -1154,6 +1183,55 @@ export class ChatService {
       ...view,
       thread: this.#withAggregateHeadVersion(view.thread),
     };
+  }
+
+  /**
+   * Questions running attempts in this host are parked on, each with what
+   * `answer-chat-turn-question` needs. Only threads the Chat listing shows
+   * qualify — active, not a hidden sidecar, filed under no Project or an
+   * active Chat Project — and only attempts this process still runs, because
+   * an answer to any other is refused and settles the attempt interrupted.
+   * Whether Chat mode is enabled is the caller's check.
+   */
+  listPendingQuestions(): ReadonlyArray<PendingRequest> {
+    this.#assertReady();
+    const hidden = this.#hiddenThreadIds();
+    const pending: PendingRequest[] = [];
+    for (const threadId of this.#activeThreadExecutions) {
+      if (hidden.has(threadId)) continue;
+      const thread = this.#persistence.readChatThread(decodeChatThreadId(threadId));
+      if (thread === undefined || thread.lifecycle !== "active") continue;
+      if (thread.projectId !== undefined && !this.#isActiveChatProject(thread.projectId)) continue;
+      const view = this.#persistence.readChatThreadView(thread.id);
+      if (view === undefined) continue;
+      const expectedVersion = this.#withAggregateHeadVersion(thread).version;
+      for (const turn of view.turns) {
+        for (const attempt of turn.attempts) {
+          const question = openQuestion(attempt);
+          if (question === undefined || !this.#activeAttempts.has(String(attempt.id))) continue;
+          pending.push({
+            mode: "chat",
+            kind: "question",
+            ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+            threadId: thread.id,
+            threadTitle: thread.title,
+            text: question.prompt,
+            options: question.options,
+            // A question carries no time of its own; journaling it is the
+            // attempt's last update while the turn stays parked on it.
+            requestedAt: attempt.updatedAt,
+            answer: {
+              threadId: thread.id,
+              expectedVersion,
+              turnId: turn.id,
+              attemptId: attempt.id,
+              requestId: question.requestId,
+            },
+          });
+        }
+      }
+    }
+    return pending;
   }
 
   async execute(
@@ -3266,12 +3344,12 @@ export class ChatService {
     const attempt = turn?.attempts.find(
       (candidate) => String(candidate.id) === String(command.attemptId),
     );
+    const question = attempt === undefined ? undefined : openQuestion(attempt);
     if (
       attempt === undefined ||
+      question === undefined ||
       String(attempt.turnId) !== String(command.turnId) ||
-      attempt.outcome !== "waiting" ||
-      attempt.pendingQuestion === undefined ||
-      String(attempt.pendingQuestion.requestId) !== String(command.requestId)
+      String(question.requestId) !== String(command.requestId)
     ) {
       throw new ChatServiceError({
         category: "invalid",
@@ -4991,6 +5069,17 @@ export class ChatService {
               onTurnEnded: (ended) => {
                 endedTurn = ended;
               },
+              ...(this.#liveTurns === undefined
+                ? {}
+                : {
+                    liveTurn: this.#liveTurns.tracker(String(input.thread.id), "chat-navigation"),
+                  }),
+              onHarnessRetry: (notice) => {
+                this.#nativeHarness?.noteRetry?.(harnessScope, notice);
+              },
+              onHarnessRetryCleared: () => {
+                this.#nativeHarness?.clearRetry?.(harnessScope);
+              },
               ...(this.#nativeHarness === undefined
                 ? {}
                 : {
@@ -5544,9 +5633,13 @@ export class ChatService {
     }
   }
 
-  #assertActiveChatProject(projectId: Parameters<PersistenceService["readProject"]>[0]): void {
+  #isActiveChatProject(projectId: Parameters<PersistenceService["readProject"]>[0]): boolean {
     const project = this.#persistence.readProject(projectId);
-    if (project === undefined || project.lifecycle !== "active" || project.type !== "chat") {
+    return project !== undefined && project.lifecycle === "active" && project.type === "chat";
+  }
+
+  #assertActiveChatProject(projectId: Parameters<PersistenceService["readProject"]>[0]): void {
+    if (!this.#isActiveChatProject(projectId)) {
       throw new ChatServiceError({
         category: "invalid",
         message: "Chat project membership is invalid.",

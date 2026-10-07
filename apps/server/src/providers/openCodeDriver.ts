@@ -9,6 +9,7 @@ import {
   type ProviderCapabilities,
   type ProviderInstanceId,
   type ProviderInputModality,
+  type ProviderOutputStopReason,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
@@ -129,6 +130,7 @@ interface SessionState {
   readonly pendingToolAnswers: Map<string, PendingToolAnswer>;
   usageTotals: OpenCodeUsageTotals | undefined;
   managedTools: ManagedToolsLease | undefined;
+  readonly stopMemory: { current: ProviderOutputStopReason | undefined };
 }
 
 interface OpenCodeUsageTotals {
@@ -1912,6 +1914,7 @@ function newSessionState(
     pendingToolAnswers: new Map(),
     usageTotals: undefined,
     managedTools: undefined,
+    stopMemory: { current: undefined },
   };
 }
 
@@ -2060,6 +2063,7 @@ function mapAndOffer(
         sessionId: state.sessionId,
         sequenceStart: state.nextSequence,
         messageParts: state.messageParts,
+        stopMemory: state.stopMemory,
         correlationId: state.correlationId,
         occurredAt: clock() as UtcTimestamp,
       },

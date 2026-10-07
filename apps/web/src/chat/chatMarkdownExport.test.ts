@@ -173,7 +173,7 @@ describe("buildChatMarkdownExport", () => {
     expect(exported.complete).toBe(false);
     expect(exported.markdown).toContain("This response was still streaming when the export");
     expect(exported.markdown).toContain("1 attachment is referenced by name only");
-    expect(exported.markdown).toContain("not connected to the authoritative transcript");
+    expect(exported.markdown).toContain("lost its connection to the host");
     expect(exported.markdown).toContain("plan.pdf");
   });
 

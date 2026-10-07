@@ -2204,6 +2204,16 @@ describe("ChatTurnRunner", () => {
       expect(ended).toEqual(completed);
     });
 
+    it("records a reply cut off at the output limit as max-tokens", async () => {
+      const { exit, ended } = await runTurn([
+        { kind: "text-delta", text: "Partial", occurredAt: at(1_000) },
+        { kind: "completed", stopReason: "max-tokens", occurredAt: at(2_000) },
+      ]);
+
+      expect(exit._tag).toBe("Success");
+      expect(ended[0]?.stopReason).toBe("max-tokens");
+    });
+
     it("says an interrupted turn stopped without finishing, and keeps what it cost", async () => {
       const { exit, completed, ended } = await runTurn(
         [

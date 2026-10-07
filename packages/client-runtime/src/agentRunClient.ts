@@ -109,6 +109,8 @@ export interface AgentRunParentSummaryClientEntry {
     readonly truncated: boolean;
   };
   readonly recoveryReason?: string;
+  /** How the host settled delivering this result to the parent; absent while owed. */
+  readonly resultDeliveryOutcome?: "delivered" | "consumed" | "invalidated" | "failed";
   /** The normalized limit fact the host journaled when the run last waited. */
   readonly usageLimit?: ProviderUsageLimit;
   /** An armed or settled usage-resume opt-in, when one exists. */

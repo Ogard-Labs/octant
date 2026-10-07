@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EventActor, type UtcTimestamp } from "@octant/contracts";
-import { decodeCanvasExportFolderSettings } from "@octant/contracts/canvas-export-folder";
+import {
+  MAX_CANVAS_EXPORT_FOLDER_OVERRIDES,
+  decodeCanvasExportFolderSettings,
+} from "@octant/contracts/canvas-export-folder";
 import { Schema } from "effect";
 import { randomUUID } from "node:crypto";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
@@ -187,6 +190,37 @@ describe("canvas export folders", () => {
       }),
     );
     expect(service.folderFor(projectId)).toBeUndefined();
+    open.close();
+  });
+
+  it("makes room for a new Project by dropping the oldest choice once the bound is reached", () => {
+    const { home, folder } = homeWithFolder();
+    const open = connection();
+    const { service } = serviceOver(open, home);
+    const first = randomUUID();
+
+    for (let index = 0; index < MAX_CANVAS_EXPORT_FOLDER_OVERRIDES; index += 1) {
+      const id = index === 0 ? first : randomUUID();
+      const chosen = service.choose({
+        scope: "project",
+        projectId: id,
+        folder,
+        expectedVersion: index,
+      });
+      expect(chosen).toMatchObject({ kind: "canvas-export-folder-settings" });
+    }
+
+    // The bound is full. The next Project still gets its choice, and the
+    // oldest one loses its override rather than the choice failing.
+    const newcomer = service.choose({
+      scope: "project",
+      projectId: randomUUID(),
+      folder,
+      expectedVersion: MAX_CANVAS_EXPORT_FOLDER_OVERRIDES,
+    });
+    expect(newcomer).toMatchObject({ kind: "canvas-export-folder-settings" });
+    expect(service.settings().overrides).toHaveLength(MAX_CANVAS_EXPORT_FOLDER_OVERRIDES);
+    expect(service.folderFor(first)).toBeUndefined();
     open.close();
   });
 });

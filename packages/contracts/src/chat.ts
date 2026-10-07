@@ -1,3 +1,4 @@
+import { HarnessRetryNotice } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import {
@@ -9,6 +10,7 @@ import {
 import { ContextManifestId } from "./context";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
+import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { ExtensionSelection } from "./extensions";
 import { HostId } from "./host";
 import { MultiModelPool, MultiModelRouteDecisionReceipt } from "./multiModelPool";
@@ -293,6 +295,12 @@ export const ChatAttempt = Schema.Struct({
    * still owes the person the provider's reason and reset time.
    */
   usageLimit: Schema.optional(ProviderUsageLimit),
+  /**
+   * Set while a direct endpoint is sending the request again. Cleared by the
+   * next content or by the attempt settling, so a finished, failed, or
+   * cancelled attempt does not keep a stale wait.
+   */
+  harnessRetry: Schema.optional(HarnessRetryNotice),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 })
@@ -1005,6 +1013,8 @@ export const ChatNavigationThread = Schema.Struct({
   lastSequence: GlobalSequence,
   followUpOpen: Schema.Boolean,
   executing: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /** The latest turn's start and latest step while it runs; absent otherwise. */
+  ...ThreadLiveTurnFields,
   /** Completed and snoozed rest, so the sidebar can file the row; absent on an older host. */
   ...ThreadRestFields,
 }).annotations(strict);

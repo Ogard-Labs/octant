@@ -1,5 +1,13 @@
+import { decodeUtcTimestamp } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { paletteFor, statusLineFrom, tasksFrom, toolLines, transcriptFrom } from "./agentTuiModel";
+import {
+  paletteFor,
+  retryFooterText,
+  statusLineFrom,
+  tasksFrom,
+  toolLines,
+  transcriptFrom,
+} from "./agentTuiModel";
 
 const threadId = "00000000-0000-4000-8000-000000000020";
 
@@ -145,6 +153,25 @@ describe("agent terminal UI model", () => {
       questions: [],
     } as never;
     expect(statusLineFrom(undefined, silent)).toBe("Idle · local-model · 1 turns");
+  });
+
+  it("puts the same retry sentence in the footer, counted down from the announcement", () => {
+    const announcedAt = "2026-10-06T12:00:00.000Z";
+    expect(
+      retryFooterText(
+        {
+          retrying: {
+            attempt: 2,
+            maxAttempts: 5,
+            delayMs: 4_000,
+            reason: "unavailable",
+            announcedAt: decodeUtcTimestamp(announcedAt),
+          },
+        },
+        Date.parse(announcedAt) + 1_000,
+      ),
+    ).toMatchInlineSnapshot(`"Provider busy, retrying 2/5 in 3 s"`);
+    expect(retryFooterText({ retrying: undefined }, Date.parse(announcedAt))).toBeUndefined();
   });
 
   it("turns the turn's calls into tree lines and counts its edits and failures", () => {

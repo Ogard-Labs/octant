@@ -101,6 +101,16 @@ Reading**. It is on by default, and the choice is saved for this installation.
 The same figures appear on the Octant Harness session card, in the terminal
 footer, and on the phone's session panel.
 
+## Threads on the usage page
+
+Octant records, on the Usage page and in Settings, list each thread with those
+same figures. Cache, speed, and first token are columns, and a column is left
+out when no thread in the reading can state it. Open a row to see one turn at
+a time, worded the same way. A partial cache hit is never rounded up to 100%.
+An approximate speed keeps its tilde, and an estimated cost keeps **est.** A
+reading that still has older turns outside the list says so, and does not
+present that partial list as the thread's full total.
+
 ## Remaining capacity
 
 Provider limits show the percentage left and the time until a reset. Absolute
@@ -139,6 +149,17 @@ time of the earlier reading and are replaced when the current read finishes.
 Normally that is the last completed reading. On a view that has never produced
 a completed reading yet, the last unfinished reading is the fallback that is
 kept, and it is replaced when a scan finishes.
+
+## Replies cut off at the output limit
+
+When the provider says a reply stopped because it reached its output limit,
+the transcript keeps the partial reply and, while it is the thread's latest
+turn, shows a quiet note under it: _This reply was cut off at the output
+limit._ **Continue** puts a short follow-up
+asking the model to pick up where it left off into the composer, after any
+draft you already have; nothing is sent until you send it. The turn's details
+say **Cut off at the output limit**. A provider that does not report why a
+reply ended shows no note: Octant does not guess.
 
 ## Turns stopped by a provider limit
 

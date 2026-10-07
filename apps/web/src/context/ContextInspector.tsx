@@ -1,8 +1,10 @@
 import type { ContextEntryId, ContextRemedy, ServiceLimitBucket } from "@octant/contracts/context";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
+import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import type { RefObject } from "react";
 import {
   contextCategoryLabel,
+  contextCategoryTone,
   contextCompositionEntries,
   contextEntryControls,
   contextHealthLabel,
@@ -94,7 +96,14 @@ export function ContextInspector(props: ContextInspectorProps) {
                 }[snapshot.modelLimits.source]
               }
             />
-            <Fact label="Context window" value={formatNumber(snapshot.modelLimits.contextWindow)} />
+            <Fact
+              label="Context window"
+              value={
+                hasKnownContextWindow(snapshot.modelLimits)
+                  ? formatNumber(snapshot.modelLimits.contextWindow)
+                  : `Unknown, planning with ${formatNumber(snapshot.modelLimits.contextWindow)} as an estimate`
+              }
+            />
             <Fact
               label="Maximum output"
               value={
@@ -232,7 +241,13 @@ function ContextEntryCard(props: {
     >
       <header>
         <div>
-          <span>{contextCategoryLabel(props.entry.category)}</span>
+          <span
+            className="context-entry-card__category"
+            data-tone={contextCategoryTone(props.entry.category)}
+          >
+            <span aria-hidden="true" className="context-entry-card__swatch" />
+            {contextCategoryLabel(props.entry.category)}
+          </span>
           <h4>{props.entry.label}</h4>
         </div>
         <span>{props.entry.plannedState}</span>

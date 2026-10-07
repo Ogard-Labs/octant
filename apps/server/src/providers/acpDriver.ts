@@ -18,6 +18,7 @@ import {
   type ProviderToolDefinition,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import { outputStopReason } from "./outputStopReason";
 import { ACP_CLIENT_TERMINAL_TOOL_NAMES, ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import {
   rejectUnsupportedChatTurn,
@@ -1621,7 +1622,11 @@ function makeConnection(
                           message: `${name} turn was interrupted.`,
                         }),
                       );
-                    } else if (result.stopReason === "end_turn") {
+                    } else if (
+                      result.stopReason === "end_turn" ||
+                      outputStopReason(result.stopReason) !== undefined
+                    ) {
+                      const stop = outputStopReason(result.stopReason);
                       state.completed = true;
                       offer(
                         eventFor(state, factories.clock, {
@@ -1637,6 +1642,7 @@ function makeConnection(
                               modelId: decodeProviderModelId(state.modelId),
                             },
                           },
+                          ...(stop === undefined ? {} : { stopReason: stop }),
                         }),
                       );
                     } else {

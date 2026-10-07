@@ -280,6 +280,57 @@ describe("ThreadMentionService search", () => {
     if (result.kind !== "mentions-searched") throw new Error("expected search result");
     expect(result.candidates.map((candidate) => candidate.title)).toEqual(["Release notes"]);
   });
+
+  it("finds an openable thread by id even when it ranks below the typeahead's limit", async () => {
+    // Eight newer threads with the same title push the ninth past the eight a
+    // typeahead returns; an exact id must still find it, and read nothing.
+    const crowded = Array.from({ length: 12 }, (_, index) =>
+      thread(
+        decodeMentionableThreadId(
+          `00000000-0000-4000-8000-0000000003${String(index).padStart(2, "0")}`,
+        ),
+        {
+          title: "Release notes",
+          updatedAt: `2026-08-14T10:${String(59 - index).padStart(2, "0")}:00.000Z` as UtcTimestamp,
+        },
+      ),
+    );
+    const ninth = crowded[8];
+    if (ninth === undefined) throw new Error("fixture lost its ninth thread");
+    const chat = directory("chat", crowded);
+    const { service } = createService([chat]);
+    const ranked = await service.execute(
+      { kind: "search-mentions", requestId, query: "Release notes" },
+      { windowId },
+    );
+    if (ranked.kind !== "mentions-searched") throw new Error("expected search result");
+    expect(ranked.candidates.map((candidate) => String(candidate.threadId))).not.toContain(
+      String(ninth.threadId),
+    );
+
+    const result = await service.execute(
+      { kind: "search-mentions", requestId, query: "", threadId: ninth.threadId },
+      { windowId },
+    );
+
+    if (result.kind !== "mentions-searched") throw new Error("expected search result");
+    expect(result.candidates.map((candidate) => String(candidate.threadId))).toEqual([
+      String(ninth.threadId),
+    ]);
+    expect(chat.readTranscript).not.toHaveBeenCalled();
+  });
+
+  it("finds nothing by id for a thread this window cannot Open", async () => {
+    const { service } = createService([directory("chat", [thread(chatThreadId)])]);
+
+    const result = await service.execute(
+      { kind: "search-mentions", requestId, query: "", threadId: secretThreadId },
+      { windowId },
+    );
+
+    if (result.kind !== "mentions-searched") throw new Error("expected search result");
+    expect(result.candidates).toEqual([]);
+  });
 });
 
 describe("ThreadMentionService resolve", () => {

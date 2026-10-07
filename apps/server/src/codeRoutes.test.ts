@@ -1356,6 +1356,61 @@ describe("Code project pull-request routes", () => {
     expect(response?.status).toBe(401);
     expect(queryProjectPullRequests).not.toHaveBeenCalled();
   });
+
+  it("returns a remote window only the projects that window was granted", async () => {
+    const remoteWindow = decodeWindowId("00000000-0000-4000-8000-000000000990");
+    const remoteCapability = `${"B".repeat(42)}A`;
+    const granted = {
+      ...view,
+      projects: [
+        {
+          kind: "connected" as const,
+          projectId: "10000000-0000-4000-8000-000000000001",
+          projectName: "Granted",
+          repositoryOwner: "octant",
+          repositoryName: "granted",
+        },
+      ],
+    };
+    const other = {
+      ...view,
+      projects: [
+        {
+          kind: "connected" as const,
+          projectId: "10000000-0000-4000-8000-000000000002",
+          projectName: "Other",
+          repositoryOwner: "octant",
+          repositoryName: "other",
+        },
+      ],
+    };
+    const queryProjectPullRequests = vi.fn((id: { toString(): string }) =>
+      String(id) === String(remoteWindow) ? granted : other,
+    );
+    const route = routeFixture({ queryProjectPullRequests }, undefined, undefined, [
+      { windowId: remoteWindow, capability: remoteCapability },
+    ]);
+
+    const response = await route(
+      request("/api/code/project-pull-requests", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": remoteCapability,
+        },
+        body: JSON.stringify({ version: 1 }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    if (response === undefined) {
+      throw new Error("The pull-request route returned no response.");
+    }
+    const body: { projects: typeof granted.projects } = await response.json();
+    expect(body.projects).toEqual(granted.projects);
+    expect(JSON.stringify(body)).not.toContain("Other");
+    expect(queryProjectPullRequests).toHaveBeenCalledWith(remoteWindow, { version: 1 });
+  });
 });
 
 describe("Code project pull-request detail routes", () => {
@@ -1549,9 +1604,16 @@ function routeFixture(
   overrides: Record<string, unknown> = {},
   maxJsonBodySize?: number,
   projectTerminals?: { readonly execute: (...args: never[]) => unknown },
+  extraWindows: ReadonlyArray<{
+    readonly windowId: ReturnType<typeof decodeWindowId>;
+    readonly capability: string;
+  }> = [],
 ) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
+  for (const extra of extraWindows) {
+    store.register({ windowId: extra.windowId, capability: extra.capability, now: 0 });
+  }
   const service = {
     bootstrap: vi.fn(async () => ({ settings: settings(), threads: [], checkouts: [] })),
     navigation: vi.fn(async () => ({ threads: [], activity: [], runtime: [] })),

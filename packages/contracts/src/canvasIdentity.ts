@@ -18,13 +18,16 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // envelopes. A decoder must reject a future version until its renderer and
 // policy have been reviewed together. Version 2 adds the board surface
 // (diagram v2 layout fields and journaled comments). Version 3 adds the
-// mockup block: a mockup is only valid inside a document declaring version 3,
-// so a rolled-back older runtime refuses a mockup-carrying document as a
-// declared future version instead of reading it as corrupt. Version 4 adds the
-// thread presentation hint under the same rule. Existing v1, v2 and v3
-// documents remain decodable so a host does not lose its history at the bump.
-export const CANVAS_SCHEMA_VERSION = 4 as const;
-export const CanvasSchemaVersion = Schema.Literal(1, 2, 3, CANVAS_SCHEMA_VERSION);
+// mockup block, version 4 the thread presentation, version 5 the treemap
+// block, and version 6 the heatmap block. A version-gated kind or hint is only
+// valid inside a document declaring the version that introduced it, so a
+// rolled-back older runtime refuses it as a declared future version instead of
+// reading it as corrupt. Each gated block kind is admitted from the version
+// that introduced it: existing v1 through v5 documents (including
+// mockup-carrying v3, presentation v4, and treemap-carrying v5 documents)
+// remain decodable so a host does not lose its history at the bump.
+export const CANVAS_SCHEMA_VERSION = 6 as const;
+export const CanvasSchemaVersion = Schema.Literal(1, 2, 3, 4, 5, CANVAS_SCHEMA_VERSION);
 export type CanvasSchemaVersion = typeof CanvasSchemaVersion.Type;
 export const CanvasBlockSchemaVersion = CanvasSchemaVersion;
 export type CanvasBlockSchemaVersion = CanvasSchemaVersion;

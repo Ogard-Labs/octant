@@ -16,7 +16,14 @@ import {
   ThreadBoardCardMeta,
   type ThreadBoardCardMetaProps,
 } from "../threadBoard/ThreadBoardCardParts";
+import { ThreadBoardCardRequest } from "../threadBoard/ThreadBoardCardRequest";
+import { waitingColumnOldestFirst } from "../threadBoard/threadBoardGrouping";
 import { cardViewExtras, ThreadBoardBody } from "../threadBoard/ThreadBoardView";
+import {
+  useBoardPendingRequests,
+  type BoardCardRequest,
+  type BoardPendingRequestSource,
+} from "../threadBoard/useBoardPendingRequests";
 import {
   activityLabel,
   defaultBoardStorage,
@@ -71,6 +78,8 @@ export interface WorkThreadBoardProps {
   /** Driver kinds for provider instances, keyed by instance id; picks the provider mark. */
   readonly providerKinds?: ReadonlyMap<string, string>;
   readonly isNarrow?: boolean;
+  /** Lets a waiting card answer its thread's question; without it cards look as they always did. */
+  readonly pendingRequests?: BoardPendingRequestSource;
 }
 
 interface FilterState {
@@ -110,6 +119,9 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
 
   const query = useMemo(() => buildQuery(filters), [filters]);
   const queryKey = JSON.stringify(query);
+  const pending = useBoardPendingRequests(props.pendingRequests, "work", () =>
+    setRefreshNonce((nonce) => nonce + 1),
+  );
 
   const loadBoardRef = useRef(props.loadBoard);
   useEffect(() => {
@@ -383,7 +395,12 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
           emptyFilteredTitle: "No tasks match these filters",
           emptyDetail: "Create a task to see it here.",
         }}
-        groupCards={(cards) => groupWorkBoardCards(cards, grouping, { projects: props.projects })}
+        groupCards={(cards) =>
+          waitingColumnOldestFirst(
+            groupWorkBoardCards(cards, grouping, { projects: props.projects }),
+            pending.oldestRequestedAt,
+          )
+        }
         grouping={grouping}
         isNarrow={props.isNarrow === true}
         layout={props.isNarrow === true ? "list" : "columns"}
@@ -394,6 +411,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
             layout={presentation.layout}
             statusPresentation={presentation.statusPresentation}
             unread={props.unreadThreadIds?.has(String(card.threadId)) === true}
+            request={pending.forCard(card)}
             {...cardViewExtras(card, {
               projectNames,
               ...(props.providerLabels === undefined
@@ -419,6 +437,8 @@ function WorkBoardCardView(props: {
   readonly layout: "card" | "list";
   readonly statusPresentation: "visible" | "screen-reader";
   readonly unread: boolean;
+  /** The question or approval this waiting card can answer in place. */
+  readonly request?: BoardCardRequest | undefined;
   readonly projectName?: string;
   readonly providerLabel?: string;
   readonly providerKind?: string;
@@ -429,6 +449,7 @@ function WorkBoardCardView(props: {
   const statusLabel = workBoardStatusLabel(card.status);
   const waitingReason = waitingReasonText(card);
   const className = props.layout === "list" ? "issuerow" : "board-card";
+  const onOpenThread = () => props.onOpen?.({ threadId: card.threadId, projectId: card.projectId });
   return (
     <article
       className={className}
@@ -461,7 +482,9 @@ function WorkBoardCardView(props: {
           {statusLabel}
         </span>
       </span>
-      {props.layout === "card" && card.executing ? (
+      {/* A thread parked on a question shows the question, not a turning
+          "Working…" that would contradict it. */}
+      {props.layout === "card" && card.executing && props.request === undefined ? (
         <ThreadBoardCardLive summary={card.childRuns.latestSummary} />
       ) : props.layout === "card" && card.childRuns.latestSummary !== undefined ? (
         <span className="board-card-activity">{card.childRuns.latestSummary}</span>
@@ -472,8 +495,8 @@ function WorkBoardCardView(props: {
           made every task a wall of metadata with the same weight as its title. */}
       <span className={props.layout === "list" ? "issuerow-meta" : "board-card-facts"}>
         {(props.layout === "list"
-          ? cardFacts(card, props.projectName, props.providerLabel)
-          : cardSummary(card, waitingReason)
+          ? cardFacts(card, props.projectName, props.providerLabel, props.request !== undefined)
+          : cardSummary(card, waitingReason, props.request !== undefined)
         ).map((fact) => (
           <span className={fact.className ?? "fact"} key={fact.key} title={fact.title ?? fact.text}>
             {fact.icon}
@@ -484,6 +507,9 @@ function WorkBoardCardView(props: {
           </span>
         ))}
       </span>
+      {props.request === undefined ? null : (
+        <ThreadBoardCardRequest onOpenThread={onOpenThread} request={props.request} />
+      )}
       <ThreadBoardPullRequestSummaries
         {...(props.onSelectPullRequest === undefined
           ? {}
@@ -531,6 +557,7 @@ function cardFacts(
   card: WorkBoardCard,
   projectName: string | undefined,
   providerLabel: string | undefined,
+  requestShown: boolean,
 ): ReadonlyArray<CardFact<ReactNode>> {
   const facts: CardFact<ReactNode>[] = [];
   if (projectName !== undefined) facts.push({ key: "project", text: projectName });
@@ -545,15 +572,8 @@ function cardFacts(
     key: "provider-model",
     text: providerLabel === undefined ? card.modelId : `${providerLabel} · ${card.modelId}`,
   });
-  if (card.activeRequest.kind === "pending") {
-    facts.push({
-      key: "request",
-      text:
-        card.activeRequest.requestKind === "approval"
-          ? `Approval: ${card.activeRequest.summary}`
-          : `Input: ${card.activeRequest.summary}`,
-      className: "fact warn",
-    });
+  if (card.activeRequest.kind === "pending" && !requestShown) {
+    facts.push(requestFact(card.activeRequest));
   }
   if (card.artifacts.count > 0) {
     const count = card.artifacts.count;
@@ -609,6 +629,20 @@ function cardFacts(
   return facts;
 }
 
+/** The line that names what the thread asks, when the card does not carry the question itself. */
+function requestFact(
+  request: Extract<WorkBoardCard["activeRequest"], { readonly kind: "pending" }>,
+): CardFact<ReactNode> {
+  return {
+    key: "request",
+    text:
+      request.requestKind === "approval"
+        ? `Approval: ${request.summary}`
+        : `Input: ${request.summary}`,
+    className: "fact warn",
+  };
+}
+
 /**
  * The card face: what needs the person. Who runs the task and when it last
  * moved sit in the footer; everything else waits in the list view's facts.
@@ -616,18 +650,12 @@ function cardFacts(
 function cardSummary(
   card: WorkBoardCard,
   waitingReason: string | undefined,
+  requestShown: boolean,
 ): ReadonlyArray<CardFact<ReactNode>> {
   const facts: CardFact<ReactNode>[] = [];
   if (waitingReason !== undefined) facts.push({ key: "waiting", text: waitingReason });
-  if (card.activeRequest.kind === "pending") {
-    facts.push({
-      key: "request",
-      text:
-        card.activeRequest.requestKind === "approval"
-          ? `Approval: ${card.activeRequest.summary}`
-          : `Input: ${card.activeRequest.summary}`,
-      className: "fact warn",
-    });
+  if (card.activeRequest.kind === "pending" && !requestShown) {
+    facts.push(requestFact(card.activeRequest));
   }
   if (card.followUp) facts.push({ key: "follow-up", text: "Follow-up", className: "fact warn" });
   if (card.recovery.kind === "recovering") facts.push({ key: "recovery", text: "Recovering" });

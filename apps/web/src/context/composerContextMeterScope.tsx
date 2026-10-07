@@ -1,3 +1,4 @@
+import type { ProviderContextBreakdown } from "@octant/contracts";
 import type { ContextEntryId } from "@octant/contracts/context";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import type { CodeProviderLimit } from "@octant/contracts/code-operations";
@@ -38,6 +39,11 @@ export interface ComposerContextUsageFallback {
    * window.
    */
   readonly autoCompactThreshold?: number;
+  /**
+   * What the window held, as the runtime reported its categories or as Octant
+   * counted the parts it adds; absent when neither is known.
+   */
+  readonly contextBreakdown?: ProviderContextBreakdown;
   /**
    * The window the selected model declares, when the provider's usage report
    * did not name one. A driver that lists a model's context limit already

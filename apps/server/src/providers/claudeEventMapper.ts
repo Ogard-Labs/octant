@@ -1,5 +1,6 @@
 import type {
   CorrelationId,
+  ProviderContextBreakdown,
   ProviderFailure,
   ProviderInstanceId,
   ProviderRuntimeEvent,
@@ -17,6 +18,7 @@ import type {
   ClaudeToolRequest,
   ClaudeUsage,
 } from "./claudeAgentSdkPort";
+import { outputStopReason } from "./outputStopReason";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const DIFF_MAX_CHARACTERS = 65_536;
@@ -211,6 +213,7 @@ function usageEvent(
   value: ClaudeUsage,
   providerExecutionDurationMs?: number,
   costUsd?: number,
+  contextBreakdown?: ProviderContextBreakdown,
 ): ClaudeMappedMessage {
   return event(context, {
     kind: "usage",
@@ -225,6 +228,7 @@ function usageEvent(
     ...(context.autoCompactThreshold === undefined
       ? {}
       : { autoCompactThreshold: context.autoCompactThreshold }),
+    ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
   });
 }
 
@@ -796,13 +800,21 @@ function mapResult(
     return [failure("Claude returned invalid usage metadata.")];
   }
   const results: ClaudeMappedMessage[] = [
-    usageEvent(context, message.usage, message.durationMs, message.totalCostUsd),
+    usageEvent(
+      context,
+      message.usage,
+      message.durationMs,
+      message.totalCostUsd,
+      message.contextBreakdown,
+    ),
   ];
   if (message.outcome === "success") {
+    const stop = outputStopReason(message.stopReason);
     results.push(
       terminal(context, {
         kind: "completed",
         resumeCursor: { driverKind: "claude", value: context.claudeSessionId },
+        ...(stop === undefined ? {} : { stopReason: stop }),
       }),
     );
     return results;

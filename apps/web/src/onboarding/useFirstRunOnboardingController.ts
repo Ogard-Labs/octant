@@ -12,10 +12,11 @@ export interface UseFirstRunOnboardingControllerOptions {
   readonly onboarding: FirstRunOnboardingStatus | undefined;
   readonly shellStatus: ShellControllerStatus;
   /**
-   * Record the outcome on the host. Resolving does not imply the host accepted
-   * it; the authoritative `onboarding` value does.
+   * Record the outcome on the host. Resolves to whether the host accepted it,
+   * so a refusal can be said out loud; the authoritative `onboarding` value is
+   * still what hides the surface.
    */
-  readonly resolve: (outcome: FirstRunOnboardingOutcome) => Promise<void>;
+  readonly resolve: (outcome: FirstRunOnboardingOutcome) => Promise<boolean>;
   /**
    * Another host surface is covering this one — Settings, or the Project
    * create dialog. The draft stays mounted and first run stays pending, so
@@ -37,6 +38,11 @@ export interface FirstRunOnboardingController {
   readonly submitting: FirstRunOnboardingOutcome | undefined;
   /** Honest reason the host cannot record an answer, when there is one. */
   readonly blockedMessage: string | undefined;
+  /**
+   * The host refused the last outcome that was sent. The surface stays up, and
+   * without this the button that was just pressed looked like it did nothing.
+   */
+  readonly refused: boolean;
   readonly complete: () => void;
   readonly skip: () => void;
   /**
@@ -76,6 +82,7 @@ export function useFirstRunOnboardingController(
   options: UseFirstRunOnboardingControllerOptions,
 ): FirstRunOnboardingController {
   const [submitting, setSubmitting] = useState<FirstRunOnboardingOutcome | undefined>(undefined);
+  const [refused, setRefused] = useState(false);
   const [deferred, setDeferred] = useState(false);
   const generation = useRef(0);
   const mounted = useRef(true);
@@ -94,10 +101,14 @@ export function useFirstRunOnboardingController(
       if (shellStatus !== "ready") return;
       const attempt = ++generation.current;
       setSubmitting(outcome);
-      void resolve(outcome).finally(() => {
-        if (!mounted.current || generation.current !== attempt) return;
-        setSubmitting(undefined);
-      });
+      setRefused(false);
+      void resolve(outcome)
+        .catch(() => false)
+        .then((accepted) => {
+          if (!mounted.current || generation.current !== attempt) return;
+          setSubmitting(undefined);
+          setRefused(!accepted);
+        });
     },
     [resolve, shellStatus],
   );
@@ -120,6 +131,7 @@ export function useFirstRunOnboardingController(
     visible: pending && !concealed,
     submitting,
     blockedMessage: BLOCKED_COPY[shellStatus],
+    refused,
     complete,
     skip,
     defer,

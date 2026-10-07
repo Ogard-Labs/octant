@@ -79,7 +79,8 @@ import {
 import { Data, Effect, Schema, Scope } from "effect";
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
 import { assistantTranscript } from "./chat/assistantTranscript";
-import { ChatService, ChatServiceError } from "./chat/chatService";
+import { createChatAgentResultDeliveryPort } from "./chat/chatAgentResultDeliveryPort";
+import { ChatService } from "./chat/chatService";
 import { UsageResumeService } from "./usage/usageResumeService";
 import { createUsageResumePorts } from "./usage/usageResumePorts";
 import { ThreadMessageQueueService } from "./messageQueue/threadMessageQueueService";
@@ -171,6 +172,8 @@ import { WorkRequestProjection } from "./work/workRequestProjection";
 import { attachWorkRequestRuntime, WorkRequestRuntime } from "./work/workRequestRuntime";
 import { WorkRequestService } from "./work/workRequestService";
 import { createWorkRequestRouteHandler } from "./workRequestRoutes";
+import { createPendingRequestRouteHandler } from "./pendingRequestRoutes";
+import { PendingRequestService } from "./pendingRequestService";
 import { createWorkThreadRouteHandler } from "./workThreadRoutes";
 import { createWorkTurnRouteHandler } from "./workTurnRoutes";
 import { createSidebarBackgroundRouteHandler } from "./theme/sidebarBackgroundRoutes";
@@ -230,6 +233,7 @@ import {
   type CompletedThreadArchiveInput,
 } from "./completedThreadArchiveSweep";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
+import { LiveTurnRegistry } from "./liveTurn/liveTurnRegistry";
 import { CodePlannerService } from "./code/codePlannerService";
 import {
   createCodeProfileSkillResolver,
@@ -320,6 +324,7 @@ import { GhRepositoryCataloguePort } from "./github/ghRepositoryCataloguePort";
 import { GhRepositoryObservationPort } from "./github/ghRepositoryObservationPort";
 import { GithubCapabilityService } from "./github/githubCapabilityService";
 import { GithubCatalogueService } from "./github/githubCatalogueService";
+import { createGhGistCreationPort } from "./github/gistCreationPort";
 import { GithubIssueContextService } from "./github/githubIssueContextService";
 import { LinearIssueContextService } from "./plugins/linear/linearIssueContextService";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
@@ -469,6 +474,15 @@ import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
 import { createProviderOAuthRouteHandler } from "./providers/oauth/providerOAuthRoutes";
+import {
+  claudeHelperSignInFromBroker,
+  type ClaudeHelperSignInPort,
+} from "./providers/claudeHelperSignIn";
+import {
+  createClaudeHelperSignInRouteHandler,
+  createClaudeHelperSignInService,
+} from "./providers/claudeHelperSignInRoutes";
+import { runInstalledClaudeSetupToken } from "./providers/claudeSetupToken";
 import { subscriptionOAuthHostFromBroker } from "./providers/oauth/subscriptionOAuthHost";
 import type { CompatibleFetch } from "./providers/openAiCompatibleEndpoint";
 import { makeClaudeAgentSdkPort, type ClaudeAgentSdkPort } from "./providers/claudeAgentSdkPort";
@@ -564,6 +578,7 @@ import {
   createLiveLocalServerStopPort,
 } from "./localServers/localServerHostPorts";
 import { createCodeThreadLocalServerScopeResolver } from "./localServers/localServerScopeResolver";
+import { createRunningServiceScopeResolver } from "./localServers/runningServiceScopeResolver";
 import { LocalServerService } from "./localServers/localServerService";
 import { createDiagnosticsExportRouteHandler } from "./diagnosticsExportRoutes";
 import {
@@ -633,6 +648,7 @@ import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
 } from "./canvas/canvasExportTargets";
+import { GistConnection } from "./canvas/gistExportTarget";
 import { createDefaultCodexPluginPackageSources } from "./extensions/curatedBuildIosAppsCatalog";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "./scaffold/curatedScaffoldCatalog";
 import { resolveAvailableTools } from "./scaffold/scaffoldFilesystem";
@@ -922,6 +938,7 @@ interface ConfiguredProviderDriverOptions {
   readonly claudeProcess?: ClaudeProcessPort;
   readonly claudeSdk?: ClaudeAgentSdkPort;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
+  readonly claudeHelperSignIn?: ClaudeHelperSignInPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly permissionPersistence: () => PermissionPersistence;
@@ -1020,6 +1037,9 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeResumeIdentityPort === undefined
         ? {}
         : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
+      ...(options.claudeHelperSignIn === undefined
+        ? {}
+        : { claudeHelperSignIn: options.claudeHelperSignIn }),
       ...(options.isProjectConfinedPath === undefined
         ? {}
         : { isProjectConfinedPath: options.isProjectConfinedPath }),
@@ -1811,6 +1831,13 @@ export function startOctantServer(
     const simulatorInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
     const androidInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
     const machineChangeFeed = new MachineChangeFeed();
+    // What each running turn is doing, for the Chat, Work, and Code navigation
+    // reads. Process-local by design: a restart interrupts every turn. A step
+    // is not a journal event, so the registry tells the change feed when one
+    // moves, and the navigation reads follow it as they do for any change.
+    const liveTurns = new LiveTurnRegistry({
+      onChanged: (topic) => machineChangeFeed.publish([topic]),
+    });
     const unsubscribeMachineChanges = persistence.journal.subscribeCommitted((append) =>
       machineChangeFeed.publishCommitted(append),
     );
@@ -2710,9 +2737,14 @@ export function startOctantServer(
       options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable },
     );
     let revokeProjectPullRequests: (() => void) | undefined;
+    // The gist export destination's GitHub state. It is read on demand when an
+    // export lists or prepares destinations, never at startup; see
+    // `GistConnection`.
+    const gistConnection = new GistConnection((signal) => githubCapabilityService.snapshot(signal));
     const githubCapabilityService = new GithubCapabilityService(githubAuthenticationPort, {
       probes: githubCataloguePort,
       onAuthenticationChanged: (snapshot) => {
+        gistConnection.changed(snapshot);
         const readable = snapshot.capabilities.some(
           (capability) => capability.kind === "pull-requests-read" && capability.available,
         );
@@ -3524,6 +3556,7 @@ export function startOctantServer(
     const codeService =
       options.codeService ??
       new CodeService({
+        liveTurns,
         gitHistory: new GitHistoryPort(),
         persistence,
         access: {
@@ -4127,6 +4160,10 @@ export function startOctantServer(
             url: options.credentialBrokerUrl,
             token: options.credentialBrokerToken,
           });
+    const claudeHelperSignIn =
+      credentialResolver === undefined
+        ? undefined
+        : claudeHelperSignInFromBroker(credentialResolver);
     const oauthBroker =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
@@ -4170,6 +4207,11 @@ export function startOctantServer(
           agentRunSessionStore.removeProviderIdentities(instanceId, signal),
         ]);
       },
+      // The provider is already gone; a store that cannot be reached leaves the
+      // token behind rather than reporting the removal as failed.
+      clearClaudeHelperSignIn: async (instanceId) => {
+        await claudeHelperSignIn?.disconnect(String(instanceId)).catch(() => undefined);
+      },
       clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
       driver: (instance) =>
         attachWorkRequestRuntime(
@@ -4193,6 +4235,7 @@ export function startOctantServer(
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
             onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
+            ...(claudeHelperSignIn === undefined ? {} : { claudeHelperSignIn }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
           }),
           () => workRequestRuntime,
@@ -4215,6 +4258,27 @@ export function startOctantServer(
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
+    });
+    // A host without the credential broker has nowhere safe to keep the token,
+    // so Settings is told that instead of a Connect button that cannot work.
+    const brokerMissing = async () =>
+      ({
+        kind: "refused",
+        reason: "Claude for helpers needs Octant's credential store, which this host does not run.",
+      }) as const;
+    const claudeHelperSignInRoutes = createClaudeHelperSignInRouteHandler({
+      service:
+        claudeHelperSignIn === undefined
+          ? { status: brokerMissing, connect: brokerMissing, disconnect: brokerMissing }
+          : createClaudeHelperSignInService({
+              store: claudeHelperSignIn,
+              readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+              runSetupToken: runInstalledClaudeSetupToken,
+            }),
+      windowAuthorityStore,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
     const providerOAuthRoutes =
       hostOAuth === undefined
@@ -4308,6 +4372,7 @@ export function startOctantServer(
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
+      ...(claudeHelperSignIn === undefined ? {} : { claudeHelperSignIn }),
       ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
       localUsageHistorySourceForInstance: (instance) =>
         createLocalUsageHistorySourceForDriver({
@@ -4617,6 +4682,8 @@ export function startOctantServer(
         },
       });
       codeOperationRuntime = createCodeOperationRuntime({
+        liveTurns,
+        onPendingRequestWithdrawn: () => machineChangeFeed.publish(["code-navigation"]),
         gitMutationPort,
         agentRuns: agentRunPersistence,
         resolveSelectedExtensions,
@@ -5605,6 +5672,31 @@ export function startOctantServer(
             ownedPids: () => new Set<number>(),
           },
         }),
+        hostScopes: createRunningServiceScopeResolver({
+          projects: projectService,
+          source: {
+            readThreads: persistence.readCodeThreads,
+            readCheckout: persistence.readCodeCheckout,
+            // Only the ownership receipt the host wrote for this thread's own
+            // worktree vouches for the folder; the same fields the Code file
+            // root authority demands, without its Git observation, because this
+            // only names where a listener came from and authorizes nothing.
+            managedWorktreeRoot: async (thread, checkout, repositoryRoot) => {
+              const receipt = await managedWorktreeReceipts.load(checkout.ownershipReceiptId);
+              return receipt !== undefined &&
+                receipt.state === "ready" &&
+                receipt.receiptId === checkout.ownershipReceiptId &&
+                receipt.threadId === thread.id &&
+                receipt.checkoutId === checkout.id &&
+                receipt.repositoryId === thread.repositoryId &&
+                receipt.repositoryId === checkout.repositoryId &&
+                receipt.canonicalRepositoryPath === repositoryRoot
+                ? receipt.canonicalWorktreePath
+                : undefined;
+            },
+            ownedPids: () => new Set<number>(),
+          },
+        }),
       }),
       persistence,
       projects: projectService,
@@ -6156,6 +6248,7 @@ export function startOctantServer(
     let imageJobService!: ImageJobService;
     let purgeQueuedChatMessages: ((threadId: ChatThreadId) => Promise<void>) | undefined;
     const chatService = new ChatService({
+      liveTurns,
       attachmentStore: chatAttachmentStore,
       beforeAttachmentPurge: async (threadId) => {
         if (purgeQueuedChatMessages === undefined)
@@ -6623,7 +6716,10 @@ export function startOctantServer(
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
       onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
-      observeRuntime: (threadId) => observeWorkThreadRuntime?.(threadId) ?? { executing: false },
+      observeRuntime: (threadId) => ({
+        ...(observeWorkThreadRuntime?.(threadId) ?? { executing: false }),
+        ...liveTurns.read(String(threadId)),
+      }),
       projectDueReminder,
       readProviderModel: (providerInstanceId, modelId) =>
         persistence
@@ -6634,6 +6730,7 @@ export function startOctantServer(
     });
     let workRequestService: WorkRequestService | undefined;
     const workTurnService = new WorkTurnService({
+      liveTurns,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
       contextHarness,
@@ -7403,55 +7500,10 @@ export function startOctantServer(
       agentRuns: agentRunPersistence,
       clock: () => new Date(),
       ports: {
-        chat: {
-          inspect: async (run) =>
-            persistence.readChatThread(decodeChatThreadId(String(run.parentThreadId))) === undefined
-              ? { kind: "invalid", detail: "The parent Chat thread is gone." }
-              : { kind: "ready" },
-          dispatch: async (runs) => {
-            const run = runs[0];
-            if (run === undefined)
-              return { kind: "refused", detail: "No child results were supplied." };
-            const delivery = {
-              kind: "agent-result" as const,
-              runId: run.id,
-              runIds: runs.map((child) => child.id),
-              runGenerations: runs.map((child) => ({
-                runId: child.id,
-                generation: child.generation ?? 1,
-              })),
-            };
-            const thread = persistence.readChatThread(
-              decodeChatThreadId(String(run.parentThreadId)),
-            );
-            if (thread === undefined) {
-              return { kind: "refused", detail: "The parent Chat thread is gone." };
-            }
-            try {
-              const result = await chatService.execute({
-                kind: "deliver-chat-agent-result",
-                threadId: thread.id,
-                expectedVersion: thread.version,
-                runId: delivery.runId,
-                runIds: delivery.runIds,
-                runGenerations: delivery.runGenerations,
-              });
-              return agentResultDeliveryReceipt(
-                delivery,
-                result.kind === "turn-created" ? result.turn.delivery : undefined,
-              );
-            } catch (error) {
-              if (error instanceof ChatServiceError && error.failure.category === "waiting") {
-                return { kind: "deferred", detail: "The parent Chat thread is mid-turn." };
-              }
-              return {
-                kind: "refused",
-                detail:
-                  error instanceof Error ? error.message : "The delivery could not be admitted.",
-              };
-            }
-          },
-        },
+        chat: createChatAgentResultDeliveryPort({
+          readThread: (threadId) => persistence.readChatThread(threadId),
+          chat: chatService,
+        }),
         work: {
           inspect: async (run) =>
             workThreadProjection.read(decodeWorkThreadId(String(run.parentThreadId))) === undefined
@@ -8756,6 +8808,13 @@ export function startOctantServer(
       home: homedir(),
       standingOutsideApproval: false,
       newTempId: randomUUID,
+      // The gist destination reuses the GitHub connection Octant already has:
+      // the same host-managed credential `gh` resolves, and the snapshot the
+      // host keeps current. It reads that credential nowhere here.
+      gist: {
+        availability: () => gistConnection.availability(),
+        gists: createGhGistCreationPort(options.ghExecutable),
+      },
     };
     // Destinations arrive through the export contribution and are offered
     // through the same activation policy a plugin's contribution passes. The
@@ -8950,6 +9009,11 @@ export function startOctantServer(
       canvasService,
       canvasShareService,
       canvasExportService,
+      // A host with no usable `gh` has no GitHub state to read; the gist
+      // destination then stays not-connected without spawning anything.
+      ...(options.ghExecutable === undefined
+        ? {}
+        : { refreshCanvasExportTargets: () => gistConnection.refresh() }),
       canvasExportFolderService,
       resolveFolderCandidate: (windowId, input) =>
         folderBrowseService.resolveCandidate(windowId, input),
@@ -9378,6 +9442,15 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const pendingRequestRoutes = createPendingRequestRouteHandler({
+      service: new PendingRequestService({
+        readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+        work: (windowId) => workRequestApplication.listPendingForWindow(windowId),
+        code: async (windowId) => (await codeOperationRuntime?.pendingRequests?.(windowId)) ?? [],
+        chat: () => chatService.listPendingQuestions(),
+      }),
+      windowAuthorityStore,
+    });
     const workThreadRoutes = createWorkThreadRouteHandler({
       service: {
         bootstrap: (windowId) => workThreadServiceWithWorkflows.bootstrap(windowId),
@@ -9533,6 +9606,7 @@ export function startOctantServer(
       (await androidToolchainRoutes(request)) ??
       (await providerRoutes(request)) ??
       (await providerOAuthRoutes(request)) ??
+      (await claudeHelperSignInRoutes(request)) ??
       (await providerUsageLimitsRoutes(request)) ??
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??
@@ -9556,6 +9630,7 @@ export function startOctantServer(
       (await automationNotificationRoutes(request)) ??
       (await workPromotionRoutes(request)) ??
       (await workRequestRoutes(request)) ??
+      (await pendingRequestRoutes(request)) ??
       (await sidebarBackgroundRoutes(request)) ??
       (await zenBackgroundRoutes(request)) ??
       (await zenRoutes(request)) ??

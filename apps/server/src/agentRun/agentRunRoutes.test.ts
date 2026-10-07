@@ -992,6 +992,43 @@ describe("agentRunRoutes", () => {
     const body = (await response!.json()) as { entries: Array<{ runId: string; task: string }> };
     expect(body.entries).toHaveLength(1);
     expect(body.entries[0]?.task).toBe("Summarize");
+    expect(body.entries[0]).not.toHaveProperty("resultDeliveryOutcome");
+
+    if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
+    const runId = accepted.run.id;
+    for (const kind of [
+      "start-agent-run",
+      "mark-agent-run-running",
+      "complete-agent-run",
+      "settle-agent-run-result-delivery",
+    ] as const) {
+      const current = persistence.getById(runId);
+      if (current === undefined) throw new Error("Missing run");
+      const version = current.version;
+      const result = persistence.applyCommand(
+        kind === "complete-agent-run"
+          ? {
+              kind,
+              runId,
+              expectedVersion: version,
+              result: { reference: `octant://agent-run/${runId}/result`, truncated: false },
+              resultText: "Done.",
+            }
+          : kind === "settle-agent-run-result-delivery"
+            ? { kind, runId, expectedVersion: version, outcome: "consumed" }
+            : { kind, runId, expectedVersion: version },
+      );
+      expect(result.kind).toBe("run-updated");
+    }
+    const settled = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/parent-summary?parentThreadId=${ids.thread}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    const settledBody = (await settled!.json()) as {
+      entries: Array<{ resultDeliveryOutcome?: string }>;
+    };
+    expect(settledBody.entries[0]?.resultDeliveryOutcome).toBe("consumed");
   });
 
   it.each(["parent", "child"])("refuses child data when %s scope is denied", async (scope) => {

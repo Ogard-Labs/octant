@@ -88,6 +88,7 @@ import {
   describeProviderConfigurationChange,
   invalidateModelCapabilityEvidence,
   isImageProfileDriverKind,
+  isNativeHarnessDriverKind,
   type CapabilityEvidenceChange,
 } from "@octant/domain";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
@@ -191,6 +192,8 @@ export interface ProviderServiceOptions {
   readonly driver?: (instance: ProviderInstance) => ProviderDriver;
   readonly isDriverPluginEffective?: (driverKind: ProviderDriverKind) => boolean;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
+  /** Removes the long-lived Claude for helpers token a removed Claude provider held. */
+  readonly clearClaudeHelperSignIn?: (instanceId: ProviderInstanceId) => Promise<void>;
   /** Clears process-local provider limit evidence when identity/configuration changes. */
   readonly clearRuntimeUsageLimits?: (instanceId: ProviderInstanceId) => void;
   readonly runCliUpdate?: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
@@ -213,11 +216,16 @@ export class ProviderService implements ProviderServiceApi {
   readonly #runtime: ProviderRuntimeRegistry;
   readonly #probeProvider: NonNullable<ProviderServiceOptions["probe"]>;
   readonly #instanceOperationTails = new Map<ProviderInstanceId, Promise<void>>();
+  readonly #probesInFlight = new Map<
+    ProviderInstanceId,
+    { readonly result: Promise<ProviderProbeResult>; readonly tail: Promise<void> }
+  >();
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #driverProvider: ProviderServiceOptions["driver"];
   readonly #isDriverPluginEffective: (driverKind: ProviderDriverKind) => boolean;
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
+  readonly #clearClaudeHelperSignIn: ProviderServiceOptions["clearClaudeHelperSignIn"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
   readonly #runCliUpdate: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
   readonly #isProviderExecutableAvailable: (instance: ProviderInstance) => boolean;
@@ -252,6 +260,7 @@ export class ProviderService implements ProviderServiceApi {
       options.isDriverPluginEffective ??
       ((driverKind) => admittedBundledProviderDriverKinds().has(driverKind));
     this.#clearResumeIdentities = options.clearResumeIdentities;
+    this.#clearClaudeHelperSignIn = options.clearClaudeHelperSignIn;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
     this.#runCliUpdate = options.runCliUpdate ?? runProviderCliUpdate;
     this.#isProviderExecutableAvailable = options.isProviderExecutableAvailable ?? (() => true);
@@ -504,14 +513,14 @@ export class ProviderService implements ProviderServiceApi {
         }
       }
     }
-    if (command.kind === "verify-foundry-tools") {
-      const result = await this.verifyFoundryTools(
+    if (command.kind === "verify-model-tools") {
+      const result = await this.verifyModelTools(
         authenticatedWindowId,
         command.instanceId,
         command.modelId,
       );
       return decodeProviderRegistryCommandResult({
-        kind: "foundry-tools-verified",
+        kind: "model-tools-verified",
         instanceId: command.instanceId,
         modelId: command.modelId,
         appManagedTools: result,
@@ -821,6 +830,10 @@ export class ProviderService implements ProviderServiceApi {
           }
           if (current.driverKind === "claude") {
             await this.#clearResumeIdentities?.(current.id);
+            // The renderer clears a removed provider's API key, but nothing
+            // else names this token once the instance is gone, and it stays
+            // valid for a year.
+            await this.#clearClaudeHelperSignIn?.(current.id);
           }
           this.#invalidateCatalog(current.id, { kind: "all" }, "provider removed", updatedAt);
           this.#clearRuntimeUsageLimits?.(current.id);
@@ -1194,7 +1207,33 @@ export class ProviderService implements ProviderServiceApi {
     return this.#probeConfiguredInstance(instanceId);
   }
 
+  /**
+   * Probes of one provider run one at a time, so every caller that asked while
+   * a slow endpoint was being checked used to wait for its own full round
+   * trip behind the rest: the web client's first check, the check after
+   * adding a provider, and a person's own click took 22, 39 and 67 seconds in
+   * turn on one slow Azure listing. A probe asked for while one is already
+   * running joins it, unless another operation (an enable or a configuration
+   * change) queued after it: that one must be checked afresh.
+   */
   #probeConfiguredInstance(instanceId: ProviderInstanceId): Promise<ProviderProbeResult> {
+    const running = this.#probesInFlight.get(instanceId);
+    if (running !== undefined && this.#instanceOperationTails.get(instanceId) === running.tail) {
+      return running.result;
+    }
+    const result = this.#queueProbe(instanceId);
+    const tail = this.#instanceOperationTails.get(instanceId);
+    if (tail === undefined) return result;
+    const entry = { result, tail };
+    this.#probesInFlight.set(instanceId, entry);
+    const forget = () => {
+      if (this.#probesInFlight.get(instanceId) === entry) this.#probesInFlight.delete(instanceId);
+    };
+    result.then(forget, forget);
+    return result;
+  }
+
+  #queueProbe(instanceId: ProviderInstanceId): Promise<ProviderProbeResult> {
     return this.#withInstanceOperation(instanceId, async () => {
       try {
         this.#assertReady();
@@ -1305,7 +1344,7 @@ export class ProviderService implements ProviderServiceApi {
     });
   }
 
-  async verifyFoundryTools(
+  async verifyModelTools(
     _authenticatedWindowId: WindowId,
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,
@@ -1314,30 +1353,45 @@ export class ProviderService implements ProviderServiceApi {
       this.#assertReady();
       const instance = this.#persistence.readProviderInstance(instanceId);
       if (instance === undefined) throw this.#invalid("Provider instance was not found.");
-      if (instance.driverKind !== "azure-foundry") {
-        throw this.#invalid("Tool verification is only available for Azure AI Foundry providers.");
+      // Only the endpoints Octant drives itself can prove a tool turn: the
+      // verification is one request through the same sender a harness turn
+      // uses. Other runtimes bring their own tools and have nothing to prove.
+      if (!isNativeHarnessDriverKind(instance.driverKind)) {
+        throw this.#invalid(
+          "Tool verification is only available for OpenAI-compatible, Anthropic-compatible, and Azure AI Foundry providers.",
+        );
       }
       if (!instance.enabled) throw this.#invalid("Enable this provider before verifying tools.");
       this.#assertDriverPluginEffective(instance);
-      // Validate the target modelId against the configured deployment IDs so
-      // an authenticated renderer cannot probe and record an arbitrary
-      // unconfigured model as verified. The Settings UI only exposes
-      // configured IDs, but the server-side command handler is the authority
-      // boundary.
-      const configuredIds = instance.configuration.manualModelIds.map((id) => String(id));
-      if (!configuredIds.includes(String(modelId))) {
-        throw this.#invalid(
-          "Azure AI Foundry tool verification is only available for configured deployment IDs.",
-        );
-      }
-      // Require a prior Connection Check so the verification has an observed
-      // state to update. Without this, the server would return success but
-      // silently discard the verification since there is no runtime observation
-      // to store it in.
+      // Run Check connection first so the verification has an observed state
+      // to update. Without it the server would return success but silently
+      // discard the verification since there is no runtime observation to
+      // store it in.
       const observed = this.#runtime.observedState(instanceId);
       if (observed === undefined) {
+        throw this.#invalid("Run Check connection for this provider before verifying tools.");
+      }
+      // Validate the target modelId so an authenticated renderer cannot probe
+      // and record an arbitrary model as verified; the Settings UI only
+      // exposes known ids, but this handler is the authority boundary. An
+      // Azure AI Foundry profile runs only its configured deployments (its
+      // catalogue lists base models that are not deployments); the other
+      // endpoint profiles also run any model the endpoint reported.
+      const configuredIds =
+        instance.configuration.kind === "openai-compatible-http" ||
+        instance.configuration.kind === "anthropic-compatible-http" ||
+        instance.configuration.kind === "azure-foundry-openai-http"
+          ? instance.configuration.manualModelIds.map((id) => String(id))
+          : [];
+      const knownIds =
+        instance.driverKind === "azure-foundry"
+          ? configuredIds
+          : [...configuredIds, ...observed.models.map((model) => String(model.id))];
+      if (!knownIds.includes(String(modelId))) {
         throw this.#invalid(
-          "Run Check connection for this Azure AI Foundry provider before verifying tools.",
+          instance.driverKind === "azure-foundry"
+            ? "Azure AI Foundry tool verification is only available for configured deployment IDs."
+            : "Tool verification is only available for models this provider lists.",
         );
       }
       if (this.#driverProvider === undefined) throw this.#unavailable();

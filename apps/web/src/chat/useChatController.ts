@@ -29,7 +29,12 @@ import { applyChatAttemptFrame } from "./chatStreamFrames";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { failureMessage } from "../lib/failureMessage";
 import { waitForReconnect } from "../lib/waitForReconnect";
-import { buildChatThreadNavigation, type ChatThreadNavigationItem } from "../shell/navigationModel";
+import {
+  buildChatThreadNavigation,
+  sameLiveTurn,
+  type ChatThreadNavigationItem,
+  type LiveTurnFacts,
+} from "../shell/navigationModel";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { createReadCursorStore, type ReadCursorStore } from "../threads/readCursorStore";
 
@@ -211,6 +216,9 @@ export function useChatController(options: ChatControllerOptions) {
   const [executingByThread, setExecutingByThread] = useState<ReadonlyMap<string, boolean>>(
     new Map(),
   );
+  const [liveTurnByThread, setLiveTurnByThread] = useState<ReadonlyMap<string, LiveTurnFacts>>(
+    new Map(),
+  );
   const [sequenceByThread, setSequenceByThread] = useState<ReadonlyMap<string, number>>(new Map());
   const [updatedAtByThread, setUpdatedAtByThread] = useState<ReadonlyMap<string, string>>(
     new Map(),
@@ -321,6 +329,25 @@ export function useChatController(options: ChatControllerOptions) {
           next.set(key, thread.executing);
           changed = true;
         }
+      }
+      return changed ? next : current;
+    });
+    setLiveTurnByThread((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const thread of threads) {
+        const key = String(thread.id);
+        const live =
+          thread.turnStartedAt === undefined
+            ? undefined
+            : {
+                turnStartedAt: thread.turnStartedAt,
+                ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
+              };
+        if (sameLiveTurn(current.get(key), live)) continue;
+        if (live === undefined) next.delete(key);
+        else next.set(key, live);
+        changed = true;
       }
       return changed ? next : current;
     });
@@ -628,6 +655,7 @@ export function useChatController(options: ChatControllerOptions) {
       if (thread.lifecycle === "active") {
         items.push({
           ...(executingByThread.get(String(thread.id)) === true ? { executing: true } : {}),
+          ...liveTurnByThread.get(String(thread.id)),
           ...(followUpByThread.get(String(thread.id)) === undefined
             ? {}
             : { followUpOpen: followUpByThread.get(String(thread.id))! }),
@@ -659,6 +687,7 @@ export function useChatController(options: ChatControllerOptions) {
     bootstrap,
     executingByThread,
     followUpByThread,
+    liveTurnByThread,
     markedUnreadThreads,
     readCursors,
     sequenceByThread,
@@ -964,6 +993,22 @@ export function useChatController(options: ChatControllerOptions) {
       })),
     [restCommand],
   );
+  /**
+   * One more turn on a finished thread that is not open, from the Review page.
+   * It is the ordinary send command with the thread's current version, and a
+   * refusal comes back as a value for the same reason the rest commands'
+   * do: nothing else reports it.
+   */
+  const sendBackTurn = useCallback(
+    (threadId: ChatThreadId, prompt: string) =>
+      restCommand(threadId, (expectedVersion) => ({
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion,
+        prompt,
+      })),
+    [restCommand],
+  );
 
   return {
     activeView: visibleActiveView,
@@ -1000,6 +1045,7 @@ export function useChatController(options: ChatControllerOptions) {
           : activateThread(options.activeThreadId)
         : loadBootstrap(),
     sendTurn,
+    sendBackTurn,
     settingsMessage,
     setPendingDraft: updatePendingDraft,
     setPendingDraftCaret,

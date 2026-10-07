@@ -223,7 +223,7 @@ function createRevisionRoute(projection = new CanvasProjection()) {
     canvasService,
     canvasShareService,
     canvasExportFolderService,
-    resolveFolderCandidate: (_windowId, input) => {
+    resolveFolderCandidate: async (_windowId, input) => {
       const { candidateId } = readFolderCandidate(input);
       if (candidateId !== exportFolderCandidateId) {
         throw new Error("That folder is no longer available to choose.");

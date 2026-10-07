@@ -178,7 +178,7 @@ describe("CanvasSkillContribution contract", () => {
             id: "wireframe",
             title: "Wireframe",
             whenToUse: "Should not decode.",
-            skeleton: [{ kind: "heatmap", role: "A screen." }],
+            skeleton: [{ kind: "sankey", role: "A screen." }],
           },
         ],
       }),

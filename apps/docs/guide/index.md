@@ -23,7 +23,7 @@ Welcome to the Octant guide. Use these pages to install the app, configure provi
 - [Shared Memory](/guide/memory) — persist decisions, facts, and context across threads
 - [Promotions](/guide/promotions) — escalate Work work to a linked Code thread
 - [Sync artifacts across your computers](/guide/sync-artifacts) — what leaves this computer, where it goes, and how to turn sync off
-- [Export a Canvas or artifact to a folder](/guide/export) — write a readable Markdown or HTML copy into a folder you choose
+- [Export a Canvas or artifact](/guide/export) — write a readable Markdown or HTML copy into a folder you choose, or publish it as a GitHub Gist
 
 ## Concepts
 
@@ -48,11 +48,50 @@ Chat has no board.
 Under the composer on a new Work or Code task, a few cards show what is
 happening now. **Working now** lists what is running across your Projects:
 each row has the provider mark, the thread's title, a line saying what it is
-doing, and a time. An agent run says how long it has run; a thread says when it
-last moved, because the app does not record when a turn began. When the window
+doing, and a time. A command or tool shows as it runs, such as `Command: bun run
+test`, or the row says it is waiting for your approval or an answer. The time is
+how long the turn has been running. Paths and anything that looks like a secret
+are removed from the line before it leaves the host. When the window
 is showing another computer's work, the row names that computer. Up to five rows
 show, then **+N more** opens Running. Choose a row to open its thread. When
 nothing is running, the card says so in one line.
+
+**Running services** lists the dev servers running in your Code Projects: the
+port, the Project and the branch or thread, what is running (`vite`, `node`,
+`bun`), and whether it is answering. A server Octant does not own is marked
+**Not owned by Octant**: it may be one left from an earlier session, or one you
+started yourself in a terminal or with another tool, and Octant cannot tell
+which. **Open** shows the page in a Browser tab for that thread, or in your own
+browser; **Stop** stops it. A server Octant owns can stop at once; one it does
+not own asks you to confirm first, and from a paired device it can only be
+stopped at the computer itself.
+A server an editor such as VS Code started is not listed, and neither is
+anything outside your Code Projects. Up to five show, then **+N more
+listening**. The card refreshes about every five seconds while the window is
+showing, and not at all when it is hidden or turned off. When the window shows
+another computer's work, the row names that computer.
+
+**Needs you** comes first and appears only while an agent is waiting on you. It
+lists every approval and question across your Projects, oldest first: the
+provider mark, the thread's title, how long it has waited, and what it asked.
+Choose **Approve** or **Deny** on an approval. A question with choices has one
+numbered button per choice (press the number while the row has focus), and
+**Reply…** opens the thread so you can type your own answer. Answering works the
+same as in the thread itself, with the same permissions. If the request changed
+before your answer arrived (it was answered elsewhere, or the turn ended), the
+row says so once and refreshes. Up to five rows show, then **+N more** opens the
+Inbox. On Work this covers Chat and Work threads; on Code, Code threads. The
+card is only available in a window on this computer.
+
+**Pull requests**, on a new Code task, lists what is waiting on you across your
+Code Projects. **Waiting on your review** is a review asked of you; **Yours**
+is one you opened. A row shows the title, a short repository and number, and
+the words for checks and review — passed, failed, running, or none, and
+approved, changes requested, in review, or draft. Up to six rows show, then
+**+N more** opens Pull requests. Choose a row to open that pull request. The
+card is not shown at all without a connection, or when credential storage is
+insecure. It reads the list the Pull requests page already keeps, so it does
+not ask again on its own.
 
 **Customize**, on the right under the composer, turns each card on or off and
 reorders them: drag a card by its handle, or use the up and down buttons from the
