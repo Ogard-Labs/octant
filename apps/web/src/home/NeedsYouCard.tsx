@@ -58,7 +58,8 @@ export function createNeedsYouCard(source: NeedsYouCardSource): HomeCardDefiniti
 
 /**
  * A request whose answer was refused. If the host stops listing it, the row
- * stays for one more read so its refusal line can be read, then goes.
+ * stays so its refusal line can be read, until the next read or the shell's
+ * next minute tick, whichever comes first; a quiet host may send no next read.
  */
 interface RefusedRequest {
   readonly request: PendingRequest;
@@ -92,6 +93,13 @@ function useNeedsYouContent(source: NeedsYouCardSource): HomeCardContent {
       return next;
     });
   }, [listed]);
+
+  useEffect(() => {
+    setRefused((current) => {
+      if (![...current.values()].some((entry) => entry.unlisted)) return current;
+      return new Map([...current].filter(([, entry]) => !entry.unlisted));
+    });
+  }, [now]);
 
   const answer = useCallback(
     async (request: PendingRequest, response: PendingRequestResponse) => {

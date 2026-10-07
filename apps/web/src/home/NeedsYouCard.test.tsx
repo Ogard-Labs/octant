@@ -412,6 +412,36 @@ describe("the Needs you card", () => {
     view.unmount();
   });
 
+  it("lets a refused row the host no longer lists go at the next minute on a quiet host", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    answerClients.codeClient.executeOperation.mockResolvedValueOnce({
+      kind: "operation-failed",
+    } as never);
+    const client = reader([codeApproval], []);
+    const first = source({ answerClients: answerClients as never, pendingRequestClient: client });
+    const view = renderCard(createNeedsYouCard(first));
+    const row = await screen.findByRole("group", {
+      name: "Fix the flaky build is waiting for you",
+    });
+    await user.click(within(row).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(client.list).toHaveBeenCalledTimes(2));
+    expect(await within(row).findByRole("status")).toBeVisible();
+    view.rerender(
+      <HomeDashboard
+        cards={[createNeedsYouCard({ ...first, now: NOW + 60_000 })]}
+        customization={{ order: [], visibility: [] }}
+        onCustomizationChange={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("group", { name: "Fix the flaky build is waiting for you" }),
+      ).toBeNull(),
+    );
+    expect(client.list).toHaveBeenCalledTimes(2);
+  });
+
   it("shows five rows, counts them all, and opens the Inbox from +N more", async () => {
     const user = userEvent.setup();
     const onOpenInbox = vi.fn();

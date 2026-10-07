@@ -194,7 +194,7 @@ makes. After an answer the card re-reads and the row leaves with the next read.
 A refused answer (a stale version, a turn that ended, a turn that cannot take
 it, such as one in Plan mode, an unreachable host) shows one quiet line in the
 row saying why, and then the card re-reads; a row the host no longer lists stays
-for that one read so the line can be seen. A Code answer
+until the next read or the next minute so the line can be seen. A Code answer
 counts as refused when the host says `operation-failed` or reports the turn
 `failed` or `interrupted`; the command palette reads Code answers the same way.
 The card reads the list when it mounts, on the navigation topics named below,
