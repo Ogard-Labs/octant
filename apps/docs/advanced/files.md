@@ -229,7 +229,9 @@ with the device it came through noted ("paired device" when it arrived from a
 paired phone or browser). A comment whose block has since left the canvas is
 kept and marked rather than dropped. Shared snapshots never include comments.
 A shared snapshot keeps every block, including charts, tables, treemaps,
-heatmaps, and bar lists with their number formats; only a design stops a share.
+heatmaps, and bar lists with their number formats. A design, or an action block
+that runs a command on this Mac, stops a share: Share then says the canvas
+cannot be shared safely.
 A treemap or bar list in a shared snapshot offers no **Open file**, because
 those files are on your Mac.
 Board templates are not available yet. Revisions
