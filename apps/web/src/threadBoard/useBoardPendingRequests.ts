@@ -14,8 +14,9 @@ import {
 
 /**
  * What a mounted board needs to show a waiting thread's question where its
- * card is: the one read this window shares, and the clients each thread view
- * already answers through. A board without a source looks as it always did.
+ * card is: the window's pending-request reader, which the board reads on its
+ * own, and the clients each thread view already answers through. A board
+ * without a source looks as it always did.
  */
 export interface BoardPendingRequestSource extends Omit<PendingRequestRowsSource, "modes"> {
   /** The clock the waits read, advanced once a minute by the shell. */

@@ -302,10 +302,11 @@ denial in one turn: the provider received that Deny and the host then stopped
 the turn, so it counts as answered. The command palette and the open Code
 thread read Code answers the same way, and the open thread keeps a refused
 request and adds the host's reason to its waiting line.
-The card reads the list when it mounts, on the navigation topics named below,
-and when the shell settings or the window workspace change (neither has a feed
-topic). Signals that arrive while a read is in flight become one more read once
-it lands, so a streaming reply does not start a host read per delta.
+The card reads the list when it mounts, on the Machine change feed's Chat,
+Work, and Code navigation topics, and when the shell settings or the window
+workspace change (neither has a feed topic). Signals that arrive while a read
+is in flight become one more read once it lands, so a streaming reply does not
+start a host read per delta.
 
 **Pull requests** is the next card, on by default, and only on a Code start
 screen. It is hidden — and left out of Customize — unless the Pull requests
@@ -367,16 +368,14 @@ while it is visible and the window is in front, about every ten seconds, and
 stops when the window is hidden. It never polls in the background.
 
 **Needs you** surfaces (a start-screen card, answering from Board cards, the
-command palette) read one host list of the approvals and
-questions this window can answer, across Chat, Work, and Code and across
-Projects, oldest waiting first. Each item names its mode, Project, thread and
-title, kind, text, options where the mode has them, and when it was asked, and
-carries the handle that mode's own answer command takes, so a surface answers
-in place through the commands the open thread already uses. The list is re-read
-on the Machine change feed's Chat, Work, and Code navigation topics and never
-on a timer; an answered or ended request is gone from the next read. It is read
-at a local window only, so a remote window has no Needs you source. What it
-includes and leaves out is in
+command palette) each read the same host list described with the Needs you
+card above (the `pendingRequests` read); each surface's own paragraph says when
+it reads. Each item names its mode, Project, thread and title, kind, text,
+options where the mode has them, and when it was asked, and carries the handle
+that mode's own answer command takes, so a surface answers in place through the
+commands the open thread already uses. An answered or ended request is gone
+from the host's next list. The list is read at a local window only, so a
+remote window has no Needs you source. What it includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
 
 The command palette opens on a **Needs you** group when this window can read
