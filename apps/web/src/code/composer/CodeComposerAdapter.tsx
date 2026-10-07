@@ -110,6 +110,11 @@ export interface CodeComposerAdapterProps {
   readonly projectRoot?: string;
   readonly repositoryId?: CodeRepositoryId;
   readonly checkoutId?: CodeCheckoutId;
+  /**
+   * The branch this draft was opened for, such as the failing pull request's
+   * branch from Start a fix. It is a decision, not a seed: the draft starts a
+   * worktree from it, and the checkout's head does not replace it.
+   */
   readonly branchName?: string;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedHostId?: HostId;
@@ -365,7 +370,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // Unknown until the host says. Neither caller supplies a branch for a
   // Project-bound composer, so seeding a literal here meant the tray asserted
   // `development` for every repository, including the ones on `main`.
-  const initialBaseBranch = props.baseBranch ?? props.branchName ?? "";
+  const initialBaseBranch = props.branchName ?? props.baseBranch ?? "";
   // The delivery target is derived from the tray, not typed into a form: the
   // base branch is the branch picker, the base repository is the connected
   // GitHub repository (or the local Project), and the remote is the one the
@@ -377,10 +382,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       ? "local/repository"
       : `local/${props.projectName}`);
   const [baseBranch, setBaseBranch] = useState(initialBaseBranch);
-  // Whether the branch on screen is the reader's own pick. A seeded prop is a
-  // starting value, not a decision: the checkout's actual head outranks it, and
-  // only a pick from the ref list outranks the head.
-  const baseBranchChosen = useRef(false);
+  // Whether the branch on screen is the reader's own pick. A seeded base branch
+  // is a starting value, not a decision: the checkout's actual head outranks it,
+  // and only a pick from the ref list outranks the head. A branch the draft was
+  // opened for is already chosen; read as a seed, the head replaced it and Start
+  // a fix created the thread from `main` while the tray named the failing branch.
+  const handedBranch = props.branchName;
+  const baseBranchChosen = useRef(handedBranch !== undefined);
   // F4: remote facts are server-authoritative. When the server has not
   // provided them, fail closed with no remotes so Start from origin is
   // disabled rather than fabricated.
@@ -393,7 +401,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // The Project habit is the preselection; the user may override it for this
   // one thread. Switching Projects drops the override so the next Project's
   // own habit is honored rather than the previous Project's choice.
-  const [workspaceOverride, setWorkspaceOverride] = useState<CodeNewThreadWorkspace>();
+  // The current checkout keeps whatever branch it is on, so a draft opened for
+  // a branch starts a worktree from that branch instead.
+  const handedWorkspace: CodeNewThreadWorkspace | undefined =
+    handedBranch === undefined ? undefined : "managed-worktree";
+  const [workspaceOverride, setWorkspaceOverride] = useState<CodeNewThreadWorkspace | undefined>(
+    handedWorkspace,
+  );
   const workspace =
     workspaceOverride ?? props.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE;
   const startFromOrigin = startFromOriginOverride ?? defaultStartFromOrigin(worktreeRemoteFacts);
@@ -472,14 +486,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     projectIdRef.current = projectId;
     setWorktreeRefs(undefined);
     setRefsLoading(false);
-    setWorkspaceOverride(undefined);
+    setWorkspaceOverride(handedWorkspace);
     // A ref the reader picked belongs to the Project they picked it in. Left
     // standing, it both kept the previous Project's branch on screen and told
     // the adoption below that this Project's head had already been overruled.
     // Falls back to whatever the caller seeded, not to nothing: a host that
     // never lists refs still has that to show.
-    baseBranchChosen.current = false;
-    setBaseBranch(props.baseBranch ?? props.branchName ?? "");
+    baseBranchChosen.current = handedBranch !== undefined;
+    setBaseBranch(props.branchName ?? props.baseBranch ?? "");
     // Only a change of Project resets this; the seed is read as it stands then.
   }, [projectId]);
   const loadWorktreeRefs = useCallback(() => {

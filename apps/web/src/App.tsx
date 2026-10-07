@@ -5239,6 +5239,9 @@ function LaunchedShell(
         );
         return false;
       }
+      // The branch Start a fix handed in now belongs to this thread; the next
+      // draft must not open on it.
+      setPendingDraftBranch(undefined);
       // The thread opens before its first turn starts, so tell its own
       // controller which prompt is coming. Otherwise the transcript reads the
       // empty journal and calls the thread empty until the turn is durable.
@@ -6814,7 +6817,12 @@ function LaunchedShell(
                           .openDraftThread(mode, projectId)
                           .then((accepted) => {
                             if (accepted) {
-                              if (mode === "code") setDraftPermissionPersistence(undefined);
+                              if (mode === "code") {
+                                setDraftPermissionPersistence(undefined);
+                                // A branch handed in by Start a fix names a
+                                // branch of the Project it came from.
+                                setPendingDraftBranch(undefined);
+                              }
                               setDraftProjectSelection((current) => ({
                                 ...current,
                                 [mode]: projectId,
