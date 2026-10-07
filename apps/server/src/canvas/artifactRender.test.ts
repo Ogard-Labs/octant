@@ -316,4 +316,51 @@ describe("drawing a preview of an artifact", () => {
     expect(phone).not.toMatch(/<\s*script/i);
     expect(phone).not.toBe(desktop);
   });
+
+  it("draws a heatmap as one cell per coordinate, with a dashed cell for a gap", () => {
+    const matrix = {
+      blockId: "commits",
+      schemaVersion: 5,
+      kind: "heatmap",
+      layout: "matrix",
+      rows: [
+        { rowId: "mon", label: "Mon" },
+        { rowId: "tue", label: "Tue" },
+      ],
+      columns: [
+        { columnId: "h09", label: "09" },
+        { columnId: "h10", label: "10" },
+      ],
+      cells: [{ rowId: "mon", columnId: "h09", value: 3 }],
+    } as unknown as CanvasBlock;
+
+    const markup = renderArtifactThumbnail(definition([matrix]));
+
+    expect(markup.startsWith("<svg")).toBe(true);
+    expect(markup).not.toMatch(/<\s*script/i);
+    // A background, then one cell per coordinate the block declares.
+    expect((markup.match(/<rect/g) ?? []).length).toBe(5);
+    // The coordinate the block does not list is drawn apart from a zero.
+    expect(markup).toContain('stroke-dasharray="2 2"');
+  });
+
+  it("draws a calendar heatmap from the shared week grid", () => {
+    const calendar = {
+      blockId: "failures",
+      schemaVersion: 5,
+      kind: "heatmap",
+      layout: "calendar",
+      days: [
+        { date: "2026-09-01", value: 0 },
+        { date: "2026-09-08", value: 5 },
+      ],
+    } as unknown as CanvasBlock;
+
+    const markup = renderArtifactThumbnail(definition([calendar]));
+
+    expect(markup.startsWith("<svg")).toBe(true);
+    expect(markup).not.toMatch(/<\s*script/i);
+    // Eight days are laid out between the first and last reading.
+    expect((markup.match(/<rect/g) ?? []).length).toBeGreaterThanOrEqual(8);
+  });
 });

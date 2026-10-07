@@ -2604,6 +2604,21 @@ function LaunchedShell(
       dockTabs.length > 0 ||
       launchableDockSurfaces.length > 0);
   const dockOpen = dockVisible && dockAvailable;
+  // A Browser tab bound to one host-opened context (a link or a local server)
+  // is not the thread's shared Browser, so it does not stand in for the agent's
+  // session: only a tab with no context of its own counts as that view.
+  const sharedBrowserInDock =
+    dockOpen &&
+    displayedDockState.tabs.some(
+      (tab) =>
+        tab.id === displayedDockState.active &&
+        tab.surface === "browser" &&
+        tab.browserContextId === undefined,
+    );
+  const sharedBrowserInBottomPanel =
+    bottomPanelOpen &&
+    activeBottomSurface?.id === "browser" &&
+    activeBottomTab?.browserContextId === undefined;
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
@@ -7263,6 +7278,11 @@ function LaunchedShell(
                           controller.openSurface(surface, paneId, browserContextId)
                         }
                         onRevealBrowserActivity={(input) => controller.revealBrowserActivity(input)}
+                        onOpenThreadBrowser={(input) => controller.openThreadBrowser(input)}
+                        {...(dockThreadId === undefined ||
+                        !(sharedBrowserInDock || sharedBrowserInBottomPanel)
+                          ? {}
+                          : { browserToolThreadId: String(dockThreadId) })}
                         {...(browserAutomationClient === undefined
                           ? {}
                           : { onOpenLink: (request) => void openLinkInApp(request) })}
