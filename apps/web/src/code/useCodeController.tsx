@@ -2318,7 +2318,8 @@ export function useCodeController(options: CodeControllerOptions) {
           setRefusedAnswer({ requestKey: providerAnswerKey(answer), message: outcome.message });
           return false;
         }
-        setRefusedAnswer(undefined);
+        const answeredKey = providerAnswerKey(answer);
+        setRefusedAnswer((current) => (current?.requestKey === answeredKey ? undefined : current));
         setProviderRequests((current) =>
           current.filter((request) =>
             answer.kind === "approval"

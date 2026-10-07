@@ -243,6 +243,25 @@ describe("ReviewPage", () => {
     expect(page.onComplete).toHaveBeenCalledOnce();
   });
 
+  it("leaves its keys alone when a row leaves after a click already moved focus off the page", async () => {
+    const user = userEvent.setup();
+    const page = props();
+    const view = render(<ReviewPage {...page} />);
+    const rows = () =>
+      within(screen.getByRole("navigation", { name: "Finished threads" })).getAllByRole("button");
+    act(() => rows()[0]?.focus());
+    expect(rows()[0]).toHaveFocus();
+    // A click on a part of the window that takes no focus drops it to the body
+    // while the row is still there.
+    await act(async () => rows()[0]?.blur());
+    expect(document.activeElement).toBe(document.body);
+
+    view.rerender(<ReviewPage {...page} entries={[second, third]} />);
+    await user.keyboard("c");
+
+    expect(page.onComplete).not.toHaveBeenCalled();
+  });
+
   it("acts on the row that has focus, and moves that focus with J and K", async () => {
     const user = userEvent.setup();
     const page = props();

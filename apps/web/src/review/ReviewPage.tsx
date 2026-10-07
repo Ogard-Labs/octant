@@ -229,8 +229,8 @@ export function ReviewPage(props: ReviewPageProps) {
 
   // A control holding focus can leave with the thread it belonged to (a
   // completed thread's row), which drops focus to the body. The page takes it
-  // back so its keys keep working; a click elsewhere in the window leaves the
-  // control in place, so focus that fell to the body that way stays there.
+  // back so its keys keep working. Focus that left the page first (a click
+  // elsewhere in the window) clears the record on blur, so it stays there.
   const lastFocusedRef = useRef<Element | null>(null);
   useEffect(() => {
     const last = lastFocusedRef.current;
@@ -425,6 +425,17 @@ export function ReviewPage(props: ReviewPageProps) {
       <section
         aria-label="Review finished threads"
         className="review-page__body"
+        onBlur={(event) => {
+          const next = event.relatedTarget;
+          if (next instanceof Node && rootRef.current?.contains(next) === true) return;
+          // Focus leaving the page forgets the control, so a later removal of
+          // it does not pull focus back. A removal itself may also blur with
+          // no next target; the control is gone by then, so it is kept.
+          const left = event.target;
+          queueMicrotask(() => {
+            if (left.isConnected && lastFocusedRef.current === left) lastFocusedRef.current = null;
+          });
+        }}
         onFocus={(event) => {
           lastFocusedRef.current = event.target;
         }}
