@@ -57,6 +57,20 @@ A **Test connection** button proves the setup by writing one small probe file
 in the bucket. It deletes nothing, and the app ignores that file when it reads
 the store. Octant does not delete objects from your bucket on your behalf.
 
+## Joining another computer
+
+This preview does not offer joining yet either. When it does, it works like
+this. The new computer writes a request into the store, signed with a key
+kept in its own Keychain or Secret Service. A computer that already shares
+the store shows that the new one wants to join, and both screens show the
+same six-digit code. You approve only if the codes match, then confirm on the
+new computer. The code is a check that both screens mean the same two
+computers; it is not a password, and nothing secret passes through the store.
+
+Revoking a computer writes a signed record. After your other computers read
+it, they refuse anything that computer writes. A revoked computer that wants
+back in joins again as a new computer.
+
 ## Turning sync off
 
 Turning sync off stops this computer writing to the store and reading from

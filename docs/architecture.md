@@ -1295,6 +1295,36 @@ flowchart LR
   connection action writes one probe object in a reserved key namespace and
   deletes nothing; `list` skips that namespace. Publish and pull are not this
   store; they call it.
+- **Artifact replica membership, as wired today.** The host serves the
+  membership commands — create a replica, write a join request, approve a
+  join, confirm a join on the joining computer, revoke, and pull — on the
+  host-only `/api/replica-membership/commands` route. Membership facts —
+  this computer's own instance, the members and their device keys,
+  revocations, the entries already applied from each instance, and this
+  computer's next sequence — are a projection of `replica.*` journal events,
+  held in memory and rebuilt from the journal on every start; replaying it
+  twice gives the same facts. A command that publishes journals the signed
+  entry before either file is written, writes the signature and then the
+  entry, and journals what the entry means once both landed. If a publish
+  stops part-way, the next command finishes it first with the same bytes and
+  the same deterministic Ed25519 signature, so that sequence slot is not lost.
+  A pull walks every other instance from the first entry it has not applied.
+  Each entry is verified against the device key the journal holds for its
+  origin; only a join request, the one record a computer that is not yet a
+  member may write, is verified against the key it names. A bad or missing
+  signature, an unknown or revoked origin, a body whose origin is not its path,
+  an unreadable file, a gap, or a rewritten sequence is refused and journaled
+  before anything from that entry is applied, and the walk for that instance
+  stops there. A refusal is journaled once, not on every pull. An entry
+  counts as signed after a revocation once the reading computer has applied
+  that revocation; there is no clock shared between computers. Device signing
+  keys live per replica instance in the host credential store, reached through
+  the credential broker. Three things are not wired: no host setting selects a
+  store yet, so every command answers a typed `not-configured` refusal and
+  makes no store call; there is no Settings surface for sync; and artifact
+  versions are neither published nor imported — a pull stops at a verified
+  artifact entry and reads it again later, rather than marking it applied. A
+  person cannot turn sync on or join another computer yet.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -2568,16 +2598,21 @@ mechanisms are:
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal.
 - **Artifact replica membership.** Each replica entry carries a detached
-  signature from the writing host's own identity key — the host-owned identity,
-  not a paired client's device key. There is no replica key. An entry from an
+  Ed25519 signature from the device signing key the writing host holds for its
+  replica instance, in its own credential store — not a paired client's device
+  key. There is no replica key. An entry from an
   unknown or revoked host, or one that fails verification, is refused and
   journaled. A new computer joins by writing a join request into the store,
   signed over the time it was written; a request older than a day is not
   offered for approval. A computer that is already a member approves it by
   name, and only the store's own copy of the request — verified against the
-  joiner's device key — can be approved, not a copy a caller hands over. A
-  short matching code, shown on both screens, guards against a stranger's
-  request. Revoke writes a signed revocation. Store setup, joining, and
+  joiner's device key — can be approved, not a copy a caller hands over. Only a
+  member approves. A short matching code, compared on both screens, shows the
+  person that the request the member is approving, and the member approving
+  it, are the ones the joining computer means; it is not a secret, and the
+  signatures, not the code, make the records authoritative. The joining
+  computer confirms the approval after the codes agree, which is how it learns
+  its first member. Revoke writes a signed revocation. Store setup, joining, and
   revoking happen on the host, never from a paired phone. Store credentials
   live in the host credential store — macOS Keychain or freedesktop Secret
   Service — and are not written into the replica. An S3-compatible store is
