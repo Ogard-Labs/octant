@@ -351,6 +351,27 @@ describe("Canvas share contracts", () => {
     }
   });
 
+  it("shares a metric with its number format, sparkline, direction, and caption", () => {
+    const exported = {
+      ...document,
+      blocks: [
+        {
+          blockId: "metric-trend",
+          schemaVersion: 1,
+          kind: "metric",
+          label: "Lines of code",
+          value: 1_360_000,
+          format: "compact",
+          delta: 12_400,
+          goodDirection: "up",
+          sparkline: [1.2, 1.24, 1.27, 1.3],
+          caption: "since last release",
+        },
+      ],
+    };
+    expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+  });
+
   it("rejects secret-bearing export text and credential query URLs at decode time", () => {
     expect(() =>
       decodeCanvasStaticExportDocument({

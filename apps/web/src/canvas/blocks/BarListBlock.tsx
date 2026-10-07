@@ -15,6 +15,8 @@ import {
   type CanvasBarListRowLayout,
 } from "@octant/domain/canvas-bar-list-layout";
 
+type BarListDirection = "desc" | "asc";
+
 /** Above this many rows the list is read through its disclosed table, so the
  * keyboard does not walk a tab stop per bar. Matches the chart mark cap. */
 const MAX_INTERACTIVE_ROWS = 24;
@@ -22,11 +24,11 @@ const MAX_INTERACTIVE_ROWS = 24;
 /**
  * A ranked list of magnitudes: the "hottest files" or "slowest tests" panel.
  *
- * Rows are ordered largest first by default and each bar is its share of the
- * largest value, worked out by the shared domain layout so the screen and the
- * static export draw the same list. The order, the number of rows shown, and
- * Show all are view state: they are never journaled and never revise the
- * Canvas. A row that names a manifest source offers Open file through the
+ * Rows are ordered largest first by default, and a reader can flip the ranking
+ * to smallest first. Each bar is its share of the largest value, worked out by
+ * the shared domain layout so the screen and the static export draw the same
+ * list. The order and Show all are view state: they are never journaled and
+ * never revise the Canvas. A row that names a manifest source offers Open file through the
  * allowlisted open-source action; the host reauthorizes it. The disclosed table
  * is the complete, accessible reading of every row.
  */
@@ -38,12 +40,19 @@ export function BarListBlock({
   readonly actionRuntime?: CanvasActionRuntime | undefined;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const [direction, setDirection] = useState<BarListDirection>("desc");
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined);
 
   const layout = useMemo(
-    () => layoutCanvasBarList(block, showAll ? {} : { limit: BAR_LIST_DEFAULT_VISIBLE_ROWS }),
-    [block, showAll],
+    () =>
+      layoutCanvasBarList(
+        block,
+        showAll ? { direction } : { direction, limit: BAR_LIST_DEFAULT_VISIBLE_ROWS },
+      ),
+    [block, showAll, direction],
   );
+  // The disclosed table reads every row in the order the picture ranks them.
+  const ranked = useMemo(() => layoutCanvasBarList(block, { direction }).rows, [block, direction]);
   const domain = useMemo(() => barListValueDomain(block), [block]);
   const scale = block.scale ?? "neutral";
   const interactive = block.rows.length <= MAX_INTERACTIVE_ROWS;
@@ -61,6 +70,18 @@ export function BarListBlock({
 
   return (
     <figure className="canvas-block__bar-list" data-scale={scale}>
+      {block.rows.length < 2 ? null : (
+        <div className="canvas-block__bar-list-header">
+          <OctantButton
+            aria-pressed={direction === "asc"}
+            onClick={() => setDirection((current) => (current === "desc" ? "asc" : "desc"))}
+            type="button"
+            variant="bare"
+          >
+            {direction === "desc" ? "Largest first ↓" : "Smallest first ↑"}
+          </OctantButton>
+        </div>
+      )}
       <ol aria-label={barListLabel(block)} className="canvas-block__bar-list-rows">
         {layout.rows.map((row) => (
           <li className="canvas-block__bar-list-row" key={`${row.label}:${String(row.index)}`}>
@@ -120,7 +141,7 @@ export function BarListBlock({
             : `Show all ${String(block.rows.length)}`}
         </OctantButton>
       )}
-      <BarListData block={block} actionRuntime={actionRuntime} />
+      <BarListData actionRuntime={actionRuntime} block={block} rows={ranked} />
     </figure>
   );
 }
@@ -184,9 +205,11 @@ function OpenFileControl({
 
 function BarListData({
   block,
+  rows,
   actionRuntime,
 }: {
   readonly block: CanvasBarListBlock;
+  readonly rows: ReadonlyArray<CanvasBarListRowLayout>;
   readonly actionRuntime: CanvasActionRuntime | undefined;
 }) {
   const hasSecondary = block.rows.some((row) => row.secondaryValue !== undefined);
@@ -211,7 +234,7 @@ function BarListData({
             </tr>
           </thead>
           <tbody>
-            {block.rows.map((row, index) => (
+            {rows.map((row) => (
               <tr key={row.label}>
                 <th scope="row">{row.label}</th>
                 <td>{formatCanvasValue(row.value, block.format)}</td>
@@ -231,7 +254,7 @@ function BarListData({
                       <OpenFileControl
                         actionRuntime={actionRuntime}
                         blockId={String(block.blockId)}
-                        index={index}
+                        index={row.index}
                         label={row.label}
                         sourceId={row.sourceId}
                       />

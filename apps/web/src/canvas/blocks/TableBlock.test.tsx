@@ -133,6 +133,26 @@ describe("hideable table columns", () => {
     expect(screen.getByRole("columnheader", { name: "Requests" })).toBeVisible();
   });
 
+  it("drops the sort when its column is hidden, so no row order is left unexplained", async () => {
+    const user = userEvent.setup();
+    render(<CanvasView input={definition()} />);
+
+    await user.click(screen.getByRole("button", { name: "Requests" }));
+    expect(firstColumn()[0]).toBe("README.md");
+
+    await user.click(screen.getByText("Columns"));
+    await user.click(screen.getByRole("checkbox", { name: "Requests" }));
+    expect(firstColumn()).toEqual([
+      "apps/web/src/Table.tsx",
+      "packages/domain/canvas.ts",
+      "README.md",
+    ]);
+
+    // Showing the column again does not bring back an ordering nobody chose.
+    await user.click(screen.getByRole("checkbox", { name: "Requests" }));
+    expect(screen.getByRole("columnheader", { name: "Requests" })).not.toHaveAttribute("aria-sort");
+  });
+
   it("will not hide the last visible column", async () => {
     const user = userEvent.setup();
     render(<CanvasView input={definition()} />);

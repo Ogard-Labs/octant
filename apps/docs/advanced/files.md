@@ -145,8 +145,9 @@ operation:
 `width` is `inline`, `sidebar`, or a number of pixels from 320 to 1200, and
 `theme` is `light` or `dark`; both default to `sidebar` and `light`. The agent
 can name a `version` sequence to look at an earlier version instead of the
-current one. Preview returns the picture the thread will draw and a list of
-layout warnings: a label too long for its slot, a legend that overflows its row,
+current one. Preview returns a screenshot of the Canvas drawn by the same
+renderer the thread uses, at that width and in that theme, and a list of layout
+warnings: a label too long for its slot, a legend that overflows its row,
 a chart with an empty series, an inline document past its height cap, and text
 or marks below their contrast target. The agent fixes what the warnings name
 with a revision, then replies.
@@ -161,7 +162,8 @@ its own. The signed app does not bundle a browser, so on a Mac with none of
 those installed, `preview` still returns the layout warnings but no picture, and
 says so. Some models cannot take a picture in a tool result; for those the
 warnings alone come back, and the result says the model could not be shown an
-image.
+image. The page Octant screenshots loads nothing from the network: it carries
+only Octant's own built files and the Canvas itself.
 
 ### Diagrams as boards
 

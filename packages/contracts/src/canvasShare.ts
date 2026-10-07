@@ -1,8 +1,11 @@
 import { Schema } from "effect";
 import {
+  CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CanvasActor,
   CanvasBlock,
   CanvasId,
+  CanvasMetricDirection,
+  CanvasNumberFormat,
   CanvasSchemaVersion,
   CanvasVersionId,
   canvasChartSeriesIssue,
@@ -263,6 +266,14 @@ export const CanvasStaticExportBlock = Schema.Union(
     value: ExportScalar,
     unit: Schema.optional(ExportLabel),
     delta: Schema.optional(Schema.Number),
+    // The reading fields a metric gained after the share contract was first
+    // written; without them a shared metric that names any of them was refused.
+    format: Schema.optional(CanvasNumberFormat),
+    sparkline: Schema.optional(
+      Schema.Array(Schema.Number).pipe(Schema.maxItems(CANVAS_MAX_METRIC_SPARKLINE_POINTS)),
+    ),
+    goodDirection: Schema.optional(CanvasMetricDirection),
+    caption: Schema.optional(ExportText),
   }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,

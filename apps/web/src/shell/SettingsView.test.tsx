@@ -10,6 +10,7 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { settingsPastFirstRun } from "../App.test-fixtures";
 import { SettingsView, type SettingsViewProps } from "./SettingsView";
+import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
 import type { DiscoveryController } from "../providers/useDiscoveryController";
@@ -336,6 +337,45 @@ describe("SettingsView", () => {
       .getByRole("heading", { level: 1, name: "Remote access" })
       .closest("header")!;
     expect(within(header).getByLabelText("Scope: Selected host")).toBeInTheDocument();
+  });
+
+  it("takes the Connect a provider button on a harness slot to Providers & Models", async () => {
+    const user = userEvent.setup();
+    const nativeHarnessClient = {
+      routing: vi.fn(async () => ({
+        configuration: {
+          slots: [
+            {
+              id: "default" as never,
+              candidates: [
+                {
+                  hostId: "00000000-0000-0000-0000-000000000001" as never,
+                  providerInstanceId: "missing-provider" as never,
+                  modelId: "missing-model" as never,
+                },
+              ],
+            },
+          ],
+          jobSlots: [],
+        },
+        version: 1 as never,
+        updatedAt: now as never,
+      })),
+      updateRouting: vi.fn(),
+    } as unknown as NativeHarnessClient;
+    renderSettings({
+      nativeHarnessClient,
+      providerController: providerControllerFixture(),
+      discoveryController: discoveryControllerFixture(),
+      initialDeepLink: { section: "harness" },
+    });
+
+    const connect = await screen.findAllByRole("button", { name: "Connect a provider" });
+    await user.click(connect[0]!);
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Providers & Models" }),
+    ).toBeVisible();
   });
 
   it("scans once when the Providers section opens", async () => {

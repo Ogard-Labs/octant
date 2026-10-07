@@ -25,6 +25,7 @@ import {
   CANVAS_MAX_TREEMAP_LEAVES,
   CANVAS_BAR_LIST_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
+  CANVAS_METRIC_TREND_SCHEMA_VERSION,
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_MOCKUP_SCHEMA_VERSION,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
@@ -33,6 +34,7 @@ import {
   CanvasBlock,
   CanvasDefinition,
   CanvasVersion,
+  canvasMetricUsesTrendFields,
   decodeCanvasDefinition,
   decodeCanvasVersion,
   type CanvasSourceId,
@@ -366,9 +368,11 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
       (block) =>
         typeof block === "object" &&
         block !== null &&
-        VERSION_GATED_BLOCK_KINDS.some(
+        (VERSION_GATED_BLOCK_KINDS.some(
           (gated) => gated.kind === (block as { kind?: unknown }).kind && declared < gated.since,
-        ),
+        ) ||
+          (declared < CANVAS_METRIC_TREND_SCHEMA_VERSION &&
+            canvasMetricUsesTrendFields(block as Record<string, unknown>))),
     )
   ) {
     return "unsupported-schema-version";

@@ -21,7 +21,7 @@ export type WorkRequestId = typeof WorkRequestId.Type;
  * snippet, or authority URL from an untrusted provider payload can never
  * reach the renderer-facing contract. Mirrors `WorkPromotionSummaryText`.
  */
-const WorkRequestSanitizedText = Schema.NonEmptyTrimmedString.pipe(
+export const WorkRequestSanitizedText = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(2_000),
   Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[[({<])(file|https?):/i.test(value)),
 );
@@ -76,6 +76,8 @@ export const WorkRequestStatus = Schema.Literal(
 );
 export type WorkRequestStatus = typeof WorkRequestStatus.Type;
 
+export const MAX_WORK_REQUEST_OPTIONS = 8;
+
 /**
  * Sanitized request detail. `approval` carries the action/description a
  * provider tool call wants to perform; `user-input` carries the prompt and
@@ -91,7 +93,7 @@ export const WorkRequestDetail = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("user-input"),
     prompt: WorkRequestSanitizedText,
-    options: Schema.Array(WorkRequestSanitizedText).pipe(Schema.maxItems(8)),
+    options: Schema.Array(WorkRequestSanitizedText).pipe(Schema.maxItems(MAX_WORK_REQUEST_OPTIONS)),
   }).annotations(strict),
 );
 export type WorkRequestDetail = typeof WorkRequestDetail.Type;

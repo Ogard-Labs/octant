@@ -12,6 +12,7 @@ import {
   treemapTotals,
 } from "@octant/domain/canvas-treemap-layout";
 import { heatmapRowTotals } from "@octant/domain/canvas-heatmap-layout";
+import { layoutCanvasBarList } from "@octant/domain/canvas-bar-list-layout";
 import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
 
 /**
@@ -360,10 +361,11 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       ];
     }
     case "bar-list": {
-      // The ranking as a table: one row per entry, largest first would be a
-      // view choice, so the exported document keeps the author's order and
-      // carries every row the block declares.
+      // The ranking as a table in the order the screen and the preview draw
+      // it, largest first through the shared layout, carrying every row the
+      // block declares rather than only the top rows.
       const hasSecondary = block.rows.some((row) => row.secondaryValue !== undefined);
+      const ranked = layoutCanvasBarList(block).rows;
       return [
         {
           kind: "table",
@@ -372,7 +374,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
             reading(block.valueLabel ?? "Value"),
             ...(hasSecondary ? [reading(block.secondaryLabel ?? "Second")] : []),
           ],
-          rows: block.rows.map((row) => [
+          rows: ranked.map((row) => [
             reading(row.label),
             scalar(row.value, block.format),
             ...(hasSecondary

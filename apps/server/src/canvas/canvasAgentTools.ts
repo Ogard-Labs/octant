@@ -986,7 +986,7 @@ function previewToolResult(
           canvasId: outcome.canvasId,
           sequence: outcome.sequence,
           width: outcome.width,
-          height: outcome.height,
+          ...(outcome.height === undefined ? {} : { height: outcome.height }),
           warnings: outcome.warnings,
           imagesInToolResults,
           ...(outcome.image === undefined

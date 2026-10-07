@@ -362,7 +362,7 @@ asked up front; it is derived from the chips and shown on the thread once it
 exists.
 
 Under the composer, Work and Code start screens offer a row of action tiles and
-then the card area, both on the composer's measure and ahead of Code's prompt
+then the card area (Chat's start screens carry the card area alone), both on the composer's measure and ahead of Code's prompt
 suggestions, so a running thread is never under the fold. The tiles are
 always a three-column grid, one column under 560px, so one or two tiles keep a
 tile's width instead of stretching across the row; a detail line wraps to a
@@ -396,7 +396,11 @@ running right now." when empty. A running tool is shown in mono
 (`Command: bun run test`); a turn waiting on the person is plain prose. A turn's
 time says "Running 12m" from the start time the host reports, and "Active 4m
 ago" only for a host that reports none; a fact the host does not report is left
-out rather than invented. Under the Vivid style the tiles'
+out rather than invented. **Pull requests** lists up to six rows on a Code
+start screen, in Waiting on your review and Yours. Each row is the title, a
+short repository and number, and the words for checks and review — never
+colour alone. It is absent when that read is not allowed. Under the Vivid
+style the tiles'
 icon squares take the blue, orange, and purple palette hues. Code's five prompt
 suggestions are one compact row of label-only chips under the cards, and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
@@ -752,7 +756,9 @@ accessible reading, sortable by each measure.
 (`packages/domain/src/canvasHeatmapLayout.ts`). A `matrix` names its rows and
 columns and carries a cell per coordinate with a value and an optional short
 note; a `calendar` carries one reading per date and lays the days out on a week
-grid whose first day comes from the locale. Both read a value through one of the
+grid whose first day comes from the locale, drawn at its own size and scaled
+down only to fit a narrower Canvas. A matrix row label longer than its gutter
+is shortened with an ellipsis; the table carries it in full. Both read a value through one of the
 same two scale roles — sequential or diverging — with a legend that shows a
 scale bar and its bounds. A coordinate the block does not list is drawn as an
 empty dashed cell, apart from a zero reading. The screen renderer and the static
@@ -764,15 +770,16 @@ shows a missing coordinate as an empty cell rather than a zero.
 **Bar list.** A ranking of magnitudes — the "hottest files" or "slowest tests"
 panel (`packages/domain/src/canvasBarListLayout.ts`). Each row is a label, a
 value, an optional second value, and an optional manifest source. Rows sort
-largest first by default; a tie keeps the author's order. The list shows a top N
-with Show all up to the row budget, and both the order and the number shown are
-view state. A bar's length is its share of the largest value — the reading is
+largest first by default and a reader can flip the ranking to smallest first; a
+tie keeps the author's order. The list shows a top N with Show all up to the row
+budget, and both the order and the number shown are view state. A bar's length is its share of the largest value — the reading is
 the length, so bars use the neutral ink, or the sequential scale when the
 magnitude is the subject; a value is never negative. A label that reads as a
 path uses the shared path style: the directory is dimmed and the file name keeps
 full ink in the code font. A row that names a manifest source offers Open file
 through the allowlisted open-source action, which the host reauthorizes. The
-screen renderer and the static SVG export draw the same list. The disclosed
+screen renderer, the static SVG export, and the Markdown and HTML export rank
+the same list. The disclosed
 table is the accessible reading of every row, including the rows Show all holds
 back.
 
@@ -796,8 +803,8 @@ the mark, never instead of it, so a bar and a tint are scan aids: under forced
 colours they fall to system ink and the plain value remains the reading. A text
 column whose values read as a path uses the shared path style, and a number
 column is right-aligned in tabular numerals. Sorting (each sorted header
-announces its direction with `aria-sort`), a text filter, and hidden columns are
-view state and revise nothing, so the exported and static forms keep the order
+announces its direction with `aria-sort`; hiding the sorted column drops the
+sort), a text filter, and hidden columns are view state and revise nothing, so the exported and static forms keep the order
 the author wrote. The header sticks through a scrolling table.
 
 **Motion.** A chart transitions only on a state change — a legend toggle, a zoom
@@ -1236,7 +1243,10 @@ label's description. Ordering controls appear only in an explicit Reorder mode.
 Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
-input, output, and measurement quality. Reasoning, cache, execution time, and
+input, output, and measurement quality. Its thread table uses the same figures
+as the line under the composer: cache, speed, and first token are columns,
+omitted when unavailable, and opening a row lists that thread's turns. The
+table stays a hairline table, not a card. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay
 collapsed in Settings. The standalone Usage destination also exposes provider
 capacity independently of ledger loading. Each provider window leads with its
@@ -1253,7 +1263,11 @@ First run is a five-step wizard with a progress rail. Each step is pending,
 current, or completed: the current step is a filled card, completed steps show
 a check, and pending steps show their number. Mode choices on the readiness
 step use `OctantToggleGroup`. Answers still write through to the settings that
-own them.
+own them. First run records its outcome only after every answer has landed. When
+the host refused an answer, the first press of Skip setup or the primary action
+says so in a warning notice and records nothing; the next press goes on without
+that answer, so a refusing host can never leave the dialog impossible to leave.
+A refused outcome is reported the same way and the dialog stays open.
 
 The right dock follows the active pane and never leaks another pane's content.
 The dock and the bottom panel both step aside while a reader route (Board,

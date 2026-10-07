@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The host loads this page into a headless Chromium to show an agent its
+         Canvas. It reaches nothing: the host answers only its own built files
+         and aborts every other request, and the policy below forbids
+         connections outright. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'none'; font-src 'self'; connect-src 'none'; worker-src 'none'; frame-src 'none'"
+    />
+    <title>Octant Canvas preview</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/canvas/canvasPreviewPage.tsx"></script>
+  </body>
+</html>

@@ -66,7 +66,11 @@ function request(overrides: Record<string, unknown> = {}) {
 
 describe("createCanvasPreviewService", () => {
   it("attaches a PNG and the warnings when a browser exists and the model takes images", async () => {
-    const renderer = rendererStub({ kind: "rendered", png: new Uint8Array([1, 2, 3, 4]) });
+    const renderer = rendererStub({
+      kind: "rendered",
+      png: new Uint8Array([1, 2, 3, 4]),
+      height: 480,
+    });
     const service = createCanvasPreviewService({ canvas: canvasStub(), renderer });
     const outcome = await service.preview(request(), context, project);
     expect(outcome.kind).toBe("preview");
@@ -75,10 +79,39 @@ describe("createCanvasPreviewService", () => {
     expect(outcome.image?.data).toBe(Buffer.from([1, 2, 3, 4]).toString("base64"));
     expect(outcome.imageOmitted).toBeUndefined();
     expect(outcome.sequence).toBe(1);
+    // The height reported is the picture's own, not an estimate from the blocks.
+    expect(outcome.height).toBe(480);
+  });
+
+  it("draws an inline preview the way the thread places it, in the chosen theme", async () => {
+    const renderer = rendererStub({ kind: "rendered", png: new Uint8Array([1]), height: 200 });
+    const service = createCanvasPreviewService({ canvas: canvasStub(), renderer });
+    await service.preview(request({ width: "inline", theme: "dark" }), context, project);
+    expect(renderer.render).toHaveBeenCalledWith(
+      expect.objectContaining({ placement: "thread", theme: "dark", definition }),
+    );
+  });
+
+  it("names a build without the preview page and a failed look apart from a missing browser", async () => {
+    for (const [reason, omitted] of [
+      ["no-renderer", "no-renderer"],
+      ["failed", "render-failed"],
+    ] as const) {
+      const renderer: CanvasPreviewRenderer = {
+        available: async () => true,
+        render: async () => ({ kind: "unavailable", reason }),
+      };
+      const service = createCanvasPreviewService({ canvas: canvasStub(), renderer });
+      const outcome = await service.preview(request({ threadKey: reason }), context, project);
+      expect(outcome.kind).toBe("preview");
+      if (outcome.kind !== "preview") return;
+      expect(outcome.imageOmitted).toBe(omitted);
+      expect(outcome.height).toBeUndefined();
+    }
   });
 
   it("returns the warnings and says why when the model cannot take images", async () => {
-    const renderer = rendererStub({ kind: "rendered", png: new Uint8Array([1]) });
+    const renderer = rendererStub({ kind: "rendered", png: new Uint8Array([1]), height: 480 });
     const service = createCanvasPreviewService({ canvas: canvasStub(), renderer });
     const outcome = await service.preview(
       request({ imagesInToolResults: false }),
@@ -94,7 +127,7 @@ describe("createCanvasPreviewService", () => {
   });
 
   it("returns the warnings and says why when the host has no browser", async () => {
-    const renderer = rendererStub({ kind: "unavailable" });
+    const renderer = rendererStub({ kind: "unavailable", reason: "no-browser" });
     const service = createCanvasPreviewService({ canvas: canvasStub(), renderer });
     const outcome = await service.preview(request(), context, project);
     expect(outcome.kind).toBe("preview");
@@ -112,7 +145,7 @@ describe("createCanvasPreviewService", () => {
       available: async () => true,
       render: async () => {
         await blocked;
-        return { kind: "rendered", png: new Uint8Array([1]) };
+        return { kind: "rendered", png: new Uint8Array([1]), height: 480 };
       },
     };
     const service = createCanvasPreviewService({ canvas: canvasStub(), renderer });
@@ -124,7 +157,7 @@ describe("createCanvasPreviewService", () => {
   });
 
   it("rate limits repeated previews of the same thread", async () => {
-    const renderer = rendererStub({ kind: "rendered", png: new Uint8Array([1]) });
+    const renderer = rendererStub({ kind: "rendered", png: new Uint8Array([1]), height: 480 });
     const service = createCanvasPreviewService({
       canvas: canvasStub(),
       renderer,
@@ -137,7 +170,7 @@ describe("createCanvasPreviewService", () => {
   });
 
   it("refuses a version the Canvas does not have", async () => {
-    const renderer = rendererStub({ kind: "rendered", png: new Uint8Array([1]) });
+    const renderer = rendererStub({ kind: "rendered", png: new Uint8Array([1]), height: 480 });
     const service = createCanvasPreviewService({ canvas: canvasStub(), renderer });
     const outcome = await service.preview(request({ version: 9 }), context, project);
     expect(outcome.kind).toBe("unavailable");
