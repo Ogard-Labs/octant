@@ -316,11 +316,46 @@ export const ReplicaMembershipCommand = Schema.Union(
     confirmationCode: Schema.String.pipe(Schema.pattern(/^\d{6}$/)),
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("confirm-join"),
+    /** The member whose approval of this computer's request the person confirmed. */
+    approver: ReplicaInstanceId,
+    confirmationCode: Schema.String.pipe(Schema.pattern(/^\d{6}$/)),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("revoke"),
     subject: ReplicaInstanceId,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("pull"),
+  }).annotations(strict),
 );
 export type ReplicaMembershipCommand = typeof ReplicaMembershipCommand.Type;
+
+/**
+ * Why an entry read from the store was not applied. The first seven are the
+ * reconcile policy's reasons; `path-mismatch` is a body whose origin is not
+ * the instance and sequence its path names, and `unreadable` is a file that
+ * does not decode as an entry this format defines.
+ */
+export const ReplicaReadRefusalReason = Schema.Literal(
+  "unknown-instance",
+  "revoked-instance",
+  "sequence-gap",
+  "names-local-artifact-as-foreign",
+  "hash-mismatch",
+  "membership-conflict",
+  "bad-signature",
+  "path-mismatch",
+  "unreadable",
+);
+export type ReplicaReadRefusalReason = typeof ReplicaReadRefusalReason.Type;
+
+export const ReplicaReadRefusal = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  sequence: PositiveInt,
+  reason: ReplicaReadRefusalReason,
+}).annotations(strict);
+export type ReplicaReadRefusal = typeof ReplicaReadRefusal.Type;
 
 export const ReplicaMembershipResult = Schema.Union(
   Schema.Struct({
@@ -344,8 +379,30 @@ export const ReplicaMembershipResult = Schema.Union(
     entry: ReplicaMembershipEntry,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("join-confirmed"),
+    approver: ReplicaInstanceId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("pulled"),
+    /** Entries verified and applied by this pull. */
+    applied: Schema.Int.pipe(Schema.nonNegative()),
+    /** Entries refused by this pull, each journaled. */
+    refused: Schema.Array(ReplicaReadRefusal),
+    /**
+     * Artifact entries that verified but were not applied: importing an
+     * artifact version is not built yet, so the walk for that instance stops
+     * there and the entry is read again by a later pull.
+     */
+    held: Schema.Array(
+      Schema.Struct({ instanceId: ReplicaInstanceId, sequence: PositiveInt }).annotations(strict),
+    ),
+    /** Fresh join requests from computers that are not members yet. */
+    joinRequests: Schema.Array(ReplicaMembershipEntry),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("refused"),
     reason: Schema.Literal(
+      "not-configured",
       "already-member",
       "revoked-instance",
       "code-mismatch",

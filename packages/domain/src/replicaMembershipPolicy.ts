@@ -18,7 +18,12 @@ import type { ReplicaInstanceId } from "@octant/contracts/replica-entry";
 
 /** A join request older than this is not offered for approval. */
 export const REPLICA_JOIN_REQUEST_TTL_MS = 24 * 60 * 60 * 1_000;
-/** Enough digits that guessing is not realistic, few enough to read aloud. */
+/**
+ * Few enough digits to read aloud, enough that two different requests rarely
+ * share a code by chance. The code is a comparison, not a secret: it does not
+ * hold against a party that can write the store and searches keys offline
+ * for a colliding one. The signatures carry the authority.
+ */
 export const REPLICA_JOIN_MATCHING_CODE_DIGITS = 6;
 /** The pairing comparison code derivation works over a fixed-width digest. */
 export const REPLICA_JOIN_MATCHING_CODE_MODULUS = 1_000_000;
