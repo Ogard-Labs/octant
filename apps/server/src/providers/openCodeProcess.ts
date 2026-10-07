@@ -23,6 +23,7 @@ import type {
   ProviderFailure,
   ProviderProcessDiagnostic,
 } from "@octant/contracts";
+import type { PermissionV2Rule } from "@opencode-ai/sdk/v2/types";
 import { Cause, Effect, Exit, Option, type Scope } from "effect";
 import { childProcessEnvironment } from "../childProcessEnvironment";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
@@ -54,6 +55,12 @@ export interface OpenCodeServerConnection {
   readonly runtime?: OpenCodeRuntime;
   /** Version emitted by the same probe that selected the runtime protocol. */
   readonly version?: string;
+  /**
+   * Owner-only scratch directory of this launch. The launch profile lets the
+   * confined process read it, unlike the host temporary directory beneath the
+   * denied `/private`, and it is removed with the process.
+   */
+  readonly temporaryDirectory?: string;
   readonly url: URL;
 }
 
@@ -66,6 +73,12 @@ export interface OpenCodeProcessStartInput {
   readonly executionPolicy?: ProviderExecutionPolicy;
   /** Exact loopback ports owned by this connection's app-managed tool bridges. */
   readonly loopbackPorts?: ReadonlyArray<number>;
+  /**
+   * OpenCode 2 permission rules for every session this process serves, in
+   * last-match order. 2.x accepts no per-session ruleset, so these are written
+   * into the private configuration; a 2.x launch without them denies all.
+   */
+  readonly betaPermissions?: ReadonlyArray<PermissionV2Rule>;
 }
 
 export interface OpenCodeProcessPort {
@@ -143,6 +156,10 @@ const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$
  * and the readiness probe fails closed.
  */
 const GIT_STANDIN_TARGET = "/usr/bin/false";
+/** A 2.x launch whose caller named no posture runs nothing without refusal. */
+const BETA_DENY_ALL: ReadonlyArray<PermissionV2Rule> = [
+  { action: "*", resource: "*", effect: "deny" },
+];
 
 interface ParsedOpenCodeVersion {
   readonly runtime: OpenCodeRuntime;
@@ -592,6 +609,7 @@ export function createPrivateOpenCodeProfile(
   config: PrivateRuntimeConfig,
   inheritedEnvironment: NodeJS.ProcessEnv,
   temporaryDirectory: () => string = tmpdir,
+  betaPermissions?: ReadonlyArray<PermissionV2Rule>,
 ): PrivateOpenCodeProfile {
   const root = temporaryDirectory();
   const directories: string[] = [];
@@ -654,6 +672,10 @@ export function createPrivateOpenCodeProfile(
       ...projected,
       permission: { skill: { "*": "deny" }, "*_*": "deny" },
     };
+    // OpenCode 2 appends configured `permissions` after every agent's
+    // built-in rules, and its default agent allows `*`. Without these rules an
+    // approval-gated edit or shell command would run without asking.
+    if (betaPermissions !== undefined) ownedConfig.permissions = betaPermissions;
     writeFileSync(configPath, JSON.stringify(ownedConfig), { mode: 0o600 });
     chmodSync(configPath, 0o600);
     let closed = false;
@@ -1198,6 +1220,8 @@ function acquireOpenCodeServer(
         profile = createPrivateOpenCodeProfile(
           options.runtimeConfig,
           options.inheritedEnvironment ?? process.env,
+          tmpdir,
+          runtime === "beta" ? (input.betaPermissions ?? BETA_DENY_ALL) : undefined,
         );
       } catch {
         resume(
@@ -1337,6 +1361,9 @@ function acquireOpenCodeServer(
                     : {}),
                   runtime,
                   version,
+                  ...(profile.environment.TMPDIR === undefined
+                    ? {}
+                    : { temporaryDirectory: profile.environment.TMPDIR }),
                   url,
                 },
                 terminate: terminateOwned,

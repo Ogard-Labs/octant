@@ -1,6 +1,7 @@
 import {
   accessSync,
   chmodSync,
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -1057,6 +1058,42 @@ describe("OpenCodeProcessPort", () => {
     expect(observed.runtime).toBe("beta");
     expect(observed.version).toBe("opencode2 v0.0.0-beta-18721");
     expect(observed.authorization).toMatch(/^Basic b3BlbmNvZGU6/);
+  });
+
+  it("writes a 2.x launch's permission posture into its private configuration and reports its readable scratch directory", async () => {
+    const root = fixtureRoot();
+    const binaryPath = join(root, "opencode-config-fixture");
+    const configCopy = join(root, ".fake-opencode-config");
+    writeFileSync(
+      binaryPath,
+      `#!/bin/sh\ncd '${root}'\nif [ "$1" = "serve" ]; then cp "$OPENCODE_CONFIG" '${configCopy}'; fi\nOCTANT_FAKE_OPENCODE_MODE=v2-ready exec '${fakeCliPath}' "$@"\n`,
+    );
+    chmodSync(binaryPath, 0o755);
+    const posture = [
+      { action: "*", resource: "*", effect: "ask" },
+      { action: "octant-bridge_*", resource: "*", effect: "allow" },
+    ] as const;
+
+    const scratch = await Effect.runPromise(
+      Effect.scoped(
+        makePort()
+          .start({ binaryPath, cwd: root, betaPermissions: posture })
+          .pipe(
+            Effect.map((server) => {
+              expect(server.temporaryDirectory).toBeDefined();
+              expect(existsSync(server.temporaryDirectory ?? "")).toBe(true);
+              return server.temporaryDirectory;
+            }),
+          ),
+      ),
+    );
+    expect(JSON.parse(readFileSync(configCopy, "utf8")).permissions).toEqual(posture);
+    expect(existsSync(scratch ?? "")).toBe(false);
+
+    await Effect.runPromise(Effect.scoped(makePort().start({ binaryPath, cwd: root })));
+    expect(JSON.parse(readFileSync(configCopy, "utf8")).permissions).toEqual([
+      { action: "*", resource: "*", effect: "deny" },
+    ]);
   });
 
   // The 2.0.x CLI declares both executable names and prints the bare one; the

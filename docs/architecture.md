@@ -1272,16 +1272,23 @@ modelId }`, and the model picker is provider-first. Discovery can find
   picker), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
   GitHub Copilot, Cline, Qwen Code, fx). The installed OpenCode binary's
-  version selects its routes: 1.x keeps the legacy session API, and 2.x lists
-  providers and models, then runs a turn where the process jail already
-  enforces the permission boundary. Chat turns run. Work and Code writes stay
-  refused until session permission rules can be enforced; resume, interruption,
-  and tool activity are reported, and anything not mapped fails closed. The probe
-  also asks the confined 2.x server to answer for a directory carrying a Git
-  marker: project resolution starts Git, which the Chat and Plan jail refuses
-  (observed with 2.0.22 on macOS as HTTP 500 for any work tree), so a runtime
-  that cannot answer reports `incompatible` with its models listed and every
-  capability unsupported, and no turn is offered. fx runs in a per-instance managed
+  version selects its routes: 1.x keeps the legacy session API and its
+  per-session permission ruleset. 2.x accepts no per-session ruleset, so each
+  launch writes its session posture — the same rules in 2.x action names
+  (`shell`, `subagent`), every namespaced tool and skill denied, and only that
+  connection's app-managed tool bridge allowed — into the private
+  configuration, where OpenCode appends it after every agent's built-in rules
+  (its default agent otherwise allows everything); a launch that names no
+  posture denies all. 2.x offers Code turns only, because project resolution
+  starts Git, which the Chat, Plan, and Work jail refuses. Approvals and
+  questions map through the v2 routes; resume, interruption, and tool activity
+  are reported; a file change that no allowed or approved edit preceded fails
+  the turn; and anything not mapped fails closed. The probe also asks the
+  confined 2.x server to answer for a directory carrying a Git marker, made in
+  the launch's own scratch directory because every launch profile denies the
+  host temporary directory beneath `/private`; a runtime that cannot answer
+  (observed with 2.0.22 on macOS as HTTP 500) reports `incompatible` with its
+  models listed and every capability unsupported, and no turn is offered. fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable; see
   [fx-acp-compatibility.md](fx-acp-compatibility.md) and
   [0130](decisions/0130-fx-runs-in-a-managed-home.md). Image profiles are

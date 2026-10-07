@@ -6,6 +6,9 @@ import {
 import { runProviderConformance } from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
 import type { Event } from "@opencode-ai/sdk/v2/types";
+import { mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { makeOpenCodeDriver, type OpenCodeClientPort } from "./openCodeDriver";
@@ -626,6 +629,7 @@ function makeBetaHarnessDriver(
   },
 ) {
   let released = false;
+  const launchScratch = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-launch-")));
   const session = {
     id: "provider-session",
     directory: projectRoot,
@@ -643,7 +647,11 @@ function makeBetaHarnessDriver(
     prompt: async ({ sessionId: nativeId }) => {
       handlers.onPrompt(nativeId);
     },
-    addMcpServer: async () => undefined,
+    // A 2.x server connects to the bridge it is given, as 1.x does; a fixture
+    // that never connects leaves the probe waiting out its attestation timeout.
+    addMcpServer: async ({ url }) => {
+      await attestManagedBridge(url);
+    },
     disconnectMcpServer: async () => undefined,
     abort: async (nativeId) => {
       handlers.onAbort(nativeId);
@@ -665,6 +673,7 @@ function makeBetaHarnessDriver(
               pid: process.pid,
               runtime: "beta" as const,
               version: "opencode v2.0.22",
+              temporaryDirectory: launchScratch,
               url: new URL("http://127.0.0.1:1/"),
             }),
             () =>
