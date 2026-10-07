@@ -233,4 +233,26 @@ describe("the folder export destination", () => {
     });
     expect(readdirSync(elsewhere)).toEqual([]);
   });
+
+  it("refuses to follow a link that replaced a folder above the chosen folder", async () => {
+    const parent = privateFolder();
+    const chosen = join(parent, "Exports");
+    mkdirSync(chosen, { mode: 0o700 });
+    const elsewhere = privateFolder();
+    mkdirSync(join(elsewhere, "Exports"), { mode: 0o700 });
+    const target = folderTarget(() => ({ kind: "ready", folder: chosen }));
+    // The chosen folder itself is no link, but the path to it now runs through
+    // one: a folder of the same name somewhere the person never approved.
+    rmSync(parent, { recursive: true });
+    symlinkSync(elsewhere, parent, "dir");
+
+    const delivery = await target.exportDocument(document({}));
+
+    expect(delivery).toEqual({
+      kind: "refused",
+      code: "refused",
+      message: "The export could not be written to that folder.",
+    });
+    expect(readdirSync(join(elsewhere, "Exports"))).toEqual([]);
+  });
 });
