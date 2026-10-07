@@ -348,3 +348,18 @@ ul.board-col-body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The question a waiting thread is parked on, answered on its card. A hairline
+   sets it apart from the card's facts; the wait and the answers stay neutral
+   ink, so no tinted band marks one card as louder than its neighbours. */
+.board-card-request {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-1);
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.board-card-request__more.board-card-request__more {
+  justify-self: start;
+}

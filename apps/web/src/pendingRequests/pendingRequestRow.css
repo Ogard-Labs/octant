@@ -89,3 +89,9 @@
   margin: 0;
   padding-top: var(--oct-space-1);
 }
+
+/* Inside a card that already names the thread: no padding of its own, and the
+   wait reads as a quiet line above the text. */
+.pending-request[data-embedded="true"] {
+  padding: 0;
+}

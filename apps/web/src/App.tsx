@@ -4087,15 +4087,16 @@ function LaunchedShell(
     props.hostBridge === undefined
       ? remoteHostLabel(props.launch.serverUrl, localHost?.displayName)
       : undefined;
+  // What moves the pending-request read: a thread raising or clearing a
+  // question journals on its own mode's navigation topic.
+  const pendingRequestFeedRevision =
+    machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
   // The card list is rebuilt each render and is cheap: each card's own rows are
   // memoized from the inputs above, which keep their identity between renders.
   const homeCards = [
     createNeedsYouCard({
       answerClients: { chatClient, codeClient, workRequestClient },
-      feedRevision:
-        machineChanges.chatNavigation +
-        machineChanges.workNavigation +
-        machineChanges.codeNavigation,
+      feedRevision: pendingRequestFeedRevision,
       modes: workingNowModes,
       now: minuteNow.getTime(),
       onOpenInbox: openInbox,
@@ -6648,6 +6649,14 @@ function LaunchedShell(
                     ),
                   )
                 }
+                boardPendingRequests={{
+                  answerClients: { chatClient, codeClient, workRequestClient },
+                  feedRevision: pendingRequestFeedRevision,
+                  now: minuteNow.getTime(),
+                  pendingRequestClient,
+                  settings: controller.settings,
+                  workspace: controller.workspace,
+                }}
                 providerKinds={
                   new Map(
                     (activeMode === "work" ? workProviderGroups : codeProviderGroups).map(

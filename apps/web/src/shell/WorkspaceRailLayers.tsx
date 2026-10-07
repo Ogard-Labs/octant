@@ -31,6 +31,7 @@ import type { AssignedLinearIssuesList } from "../inbox/loadAssignedLinearIssues
 import type { InboxAttentionItem } from "../inbox/inboxModel";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import type { ThreadBoardProjectRef } from "../threadBoard/threadBoardGrouping";
+import type { BoardPendingRequestSource } from "../threadBoard/useBoardPendingRequests";
 import type { WorkThreadOpenTarget } from "../work/WorkThreadBoard";
 import type { ArchivedThreadEntry, ArchiveProject } from "./ArchiveView";
 import { ShellState } from "./ShellState";
@@ -113,6 +114,8 @@ export interface WorkspaceRailLayersProps {
   readonly providerLabels?: ReadonlyMap<string, string>;
   /** Driver kinds by provider instance id; the boards draw the provider mark from them. */
   readonly providerKinds?: ReadonlyMap<string, string>;
+  /** Lets a waiting Board card answer its thread's question; absent in a remote window. */
+  readonly boardPendingRequests?: BoardPendingRequestSource;
   readonly archiveOpen?: boolean;
   readonly archiveChatClient?: ChatClient;
   readonly archiveEntries?: ReadonlyArray<ArchivedThreadEntry>;
@@ -266,6 +269,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
                 ? {}
                 : { providerLabels: props.providerLabels })}
               {...(props.providerKinds === undefined ? {} : { providerKinds: props.providerKinds })}
+              {...(props.boardPendingRequests === undefined
+                ? {}
+                : { pendingRequests: props.boardPendingRequests })}
             />
           </LazyRailSurface>
         </div>
@@ -289,6 +295,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
                 ? {}
                 : { providerLabels: props.providerLabels })}
               {...(props.providerKinds === undefined ? {} : { providerKinds: props.providerKinds })}
+              {...(props.boardPendingRequests === undefined
+                ? {}
+                : { pendingRequests: props.boardPendingRequests })}
             />
           </LazyRailSurface>
         </div>
