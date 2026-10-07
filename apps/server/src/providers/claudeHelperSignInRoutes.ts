@@ -33,9 +33,18 @@ export interface ClaudeHelperSignInService {
 export function createClaudeHelperSignInService(dependencies: {
   readonly store: ClaudeHelperSignInStore;
   readonly readInstance: (instanceId: ProviderInstanceId) => ProviderInstance | undefined;
-  readonly runSetupToken: (binaryPath: string) => Promise<ClaudeSetupTokenOutcome>;
-}): ClaudeHelperSignInService {
-  const attempts = new Map<string, Promise<void>>();
+  readonly runSetupToken: (
+    binaryPath: string,
+    signal: AbortSignal,
+  ) => Promise<ClaudeSetupTokenOutcome>;
+}): ClaudeHelperSignInService & {
+  /** Stops a waiting connect for a removed provider, then deletes the token it held. */
+  readonly forgetRemovedProvider: (instanceId: ProviderInstanceId) => Promise<void>;
+} {
+  const attempts = new Map<
+    string,
+    { readonly settled: Promise<void>; readonly controller: AbortController }
+  >();
   const refusals = new Map<string, string>();
   const subscriptionInstance = (instanceId: ProviderInstanceId) => {
     const instance = dependencies.readInstance(instanceId);
@@ -71,21 +80,36 @@ export function createClaudeHelperSignInService(dependencies: {
       const key = String(instanceId);
       if (attempts.has(key)) return { kind: "connecting" };
       refusals.delete(key);
-      const attempt = dependencies
-        .runSetupToken(instance.configuration.binaryPath)
+      const controller = new AbortController();
+      const settled = dependencies
+        .runSetupToken(instance.configuration.binaryPath, controller.signal)
         .then(async (outcome) => {
           if (outcome.kind === "refused") {
             refusals.set(key, outcome.reason);
             return;
           }
+          // The browser approval can take minutes. A provider removed or
+          // switched to an API key meanwhile no longer names this token, so
+          // keeping it would leave a year-long sign-in nothing can disconnect.
+          if (subscriptionInstance(instanceId) === undefined) return;
           await dependencies.store.connect(key, outcome.token);
         })
         .catch(() => {
           refusals.set(key, "Octant could not keep the Claude sign-in. Try again.");
         })
         .finally(() => attempts.delete(key));
-      attempts.set(key, attempt);
+      attempts.set(key, { settled, controller });
       return { kind: "connecting" };
+    },
+    forgetRemovedProvider: async (instanceId) => {
+      const key = String(instanceId);
+      const attempt = attempts.get(key);
+      attempt?.controller.abort();
+      // Waiting lets an attempt already storing its token finish first, so
+      // the delete below cannot run ahead of that write.
+      await attempt?.settled;
+      refusals.delete(key);
+      await dependencies.store.disconnect(key);
     },
     disconnect: async (instanceId) => {
       if (subscriptionInstance(instanceId) === undefined) return status(instanceId);

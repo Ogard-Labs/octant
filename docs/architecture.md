@@ -2425,7 +2425,10 @@ mechanisms are:
   The host runs that command on a host-owned pseudo-terminal outside any
   sandbox, reads the printed token from memory, and keeps it in the credential
   broker under the Claude Code instance, wrapped so it never reads as that
-  instance's API key. A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
+  instance's API key. Removing the provider stops a connect still waiting for
+  that approval, and a token that arrives after the instance was removed or
+  switched to an API key is discarded, never kept.
+  A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
   and no keychain lookup; unconfined launches keep the runtime's own sign-in.
   Without a connected token the launch refuses with "Connect Claude for helpers
   in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
