@@ -647,7 +647,11 @@ function makeBetaHarnessDriver(
     prompt: async ({ sessionId: nativeId }) => {
       handlers.onPrompt(nativeId);
     },
-    addMcpServer: async () => undefined,
+    // A 2.x server connects to the bridge it is given, as 1.x does; a fixture
+    // that never connects leaves the probe waiting out its attestation timeout.
+    addMcpServer: async ({ url }) => {
+      await attestManagedBridge(url);
+    },
     disconnectMcpServer: async () => undefined,
     abort: async (nativeId) => {
       handlers.onAbort(nativeId);
