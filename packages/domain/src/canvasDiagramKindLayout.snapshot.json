@@ -1,7 +1,7 @@
 {
   "er": {
-    "width": 528,
-    "height": 248,
+    "width": 638,
+    "height": 272,
     "entities": [
       {
         "entityId": "person",
@@ -37,7 +37,7 @@
       {
         "entityId": "order",
         "label": "Order",
-        "x": 284,
+        "x": 394,
         "y": 24,
         "width": 220,
         "height": 94,
@@ -48,7 +48,7 @@
             "name": "id",
             "type": "uuid",
             "key": true,
-            "x": 290,
+            "x": 400,
             "y": 52,
             "width": 208,
             "height": 20
@@ -58,7 +58,7 @@
             "name": "total",
             "type": "money",
             "key": false,
-            "x": 290,
+            "x": 400,
             "y": 72,
             "width": 208,
             "height": 20
@@ -68,7 +68,7 @@
             "name": "person_id",
             "type": "uuid",
             "key": false,
-            "x": 290,
+            "x": 400,
             "y": 92,
             "width": 208,
             "height": 20
@@ -79,7 +79,7 @@
         "entityId": "payment",
         "label": "Payment",
         "x": 24,
-        "y": 150,
+        "y": 174,
         "width": 220,
         "height": 74,
         "headerHeight": 28,
@@ -90,7 +90,7 @@
             "type": "uuid",
             "key": true,
             "x": 30,
-            "y": 178,
+            "y": 202,
             "width": 208,
             "height": 20
           },
@@ -100,7 +100,7 @@
             "type": "uuid",
             "key": false,
             "x": 30,
-            "y": 198,
+            "y": 222,
             "width": 208,
             "height": 20
           }
@@ -116,15 +116,26 @@
         "points": [
           {
             "x": 244,
-            "y": 65
+            "y": 64
           },
           {
-            "x": 284,
-            "y": 67
+            "x": 394,
+            "y": 68
           }
         ],
-        "labelX": 264,
-        "labelY": 58
+        "labelX": 319,
+        "labelY": 58,
+        "labelAnchor": "middle",
+        "sourceCardinalityAt": {
+          "x": 250,
+          "y": 78,
+          "anchor": "start"
+        },
+        "targetCardinalityAt": {
+          "x": 388,
+          "y": 82,
+          "anchor": "end"
+        }
       },
       {
         "relationshipId": "order-pays-payment",
@@ -132,21 +143,32 @@
         "targetCardinality": "one",
         "points": [
           {
-            "x": 289,
-            "y": 118
+            "x": 394,
+            "y": 113
           },
           {
-            "x": 217,
-            "y": 150
+            "x": 232,
+            "y": 174
           }
         ],
-        "labelX": 253,
-        "labelY": 126
+        "labelX": 313,
+        "labelY": 136,
+        "labelAnchor": "middle",
+        "sourceCardinalityAt": {
+          "x": 388,
+          "y": 107,
+          "anchor": "end"
+        },
+        "targetCardinalityAt": {
+          "x": 226,
+          "y": 168,
+          "anchor": "end"
+        }
       }
     ]
   },
   "swimlane": {
-    "width": 728,
+    "width": 740,
     "height": 240,
     "lanes": [
       {
@@ -155,8 +177,9 @@
         "kind": "actor",
         "x": 24,
         "y": 24,
-        "width": 680,
-        "height": 64
+        "width": 692,
+        "height": 64,
+        "headerWidth": 132
       },
       {
         "laneId": "support",
@@ -164,8 +187,9 @@
         "kind": "team",
         "x": 24,
         "y": 88,
-        "width": 680,
-        "height": 64
+        "width": 692,
+        "height": 64,
+        "headerWidth": 132
       },
       {
         "laneId": "engineering",
@@ -173,8 +197,9 @@
         "kind": "team",
         "x": 24,
         "y": 152,
-        "width": 680,
-        "height": 64
+        "width": 692,
+        "height": 64,
+        "headerWidth": 132
       }
     ],
     "steps": [
@@ -183,7 +208,7 @@
         "laneId": "customer",
         "label": "Report a problem",
         "decision": false,
-        "x": 156,
+        "x": 168,
         "y": 36,
         "width": 160,
         "height": 40
@@ -193,7 +218,7 @@
         "laneId": "support",
         "label": "Is it a defect?",
         "decision": true,
-        "x": 156,
+        "x": 168,
         "y": 100,
         "width": 160,
         "height": 40
@@ -203,7 +228,7 @@
         "laneId": "support",
         "label": "Answer the question",
         "decision": false,
-        "x": 344,
+        "x": 356,
         "y": 100,
         "width": 160,
         "height": 40
@@ -213,7 +238,7 @@
         "laneId": "support",
         "label": "Close the ticket",
         "decision": false,
-        "x": 532,
+        "x": 544,
         "y": 100,
         "width": 160,
         "height": 40
@@ -223,7 +248,7 @@
         "laneId": "engineering",
         "label": "Fix the defect",
         "decision": false,
-        "x": 156,
+        "x": 168,
         "y": 164,
         "width": 160,
         "height": 40
@@ -234,15 +259,15 @@
         "connectionId": "report-triage",
         "points": [
           {
-            "x": 236,
+            "x": 248,
             "y": 76
           },
           {
-            "x": 236,
+            "x": 248,
             "y": 100
           }
         ],
-        "labelX": 236,
+        "labelX": 248,
         "labelY": 80
       },
       {
@@ -250,15 +275,15 @@
         "label": "no",
         "points": [
           {
-            "x": 316,
+            "x": 328,
             "y": 120
           },
           {
-            "x": 344,
+            "x": 356,
             "y": 120
           }
         ],
-        "labelX": 330,
+        "labelX": 342,
         "labelY": 112
       },
       {
@@ -266,45 +291,45 @@
         "label": "yes",
         "points": [
           {
-            "x": 236,
+            "x": 248,
             "y": 140
           },
           {
-            "x": 236,
+            "x": 248,
             "y": 164
           }
         ],
-        "labelX": 236,
+        "labelX": 248,
         "labelY": 144
       },
       {
         "connectionId": "fix-close",
         "points": [
           {
-            "x": 316,
+            "x": 328,
             "y": 170
           },
           {
-            "x": 532,
+            "x": 544,
             "y": 134
           }
         ],
-        "labelX": 424,
+        "labelX": 436,
         "labelY": 144
       },
       {
         "connectionId": "answer-close",
         "points": [
           {
-            "x": 504,
+            "x": 516,
             "y": 120
           },
           {
-            "x": 532,
+            "x": 544,
             "y": 120
           }
         ],
-        "labelX": 518,
+        "labelX": 530,
         "labelY": 112
       }
     ]

@@ -280,46 +280,41 @@ export function ErDiagram({ block }: { readonly block: CanvasErBlock }) {
         viewBox={`0 0 ${layout.width} ${layout.height}`}
         width={layout.width}
       >
-        {layout.relationships.map((relationship) => {
-          const start = relationship.points[0];
-          const end = relationship.points[1];
-          return (
-            <g data-edge-id={relationship.relationshipId} key={relationship.relationshipId}>
-              <path
-                className="canvas-block__diagram-edge"
-                d={route(relationship.points)}
-                fill="none"
-              />
-              {relationship.label === undefined ? null : (
-                <text
-                  className="canvas-block__diagram-edge-label"
-                  x={relationship.labelX}
-                  y={relationship.labelY}
-                >
-                  {relationship.label}
-                </text>
-              )}
-              {start === undefined || end === undefined ? null : (
-                <>
-                  <text
-                    className="canvas-block__er-cardinality"
-                    x={start.x + (end.x - start.x) * 0.2}
-                    y={start.y + (end.y - start.y) * 0.2 - 4}
-                  >
-                    {relationship.sourceCardinality}
-                  </text>
-                  <text
-                    className="canvas-block__er-cardinality"
-                    x={start.x + (end.x - start.x) * 0.8}
-                    y={start.y + (end.y - start.y) * 0.8 - 4}
-                  >
-                    {relationship.targetCardinality}
-                  </text>
-                </>
-              )}
-            </g>
-          );
-        })}
+        {layout.relationships.map((relationship) => (
+          <g data-edge-id={relationship.relationshipId} key={relationship.relationshipId}>
+            <path
+              className="canvas-block__diagram-edge"
+              d={route(relationship.points)}
+              fill="none"
+            />
+            {relationship.label === undefined ? null : (
+              <text
+                className="canvas-block__diagram-edge-label"
+                style={{ textAnchor: relationship.labelAnchor }}
+                x={relationship.labelX}
+                y={relationship.labelY}
+              >
+                {relationship.label}
+              </text>
+            )}
+            <text
+              className="canvas-block__er-cardinality"
+              style={{ textAnchor: relationship.sourceCardinalityAt.anchor }}
+              x={relationship.sourceCardinalityAt.x}
+              y={relationship.sourceCardinalityAt.y}
+            >
+              {relationship.sourceCardinality}
+            </text>
+            <text
+              className="canvas-block__er-cardinality"
+              style={{ textAnchor: relationship.targetCardinalityAt.anchor }}
+              x={relationship.targetCardinalityAt.x}
+              y={relationship.targetCardinalityAt.y}
+            >
+              {relationship.targetCardinality}
+            </text>
+          </g>
+        ))}
         {layout.entities.map((entity) => (
           <g
             aria-label={entity.label}
@@ -420,20 +415,8 @@ export function SwimlaneDiagram({ block }: { readonly block: CanvasSwimlaneBlock
         viewBox={`0 0 ${layout.width} ${layout.height}`}
         width={layout.width}
       >
-        {layout.connections.map((connection) => (
-          <g data-edge-id={connection.connectionId} key={connection.connectionId}>
-            <path className="canvas-block__diagram-edge" d={route(connection.points)} fill="none" />
-            {connection.label === undefined ? null : (
-              <text
-                className="canvas-block__diagram-edge-label"
-                x={connection.labelX}
-                y={connection.labelY}
-              >
-                {connection.label}
-              </text>
-            )}
-          </g>
-        ))}
+        {/* The bands are the background: drawn after the connections, their
+            fill hid every connection between steps. */}
         {layout.lanes.map((lane) => (
           <g
             aria-label={lane.label}
@@ -450,18 +433,32 @@ export function SwimlaneDiagram({ block }: { readonly block: CanvasSwimlaneBlock
             />
             <line
               className="canvas-block__swimlane-divider"
-              x1={lane.x + 132}
-              x2={lane.x + 132}
+              x1={lane.x + lane.headerWidth}
+              x2={lane.x + lane.headerWidth}
               y1={lane.y}
               y2={lane.y + lane.height}
             />
             <text className="canvas-block__swimlane-label" x={lane.x + 10} y={lane.y + 18}>
               <title>{lane.label}</title>
-              {fitLabel(lane.label, 120)}
+              {fitLabel(lane.label, lane.headerWidth - 12)}
             </text>
             <text className="canvas-block__swimlane-kind" x={lane.x + 10} y={lane.y + 32}>
               {lane.kind}
             </text>
+          </g>
+        ))}
+        {layout.connections.map((connection) => (
+          <g data-edge-id={connection.connectionId} key={connection.connectionId}>
+            <path className="canvas-block__diagram-edge" d={route(connection.points)} fill="none" />
+            {connection.label === undefined ? null : (
+              <text
+                className="canvas-block__diagram-edge-label"
+                x={connection.labelX}
+                y={connection.labelY}
+              >
+                {connection.label}
+              </text>
+            )}
           </g>
         ))}
         {layout.steps.map((step) => (

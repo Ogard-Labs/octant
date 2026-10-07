@@ -33,6 +33,28 @@ describe("entity-relationship, swimlane, and mind map layout", () => {
     expect(places?.label).toBe("places");
   });
 
+  it("keeps a relationship's label and both cardinalities apart from one another", () => {
+    const layout = layoutCanvasEr(orderSchemaBlock);
+    const places = layout.relationships.find((entry) => entry.label === "places");
+    if (places === undefined) throw new Error("The places relationship was not routed.");
+    const [start, end] = places.points;
+    if (start === undefined || end === undefined) throw new Error("The line has no ends.");
+    // Person sits left of Order, so the line runs across: the label rides above
+    // it and each cardinality below it, reading away from the entity it names.
+    const lineY = Math.max(start.y, end.y);
+    expect(places.labelY).toBeLessThan(Math.min(start.y, end.y));
+    expect(places.sourceCardinalityAt.y).toBeGreaterThan(lineY);
+    expect(places.targetCardinalityAt.y).toBeGreaterThan(lineY);
+    expect(places.sourceCardinalityAt.anchor).toBe("start");
+    expect(places.targetCardinalityAt.anchor).toBe("end");
+    // The longest cardinality is eleven characters; at the extra-small size a
+    // character averages under 6px, so even two of the longest leave a space.
+    const longest = 11 * 6;
+    expect(places.sourceCardinalityAt.x + longest).toBeLessThan(
+      places.targetCardinalityAt.x - longest,
+    );
+  });
+
   it("stacks swimlane lanes in order and lays each lane's steps left to right", () => {
     const layout = layoutCanvasSwimlane(supportFlowBlock);
 
@@ -47,6 +69,17 @@ describe("entity-relationship, swimlane, and mind map layout", () => {
     expect(report?.x).toBeLessThan(answer?.x ?? 0);
     expect(layout.steps.find((step) => step.stepId === "triage")?.decision).toBe(true);
     expect(layout.connections).toHaveLength(5);
+  });
+
+  it("starts each lane's first step clear of the lane's header divider", () => {
+    const layout = layoutCanvasSwimlane(supportFlowBlock);
+    for (const lane of layout.lanes) {
+      const first = layout.steps.find((step) => step.laneId === lane.laneId);
+      if (first === undefined) continue;
+      expect(first.x).toBeGreaterThan(lane.x + lane.headerWidth);
+      const last = layout.steps.filter((step) => step.laneId === lane.laneId).at(-1);
+      expect((last?.x ?? 0) + (last?.width ?? 0)).toBeLessThan(lane.x + lane.width);
+    }
   });
 
   it("draws a mind map as one root with each generation a column to the right", () => {

@@ -86,6 +86,21 @@ describe("entity-relationship, swimlane, and mind map diagrams", () => {
     expect(document.querySelector("[data-node-id='triage']")).not.toBeNull();
   });
 
+  it("draws a swimlane's connections over its lane bands, where a reader can see them", () => {
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [supportFlowBlock] }} />);
+
+    const svg = screen.getByRole("figure", { name: /Swimlane with 3 lanes/ }).querySelector("svg");
+    if (svg === null) throw new Error("The swimlane was not drawn.");
+    const drawn = [...svg.children];
+    const lastBand = Math.max(
+      ...drawn.map((child, index) =>
+        child.querySelector(".canvas-block__swimlane-band") === null ? -1 : index,
+      ),
+    );
+    const firstConnection = drawn.findIndex((child) => child.hasAttribute("data-edge-id"));
+    expect(firstConnection).toBeGreaterThan(lastBand);
+  });
+
   it("gives each picture a screen-reader fallback and a keyboard focus ring", () => {
     render(
       <CanvasDocument

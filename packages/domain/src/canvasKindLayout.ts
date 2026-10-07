@@ -655,6 +655,13 @@ export interface CanvasErEntityBox {
   readonly attributes: ReadonlyArray<CanvasErAttributeRow>;
 }
 
+/** Where a piece of text sits and which way it reads from that point. */
+export interface CanvasErTextPlacement {
+  readonly x: number;
+  readonly y: number;
+  readonly anchor: "start" | "middle" | "end";
+}
+
 export interface CanvasErRelationshipRoute {
   readonly relationshipId: string;
   readonly label?: string;
@@ -663,14 +670,28 @@ export interface CanvasErRelationshipRoute {
   readonly points: ReadonlyArray<CanvasDiagramPoint>;
   readonly labelX: number;
   readonly labelY: number;
+  readonly labelAnchor: "start" | "middle" | "end";
+  readonly sourceCardinalityAt: CanvasErTextPlacement;
+  readonly targetCardinalityAt: CanvasErTextPlacement;
 }
 
 const ER_ENTITY_WIDTH = 220;
 const ER_HEADER_HEIGHT = 28;
 const ER_ROW_HEIGHT = 20;
 const ER_ENTITY_PAD = 6;
-const ER_COLUMN_GAP = 40;
-const ER_ROW_GAP = 32;
+// The gaps carry a relationship's label and both cardinalities. A cardinality
+// can be "zero-or-one" at one end and "one-or-many" at the other, and with a
+// 40px gap the label and both ends were drawn over one another.
+const ER_COLUMN_GAP = 150;
+const ER_ROW_GAP = 56;
+/** How far a cardinality sits from the entity border it names. */
+const ER_CARDINALITY_INSET = 6;
+/** How far below a point a cardinality's baseline sits to clear it. */
+const ER_CARDINALITY_DROP = 14;
+/** A line steeper than this, as rise over run, is treated as sloped. */
+const ER_SLOPED = 0.15;
+/** How far beside a mostly vertical line a cardinality or label sits. */
+const ER_TEXT_SIDE = 6;
 
 /**
  * Place entities on a grid and route each relationship between their borders.
@@ -738,6 +759,12 @@ export function layoutCanvasEr(block: CanvasErBlock): CanvasErLayout {
     const to = centerOf(target);
     const start = roundPoint(borderPointOf(source, from, to));
     const end = roundPoint(borderPointOf(target, to, from));
+    // A mostly horizontal line carries its label above it and a mostly
+    // vertical one on its left. Each cardinality sits outside the entity it
+    // names, on the side of its end the line does not run through.
+    const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+    const middleX = Math.round((start.x + end.x) / 2);
+    const middleY = Math.round((start.y + end.y) / 2);
     return [
       {
         relationshipId: String(relationship.relationshipId),
@@ -745,8 +772,11 @@ export function layoutCanvasEr(block: CanvasErBlock): CanvasErLayout {
         sourceCardinality: relationship.sourceCardinality,
         targetCardinality: relationship.targetCardinality,
         points: [start, end],
-        labelX: Math.round((start.x + end.x) / 2),
-        labelY: Math.round((start.y + end.y) / 2 - LABEL_LIFT),
+        labelX: horizontal ? middleX : middleX - ER_TEXT_SIDE,
+        labelY: horizontal ? middleY - LABEL_LIFT : middleY,
+        labelAnchor: horizontal ? ("middle" as const) : ("end" as const),
+        sourceCardinalityAt: cardinalityPlacement(source, start, end),
+        targetCardinalityAt: cardinalityPlacement(target, end, start),
       },
     ];
   });
@@ -757,6 +787,40 @@ export function layoutCanvasEr(block: CanvasErBlock): CanvasErLayout {
     height: Math.max(...bottoms, MARGIN) + MARGIN,
     entities: boxes,
     relationships,
+  };
+}
+
+/**
+ * Where an end's cardinality is written: outside the entity, reading away from
+ * it, and on the side of the end the line leaves clear.
+ */
+function cardinalityPlacement(
+  box: Box2D,
+  from: CanvasDiagramPoint,
+  toward: CanvasDiagramPoint,
+): CanvasErTextPlacement {
+  const dx = toward.x - from.x;
+  const dy = toward.y - from.y;
+  const onSide = Math.abs(from.x - box.x) < 1 || Math.abs(from.x - (box.x + box.width)) < 1;
+  if (onSide) {
+    // Leaving a left or right edge: read away from the entity, below the line
+    // unless the line itself drops away below the end.
+    const rightward = dx >= 0;
+    const dropsAway = dy > Math.abs(dx) * ER_SLOPED;
+    return {
+      x: from.x + (rightward ? ER_CARDINALITY_INSET : -ER_CARDINALITY_INSET),
+      y: dropsAway ? from.y - ER_CARDINALITY_INSET : from.y + ER_CARDINALITY_DROP,
+      anchor: rightward ? "start" : "end",
+    };
+  }
+  // Leaving the top or bottom edge: outside that edge, on the side the line
+  // does not lean toward.
+  const above = dy < 0;
+  const leansRight = dx > 0;
+  return {
+    x: from.x + (leansRight ? -ER_TEXT_SIDE : ER_TEXT_SIDE),
+    y: above ? from.y - ER_CARDINALITY_INSET : from.y + ER_CARDINALITY_DROP,
+    anchor: leansRight ? "end" : "start",
   };
 }
 
@@ -814,6 +878,8 @@ export interface CanvasSwimlaneLaneBox {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  /** The width of the header column the lane's name is written in. */
+  readonly headerWidth: number;
 }
 
 export interface CanvasSwimlaneStepBox {
@@ -886,13 +952,16 @@ export function layoutCanvasSwimlane(block: CanvasSwimlaneBlock): CanvasSwimlane
       kind: lane.kind ?? "actor",
       x: MARGIN,
       y,
-      width: LANE_HEADER_WIDTH + contentWidth + LANE_PAD,
+      width: LANE_HEADER_WIDTH + LANE_PAD + contentWidth + LANE_PAD,
       height,
+      headerWidth: LANE_HEADER_WIDTH,
     });
     bucket.forEach((step, index) => {
+      // The first step starts a pad clear of the header divider rather than
+      // on it, the same pad that keeps the last step off the lane's end.
       const placed = {
         ...step,
-        x: MARGIN + LANE_HEADER_WIDTH + index * (SWIM_STEP_WIDTH + SWIM_STEP_GAP),
+        x: MARGIN + LANE_HEADER_WIDTH + LANE_PAD + index * (SWIM_STEP_WIDTH + SWIM_STEP_GAP),
         y: y + LANE_PAD,
       };
       steps.push(placed);
