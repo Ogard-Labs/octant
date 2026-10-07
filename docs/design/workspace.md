@@ -552,8 +552,9 @@ the open request (Work) rather than from the turn's running record. Those are
 the requests the `pendingRequests` read lists, so the board read that follows an
 answer already files the thread back under In progress. Other work still running beside a parked turn (a
 terminal, a child run) keeps the thread In progress. A card with no listed
-request is drawn as before. A thread with several requests shows the oldest and **+N more
-waiting**, which opens the thread. Answers use each mode's existing command
+request is drawn as before. A thread with several requests shows the oldest
+the host still lists (a refused one it has dropped shows only while nothing
+newer waits) and **+N more waiting**, which opens the thread. Answers use each mode's existing command
 through the listed handle and hold no new authority. A refused answer shows one
 line on the card, and the card does not move: it changes column only when the
 host's next board read says so, and the board re-reads when the set of waiting
