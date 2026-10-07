@@ -1,12 +1,14 @@
 import {
   decodeProviderFailure,
   type ProviderFailure,
+  type ProviderOutputStopReason,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderToolImage,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import { type OpenAiCompatibleEndpoint, requestGeneration } from "./openAiCompatibleEndpoint";
+import { contextOverflowFromBody } from "./endpointRetry";
 import { decodeSse } from "./openAiCompatibleSse";
 import {
   responsesToolImages,
@@ -21,6 +23,7 @@ import {
   inspectChatGptPlanRequestBody,
 } from "./chatGptPlanProfile";
 import { readOpenAiRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
+import { outputStopReason } from "./outputStopReason";
 
 export interface ProtocolToolResult {
   readonly toolCallId: string;
@@ -70,6 +73,8 @@ export interface ProtocolTurnResult {
   readonly verifiedManualModelId?: string;
   /** Quota buckets from the response headers. Absent when the endpoint sent none. */
   readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
+  /** Present when the endpoint said this reply stopped on a known limit or filter. */
+  readonly outputStopReason?: ProviderOutputStopReason;
 }
 
 /**
@@ -153,6 +158,7 @@ interface NormalizationState {
   readonly functionCalls: Map<string, TrackedFunctionCall>;
   readonly toolCalls: ProtocolToolCall[];
   responseId?: string;
+  outputStopReason?: ProviderOutputStopReason;
 }
 
 interface TrackedOutputItem {
@@ -339,6 +345,7 @@ async function runResponsesTurn(
       ? { verifiedManualModelId: input.modelId }
       : {}),
     ...(rateLimitBuckets.length === 0 ? {} : { rateLimitBuckets }),
+    ...(state.outputStopReason === undefined ? {} : { outputStopReason: state.outputStopReason }),
   };
 }
 
@@ -426,10 +433,18 @@ function normalizeEvent(
       }
       throw failure("provider-failed", "The provider failed to complete the response.");
     }
-    case "response.incomplete":
+    case "response.incomplete": {
       state.accepted = true;
       validateResponseState(event.response, "incomplete", state);
-      throw failure("provider-failed", "The provider returned an incomplete response.");
+      const reason = incompleteReason(event.response);
+      const stop = outputStopReason(reason);
+      if (stop === undefined) {
+        throw failure("provider-failed", "The provider returned an incomplete response.");
+      }
+      state.outputStopReason = stop;
+      state.completed = true;
+      return;
+    }
     case "error":
       state.accepted = true;
       throw failure("provider-failed", "The provider failed to complete the response.");
@@ -439,7 +454,10 @@ function normalizeEvent(
         state.outputStarted = true;
         throw failure("unsupported", "The provider attempted an unsupported tool call.");
       }
-      throw protocol("The provider stream contained an unsupported event.");
+      // A provider may add event types of its own; one the harness does not
+      // know is ignored and logged, not a reason to fail an otherwise good turn.
+      console.warn(`[provider] ignoring unknown stream event type: ${event.type}`);
+      return;
   }
 }
 
@@ -510,6 +528,13 @@ function validateResponseLifecycle(
 ): void {
   const expectedStatus = event.type === "response.queued" ? "queued" : "in_progress";
   validateResponseState(event.response, expectedStatus, state);
+}
+
+function incompleteReason(value: unknown): string | undefined {
+  if (!isRecord(value) || !isRecord(value.incomplete_details)) return undefined;
+  return typeof value.incomplete_details.reason === "string"
+    ? value.incomplete_details.reason
+    : undefined;
 }
 
 function validateResponseState(
@@ -729,17 +754,18 @@ function validateFunctionCallArgumentsDone(
 }
 
 function assertBoundedToolCallArguments(argumentsJson: string): void {
-  if (argumentsJson.length === 0) {
-    throw protocol("The provider function call arguments were empty.");
-  }
   if (argumentsJson.length > MAX_TOOL_CALL_ARGUMENT_BYTES) {
     throw protocol("The provider function call arguments exceeded the size limit.");
   }
+  // Arguments the harness cannot parse are not a broken stream: the call is
+  // surfaced with its raw bytes so the model is told what was wrong and can
+  // correct itself. Only a payload that does parse is held to the structural
+  // bounds below, and its raw bytes are never replaced by an empty object.
   let parsed: unknown;
   try {
     parsed = JSON.parse(argumentsJson);
   } catch {
-    throw protocol("The provider function call arguments were not valid JSON.");
+    return;
   }
   if (!isBoundedToolCallArguments(parsed)) {
     throw protocol("The provider function call arguments exceeded the bounded JSON limits.");
@@ -1329,7 +1355,12 @@ function failure(category: ProviderFailure["category"], message: string): Provid
 }
 
 function classifyStoreRejection(status: number, body: string): ProviderFailure | undefined {
-  if (status !== 400 && status !== 422) return undefined;
+  if (status !== 400 && status !== 413 && status !== 422) return undefined;
+  // A filled context window is reported as the same 400 shape as a refused
+  // `store` parameter; the message says the context is too large, so it is
+  // read before the store check below.
+  const overflow = contextOverflowFromBody(body);
+  if (overflow !== undefined) return overflow;
   let value: unknown;
   try {
     value = JSON.parse(body) as unknown;

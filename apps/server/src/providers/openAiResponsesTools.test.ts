@@ -319,7 +319,7 @@ describe("sendResponsesTurn tool calls", () => {
     ]);
   });
 
-  it("fails closed when the function call arguments are not valid JSON", async () => {
+  it("surfaces function call arguments that are not valid JSON so the model can correct them", async () => {
     const fetch = vi.fn(async () =>
       sse(
         created(1),
@@ -331,13 +331,22 @@ describe("sendResponsesTurn tool calls", () => {
           name: "octant_capability_echo",
           arguments: "",
         }),
-        functionCallDone(3, functionCallItem("call_abc", "octant_capability_echo", "{not json}")),
-        completed(4, [functionCallItem("call_abc", "octant_capability_echo", "{not json}")]),
+        argumentsDelta(3, "fc_private", "{not json}"),
+        functionCallDone(4, functionCallItem("call_abc", "octant_capability_echo", "{not json}")),
+        completed(5, [functionCallItem("call_abc", "octant_capability_echo", "{not json}")]),
       ),
     );
 
-    const failure = await failureOf(sendResponsesTurn({ ...input(fetch), tools: [echoTool] }));
-    expect(failure.category).toBe("protocol");
+    const result = await Effect.runPromise(
+      sendResponsesTurn({ ...input(fetch), tools: [echoTool] }),
+    );
+    expect(result.toolCalls).toEqual<ProtocolToolCall[]>([
+      {
+        toolCallId: "call_abc",
+        toolName: "octant_capability_echo",
+        argumentsJson: "{not json}",
+      },
+    ]);
   });
 
   it("fails closed when the function call name is malformed", async () => {

@@ -1,20 +1,40 @@
 import {
   CANVAS_MAX_BLOCKS,
+  CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_DEPTH,
+  CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY,
+  CANVAS_MAX_HEATMAP_CELLS,
+  CANVAS_MAX_HEATMAP_COLUMNS,
+  CANVAS_MAX_HEATMAP_DAYS,
+  CANVAS_MAX_HEATMAP_NOTE_LENGTH,
+  CANVAS_MAX_HEATMAP_ROWS,
   CANVAS_MAX_IMAGES,
+  CANVAS_MAX_METRIC_SPARKLINE_POINTS,
+  CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_MOCKUP_DEPTH,
   CANVAS_MAX_MOCKUP_NODES,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_PAYLOAD_BYTES,
   CANVAS_MAX_SERIES,
+  CANVAS_MAX_SWIMLANE_LANES,
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
+  CANVAS_MAX_TREEMAP_DEPTH,
+  CANVAS_MAX_TREEMAP_LEAVES,
+  CANVAS_BAR_LIST_SCHEMA_VERSION,
+  CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
+  CANVAS_METRIC_TREND_SCHEMA_VERSION,
+  CANVAS_HEATMAP_SCHEMA_VERSION,
+  CANVAS_MOCKUP_SCHEMA_VERSION,
+  CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
+  CANVAS_TREEMAP_SCHEMA_VERSION,
   CanvasBlock,
   CanvasDefinition,
   CanvasVersion,
+  canvasMetricUsesTrendFields,
   decodeCanvasDefinition,
   decodeCanvasVersion,
   type CanvasSourceId,
@@ -25,7 +45,30 @@ const encoder = new TextEncoder();
 // Versions this runtime decodes: every historical version plus the current
 // one. A document declaring anything else is refused as a future version,
 // before its blocks are read, so a newer contract never reaches a renderer.
-const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, CANVAS_SCHEMA_VERSION];
+const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
+  1,
+  2,
+  3,
+  CANVAS_PRESENTATION_SCHEMA_VERSION,
+  CANVAS_TREEMAP_SCHEMA_VERSION,
+  CANVAS_HEATMAP_SCHEMA_VERSION,
+  CANVAS_BAR_LIST_SCHEMA_VERSION,
+  CANVAS_SCHEMA_VERSION,
+];
+
+// A block kind that a document may only carry from the version that
+// introduced it. A document declaring an older version but carrying the kind
+// fails closed as a declared future version rather than a corrupt document.
+const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly since: number }> =
+  [
+    { kind: "mockup", since: CANVAS_MOCKUP_SCHEMA_VERSION },
+    { kind: "treemap", since: CANVAS_TREEMAP_SCHEMA_VERSION },
+    { kind: "heatmap", since: CANVAS_HEATMAP_SCHEMA_VERSION },
+    { kind: "bar-list", since: CANVAS_BAR_LIST_SCHEMA_VERSION },
+    { kind: "er", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
+    { kind: "swimlane", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
+    { kind: "mindmap", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
+  ];
 
 export type CanvasPolicyRejectionCode =
   | "invalid-schema"
@@ -62,7 +105,38 @@ export type CanvasPolicyRejectionCode =
   | "mockup-node-budget-exceeded"
   | "mockup-text-budget-exceeded"
   | "dangling-mockup-parent"
-  | "mockup-nesting-cycle";
+  | "mockup-nesting-cycle"
+  | "duplicate-measure-id"
+  | "unknown-treemap-measure"
+  | "treemap-roots"
+  | "treemap-nesting-cycle"
+  | "dangling-treemap-parent"
+  | "treemap-value-placement"
+  | "treemap-negative-value"
+  | "duplicate-heatmap-row-id"
+  | "duplicate-heatmap-column-id"
+  | "unknown-heatmap-row"
+  | "unknown-heatmap-column"
+  | "duplicate-heatmap-cell"
+  | "duplicate-heatmap-date"
+  | "heatmap-rows-budget-exceeded"
+  | "heatmap-columns-budget-exceeded"
+  | "heatmap-cells-budget-exceeded"
+  | "heatmap-days-budget-exceeded"
+  | "heatmap-note-budget-exceeded"
+  | "bar-list-rows-budget-exceeded"
+  | "duplicate-bar-list-label"
+  | "bar-list-negative-value"
+  | "metric-sparkline-budget-exceeded"
+  | "duplicate-er-attribute-id"
+  | "er-attribute-budget-exceeded"
+  | "unknown-swimlane-lane"
+  | "duplicate-swimlane-lane-id"
+  | "swimlane-lanes-budget-exceeded"
+  | "mindmap-roots"
+  | "dangling-mindmap-parent"
+  | "mindmap-nesting-cycle"
+  | "mindmap-note-budget-exceeded";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -176,6 +250,10 @@ function sourceIdsForBlock(block: CanvasBlock): ReadonlyArray<CanvasSourceId> {
       return "sourceId" in block && block.sourceId !== undefined ? [block.sourceId] : [];
     case "plan":
       return block.tasks.flatMap((task) => task.sourceIds ?? []);
+    case "treemap":
+      return block.nodes.flatMap((node) => (node.sourceId === undefined ? [] : [node.sourceId]));
+    case "bar-list":
+      return block.rows.flatMap((row) => (row.sourceId === undefined ? [] : [row.sourceId]));
     default:
       return [];
   }
@@ -223,6 +301,17 @@ function calculateBudgetUsage(
         diagramNodes += block.states.length;
         diagramEdges += block.transitions.length;
         break;
+      case "er":
+        diagramNodes += block.entities.length;
+        diagramEdges += block.relationships.length;
+        break;
+      case "swimlane":
+        diagramNodes += block.steps.length;
+        diagramEdges += block.connections.length;
+        break;
+      case "mindmap":
+        diagramNodes += block.nodes.length;
+        break;
       case "image":
         imageCount += 1;
         break;
@@ -265,10 +354,10 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
   const declared = envelope.schemaVersion;
   if (typeof declared !== "number") return undefined;
   if (!SUPPORTED_CANVAS_SCHEMA_VERSIONS.includes(declared)) return "unsupported-schema-version";
-  if (declared === CANVAS_SCHEMA_VERSION) return undefined;
   const presentation = envelope.presentation ?? envelope.definition?.presentation;
-  if (declared < 4 && presentation !== undefined) return "unsupported-schema-version";
-  if (declared >= 3) return undefined;
+  if (declared < CANVAS_PRESENTATION_SCHEMA_VERSION && presentation !== undefined) {
+    return "unsupported-schema-version";
+  }
   const blocks = Array.isArray(envelope.blocks)
     ? envelope.blocks
     : Array.isArray(envelope.definition?.blocks)
@@ -279,7 +368,11 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
       (block) =>
         typeof block === "object" &&
         block !== null &&
-        (block as { kind?: unknown }).kind === "mockup",
+        (VERSION_GATED_BLOCK_KINDS.some(
+          (gated) => gated.kind === (block as { kind?: unknown }).kind && declared < gated.since,
+        ) ||
+          (declared < CANVAS_METRIC_TREND_SCHEMA_VERSION &&
+            canvasMetricUsesTrendFields(block as Record<string, unknown>))),
     )
   ) {
     return "unsupported-schema-version";
@@ -334,7 +427,16 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       messages?: unknown;
       states?: unknown;
       transitions?: unknown;
+      entities?: unknown;
+      relationships?: unknown;
+      lanes?: unknown;
+      steps?: unknown;
+      connections?: unknown;
       title?: unknown;
+      columns?: unknown;
+      cells?: unknown;
+      days?: unknown;
+      sparkline?: unknown;
     };
     if (block.kind === "image") imageCount += 1;
     if (
@@ -369,6 +471,54 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
         return "edge-budget-exceeded";
       }
     }
+    if (block.kind === "er") {
+      if (Array.isArray(block.entities) && block.entities.length > CANVAS_MAX_DIAGRAM_NODES) {
+        return "node-budget-exceeded";
+      }
+      if (
+        Array.isArray(block.relationships) &&
+        block.relationships.length > CANVAS_MAX_DIAGRAM_EDGES
+      ) {
+        return "edge-budget-exceeded";
+      }
+      if (Array.isArray(block.entities)) {
+        for (const entity of block.entities) {
+          if (typeof entity !== "object" || entity === null) continue;
+          const attributes = (entity as { attributes?: unknown }).attributes;
+          if (
+            Array.isArray(attributes) &&
+            attributes.length > CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY
+          ) {
+            return "er-attribute-budget-exceeded";
+          }
+        }
+      }
+    }
+    if (block.kind === "swimlane") {
+      if (Array.isArray(block.steps) && block.steps.length > CANVAS_MAX_DIAGRAM_NODES) {
+        return "node-budget-exceeded";
+      }
+      if (Array.isArray(block.connections) && block.connections.length > CANVAS_MAX_DIAGRAM_EDGES) {
+        return "edge-budget-exceeded";
+      }
+      if (Array.isArray(block.lanes) && block.lanes.length > CANVAS_MAX_SWIMLANE_LANES) {
+        return "swimlane-lanes-budget-exceeded";
+      }
+    }
+    if (block.kind === "mindmap") {
+      if (Array.isArray(block.nodes) && block.nodes.length > CANVAS_MAX_DIAGRAM_NODES) {
+        return "node-budget-exceeded";
+      }
+      if (Array.isArray(block.nodes)) {
+        for (const node of block.nodes) {
+          if (typeof node !== "object" || node === null) continue;
+          const note = (node as { note?: unknown }).note;
+          if (typeof note === "string" && note.length > CANVAS_MAX_MINDMAP_NOTE_LENGTH) {
+            return "mindmap-note-budget-exceeded";
+          }
+        }
+      }
+    }
     if (block.kind === "mockup") {
       if (typeof block.title === "string" && block.title.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
         return "mockup-text-budget-exceeded";
@@ -385,6 +535,52 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
           }
         }
       }
+    }
+    if (
+      block.kind === "treemap" &&
+      Array.isArray(block.nodes) &&
+      block.nodes.length > CANVAS_MAX_TREEMAP_LEAVES
+    ) {
+      return "node-budget-exceeded";
+    }
+    if (block.kind === "heatmap") {
+      if (Array.isArray(block.rows) && block.rows.length > CANVAS_MAX_HEATMAP_ROWS) {
+        return "heatmap-rows-budget-exceeded";
+      }
+      if (Array.isArray(block.columns) && block.columns.length > CANVAS_MAX_HEATMAP_COLUMNS) {
+        return "heatmap-columns-budget-exceeded";
+      }
+      if (Array.isArray(block.cells) && block.cells.length > CANVAS_MAX_HEATMAP_CELLS) {
+        return "heatmap-cells-budget-exceeded";
+      }
+      if (Array.isArray(block.days) && block.days.length > CANVAS_MAX_HEATMAP_DAYS) {
+        return "heatmap-days-budget-exceeded";
+      }
+      const noted = [
+        ...(Array.isArray(block.cells) ? block.cells : []),
+        ...(Array.isArray(block.days) ? block.days : []),
+      ];
+      for (const entry of noted) {
+        if (typeof entry !== "object" || entry === null) continue;
+        const note = (entry as { note?: unknown }).note;
+        if (typeof note === "string" && note.length > CANVAS_MAX_HEATMAP_NOTE_LENGTH) {
+          return "heatmap-note-budget-exceeded";
+        }
+      }
+    }
+    if (
+      block.kind === "bar-list" &&
+      Array.isArray(block.rows) &&
+      block.rows.length > CANVAS_MAX_BAR_LIST_ROWS
+    ) {
+      return "bar-list-rows-budget-exceeded";
+    }
+    if (
+      block.kind === "metric" &&
+      Array.isArray(block.sparkline) &&
+      block.sparkline.length > CANVAS_MAX_METRIC_SPARKLINE_POINTS
+    ) {
+      return "metric-sparkline-budget-exceeded";
     }
   }
   if (imageCount > CANVAS_MAX_IMAGES) return "image-budget-exceeded";
@@ -483,7 +679,14 @@ function validateCrossReferences(definition: CanvasDefinition): void {
 
     if (block.kind === "sequence") validateSequence(block);
     if (block.kind === "state") validateState(block);
+    if (block.kind === "er") validateEr(block);
+    if (block.kind === "swimlane") validateSwimlane(block);
+    if (block.kind === "mindmap") validateMindmap(block);
     if (block.kind === "mockup") validateMockup(block);
+    if (block.kind === "treemap") validateTreemap(block);
+    if (block.kind === "heatmap") validateHeatmap(block);
+    if (block.kind === "bar-list") validateBarList(block);
+    if (block.kind === "metric") validateMetric(block);
   }
 }
 
@@ -632,6 +835,171 @@ function validateState(block: Extract<CanvasBlock, { readonly kind: "state" }>):
 }
 
 /**
+ * An entity-relationship block names each entity by id, and every relationship
+ * must land on two entities the block holds. An attribute id repeats only
+ * within its own entity, and the per-entity attribute list is bounded, so a
+ * schema that exceeds either would draw a table the picture cannot carry.
+ */
+function validateEr(block: Extract<CanvasBlock, { readonly kind: "er" }>): void {
+  const entities = new Set<string>();
+  for (const entity of block.entities) {
+    const id = String(entity.entityId);
+    if (entities.has(id)) {
+      reject(
+        "duplicate-node-id",
+        `Canvas entity relationship ${block.blockId} has duplicate entities.`,
+      );
+    }
+    entities.add(id);
+    if (entity.attributes.length > CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY) {
+      reject(
+        "er-attribute-budget-exceeded",
+        `Canvas entity relationship ${block.blockId} has an entity with more than ${String(CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY)} attributes.`,
+      );
+    }
+    const attributes = new Set<string>();
+    for (const attribute of entity.attributes) {
+      const attributeId = String(attribute.attributeId);
+      if (attributes.has(attributeId)) {
+        reject(
+          "duplicate-er-attribute-id",
+          `Canvas entity relationship ${block.blockId} repeats an attribute.`,
+        );
+      }
+      attributes.add(attributeId);
+    }
+  }
+  const relationships = new Set<string>();
+  for (const relationship of block.relationships) {
+    const id = String(relationship.relationshipId);
+    if (relationships.has(id)) {
+      reject(
+        "duplicate-edge-id",
+        `Canvas entity relationship ${block.blockId} has duplicate relationships.`,
+      );
+    }
+    relationships.add(id);
+    if (!entities.has(String(relationship.source)) || !entities.has(String(relationship.target))) {
+      reject(
+        "dangling-edge",
+        `Canvas entity relationship ${block.blockId} has a relationship to a missing entity.`,
+      );
+    }
+  }
+}
+
+/**
+ * A swimlane's steps name the lane they sit in, and every connection must land
+ * on two steps the block holds. A lane order past the lane budget or a step on
+ * a lane the block does not declare would draw a band nobody ordered.
+ */
+function validateSwimlane(block: Extract<CanvasBlock, { readonly kind: "swimlane" }>): void {
+  if (block.lanes.length > CANVAS_MAX_SWIMLANE_LANES) {
+    reject(
+      "swimlane-lanes-budget-exceeded",
+      `Canvas swimlane ${block.blockId} has more than ${String(CANVAS_MAX_SWIMLANE_LANES)} lanes.`,
+    );
+  }
+  const lanes = new Set<string>();
+  for (const lane of block.lanes) {
+    const id = String(lane.laneId);
+    if (lanes.has(id)) {
+      reject("duplicate-swimlane-lane-id", `Canvas swimlane ${block.blockId} repeats a lane.`);
+    }
+    lanes.add(id);
+  }
+  const steps = new Set<string>();
+  for (const step of block.steps) {
+    const id = String(step.stepId);
+    if (steps.has(id)) {
+      reject("duplicate-node-id", `Canvas swimlane ${block.blockId} has duplicate steps.`);
+    }
+    if (!lanes.has(String(step.laneId))) {
+      reject(
+        "unknown-swimlane-lane",
+        `Canvas swimlane ${block.blockId} places a step in a lane it does not hold.`,
+      );
+    }
+    steps.add(id);
+  }
+  const connections = new Set<string>();
+  for (const connection of block.connections) {
+    const id = String(connection.connectionId);
+    if (connections.has(id)) {
+      reject("duplicate-edge-id", `Canvas swimlane ${block.blockId} has duplicate connections.`);
+    }
+    connections.add(id);
+    if (!steps.has(String(connection.source)) || !steps.has(String(connection.target))) {
+      reject(
+        "dangling-edge",
+        `Canvas swimlane ${block.blockId} has a connection to a missing step.`,
+      );
+    }
+  }
+}
+
+/**
+ * A mind map is one root over topics that name their parent. A second root, a
+ * parent the block does not hold, a cycle, a chain past the depth budget, or a
+ * note past its length would each draw a map the data does not support.
+ */
+function validateMindmap(block: Extract<CanvasBlock, { readonly kind: "mindmap" }>): void {
+  const parents = new Map<string, string | undefined>();
+  for (const node of block.nodes) {
+    const id = String(node.nodeId);
+    if (parents.has(id)) {
+      reject("duplicate-node-id", `Canvas mind map ${block.blockId} has duplicate topics.`);
+    }
+    if (node.note !== undefined && node.note.length > CANVAS_MAX_MINDMAP_NOTE_LENGTH) {
+      reject(
+        "mindmap-note-budget-exceeded",
+        `Canvas mind map ${block.blockId} has a note longer than ${String(CANVAS_MAX_MINDMAP_NOTE_LENGTH)} characters.`,
+      );
+    }
+    parents.set(id, node.parentId === undefined ? undefined : String(node.parentId));
+  }
+  let roots = 0;
+  for (const [_id, parentId] of parents) {
+    if (parentId === undefined) {
+      roots += 1;
+      continue;
+    }
+    if (!parents.has(parentId)) {
+      reject(
+        "dangling-mindmap-parent",
+        `Canvas mind map ${block.blockId} nests a topic it does not hold.`,
+      );
+    }
+  }
+  // One root: a forest is not a map a reader can follow from a single topic.
+  if (parents.size > 0 && roots !== 1) {
+    reject("mindmap-roots", `Canvas mind map ${block.blockId} does not have exactly one root.`);
+  }
+  for (const [id, parentId] of parents) {
+    const seen = new Set<string>([id]);
+    let current = parentId;
+    let depth = 1;
+    while (current !== undefined) {
+      if (seen.has(current)) {
+        reject(
+          "mindmap-nesting-cycle",
+          `Canvas mind map ${block.blockId} nests a topic inside itself.`,
+        );
+      }
+      seen.add(current);
+      depth += 1;
+      if (depth > CANVAS_MAX_DEPTH) {
+        reject(
+          "depth-budget-exceeded",
+          `Canvas mind map ${block.blockId} nests topics deeper than ${CANVAS_MAX_DEPTH}.`,
+        );
+      }
+      current = parents.get(current);
+    }
+  }
+}
+
+/**
  * A mockup's nodes name their parent. A chain longer than the depth limit, a
  * parent the block does not hold, or a cycle would draw a screen inside itself.
  */
@@ -741,6 +1109,313 @@ function validatePlan(block: Extract<CanvasBlock, { readonly kind: "plan" }>): v
     settled.add(taskId);
   };
   for (const taskId of tasks.keys()) visit(taskId);
+}
+
+/**
+ * A treemap is one root over leaves that carry every declared measure. A
+ * group's reading is the sum of its children, so a group carrying its own
+ * value, a leaf missing one, a dangling parent, a cycle, or a chain past the
+ * depth budget would each draw a picture the data does not support. Sizes are
+ * areas, so every value must be finite and not negative.
+ */
+function validateTreemap(block: Extract<CanvasBlock, { readonly kind: "treemap" }>): void {
+  if (block.nodes.length > CANVAS_MAX_TREEMAP_LEAVES) {
+    reject(
+      "node-budget-exceeded",
+      `Canvas treemap ${block.blockId} has more than ${String(CANVAS_MAX_TREEMAP_LEAVES)} nodes.`,
+    );
+  }
+  const measures = new Set<string>();
+  for (const measure of block.measures) {
+    const id = String(measure.measureId);
+    if (measures.has(id)) {
+      reject("duplicate-measure-id", `Canvas treemap ${block.blockId} has duplicate measures.`);
+    }
+    measures.add(id);
+  }
+  if (!measures.has(String(block.sizeBy))) {
+    reject(
+      "unknown-treemap-measure",
+      `Canvas treemap ${block.blockId} sizes by a measure it does not declare.`,
+    );
+  }
+  if (!measures.has(String(block.colorBy))) {
+    reject(
+      "unknown-treemap-measure",
+      `Canvas treemap ${block.blockId} colours by a measure it does not declare.`,
+    );
+  }
+
+  const parents = new Map<string, string | undefined>();
+  const valued = new Set<string>();
+  for (const node of block.nodes) {
+    const id = String(node.nodeId);
+    if (parents.has(id)) {
+      reject("duplicate-node-id", `Canvas treemap ${block.blockId} has duplicate nodes.`);
+    }
+    if (node.values !== undefined) valued.add(id);
+    parents.set(id, node.parentId === undefined ? undefined : String(node.parentId));
+  }
+
+  const childrenOf = new Map<string, string[]>();
+  let roots = 0;
+  for (const [id, parentId] of parents) {
+    if (parentId === undefined) {
+      roots += 1;
+      continue;
+    }
+    if (!parents.has(parentId)) {
+      reject(
+        "dangling-treemap-parent",
+        `Canvas treemap ${block.blockId} nests a node it does not hold.`,
+      );
+    }
+    const siblings = childrenOf.get(parentId) ?? [];
+    siblings.push(id);
+    childrenOf.set(parentId, siblings);
+  }
+  // One root: a forest draws no single whole to read.
+  if (roots !== 1) {
+    reject("treemap-roots", `Canvas treemap ${block.blockId} does not have exactly one root.`);
+  }
+
+  for (const [id, parentId] of parents) {
+    const seen = new Set<string>([id]);
+    let current = parentId;
+    let depth = 1;
+    while (current !== undefined) {
+      if (seen.has(current)) {
+        reject(
+          "treemap-nesting-cycle",
+          `Canvas treemap ${block.blockId} nests a node inside itself.`,
+        );
+      }
+      seen.add(current);
+      depth += 1;
+      if (depth > CANVAS_MAX_TREEMAP_DEPTH) {
+        reject(
+          "depth-budget-exceeded",
+          `Canvas treemap ${block.blockId} nests deeper than ${String(CANVAS_MAX_TREEMAP_DEPTH)}.`,
+        );
+      }
+      current = parents.get(current);
+    }
+  }
+
+  // Values sit on leaves; a group sums its children, so it carries none.
+  for (const id of parents.keys()) {
+    const isLeaf = (childrenOf.get(id)?.length ?? 0) === 0;
+    const carriesValues = valued.has(id);
+    if (isLeaf && !carriesValues) {
+      reject(
+        "treemap-value-placement",
+        `Canvas treemap ${block.blockId} has a leaf with no value.`,
+      );
+    }
+    if (!isLeaf && carriesValues) {
+      reject(
+        "treemap-value-placement",
+        `Canvas treemap ${block.blockId} puts a value on a group it sums instead.`,
+      );
+    }
+  }
+
+  for (const node of block.nodes) {
+    const values = node.values;
+    if (values === undefined) continue;
+    for (const [key, value] of Object.entries(values)) {
+      if (!measures.has(key)) {
+        reject(
+          "unknown-treemap-measure",
+          `Canvas treemap ${block.blockId} carries a value for a measure it does not declare.`,
+        );
+      }
+      if (!Number.isFinite(value) || value < 0) {
+        reject(
+          "treemap-negative-value",
+          `Canvas treemap ${block.blockId} has a value that is negative or not finite.`,
+        );
+      }
+    }
+    for (const measure of measures) {
+      if (!Object.prototype.hasOwnProperty.call(values, measure)) {
+        reject(
+          "treemap-value-placement",
+          `Canvas treemap ${block.blockId} has a leaf missing a declared measure.`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * A heatmap's cells name their row and column by id, and a calendar lists one
+ * reading per date. A cell on a missing axis, a coordinate listed twice, a
+ * repeated date, a note past its length, or a grid past its row, column, cell,
+ * or day budget would each draw a picture the data does not support.
+ */
+function validateHeatmap(block: Extract<CanvasBlock, { readonly kind: "heatmap" }>): void {
+  if (block.layout === "matrix") {
+    if (block.rows.length > CANVAS_MAX_HEATMAP_ROWS) {
+      reject(
+        "heatmap-rows-budget-exceeded",
+        `Canvas heatmap ${block.blockId} has more than ${String(CANVAS_MAX_HEATMAP_ROWS)} rows.`,
+      );
+    }
+    if (block.columns.length > CANVAS_MAX_HEATMAP_COLUMNS) {
+      reject(
+        "heatmap-columns-budget-exceeded",
+        `Canvas heatmap ${block.blockId} has more than ${String(CANVAS_MAX_HEATMAP_COLUMNS)} columns.`,
+      );
+    }
+    if (block.cells.length > CANVAS_MAX_HEATMAP_CELLS) {
+      reject(
+        "heatmap-cells-budget-exceeded",
+        `Canvas heatmap ${block.blockId} has more than ${String(CANVAS_MAX_HEATMAP_CELLS)} cells.`,
+      );
+    }
+    const rows = new Set<string>();
+    for (const row of block.rows) {
+      const id = String(row.rowId);
+      if (rows.has(id)) {
+        reject("duplicate-heatmap-row-id", `Canvas heatmap ${block.blockId} repeats a row.`);
+      }
+      rows.add(id);
+    }
+    const columns = new Set<string>();
+    for (const column of block.columns) {
+      const id = String(column.columnId);
+      if (columns.has(id)) {
+        reject("duplicate-heatmap-column-id", `Canvas heatmap ${block.blockId} repeats a column.`);
+      }
+      columns.add(id);
+    }
+    const coordinates = new Set<string>();
+    for (const cell of block.cells) {
+      if (!rows.has(String(cell.rowId))) {
+        reject(
+          "unknown-heatmap-row",
+          `Canvas heatmap ${block.blockId} has a cell on a row it does not hold.`,
+        );
+      }
+      if (!columns.has(String(cell.columnId))) {
+        reject(
+          "unknown-heatmap-column",
+          `Canvas heatmap ${block.blockId} has a cell on a column it does not hold.`,
+        );
+      }
+      const coordinate = `${String(cell.rowId)}\u0000${String(cell.columnId)}`;
+      if (coordinates.has(coordinate)) {
+        reject(
+          "duplicate-heatmap-cell",
+          `Canvas heatmap ${block.blockId} lists one coordinate more than once.`,
+        );
+      }
+      coordinates.add(coordinate);
+      if (cell.note !== undefined && cell.note.length > CANVAS_MAX_HEATMAP_NOTE_LENGTH) {
+        reject(
+          "heatmap-note-budget-exceeded",
+          `Canvas heatmap ${block.blockId} has a note longer than ${String(CANVAS_MAX_HEATMAP_NOTE_LENGTH)} characters.`,
+        );
+      }
+    }
+    return;
+  }
+
+  if (block.days.length > CANVAS_MAX_HEATMAP_DAYS) {
+    reject(
+      "heatmap-days-budget-exceeded",
+      `Canvas heatmap ${block.blockId} has more than ${String(CANVAS_MAX_HEATMAP_DAYS)} days.`,
+    );
+  }
+  const orderedDates = block.days.map((day) => day.date).sort();
+  const firstDate = orderedDates[0];
+  const lastDate = orderedDates[orderedDates.length - 1];
+  if (firstDate !== undefined && lastDate !== undefined) {
+    // The picture fills the days between the first and last reading, so a span
+    // past the day budget would draw more days than the block may declare.
+    const span =
+      (Date.parse(`${lastDate}T00:00:00.000Z`) - Date.parse(`${firstDate}T00:00:00.000Z`)) /
+        86_400_000 +
+      1;
+    if (span > CANVAS_MAX_HEATMAP_DAYS) {
+      reject(
+        "heatmap-days-budget-exceeded",
+        `Canvas heatmap ${block.blockId} spans more than ${String(CANVAS_MAX_HEATMAP_DAYS)} days.`,
+      );
+    }
+  }
+  const dates = new Set<string>();
+  for (const day of block.days) {
+    if (dates.has(day.date)) {
+      reject("duplicate-heatmap-date", `Canvas heatmap ${block.blockId} repeats a date.`);
+    }
+    dates.add(day.date);
+    if (day.note !== undefined && day.note.length > CANVAS_MAX_HEATMAP_NOTE_LENGTH) {
+      reject(
+        "heatmap-note-budget-exceeded",
+        `Canvas heatmap ${block.blockId} has a note longer than ${String(CANVAS_MAX_HEATMAP_NOTE_LENGTH)} characters.`,
+      );
+    }
+  }
+}
+
+/**
+ * A bar list is a ranking of magnitudes. A repeated label would draw one entry
+ * twice, a row past the row budget would draw a list longer than the block may
+ * declare, and a negative value has no bar length, so each is refused. The
+ * sort order is not validated: largest-first is the default the renderer
+ * applies, and the person may reverse it as view state.
+ */
+function validateBarList(block: Extract<CanvasBlock, { readonly kind: "bar-list" }>): void {
+  if (block.rows.length > CANVAS_MAX_BAR_LIST_ROWS) {
+    reject(
+      "bar-list-rows-budget-exceeded",
+      `Canvas bar list ${block.blockId} has more than ${String(CANVAS_MAX_BAR_LIST_ROWS)} rows.`,
+    );
+  }
+  const labels = new Set<string>();
+  for (const row of block.rows) {
+    if (labels.has(row.label)) {
+      reject(
+        "duplicate-bar-list-label",
+        `Canvas bar list ${block.blockId} lists one label more than once.`,
+      );
+    }
+    labels.add(row.label);
+    if (!Number.isFinite(row.value) || row.value < 0) {
+      reject(
+        "bar-list-negative-value",
+        `Canvas bar list ${block.blockId} has a value that is negative or not finite.`,
+      );
+    }
+    if (
+      row.secondaryValue !== undefined &&
+      (!Number.isFinite(row.secondaryValue) || row.secondaryValue < 0)
+    ) {
+      reject(
+        "bar-list-negative-value",
+        `Canvas bar list ${block.blockId} has a second value that is negative or not finite.`,
+      );
+    }
+  }
+}
+
+/**
+ * A metric's sparkline is a bounded glance. The contract caps it, so this
+ * re-check only fires for a caller that bypassed the decoder; the block stays
+ * otherwise unconstrained because an absent direction simply means neutral.
+ */
+function validateMetric(block: Extract<CanvasBlock, { readonly kind: "metric" }>): void {
+  if (
+    block.sparkline !== undefined &&
+    block.sparkline.length > CANVAS_MAX_METRIC_SPARKLINE_POINTS
+  ) {
+    reject(
+      "metric-sparkline-budget-exceeded",
+      `Canvas metric ${block.blockId} has a sparkline longer than ${String(CANVAS_MAX_METRIC_SPARKLINE_POINTS)} points.`,
+    );
+  }
 }
 
 function enforceBudgets(usage: CanvasBudgetUsage): void {

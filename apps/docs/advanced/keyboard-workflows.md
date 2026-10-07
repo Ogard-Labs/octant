@@ -22,6 +22,17 @@ Focus returns to the control that had it when the chord fired. The
 palette is inert while Zen is active. Every command still runs through
 its ordinary authority check.
 
+When an agent is waiting on you, the palette opens on a **Needs you** group
+above everything else. Each waiting thread is one row that shows its mode, what
+it waits on (approval or your answer), and how long it has waited; Enter opens
+the thread, where the request is waiting. Every approval also has **Approve** and **Deny**
+commands, so typing "approve" finds them and answers without opening the
+thread. A question is answered in its thread, not in the palette. The list is
+read when the palette opens, so it is current at that moment and is not kept
+fresh while the palette stays open. If an answer is refused, for example because
+it was answered elsewhere first, a notice says so. The group is absent when
+nothing is waiting, and in a remote or phone window.
+
 It can switch mode, start a new thread in the current mode, open thread
 Search, open a thread or Project the host has already listed,
 open Settings, and open the Apple workbench for a
@@ -38,6 +49,14 @@ Home, and End move, Enter opens, and Escape dismisses.
 
 The palette command **Search Chat threads**, **Search Work threads**, or
 **Search Code threads** opens the same overlay.
+
+## Attaching a thread as context
+
+Focus a thread row and open its menu (the context-menu key, or Shift+F10),
+then choose **Attach as context**. That attaches the thread to the composer
+that has focus, or to the only composer when one is open, the same bounded
+reference as dragging the row onto the composer or typing `#` and choosing
+it. The draft is not sent, and the source thread is not opened.
 
 ## Mode switcher
 
@@ -75,12 +94,17 @@ The remappable set:
 - **Find a file by name** — **⌘/Ctrl+P**, in the active Code thread
 - **Find text across the repository** — **⌘/Ctrl+Shift+F**, in the active
   Code thread
+- On the Review page only: **Next** and **Previous finished thread** — **J**
+  and **K**; **Open the finished thread** — **Enter**; **Complete** — **C**;
+  **Send back** — **S**; **Snooze** — **Z**; **Mark seen** — **E**
 
 If two actions share a chord, the first keeps it and the other is marked as
 sharing it and will not run. **Reset** restores one action to its default;
 **Reset all to defaults** restores every action. A chord that would swallow
 ordinary typing — a bare letter, Shift alone, Tab, Escape, or Enter — is
-refused. Keybindings are a preference about this client's keyboard, stored
+refused, except for the Review page's own keys: they answer only while that
+page has focus and you are not typing in its follow-up field, so they may be a
+bare letter or Enter. Keybindings are a preference about this client's keyboard, stored
 locally; they change which panel a key opens, not what the server will
 authorize.
 

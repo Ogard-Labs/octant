@@ -340,7 +340,8 @@ describe("makeOpenAiCompatibleDriver", () => {
           expect(String(duplicate)).toContain("protocol");
           yield* connection.interrupt(sessionId);
           expect(requestSignal?.aborted).toBe(true);
-          expect(runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
+          // A cancel ends the turn but keeps the session live for the next send.
+          expect(runtimeRegistry.activeSessionCount(instanceId)).toBe(1);
           return Array.from(yield* Fiber.join(collected));
         }),
       ),
@@ -415,6 +416,8 @@ describe("makeOpenAiCompatibleDriver", () => {
           });
           yield* connection.interrupt(sessionId);
           expect(Array.from(yield* Fiber.join(interrupted)).at(-1)?.kind).toBe("interrupted");
+          // The cancel kept the session live; release it before starting over.
+          yield* connection.stop(sessionId);
 
           hanging = false;
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
@@ -624,6 +627,91 @@ describe("makeOpenAiCompatibleDriver", () => {
     );
 
     expect(bodies[0]?.prompt_cache_key).toBe(String(sessionId));
+  });
+
+  it("does not let a responses token count reject a later request automatic mode may send as chat completions", async () => {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setCompatibleProtocol(instanceId, "responses");
+    runtimeRegistry.setObservedState({
+      instanceId,
+      readiness: "ready",
+      processState: "stopped",
+      models: [
+        {
+          id: modelId,
+          displayName: "manual",
+          source: "manual",
+          verification: "unverified",
+          reasoning: "unavailable",
+          inputModalities: ["text"],
+          options: [],
+          contextLimit: 200,
+        },
+      ],
+      capabilities: {
+        streaming: "supported",
+        resume: "unsupported",
+        interruption: "supported",
+        approvals: "unsupported",
+        userQuestions: "unsupported",
+        reasoning: "unavailable",
+        usage: "supported",
+        toolActivity: "unsupported",
+        fileChanges: "unsupported",
+        diffs: "unsupported",
+        taskProgress: "unsupported",
+        nativeChildAgents: "unsupported",
+        harnessAutoReview: "unsupported",
+        nativeAttachments: "unsupported",
+        nativeWebResearch: "unsupported",
+        appManagedTools: "supported",
+        citations: "unsupported",
+      },
+      observedAt: "2026-07-15T12:00:00.000Z",
+    });
+    const fetch = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/responses")
+        ? responsesTextStream("ok", {
+            input_tokens: 10_000,
+            output_tokens: 1,
+            total_tokens: 10_001,
+          })
+        : chatStream("ok"),
+    );
+    const driver = makeDriver({
+      configuration: { ...configuration, protocol: "auto" },
+      fetch,
+      runtimeRegistry,
+    });
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const first = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({ sessionId, prompt: "hi", attachments: [], tools: [] });
+          expect(Array.from(yield* Fiber.join(first)).at(-1)?.kind).toBe("completed");
+          const second = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({
+            sessionId,
+            prompt: "x".repeat(400),
+            attachments: [],
+            tools: [],
+          });
+          const followed = Array.from(yield* Fiber.join(second));
+          yield* connection.stop(sessionId);
+          return followed;
+        }),
+      ),
+    );
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -863,7 +951,14 @@ function isTerminalEvent(event: ProviderRuntimeEvent) {
   return event.kind === "completed" || event.kind === "interrupted" || event.kind === "failed";
 }
 
-function responsesTextStream(text: string): Response {
+function responsesTextStream(
+  text: string,
+  usage: { input_tokens: number; output_tokens: number; total_tokens: number } = {
+    input_tokens: 1,
+    output_tokens: 1,
+    total_tokens: 2,
+  },
+): Response {
   const response = (status: "in_progress" | "completed", usage: unknown = null) => ({
     id: "resp_private",
     object: "response",
@@ -917,7 +1012,7 @@ function responsesTextStream(text: string): Response {
     {
       type: "response.completed",
       sequence_number: 6,
-      response: response("completed", { input_tokens: 1, output_tokens: 1, total_tokens: 2 }),
+      response: response("completed", usage),
     },
   ];
   return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {

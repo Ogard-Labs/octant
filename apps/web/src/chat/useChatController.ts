@@ -993,6 +993,22 @@ export function useChatController(options: ChatControllerOptions) {
       })),
     [restCommand],
   );
+  /**
+   * One more turn on a finished thread that is not open, from the Review page.
+   * It is the ordinary send command with the thread's current version, and a
+   * refusal comes back as a value for the same reason the rest commands'
+   * do: nothing else reports it.
+   */
+  const sendBackTurn = useCallback(
+    (threadId: ChatThreadId, prompt: string) =>
+      restCommand(threadId, (expectedVersion) => ({
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion,
+        prompt,
+      })),
+    [restCommand],
+  );
 
   return {
     activeView: visibleActiveView,
@@ -1029,6 +1045,7 @@ export function useChatController(options: ChatControllerOptions) {
           : activateThread(options.activeThreadId)
         : loadBootstrap(),
     sendTurn,
+    sendBackTurn,
     settingsMessage,
     setPendingDraft: updatePendingDraft,
     setPendingDraftCaret,

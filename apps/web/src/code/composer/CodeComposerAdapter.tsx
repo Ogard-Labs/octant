@@ -66,6 +66,7 @@ import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
 import { providerFamilyForThread } from "../../providers/providerFamily";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { WelcomeHeading } from "../../composer/WelcomeHeading";
+import { HomeComposerTabs, type HomeComposerTabsSlot } from "../../home/HomeComposerTabs";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
 import { appendTranscript } from "../../voice/appendTranscript";
 import { HostSelector } from "../../shell/HostSelector";
@@ -88,6 +89,7 @@ import {
   useThreadMentionTypeahead,
 } from "../../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../../chat/useThreadMentions";
+import { useComposerThreadDropRegistration } from "../../chat/composerThreadDrop";
 import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type {
   GithubIssueContextRequest,
@@ -110,6 +112,11 @@ export interface CodeComposerAdapterProps {
   readonly projectRoot?: string;
   readonly repositoryId?: CodeRepositoryId;
   readonly checkoutId?: CodeCheckoutId;
+  /**
+   * The branch this draft was opened for, such as the failing pull request's
+   * branch from Start a fix. It is a decision, not a seed: the draft starts a
+   * worktree from it, and the checkout's head does not replace it.
+   */
   readonly branchName?: string;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedHostId?: HostId;
@@ -158,6 +165,8 @@ export interface CodeComposerAdapterProps {
    * composer and its suggestions, ahead of the sections in `beneath`.
    */
   readonly homeStart?: ReactNode;
+  /** The Running tab above the composer; absent leaves the composer on its own. */
+  readonly composerTabs?: HomeComposerTabsSlot;
   /** Content shown under the composer (what is waiting, what to continue). */
   readonly beneath?: ReactNode;
   /**
@@ -350,6 +359,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     textarea: () => textareaRef.current,
     ...(props.creating === true ? { disabled: true } : {}),
   });
+  const threadDropKey = useComposerThreadDropRegistration({
+    enabled: threadMentions.composer !== undefined,
+    onDraftChange: (next) => setPrompt(next),
+    attachDroppedThread: threadMentions.attachDroppedThread,
+  });
   const [executionPolicy, setExecutionPolicy] = useState(props.defaultExecutionPolicy);
   const [permissionPersistence, setPermissionPersistence] = useState(
     props.defaultPermissionPersistence,
@@ -365,7 +379,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // Unknown until the host says. Neither caller supplies a branch for a
   // Project-bound composer, so seeding a literal here meant the tray asserted
   // `development` for every repository, including the ones on `main`.
-  const initialBaseBranch = props.baseBranch ?? props.branchName ?? "";
+  const initialBaseBranch = props.branchName ?? props.baseBranch ?? "";
   // The delivery target is derived from the tray, not typed into a form: the
   // base branch is the branch picker, the base repository is the connected
   // GitHub repository (or the local Project), and the remote is the one the
@@ -377,10 +391,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       ? "local/repository"
       : `local/${props.projectName}`);
   const [baseBranch, setBaseBranch] = useState(initialBaseBranch);
-  // Whether the branch on screen is the reader's own pick. A seeded prop is a
-  // starting value, not a decision: the checkout's actual head outranks it, and
-  // only a pick from the ref list outranks the head.
-  const baseBranchChosen = useRef(false);
+  // Whether the branch on screen is the reader's own pick. A seeded base branch
+  // is a starting value, not a decision: the checkout's actual head outranks it,
+  // and only a pick from the ref list outranks the head. A branch the draft was
+  // opened for is already chosen; read as a seed, the head replaced it and Start
+  // a fix created the thread from `main` while the tray named the failing branch.
+  const handedBranch = props.branchName;
+  const baseBranchChosen = useRef(handedBranch !== undefined);
   // F4: remote facts are server-authoritative. When the server has not
   // provided them, fail closed with no remotes so Start from origin is
   // disabled rather than fabricated.
@@ -393,7 +410,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // The Project habit is the preselection; the user may override it for this
   // one thread. Switching Projects drops the override so the next Project's
   // own habit is honored rather than the previous Project's choice.
-  const [workspaceOverride, setWorkspaceOverride] = useState<CodeNewThreadWorkspace>();
+  // The current checkout keeps whatever branch it is on, so a draft opened for
+  // a branch starts a worktree from that branch instead.
+  const handedWorkspace: CodeNewThreadWorkspace | undefined =
+    handedBranch === undefined ? undefined : "managed-worktree";
+  const [workspaceOverride, setWorkspaceOverride] = useState<CodeNewThreadWorkspace | undefined>(
+    handedWorkspace,
+  );
   const workspace =
     workspaceOverride ?? props.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE;
   const startFromOrigin = startFromOriginOverride ?? defaultStartFromOrigin(worktreeRemoteFacts);
@@ -472,14 +495,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     projectIdRef.current = projectId;
     setWorktreeRefs(undefined);
     setRefsLoading(false);
-    setWorkspaceOverride(undefined);
+    setWorkspaceOverride(handedWorkspace);
     // A ref the reader picked belongs to the Project they picked it in. Left
     // standing, it both kept the previous Project's branch on screen and told
     // the adoption below that this Project's head had already been overruled.
     // Falls back to whatever the caller seeded, not to nothing: a host that
     // never lists refs still has that to show.
-    baseBranchChosen.current = false;
-    setBaseBranch(props.baseBranch ?? props.branchName ?? "");
+    baseBranchChosen.current = handedBranch !== undefined;
+    setBaseBranch(props.branchName ?? props.baseBranch ?? "");
     // Only a change of Project resets this; the seed is read as it stands then.
   }, [projectId]);
   const loadWorktreeRefs = useCallback(() => {
@@ -698,212 +721,215 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           ) : null}
         </div>
 
-        <div className="composer-stack">
-          <ThreadComposer
-            startContext={
-              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
-                <div className="composer-tray__leading">
-                  {projectControl}
-                  {branchControl}
-                  {environmentControl}
+        <HomeComposerTabs slot={props.composerTabs}>
+          <div className="composer-stack">
+            <ThreadComposer
+              {...(threadDropKey === undefined ? {} : { threadDropKey })}
+              startContext={
+                <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                  <div className="composer-tray__leading">
+                    {projectControl}
+                    {branchControl}
+                    {environmentControl}
+                  </div>
+                  <div className="composer-tray__trailing">
+                    {hasProject ? (
+                      <CodeWorkspaceSelector
+                        onChange={setWorkspaceOverride}
+                        value={workspace}
+                        {...(props.creating === true ? { disabled: true } : {})}
+                      />
+                    ) : null}
+                    {props.createFromControl}
+                  </div>
                 </div>
-                <div className="composer-tray__trailing">
-                  {hasProject ? (
-                    <CodeWorkspaceSelector
-                      onChange={setWorkspaceOverride}
-                      value={workspace}
-                      {...(props.creating === true ? { disabled: true } : {})}
-                    />
-                  ) : null}
-                  {props.createFromControl}
-                </div>
-              </div>
-            }
-            chips={
-              <>
-                <ComputerUseMention controller={computer} surface="chips" />
-                <BrowserUseMention controller={browser} surface="chips" />
-                {extensionDraft.receipts.length > 0 ? (
-                  <ul aria-label="Selected extensions" className="composer-chips">
-                    {extensionDraft.receipts.map((receipt) => (
-                      <li className="chip" key={receipt.reference}>
-                        <span>{receipt.label}</span>
-                        {receipt.status.kind === "blocked" ? (
-                          <span>{`Blocked: ${receipt.status.reason}`}</span>
-                        ) : null}
-                        <OctantButton
-                          aria-label={`Remove ${receipt.label} extension`}
-                          className="chip-x window-no-drag"
-                          onClick={() => extensionDraft.remove(receipt.reference)}
-                          type="button"
-                          variant="ghost"
-                        >
-                          ×
-                        </OctantButton>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                <ThreadMentionChips
-                  chips={threadMentions.chips}
-                  onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
-                />
-                <TrackerReferenceComposerHints draft={prompt} />
-                <WorkImageAttachmentChips images={images} />
-              </>
-            }
-            input={
-              <OctantTextarea
-                aria-label="First message"
-                aria-autocomplete="list"
-                aria-expanded={computer.open || browser.open || slash.open}
-                aria-controls={
-                  appMentions.open.length > 1
-                    ? appMentions.listId
-                    : computer.open
-                      ? computer.listId
-                      : browser.open
-                        ? browser.listId
-                        : slash.open
-                          ? slash.listId
-                          : undefined
-                }
-                aria-activedescendant={
-                  appMentions.open.length > 1
-                    ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
-                    : computer.open
-                      ? `${computer.listId}-computer`
-                      : browser.open
-                        ? `${browser.listId}-browser`
-                        : slash.active === undefined
-                          ? undefined
-                          : `${slash.listId}-${slash.active.id}`
-                }
-                autoFocus
-                className="composer-input"
-                disabled={props.creating}
-                onChange={(event) => {
-                  setPrompt(event.target.value);
-                  computer.sync(event.target.value, event.currentTarget.selectionStart);
-                  browser.sync(event.target.value, event.currentTarget.selectionStart);
-                  slash.sync(event.target.value, event.currentTarget.selectionStart);
-                  mention.sync(event.target.value, event.currentTarget.selectionStart);
-                }}
-                onClick={(event) => {
-                  mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                  browser.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                  slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                }}
-                onKeyDown={handleKeyDown}
-                onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
-                  if (props.creating === true) return;
-                  if (attachFromTransfer(event.clipboardData)) event.preventDefault();
-                }}
-                placeholder={draftThreadModePresentation("code").composerPlaceholder}
-                ref={textareaRef}
-                rows={3}
-                value={prompt}
-              />
-            }
-            typeahead={
-              appMentions.open.length > 1 ? (
-                <ApplicationMentionTypeahead typeahead={appMentions} />
-              ) : computer.open ? (
-                <ComputerUseMention controller={computer} surface="typeahead" />
-              ) : browser.open ? (
-                <BrowserUseMention controller={browser} surface="typeahead" />
-              ) : slash.open ? (
-                <ComposerSlashTypeahead controller={slash} />
-              ) : mention.open ? (
-                <ThreadMentionTypeahead
-                  activeIndex={mention.activeIndex}
-                  {...(threadMentions.composer?.busy === undefined
-                    ? {}
-                    : { busy: threadMentions.composer.busy })}
-                  candidates={threadMentions.composer?.candidates ?? []}
-                  listId={mentionListId}
-                  onChoose={mention.choose}
-                  onHover={mention.setActiveIndex}
-                />
-              ) : null
-            }
-            row={{
-              className: "code-composer-adapter__composer-bar",
-              leading: (
+              }
+              chips={
                 <>
-                  <ComposerAttachButton
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    busy={props.creating === true}
-                    refusedReason={
-                      imageSupport === false
-                        ? "The selected model does not accept images. Choose an image-capable model."
-                        : undefined
-                    }
-                    onRefused={images.refuse}
-                    onFileSelected={(file) => images.attach([file])}
+                  <ComputerUseMention controller={computer} surface="chips" />
+                  <BrowserUseMention controller={browser} surface="chips" />
+                  {extensionDraft.receipts.length > 0 ? (
+                    <ul aria-label="Selected extensions" className="composer-chips">
+                      {extensionDraft.receipts.map((receipt) => (
+                        <li className="chip" key={receipt.reference}>
+                          <span>{receipt.label}</span>
+                          {receipt.status.kind === "blocked" ? (
+                            <span>{`Blocked: ${receipt.status.reason}`}</span>
+                          ) : null}
+                          <OctantButton
+                            aria-label={`Remove ${receipt.label} extension`}
+                            className="chip-x window-no-drag"
+                            onClick={() => extensionDraft.remove(receipt.reference)}
+                            type="button"
+                            variant="ghost"
+                          >
+                            ×
+                          </OctantButton>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <ThreadMentionChips
+                    chips={threadMentions.chips}
+                    onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
                   />
-                  <ComposerVoiceButton
-                    disabled={props.creating === true}
-                    onTranscript={(transcript) =>
-                      setPrompt((current) => appendTranscript(current, transcript))
-                    }
-                  />
-
-                  <span aria-hidden="true" className="composer-gap" />
-                  <span className="code-composer-adapter__context-picker">
-                    <ComposerModelPicker
-                      ariaLabel="Provider and model"
-                      groups={props.providerGroups}
-                      modelOptionValues={modelOptionValues}
-                      onModelOptionChange={(id, value) => {
-                        const remaining = Object.fromEntries(
-                          Object.entries(modelOptionValues).filter(([key]) => key !== id),
-                        );
-                        setModelChoice({
-                          key: modelKey,
-                          values: value === undefined ? remaining : { ...remaining, [id]: value },
-                        });
-                      }}
-                      menuSide="bottom"
-                      onSelect={props.onSelectProvider}
-                      {...(props.selectedModelId === undefined
-                        ? {}
-                        : { selectedModelId: props.selectedModelId })}
-                      {...(props.selectedProviderInstanceId === undefined
-                        ? {}
-                        : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                    />
-                  </span>
-                  {props.poolControl}
+                  <TrackerReferenceComposerHints draft={prompt} />
+                  <WorkImageAttachmentChips images={images} />
                 </>
-              ),
-              trailing: (
-                <CodeComposerAccessMenu
-                  onChange={(nextPolicy) => {
-                    setExecutionPolicy(nextPolicy);
-                    props.onExecutionPolicyChange?.(nextPolicy, permissionPersistence);
+              }
+              input={
+                <OctantTextarea
+                  aria-label="First message"
+                  aria-autocomplete="list"
+                  aria-expanded={computer.open || browser.open || slash.open}
+                  aria-controls={
+                    appMentions.open.length > 1
+                      ? appMentions.listId
+                      : computer.open
+                        ? computer.listId
+                        : browser.open
+                          ? browser.listId
+                          : slash.open
+                            ? slash.listId
+                            : undefined
+                  }
+                  aria-activedescendant={
+                    appMentions.open.length > 1
+                      ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
+                      : computer.open
+                        ? `${computer.listId}-computer`
+                        : browser.open
+                          ? `${browser.listId}-browser`
+                          : slash.active === undefined
+                            ? undefined
+                            : `${slash.listId}-${slash.active.id}`
+                  }
+                  autoFocus
+                  className="composer-input"
+                  disabled={props.creating}
+                  onChange={(event) => {
+                    setPrompt(event.target.value);
+                    computer.sync(event.target.value, event.currentTarget.selectionStart);
+                    browser.sync(event.target.value, event.currentTarget.selectionStart);
+                    slash.sync(event.target.value, event.currentTarget.selectionStart);
+                    mention.sync(event.target.value, event.currentTarget.selectionStart);
                   }}
-                  onPersistenceChange={(nextPersistence) => {
-                    setPermissionPersistence(nextPersistence);
-                    props.onExecutionPolicyChange?.(executionPolicy, nextPersistence);
+                  onClick={(event) => {
+                    mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                    browser.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                    slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                   }}
-                  persistence={permissionPersistence}
-                  value={executionPolicy}
-                  {...(props.creating === true ? { disabled: true } : {})}
+                  onKeyDown={handleKeyDown}
+                  onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+                    if (props.creating === true) return;
+                    if (attachFromTransfer(event.clipboardData)) event.preventDefault();
+                  }}
+                  placeholder={draftThreadModePresentation("code").composerPlaceholder}
+                  ref={textareaRef}
+                  rows={3}
+                  value={prompt}
                 />
-              ),
-              actions: {
-                kind: "send",
-                send: {
-                  ariaLabel:
-                    props.errorMessage === undefined ? "Create thread" : "Retry creating thread",
-                  disabled: !canSubmit,
-                  onSend: submit,
+              }
+              typeahead={
+                appMentions.open.length > 1 ? (
+                  <ApplicationMentionTypeahead typeahead={appMentions} />
+                ) : computer.open ? (
+                  <ComputerUseMention controller={computer} surface="typeahead" />
+                ) : browser.open ? (
+                  <BrowserUseMention controller={browser} surface="typeahead" />
+                ) : slash.open ? (
+                  <ComposerSlashTypeahead controller={slash} />
+                ) : mention.open ? (
+                  <ThreadMentionTypeahead
+                    activeIndex={mention.activeIndex}
+                    {...(threadMentions.composer?.busy === undefined
+                      ? {}
+                      : { busy: threadMentions.composer.busy })}
+                    candidates={threadMentions.composer?.candidates ?? []}
+                    listId={mentionListId}
+                    onChoose={mention.choose}
+                    onHover={mention.setActiveIndex}
+                  />
+                ) : null
+              }
+              row={{
+                className: "code-composer-adapter__composer-bar",
+                leading: (
+                  <>
+                    <ComposerAttachButton
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      busy={props.creating === true}
+                      refusedReason={
+                        imageSupport === false
+                          ? "The selected model does not accept images. Choose an image-capable model."
+                          : undefined
+                      }
+                      onRefused={images.refuse}
+                      onFileSelected={(file) => images.attach([file])}
+                    />
+                    <ComposerVoiceButton
+                      disabled={props.creating === true}
+                      onTranscript={(transcript) =>
+                        setPrompt((current) => appendTranscript(current, transcript))
+                      }
+                    />
+
+                    <span aria-hidden="true" className="composer-gap" />
+                    <span className="code-composer-adapter__context-picker">
+                      <ComposerModelPicker
+                        ariaLabel="Provider and model"
+                        groups={props.providerGroups}
+                        modelOptionValues={modelOptionValues}
+                        onModelOptionChange={(id, value) => {
+                          const remaining = Object.fromEntries(
+                            Object.entries(modelOptionValues).filter(([key]) => key !== id),
+                          );
+                          setModelChoice({
+                            key: modelKey,
+                            values: value === undefined ? remaining : { ...remaining, [id]: value },
+                          });
+                        }}
+                        menuSide="bottom"
+                        onSelect={props.onSelectProvider}
+                        {...(props.selectedModelId === undefined
+                          ? {}
+                          : { selectedModelId: props.selectedModelId })}
+                        {...(props.selectedProviderInstanceId === undefined
+                          ? {}
+                          : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                      />
+                    </span>
+                    {props.poolControl}
+                  </>
+                ),
+                trailing: (
+                  <CodeComposerAccessMenu
+                    onChange={(nextPolicy) => {
+                      setExecutionPolicy(nextPolicy);
+                      props.onExecutionPolicyChange?.(nextPolicy, permissionPersistence);
+                    }}
+                    onPersistenceChange={(nextPersistence) => {
+                      setPermissionPersistence(nextPersistence);
+                      props.onExecutionPolicyChange?.(executionPolicy, nextPersistence);
+                    }}
+                    persistence={permissionPersistence}
+                    value={executionPolicy}
+                    {...(props.creating === true ? { disabled: true } : {})}
+                  />
+                ),
+                actions: {
+                  kind: "send",
+                  send: {
+                    ariaLabel:
+                      props.errorMessage === undefined ? "Create thread" : "Retry creating thread",
+                    disabled: !canSubmit,
+                    onSend: submit,
+                  },
                 },
-              },
-            }}
-          />
-        </div>
+              }}
+            />
+          </div>
+        </HomeComposerTabs>
 
         {props.projectSetup}
 

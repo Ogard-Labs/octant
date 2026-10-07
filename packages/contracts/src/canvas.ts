@@ -25,9 +25,11 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // Canvas wire contracts are deliberately versioned independently from event
 // envelopes. A decoder must reject a future version until its renderer and
 // policy have been reviewed together. The current schema version is declared
-// in `canvasIdentity.ts`: version 3 added the mockup block and version 4 the
-// thread presentation, which the definition filters below admit only under
-// those declared versions.
+// in `canvasIdentity.ts`: version 3 added the mockup block, version 4 the
+// thread presentation, version 5 the treemap block, version 6 the heatmap
+// block, version 7 the ranked bar-list block, and version 8 the
+// entity-relationship, swimlane, and mind map diagram kinds, which the
+// definition filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -57,6 +59,63 @@ export const CANVAS_MAX_PLAN_TASK_SOURCES = 8;
 export const CANVAS_MAX_MOCKUP_DEPTH = 6;
 export const CANVAS_MAX_MOCKUP_NODES = 64;
 export const CANVAS_MAX_MOCKUP_TEXT_LENGTH = 120;
+export const CANVAS_MAX_TREEMAP_LEAVES = 4_096;
+export const CANVAS_MAX_TREEMAP_DEPTH = 8;
+export const CANVAS_MAX_TREEMAP_MEASURES = 8;
+export const CANVAS_MAX_TREEMAP_LABEL_LENGTH = 120;
+export const CANVAS_MAX_HEATMAP_ROWS = 256;
+export const CANVAS_MAX_HEATMAP_COLUMNS = 256;
+export const CANVAS_MAX_HEATMAP_CELLS = 16_384;
+// Up to three years of days, leap days included, so a calendar heatmap can
+// show a year of daily readings and a multi-year view without a silent
+// truncation.
+export const CANVAS_MAX_HEATMAP_DAYS = 3 * 366;
+export const CANVAS_MAX_HEATMAP_NOTE_LENGTH = 120;
+// A ranked list is read, not scrolled: the cap is what keeps a "hottest files"
+// list from becoming the whole repository. The renderer shows a shorter top N
+// and offers Show all up to this bound.
+export const CANVAS_MAX_BAR_LIST_ROWS = 500;
+// A metric sparkline is a glance at a recent trend, not a chart: a quarter of
+// readings at a sample a day is enough, and past that the line is a smear.
+export const CANVAS_MAX_METRIC_SPARKLINE_POINTS = 256;
+// An entity-relationship entity is a table row set: a schema large enough to
+// read still fits beside its neighbours, and past this the picture is a wall.
+export const CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY = 64;
+// Swimlane lanes are few and ordered; a process with more stages than this is
+// a workflow chart, not a lane diagram.
+export const CANVAS_MAX_SWIMLANE_LANES = 32;
+// A mind map note is a remark beside a topic, not a paragraph; the cap keeps
+// the tree readable when every node carries one.
+export const CANVAS_MAX_MINDMAP_NOTE_LENGTH = 240;
+
+// The schema version that introduced each version-gated block kind or hint. A
+// document carrying one below the version that introduced it is a declared
+// future version, not a corrupt one, so a rolled-back runtime refuses it cleanly.
+export const CANVAS_MOCKUP_SCHEMA_VERSION = 3;
+export const CANVAS_PRESENTATION_SCHEMA_VERSION = 4;
+export const CANVAS_TREEMAP_SCHEMA_VERSION = 5;
+export const CANVAS_HEATMAP_SCHEMA_VERSION = 6;
+export const CANVAS_BAR_LIST_SCHEMA_VERSION = 7;
+// The three remaining diagram kinds shipped as one slice and share a floor:
+// they arrive together in the block catalog, so one bump admits them all.
+export const CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION = 8;
+// The metric's sparkline, goodDirection, and caption arrived with the bar list.
+export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
+
+/** Whether a block uses a metric field introduced at the metric-trend version. */
+export function canvasMetricUsesTrendFields(block: {
+  readonly kind?: unknown;
+  readonly sparkline?: unknown;
+  readonly goodDirection?: unknown;
+  readonly caption?: unknown;
+}): boolean {
+  return (
+    block.kind === "metric" &&
+    (block.sparkline !== undefined ||
+      block.goodDirection !== undefined ||
+      block.caption !== undefined)
+  );
+}
 
 // Descriptive aliases keep budget names discoverable without creating a
 // second source of truth.
@@ -215,6 +274,9 @@ export const CanvasBlockKind = Schema.Literal(
   "diagram",
   "sequence",
   "state",
+  "er",
+  "swimlane",
+  "mindmap",
   "code-excerpt",
   "pseudocode",
   "diff",
@@ -228,6 +290,9 @@ export const CanvasBlockKind = Schema.Literal(
   "image",
   "plan",
   "mockup",
+  "treemap",
+  "heatmap",
+  "bar-list",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -281,8 +346,37 @@ export const CanvasCitationBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasCitationBlock = typeof CanvasCitationBlock.Type;
 
+/**
+ * How a block presents a number.
+ *
+ * Absent reads as the default grouped decimal, so an author who does not care
+ * gets locale grouping for free. `compact` is the short reading (1.36M),
+ * `percent` reads the value as a ratio where 1 is 100%, `bytes` a base-1024
+ * size, and `duration` a count of seconds. The formatter that reads this is
+ * shared by charts, metrics, and tables, so one word means the same reading
+ * everywhere it appears.
+ */
+export const CanvasNumberFormat = Schema.Literal(
+  "number",
+  "compact",
+  "percent",
+  "bytes",
+  "duration",
+);
+export type CanvasNumberFormat = typeof CanvasNumberFormat.Type;
+
 export const CanvasScalar = Schema.Union(CanvasText, FiniteNumber, Schema.Boolean, Schema.Null);
 export type CanvasScalar = typeof CanvasScalar.Type;
+
+/**
+ * Which way a metric is good when it moves, so a delta's tone is never guessed.
+ *
+ * `up` means a larger reading is better (throughput), `down` a smaller one
+ * (latency, failures), and `neutral` that the metric has no good side (a count
+ * of open items that should simply be watched). Absent reads as neutral.
+ */
+export const CanvasMetricDirection = Schema.Literal("up", "down", "neutral");
+export type CanvasMetricDirection = typeof CanvasMetricDirection.Type;
 
 export const CanvasMetricBlock = Schema.Struct({
   ...CanvasBlockFields,
@@ -291,6 +385,19 @@ export const CanvasMetricBlock = Schema.Struct({
   value: CanvasScalar,
   unit: Schema.optional(CanvasLabel),
   delta: Schema.optional(FiniteNumber),
+  format: Schema.optional(CanvasNumberFormat),
+  /**
+   * A recent trend drawn beside the value. Wire numbers only; the renderer
+   * reads them as one series and the static export draws the same line. The
+   * array is bounded so a sparkline stays a glance rather than a chart.
+   */
+  sparkline: Schema.optional(
+    Schema.Array(FiniteNumber).pipe(Schema.maxItems(CANVAS_MAX_METRIC_SPARKLINE_POINTS)),
+  ),
+  /** How a delta reads; absent means the arrow gives direction without a tone. */
+  goodDirection: Schema.optional(CanvasMetricDirection),
+  /** A short note under the value, e.g. "since last release". */
+  caption: Schema.optional(CanvasText),
 }).annotations(strict);
 export type CanvasMetricBlock = typeof CanvasMetricBlock.Type;
 
@@ -331,10 +438,32 @@ export type CanvasKeyValueBlock = typeof CanvasKeyValueBlock.Type;
 export const CanvasTableColumnType = Schema.Literal("text", "number", "boolean", "date", "status");
 export type CanvasTableColumnType = typeof CanvasTableColumnType.Type;
 
+/**
+ * How a table column draws its cells.
+ *
+ * Absent reads as plain text. `bar` draws an in-cell bar whose length is the
+ * value's share of the column's largest reading, `heat` tints the cell on the
+ * shared sequential scale, and `status` reads each value as a badge. A bar or
+ * a tint is presentation only: the value is always shown, so colour never
+ * carries a reading on its own, and both fall back to the plain value under
+ * forced colours.
+ */
+export const CanvasTableColumnDisplay = Schema.Literal("text", "bar", "heat", "status");
+export type CanvasTableColumnDisplay = typeof CanvasTableColumnDisplay.Type;
+
+// `format` and `display` are additive optional presentation fields on the
+// existing table kind: they refine how a value an older runtime already reads
+// is drawn, they never change its order or add a block kind. The repository
+// treated `format` this way when it was added to the table, metric, and chart
+// columns, so `display` follows the same ungated convention rather than
+// minting a schema version a rolled-back runtime would have to learn for a
+// field it can safely draw as plain text.
 export const CanvasTableColumn = Schema.Struct({
   id: boundedToken("CanvasTableColumnId"),
   label: CanvasLabel,
   type: CanvasTableColumnType,
+  format: Schema.optional(CanvasNumberFormat),
+  display: Schema.optional(CanvasTableColumnDisplay),
 }).annotations(strict);
 export type CanvasTableColumn = typeof CanvasTableColumn.Type;
 
@@ -487,6 +616,8 @@ export const CanvasChartBlock = Schema.Struct({
   kind: Schema.Literal("chart"),
   chartType: CanvasChartType,
   series: Schema.Array(CanvasChartSeries).pipe(Schema.maxItems(CANVAS_MAX_SERIES)),
+  /** How numeric axis values and readings read; absent groups by locale. */
+  format: Schema.optional(CanvasNumberFormat),
 })
   .annotations(strict)
   .pipe(
@@ -495,6 +626,208 @@ export const CanvasChartBlock = Schema.Struct({
     }),
   );
 export type CanvasChartBlock = typeof CanvasChartBlock.Type;
+
+/**
+ * How a treemap colours its cells.
+ *
+ * `categorical` assigns a hue per top-level group; `sequential` and
+ * `diverging` read the colour measure as an ordered value. Diverging centres
+ * on the mid-point of the colour domain, so a reading above the middle takes
+ * the positive family and one below it the negative family.
+ */
+export const CanvasTreemapScale = Schema.Literal("sequential", "diverging", "categorical");
+export type CanvasTreemapScale = typeof CanvasTreemapScale.Type;
+
+export const CanvasTreemapMeasureId = boundedToken("CanvasTreemapMeasureId");
+export type CanvasTreemapMeasureId = typeof CanvasTreemapMeasureId.Type;
+
+export const CanvasTreemapMeasure = Schema.Struct({
+  measureId: CanvasTreemapMeasureId,
+  label: CanvasLabel,
+  format: Schema.optional(CanvasNumberFormat),
+}).annotations(strict);
+export type CanvasTreemapMeasure = typeof CanvasTreemapMeasure.Type;
+
+/**
+ * One node of a treemap hierarchy.
+ *
+ * A node names its parent rather than nesting its children: a nested tree at
+ * the leaf budget would land past the Canvas depth budget before a repository
+ * has named its packages. Values sit on leaves; a group's reading is the sum
+ * of its children, so the picture never states a total the leaves do not.
+ */
+export const CanvasTreemapNode = Schema.Struct({
+  nodeId: CanvasNodeId,
+  parentId: Schema.optional(CanvasNodeId),
+  label: boundedNonEmptyText(CANVAS_MAX_TREEMAP_LABEL_LENGTH),
+  /** A leaf may name a manifest source; the host reauthorizes opening it. */
+  sourceId: Schema.optional(CanvasSourceId),
+  /** The leaf's value for each declared measure. Groups carry none. */
+  values: Schema.optional(Schema.Record({ key: CanvasTreemapMeasureId, value: FiniteNumber })),
+}).annotations(strict);
+export type CanvasTreemapNode = typeof CanvasTreemapNode.Type;
+
+export const CanvasTreemapBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("treemap"),
+  nodes: Schema.Array(CanvasTreemapNode).pipe(Schema.maxItems(CANVAS_MAX_TREEMAP_LEAVES)),
+  measures: Schema.NonEmptyArray(CanvasTreemapMeasure).pipe(
+    Schema.maxItems(CANVAS_MAX_TREEMAP_MEASURES),
+  ),
+  /** The measure rectangles are sized by when the block first draws. */
+  sizeBy: CanvasTreemapMeasureId,
+  /** The measure cells are coloured by when the block first draws. */
+  colorBy: CanvasTreemapMeasureId,
+  colorScale: Schema.optional(CanvasTreemapScale),
+  /** The node a static export starts from; absent draws the whole hierarchy. */
+  startNodeId: Schema.optional(CanvasNodeId),
+}).annotations(strict);
+export type CanvasTreemapBlock = typeof CanvasTreemapBlock.Type;
+
+/**
+ * A grid coloured by value.
+ *
+ * A matrix names its rows and columns and carries a sparse cell per
+ * coordinate; a calendar carries one reading per date. Both read a value
+ * through the shared scale roles (`sequential` or `diverging`), and both draw
+ * a missing coordinate apart from a zero: an absent cell is not a reading of
+ * nothing.
+ */
+export const CanvasHeatmapScale = Schema.Literal("sequential", "diverging");
+export type CanvasHeatmapScale = typeof CanvasHeatmapScale.Type;
+
+export const CanvasHeatmapLayout = Schema.Literal("matrix", "calendar");
+export type CanvasHeatmapLayout = typeof CanvasHeatmapLayout.Type;
+
+export const CanvasHeatmapRowId = boundedToken("CanvasHeatmapRowId");
+export type CanvasHeatmapRowId = typeof CanvasHeatmapRowId.Type;
+export const CanvasHeatmapColumnId = boundedToken("CanvasHeatmapColumnId");
+export type CanvasHeatmapColumnId = typeof CanvasHeatmapColumnId.Type;
+
+export const CanvasHeatmapRow = Schema.Struct({
+  rowId: CanvasHeatmapRowId,
+  label: CanvasLabel,
+}).annotations(strict);
+export type CanvasHeatmapRow = typeof CanvasHeatmapRow.Type;
+
+export const CanvasHeatmapColumn = Schema.Struct({
+  columnId: CanvasHeatmapColumnId,
+  label: CanvasLabel,
+}).annotations(strict);
+export type CanvasHeatmapColumn = typeof CanvasHeatmapColumn.Type;
+
+const CanvasHeatmapNote = boundedText(CANVAS_MAX_HEATMAP_NOTE_LENGTH);
+
+/**
+ * One coloured reading at a row and column.
+ *
+ * A cell names its axes by id rather than by index, so the picture keeps the
+ * author's labels when rows are sorted by total as view state, and a
+ * coordinate that is not listed reads as missing rather than as zero.
+ */
+export const CanvasHeatmapCell = Schema.Struct({
+  rowId: CanvasHeatmapRowId,
+  columnId: CanvasHeatmapColumnId,
+  value: FiniteNumber,
+  note: Schema.optional(CanvasHeatmapNote),
+}).annotations(strict);
+export type CanvasHeatmapCell = typeof CanvasHeatmapCell.Type;
+
+/** A calendar date as `YYYY-MM-DD`; a rolled-over value such as 2026-02-30 fails. */
+export const CanvasHeatmapDate = Schema.String.pipe(
+  Schema.pattern(/^\d{4}-\d{2}-\d{2}$/),
+  Schema.filter(
+    (value) => {
+      const parsed = new Date(`${value}T00:00:00.000Z`);
+      return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+    },
+    { message: () => "A heatmap date must be a real calendar date." },
+  ),
+);
+export type CanvasHeatmapDate = typeof CanvasHeatmapDate.Type;
+
+export const CanvasHeatmapDay = Schema.Struct({
+  date: CanvasHeatmapDate,
+  value: FiniteNumber,
+  note: Schema.optional(CanvasHeatmapNote),
+}).annotations(strict);
+export type CanvasHeatmapDay = typeof CanvasHeatmapDay.Type;
+
+const CanvasHeatmapFields = {
+  ...CanvasBlockFields,
+  kind: Schema.Literal("heatmap"),
+  /** The reading's name, shown on the legend and in the tooltip. */
+  valueLabel: Schema.optional(CanvasLabel),
+  /** How each reading reads; absent groups by locale. */
+  format: Schema.optional(CanvasNumberFormat),
+  scale: Schema.optional(CanvasHeatmapScale),
+} as const;
+
+export const CanvasHeatmapMatrixBlock = Schema.Struct({
+  ...CanvasHeatmapFields,
+  layout: Schema.Literal("matrix"),
+  rows: Schema.NonEmptyArray(CanvasHeatmapRow).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_ROWS)),
+  columns: Schema.NonEmptyArray(CanvasHeatmapColumn).pipe(
+    Schema.maxItems(CANVAS_MAX_HEATMAP_COLUMNS),
+  ),
+  cells: Schema.Array(CanvasHeatmapCell).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_CELLS)),
+}).annotations(strict);
+export type CanvasHeatmapMatrixBlock = typeof CanvasHeatmapMatrixBlock.Type;
+
+export const CanvasHeatmapCalendarBlock = Schema.Struct({
+  ...CanvasHeatmapFields,
+  layout: Schema.Literal("calendar"),
+  days: Schema.NonEmptyArray(CanvasHeatmapDay).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_DAYS)),
+}).annotations(strict);
+export type CanvasHeatmapCalendarBlock = typeof CanvasHeatmapCalendarBlock.Type;
+
+export const CanvasHeatmapBlock = Schema.Union(
+  CanvasHeatmapMatrixBlock,
+  CanvasHeatmapCalendarBlock,
+);
+export type CanvasHeatmapBlock = typeof CanvasHeatmapBlock.Type;
+
+/**
+ * How a bar list colours its bars.
+ *
+ * `neutral` draws every bar in the same ink, which is right when the ranking
+ * itself is the point; `sequential` reads each bar's length through the shared
+ * scale, which is right when the magnitude is. Absent reads as neutral.
+ */
+export const CanvasBarListScale = Schema.Literal("neutral", "sequential");
+export type CanvasBarListScale = typeof CanvasBarListScale.Type;
+
+/**
+ * One ranked entry: a name, its magnitude, and an optional second reading.
+ *
+ * The label may be a path, which the renderer draws in the shared path style;
+ * when the row names a manifest `sourceId`, it also offers Open file through
+ * the allowlisted open-source action. Values are magnitudes, so a negative
+ * value is refused: a bar's length cannot be less than none.
+ */
+export const CanvasBarListRow = Schema.Struct({
+  label: CanvasLabel,
+  value: FiniteNumber,
+  secondaryValue: Schema.optional(FiniteNumber),
+  sourceId: Schema.optional(CanvasSourceId),
+}).annotations(strict);
+export type CanvasBarListRow = typeof CanvasBarListRow.Type;
+
+export const CanvasBarListBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("bar-list"),
+  rows: Schema.NonEmptyArray(CanvasBarListRow).pipe(Schema.maxItems(CANVAS_MAX_BAR_LIST_ROWS)),
+  /** The reading's name, shown in the tooltip and the table header. */
+  valueLabel: Schema.optional(CanvasLabel),
+  /** The second reading's name, when rows carry one. */
+  secondaryLabel: Schema.optional(CanvasLabel),
+  /** How each value reads; absent groups by locale. */
+  format: Schema.optional(CanvasNumberFormat),
+  /** How the second reading reads; defaults to the primary format. */
+  secondaryFormat: Schema.optional(CanvasNumberFormat),
+  scale: Schema.optional(CanvasBarListScale),
+}).annotations(strict);
+export type CanvasBarListBlock = typeof CanvasBarListBlock.Type;
 
 export const CanvasTimelineItem = Schema.Struct({
   itemId: boundedToken("CanvasTimelineItemId"),
@@ -659,6 +992,129 @@ export const CanvasStateBlock = Schema.Struct({
   transitions: Schema.Array(CanvasStateTransition).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_EDGES)),
 }).annotations(strict);
 export type CanvasStateBlock = typeof CanvasStateBlock.Type;
+
+/**
+ * How many of one thing sit at one end of a relationship.
+ *
+ * The four cardinalities a data model needs: exactly one, at most one, any
+ * number, and one or more. They are named rather than drawn as a number so the
+ * picture and the export read the same word, and a rolled-back runtime that
+ * never learned a new value still refuses it as a corrupt document.
+ */
+export const CanvasErCardinality = Schema.Literal("one", "zero-or-one", "many", "one-or-many");
+export type CanvasErCardinality = typeof CanvasErCardinality.Type;
+
+export const CanvasErAttribute = Schema.Struct({
+  attributeId: boundedToken("CanvasErAttributeId"),
+  name: CanvasLabel,
+  /** The attribute's type, e.g. `uuid` or `text`. Free text, not a type system. */
+  type: CanvasLabel,
+  /** Whether the attribute is (part of) the entity's key. Absent reads as false. */
+  key: Schema.optional(Schema.Literal(true)),
+}).annotations(strict);
+export type CanvasErAttribute = typeof CanvasErAttribute.Type;
+
+/** An entity and its named attributes. Attributes nest one level, never deeper. */
+export const CanvasErEntity = Schema.Struct({
+  entityId: CanvasNodeId,
+  label: CanvasLabel,
+  attributes: Schema.Array(CanvasErAttribute).pipe(
+    Schema.maxItems(CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY),
+  ),
+}).annotations(strict);
+export type CanvasErEntity = typeof CanvasErEntity.Type;
+
+/**
+ * A relationship between two entities.
+ *
+ * Cardinality is named at each end, so a reader never has to infer "one to
+ * many" from an arrow head the drawing happens to use. The label is optional;
+ * a relationship without one is still a relationship.
+ */
+export const CanvasErRelationship = Schema.Struct({
+  relationshipId: CanvasEdgeId,
+  source: CanvasNodeId,
+  target: CanvasNodeId,
+  sourceCardinality: CanvasErCardinality,
+  targetCardinality: CanvasErCardinality,
+  label: Schema.optional(CanvasLabel),
+}).annotations(strict);
+export type CanvasErRelationship = typeof CanvasErRelationship.Type;
+
+export const CanvasErBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("er"),
+  entities: Schema.Array(CanvasErEntity).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
+  relationships: Schema.Array(CanvasErRelationship).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_EDGES)),
+}).annotations(strict);
+export type CanvasErBlock = typeof CanvasErBlock.Type;
+
+/** Who owns a lane: a person or role (`actor`) or a group (`team`). */
+export const CanvasSwimlaneKind = Schema.Literal("actor", "team");
+export type CanvasSwimlaneKind = typeof CanvasSwimlaneKind.Type;
+
+/** A lane, ordered by its position in the block. Absent kind reads as `actor`. */
+export const CanvasSwimlaneLane = Schema.Struct({
+  laneId: boundedToken("CanvasSwimlaneLaneId"),
+  label: CanvasLabel,
+  kind: Schema.optional(CanvasSwimlaneKind),
+}).annotations(strict);
+export type CanvasSwimlaneLane = typeof CanvasSwimlaneLane.Type;
+
+/**
+ * A step in a lane. A decision step is a step with a branch, named as a flag
+ * rather than a second block kind so the lane order is unaffected.
+ */
+export const CanvasSwimlaneStep = Schema.Struct({
+  stepId: CanvasNodeId,
+  laneId: boundedToken("CanvasSwimlaneLaneId"),
+  label: CanvasLabel,
+  decision: Schema.optional(Schema.Literal(true)),
+}).annotations(strict);
+export type CanvasSwimlaneStep = typeof CanvasSwimlaneStep.Type;
+
+export const CanvasSwimlaneConnection = Schema.Struct({
+  connectionId: CanvasEdgeId,
+  source: CanvasNodeId,
+  target: CanvasNodeId,
+  label: Schema.optional(CanvasLabel),
+}).annotations(strict);
+export type CanvasSwimlaneConnection = typeof CanvasSwimlaneConnection.Type;
+
+export const CanvasSwimlaneBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("swimlane"),
+  lanes: Schema.NonEmptyArray(CanvasSwimlaneLane).pipe(Schema.maxItems(CANVAS_MAX_SWIMLANE_LANES)),
+  steps: Schema.Array(CanvasSwimlaneStep).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
+  connections: Schema.Array(CanvasSwimlaneConnection).pipe(
+    Schema.maxItems(CANVAS_MAX_DIAGRAM_EDGES),
+  ),
+}).annotations(strict);
+export type CanvasSwimlaneBlock = typeof CanvasSwimlaneBlock.Type;
+
+const CanvasMindmapNote = boundedText(CANVAS_MAX_MINDMAP_NOTE_LENGTH);
+
+/**
+ * One topic of a mind map.
+ *
+ * A topic names its parent rather than nesting: a nested tree would land past
+ * the Canvas depth budget before a map named its branches. Exactly one topic
+ * has no parent — the root — and the parent chain never loops.
+ */
+export const CanvasMindmapNode = Schema.Struct({
+  nodeId: CanvasNodeId,
+  label: CanvasLabel,
+  parentId: Schema.optional(CanvasNodeId),
+  note: Schema.optional(CanvasMindmapNote),
+}).annotations(strict);
+export type CanvasMindmapNode = typeof CanvasMindmapNode.Type;
+
+export const CanvasMindmapBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("mindmap"),
+  nodes: Schema.Array(CanvasMindmapNode).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
+}).annotations(strict);
+export type CanvasMindmapBlock = typeof CanvasMindmapBlock.Type;
 
 const CanvasLineNumber = Schema.Int.pipe(Schema.positive());
 
@@ -909,6 +1365,9 @@ export const CanvasBlock = Schema.Union(
   CanvasDiagramBlock,
   CanvasSequenceBlock,
   CanvasStateBlock,
+  CanvasErBlock,
+  CanvasSwimlaneBlock,
+  CanvasMindmapBlock,
   CanvasCodeExcerptBlock,
   CanvasPseudocodeBlock,
   CanvasDiffBlock,
@@ -922,6 +1381,13 @@ export const CanvasBlock = Schema.Union(
   CanvasImageBlock,
   CanvasMockupBlock,
   CanvasPlanBlock,
+  CanvasTreemapBlock,
+  // A heatmap has two layouts with different shapes, so both structs join the
+  // union directly rather than nesting a union: the block catalog derives one
+  // kind per member, and a nested union would hide its members from it.
+  CanvasHeatmapMatrixBlock,
+  CanvasHeatmapCalendarBlock,
+  CanvasBarListBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
   // effect, so union membership never makes a definition executable.
@@ -952,21 +1418,77 @@ export const CanvasDefinition = Schema.Struct({
 })
   .annotations(strict)
   .pipe(
-    // Version-gated blocks: a mockup is declared only under version 3. An older
-    // runtime that never learned the kind must see a mockup-carrying document as
-    // a declared future version, not as a v2 document that failed to decode.
+    // Version-gated blocks and hints: a mockup is admitted from version 3, the
+    // thread presentation from version 4, a treemap from version 5, a heatmap
+    // from version 6, and a bar list and the metric trend fields from version 7. A
+    // rolled-back runtime that never learned a kind or hint must see a document
+    // carrying it as a declared future version, not as a document that failed
+    // to decode. Each keeps its own floor so an earlier document stays valid.
     Schema.filter(
       (definition) =>
-        definition.schemaVersion >= 3 ||
+        definition.schemaVersion >= CANVAS_MOCKUP_SCHEMA_VERSION ||
         !definition.blocks.some((block) => block.kind === "mockup"),
       {
-        message: () => "Mockup blocks require Canvas schema version 3.",
+        message: () =>
+          `Mockup blocks require Canvas schema version ${String(CANVAS_MOCKUP_SCHEMA_VERSION)} or newer.`,
       },
     ),
     Schema.filter(
-      (definition) => definition.schemaVersion >= 4 || definition.presentation === undefined,
+      (definition) =>
+        definition.schemaVersion >= CANVAS_PRESENTATION_SCHEMA_VERSION ||
+        definition.presentation === undefined,
       {
-        message: () => "A thread presentation requires Canvas schema version 4.",
+        message: () =>
+          `A thread presentation requires Canvas schema version ${String(CANVAS_PRESENTATION_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_TREEMAP_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "treemap"),
+      {
+        message: () =>
+          `Treemap blocks require Canvas schema version ${String(CANVAS_TREEMAP_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_HEATMAP_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "heatmap"),
+      {
+        message: () =>
+          `Heatmap blocks require Canvas schema version ${String(CANVAS_HEATMAP_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_BAR_LIST_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "bar-list"),
+      {
+        message: () =>
+          `Bar-list blocks require Canvas schema version ${String(CANVAS_BAR_LIST_SCHEMA_VERSION)}.`,
+      },
+    ),
+    // The entity-relationship, swimlane, and mind map kinds shipped together,
+    // so one floor admits them all.
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION ||
+        !definition.blocks.some(
+          (block) => block.kind === "er" || block.kind === "swimlane" || block.kind === "mindmap",
+        ),
+      {
+        message: () =>
+          `Entity-relationship, swimlane, and mind map blocks require Canvas schema version ${String(CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_METRIC_TREND_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasMetricUsesTrendFields),
+      {
+        message: () =>
+          `A metric sparkline, goodDirection, or caption requires Canvas schema version ${String(CANVAS_METRIC_TREND_SCHEMA_VERSION)}.`,
       },
     ),
   );

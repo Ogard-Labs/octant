@@ -167,6 +167,30 @@ export function classifyLocalListener(
   };
 }
 
+/**
+ * The most specific root a listener's working directory sits inside, or
+ * `undefined` when it sits inside none.
+ *
+ * The start screen's Running services lists a listener only when this finds a
+ * Project (or one thread's own worktree) the window can access. A listener the
+ * classifier admits but this cannot place is the one that would turn the card
+ * into a host process inventory, so "no match" means "not a row". The longest
+ * root wins so a thread's worktree nested under its Project's folder is named
+ * as the worktree, not the Project.
+ */
+export function attributeLocalListener<T extends { readonly root: string }>(
+  workingDirectory: string | undefined,
+  candidates: ReadonlyArray<T>,
+): T | undefined {
+  if (workingDirectory === undefined || workingDirectory === "") return undefined;
+  let best: T | undefined;
+  for (const candidate of candidates) {
+    if (!isWithin(candidate.root, workingDirectory)) continue;
+    if (best === undefined || candidate.root.length > best.root.length) best = candidate;
+  }
+  return best;
+}
+
 /** Who is asking for the action, in the terms the design's authority matrix uses. */
 export type LocalServerActor = "local-user" | "agent" | "remote-client";
 
@@ -295,7 +319,8 @@ function classifyWorkspace(
 }
 
 function isWithin(root: string, candidate: string): boolean {
-  const normalizedRoot = root.replace(/\/+$/, "");
+  let normalizedRoot = root;
+  while (normalizedRoot.endsWith("/")) normalizedRoot = normalizedRoot.slice(0, -1);
   if (normalizedRoot === "" || normalizedRoot === "/") return false;
   return candidate === normalizedRoot || candidate.startsWith(`${normalizedRoot}/`);
 }

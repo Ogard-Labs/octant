@@ -1,0 +1,41 @@
+{
+  "hottestFiles": {
+    "rows": [
+      {
+        "label": "apps/web/src/canvas/blocks/ChartBlock.tsx",
+        "value": 41,
+        "secondaryValue": 1189,
+        "index": 0,
+        "fraction": 1,
+        "secondaryFraction": 0.45607978519370923
+      },
+      {
+        "label": "packages/domain/src/canvasPolicy.ts",
+        "value": 33,
+        "secondaryValue": 1255,
+        "index": 1,
+        "fraction": 0.8048780487804879,
+        "secondaryFraction": 0.4813962408899118
+      },
+      {
+        "label": "apps/server/src/canvas/artifactRender.ts",
+        "value": 27,
+        "secondaryValue": 769,
+        "index": 2,
+        "fraction": 0.6585365853658537,
+        "secondaryFraction": 0.29497506712696586
+      },
+      {
+        "label": "packages/contracts/src/canvas.ts",
+        "value": 19,
+        "secondaryValue": 1290,
+        "index": 3,
+        "fraction": 0.4634146341463415,
+        "secondaryFraction": 0.4948216340621404
+      }
+    ],
+    "total": 132,
+    "max": 41,
+    "hiddenCount": 1
+  }
+}

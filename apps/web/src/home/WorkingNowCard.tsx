@@ -15,6 +15,9 @@ import {
 
 export const WORKING_NOW_CARD_ID = "working-now";
 
+/** The one quiet line both the card and the Running tab say when nothing is running. */
+export const WORKING_NOW_EMPTY_LABEL = "Nothing is running right now.";
+
 export interface WorkingNowCardSource extends Omit<WorkingNowInput, "runs"> {
   /** This window's AgentRun reader; without one only threads are listed. */
   readonly agentRunClient: AgentRunClient | undefined;
@@ -40,15 +43,19 @@ export function createWorkingNowCard(source: WorkingNowCardSource): HomeCardDefi
     icon: Activity,
     defaultOn: true,
     available: true,
-    emptyLabel: "Nothing is running right now.",
+    emptyLabel: WORKING_NOW_EMPTY_LABEL,
     useContent: () => useWorkingNowContent(source),
   };
 }
 
-function useWorkingNowContent(source: WorkingNowCardSource): HomeCardContent {
+/**
+ * The rows the card lists, newest first. The Running tab on the composer reads
+ * the same hook, so the two never list different work.
+ */
+export function useWorkingNowRows(source: WorkingNowCardSource): ReadonlyArray<WorkingNowRow> {
   const runs = useActiveAgentRuns(source.agentRunClient, source.runRevision);
   const { threads, modes, projectNames, providers, boardFacts, host } = source;
-  const rows = useMemo(
+  return useMemo(
     () =>
       buildWorkingNowRows({
         threads,
@@ -61,6 +68,10 @@ function useWorkingNowContent(source: WorkingNowCardSource): HomeCardContent {
       }),
     [boardFacts, host, modes, projectNames, providers, runs, threads],
   );
+}
+
+function useWorkingNowContent(source: WorkingNowCardSource): HomeCardContent {
+  const rows = useWorkingNowRows(source);
   return {
     status: "ready",
     count: rows.length,
@@ -151,7 +162,7 @@ function WorkingNowRows(props: {
 }
 
 /** Work with a known start says how long it has run; a thread whose host reports none says when it last moved. */
-function WorkingNowTime(props: { readonly row: WorkingNowRow; readonly now: number }) {
+export function WorkingNowTime(props: { readonly row: WorkingNowRow; readonly now: number }) {
   const { row } = props;
   if (row.startedAt !== undefined) {
     return (

@@ -91,6 +91,34 @@ const inTreeCanvasDocumentRecipeDocuments = [
       { kind: "plan", role: "The actions that follow." },
     ],
   },
+  {
+    id: "repository-map",
+    title: "Repository map",
+    whenToUse: "When someone asks to map a repository, a codebase, or how the code is organised.",
+    skeleton: [
+      { kind: "heading", role: "Repository" },
+      {
+        kind: "treemap",
+        role: "The hierarchy sized by lines of code and coloured by edits in the last 60 days. Gather the numbers with your own tools.",
+      },
+      { kind: "heading", role: "Notes" },
+      { kind: "rich-text", role: "What stands out, and what to look at next." },
+    ],
+  },
+  {
+    id: "data-model",
+    title: "Data model",
+    whenToUse: "When someone asks to model data, diagram a schema, or describe how records relate.",
+    skeleton: [
+      { kind: "heading", role: "Overview" },
+      { kind: "rich-text", role: "What the model covers." },
+      {
+        kind: "er",
+        role: "Entities with their named, typed attributes, and relationships with a cardinality at each end.",
+      },
+      { kind: "rich-text", role: "What is deliberately out of scope." },
+    ],
+  },
 ] as const;
 
 const inTreeRecipes = inTreeCanvasDocumentRecipeDocuments.map((recipe) =>

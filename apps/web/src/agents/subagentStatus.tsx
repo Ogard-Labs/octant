@@ -46,11 +46,6 @@ export function subagentRoleWord(role: string): string {
   return ROLE_WORDS[role] ?? role;
 }
 
-/** A finished result the person has not yet looked at and marked reviewed. */
-export function subagentNeedsReview(entry: AgentHierarchyInputEntry): boolean {
-  return entry.resultAcknowledgement.required && !entry.resultAcknowledgement.acknowledged;
-}
-
 /** The model the host actually ran, when it reported a route. */
 export function subagentModel(entry: AgentHierarchyInputEntry): string | undefined {
   return entry.route?.executionModelId;

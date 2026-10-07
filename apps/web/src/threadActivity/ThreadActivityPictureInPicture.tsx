@@ -1,19 +1,34 @@
+import { BrowserPreviewThumbnail } from "./BrowserPreviewThumbnail";
 import { ThreadActivityPreviewContext } from "./ThreadActivityEnvironment";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import type { ComputerUseSessionView } from "@octant/contracts/computer-use";
-import { Eye, EyeOff, Globe2, MonitorUp, Square } from "lucide-react";
+import { Eye, EyeOff, MonitorUp, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { IconButton } from "../shell/IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
 import { computerUseApproveLabel } from "../computerUse/computerUseApprovalCopy";
 
-type ActivityKind = "browser" | "computer-use";
+/** The slowest a preview of an unchanged page is asked for again. */
+const MAX_UNCHANGED_POLL_MS = 5_000;
+
+/**
+ * Browser sessions whose preview the person hid, by thread and session. Held
+ * for the life of the page because the preview remounts with its pane, and a
+ * preview that came back after being closed would not be closed.
+ */
+const hiddenBrowserPreviews = new Set<string>();
 
 export interface ThreadActivityPictureInPictureProps {
+  /**
+   * Whether this thread's Browser is already on screen (a pane, the dock, or
+   * the bottom panel). A preview of a page the person can see is a copy of it,
+   * so none is drawn and no picture is asked for.
+   */
+  readonly browserVisible?: boolean;
   readonly browserClient?: BrowserAutomationClient;
   readonly children: ReactNode;
   readonly computerUseClient?: ComputerUseClient;
@@ -29,6 +44,8 @@ export interface ThreadActivityPictureInPictureProps {
    * a dismissal across remounts.
    */
   readonly onOpenBrowser?: (activity: { readonly sessionIds: ReadonlyArray<string> }) => void;
+  /** Shows this thread's Browser because the person opened the preview. */
+  readonly onShowBrowser?: () => void;
   readonly pollIntervalMs?: number;
   readonly threadId: BrowserThreadId;
 }
@@ -38,41 +55,68 @@ export interface ThreadActivityPictureInPictureProps {
  * It never creates or rebinds authority: every action goes back through the
  * existing exact-thread clients, while Browser activity can ask the shell to
  * reveal the already-authoritative Browser surface.
+ *
+ * Browser activity appears as a small live picture only while the Browser is
+ * out of sight. Computer Use keeps its card, since an approval cannot wait for
+ * the person to go looking for it.
  */
 export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPictureProps) {
   const [browserSnapshot, setBrowserSnapshot] = useState<BrowserAutomationSnapshot>();
   const [computerSession, setComputerSession] = useState<ComputerUseSessionView>();
   const [collapsed, setCollapsed] = useState(false);
-  const [selectedKind, setSelectedKind] = useState<ActivityKind>();
   const [busy, setBusy] = useState(false);
+  const [, setHiddenRevision] = useState(0);
   const activityGeneration = useRef(0);
+  const browserSignature = useRef("");
+
+  const browserPreviewKey =
+    browserSnapshot?.context === undefined
+      ? undefined
+      : `${String(props.threadId)}:${String(browserSnapshot.context.contextId)}`;
+  const browserPreviewHidden =
+    browserPreviewKey !== undefined && hiddenBrowserPreviews.has(browserPreviewKey);
+  // A picture is asked for only while one could be seen.
+  const wantsPicture = props.browserVisible !== true && !browserPreviewHidden;
   const hasPolledActivity =
-    (browserSnapshot !== undefined && isBrowserActivity(browserSnapshot)) ||
+    (wantsPicture && browserSnapshot !== undefined && isBrowserActivity(browserSnapshot)) ||
     (computerSession !== undefined && isComputerUseActivity(computerSession));
   const pollIntervalMs = props.pollIntervalMs ?? (hasPolledActivity ? 1_000 : 5_000);
 
+  /** Resolves to whether the read changed what the preview would show. */
   const loadBrowser = useCallback(
-    async (signal?: AbortSignal) => {
+    async (signal?: AbortSignal): Promise<boolean> => {
       const generation = activityGeneration.current;
       if (props.browserClient === undefined) {
+        browserSignature.current = "";
         setBrowserSnapshot(undefined);
-        return;
+        return true;
       }
       try {
-        const next = await props.browserClient.inspectThread({ threadId: props.threadId }, signal);
-        if (signal?.aborted === true || generation !== activityGeneration.current) return;
-        if (String(next.threadId) !== String(props.threadId)) {
-          setBrowserSnapshot(undefined);
-          return;
-        }
-        setBrowserSnapshot(isBrowserActivity(next) ? next : undefined);
+        const next = await props.browserClient.inspectThread(
+          wantsPicture
+            ? { threadId: props.threadId }
+            : { threadId: props.threadId, freshPicture: false },
+          signal,
+        );
+        if (signal?.aborted === true || generation !== activityGeneration.current) return true;
+        const live =
+          String(next.threadId) === String(props.threadId) && isBrowserActivity(next)
+            ? next
+            : undefined;
+        const signature = browserPictureSignature(live);
+        if (signature === browserSignature.current) return false;
+        browserSignature.current = signature;
+        setBrowserSnapshot(live);
+        return true;
       } catch (error) {
-        if (signal?.aborted === true || isAbortError(error)) return;
-        if (generation !== activityGeneration.current) return;
+        if (signal?.aborted === true || isAbortError(error)) return true;
+        if (generation !== activityGeneration.current) return true;
+        browserSignature.current = browserPictureSignature(undefined);
         setBrowserSnapshot(undefined);
+        return true;
       }
     },
-    [props.browserClient, props.threadId],
+    [props.browserClient, props.threadId, wantsPicture],
   );
 
   const loadComputerUse = useCallback(
@@ -105,6 +149,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
   useEffect(() => {
     if (props.enabled === false) {
       activityGeneration.current += 1;
+      browserSignature.current = "";
       setBrowserSnapshot(undefined);
       setComputerSession(undefined);
       return;
@@ -112,12 +157,25 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
     const controller = new AbortController();
     let browserInFlight = false;
     let computerInFlight = false;
+    let unchangedReads = 0;
+    let browserDueAt = 0;
     const refreshBrowser = async () => {
-      if (browserInFlight) return;
+      // A page that has not changed is asked about less and less often, down
+      // to one look every few seconds, so a still page costs next to nothing.
+      if (browserInFlight || Date.now() < browserDueAt) return;
       browserInFlight = true;
-      await loadBrowser(controller.signal).finally(() => {
+      try {
+        const changed = await loadBrowser(controller.signal);
+        unchangedReads = changed ? 0 : unchangedReads + 1;
+      } finally {
         browserInFlight = false;
-      });
+      }
+      browserDueAt =
+        Date.now() +
+        Math.min(
+          Math.max(pollIntervalMs, MAX_UNCHANGED_POLL_MS),
+          pollIntervalMs * 2 ** Math.min(unchangedReads, 3),
+        );
     };
     const refreshComputer = async () => {
       if (computerInFlight) return;
@@ -126,6 +184,8 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
         computerInFlight = false;
       });
     };
+    // Paused while the window is hidden: a preview nobody can see takes no
+    // pictures.
     const stop = scheduleVisibleInterval(
       () => {
         void refreshBrowser();
@@ -179,51 +239,13 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
     return () => props.onComputerUseSessionChange?.(threadId, sessionId, false);
   }, [props.onComputerUseSessionChange, props.threadId, representedComputerUseSessionId]);
 
-  const availableKinds = useMemo(() => {
-    const kinds: ActivityKind[] = [];
-    if (currentBrowserSnapshot !== undefined) kinds.push("browser");
-    if (currentComputerSession !== undefined) kinds.push("computer-use");
-    return kinds;
-  }, [currentBrowserSnapshot, currentComputerSession]);
-
-  const activityKey = `${currentBrowserSnapshot?.context?.contextId ?? ""}:${
-    currentComputerSession?.sessionId ?? ""
-  }`;
-  const previousActivityKey = useRef(activityKey);
+  const previousComputerSessionId = useRef(currentComputerSession?.sessionId);
   useEffect(() => {
-    if (activityKey !== previousActivityKey.current) {
-      previousActivityKey.current = activityKey;
+    if (currentComputerSession?.sessionId !== previousComputerSessionId.current) {
+      previousComputerSessionId.current = currentComputerSession?.sessionId;
       setCollapsed(false);
     }
-  }, [activityKey]);
-
-  const activeKind = availableKinds.includes(selectedKind ?? "browser")
-    ? (selectedKind ?? "browser")
-    : currentComputerSession?.pendingApproval !== undefined
-      ? "computer-use"
-      : availableKinds[0];
-
-  useEffect(() => {
-    if (currentComputerSession?.pendingApproval !== undefined) setSelectedKind("computer-use");
-  }, [currentComputerSession?.pendingApproval]);
-
-  async function stopBrowser() {
-    const context = currentBrowserSnapshot?.context;
-    if (context === undefined || props.browserClient === undefined || busy) return;
-    activityGeneration.current += 1;
-    setBusy(true);
-    try {
-      const next = await props.browserClient.stop({
-        contextId: context.contextId,
-        threadId: props.threadId,
-      });
-      setBrowserSnapshot(isBrowserActivity(next) ? next : undefined);
-    } catch {
-      setBrowserSnapshot(undefined);
-    } finally {
-      setBusy(false);
-    }
-  }
+  }, [currentComputerSession?.sessionId]);
 
   async function decideComputerUse(decision: "approved" | "denied") {
     const pending = currentComputerSession?.pendingApproval;
@@ -273,228 +295,138 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
     }
   }
 
-  const hasActivity = activeKind !== undefined;
-  const collapsedLabel =
-    availableKinds.length > 1
-      ? `${availableKinds.length} activities`
-      : activeKind === "browser"
-        ? "Browser"
-        : "Computer Use";
+  function hideBrowserPreview() {
+    if (browserPreviewKey === undefined) return;
+    hiddenBrowserPreviews.add(browserPreviewKey);
+    setHiddenRevision((revision) => revision + 1);
+  }
 
-  const preview = !hasActivity ? null : collapsed ? (
+  const hasComputerUse = currentComputerSession !== undefined;
+  const showBrowserPreview =
+    currentBrowserSnapshot !== undefined && props.browserVisible !== true && !browserPreviewHidden;
+
+  const computerUsePreview = !hasComputerUse ? null : collapsed ? (
     <>
       <OctantButton
-        aria-label={`Show ${collapsedLabel} activity preview`}
+        aria-label="Show Computer Use activity preview"
         className="thread-activity-pip-trigger window-no-drag"
         onClick={() => setCollapsed(false)}
         type="button"
         variant="secondary"
       >
         <span className="thread-activity-pip__pulse" />
-        {activeKind === "browser" ? (
-          <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
-        ) : (
-          <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
-        )}
-        <span>{collapsedLabel} active</span>
+        <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
+        <span>Computer Use active</span>
         <Eye aria-hidden="true" size={14} strokeWidth={1.7} />
       </OctantButton>
-      {activeKind === "computer-use" && currentComputerSession !== undefined ? (
-        <div className="thread-activity-pip__collapsed-controls">
-          {currentComputerSession.pendingApproval === undefined ? null : (
-            <>
-              <OctantButton
-                disabled={busy}
-                onClick={() => void decideComputerUse("approved")}
-                size="sm"
-                type="button"
-              >
-                {computerUseApproveLabel(currentComputerSession.pendingApproval)}
-              </OctantButton>
-              <OctantButton
-                disabled={busy}
-                onClick={() => void decideComputerUse("denied")}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                Deny
-              </OctantButton>
-            </>
-          )}
-          <OctantButton
-            disabled={busy}
-            onClick={() => void stopComputerUse()}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            Stop Computer Use
-          </OctantButton>
-        </div>
-      ) : null}
+      <div className="thread-activity-pip__collapsed-controls">
+        {currentComputerSession.pendingApproval === undefined ? null : (
+          <>
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decideComputerUse("approved")}
+              size="sm"
+              type="button"
+            >
+              {computerUseApproveLabel(currentComputerSession.pendingApproval)}
+            </OctantButton>
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decideComputerUse("denied")}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Deny
+            </OctantButton>
+          </>
+        )}
+        <OctantButton
+          disabled={busy}
+          onClick={() => void stopComputerUse()}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          Stop Computer Use
+        </OctantButton>
+      </div>
     </>
   ) : (
     <aside
       aria-label="Thread activity preview"
       className="thread-activity-pip"
-      data-activity-kind={activeKind}
-      data-approval={currentComputerSession?.pendingApproval !== undefined ? "pending" : undefined}
+      data-activity-kind="computer-use"
+      data-approval={currentComputerSession.pendingApproval !== undefined ? "pending" : undefined}
     >
-      {/* The preview is the pictures, stacked, and nothing else at rest:
-              each card's name, status, and controls sit over its top edge and
-              show under the pointer. A card without a picture keeps them out
-              in the open, since there is nothing for them to cover. */}
-      {currentBrowserSnapshot === undefined ? null : (
-        <section
-          aria-label="Browser activity"
-          className="thread-activity-pip__card"
-          data-kind="browser"
-        >
-          <BrowserActivityPreview snapshot={currentBrowserSnapshot} />
-          <div className="thread-activity-pip__controls">
-            <span className="thread-activity-pip__identity">
+      <section
+        aria-label="Computer Use activity"
+        className="thread-activity-pip__card"
+        data-kind="computer-use"
+      >
+        <ComputerUseActivityPreview
+          busy={busy}
+          onApprove={() => void decideComputerUse("approved")}
+          onDeny={() => void decideComputerUse("denied")}
+          session={currentComputerSession}
+        />
+        {/* Name, status, and controls ride the picture's top edge and show
+            under the pointer; a card with nothing to cover keeps them out in
+            the open. */}
+        <div className="thread-activity-pip__controls">
+          <span className="thread-activity-pip__identity">
+            {currentComputerSession.pendingApproval === undefined ? (
               <span className="thread-activity-pip__pulse" />
-              <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
-              <strong>Browser</strong>
+            ) : null}
+            <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
+            <strong>Computer Use</strong>
+            {currentComputerSession.pendingApproval === undefined ? (
               <span>
-                {activityStatus("browser", currentBrowserSnapshot, currentComputerSession)}
+                {currentComputerSession.state === "waiting-for-approval"
+                  ? "Approval needed"
+                  : "Live"}
               </span>
-            </span>
-            <span className="thread-activity-pip__header-actions">
-              <IconButton
-                icon={EyeOff}
-                label="Hide activity preview"
-                onClick={() => setCollapsed(true)}
-              />
-              <IconButton
-                disabled={busy}
-                icon={Square}
-                label="Stop Browser"
-                onClick={() => void stopBrowser()}
-              />
-            </span>
-          </div>
-        </section>
-      )}
-      {currentComputerSession === undefined ? null : (
-        <section
-          aria-label="Computer Use activity"
-          className="thread-activity-pip__card"
-          data-kind="computer-use"
-        >
-          <ComputerUseActivityPreview
-            busy={busy}
-            onApprove={() => void decideComputerUse("approved")}
-            onDeny={() => void decideComputerUse("denied")}
-            session={currentComputerSession}
-          />
-          <div className="thread-activity-pip__controls">
-            <span className="thread-activity-pip__identity">
-              {currentComputerSession.pendingApproval === undefined ? (
-                <span className="thread-activity-pip__pulse" />
-              ) : null}
-              <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
-              <strong>Computer Use</strong>
-              {currentComputerSession.pendingApproval === undefined ? (
-                <span>
-                  {activityStatus("computer-use", currentBrowserSnapshot, currentComputerSession)}
-                </span>
-              ) : null}
-            </span>
-            <span className="thread-activity-pip__header-actions">
-              {currentBrowserSnapshot === undefined ? (
-                <IconButton
-                  icon={EyeOff}
-                  label="Hide activity preview"
-                  onClick={() => setCollapsed(true)}
-                />
-              ) : null}
-              <IconButton
-                disabled={busy}
-                icon={Square}
-                label="Stop Computer Use"
-                onClick={() => void stopComputerUse()}
-              />
-            </span>
-          </div>
-        </section>
-      )}
+            ) : null}
+          </span>
+          <span className="thread-activity-pip__header-actions">
+            <IconButton
+              icon={EyeOff}
+              label="Hide activity preview"
+              onClick={() => setCollapsed(true)}
+            />
+            <IconButton
+              disabled={busy}
+              icon={Square}
+              label="Stop Computer Use"
+              onClick={() => void stopComputerUse()}
+            />
+          </span>
+        </div>
+      </section>
     </aside>
   );
   const presentation = useMemo(
     () => ({
-      available: hasActivity,
+      available: hasComputerUse,
       hidden: collapsed,
       setHidden: setCollapsed,
     }),
-    [hasActivity, collapsed],
+    [hasComputerUse, collapsed],
   );
   return (
     <ThreadActivityPreviewContext.Provider value={presentation}>
       <div className="thread-activity-frame">
         <div className="thread-activity-frame__content">{props.children}</div>
-        {preview}
+        {showBrowserPreview ? (
+          <BrowserPreviewThumbnail
+            onClose={hideBrowserPreview}
+            snapshot={currentBrowserSnapshot}
+            {...(props.onShowBrowser === undefined ? {} : { onOpen: props.onShowBrowser })}
+          />
+        ) : null}
+        {computerUsePreview}
       </div>
     </ThreadActivityPreviewContext.Provider>
-  );
-}
-
-function BrowserActivityPreview(props: { readonly snapshot: BrowserAutomationSnapshot }) {
-  const contexts = props.snapshot.contexts;
-  if (contexts !== undefined && contexts.length > 1) {
-    return (
-      <div
-        aria-label="Browser windows"
-        className="thread-activity-pip__visual thread-activity-pip__visual--stack"
-      >
-        {contexts.map((entry, index) => {
-          const observation = entry.observation;
-          const screenshot =
-            observation?.stale === false ? observation.screenshotDataUrl : undefined;
-          const title = observation?.title ?? `Browser ${index + 1}`;
-          const offset = (index - (contexts.length - 1) / 2) * 10;
-          const rotation = -3 + index * 2;
-          return (
-            <div
-              key={String(entry.context.contextId)}
-              className="thread-activity-pip__card thread-activity-pip__stack-card"
-              style={{
-                transform: `rotate(${rotation}deg) translate(${offset}px, ${Math.abs(offset) * 0.4}px)`,
-                zIndex: contexts.length - index,
-              }}
-              title={title}
-            >
-              {screenshot !== undefined ? (
-                <img alt={`${title} browser activity`} src={screenshot} />
-              ) : (
-                <span className="thread-activity-pip__stack-placeholder">{title}</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-  const observation = props.snapshot.observation;
-  const screenshot = observation?.stale === false ? observation.screenshotDataUrl : undefined;
-  const title = observation?.title ?? "Browser";
-  if (screenshot !== undefined) {
-    return (
-      <div className="thread-activity-pip__visual">
-        <img alt={`${title} browser activity`} src={screenshot} />
-      </div>
-    );
-  }
-  // Without a picture there is nothing to frame: a box holding an icon and
-  // two sentences was the preview's whole height with nothing previewed. One
-  // line says where the page is, and the header already offers the way there.
-  return (
-    <p className="thread-activity-pip__note">
-      {observation?.stale === true
-        ? "Preview is stale; waiting for the next page snapshot."
-        : "Waiting for the next page snapshot."}
-    </p>
   );
 }
 
@@ -564,6 +496,27 @@ function isBrowserActivity(snapshot: BrowserAutomationSnapshot): boolean {
   return active(snapshot.context?.state);
 }
 
+/**
+ * What the preview would draw from a read. Two reads with the same signature
+ * are one picture, so the second is not a change and costs no render; the
+ * observation's own revision moves on every look and says nothing about the page.
+ */
+function browserPictureSignature(snapshot: BrowserAutomationSnapshot | undefined): string {
+  if (snapshot === undefined) return "none";
+  return JSON.stringify([
+    snapshot.status,
+    snapshot.context?.contextId,
+    snapshot.context?.state,
+    snapshot.contexts?.length,
+    snapshot.observation?.url,
+    snapshot.observation?.title,
+    snapshot.observation?.stale,
+    snapshot.observation?.viewport?.width,
+    snapshot.observation?.viewport?.height,
+    snapshot.observation?.screenshotDataUrl,
+  ]);
+}
+
 function isComputerUseActivity(session: ComputerUseSessionView): boolean {
   return (
     session.state === "requesting-approval" ||
@@ -572,19 +525,6 @@ function isComputerUseActivity(session: ComputerUseSessionView): boolean {
     session.state === "running" ||
     session.state === "stopping"
   );
-}
-
-function activityStatus(
-  kind: ActivityKind,
-  browser: BrowserAutomationSnapshot | undefined,
-  computer: ComputerUseSessionView | undefined,
-): string {
-  if (kind === "browser") {
-    if (browser?.observation?.stale === true) return "Stale";
-    if (browser?.status === "failed") return "Needs attention";
-    return browser?.context?.state === "stopping" ? "Stopping" : "Live";
-  }
-  return computer?.state === "waiting-for-approval" ? "Approval needed" : "Live";
 }
 
 function computerUseState(state: ComputerUseSessionView["state"]): string {

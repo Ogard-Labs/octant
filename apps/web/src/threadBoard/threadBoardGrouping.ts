@@ -72,6 +72,33 @@ export function groupThreadBoardCards<TCard extends ThreadBoardGroupableCard>(
   return grouping === "status" ? groupByStatus(cards) : groupByProject(cards, options.projects);
 }
 
+/**
+ * The Waiting column leads with the threads that have waited on the person the
+ * longest, so a column of waiting cards is cleared from the top. A card with no
+ * listed request keeps its place after them, in the order grouping gave it.
+ * Without a reader the columns come back untouched.
+ */
+export function waitingColumnOldestFirst<TCard extends ThreadBoardGroupableCard>(
+  columns: readonly ThreadBoardColumn<TCard>[],
+  oldestRequestedAt: ReadonlyMap<string, string> | undefined,
+): readonly ThreadBoardColumn<TCard>[] {
+  if (oldestRequestedAt === undefined || oldestRequestedAt.size === 0) return columns;
+  return columns.map((column) =>
+    column.kind === "status" && column.status === "waiting"
+      ? {
+          ...column,
+          cards: column.cards.toSorted((a, b) => {
+            const first = oldestRequestedAt.get(String(a.threadId));
+            const second = oldestRequestedAt.get(String(b.threadId));
+            if (first === undefined) return second === undefined ? 0 : 1;
+            if (second === undefined) return -1;
+            return first.localeCompare(second);
+          }),
+        }
+      : column,
+  );
+}
+
 function groupByStatus<TCard extends ThreadBoardGroupableCard>(
   cards: readonly TCard[],
 ): readonly ThreadBoardColumn<TCard>[] {

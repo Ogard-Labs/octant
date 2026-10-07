@@ -64,6 +64,35 @@ export class WorkTurnLiveStore {
     );
   }
 
+  appendRetry(
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    notice: {
+      readonly attempt: number;
+      readonly maxAttempts: number;
+      readonly delayMs: number;
+      readonly reason: "rate-limited" | "unavailable" | "stream-interrupted" | "empty-completion";
+      readonly announcedAt: string;
+    },
+  ): void {
+    if (this.#closed) return;
+    const state = this.#state(threadId);
+    this.#publish(
+      threadId,
+      decodeWorkTurnStreamFrame({
+        kind: "provider-retry",
+        sequence: state.nextSequence,
+        threadId,
+        requestId,
+        attempt: notice.attempt,
+        maxAttempts: notice.maxAttempts,
+        delayMs: notice.delayMs,
+        reason: notice.reason,
+        announcedAt: notice.announcedAt,
+      }),
+    );
+  }
+
   /** Publishes the provider's restated task list whole, so a late subscriber reads current state. */
   appendTasks(
     threadId: WorkThreadId,

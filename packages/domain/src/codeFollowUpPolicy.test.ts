@@ -8,6 +8,7 @@ import {
   completeCodeFollowUp,
   deriveCodeFollowUpTrigger,
   deriveFailingChecksFollowUpTriggers,
+  buildCiFailureFollowUpDraft,
   evaluateCodeFollowUpTrigger,
   type LinkedPullRequestDefinitiveChecks,
 } from "./codeFollowUpPolicy";
@@ -349,5 +350,26 @@ describe("failing checks follow-up trigger derivation", () => {
       lastDefinitiveChecks: lostSight.lastDefinitiveChecks,
     });
     expect(failingAgain.triggers).toHaveLength(0);
+  });
+});
+
+describe("a CI failure draft", () => {
+  it("reuses the follow-up reason and names the check, the branch, and the repository", () => {
+    const draft = buildCiFailureFollowUpDraft({
+      number: 12,
+      title: "List active pull requests",
+      checkName: "web tests",
+      branch: "feature/list",
+      repository: "octant/octant",
+    });
+    expect(draft).toBe(
+      [
+        "CI is failing on PR #12: List active pull requests",
+        "",
+        "Check: web tests",
+        "Branch: feature/list",
+        "Repository: octant/octant",
+      ].join("\n"),
+    );
   });
 });

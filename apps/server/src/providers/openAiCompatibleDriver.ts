@@ -206,31 +206,20 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
               // unadvertised paid request per turn and would only test the
               // first listed model while setting the provider-level
               // appManagedTools flag, enabling tools for unverified models.
-              // Tool support is gated on per-model verification
-              // (verifiedToolModelIds for Foundry; stickyToolSupport after a
-              // successful tool turn for non-Foundry) instead.
-              const priorObserved = options.runtimeRegistry.observedState(instanceId);
-              const priorVerified = priorObserved?.verifiedToolModelIds;
-              // For non-Foundry profiles, preserve the prior sticky
-              // appManagedTools so a re-probe before a Chat turn does not
-              // wipe tool support that was observed during a prior successful
-              // tool turn. For Foundry, tools are gated per-model via
-              // verifiedToolModelIds, so the provider-level flag stays
-              // "unsupported" until every deployment is verified.
-              const priorAppManagedTools =
-                profile.driverKind === "azure-foundry"
-                  ? ("unsupported" as const)
-                  : (priorObserved?.capabilities.appManagedTools ?? "unsupported");
+              // Tool support is gated on per-model verification instead: a
+              // person's "Verify tools" request records the model in
+              // verifiedToolModelIds, which outlives this probe. The
+              // provider-level flag stays "unsupported" so one verified model
+              // never unlocks tools for the other models of the profile.
+              const priorVerified =
+                options.runtimeRegistry.observedState(instanceId)?.verifiedToolModelIds;
               const probe = decodeProviderObservedState({
                 instanceId,
                 readiness: result.readiness,
                 processState: "stopped",
                 ...(profile.authStrategy !== "none" ? { credentialStatus: "stored" } : {}),
                 models: result.models,
-                capabilities: {
-                  ...initialCapabilities,
-                  appManagedTools: priorAppManagedTools,
-                },
+                capabilities: initialCapabilities,
                 ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
                 ...(result.failure === undefined ? {} : { message: result.failure.message }),
                 lastSuccessfulProbeAt: observedAt,
@@ -329,27 +318,17 @@ function admitTurn(
   const model = observed?.models.find((candidate) => candidate.id === modelId);
   const isCapabilityEchoProbe =
     input.tools.length > 0 && input.tools.every((tool) => isCapabilityEchoToolCall(tool.name));
-  // For Azure AI Foundry, tool support is verified per-deployment via the
-  // separate verify-foundry-tools path. The sender gates tool requests on the
-  // per-model verifiedToolModelIds set, not on the provider-level
-  // appManagedTools flag, so one verified deployment does not unlock tools for
-  // other deployments in the same profile.
-  const isFoundry = options.profile?.driverKind === "azure-foundry";
+  // Tool support is verified per model through the verify-model-tools command,
+  // and the sender gates tool requests on the per-model verifiedToolModelIds
+  // set alone, so one verified model does not unlock tools for the other
+  // models of the same profile.
   const isVerifiedModel =
     observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;
-  const providerToolSupport =
-    observed?.capabilities.appManagedTools ?? initialCapabilities.appManagedTools;
-  const effectiveCapabilities = isCapabilityEchoProbe
-    ? { ...(observed?.capabilities ?? initialCapabilities), appManagedTools: "supported" as const }
-    : isFoundry
-      ? {
-          ...(observed?.capabilities ?? initialCapabilities),
-          appManagedTools: isVerifiedModel ? ("supported" as const) : ("unsupported" as const),
-        }
-      : {
-          ...(observed?.capabilities ?? initialCapabilities),
-          appManagedTools: isVerifiedModel ? ("supported" as const) : providerToolSupport,
-        };
+  const effectiveCapabilities = {
+    ...(observed?.capabilities ?? initialCapabilities),
+    appManagedTools:
+      isCapabilityEchoProbe || isVerifiedModel ? ("supported" as const) : ("unsupported" as const),
+  };
   return validateChatTurnInput(input, effectiveCapabilities, model);
 }
 
@@ -396,8 +375,13 @@ function openAiCompatibleTransport(
       // when the granted scopes did not include the plan-usage scope.
       const planProfile = planProfileOf(options);
       const planUsageEnabled = gate.kind === "oauth" ? gate.planUsageEnabled : undefined;
+      // What each protocol's last successful call measured and billed. A
+      // responses token count must not calibrate a request automatic mode may
+      // send as chat completions.
+      const calibration: Partial<Record<CompatibleProtocol, ObservedRequestCalibration>> = {};
       return {
-        fits: (request) => endpoint !== undefined && requestFits(options, endpoint, request),
+        fits: (request) =>
+          endpoint !== undefined && requestFits(options, endpoint, request, calibration),
         send: async (request, stream) => {
           const active = endpoint;
           if (active === undefined) throw failure("protocol", "Provider session is not active.");
@@ -411,6 +395,12 @@ function openAiCompatibleTransport(
                 planUsageEnabled,
               });
               recordObservedTurn(options, result, clock);
+              if (result.usage !== undefined && result.usage.inputTokens > 0) {
+                calibration[result.protocol] = {
+                  measured: JSON.stringify(estimateBody(request, result.protocol)).length,
+                  tokens: result.usage.inputTokens,
+                };
+              }
               return {
                 text: result.text,
                 toolCalls: result.toolCalls,
@@ -418,6 +408,9 @@ function openAiCompatibleTransport(
                 ...(result.rateLimitBuckets === undefined
                   ? {}
                   : { rateLimitBuckets: result.rateLimitBuckets }),
+                ...(result.outputStopReason === undefined
+                  ? {}
+                  : { outputStopReason: result.outputStopReason }),
               };
             },
           });
@@ -572,21 +565,6 @@ function recordObservedTurn(
     current?.models ?? manualModels(options.configuration.manualModelIds),
     result.verifiedManualModelId ?? "",
   );
-  const toolCallingObserved = result.terminal === "tool-calls";
-  // Tool support is sticky once observed: a follow-up plain completion after
-  // a tool step must not downgrade appManagedTools back to unsupported.
-  const priorToolSupport = current?.capabilities.appManagedTools ?? "unsupported";
-  // For Azure AI Foundry, tool support is per-deployment (gated by
-  // verifiedToolModelIds), so the provider-level appManagedTools flag must
-  // stay "unsupported" even after a verified deployment produces a tool call.
-  // Otherwise a successful tool turn on one deployment would unlock tools for
-  // all deployments in the same profile.
-  const isFoundry = options.profile?.driverKind === "azure-foundry";
-  const stickyToolSupport = isFoundry
-    ? ("unsupported" as const)
-    : priorToolSupport === "supported" || toolCallingObserved
-      ? ("supported" as const)
-      : priorToolSupport;
   options.runtimeRegistry.setObservedState({
     instanceId: options.instanceId,
     readiness: current?.readiness ?? "degraded",
@@ -599,7 +577,6 @@ function recordObservedTurn(
       streaming: result.protocol === "chat-completions" ? result.streaming : "supported",
       reasoning: result.reasoning.length > 0 ? "supported" : "unavailable",
       usage: result.usage === undefined ? "unavailable" : "supported",
-      appManagedTools: stickyToolSupport,
     },
     ...(current?.message === undefined ? {} : { message: current.message }),
     ...(current?.verifiedToolModelIds === undefined
@@ -770,15 +747,139 @@ function manualModels(modelIds: readonly ProviderModelId[]) {
 }
 
 /**
- * Whether a request fits the endpoint as the selected protocol would send it.
- * The measured body carries the system prompt, every message including tool
- * payloads, and the tool schemas, so the estimate matches the real request.
+ * Whether a request fits the endpoint as the protocol that may be sent would
+ * send it. The measured body carries the system prompt, every message including
+ * tool payloads, and the tool schemas, so the estimate matches that protocol.
+ *
+ * When the last call on that protocol reported how many input tokens it billed,
+ * that figure calibrates the measurement. Automatic mode may abandon a cached
+ * responses route for chat completions, so that decision uses the chat estimate
+ * and the chat calibration — never a ratio learned from a responses call.
  */
 function requestFits(
   options: OpenAiCompatibleDriverOptions,
   endpoint: OpenAiCompatibleEndpoint,
   request: NativeHarnessRequest,
+  calibration: Partial<Record<CompatibleProtocol, ObservedRequestCalibration>>,
 ): boolean {
+  const body = compatibleEstimateBody(request);
+  if (Buffer.byteLength(JSON.stringify(body), "utf8") > endpoint.limits.requestBodyBytes) {
+    return false;
+  }
+  const contextLimit = options.runtimeRegistry
+    .observedState(options.instanceId)
+    ?.models.find((model) => String(model.id) === String(request.modelId))?.contextLimit;
+  if (contextLimit === undefined) return true;
+  return contextProtocols(options).every((protocol) =>
+    contextEstimateFits(request, protocol, calibration[protocol], contextLimit),
+  );
+}
+
+/**
+ * The protocol a pre-send context check can honestly judge. A fixed preference
+ * is only itself. Automatic mode may still switch a cached responses route to
+ * chat completions, so the check judges the chat estimate.
+ */
+function contextProtocols(options: OpenAiCompatibleDriverOptions): readonly CompatibleProtocol[] {
+  const preference = options.configuration.protocol;
+  if (preference === "chat-completions" || preference === "responses") return [preference];
+  return ["chat-completions"];
+}
+
+function contextEstimateFits(
+  request: NativeHarnessRequest,
+  protocol: CompatibleProtocol,
+  calibration: ObservedRequestCalibration | undefined,
+  contextLimit: number,
+): boolean {
+  const measured = JSON.stringify(estimateBody(request, protocol)).length;
+  const bytesPerToken =
+    calibration !== undefined && calibration.tokens > 0 && calibration.measured > 0
+      ? calibration.measured / calibration.tokens
+      : 4;
+  return measured / bytesPerToken <= contextLimit;
+}
+
+/** The bytes one call measured and the input tokens the endpoint billed for it. */
+interface ObservedRequestCalibration {
+  readonly measured: number;
+  readonly tokens: number;
+}
+
+function estimateBody(
+  request: NativeHarnessRequest,
+  protocol: CompatibleProtocol,
+): Record<string, unknown> {
+  return protocol === "responses"
+    ? responsesEstimateBody(request)
+    : compatibleEstimateBody(request);
+}
+
+/**
+ * The same responses-shaped proxy a calibration measurement and a later fit
+ * check share. It is not the wire body; both sides must use this function so
+ * a responses token count is never paired with a chat-completions estimate.
+ */
+function responsesEstimateBody(request: NativeHarnessRequest): Record<string, unknown> {
+  const { history, prompt, toolAnswers } = protocolInput(request);
+  const includeUserPrompt = !(prompt.length === 0 && toolAnswers !== undefined);
+  const input = [
+    ...history.flatMap((entry) => {
+      if (entry.toolResults !== undefined && entry.toolCalls === undefined) {
+        return entry.toolResults.map((result) => ({
+          type: "function_call_output" as const,
+          call_id: result.toolCallId,
+          output: result.resultJson,
+        }));
+      }
+      return [
+        { role: entry.role, content: entry.text },
+        ...(entry.toolCalls === undefined
+          ? []
+          : entry.toolCalls.map((call) => ({
+              type: "function_call" as const,
+              call_id: call.toolCallId,
+              name: call.toolName,
+              arguments: call.argumentsJson,
+            }))),
+        ...(entry.toolResults === undefined
+          ? []
+          : entry.toolResults.map((result) => ({
+              type: "function_call_output" as const,
+              call_id: result.toolCallId,
+              output: result.resultJson,
+            }))),
+      ];
+    }),
+    ...(includeUserPrompt ? [{ role: "user" as const, content: prompt }] : []),
+    ...(toolAnswers === undefined
+      ? []
+      : toolAnswers.map((answer) => ({
+          type: "function_call_output" as const,
+          call_id: answer.requestId,
+          output: answer.resultJson,
+        }))),
+  ];
+  return {
+    model: request.modelId,
+    ...(request.system === undefined ? {} : { instructions: request.system }),
+    input,
+    stream: true,
+    store: false,
+    prompt_cache_key: String(request.sessionId),
+    ...(request.tools.length === 0
+      ? {}
+      : {
+          tools: request.tools.map((tool) => ({
+            type: "function",
+            name: tool.name,
+            parameters: tool.inputSchema,
+          })),
+        }),
+  };
+}
+
+function compatibleEstimateBody(request: NativeHarnessRequest): Record<string, unknown> {
   const messages = [
     ...(request.system === undefined ? [] : [{ role: "system", content: request.system }]),
     ...request.history.flatMap((entry): Record<string, unknown>[] => {
@@ -811,15 +912,7 @@ function requestFits(
     request.tools.length === 0
       ? {}
       : { tools: request.tools.map((tool) => ({ type: "function", function: tool })) };
-  const body = { model: request.modelId, messages, stream: true, ...tools };
-  if (Buffer.byteLength(JSON.stringify(body), "utf8") > endpoint.limits.requestBodyBytes) {
-    return false;
-  }
-  const contextLimit = options.runtimeRegistry
-    .observedState(options.instanceId)
-    ?.models.find((model) => String(model.id) === String(request.modelId))?.contextLimit;
-  // Roughly four bytes per token; only a model whose window is known is held to it.
-  return contextLimit === undefined || JSON.stringify(body).length / 4 <= contextLimit;
+  return { model: request.modelId, messages, stream: true, ...tools };
 }
 
 function sanitizeFailure(error: unknown): ProviderFailure {

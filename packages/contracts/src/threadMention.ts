@@ -185,7 +185,9 @@ export const MAX_SIDE_CHAT_TOOL_READ_LINES = 400;
 
 /**
  * Authoritative thread-mention command. `search-mentions` powers the `#`
- * typeahead, `resolve-mentions` turns chips into bounded read-only context at
+ * typeahead; with `threadId` it instead returns that one thread when this
+ * window can Open it, and nothing otherwise, so attaching a known thread does
+ * not depend on where it ranks. `resolve-mentions` turns chips into bounded read-only context at
  * send time, and `open-side-chat` gets-or-creates the one sidecar for a source
  * thread. No variant can steer, approve, append to, or otherwise mutate the
  * mentioned or source thread — that is denied for this surface entirely.
@@ -195,6 +197,7 @@ export const ThreadMentionCommand = Schema.Union(
     kind: Schema.Literal("search-mentions"),
     requestId: ThreadMentionRequestId,
     query: Schema.String.pipe(Schema.maxLength(200)),
+    threadId: Schema.optional(MentionableThreadId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("resolve-mentions"),

@@ -242,6 +242,13 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path: "/api/usage/export",
     methods: ["POST"] as const,
   },
+  {
+    kind: "exact" as const,
+    path: "/api/host/resources",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    maxResponseBytes: 4_096,
+  },
   ...[
     "/api/agent-profiles",
     "/api/apple/",

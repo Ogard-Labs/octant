@@ -4,13 +4,10 @@ import { Bot } from "lucide-react";
 import { useChildRunStatus } from "../agents/useChildRunStatus";
 import {
   isActiveAgentHierarchyStatus,
+  subagentNeedsReview,
   type AgentHierarchyInputEntry,
 } from "../agents/buildAgentHierarchyModel";
-import {
-  SubagentStatusIcon,
-  subagentNeedsReview,
-  subagentStatusWord,
-} from "../agents/subagentStatus";
+import { SubagentStatusIcon, subagentStatusWord } from "../agents/subagentStatus";
 import { OctantButton } from "../ui/base/OctantButton";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 

@@ -4,6 +4,7 @@ import type { CodeCheckoutIdentity, CodeThread } from "@octant/contracts";
 import type { ObservedLocalListener } from "./localServers/localListenerPort";
 import { createCodeThreadLocalServerScopeResolver } from "./localServers/localServerScopeResolver";
 import { LocalServerService } from "./localServers/localServerService";
+import { createRunningServiceScopeResolver } from "./localServers/runningServiceScopeResolver";
 import {
   createLocalServerRouteHandler,
   type LocalServerRouteDependencies,
@@ -32,18 +33,28 @@ const listedResult = {
   },
 } as const;
 
+const listRunningCommand = { kind: "list-running-services", requestId } as const;
+
+const runningListedResult = {
+  kind: "running-services-listed",
+  requestId,
+  snapshot: { services: [], observedAt: "2026-08-14T08:00:00.000Z" },
+} as const;
+
 function createRoute(
   options: {
     readonly accessible?: boolean;
     readonly projectType?: "code" | "work";
     readonly execute?: LocalServerRouteDependencies["service"]["execute"];
+    readonly executeRunning?: LocalServerRouteDependencies["service"]["executeRunning"];
   } = {},
 ) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   const execute = options.execute ?? vi.fn().mockResolvedValue(listedResult);
+  const executeRunning = options.executeRunning ?? vi.fn().mockResolvedValue(runningListedResult);
   const handler = createLocalServerRouteHandler({
-    service: { execute },
+    service: { execute, executeRunning },
     persistence: {
       readProject: vi.fn((id) =>
         String(id) !== String(projectId)
@@ -78,7 +89,7 @@ function createRoute(
     windowAuthorityStore: store,
     now: () => 1,
   });
-  return { handler, execute };
+  return { handler, execute, executeRunning };
 }
 
 const authHeaders = {
@@ -226,6 +237,7 @@ function createBoundRoute() {
       probe: async () => ({ scheme: "http", host: "127.0.0.1", health: "listening" }),
     },
     stopPort: { stop },
+    hostScopes: { resolve: async () => undefined },
     scopes: createCodeThreadLocalServerScopeResolver({
       projects: { bootstrap } as never,
       source: {
@@ -347,6 +359,209 @@ describe("Local servers principal authority", () => {
       )
     )?.json();
     expect(confirmed.kind).toBe("local-server-stopped");
+    expect(stop).toHaveBeenCalledWith({ pid: 9001 });
+  });
+});
+
+describe("Running services route", () => {
+  it("answers a host-wide command without naming a Project", async () => {
+    const { handler, execute, executeRunning } = createRoute();
+    const response = await handler(post(listRunningCommand));
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual(runningListedResult);
+    expect(executeRunning).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unauthenticated host-wide command", async () => {
+    const { handler, executeRunning } = createRoute();
+    const response = await handler(
+      post(listRunningCommand, { "content-type": "application/json" }),
+    );
+    expect(response?.status).toBe(401);
+    expect(executeRunning).not.toHaveBeenCalled();
+  });
+
+  it("rejects a host-wide command that carries a Project or a stray field", async () => {
+    const { handler, executeRunning } = createRoute();
+    const response = await handler(post({ ...listRunningCommand, projectId }));
+    expect(response?.status).toBe(400);
+    expect(executeRunning).not.toHaveBeenCalled();
+  });
+
+  it("reports a service failure as unavailable rather than leaking the error", async () => {
+    const { handler } = createRoute({
+      executeRunning: vi.fn().mockRejectedValue(new Error("lsof exploded at /Users/example")),
+    });
+    const response = await handler(post(listRunningCommand));
+    expect(response?.status).toBe(503);
+    expect(await response?.text()).not.toContain("example");
+  });
+});
+
+const orphanListener: ObservedLocalListener = {
+  pid: 9001,
+  port: 3000,
+  processName: "node",
+  ownership: "current-user",
+  workingDirectory: `${checkoutRoot}/apps/web`,
+  bindAddress: "127.0.0.1",
+};
+
+const strayListener: ObservedLocalListener = {
+  pid: 9100,
+  port: 5190,
+  processName: "node",
+  commandName: "vite",
+  ownership: "current-user",
+  workingDirectory: "/Users/example/elsewhere/site",
+  bindAddress: "127.0.0.1",
+};
+
+const ownedListener: ObservedLocalListener = {
+  pid: 9200,
+  port: 5173,
+  processName: "node",
+  commandName: "vite",
+  ownership: "current-user",
+  workingDirectory: `${checkoutRoot}/apps/web`,
+  bindAddress: "127.0.0.1",
+  ownedByOctant: true,
+};
+
+function createRunningRoute(options: { readonly projectsActive: boolean }) {
+  const store = new WindowAuthorityStore();
+  store.register({ windowId, capability, now: 0 });
+  const stop = vi.fn(async () => "stopped" as const);
+  const observe = vi.fn(async () => ({
+    status: "observed" as const,
+    listeners: [orphanListener, ownedListener, strayListener],
+  }));
+  const bootstrap = vi.fn().mockResolvedValue({
+    active: options.projectsActive
+      ? [
+          {
+            id: projectId,
+            name: "Octant",
+            type: "code",
+            lifecycle: "active",
+            binding: { canonicalRoot: checkoutRoot },
+          },
+          // A Work Project's folder is not somewhere Code servers are attributed.
+          {
+            id: decodeProjectId("00000000-0000-4000-8000-000000000908"),
+            name: "Notes",
+            type: "work",
+            lifecycle: "active",
+            binding: { canonicalRoot: "/Users/example/elsewhere" },
+          },
+        ]
+      : [],
+    archived: [],
+    availability: [],
+    memory: [],
+  });
+  const service = new LocalServerService({
+    listeners: { observe },
+    health: { probe: async () => ({ scheme: "http", host: "127.0.0.1", health: "listening" }) },
+    stopPort: { stop },
+    scopes: { resolve: async () => undefined },
+    hostScopes: createRunningServiceScopeResolver({
+      projects: { bootstrap } as never,
+      source: {
+        readThreads: () => [],
+        readCheckout: () => undefined,
+        managedWorktreeRoot: async () => undefined,
+        ownedPids: () => new Set<number>(),
+      },
+    }),
+    clock: () => "2026-08-14T08:00:00.000Z",
+  });
+  const handler = createLocalServerRouteHandler({
+    service,
+    persistence: { readProject: vi.fn(() => undefined) },
+    projects: { bootstrap },
+    windowAuthorityStore: store,
+    now: () => 1,
+  });
+  return { handler, stop, observe };
+}
+
+describe("Running services authority", () => {
+  it("lists only Octant-started servers inside the window's Code Projects", async () => {
+    const { handler } = createRunningRoute({ projectsActive: true });
+    const listed = await (await handler(post(listRunningCommand)))?.json();
+
+    expect(listed.kind).toBe("running-services-listed");
+    // The same dev server outside every Project, and a Work Project's folder,
+    // are the host's business and never appear.
+    expect(
+      listed.snapshot.services.map((row: { port: number; ownership: string }) => [
+        row.port,
+        row.ownership,
+      ]),
+    ).toEqual([
+      [5173, "octant-owned"],
+      [3000, "left-over"],
+    ]);
+  });
+
+  it("shows a window with no Code Project nothing and scans nothing", async () => {
+    const { handler, observe } = createRunningRoute({ projectsActive: false });
+    const listed = await (await handler(post(listRunningCommand)))?.json();
+    expect(listed.snapshot.services).toEqual([]);
+    expect(observe).not.toHaveBeenCalled();
+  });
+
+  it("keeps a paired device from stopping a leftover but lets it stop a server Octant owns", async () => {
+    const { handler, stop } = createRunningRoute({ projectsActive: true });
+    const listed = await (await handler(remotePost(listRunningCommand)))?.json();
+    const [owned, leftover] = listed.snapshot.services;
+    expect(owned.stop).toEqual({ status: "available", confirmationRequired: false });
+    expect(leftover.stop.status).toBe("unavailable");
+
+    const refused = await (
+      await handler(
+        remotePost({
+          kind: "stop-running-service",
+          requestId,
+          listenerId: leftover.listenerId,
+          confirmation: leftoverConfirmation,
+        }),
+      )
+    )?.json();
+    expect(refused).toMatchObject({
+      kind: "running-service-rejected",
+      failure: { category: "local-host-required" },
+    });
+    expect(stop).not.toHaveBeenCalled();
+
+    const stopped = await (
+      await handler(
+        remotePost({ kind: "stop-running-service", requestId, listenerId: owned.listenerId }),
+      )
+    )?.json();
+    expect(stopped.kind).toBe("running-service-stopped");
+    expect(stop).toHaveBeenCalledWith({ pid: 9200 });
+  });
+
+  it("offers the local window the leftover confirmation and honours it", async () => {
+    const { handler, stop } = createRunningRoute({ projectsActive: true });
+    const listed = await (await handler(post(listRunningCommand)))?.json();
+    const leftover = listed.snapshot.services[1];
+    expect(leftover.stop).toEqual({ status: "available", confirmationRequired: true });
+
+    const stopped = await (
+      await handler(
+        post({
+          kind: "stop-running-service",
+          requestId,
+          listenerId: leftover.listenerId,
+          confirmation: leftoverConfirmation,
+        }),
+      )
+    )?.json();
+    expect(stopped.kind).toBe("running-service-stopped");
     expect(stop).toHaveBeenCalledWith({ pid: 9001 });
   });
 });
