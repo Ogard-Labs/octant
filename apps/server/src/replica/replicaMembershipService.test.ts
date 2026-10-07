@@ -48,6 +48,12 @@ const ids = {
   east: "33333333-3333-4333-8333-333333333333" as ReplicaInstanceId,
   southAgain: "44444444-4444-4444-8444-444444444444" as ReplicaInstanceId,
   zed: "55555555-5555-4555-8555-555555555555" as ReplicaInstanceId,
+  west: "66666666-6666-4666-8666-666666666666" as ReplicaInstanceId,
+  forged: "88888888-8888-4888-8888-888888888888" as ReplicaInstanceId,
+  newbie: "99999999-9999-4999-8999-999999999999" as ReplicaInstanceId,
+  eastAgain: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as ReplicaInstanceId,
+  /** Sorts before every other id, so a pull reads its log first. */
+  early: "0aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as ReplicaInstanceId,
 } as const;
 
 const directories: string[] = [];
@@ -185,6 +191,86 @@ function expectKind<K extends ReplicaMembershipResult["kind"]>(
   return outcome as Extract<ReplicaMembershipResult, { kind: K }>;
 }
 
+type Computer = ReturnType<typeof computer>;
+
+/** `joiner` asks; `approver` reads the store, approves with its code, and the joiner confirms. */
+async function joinThrough(
+  joiner: Computer,
+  approver: Computer,
+  approverId: ReplicaInstanceId,
+  displayName: string,
+) {
+  const request = expectKind(
+    await joiner.service.execute({ kind: "write-join-request", displayName }),
+    "join-requested",
+  );
+  await approver.service.execute({ kind: "pull" });
+  const code = codeFor(request.entry, approver);
+  const approved = expectKind(
+    await approver.service.execute({
+      kind: "approve-join",
+      joinRequest: request.entry,
+      confirmationCode: code,
+    }),
+    "join-approved",
+  );
+  expectKind(
+    await joiner.service.execute({
+      kind: "confirm-join",
+      approver: approverId,
+      confirmationCode: code,
+    }),
+    "join-confirmed",
+  );
+  return { request, approved };
+}
+
+function memberIds(host: Computer): ReadonlyArray<string> {
+  return host.projection
+    .state()
+    .members.map((member) => String(member.instanceId))
+    .sort();
+}
+
+function cutIds(host: Computer): ReadonlyArray<string> {
+  return host.projection
+    .state()
+    .revocations.map((cut) => String(cut.instanceId))
+    .sort();
+}
+
+/** Writes signed records into the store with keys only the attacker holds. */
+function storeWriter(store: MemoryStore) {
+  const keys = memoryCredentialStore();
+  return {
+    key: async (instanceId: ReplicaInstanceId) =>
+      (await ensureReplicaDeviceKey(keys, instanceId)).publicKey,
+    write: async (signer: ReplicaInstanceId, entry: ReplicaMembershipEntry) => {
+      const bytes = new TextEncoder().encode(encodeReplicaEntry(entry));
+      const { signature } = await makeReplicaDeviceSigner(keys, signer).sign(bytes);
+      const path = `${entry.origin.instanceId}/${entry.origin.sequence}`;
+      store.files.set(`${path}.json`, bytes);
+      store.files.set(`${path}.sig`, new TextEncoder().encode(signature));
+    },
+  };
+}
+
+function approval(
+  origin: ReplicaInstanceId,
+  sequence: number,
+  subject: ReplicaInstanceId,
+  subjectDeviceKey: string,
+): ReplicaMembershipEntry {
+  return decodeReplicaMembershipEntry({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "join-approved",
+    origin: { instanceId: origin, displayName: "Forged", sequence },
+    subject,
+    subjectDisplayName: "Forged",
+    subjectDeviceKey,
+  });
+}
+
 /** North founds the store; South asks to join; North approves; South confirms. */
 async function joinedPair(store: MemoryStore) {
   const north = computer({ store: selected(store), instanceId: ids.north });
@@ -198,10 +284,7 @@ async function joinedPair(store: MemoryStore) {
     "join-requested",
   );
   const pulled = expectKind(await north.service.execute({ kind: "pull" }), "pulled");
-  const code = deriveReplicaJoinMatchingCode({
-    joinRequest: requested.entry,
-    approverInstanceId: ids.north,
-  });
+  const code = codeFor(requested.entry, north);
   const approved = expectKind(
     await north.service.execute({
       kind: "approve-join",
@@ -219,6 +302,22 @@ async function joinedPair(store: MemoryStore) {
     "join-confirmed",
   );
   return { north, south, requested, pulled, approved, code };
+}
+
+/** The code the approving computer shows for a join request, from its own key and founder. */
+function codeFor(
+  joinRequest: ReplicaMembershipEntry,
+  approver: { readonly projection: ReplicaMembershipProjection },
+): string {
+  const state = approver.projection.state();
+  if (state.local === undefined || state.founder === undefined) {
+    throw new Error("The approving computer has no identity in a replica.");
+  }
+  return deriveReplicaJoinMatchingCode({
+    joinRequest,
+    approver: state.local,
+    founder: state.founder,
+  });
 }
 
 function verifiesAt(store: MemoryStore, path: string, publicKey: string): boolean {
@@ -311,10 +410,7 @@ describe("replica membership service", () => {
       await south.service.execute({
         kind: "approve-join",
         joinRequest: eastRequest.entry,
-        confirmationCode: deriveReplicaJoinMatchingCode({
-          joinRequest: eastRequest.entry,
-          approverInstanceId: ids.south,
-        }),
+        confirmationCode: codeFor(eastRequest.entry, south),
       }),
       "join-approved",
     );
@@ -356,10 +452,7 @@ describe("replica membership service", () => {
     );
     expect(refreshed.entry.origin.sequence).toBe(2);
     await north.service.execute({ kind: "pull" });
-    const code = deriveReplicaJoinMatchingCode({
-      joinRequest: refreshed.entry,
-      approverInstanceId: ids.north,
-    });
+    const code = codeFor(refreshed.entry, north);
     expectKind(
       await north.service.execute({
         kind: "approve-join",
@@ -457,10 +550,7 @@ describe("replica membership service", () => {
     const outcome = await north.service.execute({
       kind: "approve-join",
       joinRequest: entry,
-      confirmationCode: deriveReplicaJoinMatchingCode({
-        joinRequest: entry,
-        approverInstanceId: ids.north,
-      }),
+      confirmationCode: codeFor(entry, north),
     });
     expect(outcome).toMatchObject({ kind: "refused", reason: "revoked-instance" });
   });
@@ -478,10 +568,7 @@ describe("replica membership service", () => {
     const failed = await south.service.execute({
       kind: "approve-join",
       joinRequest: eastRequest.entry,
-      confirmationCode: deriveReplicaJoinMatchingCode({
-        joinRequest: eastRequest.entry,
-        approverInstanceId: ids.south,
-      }),
+      confirmationCode: codeFor(eastRequest.entry, south),
     });
     expect(failed.kind).toBe("store-failed");
     expectKind(await north.service.execute({ kind: "revoke", subject: ids.south }), "revoked");
@@ -525,7 +612,7 @@ describe("replica membership service", () => {
     expect(south.projection.state().local?.instanceId).toBe(ids.south);
   });
 
-  it("refuses what a revoked computer approved after its cut, whatever order the logs are read in", async () => {
+  it("refuses what a revoked computer approved after its cut when its log is read before the revoker's", async () => {
     const store = memoryStore();
     const { north, south } = await joinedPair(store);
     const east = computer({ store: selected(store), instanceId: ids.east });
@@ -534,10 +621,7 @@ describe("replica membership service", () => {
       "join-requested",
     );
     await north.service.execute({ kind: "pull" });
-    const eastCode = deriveReplicaJoinMatchingCode({
-      joinRequest: eastRequest.entry,
-      approverInstanceId: ids.north,
-    });
+    const eastCode = codeFor(eastRequest.entry, north);
     expectKind(
       await north.service.execute({
         kind: "approve-join",
@@ -571,10 +655,7 @@ describe("replica membership service", () => {
       await south.service.execute({
         kind: "approve-join",
         joinRequest: zedRequest.entry,
-        confirmationCode: deriveReplicaJoinMatchingCode({
-          joinRequest: zedRequest.entry,
-          approverInstanceId: ids.south,
-        }),
+        confirmationCode: codeFor(zedRequest.entry, south),
       }),
       "join-approved",
     );
@@ -599,10 +680,7 @@ describe("replica membership service", () => {
       await east.service.execute({ kind: "write-join-request", displayName: "Studio" }),
       "join-requested",
     );
-    const code = deriveReplicaJoinMatchingCode({
-      joinRequest: eastRequest.entry,
-      approverInstanceId: ids.south,
-    });
+    const code = codeFor(eastRequest.entry, south);
     expectKind(
       await south.service.execute({
         kind: "approve-join",
@@ -634,10 +712,7 @@ describe("replica membership service", () => {
       await south.service.execute({
         kind: "approve-join",
         joinRequest: zedRequest.entry,
-        confirmationCode: deriveReplicaJoinMatchingCode({
-          joinRequest: zedRequest.entry,
-          approverInstanceId: ids.south,
-        }),
+        confirmationCode: codeFor(zedRequest.entry, south),
       }),
       "join-approved",
     );
@@ -658,10 +733,7 @@ describe("replica membership service", () => {
       await east.service.execute({ kind: "write-join-request", displayName: "Studio" }),
       "join-requested",
     );
-    const code = deriveReplicaJoinMatchingCode({
-      joinRequest: eastRequest.entry,
-      approverInstanceId: ids.south,
-    });
+    const code = codeFor(eastRequest.entry, south);
     await south.service.execute({
       kind: "approve-join",
       joinRequest: eastRequest.entry,
@@ -709,6 +781,288 @@ describe("replica membership service", () => {
     });
     expect(outcome).toMatchObject({ kind: "refused", reason: "unknown-instance" });
     expect(east.projection.state().members).toEqual([]);
+  });
+
+  it("ends with the same revocations on every computer when two members revoke each other", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const east = computer({ store: selected(store), instanceId: ids.east });
+    await joinThrough(east, north, ids.north, "Studio");
+    await south.service.execute({ kind: "pull" });
+    await east.service.execute({ kind: "pull" });
+    // Neither has read the other's revocation when writing its own.
+    expectKind(await east.service.execute({ kind: "revoke", subject: ids.south }), "revoked");
+    expectKind(await south.service.execute({ kind: "revoke", subject: ids.east }), "revoked");
+
+    for (const host of [north, south, east, north]) await host.service.execute({ kind: "pull" });
+    for (const host of [north, south, east]) {
+      expect(cutIds(host)).toEqual([ids.south, ids.east].sort());
+      expect(memberIds(host)).toContain(ids.north);
+    }
+  });
+
+  it("ignores a revoked computer's revocation of the computer that approved it", async () => {
+    const store = memoryStore();
+    const north = computer({ store: selected(store), instanceId: ids.north });
+    await north.service.execute({ kind: "create-replica", displayName: "MacBook" });
+    // The stolen computer's id sorts first, so every pull reads its log first.
+    const stolen = computer({ store: selected(store), instanceId: ids.early });
+    await joinThrough(stolen, north, ids.north, "Laptop");
+    const east = computer({ store: selected(store), instanceId: ids.east });
+    await joinThrough(east, north, ids.north, "Studio");
+    // East already holds the stolen computer as a member.
+    await east.service.execute({ kind: "pull" });
+
+    expectKind(await north.service.execute({ kind: "revoke", subject: ids.early }), "revoked");
+    // The thief has not read the revocation and answers by revoking North.
+    expectKind(await stolen.service.execute({ kind: "revoke", subject: ids.north }), "revoked");
+
+    for (let round = 0; round < 2; round += 1) {
+      expectKind(await east.service.execute({ kind: "pull" }), "pulled");
+      expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    }
+    for (const host of [north, east]) {
+      expect(cutIds(host)).toEqual([ids.early]);
+      expect(memberIds(host)).toEqual([ids.early, ids.north, ids.east].sort());
+    }
+  });
+
+  it("keeps a computer a member when it revokes its own approver before reading the store", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const east = computer({ store: selected(store), instanceId: ids.east });
+    const { approved } = await joinThrough(east, north, ids.north, "Studio");
+
+    const revoked = expectKind(
+      await east.service.execute({ kind: "revoke", subject: ids.north }),
+      "revoked",
+    );
+    // The cut covers the approval that admitted East, which East holds
+    // through the chain it joined by although it has applied nothing yet.
+    expect(revoked.entry.lastAcceptedSequence).toBe(approved.entry.origin.sequence);
+    expect(memberIds(east)).toContain(ids.east);
+
+    expectKind(await south.service.execute({ kind: "pull" }), "pulled");
+    expect(cutIds(south)).toEqual([ids.north]);
+    expect(memberIds(south)).toEqual([ids.north, ids.south, ids.east].sort());
+    expectKind(await south.service.execute({ kind: "pull" }), "pulled");
+    expectKind(await east.service.execute({ kind: "pull" }), "pulled");
+  });
+
+  it("refuses a join confirmation whose chain names a different key for the approver", async () => {
+    const store = memoryStore();
+    const north = computer({ store: selected(store), instanceId: ids.north });
+    const south = computer({ store: selected(store), instanceId: ids.south });
+    await north.service.execute({ kind: "create-replica", displayName: "MacBook" });
+    const request = expectKind(
+      await south.service.execute({ kind: "write-join-request", displayName: "Mac mini" }),
+      "join-requested",
+    );
+    // Someone with write access founds a store of its own, approves North's id
+    // with a key it holds, and takes North's next slot to approve South.
+    const attacker = storeWriter(store);
+    const forgedKey = await attacker.key(ids.forged);
+    const forgedNorthKey = await attacker.key(ids.north);
+    await attacker.write(ids.forged, approval(ids.forged, 1, ids.forged, forgedKey));
+    await attacker.write(ids.forged, approval(ids.forged, 2, ids.north, forgedNorthKey));
+    const southKey = request.entry.subjectDeviceKey ?? "";
+    await attacker.write(ids.north, approval(ids.north, 2, ids.south, southKey));
+
+    await north.service.execute({ kind: "pull" });
+    const code = codeFor(request.entry, north);
+    const approve = await north.service.execute({
+      kind: "approve-join",
+      joinRequest: request.entry,
+      confirmationCode: code,
+    });
+    expect(approve.kind).toBe("store-failed");
+    const outcome = await south.service.execute({
+      kind: "confirm-join",
+      approver: ids.north,
+      confirmationCode: code,
+    });
+    expect(outcome).toMatchObject({ kind: "refused", reason: "code-mismatch" });
+    expect(south.projection.state().members).toEqual([]);
+  });
+
+  it("refuses a join confirmation whose chain starts at a forged founder", async () => {
+    const store = memoryStore();
+    const north = computer({ store: selected(store), instanceId: ids.north });
+    const east = computer({ store: selected(store), instanceId: ids.east });
+    await north.service.execute({ kind: "create-replica", displayName: "MacBook" });
+    const request = expectKind(
+      await east.service.execute({ kind: "write-join-request", displayName: "Studio" }),
+      "join-requested",
+    );
+    await north.service.execute({ kind: "pull" });
+    const code = codeFor(request.entry, north);
+    expectKind(
+      await north.service.execute({
+        kind: "approve-join",
+        joinRequest: request.entry,
+        confirmationCode: code,
+      }),
+      "join-approved",
+    );
+    // A store writer replaces North's founding record and founds another
+    // store that approves North's real key.
+    const attacker = storeWriter(store);
+    const forgedKey = await attacker.key(ids.forged);
+    const forgedNorthKey = await attacker.key(ids.north);
+    await attacker.write(
+      ids.north,
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-request",
+        origin: { instanceId: ids.north, displayName: "MacBook", sequence: 1 },
+        subject: ids.north,
+        subjectDisplayName: "MacBook",
+        subjectDeviceKey: forgedNorthKey,
+        requestedAt: NOW,
+      }),
+    );
+    const northKey = north.projection.state().local?.publicKey ?? "";
+    await attacker.write(ids.forged, approval(ids.forged, 1, ids.forged, forgedKey));
+    await attacker.write(ids.forged, approval(ids.forged, 2, ids.north, northKey));
+
+    const outcome = await east.service.execute({
+      kind: "confirm-join",
+      approver: ids.north,
+      confirmationCode: code,
+    });
+    expect(outcome).toMatchObject({ kind: "refused", reason: "code-mismatch" });
+    expect(east.projection.state().members).toEqual([]);
+  });
+
+  it("keeps what a revoked computer approved before its cut on a computer that joins later", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const west = computer({ store: selected(store), instanceId: ids.west });
+    await joinThrough(west, south, ids.south, "Desk");
+    await north.service.execute({ kind: "pull" });
+    const revoked = expectKind(
+      await north.service.execute({ kind: "revoke", subject: ids.south }),
+      "revoked",
+    );
+    expect(revoked.entry.lastAcceptedSequence).toBe(2);
+
+    const newbie = computer({ store: selected(store), instanceId: ids.newbie });
+    await joinThrough(newbie, north, ids.north, "Newbie");
+    for (let round = 0; round < 2; round += 1) {
+      const pulled = expectKind(await newbie.service.execute({ kind: "pull" }), "pulled");
+      expect(pulled.joinRequests).toEqual([]);
+    }
+    expect(memberIds(newbie)).toEqual(memberIds(north));
+    expect(memberIds(newbie)).toContain(ids.west);
+    expect(cutIds(newbie)).toEqual([ids.south]);
+  });
+
+  it("keeps applying an honest member's log after it approved a computer that was later revoked", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    // Early's id sorts before North's, so a pull reads its revocation of
+    // South before it reads North's earlier approval of South.
+    const early = computer({ store: selected(store), instanceId: ids.early });
+    await joinThrough(early, south, ids.south, "Early");
+    await early.service.execute({ kind: "pull" });
+    expectKind(await early.service.execute({ kind: "revoke", subject: ids.south }), "revoked");
+    const zed = computer({ store: selected(store), instanceId: ids.zed });
+    await joinThrough(zed, early, ids.early, "Zed");
+    await zed.service.execute({ kind: "pull" });
+
+    const west = computer({ store: selected(store), instanceId: ids.west });
+    await joinThrough(west, north, ids.north, "Desk");
+    expectKind(await north.service.execute({ kind: "revoke", subject: ids.early }), "revoked");
+    // Early has not read that and approves another computer past its cut.
+    const thief = computer({ store: selected(store), instanceId: ids.forged });
+    const thiefRequest = expectKind(
+      await thief.service.execute({ kind: "write-join-request", displayName: "Thief" }),
+      "join-requested",
+    );
+    expectKind(
+      await early.service.execute({
+        kind: "approve-join",
+        joinRequest: thiefRequest.entry,
+        confirmationCode: codeFor(thiefRequest.entry, early),
+      }),
+      "join-approved",
+    );
+
+    for (let round = 0; round < 2; round += 1) {
+      await zed.service.execute({ kind: "pull" });
+      await north.service.execute({ kind: "pull" });
+    }
+    for (const host of [zed, north]) {
+      expect(memberIds(host)).toContain(ids.west);
+      expect(memberIds(host)).not.toContain(ids.forged);
+      expect(cutIds(host)).toEqual([ids.early, ids.south].sort());
+    }
+  });
+
+  it("asks to join again as a new identity after a cut removed the approval that admitted it", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const east = computer({
+      store: selected(store),
+      instanceId: ids.east,
+      laterInstanceIds: [ids.eastAgain],
+    });
+    await joinThrough(east, south, ids.south, "Studio");
+    // East approves West, then North - not having read South's approval of
+    // East - revokes South with a cut before it.
+    const west = computer({ store: selected(store), instanceId: ids.west });
+    const westRequest = expectKind(
+      await west.service.execute({ kind: "write-join-request", displayName: "Desk" }),
+      "join-requested",
+    );
+    expectKind(
+      await east.service.execute({
+        kind: "approve-join",
+        joinRequest: westRequest.entry,
+        confirmationCode: codeFor(westRequest.entry, east),
+      }),
+      "join-approved",
+    );
+    expectKind(await north.service.execute({ kind: "revoke", subject: ids.south }), "revoked");
+    await east.service.execute({ kind: "pull" });
+    expect(memberIds(east)).not.toContain(ids.east);
+
+    const again = expectKind(
+      await east.service.execute({ kind: "write-join-request", displayName: "Studio" }),
+      "join-requested",
+    );
+    expect(again.instanceId).toBe(ids.eastAgain);
+    expect(again.entry.origin.sequence).toBe(1);
+    const pulled = expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    expect(pulled.joinRequests.map((entry) => entry.subject)).toContain(ids.eastAgain);
+  });
+
+  it("refuses a join confirmation through an approval a revocation in the store already cut", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    expectKind(await north.service.execute({ kind: "revoke", subject: ids.south }), "revoked");
+    // South has not read it and approves Zed.
+    const zed = computer({ store: selected(store), instanceId: ids.zed });
+    const request = expectKind(
+      await zed.service.execute({ kind: "write-join-request", displayName: "Zed" }),
+      "join-requested",
+    );
+    const code = codeFor(request.entry, south);
+    expectKind(
+      await south.service.execute({
+        kind: "approve-join",
+        joinRequest: request.entry,
+        confirmationCode: code,
+      }),
+      "join-approved",
+    );
+    const outcome = await zed.service.execute({
+      kind: "confirm-join",
+      approver: ids.south,
+      confirmationCode: code,
+    });
+    expect(outcome).toMatchObject({ kind: "refused", reason: "revoked-instance" });
+    expect(zed.projection.state().members).toEqual([]);
   });
 
   it("refuses an entry whose bytes were changed after it was signed, and applies nothing past it", async () => {
@@ -782,10 +1136,7 @@ describe("replica membership service", () => {
       await south.service.execute({
         kind: "approve-join",
         joinRequest: request.entry,
-        confirmationCode: deriveReplicaJoinMatchingCode({
-          joinRequest: request.entry,
-          approverInstanceId: ids.south,
-        }),
+        confirmationCode: codeFor(request.entry, south),
       }),
       "join-approved",
     );
@@ -851,10 +1202,7 @@ describe("replica membership service", () => {
       await north.service.execute({
         kind: "approve-join",
         joinRequest: request.entry,
-        confirmationCode: deriveReplicaJoinMatchingCode({
-          joinRequest: request.entry,
-          approverInstanceId: ids.north,
-        }),
+        confirmationCode: codeFor(request.entry, north),
       }),
       "join-approved",
     );
@@ -896,10 +1244,7 @@ describe("replica membership service", () => {
     const outcome = await south.service.execute({
       kind: "approve-join",
       joinRequest: request.entry,
-      confirmationCode: deriveReplicaJoinMatchingCode({
-        joinRequest: request.entry,
-        approverInstanceId: ids.south,
-      }),
+      confirmationCode: "123456",
     });
     expect(outcome).toMatchObject({ kind: "refused", reason: "not-a-member" });
   });
@@ -913,10 +1258,7 @@ describe("replica membership service", () => {
     const outcome = await north.service.execute({
       kind: "approve-join",
       joinRequest: request,
-      confirmationCode: deriveReplicaJoinMatchingCode({
-        joinRequest: request,
-        approverInstanceId: ids.north,
-      }),
+      confirmationCode: codeFor(request, north),
     });
     expect(outcome).toMatchObject({ kind: "refused", reason: "unknown-instance" });
     expect(
@@ -940,10 +1282,7 @@ describe("replica membership service", () => {
     const outcome = await north.service.execute({
       kind: "approve-join",
       joinRequest: request,
-      confirmationCode: deriveReplicaJoinMatchingCode({
-        joinRequest: request,
-        approverInstanceId: ids.north,
-      }),
+      confirmationCode: codeFor(request, north),
     });
     expect(outcome).toMatchObject({ kind: "refused", reason: "code-mismatch" });
   });
@@ -962,10 +1301,7 @@ describe("replica membership service", () => {
     const outcome = await north.service.execute({
       kind: "approve-join",
       joinRequest: request.entry,
-      confirmationCode: deriveReplicaJoinMatchingCode({
-        joinRequest: request.entry,
-        approverInstanceId: ids.north,
-      }),
+      confirmationCode: codeFor(request.entry, north),
     });
     expect(outcome).toMatchObject({ kind: "refused", reason: "expired-join-request" });
   });
@@ -979,12 +1315,26 @@ describe("replica membership service", () => {
       await south.service.execute({ kind: "write-join-request", displayName: "Mac mini" }),
       "join-requested",
     );
+    await north.service.execute({ kind: "pull" });
+    expectKind(
+      await north.service.execute({
+        kind: "approve-join",
+        joinRequest: request.entry,
+        confirmationCode: codeFor(request.entry, north),
+      }),
+      "join-approved",
+    );
+    const northState = north.projection.state();
+    if (northState.local === undefined || northState.founder === undefined) {
+      throw new Error("North has no identity.");
+    }
     const outcome = await south.service.execute({
       kind: "confirm-join",
       approver: ids.north,
       confirmationCode: deriveReplicaJoinMatchingCode({
         joinRequest: request.entry,
-        approverInstanceId: ids.east,
+        approver: { ...northState.local, instanceId: ids.east },
+        founder: northState.founder,
       }),
     });
     expect(outcome).toMatchObject({ kind: "refused", reason: "code-mismatch" });
@@ -1003,10 +1353,7 @@ describe("replica membership service", () => {
     const outcome = await south.service.execute({
       kind: "confirm-join",
       approver: ids.north,
-      confirmationCode: deriveReplicaJoinMatchingCode({
-        joinRequest: request.entry,
-        approverInstanceId: ids.north,
-      }),
+      confirmationCode: codeFor(request.entry, north),
     });
     expect(outcome).toMatchObject({ kind: "refused", reason: "unknown-instance" });
     expect(south.projection.state().members).toEqual([]);

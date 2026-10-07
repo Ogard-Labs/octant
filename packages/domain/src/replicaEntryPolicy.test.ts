@@ -468,7 +468,7 @@ describe("reconciling replica membership", () => {
     expect(reconcileReplicaEntry(state(), request)).toEqual({ outcome: "already-present" });
   });
 
-  it("refuses a join request from an identity it revoked", () => {
+  it("keeps a revoked identity's own join request, so its log stays readable", () => {
     const request = membershipEntry({
       instanceId: ids.revoked,
       sequence: 1,
@@ -481,10 +481,7 @@ describe("reconciling replica membership", () => {
         { instanceId: ids.revoked, status: "revoked", lastAcceptedSequence: 0 },
       ],
     });
-    expect(reconcileReplicaEntry(revoked, request)).toEqual({
-      outcome: "refused",
-      reason: "revoked-instance",
-    });
+    expect(reconcileReplicaEntry(revoked, request)).toEqual({ outcome: "already-present" });
   });
 
   it("journals a member approval that names an instance it does not hold yet", () => {
@@ -511,7 +508,7 @@ describe("reconciling replica membership", () => {
     });
   });
 
-  it("refuses an approval that would re-admit a revoked instance", () => {
+  it("keeps an approval of a revoked instance instead of stopping its approver's log", () => {
     const approval = membershipEntry({
       kind: "join-approved",
       sequence: 1,
@@ -525,10 +522,7 @@ describe("reconciling replica membership", () => {
         { instanceId: ids.revoked, status: "revoked", lastAcceptedSequence: 0 },
       ],
     });
-    expect(reconcileReplicaEntry(revoked, approval)).toEqual({
-      outcome: "refused",
-      reason: "revoked-instance",
-    });
+    expect(reconcileReplicaEntry(revoked, approval)).toEqual({ outcome: "already-present" });
   });
 
   it("records a revocation, and a second one is already present", () => {
@@ -601,7 +595,7 @@ describe("reconciling replica membership", () => {
     expect(reconcileReplicaEntry(joinerState, founding)).toEqual({ outcome: "already-present" });
   });
 
-  it("keeps a revoked instance's entries up to its cut and refuses the ones after", () => {
+  it("keeps a revoked instance's membership records on both sides of its cut for membership to weigh", () => {
     const local = state({
       instances: [
         { instanceId: ids.local, status: "member" },
@@ -631,9 +625,6 @@ describe("reconciling replica membership", () => {
       ],
       applied: [{ instanceId: ids.north, sequence: 1, kind: "join-approved", subject: ids.north }],
     });
-    expect(reconcileReplicaEntry(pastCut, afterCut)).toEqual({
-      outcome: "refused",
-      reason: "revoked-instance",
-    });
+    expect(reconcileReplicaEntry(pastCut, afterCut)).toEqual({ outcome: "member-added" });
   });
 });

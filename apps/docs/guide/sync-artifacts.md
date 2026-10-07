@@ -93,14 +93,21 @@ kept in its own Keychain or Secret Service. A computer that already shares
 the store shows that the new one wants to join, and both screens show the
 same six-digit code. You approve only if the codes match, then confirm on the
 new computer. The code is a check that both screens mean the same two
-computers; it is not a password, and nothing secret passes through the store.
+computers, the same key on the approving one, and the same computer that set
+up the store, so a store someone tampered with shows a different code. It is
+not a password, and nothing secret passes through the store.
 
 Revoking a computer writes a signed record that marks the last of its entries
 you accept. After your other computers read it, they refuse anything that
 computer wrote after that point, including computers it approved afterwards.
 Approvals it made before that point still stand, so read the store before you
-revoke if you want to keep a computer it already brought in. A revoked
-computer that wants back in joins again as a new computer, with a new key.
+revoke if you want to keep a computer it already brought in. That point never
+falls before the approval that brought your own computer in. A computer you
+revoke cannot remove the computer that approved it in return, and if two
+computers that did not approve each other revoke each other before either
+reads the other's record, both end up revoked. A revoked computer, or one
+that lost its place because the computer that approved it was revoked before
+that approval, joins again as a new computer, with a new key.
 
 ## Turning sync off
 

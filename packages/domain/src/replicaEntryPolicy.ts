@@ -273,11 +273,15 @@ function artifactOutcome(
  * What one membership record does to the local membership list.
  *
  * A join request is the one record a computer that is not yet a member may
- * write, so its origin is not checked against membership: only a revoked
- * identity is refused, because re-joining is a new identity rather than the
- * old one back. An approval and a revocation are written by a member, so
- * their origin must be one. An approval naming a revoked instance is refused:
- * that instance rejoins with a new identity, not with this one.
+ * write, so its origin is not checked against membership. An approval and a
+ * revocation must come from an instance the host knows a key for, but a cut
+ * on that instance does not refuse them here: the host keeps every verified
+ * approval and revocation and works out membership from all of them at once,
+ * so a record past a cut is kept and does not count. Refusing it would stop
+ * the walk of that log, and what a host holds would then depend on which log
+ * it happened to read first. For the same reason an approval of a revoked
+ * instance is kept: an honest member may have written it before the
+ * revocation, and the records after it in that member's log still count.
  */
 function membershipOutcome(
   state: ReplicaLocalState,
@@ -296,28 +300,22 @@ function membershipOutcome(
     // The sequence was written once. A different record cannot take its place.
     return refuse("membership-conflict");
   }
-  const wrote = membership(state, entry.origin.instanceId, entry.origin.sequence);
-  if (entry.kind !== "join-request") {
-    // A sequence-1 self-approval proves only that its writer holds the key the
-    // record names, and any computer that can write to the store can mint
-    // one, so it cannot bootstrap trust by what it is. A computer holds the
-    // store creator as a member because it journaled that record itself -
-    // its own create, or an approval the person confirmed - and that journal
-    // is the anchor an approval's writer is checked against.
-    if (wrote === "unknown") return refuse("unknown-instance");
-    if (wrote === "revoked") return refuse("revoked-instance");
-  } else if (wrote === "revoked") {
-    return refuse("revoked-instance");
+  // A sequence-1 self-approval proves only that its writer holds the key the
+  // record names, and any computer that can write to the store can mint one,
+  // so it cannot bootstrap trust by what it is. A computer holds the store
+  // creator as a member because it journaled that record itself - its own
+  // create, or a chain the person confirmed - and that journal is the anchor
+  // an approval's writer is checked against.
+  if (entry.kind !== "join-request" && membership(state, entry.origin.instanceId) === "unknown") {
+    return refuse("unknown-instance");
   }
   if (behindSequence(state, entry)) return refuse("sequence-gap");
   const subject = membership(state, entry.subject);
-  if (entry.kind === "join-request") {
-    return subject === "unknown" ? { outcome: "request-approval" } : { outcome: "already-present" };
+  if (entry.kind === "join-request" || entry.kind === "join-approved") {
+    if (subject !== "unknown") return { outcome: "already-present" };
+    return entry.kind === "join-request"
+      ? { outcome: "request-approval" }
+      : { outcome: "member-added" };
   }
-  if (entry.kind === "join-approved") {
-    if (subject === "revoked") return refuse("revoked-instance");
-    return subject === "member" ? { outcome: "already-present" } : { outcome: "member-added" };
-  }
-  if (subject === "unknown") return refuse("unknown-instance");
   return subject === "revoked" ? { outcome: "already-present" } : { outcome: "member-revoked" };
 }
