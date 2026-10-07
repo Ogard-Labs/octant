@@ -22,16 +22,37 @@ the set to what it may reach:
 | Work | inside the bound folder | none      | yes                 | yes        |
 | Code | inside the checkout     | sandboxed | yes                 | yes        |
 
-Every call passes the same server authority check as any other tool. A read
-never needs an approval; an edit, a write, or a command follows the thread's
-access posture, and a thread that has taken in untrusted content asks again
-before writing. An edit needs a prior read of the same file and refuses when
+Every call passes the same server authority check as any other tool. A Chat
+thread holds that authority with or without a Project. A thread that can no
+longer act (archived, its folder or Project changed, or its provider turned
+off) has every tool call refused, and the model is told why so it can say so.
+A read never needs an approval; an edit, a write, or a command follows the
+thread's access posture, and a thread that has taken in untrusted content asks
+again before writing. An edit needs a prior read of the same file and refuses when
 the file changed since. A truncated result says how much was left out and
 where to continue.
 
 When a turn offers Octant's own tools — the built-in browser, Canvas, computer
 use, the terminal, the Apple and Android simulators, helper agents — the model
 also gets one line per tool saying what it is for.
+
+## Verifying a model's tools
+
+Checking a connection never spends a request on a model, so Octant does not
+yet know whether an endpoint model can call tools, and it keeps tools off until
+you say so. A model without verified tools is **Chat only**: it can answer, but
+it gets none of Octant's tools and cannot start helper agents.
+
+To change that, choose **Verify tools** next to the model: in the model picker,
+under a model in **Settings → Octant Harness**, or in **Settings → Providers &
+Models → Connection details**. Octant sends one request that asks the model to
+call a test tool. That request may be billed by your provider, once per click.
+A model that calls the tool is verified and gets Octant's tools; one that
+answers in text stays Chat only, and a failed request (a wrong key, a timeout)
+shows its error instead of a verdict. Verifying one model, or that model using
+a tool in a thread, never turns tools on for the others on the same endpoint,
+and changing the endpoint's configuration
+asks you to verify again. Ollama has no Verify tools action yet.
 
 ## Conversations that survive a restart
 
@@ -328,4 +349,6 @@ table.
   candidate until it does.
 - Context is reduced by the host's planner; each prune and cut is journaled
   with the cache cost it paid, and the lead can read `context-remaining` to
-  checkpoint before one.
+  checkpoint before one. An endpoint that never reports the model's window,
+  such as some Azure AI Foundry deployments, gives the lead no figure: the tool
+  says the context is unavailable instead of reporting room against an estimate.

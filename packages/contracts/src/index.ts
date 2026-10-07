@@ -16,6 +16,7 @@ export * from "./workOverview";
 export * from "./workProjectStatus";
 export * from "./workPromotion";
 export * from "./workRequests";
+export * from "./pendingRequests";
 export * from "./workResearch";
 export * from "./workThreads";
 export * from "./workTurns";

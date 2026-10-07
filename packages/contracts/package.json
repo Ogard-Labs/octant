@@ -35,6 +35,7 @@
     "./work-project-status": "./src/workProjectStatus.ts",
     "./work-promotion": "./src/workPromotion.ts",
     "./work-requests": "./src/workRequests.ts",
+    "./pending-requests": "./src/pendingRequests.ts",
     "./work-research": "./src/workResearch.ts",
     "./work-threads": "./src/workThreads.ts",
     "./work-turns": "./src/workTurns.ts",

@@ -47,6 +47,33 @@ export interface OklchColor {
   readonly h: number;
 }
 
+function srgbToLinearChannel(channel: number): number {
+  const normalized = channel / 255;
+  return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+}
+
+/**
+ * The OKLCH reading of a six-digit hex colour.
+ *
+ * `oklchToHex` rounds to a hex value, so a round trip is not exact; this is
+ * the inverse used to derive a scale's hue and lightness from an existing
+ * palette role rather than restating them.
+ */
+export function hexToOklch(value: string): OklchColor {
+  const { r, g, b } = parseHexColor(value);
+  const lr = srgbToLinearChannel(r);
+  const lg = srgbToLinearChannel(g);
+  const lb = srgbToLinearChannel(b);
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  const lightness = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+  const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  const bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  const hue = (Math.atan2(bb, a) * 180) / Math.PI;
+  return { l: lightness, c: Math.hypot(a, bb), h: hue < 0 ? hue + 360 : hue };
+}
+
 function linearToSrgbChannel(value: number): number {
   const clamped = Math.min(1, Math.max(0, value));
   const gamma = clamped <= 0.0031308 ? clamped * 12.92 : 1.055 * clamped ** (1 / 2.4) - 0.055;

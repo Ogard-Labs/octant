@@ -131,7 +131,7 @@ describe("fake-gh project pull-request port", () => {
       "--limit",
       "101",
       "--json",
-      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,statusCheckRollup,reviewDecision",
+      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,statusCheckRollup,reviewDecision,reviewRequests",
     ]);
     expect(calls[1]?.[3]).toBe("octant/r2");
     expect(calls.every((arguments_) => arguments_[0] === "pr" && arguments_[1] === "list")).toBe(

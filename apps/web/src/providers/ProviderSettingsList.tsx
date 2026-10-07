@@ -12,6 +12,7 @@ import type {
 import { isImageProfileDriverKind, supportsProviderCliUpdate } from "@octant/domain";
 import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ProviderToolVerification } from "./ProviderToolVerification";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -104,7 +105,7 @@ export type ProviderSettingsListProps = Pick<
   | "onModelDataTagsChange"
   | "onRemove"
   | "onProbe"
-  | "onVerifyFoundryTools"
+  | "onVerifyModelTools"
   | "onProviderOrderChange"
   | "onAgentEligibleModelsChange"
   | "onHiddenModelsChange"
@@ -258,7 +259,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           : { onUpdateProviderCli: props.onUpdateProviderCli })}
         onMove={move}
         onProbe={props.onProbe}
-        onVerifyFoundryTools={props.onVerifyFoundryTools}
+        onVerifyModelTools={props.onVerifyModelTools}
         hiddenModels={props.defaults.hiddenModels ?? []}
         onHiddenModelsChange={props.onHiddenModelsChange}
         onProviderCredentialStatus={props.onProviderCredentialStatus}
@@ -573,7 +574,7 @@ interface ProviderRowProps {
   readonly onModelDataTagsChange: ProviderSettingsViewProps["onModelDataTagsChange"];
   readonly onRemove: ProviderSettingsViewProps["onRemove"];
   readonly onProbe: ProviderSettingsViewProps["onProbe"];
-  readonly onVerifyFoundryTools: ProviderSettingsViewProps["onVerifyFoundryTools"];
+  readonly onVerifyModelTools: ProviderSettingsViewProps["onVerifyModelTools"];
   readonly hiddenModels: ReadonlyArray<HiddenProviderModelRef>;
   readonly onHiddenModelsChange: ProviderSettingsViewProps["onHiddenModelsChange"];
 }
@@ -1388,6 +1389,12 @@ function ProviderRow(props: ProviderRowProps) {
                     <span>
                       Authentication: {titleCase(props.instance.configuration.authentication)}
                     </span>
+                    <ProviderToolVerification
+                      disabled={disabled || !props.instance.enabled}
+                      instance={props.instance}
+                      observed={props.observed}
+                      onVerify={props.onVerifyModelTools}
+                    />
                   </div>
                 )}
                 {!isAnthropicHttp ? null : (
@@ -1400,6 +1407,12 @@ function ProviderRow(props: ProviderRowProps) {
                     <span>
                       Authentication: {titleCase(props.instance.configuration.authentication)}
                     </span>
+                    <ProviderToolVerification
+                      disabled={disabled || !props.instance.enabled}
+                      instance={props.instance}
+                      observed={props.observed}
+                      onVerify={props.onVerifyModelTools}
+                    />
                   </div>
                 )}
                 {!isFoundry ? null : (
@@ -1415,37 +1428,12 @@ function ProviderRow(props: ProviderRowProps) {
                         : protocolLabel(props.observed.observedProtocol)}
                     </span>
                     <span>Authentication: API key</span>
-                    <span>
-                      Tool support:{" "}
-                      <strong>
-                        {(props.observed?.verifiedToolModelIds?.length ?? 0) > 0
-                          ? `Verified (${props.observed?.verifiedToolModelIds?.length} deployment${(props.observed?.verifiedToolModelIds?.length ?? 0) > 1 ? "s" : ""})`
-                          : "Unverified (non-generating Connection Check)"}
-                      </strong>
-                    </span>
-                    <span>Deployments:</span>
-                    {props.instance.configuration.manualModelIds.map((modelId) => {
-                      const isVerified = props.observed?.verifiedToolModelIds?.some(
-                        (id) => String(id) === String(modelId),
-                      );
-                      return (
-                        <span key={String(modelId)}>
-                          <OctantButton
-                            disabled={disabled || !props.instance.enabled}
-                            onClick={() =>
-                              void props.onVerifyFoundryTools(props.instance.id, modelId)
-                            }
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            {props.probing
-                              ? "Verifying…"
-                              : `Verify tools for ${modelId}${isVerified ? " (verified)" : ""}`}
-                          </OctantButton>
-                        </span>
-                      );
-                    })}
+                    <ProviderToolVerification
+                      disabled={disabled || !props.instance.enabled}
+                      instance={props.instance}
+                      observed={props.observed}
+                      onVerify={props.onVerifyModelTools}
+                    />
                   </div>
                 )}
                 {!isClaude ? null : (
