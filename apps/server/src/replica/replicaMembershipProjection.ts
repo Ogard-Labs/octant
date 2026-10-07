@@ -346,6 +346,10 @@ export class ReplicaMembershipProjection implements Projection {
       this.#revocations.push(instanceId);
     }
     this.#joinRequests.delete(String(instanceId));
+    // A revoked identity's stopped publish is never finished.
+    if (this.#local !== undefined && same(this.#local.instanceId, instanceId)) {
+      this.#pending = undefined;
+    }
   }
 
   /**

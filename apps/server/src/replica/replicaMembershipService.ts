@@ -387,6 +387,14 @@ export class ReplicaMembershipService {
         subject,
       );
     }
+    if (keyBelongsToRevoked(state, deviceKey)) {
+      return this.#refuse(
+        "approve-join",
+        "revoked-instance",
+        "That device key belongs to a revoked computer.",
+        subject,
+      );
+    }
     const decision = decideReplicaJoinApproval({
       facts: domainFacts(state, local),
       joinRequest: {
@@ -745,6 +753,15 @@ export class ReplicaMembershipService {
       key = entry.subjectDeviceKey;
     }
     if (key === undefined) return { outcome: "refused", reason: "unknown-instance" };
+    // A new identity carrying a revoked computer's key is that computer back
+    // under another name, so its request or approval is refused.
+    if (
+      (entry.kind === "join-request" || entry.kind === "join-approved") &&
+      entry.subjectDeviceKey !== undefined &&
+      keyBelongsToRevoked(state, entry.subjectDeviceKey)
+    ) {
+      return { outcome: "refused", reason: "revoked-instance" };
+    }
     const localState: ReplicaLocalState = {
       localHostId: this.#ports.localHostId,
       localInstanceId: local.instanceId,
@@ -895,8 +912,13 @@ export class ReplicaMembershipService {
     store: ReplicaStore,
     command: "write-join-request" | "approve-join" | "revoke",
   ): Promise<ReplicaMembershipOutcome | undefined> {
-    const entry = this.#ports.state().pending;
+    const state = this.#ports.state();
+    const entry = state.pending;
     if (entry === undefined) return undefined;
+    // A revoked identity's stopped publish is dropped, not finished: its
+    // signature would be one the other computers refuse anyway, and the slot
+    // belongs to an identity this computer no longer writes as.
+    if (state.local === undefined || isRevoked(state, state.local.instanceId)) return undefined;
     const encoded = encoder.encode(encodeReplicaEntry(entry));
     let signature: string;
     try {
@@ -1113,6 +1135,12 @@ function isMember(state: ReplicaMembershipState, instanceId: ReplicaInstanceId):
 
 function isRevoked(state: ReplicaMembershipState, instanceId: ReplicaInstanceId): boolean {
   return state.revocations.some((revoked) => String(revoked) === String(instanceId));
+}
+
+function keyBelongsToRevoked(state: ReplicaMembershipState, publicKey: string): boolean {
+  return state.members.some(
+    (member) => member.publicKey === publicKey && isRevoked(state, member.instanceId),
+  );
 }
 
 function highestApplied(state: ReplicaMembershipState, instanceId: ReplicaInstanceId): number {

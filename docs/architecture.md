@@ -1312,10 +1312,19 @@ flowchart LR
   Each entry is verified against the device key the journal holds for its
   origin; only a join request, the one record a computer that is not yet a
   member may write, is verified against the key it names. A bad or missing
-  signature, an unknown or revoked origin, a body whose origin is not its path,
-  an unreadable file, a gap, or a rewritten sequence is refused and journaled
-  before anything from that entry is applied, and the walk for that instance
-  stops there. A refusal is journaled once, not on every pull. Once a computer
+  signature, an unknown or revoked origin, a new identity carrying a revoked
+  computer's key, a body whose origin is not its path, an unreadable file, or
+  a gap is refused and journaled before anything from that entry is applied,
+  and the walk for that instance stops there. A refusal is journaled once, not
+  on every pull. A sequence a computer has already applied is not read again,
+  so a file rewritten in that slot later is ignored, not detected. Anyone who
+  can write to the store can also put a file into a member's next free slot
+  first: that member's next publish then fails as slot-occupied, and nothing
+  it writes later can land, because the store is write-once and Octant never
+  deletes from it. A person recovers by deleting that file with the storage
+  provider's own tools, revoking the store credentials that wrote it, or
+  moving to a new store. A revoked identity's stopped publish is dropped, not
+  finished. Once a computer
   has applied a revocation, it refuses every entry from the revoked instance
   it has not already applied. Computers share no clock, so a reader cannot
   tell whether such an entry was signed before or after the revocation; entries
