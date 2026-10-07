@@ -102,13 +102,18 @@ refused rather than posted.
 
 The receipt is the gist's URL and its id. If GitHub refuses the credential — for
 example, because it has been revoked or expired — the export is refused with a
-clear message and nothing is posted; reconnect GitHub and try again.
+clear message and nothing is posted; reconnect GitHub and try again. If GitHub
+declines to create the gist for another reason, most often because the
+connection lacks the `gist` scope, the export says GitHub declined it rather
+than that GitHub could not be reached.
 
 ### Status
 
 The gist destination reports one of three states:
 
 - **Not connected** — GitHub is not connected. Connect it from Settings.
+  Octant checks the connection when you open the export panel, not when it
+  starts, so connecting GitHub shows up the next time you open it.
 - **Ready** — GitHub is connected and the export will post as your account.
 - **Refused**, with the reason — GitHub is signed in, but its credential is
   stored in plain text on this Mac, so Octant will not send through it. The same

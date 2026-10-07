@@ -7,6 +7,7 @@ import {
 import {
   GIST_EXPORT_TARGET_ID,
   GIST_PUBLIC_NOTE,
+  GistConnection,
   createGistExportTarget,
   gistExportAvailability,
   type GistExportAvailability,
@@ -163,6 +164,18 @@ describe("the GitHub Gist export destination", () => {
     });
   });
 
+  it("says GitHub declined, not that it could not be reached, when the gist is refused", async () => {
+    const { target: gist } = target(
+      { kind: "ready", account: "octocat" },
+      fakeGithub({ kind: "rejected" }),
+    );
+
+    const delivery = await gist.exportDocument(document({}));
+
+    expect(delivery).toMatchObject({ kind: "refused", code: "refused" });
+    expect(delivery).toHaveProperty("message", expect.stringContaining("gist scope"));
+  });
+
   it("reports unavailable without claiming the document was posted when GitHub cannot be reached", async () => {
     const { target: gist } = target(
       { kind: "ready", account: "octocat" },
@@ -226,5 +239,79 @@ describe("the gist destination's state from the GitHub connection", () => {
 
   it("is not-connected when a ready state carries no account to post as", () => {
     expect(gistExportAvailability(snapshot({ state: "ready" })).kind).toBe("not-connected");
+  });
+});
+
+describe("reading the GitHub connection for the gist destination", () => {
+  const ready: GithubAuthenticationSnapshot = {
+    state: "ready",
+    capabilities: [],
+    account: { login: "octocat", gitProtocol: "https", scopes: ["gist"] },
+  };
+  const signedOut: GithubAuthenticationSnapshot = { state: "unauthorized", capabilities: [] };
+
+  function connection(answers: ReadonlyArray<Promise<GithubAuthenticationSnapshot>>) {
+    let reads = 0;
+    const gist = new GistConnection(() => {
+      const answer = answers[reads] ?? Promise.resolve(signedOut);
+      reads += 1;
+      return answer;
+    });
+    return { gist, reads: () => reads };
+  }
+
+  it("reads nothing from GitHub until an export asks for its destinations", async () => {
+    const { gist, reads } = connection([Promise.resolve(ready)]);
+
+    expect(gist.availability()).toEqual({ kind: "not-connected" });
+    expect(reads()).toBe(0);
+
+    await gist.refresh();
+
+    expect(reads()).toBe(1);
+    expect(gist.availability()).toEqual({ kind: "ready", account: "octocat" });
+  });
+
+  it("keeps a connection that can post without reading GitHub again", async () => {
+    const { gist, reads } = connection([Promise.resolve(ready)]);
+
+    await gist.refresh();
+    await gist.refresh();
+
+    expect(reads()).toBe(1);
+  });
+
+  it("reads again when the kept state cannot offer the gist", async () => {
+    const { gist, reads } = connection([Promise.resolve(signedOut), Promise.resolve(ready)]);
+
+    await gist.refresh();
+    expect(gist.availability().kind).toBe("not-connected");
+    await gist.refresh();
+
+    expect(reads()).toBe(2);
+    expect(gist.availability()).toEqual({ kind: "ready", account: "octocat" });
+  });
+
+  it("stays not-connected when the read fails", async () => {
+    const { gist } = connection([Promise.reject(new Error("gh failed"))]);
+
+    await gist.refresh();
+
+    expect(gist.availability()).toEqual({ kind: "not-connected" });
+  });
+
+  it("keeps the state a GitHub command reported over a read that started before it", async () => {
+    let answer: (snapshot: GithubAuthenticationSnapshot) => void = () => undefined;
+    const pending = new Promise<GithubAuthenticationSnapshot>((resolve) => {
+      answer = resolve;
+    });
+    const { gist } = connection([pending]);
+
+    const reading = gist.refresh();
+    gist.changed(signedOut);
+    answer(ready);
+    await reading;
+
+    expect(gist.availability()).toEqual({ kind: "not-connected" });
   });
 });

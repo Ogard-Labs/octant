@@ -1941,17 +1941,23 @@ The GitHub Gist destination ships in-tree on the same port. It reuses the GitHub
 connection Octant already resolved through the `gh` command — the host-managed
 credential, never a token read by this code — so a host with no usable
 connection reports `not-connected` and one whose credential is stored in plain
-text reports `refused`, the same states the other GitHub capabilities report. A
-remote destination can describe more than a file: `describeDestination` names the
-account the export acts as and the audience the result will have, and a
-destination's own note, which the approval card shows verbatim. The person
-chooses `secret` or `public` on the card, the choice travels back through the
-`canvas-export-decision` request into `exportDocument`, and the card states
-plainly that a public result is visible to anyone. A gist is Markdown only and
-one file named from the Canvas title with a `.md` extension; the rendered
-document passes the same secret-and-path filter every exported document does,
-and one that fails it is refused rather than published. The receipt is the gist
-URL and its id, journaled in `canvas.export@1` like any other destination's.
+text reports `refused`, the same states the other GitHub capabilities report.
+The connection state is read on demand, when an export lists or prepares its
+destinations, and kept until Octant's own GitHub commands report a change; a
+state that cannot offer the gist is read again on the next listing. No GitHub
+call happens at host start. A GitHub refusal other than a rejected credential
+(for example a connection without the `gist` scope) is reported as declined, not
+as GitHub being unreachable. A remote destination can describe more than a file:
+`describeDestination` names the account the export acts as and the audience the
+result will have, and a destination's own note, which the approval card shows
+verbatim. The person chooses `secret` or `public` on the card, the choice
+travels back through the `canvas-export-decision` request into `exportDocument`,
+and the card states plainly that a public result is visible to anyone. A gist is
+Markdown only and one file named from the Canvas title with a `.md` extension;
+the rendered document passes the same secret-and-path filter every exported
+document does, and one that fails it is refused rather than published. The
+receipt is the gist URL and its id, journaled in `canvas.export@1` like any
+other destination's.
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured

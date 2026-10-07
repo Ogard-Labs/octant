@@ -96,6 +96,42 @@ describe("creating a gist through gh", () => {
     expect(result).toEqual({ kind: "unauthorized" });
   });
 
+  it("reports a 404 for a token without the gist scope as rejected, not unreachable", async () => {
+    const { command } = fakeCommand({
+      exitCode: 1,
+      stdout: "",
+      stderr: "gh: Not Found (HTTP 404)",
+    });
+    const port = createGistCreationPort(command);
+
+    const result = await port.create({
+      fileName: "Launch plan.md",
+      content: "# Launch plan\n",
+      description: "Launch plan",
+      visibility: "secret",
+    });
+
+    expect(result).toEqual({ kind: "rejected" });
+  });
+
+  it("keeps a rate limit unavailable rather than rejected", async () => {
+    const { command } = fakeCommand({
+      exitCode: 1,
+      stdout: "",
+      stderr: "gh: API rate limit exceeded (HTTP 403)",
+    });
+    const port = createGistCreationPort(command);
+
+    const result = await port.create({
+      fileName: "Launch plan.md",
+      content: "# Launch plan\n",
+      description: "Launch plan",
+      visibility: "secret",
+    });
+
+    expect(result).toEqual({ kind: "unavailable" });
+  });
+
   it("reports unavailable when gh cannot be reached", async () => {
     const command: GhCatalogueCommandPort = {
       run: async () => {

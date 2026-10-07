@@ -325,7 +325,6 @@ import { GhRepositoryObservationPort } from "./github/ghRepositoryObservationPor
 import { GithubCapabilityService } from "./github/githubCapabilityService";
 import { GithubCatalogueService } from "./github/githubCatalogueService";
 import { createGhGistCreationPort } from "./github/gistCreationPort";
-import type { GithubAuthenticationSnapshot } from "@octant/contracts/github-onboarding";
 import { GithubIssueContextService } from "./github/githubIssueContextService";
 import { LinearIssueContextService } from "./plugins/linear/linearIssueContextService";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
@@ -639,7 +638,7 @@ import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
 } from "./canvas/canvasExportTargets";
-import { gistExportAvailability } from "./canvas/gistExportTarget";
+import { GistConnection } from "./canvas/gistExportTarget";
 import { createDefaultCodexPluginPackageSources } from "./extensions/curatedBuildIosAppsCatalog";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "./scaffold/curatedScaffoldCatalog";
 import { resolveAvailableTools } from "./scaffold/scaffoldFilesystem";
@@ -2724,37 +2723,20 @@ export function startOctantServer(
       options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable },
     );
     let revokeProjectPullRequests: (() => void) | undefined;
-    /**
-     * The latest GitHub connection state, kept here because the gist export
-     * destination reads it while the offer list is built, which is synchronous
-     * and cannot wait on `gh`. A host with no usable `gh` starts not-connected
-     * and only refreshes when a real executable exists.
-     */
-    let githubAuthenticationSnapshot: GithubAuthenticationSnapshot = {
-      state: "unavailable",
-      capabilities: [],
-    };
+    // The gist export destination's GitHub state. It is read on demand when an
+    // export lists or prepares destinations, never at startup; see
+    // `GistConnection`.
+    const gistConnection = new GistConnection((signal) => githubCapabilityService.snapshot(signal));
     const githubCapabilityService = new GithubCapabilityService(githubAuthenticationPort, {
       probes: githubCataloguePort,
       onAuthenticationChanged: (snapshot) => {
-        githubAuthenticationSnapshot = snapshot;
+        gistConnection.changed(snapshot);
         const readable = snapshot.capabilities.some(
           (capability) => capability.kind === "pull-requests-read" && capability.available,
         );
         if (!readable) revokeProjectPullRequests?.();
       },
     });
-    if (options.ghExecutable !== undefined) {
-      // One bounded read at startup so the gist destination is offered honestly
-      // before anyone opens GitHub settings. A failure just leaves it
-      // not-connected.
-      void githubCapabilityService
-        .snapshot(new AbortController().signal)
-        .then((snapshot) => {
-          githubAuthenticationSnapshot = snapshot;
-        })
-        .catch(() => undefined);
-    }
     // One reading for every cache this host keeps, so the usage dashboard can
     // report them together and a failing external cache paces itself.
     const cacheStats = new CacheStatsProjection();
@@ -8759,7 +8741,7 @@ export function startOctantServer(
       // the same host-managed credential `gh` resolves, and the snapshot the
       // host keeps current. It reads that credential nowhere here.
       gist: {
-        availability: () => gistExportAvailability(githubAuthenticationSnapshot),
+        availability: () => gistConnection.availability(),
         gists: createGhGistCreationPort(options.ghExecutable),
       },
     };
@@ -8956,6 +8938,11 @@ export function startOctantServer(
       canvasService,
       canvasShareService,
       canvasExportService,
+      // A host with no usable `gh` has no GitHub state to read; the gist
+      // destination then stays not-connected without spawning anything.
+      ...(options.ghExecutable === undefined
+        ? {}
+        : { refreshCanvasExportTargets: () => gistConnection.refresh() }),
       canvasExportFolderService,
       resolveFolderCandidate: (windowId, input) =>
         folderBrowseService.resolveCandidate(windowId, input),

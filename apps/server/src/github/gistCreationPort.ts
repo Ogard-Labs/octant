@@ -33,6 +33,8 @@ export type GistCreationResult =
       readonly gist: { readonly id: string; readonly url: string };
     }
   | { readonly kind: "unauthorized" }
+  /** GitHub answered and declined the request, e.g. a connection without the gist scope. */
+  | { readonly kind: "rejected" }
   | { readonly kind: "unavailable" };
 
 export interface GistCreationPort {
@@ -110,6 +112,12 @@ function classifyGistFailure(diagnostic: string): GistCreationResult {
     )
   ) {
     return { kind: "unauthorized" };
+  }
+  // Any other 4xx is GitHub declining the request (a token without the gist
+  // scope answers 404 or 403), not GitHub being unreachable. A rate limit is
+  // transient, so it stays unavailable.
+  if (/HTTP 4\d\d/.test(diagnostic) && !/rate limit|HTTP 429/i.test(diagnostic)) {
+    return { kind: "rejected" };
   }
   return { kind: "unavailable" };
 }

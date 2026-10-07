@@ -77,6 +77,61 @@ export function gistExportAvailability(
   return { kind: "not-connected" };
 }
 
+/**
+ * The GitHub connection state the gist destination offers from, read on demand.
+ *
+ * The offer list is built synchronously and cannot wait on `gh`, so the state
+ * is kept here. It is read only when an export lists or prepares destinations —
+ * nothing calls GitHub at host start — and kept until Octant's own GitHub
+ * commands report a change. A state that cannot offer the gist is read again
+ * the next time, so connecting GitHub outside Octant is picked up.
+ */
+export class GistConnection {
+  readonly #read: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>;
+  #snapshot: GithubAuthenticationSnapshot | undefined;
+  #reading: Promise<void> | undefined;
+  // Bumped by every reported change, so a read that started before the change
+  // cannot overwrite the newer state when it lands.
+  #generation = 0;
+
+  constructor(read: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>) {
+    this.#read = read;
+  }
+
+  availability(): GistExportAvailability {
+    return this.#snapshot === undefined
+      ? { kind: "not-connected" }
+      : gistExportAvailability(this.#snapshot);
+  }
+
+  /** Reads the connection unless the kept state can already offer the gist. */
+  refresh(): Promise<void> {
+    if (this.availability().kind !== "not-connected") return Promise.resolve();
+    if (this.#reading !== undefined) return this.#reading;
+    const generation = this.#generation;
+    const reading = this.#read(new AbortController().signal)
+      .then(
+        (snapshot) => {
+          if (generation === this.#generation) this.#snapshot = snapshot;
+        },
+        // A failed read leaves the destination not-connected; the next
+        // listing tries again.
+        () => undefined,
+      )
+      .finally(() => {
+        this.#reading = undefined;
+      });
+    this.#reading = reading;
+    return reading;
+  }
+
+  /** Records the state an Octant GitHub command just produced. */
+  changed(snapshot: GithubAuthenticationSnapshot): void {
+    this.#generation += 1;
+    this.#snapshot = snapshot;
+  }
+}
+
 export function createGistExportTarget(
   dependencies: GistExportTargetDependencies,
 ): CanvasExportTarget {
@@ -127,6 +182,12 @@ export function createGistExportTarget(
       });
       if (outcome.kind === "unauthorized") {
         return refused("refused", "GitHub refused the credential. Reconnect GitHub and try again.");
+      }
+      if (outcome.kind === "rejected") {
+        return refused(
+          "refused",
+          "GitHub declined to create the gist. Check that the GitHub connection includes the gist scope, then try again.",
+        );
       }
       if (outcome.kind === "unavailable") {
         return refused("unavailable", "GitHub could not be reached.");
