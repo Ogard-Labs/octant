@@ -1,0 +1,29 @@
+/* A quiet line under a reply the output limit cut off. Meta ink, no hue:
+   the context ring stays the only coloured mark in the composer. */
+.output-limit-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: var(--oct-space-2) 0 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.output-limit-note__continue.output-limit-note__continue {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--oct-fg);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  appearance: none;
+}
+
+.output-limit-note__continue:focus-visible {
+  outline: 2px solid var(--oct-focus-edge);
+  outline-offset: 2px;
+}

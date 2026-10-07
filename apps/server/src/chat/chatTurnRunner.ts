@@ -305,6 +305,7 @@ export class ChatTurnRunner {
       let sawUsage = false;
       let sawVisibleResponse = false;
       let terminalOutcome: ChatAttemptOutcome | undefined;
+      let outputLimited = false;
       const turnStartedAt = clock();
       // Re-based when the prompt is sent, so the wait for a first token never
       // includes starting the provider's session.
@@ -333,7 +334,7 @@ export class ChatTurnRunner {
               input.onTurnCompleted!({
                 text: responseText,
                 toolCalls: answeredToolRequestIds.size,
-                turn: endOfTurn("end-of-turn"),
+                turn: endOfTurn(outputLimited ? "max-tokens" : "end-of-turn"),
               }).catch(() => undefined),
             );
 
@@ -598,7 +599,9 @@ export class ChatTurnRunner {
           try {
             // Reattaching a session sends no prompt, so there is no turn to measure.
             if (input.mode !== "resume") {
-              input.onTurnEnded?.(endOfTurn(stopReasonOf(terminalOutcome, input.signal?.aborted)));
+              input.onTurnEnded?.(
+                endOfTurn(stopReasonOf(terminalOutcome, input.signal?.aborted, outputLimited)),
+              );
             }
           } catch {
             // Measuring a turn never decides how it ends.
@@ -1284,6 +1287,7 @@ export class ChatTurnRunner {
                       : {}),
                   };
                   yield* input.persistAttempt(currentAttempt);
+                  if (event.stopReason === "max-tokens") outputLimited = true;
                   terminalOutcome = "completed";
                   yield* observeCompleted();
                   return;
@@ -1442,10 +1446,11 @@ export class ChatTurnRunner {
 function stopReasonOf(
   outcome: ChatAttemptOutcome | undefined,
   cancelRequested: boolean | undefined,
+  outputLimited = false,
 ): TurnStopReason {
   switch (outcome) {
     case "completed":
-      return "end-of-turn";
+      return outputLimited ? "max-tokens" : "end-of-turn";
     case "cancelled":
       return "cancelled";
     case "interrupted":

@@ -209,6 +209,30 @@ describe("native harness turn observer", () => {
       expect(recorded.settled).toBe(1);
     });
 
+    it("records a turn cut off at the output limit", async () => {
+      const { subject, recorded } = observer();
+
+      await subject.turnCompleted({
+        ...scope,
+        text: "Partial",
+        toolCalls: 0,
+        turn: summary({ stopReason: "max-tokens" }),
+      });
+
+      expect(recorded.turns).toEqual([expect.objectContaining({ stopReason: "max-tokens" })]);
+    });
+
+    it("does not record a turn cut off at the output limit a second time when it ends", async () => {
+      const { subject, recorded } = observer();
+      const cutOff = summary({ stopReason: "max-tokens" });
+      await subject.turnCompleted({ ...scope, text: "Partial", toolCalls: 0, turn: cutOff });
+
+      subject.turnEnded(scope, cutOff);
+
+      expect(recorded.turns).toEqual([expect.objectContaining({ stopReason: "max-tokens" })]);
+      expect(recorded.settled).toBe(1);
+    });
+
     it("records nothing for a provider the harness does not drive", async () => {
       const { subject, recorded } = observer(false);
 

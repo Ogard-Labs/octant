@@ -362,6 +362,9 @@ function openAiCompatibleTransport(
                 ...(result.rateLimitBuckets === undefined
                   ? {}
                   : { rateLimitBuckets: result.rateLimitBuckets }),
+                ...(result.outputStopReason === undefined
+                  ? {}
+                  : { outputStopReason: result.outputStopReason }),
               };
             },
           });

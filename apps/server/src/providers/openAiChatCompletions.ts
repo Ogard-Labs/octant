@@ -2,6 +2,7 @@ import { chatCompletionsToolImages } from "./openAiToolEncoding";
 import {
   decodeProviderFailure,
   type ProviderFailure,
+  type ProviderOutputStopReason,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
 } from "@octant/contracts";
@@ -19,6 +20,7 @@ import type {
   ProtocolTurnEvent,
   ProtocolUsage,
 } from "./openAiResponses";
+import { outputStopReason } from "./outputStopReason";
 import { readOpenAiRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
 
 export interface ChatCompletionsTurnInput {
@@ -50,6 +52,8 @@ export interface ChatCompletionsTurnResult {
   readonly verifiedManualModelId?: string;
   /** Quota buckets from the response headers. Absent when the endpoint sent none. */
   readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
+  /** Present when the endpoint said this reply stopped on a known limit or filter. */
+  readonly outputStopReason?: ProviderOutputStopReason;
 }
 
 interface TrackedChatToolCall {
@@ -71,6 +75,7 @@ interface StreamState {
   readonly events: ProtocolTurnEvent[];
   readonly toolCalls: TrackedChatToolCall[];
   completedToolCalls: ProtocolToolCall[];
+  outputStopReason?: ProviderOutputStopReason;
 }
 
 // Chunks, choices, deltas, and messages are read by the keys this protocol
@@ -364,15 +369,15 @@ function normalizeFinish(
     state.terminal = true;
     return;
   }
+  const stop = outputStopReason(reason);
+  if (stop !== undefined) {
+    state.outputStopReason = stop;
+    state.terminal = true;
+    return;
+  }
   state.outputStarted ||= reason === "function_call";
   if (reason === "function_call") {
     throw failure("unsupported", "The provider attempted an unsupported tool call.");
-  }
-  if (reason === "length") {
-    throw failure("provider-failed", "The provider returned an incomplete response.");
-  }
-  if (reason === "content_filter") {
-    throw failure("provider-failed", "The provider refused the request.");
   }
   throw protocol("The provider stream contained an unsupported finish reason.");
 }
@@ -451,22 +456,21 @@ async function normalizeNonStreaming(
   if (!hasToolCalls && choice.finish_reason === "tool_calls") {
     throw protocol("The provider returned a tool_calls finish reason without tool calls.");
   }
+  let outputStopReasonValue: ProviderOutputStopReason | undefined;
   if (!hasToolCalls && choice.finish_reason !== "stop") {
-    normalizeFinish(
-      choice.finish_reason,
-      {
-        accepted: true,
-        outputStarted: message.content !== null,
-        terminal: false,
-        done: false,
-        text: "",
-        nextSequence: 1,
-        events: [],
-        toolCalls: [],
-        completedToolCalls: [],
-      },
-      input.onEvent,
-    );
+    const finishState: StreamState = {
+      accepted: true,
+      outputStarted: message.content !== null,
+      terminal: false,
+      done: false,
+      text: "",
+      nextSequence: 1,
+      events: [],
+      toolCalls: [],
+      completedToolCalls: [],
+    };
+    normalizeFinish(choice.finish_reason, finishState, input.onEvent);
+    outputStopReasonValue = finishState.outputStopReason;
   }
   if (!hasToolCalls && typeof message.content !== "string") {
     throw protocol("The provider returned an invalid assistant message.");
@@ -485,6 +489,7 @@ async function normalizeNonStreaming(
     toolCalls: [],
     completedToolCalls: [],
     ...(usage === undefined ? {} : { usage }),
+    ...(outputStopReasonValue === undefined ? {} : { outputStopReason: outputStopReasonValue }),
   };
   assertSequenceStart(state.nextSequence);
   if (hasToolCalls) {
@@ -558,6 +563,7 @@ function result(
       ? { verifiedManualModelId: input.modelId }
       : {}),
     ...(rateLimitBuckets.length === 0 ? {} : { rateLimitBuckets }),
+    ...(state.outputStopReason === undefined ? {} : { outputStopReason: state.outputStopReason }),
   };
 }
 

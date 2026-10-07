@@ -1,6 +1,7 @@
 import {
   decodeProviderFailure,
   type ProviderFailure,
+  type ProviderOutputStopReason,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderToolImage,
@@ -15,6 +16,7 @@ import {
   normalizeToolName,
 } from "./openAiToolEncoding";
 import { readOpenAiRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
+import { outputStopReason } from "./outputStopReason";
 
 export interface ProtocolToolResult {
   readonly toolCallId: string;
@@ -64,6 +66,8 @@ export interface ProtocolTurnResult {
   readonly verifiedManualModelId?: string;
   /** Quota buckets from the response headers. Absent when the endpoint sent none. */
   readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
+  /** Present when the endpoint said this reply stopped on a known limit or filter. */
+  readonly outputStopReason?: ProviderOutputStopReason;
 }
 
 /**
@@ -133,6 +137,7 @@ interface NormalizationState {
   readonly functionCalls: Map<string, TrackedFunctionCall>;
   readonly toolCalls: ProtocolToolCall[];
   responseId?: string;
+  outputStopReason?: ProviderOutputStopReason;
 }
 
 interface TrackedOutputItem {
@@ -302,6 +307,7 @@ async function runResponsesTurn(
       ? { verifiedManualModelId: input.modelId }
       : {}),
     ...(rateLimitBuckets.length === 0 ? {} : { rateLimitBuckets }),
+    ...(state.outputStopReason === undefined ? {} : { outputStopReason: state.outputStopReason }),
   };
 }
 
@@ -381,10 +387,18 @@ function normalizeEvent(
       state.accepted = true;
       validateResponseState(event.response, "failed", state);
       throw failure("provider-failed", "The provider failed to complete the response.");
-    case "response.incomplete":
+    case "response.incomplete": {
       state.accepted = true;
       validateResponseState(event.response, "incomplete", state);
-      throw failure("provider-failed", "The provider returned an incomplete response.");
+      const reason = incompleteReason(event.response);
+      const stop = outputStopReason(reason);
+      if (stop === undefined) {
+        throw failure("provider-failed", "The provider returned an incomplete response.");
+      }
+      state.outputStopReason = stop;
+      state.completed = true;
+      return;
+    }
     case "error":
       state.accepted = true;
       throw failure("provider-failed", "The provider failed to complete the response.");
@@ -465,6 +479,13 @@ function validateResponseLifecycle(
 ): void {
   const expectedStatus = event.type === "response.queued" ? "queued" : "in_progress";
   validateResponseState(event.response, expectedStatus, state);
+}
+
+function incompleteReason(value: unknown): string | undefined {
+  if (!isRecord(value) || !isRecord(value.incomplete_details)) return undefined;
+  return typeof value.incomplete_details.reason === "string"
+    ? value.incomplete_details.reason
+    : undefined;
 }
 
 function validateResponseState(

@@ -454,7 +454,13 @@ export function createNativeHarnessConnection(
         emit(state, { kind: "usage", ...state.usage });
       }
       state.acceptingSteering = false;
-      emit(state, { kind: "completed", resumeCursor: cursorFor(state) });
+      emit(state, {
+        kind: "completed",
+        resumeCursor: cursorFor(state),
+        ...(response.outputStopReason === undefined
+          ? {}
+          : { stopReason: response.outputStopReason }),
+      });
     };
 
     const emitBucket = (state: SessionState, bucket: ObservedRateLimitBucket) =>

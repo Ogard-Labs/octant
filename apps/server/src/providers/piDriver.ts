@@ -8,6 +8,7 @@ import {
   type ProviderExecutionPolicy,
   type ProviderFailure,
   type ProviderInstanceId,
+  type ProviderOutputStopReason,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
   type ProviderToolAnswer,
@@ -29,6 +30,7 @@ import {
   type PiSessionMode,
 } from "./piProcess";
 import { PiRpcFailure, type PiRpcEvent, type PiRpcResponse } from "./piRpcClient";
+import { outputStopReason } from "./outputStopReason";
 import {
   createPiManagedToolsBridge,
   type PiManagedToolCall,
@@ -117,6 +119,8 @@ interface SessionState {
   promptActive: boolean;
   terminal: boolean;
   closed: boolean;
+  /** The last assistant message's stop reason, when Pi reported one Octant understands. */
+  outputStopReason?: ProviderOutputStopReason;
 }
 
 interface PendingPiTool {
@@ -517,6 +521,10 @@ function makeConnection(
         const message = record(event.message);
         const usage = record(message?.usage);
         if (message?.role !== "assistant") return;
+        const stop = outputStopReason(
+          typeof message.stopReason === "string" ? message.stopReason : undefined,
+        );
+        if (stop !== undefined) state.outputStopReason = stop;
         if (usage === undefined) {
           state.usageIncomplete = true;
           return;
@@ -683,6 +691,7 @@ function makeConnection(
               modelId: decodeProviderModelId(state.modelId),
             },
           },
+          ...(state.outputStopReason === undefined ? {} : { stopReason: state.outputStopReason }),
         });
         return;
       }

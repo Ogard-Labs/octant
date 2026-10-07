@@ -1323,6 +1323,38 @@ describe("mapClaudeMessage", () => {
     });
   });
 
+  it("records a max_tokens stop on the completed event and leaves an ordinary finish unstated", () => {
+    const limited = mapped(context(), {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "max_tokens",
+      usage,
+      totalCostUsd: 0.01,
+      permissionDenials: [],
+    });
+    const finished = mapped(context(), {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage,
+      totalCostUsd: 0.01,
+      permissionDenials: [],
+    });
+
+    expect(limited.at(-1)).toMatchObject({
+      kind: "event",
+      event: { kind: "completed", stopReason: "max-tokens" },
+    });
+    const finishedEvent = finished.at(-1);
+    expect(finishedEvent?.kind === "event" ? finishedEvent.event : undefined).not.toHaveProperty(
+      "stopReason",
+    );
+  });
+
   it("reports how much of the window the last request filled, and where the runtime compacts", () => {
     const ctx = context({ autoCompactThreshold: 167_000 });
     const result = {

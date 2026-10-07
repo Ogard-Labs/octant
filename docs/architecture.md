@@ -1556,6 +1556,32 @@ session's `usage` and `metrics` totals fold them, so a Code turn on a direct
 endpoint no longer records zero tokens. Chat, Work and Code on every provider
 journal the frame; the harness additionally keeps its own record.
 
+### Stop reasons
+
+A completed runtime event may carry an optional stop reason. `max-tokens` means
+the reply was cut off because the output limit was reached. `content-filter`
+means the provider stopped the reply on a content filter. The field is absent
+when the runtime did not say why the turn ended; absence is not a normal
+finish guessed into a reason.
+
+Chat Completions maps `finish_reason` `length` to `max-tokens` and
+`content_filter` to `content-filter`. The Responses protocol maps
+`incomplete_details.reason` `max_output_tokens` and `content_filter` the same
+way. The Messages protocol maps `stop_reason` `max_tokens`, and `refusal`
+(its safety classifier stopping the reply) to `content-filter`; an ACP prompt
+result's `refusal` names the agent declining to continue, not a filter, so it
+leaves the field absent. Claude's result
+`stop_reason`, Pi's assistant `stopReason` of `length`, OpenCode's step
+`finish` of `length`, and an ACP prompt result that names one of those
+strings, map when the protocol reports them. A local runtime's `done_reason`
+of `length` maps the same way. Codex's turn status does not say the output
+was cut off, so its completed event leaves the field absent.
+
+A turn record's stop reason is `max-tokens` when the completed event carried
+that reason. The per-turn detail says "Cut off at the output limit". The
+transcript shows a quiet note with Continue, which drafts a follow-up into
+the composer and sends nothing until the person does.
+
 The ACP and RPC mappers (Devin, Kimi, Grok, Copilot, Mistral Vibe, Oh My Pi)
 report no usage today: the prompt result is read only for its stop reason, and
 the capability is declared `unavailable`, so their turns are `unavailable` and
