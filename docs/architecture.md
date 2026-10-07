@@ -1290,8 +1290,18 @@ modelId }`, and the model picker is provider-first. Discovery can find
   body is `{decision}`. An approval is answered `once`, never `always`, even
   when approvals are remembered for the Project: `always` would save a grant
   in OpenCode's data directory, which it shares with the person's own use,
-  outside Octant's revocation. A 2.x reject settles every pending request in
-  the session, so each settled request is forgotten. Questions are
+  outside Octant's revocation. Approval-gated on 2.x honours permission
+  grants the person saved in OpenCode itself for the same repository: OpenCode
+  keys them by the repository's root commit, keeps them in its own data store
+  (shared with the person's own use because provider credentials live there),
+  and applies them as allow after Octant's rules. Octant's denies still win,
+  so Plan and the Work shell and subagent denials hold, and Octant itself
+  never writes such a grant because it answers approvals `once`. An edit
+  allowed this way still fails the turn through the file-change check, after
+  the write; a shell command allowed this way runs without an approval card.
+  Clearing the saved grants in OpenCode restores the prompts. A 2.x reject
+  settles every pending request in the session, so each settled request is
+  forgotten. Questions are
   unsupported: 2.0.22 serves no question routes and asks through forms, which
   are not mapped, so the written posture denies `question` and a form that
   still arrives fails the turn. Resume, interruption, and tool
@@ -1984,6 +1994,11 @@ mechanisms are:
   and records the posture the turn ran under. Compatible harnesses may
   answer those prompts themselves when the thread opts in
   (`docs/decisions/0104`); categories and confinement stay Octant's.
+  One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
+  honours permission grants the person saved in OpenCode itself for the same
+  repository, so such an action runs without an Octant prompt. Octant's
+  denies still win, and Octant never writes such a grant; the
+  [providers](#providers) entry on OpenCode states the details.
   The access picker also offers "Lower thread" to durably return a thread to
   approval-gated and revoke a session-only Full-access grant for that window
   without confirmation.
