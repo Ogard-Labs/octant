@@ -1,6 +1,5 @@
 import { OpenCodeMessageParts } from "./openCodeMessageParts";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import {
   type CorrelationId,
@@ -27,7 +26,12 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
-import type { Event, PermissionRuleset, Provider } from "@opencode-ai/sdk/v2/types";
+import type {
+  Event,
+  PermissionRuleset,
+  PermissionV2Ruleset,
+  Provider,
+} from "@opencode-ai/sdk/v2/types";
 import { Cause, Effect, Exit, Option, PubSub, Scope, Stream } from "effect";
 import { mapOpenCodeEvent } from "./openCodeEventMapper";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
@@ -59,6 +63,8 @@ export interface OpenCodeClientPort {
     readonly model?: { readonly providerId: string; readonly modelId: string };
   }) => Promise<OpenCodeSessionRecord>;
   readonly getSession: (sessionId: string) => Promise<OpenCodeSessionRecord>;
+  /** Removes a session and its history from the provider's own store. */
+  readonly deleteSession: (sessionId: string) => Promise<void>;
   readonly prompt: (input: {
     readonly sessionId: string;
     readonly providerId: string;
@@ -71,10 +77,15 @@ export interface OpenCodeClientPort {
   readonly disconnectMcpServer: (name: string) => Promise<void>;
   readonly abort: (sessionId: string) => Promise<void>;
   readonly replyPermission: (
+    sessionId: string,
     requestId: string,
     reply: "once" | "always" | "reject",
   ) => Promise<void>;
-  readonly replyQuestion: (requestId: string, answers: ReadonlyArray<string>) => Promise<void>;
+  readonly replyQuestion: (
+    sessionId: string,
+    requestId: string,
+    answers: ReadonlyArray<string>,
+  ) => Promise<void>;
 }
 
 export interface OpenCodeDriverOptions {
@@ -104,6 +115,10 @@ interface SessionState {
   sourceId: string | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvals: Set<string>;
+  /** Action named by each pending approval, so a granted edit can release a later file change. */
+  readonly approvalActions: Map<string, string>;
+  /** Set when this session's posture or an approval has allowed an edit to run. */
+  grantedEdits: boolean;
   readonly questions: Map<
     string,
     {
@@ -186,9 +201,10 @@ function openCodeChatCapabilities(
 }
 
 /**
- * 2.x reports the operations this slice maps. Approvals, questions, file
- * changes, and app-managed tools stay unsupported until their rules can be
- * enforced; a caller that needs one fails closed.
+ * 2.x reports the operations this slice maps. Approvals are mapped through
+ * the 2.x permission event and reply route. Questions stay unsupported:
+ * 2.0.22 serves no question routes and asks through forms instead. File
+ * changes stay unsupported until their events can be enforced.
  */
 function openCodeBetaCapabilities(reported: ProviderCapabilities): ProviderCapabilities {
   return {
@@ -196,16 +212,19 @@ function openCodeBetaCapabilities(reported: ProviderCapabilities): ProviderCapab
     resume: "supported",
     interruption: "supported",
     toolActivity: "supported",
-    approvals: "unsupported",
+    approvals: "supported",
     userQuestions: "unsupported",
     fileChanges: "unsupported",
-    appManagedTools: "unsupported",
+    appManagedTools: reported.appManagedTools,
   };
 }
 
 /**
- * A 2.x runtime whose confined catalogue is readable but whose jail cannot
- * serve a Git work tree. Models stay visible; no turn is offered.
+ * A 2.x runtime whose confined jail cannot serve a Git work tree even with
+ * the always-failing `git` stand-in. Models stay visible; no turn is offered.
+ * The probe attests at a directory with a `.git` marker under the Chat/Plan
+ * confinement; if a future OpenCode treats the failing `git` as fatal, the
+ * probe fails closed here.
  */
 const BETA_GIT_WORKTREE_REFUSAL_MESSAGE =
   "OpenCode 2 cannot resolve a Git project inside the Chat and Plan jail, so turns are not offered.";
@@ -230,14 +249,20 @@ const BETA_LISTING_ONLY_CAPABILITIES = {
 
 /**
  * Project resolution on 2.x spawns the Git binary for any directory inside a
- * work tree, and the Chat and Plan jail refuses that spawn. Observed with
- * 2.0.22 on macOS: the confined provider and model routes answered 500 for a
- * work tree and 200 for a plain directory, while the same binary unconfined
- * answered 200 for both. A `.git` marker is enough to take the Git path, so
+ * work tree. The Chat and Plan jail allows fork plus exec of exactly one
+ * binary — `/usr/bin/false`, reached through a private `git` symlink on PATH
+ * — so the spawn succeeds and git exits non-zero, which OpenCode reads as
+ * "not a git project". A `.git` marker is enough to take the Git path, so
  * the probe can attest the jail without a real repository or a Git binary.
+ * If a future OpenCode treats the failing `git` as fatal, the probe fails
+ * closed and the runtime stays listing-only.
+ *
+ * The marker lives in the launch's own scratch directory: every launch profile
+ * denies reading `/private`, where the host temporary directory resolves, so
+ * a marker there was refused for being unreadable, not for being a work tree.
  */
-function makeBetaWorktreeMarker(): string {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-probe-")));
+function makeBetaWorktreeMarker(parent: string): string {
+  const root = realpathSync(mkdtempSync(join(parent, "octant-opencode-probe-")));
   try {
     mkdirSync(join(root, ".git", "objects"), { recursive: true });
     mkdirSync(join(root, ".git", "refs"));
@@ -278,36 +303,13 @@ const BETA_API_TIMEOUT_MS = 5_000;
 const BETA_MUTATION_TIMEOUT_MS = 10_000;
 const MCP_PROBE_TIMEOUT_MS = 5_000;
 const BETA_WRITE_REFUSAL_MESSAGE =
-  "OpenCode 2 cannot enforce session permission rules, so Work and Code writes are refused.";
-
-/**
- * Session permission rules are not sent on 2.x. A turn is offered only when
- * the process jail already enforces the boundary those rules would: Chat never
- * writes, and Plan denies writes in every mode. Any other Work or Code policy
- * would let a write proceed without an approval, so it fails closed.
- */
-export function betaWritesUnenforceable(
-  runtime: "legacy" | "beta" | undefined,
-  mode: "chat" | "work" | "code",
-  policy: ProviderExecutionPolicy,
-): boolean {
-  return runtime === "beta" && mode !== "chat" && policy !== "plan";
-}
+  "OpenCode 2 reported a file change that no approval or setting allowed, so the turn was stopped.";
 
 /**
  * OpenCode applies the last matching rule. An allow on edit or the wildcard
  * would write without an approval if the rules were dropped, so that ruleset
  * is refused even when the caller did not also name the mode.
  */
-function rulesPermitUnaskedWrites(rules: PermissionRuleset): boolean {
-  let action: PermissionRuleset[number]["action"] | undefined;
-  for (const rule of rules) {
-    if (rule.pattern !== "*") continue;
-    if (rule.permission === "*" || rule.permission === "edit") action = rule.action;
-  }
-  return action === "allow";
-}
-
 function betaRequestOptions() {
   return { throwOnError: true as const, signal: AbortSignal.timeout(BETA_API_TIMEOUT_MS) };
 }
@@ -548,7 +550,16 @@ export function adaptBetaOpenCodeEvent(value: unknown): Event | undefined {
   if (properties === undefined && record.properties !== undefined && record.data !== undefined) {
     return undefined;
   }
-  return { type, properties: properties ?? {} } as Event;
+  // 2.0.22 publishes its permission events as `permission.asked` and
+  // `permission.replied` with the 2.x payload (`action`, `resources`), not
+  // the `permission.v2.*` names the pinned SDK types declare.
+  const betaType =
+    type === "permission.asked"
+      ? "permission.v2.asked"
+      : type === "permission.replied"
+        ? "permission.v2.replied"
+        : type;
+  return { type: betaType, properties: properties ?? {} } as Event;
 }
 
 async function* adaptBetaEventStream(stream: AsyncIterable<unknown>): AsyncGenerator<Event> {
@@ -563,12 +574,6 @@ function openCodeBetaPromptFiles(attachments: ProviderTurnInput["attachments"]) 
     uri: `data:${attachment.mediaType};base64,${Buffer.from(attachment.bytes).toString("base64")}`,
     name: attachment.displayName,
   }));
-}
-
-function refuseUnaskedBetaWrites(permission: PermissionRuleset): void {
-  if (rulesPermitUnaskedWrites(permission)) {
-    throw fail("unsupported", BETA_WRITE_REFUSAL_MESSAGE);
-  }
 }
 
 export function makeOfficialOpenCodeClient(
@@ -617,7 +622,6 @@ export function makeOfficialOpenCodeClient(
     createSession: async ({ permission, model }) => {
       if (!beta)
         return resultData(await client.session.create({ permission }, { throwOnError: true }));
-      refuseUnaskedBetaWrites(permission);
       return adaptBetaSession(
         resultData(
           await client.v2.session.create(
@@ -640,22 +644,63 @@ export function makeOfficialOpenCodeClient(
             ),
           )
         : resultData(await client.session.get({ sessionID: sessionId }, { throwOnError: true })),
+    deleteSession: async (sessionId) => {
+      if (!beta) {
+        await client.session.delete(
+          { sessionID: sessionId, directory: projectRoot },
+          { throwOnError: true, signal: AbortSignal.timeout(10_000) },
+        );
+        return;
+      }
+      // The pinned SDK 1.18.0 has no v2 session delete; 2.0.22 serves
+      // `DELETE /api/session/{sessionID}` and answers 204.
+      const response = await fetch(
+        new URL(`/api/session/${encodeURIComponent(sessionId)}`, server.url).toString(),
+        {
+          method: "DELETE",
+          headers: {
+            authorization: server.authorization,
+            "x-opencode-directory": encodeURIComponent(projectRoot),
+          },
+          signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`OpenCode 2 session delete failed with status ${response.status}.`);
+      }
+    },
     prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [], permission }) => {
       if (beta) {
-        refuseUnaskedBetaWrites(permission);
         await client.v2.session.switchModel(
           { sessionID: sessionId, model: { providerID: providerId, id: modelId } },
           betaMutationOptions(),
         );
         const files = openCodeBetaPromptFiles(attachments);
-        await client.v2.session.prompt(
-          {
-            sessionID: sessionId,
-            prompt: { text: prompt, ...(files.length === 0 ? {} : { files }) },
-            resume: true,
-          },
-          betaMutationOptions(),
+        // The pinned SDK 1.18.0 sends `v2.session.prompt` with a nested
+        // `prompt:{text,files}` body, but OpenCode 2.0.22 expects a flat
+        // `{text,files,resume}` body and answers 400 "Missing key at [text]"
+        // for the nested shape. Send the flat body directly.
+        const promptUrl = new URL(
+          `/api/session/${encodeURIComponent(sessionId)}/prompt`,
+          server.url,
         );
+        const response = await fetch(promptUrl.toString(), {
+          method: "POST",
+          headers: {
+            authorization: server.authorization,
+            "content-type": "application/json",
+            "x-opencode-directory": encodeURIComponent(projectRoot),
+          },
+          body: JSON.stringify({
+            text: prompt,
+            ...(files.length === 0 ? {} : { files }),
+            resume: true,
+          }),
+          signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+          throw new Error(`OpenCode 2 prompt failed with status ${response.status}.`);
+        }
         return;
       }
       await client.session.update(
@@ -672,7 +717,6 @@ export function makeOfficialOpenCodeClient(
       );
     },
     addMcpServer: async ({ name, url }) => {
-      if (beta) throw fail("unsupported", "OpenCode 2 app-managed tools are not mapped.");
       await client.mcp.add(
         {
           directory: projectRoot,
@@ -683,7 +727,6 @@ export function makeOfficialOpenCodeClient(
       );
     },
     disconnectMcpServer: async (name) => {
-      if (beta) throw fail("unsupported", "OpenCode 2 app-managed tools are not mapped.");
       await client.mcp.disconnect(
         { name, directory: projectRoot },
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
@@ -699,11 +742,36 @@ export function makeOfficialOpenCodeClient(
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
       );
     },
-    replyPermission: async (requestId, reply) => {
-      if (beta) throw fail("unsupported", "OpenCode 2 approval replies are not mapped.");
+    replyPermission: async (sessionId, requestId, reply) => {
+      if (beta) {
+        // The pinned SDK 1.18.0 sends `{reply}`, which 2.0.22 answers 400;
+        // its reply route requires `{decision}`. Send that body directly.
+        const response = await fetch(
+          new URL(
+            `/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(requestId)}/reply`,
+            server.url,
+          ).toString(),
+          {
+            method: "POST",
+            headers: {
+              authorization: server.authorization,
+              "content-type": "application/json",
+              "x-opencode-directory": encodeURIComponent(projectRoot),
+            },
+            body: JSON.stringify({ decision: reply }),
+            signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(`OpenCode 2 permission reply failed with status ${response.status}.`);
+        }
+        return;
+      }
       await client.permission.reply({ requestID: requestId, reply }, { throwOnError: true });
     },
-    replyQuestion: async (requestId, answers) => {
+    replyQuestion: async (_sessionId, requestId, answers) => {
+      // 2.0.22 serves no question routes; it asks through forms, which are
+      // not mapped, so its questions are reported unsupported.
       if (beta) throw fail("unsupported", "OpenCode 2 questions are not mapped.");
       await client.question.reply(
         { requestID: requestId, answers: answers.map((answer) => [answer]) },
@@ -745,10 +813,16 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                     (ownedBridge) => Effect.promise(() => ownedBridge.close()),
                   )
                 : undefined;
+            // Probe under the Chat/Plan jail, not the Code jail: the git
+            // stand-in (fork plus exec of /usr/bin/false only) is what makes
+            // a 2.x runtime serve a Git work tree in Chat, Plan, and Work.
+            // Attesting under Code confinement would pass even without it.
             const runtime = yield* acquireRuntime(
               options,
               projectRoot,
               bridge === undefined ? [] : [bridge.port],
+              "chat",
+              "plan",
             );
             const client = clientFactory(runtime, projectRoot);
             const health = yield* request(client.health);
@@ -778,17 +852,46 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               runtime.isolatedConfiguration === true && mcpAccepted,
             );
             if (runtime.runtime === "beta" && normalized.models.length > 0) {
-              const marker = yield* Effect.acquireRelease(
-                Effect.try({
-                  try: makeBetaWorktreeMarker,
-                  catch: () => fail("unavailable", "OpenCode probe workspace is unavailable."),
-                }),
-                (owned) => Effect.sync(() => rmSync(owned, { recursive: true, force: true })),
-              );
-              const servesWorktree = yield* request(clientFactory(runtime, marker).providers).pipe(
-                Effect.as(true),
-                Effect.orElseSucceed(() => false),
-              );
+              // A launch that reports no scratch directory cannot be attested.
+              // Otherwise attest that the Chat/Plan jail serves a Git work
+              // tree: a session create in the marker directory triggers git
+              // project resolution, which the stand-in makes fail gracefully.
+              // If a future OpenCode treats the failing git as fatal, this
+              // fails closed and the runtime stays listing-only.
+              const scratch = runtime.temporaryDirectory;
+              const servesWorktree =
+                scratch === undefined
+                  ? false
+                  : yield* Effect.acquireRelease(
+                      Effect.try({
+                        try: () => makeBetaWorktreeMarker(scratch),
+                        catch: () =>
+                          fail("unavailable", "OpenCode probe workspace is unavailable."),
+                      }),
+                      (owned) => Effect.sync(() => rmSync(owned, { recursive: true, force: true })),
+                    ).pipe(
+                      Effect.flatMap((marker) => {
+                        const markerClient = clientFactory(runtime, marker);
+                        return request(() =>
+                          markerClient.createSession({
+                            permission: [{ permission: "*", pattern: "*", action: "ask" }],
+                          }),
+                        ).pipe(
+                          // OpenCode keeps sessions in the data directory it
+                          // shares with the person's own use, where its auth
+                          // lives too. Remove the attestation session; a
+                          // failed delete leaves one empty session behind and
+                          // does not change what the create attested.
+                          Effect.tap((session) =>
+                            Effect.promise(() =>
+                              markerClient.deleteSession(session.id).catch(() => undefined),
+                            ),
+                          ),
+                          Effect.as(true),
+                          Effect.orElseSucceed(() => false),
+                        );
+                      }),
+                    );
               if (!servesWorktree) {
                 return decodeProviderProbeResult({
                   ...normalized,
@@ -845,7 +948,10 @@ function acquireRuntime(
   options: OpenCodeDriverOptions,
   projectRoot: string,
   loopbackPorts: ReadonlyArray<number> = [],
+  probeMode: "chat" | "work" | "code" = "chat",
+  probePolicy: ProviderExecutionPolicy = "plan",
 ) {
+  const betaPermissions = betaSessionPermissionRules(probePolicy, probeMode);
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
     idleMs: options.idleLeaseMs ?? 30_000,
     start: async () => {
@@ -857,8 +963,9 @@ function acquireRuntime(
             .start({
               binaryPath: options.binaryPath,
               cwd: projectRoot,
-              mode: "chat",
-              executionPolicy: "plan",
+              mode: probeMode,
+              executionPolicy: probePolicy,
+              betaPermissions,
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
@@ -993,11 +1100,47 @@ function makeConnection(
       state.terminal = true;
       cancelPendingTools(state);
       state.approvals.clear();
+      state.approvalActions.clear();
       state.questions.clear();
       state.questionAnswers.clear();
       deactivate(state);
       void releaseManagedTools(state).catch(() => undefined);
     };
+    const betaEnforcement = (state: SessionState) =>
+      runtimeKind !== "beta"
+        ? undefined
+        : {
+            mode,
+            reply: (requestId: string, reply: "once" | "reject") => {
+              const active = client;
+              const source = state.sourceId;
+              if (active === undefined || source === undefined) {
+                if (state.terminal) return;
+                offer(
+                  unmappedBetaFailure(
+                    state,
+                    options.instanceId,
+                    clock,
+                    "OpenCode 2 permission reply failed.",
+                  ),
+                );
+                retireState(state);
+                return;
+              }
+              void active.replyPermission(source, requestId, reply).catch(() => {
+                if (state.terminal) return;
+                offer(
+                  unmappedBetaFailure(
+                    state,
+                    options.instanceId,
+                    clock,
+                    "OpenCode 2 permission reply failed.",
+                  ),
+                );
+                retireState(state);
+              });
+            },
+          };
     const emitInterrupted = (state: SessionState, message: string) => {
       if (state.terminal) return;
       retireState(state);
@@ -1038,6 +1181,7 @@ function makeConnection(
     const ensureRuntime = (
       executionPolicy: ProviderExecutionPolicy,
       loopbackPorts: ReadonlyArray<number>,
+      managedToolServerName: string | undefined,
     ): Effect.Effect<OpenCodeClientPort, ProviderFailure> =>
       Effect.tryPromise({
         try: async () => {
@@ -1065,6 +1209,11 @@ function makeConnection(
                   cwd: projectRoot,
                   mode,
                   executionPolicy,
+                  betaPermissions: betaSessionPermissionRules(
+                    executionPolicy,
+                    mode,
+                    managedToolServerName,
+                  ),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
                   onProcessStarted: (process) =>
                     options.runtimeRegistry.trackProcess(options.instanceId, process),
@@ -1189,7 +1338,7 @@ function makeConnection(
                       clock,
                       offer,
                       retireState,
-                      runtimeKind === "beta",
+                      betaEnforcement(state),
                     );
                   }
                 }
@@ -1357,17 +1506,10 @@ function makeConnection(
               ensureRuntime(
                 input.executionPolicy,
                 state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
+                state.managedTools?.serverName,
               ),
             ),
             Effect.flatMap((runtimeClient) => {
-              if (betaWritesUnenforceable(runtimeKind, mode, input.executionPolicy)) {
-                return Effect.promise(async () => {
-                  await releaseManagedTools(state);
-                  await closeRuntime();
-                }).pipe(
-                  Effect.zipRight(Effect.fail(fail("unsupported", BETA_WRITE_REFUSAL_MESSAGE))),
-                );
-              }
               if (state.managedTools !== undefined && !runtimeIsolated) {
                 return Effect.promise(() => releaseManagedTools(state)).pipe(
                   Effect.zipRight(
@@ -1429,7 +1571,7 @@ function makeConnection(
                   clock,
                   offer,
                   retireState,
-                  runtimeKind === "beta",
+                  betaEnforcement(state),
                 );
               }
               pendingBySource.delete(session.id);
@@ -1489,17 +1631,10 @@ function makeConnection(
                   ensureRuntime(
                     input.executionPolicy,
                     state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
+                    state.managedTools?.serverName,
                   ),
                 ),
                 Effect.flatMap((runtimeClient) => {
-                  if (betaWritesUnenforceable(runtimeKind, mode, input.executionPolicy)) {
-                    return Effect.promise(async () => {
-                      await releaseManagedTools(state);
-                      await closeRuntime();
-                    }).pipe(
-                      Effect.zipRight(Effect.fail(fail("unsupported", BETA_WRITE_REFUSAL_MESSAGE))),
-                    );
-                  }
                   const attachManagedTools =
                     state.managedTools === undefined || inheritedTools !== undefined
                       ? Promise.resolve()
@@ -1551,7 +1686,7 @@ function makeConnection(
                       clock,
                       offer,
                       retireState,
-                      runtimeKind === "beta",
+                      betaEnforcement(state),
                     );
                   }
                   pendingBySource.delete(session.id);
@@ -1574,9 +1709,6 @@ function makeConnection(
             const state = sessionsBySource.get(source)!;
             if (state.terminal) {
               return Effect.fail(fail("protocol", "Provider session is already terminal."));
-            }
-            if (betaWritesUnenforceable(runtimeKind, mode, state.executionPolicy)) {
-              return Effect.fail(fail("unsupported", BETA_WRITE_REFUSAL_MESSAGE));
             }
             const observed = options.runtimeRegistry.observedState(options.instanceId);
             const model = observed?.models.find((candidate) => candidate.id === state.modelId);
@@ -1667,44 +1799,64 @@ function makeConnection(
           }),
         ),
       answerApproval: (input) =>
-        runtimeKind === "beta"
-          ? Effect.fail(fail("unsupported", "OpenCode 2 approval replies are not mapped."))
-          : usableStateFor(input.sessionId).pipe(
-              Effect.flatMap(([, state]) => {
-                const activeClient = client;
-                if (activeClient === undefined) {
-                  return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
-                }
-                return state.terminal
-                  ? Effect.fail(fail("protocol", "Provider session is already terminal."))
-                  : state.executionPolicy === "plan"
-                    ? Effect.fail(
-                        fail("unauthorized", "Plan mode cannot approve provider actions."),
-                      )
-                    : !state.approvals.has(input.requestId)
-                      ? Effect.fail(fail("protocol", "Provider approval request is not pending."))
-                      : request(() =>
-                          activeClient.replyPermission(
-                            input.requestId,
-                            input.approved
-                              ? (options.permissionPersistence?.() ?? "current-session") ===
+        usableStateFor(input.sessionId).pipe(
+          Effect.flatMap(([source, state]) => {
+            const activeClient = client;
+            if (activeClient === undefined) {
+              return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
+            }
+            return state.terminal
+              ? Effect.fail(fail("protocol", "Provider session is already terminal."))
+              : state.executionPolicy === "plan"
+                ? Effect.fail(fail("unauthorized", "Plan mode cannot approve provider actions."))
+                : !state.approvals.has(input.requestId)
+                  ? Effect.fail(fail("protocol", "Provider approval request is not pending."))
+                  : Effect.suspend(() => {
+                      // Settle the edit grant before replying: OpenCode runs the
+                      // approved edit, and announces the request as settled, on
+                      // its event stream, which can arrive before this reply's
+                      // response. A failed reply restores the earlier grant.
+                      const action = state.approvalActions.get(input.requestId);
+                      const priorGrant = state.grantedEdits;
+                      if (action === "edit") state.grantedEdits = input.approved;
+                      return request(() =>
+                        activeClient.replyPermission(
+                          source,
+                          input.requestId,
+                          // On 2.x `always` saves a project grant in OpenCode's
+                          // own data directory, shared with the person's OpenCode
+                          // use, outside Octant's revocation, and it also settles
+                          // other pending requests it covers. Octant keeps its
+                          // own remembered approvals, so 2.x is only answered once.
+                          input.approved
+                            ? runtimeKind !== "beta" &&
+                              (options.permissionPersistence?.() ?? "current-session") ===
                                 "project-default"
-                                ? "always"
-                                : "once"
-                              : "reject",
-                          ),
-                        ).pipe(
-                          Effect.tap(() =>
-                            Effect.sync(() => state.approvals.delete(input.requestId)),
-                          ),
-                        );
-              }),
-            ),
+                              ? "always"
+                              : "once"
+                            : "reject",
+                        ),
+                      ).pipe(
+                        Effect.tapError(() =>
+                          Effect.sync(() => {
+                            if (action === "edit") state.grantedEdits = priorGrant;
+                          }),
+                        ),
+                        Effect.tap(() =>
+                          Effect.sync(() => {
+                            state.approvalActions.delete(input.requestId);
+                            state.approvals.delete(input.requestId);
+                          }),
+                        ),
+                      );
+                    });
+          }),
+        ),
       answerUserInput: (input) =>
         runtimeKind === "beta"
           ? Effect.fail(fail("unsupported", "OpenCode 2 questions are not mapped."))
           : usableStateFor(input.sessionId).pipe(
-              Effect.flatMap(([, state]) => {
+              Effect.flatMap(([source, state]) => {
                 const activeClient = client;
                 if (activeClient === undefined) {
                   return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
@@ -1734,7 +1886,7 @@ function makeConnection(
                           (_, index) => answers.get(index + 1) ?? "",
                         );
                         const reply = request(() =>
-                          activeClient.replyQuestion(question.providerRequestId, ordered),
+                          activeClient.replyQuestion(source, question.providerRequestId, ordered),
                         ).pipe(
                           Effect.tap(() =>
                             Effect.sync(() => {
@@ -1793,6 +1945,8 @@ function newSessionState(
     sourceId: undefined,
     executionPolicy,
     approvals: new Set(),
+    approvalActions: new Map(),
+    grantedEdits: false,
     questions: new Map(),
     questionAnswers: new Map(),
     toolNames: new Set(tools.map((tool) => tool.name)),
@@ -1822,6 +1976,7 @@ function unmappedBetaFailure(
   state: SessionState,
   instanceId: ProviderInstanceId,
   clock: () => string,
+  message = "OpenCode 2 cannot map this provider event.",
 ): ProviderRuntimeEvent {
   return {
     kind: "failed",
@@ -1832,19 +1987,34 @@ function unmappedBetaFailure(
     occurredAt: clock() as UtcTimestamp,
     failure: {
       category: "unsupported",
-      message: "OpenCode 2 cannot map this provider event.",
+      message,
     },
   };
 }
 
-function failClosedBetaEvent(event: ProviderRuntimeEvent): ProviderRuntimeEvent {
-  if (
-    event.kind !== "approval-request" &&
-    event.kind !== "user-input-request" &&
-    event.kind !== "file-change"
-  ) {
+function failClosedBetaEvent(
+  event: ProviderRuntimeEvent,
+  state: SessionState,
+  mode: "chat" | "work" | "code",
+): ProviderRuntimeEvent {
+  if (event.kind === "user-input-request") {
+    return {
+      kind: "failed",
+      instanceId: event.instanceId,
+      sessionId: event.sessionId,
+      correlationId: event.correlationId,
+      sequence: event.sequence,
+      occurredAt: event.occurredAt,
+      failure: { category: "unsupported", message: "OpenCode 2 questions are not mapped." },
+    };
+  }
+  if (event.kind !== "file-change") {
     return event;
   }
+  const edit = betaPermissionEffect(betaAgentPermissionRules(state.executionPolicy, mode), "edit");
+  // An edit the posture allows, or one the user already approved, may be
+  // reported. Any other file change ran without a grant, so the turn fails.
+  if (edit === "allow" || state.grantedEdits) return event;
   return {
     kind: "failed",
     instanceId: event.instanceId,
@@ -1854,10 +2024,7 @@ function failClosedBetaEvent(event: ProviderRuntimeEvent): ProviderRuntimeEvent 
     occurredAt: event.occurredAt,
     failure: {
       category: "unsupported",
-      message:
-        event.kind === "file-change"
-          ? BETA_WRITE_REFUSAL_MESSAGE
-          : "OpenCode 2 cannot map this provider request.",
+      message: BETA_WRITE_REFUSAL_MESSAGE,
     },
   };
 }
@@ -1869,9 +2036,64 @@ function mapAndOffer(
   clock: () => string,
   offer: (event: ProviderRuntimeEvent) => void,
   retire: (state: SessionState) => void,
-  failClosed = false,
+  beta?: {
+    readonly mode: "chat" | "work" | "code";
+    readonly reply: (requestId: string, reply: "once" | "reject") => void;
+  },
 ): void {
   if (state.terminal) return;
+  // 2.0.22 asks its questions through forms, which are not mapped; a turn
+  // waiting on an unanswerable form would hang, so it fails instead.
+  if (beta !== undefined && String(event.type) === "form.created") {
+    offer(unmappedBetaFailure(state, instanceId, clock, "OpenCode 2 questions are not mapped."));
+    retire(state);
+    return;
+  }
+  // A 2.x reject settles every pending request in the session, observed with
+  // 2.0.22, and each settled request is announced. Forget each one so a later
+  // answer to it is refused as not pending instead of failing at the server.
+  if (beta !== undefined && event.type === "permission.v2.replied") {
+    const settled = textProperty(event.properties, "requestID");
+    state.approvals.delete(settled);
+    state.approvalActions.delete(settled);
+    return;
+  }
+  if (beta !== undefined && event.type === "permission.v2.asked") {
+    const requestId = textProperty(event.properties, "id");
+    const action = textProperty(event.properties, "action");
+    const effect =
+      requestId === "" || action === ""
+        ? undefined
+        : betaPermissionEffect(
+            betaSessionPermissionRules(
+              state.executionPolicy,
+              beta.mode,
+              state.managedTools?.serverName,
+            ),
+            action,
+          );
+    if (effect === undefined) {
+      offer(
+        unmappedBetaFailure(
+          state,
+          instanceId,
+          clock,
+          "OpenCode 2 permission request cannot be mapped.",
+        ),
+      );
+      retire(state);
+      return;
+    }
+    if (effect === "deny") {
+      beta.reply(requestId, "reject");
+      return;
+    }
+    if (effect === "allow") {
+      if (action === "edit") state.grantedEdits = true;
+      beta.reply(requestId, "once");
+      return;
+    }
+  }
   let mapped: ReadonlyArray<ProviderRuntimeEvent>;
   try {
     mapped = mapOpenCodeEvent(
@@ -1887,7 +2109,7 @@ function mapAndOffer(
       event,
     );
   } catch (error) {
-    if (!failClosed) throw error;
+    if (!beta) throw error;
     offer(unmappedBetaFailure(state, instanceId, clock));
     retire(state);
     return;
@@ -1900,7 +2122,7 @@ function mapAndOffer(
       taskOccurrences.set(original.summary, occurrence + 1);
     }
     let normalized = stableTaskIdentity(state, original, occurrence);
-    if (failClosed) normalized = failClosedBetaEvent(normalized);
+    if (beta !== undefined) normalized = failClosedBetaEvent(normalized, state, beta.mode);
     // OpenCode settles usage once per model step. Consumers keep the latest
     // report as the logical turn's figure, so make each report cumulative
     // across the prompt's tool loop while keeping the same provider session.
@@ -1924,7 +2146,10 @@ function mapAndOffer(
       };
       normalized = { ...normalized, ...state.usageTotals };
     }
-    if (normalized.kind === "approval-request") state.approvals.add(normalized.requestId);
+    if (normalized.kind === "approval-request") {
+      state.approvals.add(normalized.requestId);
+      state.approvalActions.set(normalized.requestId, normalized.action);
+    }
     if (normalized.kind === "user-input-request") {
       const providerRequestId = normalized.requestId;
       const index = normalized.questionIndex ?? 1;
@@ -2007,6 +2232,113 @@ function splitModelId(value: string): { providerId: string; modelId: string } {
   return { providerId: value.slice(0, separator), modelId: value.slice(separator + 1) };
 }
 
+const BETA_SHELL_AND_SUBAGENT_DENY: PermissionV2Ruleset = [
+  { action: "bash", resource: "*", effect: "deny" },
+  { action: "shell", resource: "*", effect: "deny" },
+  { action: "task", resource: "*", effect: "deny" },
+  { action: "subagent", resource: "*", effect: "deny" },
+];
+
+/**
+ * Maps Octant's approval posture onto the 2.x agent permission ruleset. The
+ * 2.x session create API does not accept a ruleset, so the process writes
+ * these rules into its private configuration, where OpenCode appends them
+ * after every agent's built-in rules. The host also applies the last matching
+ * rule when a `permission.v2.asked` event arrives: deny is rejected without
+ * asking, allow is replied once without asking, and ask is surfaced.
+ *
+ * 2.0.22 names the shell `shell` and child agents `subagent`; the 1.x names
+ * stay denied too so neither spelling reopens what the posture refuses.
+ */
+export function betaAgentPermissionRules(
+  policy: ProviderExecutionPolicy,
+  mode: "chat" | "work" | "code",
+): PermissionV2Ruleset {
+  const denyExternal: PermissionV2Ruleset = [
+    { action: "external_directory", resource: "*", effect: "deny" },
+  ];
+  let rules: PermissionV2Ruleset;
+  if (policy === "full-access") {
+    rules = [{ action: "*", resource: "*", effect: "allow" }, ...denyExternal];
+  } else if (policy === "auto-accept-edits") {
+    rules = [
+      { action: "*", resource: "*", effect: "ask" },
+      { action: "edit", resource: "*", effect: "allow" },
+      ...denyExternal,
+    ];
+  } else if (policy === "approval-gated") {
+    rules = [{ action: "*", resource: "*", effect: "ask" }, ...denyExternal];
+  } else {
+    rules = [
+      { action: "*", resource: "*", effect: "ask" },
+      { action: "edit", resource: "*", effect: "deny" },
+      ...BETA_SHELL_AND_SUBAGENT_DENY,
+      { action: "external_directory", resource: "*", effect: "deny" },
+      { action: "todowrite", resource: "*", effect: "deny" },
+      { action: "webfetch", resource: "*", effect: "deny" },
+      { action: "websearch", resource: "*", effect: "deny" },
+    ];
+  }
+  if (mode === "work") rules.push(...BETA_SHELL_AND_SUBAGENT_DENY);
+  return rules;
+}
+
+/**
+ * The whole 2.x ruleset a process serves, in the same order as the 1.x
+ * session ruleset: the posture, then every namespaced tool, skill, and
+ * question denied, then only this connection's app-managed tool bridge
+ * allowed. These come after the posture's catch-all so they still apply.
+ */
+export function betaSessionPermissionRules(
+  policy: ProviderExecutionPolicy,
+  mode: "chat" | "work" | "code",
+  managedToolServerName?: string,
+): PermissionV2Ruleset {
+  const rules: PermissionV2Ruleset = [
+    ...betaAgentPermissionRules(policy, mode),
+    { action: "*_*", resource: "*", effect: "deny" },
+    { action: "skill", resource: "*", effect: "deny" },
+    // 2.0.22's question tool asks for this permission and then publishes a
+    // form, which Octant does not map; its default agent allows it.
+    { action: "question", resource: "*", effect: "deny" },
+  ];
+  if (managedToolServerName !== undefined) {
+    rules.push({ action: `${managedToolServerName}_*`, resource: "*", effect: "allow" });
+  }
+  return rules;
+}
+
+/**
+ * Last matching 2.x rule for an action. An action that matches nothing is
+ * unmappable: the caller refuses the turn rather than guessing ask or allow.
+ */
+export function betaPermissionEffect(
+  rules: PermissionV2Ruleset,
+  action: string,
+): "allow" | "deny" | "ask" | undefined {
+  let effect: "allow" | "deny" | "ask" | undefined;
+  for (const rule of rules) {
+    if (rule.resource !== "*") continue;
+    if (!betaActionMatches(rule.action, action)) continue;
+    effect = rule.effect;
+  }
+  return effect;
+}
+
+function betaActionMatches(pattern: string, action: string): boolean {
+  const source = `^${pattern
+    .split("*")
+    .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&"))
+    .join(".*")}$`;
+  return new RegExp(source).test(action);
+}
+
+function textProperty(value: unknown, key: string): string {
+  if (typeof value !== "object" || value === null || !Object.hasOwn(value, key)) return "";
+  const field = Reflect.get(value, key);
+  return typeof field === "string" ? field.trim() : "";
+}
+
 export function normalizeOpenCodeProbe(
   instanceId: ProviderInstanceId,
   health: { readonly version: string },
@@ -2069,9 +2401,15 @@ export function providerFailure(error: unknown): ProviderFailure {
 }
 
 export function sourceSessionId(event: Event): string | undefined {
-  const properties = event.properties as { readonly sessionID?: unknown };
+  const properties = event.properties as {
+    readonly sessionID?: unknown;
+    readonly form?: { readonly sessionID?: unknown };
+  };
   if (typeof properties.sessionID === "string" && properties.sessionID.length > 0)
     return properties.sessionID;
+  // 2.0.22 publishes `form.created` with the session inside the form.
+  const formSession = properties.form?.sessionID;
+  if (typeof formSession === "string" && formSession.length > 0) return formSession;
   // Earlier runtimes put the session identity inside the message or part.
   const nested =
     event.type === "message.part.updated"

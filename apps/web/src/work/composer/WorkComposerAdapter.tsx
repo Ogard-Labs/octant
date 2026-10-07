@@ -51,6 +51,7 @@ import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { WelcomeHeading } from "../../composer/WelcomeHeading";
+import { HomeComposerTabs, type HomeComposerTabsSlot } from "../../home/HomeComposerTabs";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
 import { appendTranscript } from "../../voice/appendTranscript";
 import { selectedModelReadsImages, useWorkComposerImages } from "./useWorkComposerImages";
@@ -106,6 +107,8 @@ export interface WorkComposerAdapterProps {
   readonly reviewCount?: number | undefined;
   /** The start screen's action tiles and Running now strip, under the composer. */
   readonly homeStart?: ReactNode;
+  /** The Running tab above the composer; absent leaves the composer on its own. */
+  readonly composerTabs?: HomeComposerTabsSlot;
   readonly folderControl?: ReactNode;
   readonly createFromControl?: ReactNode;
   /** Optional multi-model pool control slot rendered in the composer bar. */
@@ -370,188 +373,190 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
           />
         </div>
 
-        <div className="composer-stack">
-          <ThreadComposer
-            {...(threadDropKey === undefined ? {} : { threadDropKey })}
-            startContext={
-              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
-                <div className="composer-tray__leading">
-                  <WorkKindSwitch />
-                  {projectControl}
-                  {environmentControl}
+        <HomeComposerTabs slot={props.composerTabs}>
+          <div className="composer-stack">
+            <ThreadComposer
+              {...(threadDropKey === undefined ? {} : { threadDropKey })}
+              startContext={
+                <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                  <div className="composer-tray__leading">
+                    <WorkKindSwitch />
+                    {projectControl}
+                    {environmentControl}
+                  </div>
+                  {props.createFromControl === undefined ? null : (
+                    <div className="composer-tray__trailing">{props.createFromControl}</div>
+                  )}
                 </div>
-                {props.createFromControl === undefined ? null : (
-                  <div className="composer-tray__trailing">{props.createFromControl}</div>
-                )}
-              </div>
-            }
-            chips={
-              <>
-                <ComputerUseMention controller={computer} surface="chips" />
-                <BrowserUseMention controller={browser} surface="chips" />
-                {extensionDraft.receipts.length > 0 ? (
-                  <ul aria-label="Selected extensions" className="composer-chips">
-                    {extensionDraft.receipts.map((receipt) => (
-                      <li className="chip" key={receipt.reference}>
-                        <span>{receipt.label}</span>
-                        {receipt.status.kind === "blocked" ? (
-                          <span>{`Blocked: ${receipt.status.reason}`}</span>
-                        ) : null}
-                        <OctantButton
-                          aria-label={`Remove ${receipt.label} extension`}
-                          className="chip-x window-no-drag"
-                          onClick={() => extensionDraft.remove(receipt.reference)}
-                          type="button"
-                          variant="ghost"
-                        >
-                          ×
-                        </OctantButton>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                <ThreadMentionChips
-                  chips={threadMentions.chips}
-                  onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
-                />
-                <TrackerReferenceComposerHints draft={prompt} />
-                <WorkImageAttachmentChips images={images} />
-              </>
-            }
-            input={
-              <OctantTextarea
-                aria-label="First message"
-                aria-autocomplete="list"
-                aria-expanded={computer.open || browser.open || slash.open}
-                aria-controls={
-                  appMentions.open.length > 1
-                    ? appMentions.listId
-                    : computer.open
-                      ? computer.listId
-                      : browser.open
-                        ? browser.listId
-                        : slash.open
-                          ? slash.listId
-                          : undefined
-                }
-                aria-activedescendant={
-                  appMentions.open.length > 1
-                    ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
-                    : computer.open
-                      ? `${computer.listId}-computer`
-                      : browser.open
-                        ? `${browser.listId}-browser`
-                        : slash.active === undefined
-                          ? undefined
-                          : `${slash.listId}-${slash.active.id}`
-                }
-                autoFocus
-                className="composer-input"
-                disabled={props.creating}
-                onChange={(event) => {
-                  setPrompt(event.target.value);
-                  computer.sync(event.target.value, event.currentTarget.selectionStart);
-                  browser.sync(event.target.value, event.currentTarget.selectionStart);
-                  slash.sync(event.target.value, event.currentTarget.selectionStart);
-                  mention.sync(event.target.value, event.currentTarget.selectionStart);
-                }}
-                onClick={(event) => {
-                  mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                  browser.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                  slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                }}
-                ref={textareaRef}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  if (attachFromTransfer(event.dataTransfer)) event.preventDefault();
-                }}
-                onKeyDown={handleKeyDown}
-                onPaste={onDraftPaste}
-                placeholder={draftThreadModePresentation("work").composerPlaceholder}
-                rows={3}
-                value={prompt}
-              />
-            }
-            typeahead={
-              appMentions.open.length > 1 ? (
-                <ApplicationMentionTypeahead typeahead={appMentions} />
-              ) : computer.open ? (
-                <ComputerUseMention controller={computer} surface="typeahead" />
-              ) : browser.open ? (
-                <BrowserUseMention controller={browser} surface="typeahead" />
-              ) : slash.open ? (
-                <ComposerSlashTypeahead controller={slash} />
-              ) : mention.open ? (
-                <ThreadMentionTypeahead
-                  activeIndex={mention.activeIndex}
-                  {...(threadMentions.composer?.busy === undefined
-                    ? {}
-                    : { busy: threadMentions.composer.busy })}
-                  candidates={threadMentions.composer?.candidates ?? []}
-                  listId={mentionListId}
-                  onChoose={mention.choose}
-                  onHover={mention.setActiveIndex}
-                />
-              ) : null
-            }
-            row={{
-              className: "work-composer-adapter__composer-bar",
-              leading: (
+              }
+              chips={
                 <>
-                  <ComposerAttachButton
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    busy={props.creating === true}
-                    refusedReason={
-                      imageSupport === false
-                        ? "The selected model does not accept images. Choose an image-capable model."
-                        : undefined
-                    }
-                    onRefused={images.refuse}
-                    onFileSelected={(file) => images.attach([file])}
+                  <ComputerUseMention controller={computer} surface="chips" />
+                  <BrowserUseMention controller={browser} surface="chips" />
+                  {extensionDraft.receipts.length > 0 ? (
+                    <ul aria-label="Selected extensions" className="composer-chips">
+                      {extensionDraft.receipts.map((receipt) => (
+                        <li className="chip" key={receipt.reference}>
+                          <span>{receipt.label}</span>
+                          {receipt.status.kind === "blocked" ? (
+                            <span>{`Blocked: ${receipt.status.reason}`}</span>
+                          ) : null}
+                          <OctantButton
+                            aria-label={`Remove ${receipt.label} extension`}
+                            className="chip-x window-no-drag"
+                            onClick={() => extensionDraft.remove(receipt.reference)}
+                            type="button"
+                            variant="ghost"
+                          >
+                            ×
+                          </OctantButton>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <ThreadMentionChips
+                    chips={threadMentions.chips}
+                    onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
                   />
-                  <ComposerVoiceButton
-                    disabled={props.creating === true}
-                    onTranscript={(transcript) =>
-                      setPrompt((current) => appendTranscript(current, transcript))
-                    }
-                  />
-
-                  <span aria-hidden="true" className="composer-gap" />
-                  <ComposerModelPicker
-                    ariaLabel="Provider and model"
-                    groups={props.providerGroups}
-                    menuSide="bottom"
-                    disabled={props.creating === true || submitting}
-                    modelOptionValues={modelOptionValues}
-                    onModelOptionChange={(optionId, value) => {
-                      const values = { ...modelOptionValues };
-                      if (value === undefined) delete values[optionId];
-                      else values[optionId] = value;
-                      setOptionState({ key: modelKey, values });
-                    }}
-                    onSelect={props.onSelectProvider}
-                    {...(props.selectedModelId === undefined
-                      ? {}
-                      : { selectedModelId: props.selectedModelId })}
-                    {...(props.selectedProviderInstanceId === undefined
-                      ? {}
-                      : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                  />
-                  {props.poolControl}
+                  <TrackerReferenceComposerHints draft={prompt} />
+                  <WorkImageAttachmentChips images={images} />
                 </>
-              ),
-              actions: {
-                kind: "send",
-                send: {
-                  ariaLabel:
-                    props.errorMessage === undefined ? "Create thread" : "Retry creating thread",
-                  disabled: !canSubmit,
-                  onSend: submit,
+              }
+              input={
+                <OctantTextarea
+                  aria-label="First message"
+                  aria-autocomplete="list"
+                  aria-expanded={computer.open || browser.open || slash.open}
+                  aria-controls={
+                    appMentions.open.length > 1
+                      ? appMentions.listId
+                      : computer.open
+                        ? computer.listId
+                        : browser.open
+                          ? browser.listId
+                          : slash.open
+                            ? slash.listId
+                            : undefined
+                  }
+                  aria-activedescendant={
+                    appMentions.open.length > 1
+                      ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
+                      : computer.open
+                        ? `${computer.listId}-computer`
+                        : browser.open
+                          ? `${browser.listId}-browser`
+                          : slash.active === undefined
+                            ? undefined
+                            : `${slash.listId}-${slash.active.id}`
+                  }
+                  autoFocus
+                  className="composer-input"
+                  disabled={props.creating}
+                  onChange={(event) => {
+                    setPrompt(event.target.value);
+                    computer.sync(event.target.value, event.currentTarget.selectionStart);
+                    browser.sync(event.target.value, event.currentTarget.selectionStart);
+                    slash.sync(event.target.value, event.currentTarget.selectionStart);
+                    mention.sync(event.target.value, event.currentTarget.selectionStart);
+                  }}
+                  onClick={(event) => {
+                    mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                    browser.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                    slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  }}
+                  ref={textareaRef}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    if (attachFromTransfer(event.dataTransfer)) event.preventDefault();
+                  }}
+                  onKeyDown={handleKeyDown}
+                  onPaste={onDraftPaste}
+                  placeholder={draftThreadModePresentation("work").composerPlaceholder}
+                  rows={3}
+                  value={prompt}
+                />
+              }
+              typeahead={
+                appMentions.open.length > 1 ? (
+                  <ApplicationMentionTypeahead typeahead={appMentions} />
+                ) : computer.open ? (
+                  <ComputerUseMention controller={computer} surface="typeahead" />
+                ) : browser.open ? (
+                  <BrowserUseMention controller={browser} surface="typeahead" />
+                ) : slash.open ? (
+                  <ComposerSlashTypeahead controller={slash} />
+                ) : mention.open ? (
+                  <ThreadMentionTypeahead
+                    activeIndex={mention.activeIndex}
+                    {...(threadMentions.composer?.busy === undefined
+                      ? {}
+                      : { busy: threadMentions.composer.busy })}
+                    candidates={threadMentions.composer?.candidates ?? []}
+                    listId={mentionListId}
+                    onChoose={mention.choose}
+                    onHover={mention.setActiveIndex}
+                  />
+                ) : null
+              }
+              row={{
+                className: "work-composer-adapter__composer-bar",
+                leading: (
+                  <>
+                    <ComposerAttachButton
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      busy={props.creating === true}
+                      refusedReason={
+                        imageSupport === false
+                          ? "The selected model does not accept images. Choose an image-capable model."
+                          : undefined
+                      }
+                      onRefused={images.refuse}
+                      onFileSelected={(file) => images.attach([file])}
+                    />
+                    <ComposerVoiceButton
+                      disabled={props.creating === true}
+                      onTranscript={(transcript) =>
+                        setPrompt((current) => appendTranscript(current, transcript))
+                      }
+                    />
+
+                    <span aria-hidden="true" className="composer-gap" />
+                    <ComposerModelPicker
+                      ariaLabel="Provider and model"
+                      groups={props.providerGroups}
+                      menuSide="bottom"
+                      disabled={props.creating === true || submitting}
+                      modelOptionValues={modelOptionValues}
+                      onModelOptionChange={(optionId, value) => {
+                        const values = { ...modelOptionValues };
+                        if (value === undefined) delete values[optionId];
+                        else values[optionId] = value;
+                        setOptionState({ key: modelKey, values });
+                      }}
+                      onSelect={props.onSelectProvider}
+                      {...(props.selectedModelId === undefined
+                        ? {}
+                        : { selectedModelId: props.selectedModelId })}
+                      {...(props.selectedProviderInstanceId === undefined
+                        ? {}
+                        : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                    />
+                    {props.poolControl}
+                  </>
+                ),
+                actions: {
+                  kind: "send",
+                  send: {
+                    ariaLabel:
+                      props.errorMessage === undefined ? "Create thread" : "Retry creating thread",
+                    disabled: !canSubmit,
+                    onSend: submit,
+                  },
                 },
-              },
-            }}
-          />
-        </div>
+              }}
+            />
+          </div>
+        </HomeComposerTabs>
 
         {props.homeStart}
 

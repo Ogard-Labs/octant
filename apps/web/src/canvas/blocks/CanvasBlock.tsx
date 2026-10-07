@@ -4,13 +4,20 @@ import { DataBlocks } from "./DataBlocks";
 import { PlanBlock, type PlanTaskRuntime } from "./PlanBlock";
 import { ReferenceBlocks } from "./ReferenceBlocks";
 import type { DiagramBoardLayoutRuntime } from "./DiagramBoard";
-import { SequenceDiagram, StateDiagram } from "./KindDiagrams";
+import {
+  ErDiagram,
+  MindmapDiagram,
+  SequenceDiagram,
+  StateDiagram,
+  SwimlaneDiagram,
+} from "./KindDiagrams";
 import { DesignBlock } from "./DesignBlock";
 import { MockupBlock } from "./MockupBlock";
 import { StructuredBlocks } from "./StructuredBlocks";
 import { TextBlocks } from "./TextBlocks";
 import { TreemapBlock } from "./TreemapBlock";
 import { HeatmapBlock } from "./HeatmapBlock";
+import { BarListBlock } from "./BarListBlock";
 import type { CanvasActionRuntime } from "../canvasActionRuntime";
 
 export function CanvasBlockRenderer({
@@ -57,6 +64,12 @@ export function CanvasBlockRenderer({
       return <SequenceDiagram block={block} />;
     case "state":
       return <StateDiagram block={block} />;
+    case "er":
+      return <ErDiagram block={block} />;
+    case "swimlane":
+      return <SwimlaneDiagram block={block} />;
+    case "mindmap":
+      return <MindmapDiagram block={block} />;
     case "mockup":
       return <MockupBlock block={block} />;
     case "treemap":
@@ -67,6 +80,10 @@ export function CanvasBlockRenderer({
       return <HeatmapBlock block={block} />;
     case "design":
       return <DesignBlock block={block} />;
+    case "bar-list":
+      return (
+        <BarListBlock block={block} {...(actionRuntime === undefined ? {} : { actionRuntime })} />
+      );
     case "code-excerpt":
     case "pseudocode":
     case "diff":

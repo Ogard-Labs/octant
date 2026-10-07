@@ -210,6 +210,65 @@ start and step ride on the same navigation rows as the executing flag (see
 reads), so a remote window sees them for exactly the threads it can already
 list.
 
+**Running services** follows Working now, on by default. It lists the dev servers
+and other listeners running in the host's Code Projects: the Code Environment's
+Local servers read host-wide, across every active Code Project the Project
+bootstrap lists, which today does not vary by window (see
+[Architecture: security and authority](../architecture.md#security-and-authority),
+Local servers and Running services). A row is the server's name (its framework,
+else its runtime) and port, the Project and the branch or thread it belongs to,
+its health with a glyph and a word ("Listening", "Not responding", "Not
+checked"; never a colour), and the host's name only when the window is reading a
+computer that is not this one. A server Octant owns says nothing more; any other
+says **Not owned by Octant**. Such a server is listed only while nothing names
+another editor as its starter, which does not show who did: one an earlier
+Octant session left behind looks the same as one started in Terminal, by Claude
+Code, or by Codex, so neither the row nor its Stop confirmation says Octant
+started it. Each row
+has **Open** and **Stop**. Open places the page the host prepared: as a Browser
+tab of the thread whose own worktree the server runs in, otherwise in this
+computer's own browser, and only there, so a window reading another computer
+never opens that computer's loopback address on its own. Stop is the
+Environment's authorized stop unchanged: a server Octant owns stops at once, one
+it does not own asks for the same confirmation naming process, folder, and port,
+and a Stop the host will not offer (a server in a Plan thread's own worktree, a
+server Octant does not own from a paired device) is explained in a line with no
+control. A server in the Project folder itself is no one thread's, so it is
+judged as the person's own, approval-gated, even when a Plan thread works in
+that folder. At most five rows show, then
+**+N more listening**. The card reads when it mounts and then every five
+seconds, the Environment panel's cadence, and only while the window is visible;
+a card that is off, or a start screen that is not showing, scans nothing. When
+the host cannot scan, the card says it could not check rather than that nothing
+is running, and a refused refresh keeps the last listing. A window with no Code
+Project sees an empty card.
+
+Above the composer the same screens carry two tabs on its top-left edge,
+**New task** and **Running**. New task is selected first and is the composer as
+it was: the Running tab never takes the focus the composer takes on arrival. The
+Running label carries the sidebar's own Running count for the current mode, read
+from the same place as the tile (nothing is added at zero), so the two cannot
+disagree; the list can run longer by an agent run whose thread is resting, which
+the sidebar does not count either. The tabs are a tablist: Arrow keys move
+between them, Enter or Space chooses, and Tab goes on to the composer. Choosing
+Running hides the composer without unmounting it, so the draft, the chosen
+Project, model, and attachments are all there when New task comes back; the list
+mounts, and reads, only while it is open. It shows the Working now rows
+without the five-row limit, compact, each with **Open** (the thread, as a Working
+now row does) and **Stop**. A start screen has no thread open, and the
+navigation rows carry no turn or attempt identity, so Stop sends the command its
+mode already uses for the Stop control inside the thread (interrupt a Chat
+attempt, cancel a Work turn, cancel a Code provider turn, or cancel an agent run
+for a row that is only a run). Chat and Work first read the thread's running
+turn and send nothing when there is none. Code has no turn to name: its host
+cancels only the turn it is running for that thread and answers a cancel it had
+no turn for with a failed turn state and no reason, which counts as nothing
+running. It asks first, in the row: "Stop this turn?" ("Stop this agent run?"
+on a row that is only a run) with **Stop** and **Keep running**, the safe
+answer holding the focus. In every mode a turn that finished
+meanwhile is reported ("Already finished.") and never cancelled twice, and a
+host refusal shows in the row in the host's words. The tabs and list add no persisted state or authority.
+
 **Needs you** is the card before Working now, on by default. It lists the
 approvals and questions a provider is waiting on, from one host list of every
 approval and question this window can answer across Chat, Work, and Code and
@@ -260,6 +319,46 @@ draft says draft rather than a decision. At most six rows show, then **+N
 more**, which opens Pull requests. A row opens that pull request's existing
 review for its Project. The read is one query of the window's authorized
 snapshot, so a remote window sees only the Projects it was granted.
+
+**CI failures** is the next card, on by default, and only on a Code start
+screen. It uses the same gate as Pull requests: no connection, insecure token
+storage, or a missing pull-request capability hides it and leaves it out of
+Customize. It lists failing checks the pull-request refresh already recorded,
+on the signed-in person's open pull requests and on the current branches of
+Code Projects. A current branch is the branch of an active thread's available
+checkout; the card does not observe checkouts itself. A failing check that is
+neither is left out. A row shows the check name, the repository and number
+when the pull request is the person's (`repo#12`) or the branch when it is
+only a current checkout, and how long ago the check finished failing. The
+refresh's rollup carries the name and the finish time; it does not carry a
+log, so a row never invents one. At most five rows show, most recently failed
+first. The card hides when it has nothing to show — there is no empty line —
+which is its default. **Start a fix** opens a new Code task draft in that
+Project with the failing branch as its chosen base branch and a new worktree as
+its workspace, since the current checkout may be on another branch; the
+checkout's head does not replace that branch. The pull request, check, branch,
+and repository are already written in; the rollup carries no failure text, so
+the draft quotes none. Sending, switching the draft's Project, or starting a
+new draft lets go of that branch. It does not start a turn; the person sends
+it. Opening the card reads the same cached snapshot
+Pull requests reads and adds no poll.
+
+**Computers** is the next card, on by default, on Work and Code. It lists every
+host this window is connected to: this computer, paired remote hosts, devboxes,
+and servers. A row names the host and says whether it is connected,
+reconnecting, or offline — the word, not colour alone. A connected or
+reconnecting host this window may read shows its core count, total memory, and
+small monochrome bars for CPU, memory, and disk, each with a percentage. Disk
+is left out when the volume could not be read. A host that is connected but
+which this window has no authority to read shows as connected with no figures.
+An offline host shows when it was last seen and no bars. A read that fails
+drops that host's figures until a later read succeeds, rather than showing old
+figures as current. The host this window was opened from reports how many
+agents run there, and that count opens Running with the environment filter set
+to the host; any other host does not report one, so its row shows no count.
+At most four hosts show, then **+N more**. The card reads each host's load only
+while it is visible and the window is in front, about every ten seconds, and
+stops when the window is hidden. It never polls in the background.
 
 **Needs you** surfaces (a start-screen card, answering from Board cards, the
 command palette) read one host list of the approvals and
@@ -441,10 +540,15 @@ keeps the wait, the text clamped to two lines, and the answers): **Approve** and
 The board reads the same host list as the Needs you card (the `pendingRequests`
 read) once for the whole board, only while the board is mounted, on the same
 change-feed, settings, and workspace signals, and never on a timer. A card is
-matched to its request by thread and mode, whichever column the board files it
-in: a Code thread parked on a tool approval still counts as executing while its
-turn runs, so its card sits in In progress, and it carries the request all the
-same. A card with no listed request is drawn as before. A thread with several requests shows the oldest and **+N more
+matched to its request by thread and mode. A thread whose live turn waits on an
+approval or a question files under Waiting with the awaiting-input reason, not
+In progress: the provider session stays open while it waits, so the host
+reads the wait from the running turn's open approvals and questions (Code) or
+the open request (Work) rather than from the turn's running record. Those are
+the requests the `pendingRequests` read lists, so the board read that follows an
+answer already files the thread back under In progress. Other work still running beside a parked turn (a
+terminal, a child run) keeps the thread In progress. A card with no listed
+request is drawn as before. A thread with several requests shows the oldest and **+N more
 waiting**, which opens the thread. Answers use each mode's existing command
 through the listed handle and hold no new authority. A refused answer shows one
 line on the card, and the card does not move: it changes column only when the
@@ -454,6 +558,13 @@ grouping the Waiting column lists the oldest waiting request first, then cards
 with no listed request in their usual order. The list layout (narrow width, or
 Code's List view) carries the same actions in its rows. A window with no
 pending-request reader (a remote window) draws cards exactly as before.
+
+While a pointer rests on the board, every card keeps the column and slot it had
+when the pointer arrived, so answering one card cannot slide the next card
+under the cursor. Only placement is held: each held slot shows the card's newest
+content, a card the host no longer lists keeps its slot with its last content,
+and a newly listed card joins the end of its column. Leaving the board applies
+the host's placement. Touch and keyboard use never hold, because neither hovers.
 
 **GitHub issue browser.** The first-party GitHub plugin contributes a second
 `sidebar.destination` (`github-issues`) that opens a host-scoped, read-only
@@ -568,6 +679,8 @@ Local-server stop authority recognizes live terminal descendants by a host proce
 snapshot and the tracked shell's process identity. An exited shell, a reused PID,
 or missing ownership evidence leaves the listener classified as a leftover and
 requires confirmation. Editor provenance labels alone never grant stop authority.
+The start screen's Running services card applies the same rule and lists both
+kinds, labelling the leftover; it adds no authority of its own.
 
 ## Verification
 

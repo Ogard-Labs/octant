@@ -27,6 +27,7 @@ import type { BrowserAutomationClient } from "@octant/client-runtime/browser-aut
 import type { HostClient } from "@octant/client-runtime/host-client";
 import type { NavigatorAssistantClient } from "@octant/client-runtime/navigator-assistant-client";
 import {
+  createLocalServerClient,
   isRemotePairingOrigin,
   localHostDisplayName,
   readPairingFragment,
@@ -97,6 +98,8 @@ import type {
   CodeProjectPullRequestMergeMethod,
   CodeProjectPullRequestMergeOutcome,
   CodeProjectPullRequestRow,
+  LocalServerOpenTarget,
+  RunningService,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import { type PaneId, type WindowId } from "@octant/contracts/shell";
@@ -432,12 +435,20 @@ import type {
   ThreadProviderIdentity,
 } from "./shell/navigationModel";
 import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
+import { RunningTab } from "./home/RunningTab";
+import { stopRunningRow } from "./home/stopRunningRow";
+import { createRunningServicesCard } from "./home/RunningServicesCard";
 import { buildReviewEntries, type ReviewEntry } from "./review/reviewModel";
 import { createReviewSource } from "./review/reviewSource";
 import type { ReviewActionOutcome, ReviewPageProps } from "./review/ReviewPage";
-import { createWorkingNowCard } from "./home/WorkingNowCard";
+import { createWorkingNowCard, type WorkingNowCardSource } from "./home/WorkingNowCard";
 import { createNeedsYouCard } from "./home/NeedsYouCard";
 import { createPullRequestsCard } from "./home/PullRequestsCard";
+import { createCiFailuresCard } from "./home/CiFailuresCard";
+import { createComputersCard } from "./home/ComputersCard";
+import { computerConnection, sameHostOrigin } from "./home/computers";
+import { decodeHostResourceSnapshot } from "@octant/contracts/host-resources";
+import { currentCodeProjectBranches } from "./home/ciFailures";
 import {
   pullRequestCardAvailable,
   pullRequestCardCapability,
@@ -899,6 +910,7 @@ function LaunchedShell(
     if (mode === "code") {
       setDraftExecutionPolicy(undefined);
       setDraftPermissionPersistence(undefined);
+      setPendingDraftBranch(undefined);
     }
     setDraftResetRevision((revision) => revision + 1);
   }
@@ -937,6 +949,7 @@ function LaunchedShell(
   // A Canvas plan task handed to a new thread: the draft opens with it written
   // in, and the person sends it like any new thread.
   const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
+  const [pendingDraftBranch, setPendingDraftBranch] = useState<string>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [githubPullRequestCapability, setGithubPullRequestCapability] =
     useState<PullRequestCardCapability>({ readable: false });
@@ -1423,6 +1436,7 @@ function LaunchedShell(
     goalClient,
     goalLoopClient,
     hostClient,
+    hostResourceClient,
     pendingRequestClient,
     projectBrowserClient,
     projectTerminalClient,
@@ -1568,6 +1582,19 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
+  // The host-wide Running services read. A base URL the client refuses (a
+  // plain-HTTP remote host) leaves the card unoffered rather than broken.
+  const runningServicesClient = useMemo(() => {
+    try {
+      return createLocalServerClient({
+        baseUrl: props.launch.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: props.projectWindowCapability,
+      });
+    } catch {
+      return undefined;
+    }
+  }, [props.launch.serverUrl, props.projectWindowCapability]);
   const threadHandOffClient = useMemo(
     () =>
       resolveThreadHandOffClient({
@@ -1707,7 +1734,9 @@ function LaunchedShell(
     ],
   );
   const observedHosts = useHostObservation(hostClient);
-  const hostFederationLifecycle = useHostFederationLifecycle();
+  const federation = useHostFederationLifecycle();
+  const hostFederationLifecycle = federation?.lifecycle;
+  const hostFederationTransports = federation?.transports;
   const [federationRevision, setFederationRevision] = useState(0);
   useEffect(() => {
     if (hostFederationLifecycle === undefined) return;
@@ -3410,6 +3439,38 @@ function LaunchedShell(
     }
   }
   /**
+   * Shows a running service's page. A service attributed to a thread's own
+   * worktree opens as a Browser tab of that thread, confined to the one origin
+   * the host prepared; the rest open in this computer's own browser, which is
+   * only right when the window is reading this computer. Either failure is
+   * thrown to the row, never answered by opening a loopback address that
+   * belongs to some other computer.
+   */
+  async function openRunningService(
+    service: RunningService,
+    target: LocalServerOpenTarget,
+  ): Promise<void> {
+    const client = browserAutomationClient;
+    const paneId = activePaneId;
+    if (service.thread !== undefined && client !== undefined && paneId !== undefined) {
+      const threadId = decodeBrowserThreadId(service.thread.threadId);
+      const contextId = await openDedicatedBrowserContext(client, threadId, "code", {
+        allowedOrigin: target.allowedOrigin,
+        url: String(target.url),
+        ...(target.acceptsLocalCertificate ? { acceptsLocalCertificate: true } : {}),
+      });
+      const adopted = await controller.openSurfaceInSplit("browser", paneId, contextId);
+      if (adopted) return;
+      await releaseBrowserContext(client, threadId, contextId);
+      throw new Error("No Browser tab adopted the context opened for this server.");
+    }
+    if (workingNowHost === undefined) {
+      openExternalUrl(props.hostBridge, String(target.url));
+      return;
+    }
+    throw new Error("This server runs on another computer.");
+  }
+  /**
    * Takes the reader to the degraded Project. Context usage lives on that
    * Project's thread composer, so activating the Project is the honest
    * destination — a dock panel about someone else's context is not.
@@ -4151,8 +4212,86 @@ function LaunchedShell(
   // question journals on its own mode's navigation topic.
   const pendingRequestFeedRevision =
     machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
+  const computerSnapshots = hostFederationLifecycle?.list() ?? [];
+  const computerLaunchHostId =
+    props.hostBridge !== undefined
+      ? String(LOCAL_HOST_ID)
+      : String(
+          computerSnapshots.find(
+            (snapshot) =>
+              snapshot.origin !== undefined &&
+              sameHostOrigin(snapshot.origin, props.launch.serverUrl),
+          )?.hostId ?? LOCAL_HOST_ID,
+        );
+  const computerHosts =
+    computerSnapshots.length === 0
+      ? [
+          {
+            hostId: String(LOCAL_HOST_ID),
+            name: localHostDisplayName(),
+            connection: "connected" as const,
+            figuresAllowed: props.hostBridge !== undefined,
+          },
+        ]
+      : computerSnapshots.map((snapshot) => {
+          const connection = computerConnection(snapshot.state);
+          return {
+            hostId: String(snapshot.hostId),
+            name: snapshot.displayName,
+            connection: connection.connection,
+            figuresAllowed: connection.figuresAllowed,
+            ...(snapshot.lastReadyAt === undefined ? {} : { lastSeenAt: snapshot.lastReadyAt }),
+          };
+        });
+  const readComputerResources = async (hostId: string) => {
+    if (hostId === computerLaunchHostId) return hostResourceClient.read();
+    const transport = hostFederationTransports?.remoteTransportFor(hostId);
+    if (transport === undefined) return { status: "refused" as const };
+    try {
+      const response = await transport.authenticatedFetch({
+        method: "GET",
+        path: "/api/host/resources",
+      });
+      if (response.status === 401 || response.status === 403) return { status: "refused" as const };
+      if (!response.ok) return { status: "unavailable" as const };
+      return {
+        status: "ready" as const,
+        snapshot: decodeHostResourceSnapshot(await response.json()),
+      };
+    } catch {
+      return { status: "unavailable" as const };
+    }
+  };
   // The card list is rebuilt each render and is cheap: each card's own rows are
   // memoized from the inputs above, which keep their identity between renders.
+  const workingNowSource: WorkingNowCardSource = {
+    agentRunClient,
+    boardFacts: workingNowBoardFacts,
+    ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
+    modes: workingNowModes,
+    now: minuteNow.getTime(),
+    onOpenRow: (row) => {
+      pluginSidebarDestinationActionContext.closeOverlays();
+      if (row.mode === "chat") selectChatThread(row.threadId);
+      else if (row.mode === "work") selectWorkThread(row.threadId);
+      else selectCodeThread(row.threadId);
+    },
+    // The same place the sidebar's Running tile goes: Chat has no board, so
+    // its running threads lead the Activity feed instead.
+    onOpenRunning: () => {
+      if (activeMode === "chat") {
+        openSidebarList("activity");
+        return;
+      }
+      pluginSidebarDestinationActionContext.closeOverlays();
+      pluginSidebarDestinationActionContext.openThreadBoard();
+    },
+    projectNames: workingNowProjectNames,
+    providers: workingNowProviders,
+    runRevision:
+      machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation,
+    threads: workingNowThreads,
+  };
   const homeCards = [
     createNeedsYouCard({
       answerClients: { chatClient, codeClient, workRequestClient },
@@ -4172,35 +4311,18 @@ function LaunchedShell(
       threadProviders: needsYouThreadProviders,
       workspace: controller.workspace,
     }),
-    createWorkingNowCard({
-      agentRunClient,
-      boardFacts: workingNowBoardFacts,
+    createWorkingNowCard(workingNowSource),
+    createRunningServicesCard({
+      client: runningServicesClient,
       ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
-      modes: workingNowModes,
-      now: minuteNow.getTime(),
-      onOpenRow: (row) => {
-        pluginSidebarDestinationActionContext.closeOverlays();
-        if (row.mode === "chat") selectChatThread(row.threadId);
-        else if (row.mode === "work") selectWorkThread(row.threadId);
-        else selectCodeThread(row.threadId);
-      },
-      // The same place the sidebar's Running tile goes: Chat has no board, so
-      // its running threads lead the Activity feed instead.
-      onOpenRunning: () => {
-        if (activeMode === "chat") {
-          openSidebarList("activity");
-          return;
-        }
-        pluginSidebarDestinationActionContext.closeOverlays();
-        pluginSidebarDestinationActionContext.openThreadBoard();
-      },
-      projectNames: workingNowProjectNames,
-      providers: workingNowProviders,
-      runRevision:
-        machineChanges.chatNavigation +
-        machineChanges.workNavigation +
-        machineChanges.codeNavigation,
-      threads: workingNowThreads,
+      // A service on another computer opens only as that thread's Browser tab,
+      // which the host itself shows; this window's own browser cannot reach it.
+      canOpen: (service) =>
+        workingNowHost === undefined ||
+        (service.thread !== undefined &&
+          browserAutomationClient !== undefined &&
+          activePaneId !== undefined),
+      onOpenTarget: openRunningService,
     }),
     createPullRequestsCard({
       available: pullRequestCardAvailable({
@@ -4224,13 +4346,72 @@ function LaunchedShell(
         setCodePullRequestsOpen(true);
       },
     }),
+    createCiFailuresCard({
+      available: pullRequestCardAvailable({
+        mode: activeMode,
+        pluginEffective: FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true,
+        capability: githubPullRequestCapability,
+      }),
+      viewerLogin: githubPullRequestCapability.login ?? "",
+      currentBranches: currentCodeProjectBranches({
+        threads: codeController.bootstrap?.threads ?? [],
+        checkouts: codeController.bootstrap?.checkouts ?? [],
+      }),
+      load: loadHomePullRequests,
+      now: minuteNow.getTime(),
+      onStartFix: (fix) => {
+        // A draft only. The person sends it; this never starts a turn.
+        closeWorkspaceReaders();
+        setDraftError(undefined);
+        setDraftPendingMessage(undefined);
+        resetNewTaskDraft("code");
+        setPendingDraftPrompt(fix.prompt);
+        setPendingDraftBranch(fix.branch);
+        setDraftProjectSelection((current) => ({ ...current, code: fix.projectId }));
+        void controller.openDraftThread("code", fix.projectId);
+      },
+    }),
+    createComputersCard({
+      hosts: computerHosts,
+      launchHostId: computerLaunchHostId,
+      agentRunClient,
+      runRevision:
+        machineChanges.chatNavigation +
+        machineChanges.workNavigation +
+        machineChanges.codeNavigation,
+      now: minuteNow.getTime(),
+      readResources: readComputerResources,
+      onOpenRunning: (hostId) => {
+        setEnvironmentSelection({ kind: "some", hostIds: new Set([hostId]) });
+        if (activeMode === "chat") {
+          openSidebarList("activity");
+          return;
+        }
+        pluginSidebarDestinationActionContext.closeOverlays();
+        pluginSidebarDestinationActionContext.openThreadBoard();
+      },
+    }),
   ];
+  // The Running tab lists the card's own rows and shows the sidebar's own
+  // Running count, so the three never disagree.
+  const composerTabs = {
+    runningCount: sidebarTileCounts.running,
+    running: (
+      <RunningTab
+        onStop={(row) =>
+          stopRunningRow({ agentRunClient, chatClient, codeClient, workTurnClient }, row)
+        }
+        source={workingNowSource}
+      />
+    ),
+  };
   const homeStart: DraftThreadWorkspaceProps["homeStart"] =
     activeMode === "chat"
       ? {
           reviewCount: 0,
           runningCount: 0,
           cards: homeCards,
+          composerTabs,
           cardCustomization: controller.settings.homeCards,
           onCardCustomizationChange: (homeCardChoice) =>
             void controller.updateSettings({ homeCards: homeCardChoice }),
@@ -4248,6 +4429,7 @@ function LaunchedShell(
                 : runningThreadCount(workProjectThreads),
             onReview: openReview,
             cards: homeCards,
+            composerTabs,
             cardCustomization: controller.settings.homeCards,
             onCardCustomizationChange: (homeCardChoice) =>
               void controller.updateSettings({ homeCards: homeCardChoice }),
@@ -5425,6 +5607,9 @@ function LaunchedShell(
         );
         return false;
       }
+      // The branch Start a fix handed in now belongs to this thread; the next
+      // draft must not open on it.
+      setPendingDraftBranch(undefined);
       // The thread opens before its first turn starts, so tell its own
       // controller which prompt is coming. Otherwise the transcript reads the
       // empty journal and calls the thread empty until the turn is durable.
@@ -7018,7 +7203,12 @@ function LaunchedShell(
                             .openDraftThread(mode, projectId)
                             .then((accepted) => {
                               if (accepted) {
-                                if (mode === "code") setDraftPermissionPersistence(undefined);
+                                if (mode === "code") {
+                                  setDraftPermissionPersistence(undefined);
+                                  // A branch handed in by Start a fix names a
+                                  // branch of the Project it came from.
+                                  setPendingDraftBranch(undefined);
+                                }
                                 setDraftProjectSelection((current) => ({
                                   ...current,
                                   [mode]: projectId,
@@ -7318,6 +7508,9 @@ function LaunchedShell(
                         {...(projectController.activeProject === undefined
                           ? {}
                           : { draftProjectName: projectController.activeProject.name })}
+                        {...(pendingDraftBranch === undefined
+                          ? {}
+                          : { draftBranchName: pendingDraftBranch })}
                         {...(effectiveDraftProviderInstanceId === undefined
                           ? {}
                           : { draftSelectedProviderInstanceId: effectiveDraftProviderInstanceId })}

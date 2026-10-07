@@ -2002,6 +2002,7 @@ function renderNonCodeTab(
     return (
       <ChatWelcome
         greetingName={props.greetingName}
+        {...(home?.composerTabs === undefined ? {} : { composerTabs: home.composerTabs })}
         {...(home?.cards === undefined
           ? {}
           : {

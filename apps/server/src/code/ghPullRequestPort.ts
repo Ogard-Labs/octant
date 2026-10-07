@@ -1,7 +1,11 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import type { CodeProjectPullRequestMergeMethod, CodeThreadId } from "@octant/contracts";
+import {
+  MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS,
+  type CodeProjectPullRequestMergeMethod,
+  type CodeThreadId,
+} from "@octant/contracts";
 import { childProcessEnvironment } from "../childProcessEnvironment";
 
 const MAX_GH_OUTPUT_BYTES = 1_048_576;
@@ -140,6 +144,14 @@ export interface GhActivePullRequestRow {
   readonly review: "unknown" | "none" | "pending" | "approved" | "changes-requested";
   /** Logins asked to review. A team request has no login and is not listed. */
   readonly reviewRequestedFrom: ReadonlyArray<string>;
+  /**
+   * Failing checks from the same rollup the summary already reads. Empty when
+   * none failed, or when the rollup named none.
+   */
+  readonly failingChecks: ReadonlyArray<{
+    readonly name: string;
+    readonly completedAt?: string;
+  }>;
 }
 
 export type GhActivePullRequestListResult =
@@ -903,6 +915,7 @@ function decodeActivePullRequests(
       checks: summarizeChecks(item.statusCheckRollup),
       review: summarizeReview(item.reviewDecision),
       reviewRequestedFrom: reviewRequestLogins(item.reviewRequests),
+      failingChecks: decodeFailingChecks(item.statusCheckRollup),
     });
   }
   return rows;
@@ -937,6 +950,45 @@ function summarizeChecks(value: unknown): GhActivePullRequestRow["checks"] {
   if (pending) return "pending";
   if (passing) return "passing";
   return "unknown";
+}
+
+const RECORDED_FAILURE_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+const EARLIEST_RECORDED_FAILURE_MS = Date.parse("2000-01-01T00:00:00.000Z");
+
+/**
+ * Failing checks already present on the list rollup. A zero timestamp is the
+ * command's empty time, not a failure time, so it is left off. The rollup's
+ * check entries carry a name, a state, times, and a details link, never failure
+ * text, so no excerpt is read from them.
+ */
+function decodeFailingChecks(value: unknown): GhActivePullRequestRow["failingChecks"] {
+  if (!Array.isArray(value)) return [];
+  const checks: Array<{ name: string; completedAt?: string }> = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || normalizeCheckState(entry) !== "failure") continue;
+    const rawName = typeof entry.name === "string" ? entry.name : entry.context;
+    const name = clampBytes(rawName, 512).trim();
+    if (name.length === 0) continue;
+    const completedAt = recordedFailureAt(entry.completedAt);
+    checks.push({ name, ...(completedAt === undefined ? {} : { completedAt }) });
+  }
+  checks.sort((left, right) => {
+    const leftAt = left.completedAt ?? "";
+    const rightAt = right.completedAt ?? "";
+    if (leftAt === rightAt) return left.name.localeCompare(right.name);
+    if (leftAt === "") return 1;
+    if (rightAt === "") return -1;
+    return rightAt.localeCompare(leftAt);
+  });
+  return checks.slice(0, MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS);
+}
+
+function recordedFailureAt(value: unknown): string | undefined {
+  if (typeof value !== "string" || !RECORDED_FAILURE_AT.test(value)) return undefined;
+  if (value.startsWith("0001-")) return undefined;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed) || parsed < EARLIEST_RECORDED_FAILURE_MS) return undefined;
+  return value;
 }
 
 function summarizeReview(value: unknown): GhActivePullRequestRow["review"] {

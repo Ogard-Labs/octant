@@ -38,6 +38,7 @@ export * from "./artifactMirrorClient";
 export * from "./scaffoldClient";
 export * from "./threadCheckpointClient";
 export * from "./hostClient";
+export * from "./hostResourceClient";
 export * from "./hostControlClient";
 export * from "./hostFederationRegistry";
 export * from "./localHostDisplayName";

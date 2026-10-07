@@ -56,6 +56,7 @@ export * from "./diagnostics";
 export * from "./validationComposition";
 export * from "./validationEvents";
 export * from "./host";
+export * from "./hostResources";
 export * from "./hostControl";
 export * from "./hostDataMap";
 export * from "./hostExport";

@@ -199,6 +199,21 @@ that file and continues, and it checks the socket is still absent before the
 move so a peer that bound in the meantime keeps the secret it just wrote. An
 ownership failure names the code, the artifact path, and the next step.
 
+**Host resources.** `GET /api/host/resources` is a read-only snapshot of this
+host's load: CPU use averaged over a short sample of the process's CPU times,
+used and total memory, the core count, and used and free space on the volume
+that holds the data directory. The disk figures are omitted when that volume
+cannot be read. The snapshot names no path, no user, and no process. The server
+keeps one snapshot for about five seconds. The local owner always receives it.
+A paired remote device with an active session receives it under the same
+`project.overview.read` action as the Project overview reads; an
+unauthenticated caller is refused, with no figures in the refusal. The route
+also compares the device's host identity with this host's, but every paired
+device row on a host carries that host's own identity, so the comparison does
+not separate one paired device from another. The Computers card
+reads the route only while the card is on screen and the window is in front,
+about every ten seconds, and does not poll in the background.
+
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
 `@octant/client-runtime` and never holds authority of its own. In development
@@ -282,6 +297,34 @@ with no `diagram`, `plan`, `mockup` or `design`. When an author asks for `inline
 that bound, the host records `sidebar` and returns the reason as
 `presentationNote`.
 A revise without a choice keeps the current presentation.
+`preview` returns a picture and a layout reading of one shipped version. Its
+input is the `canvasId`, an optional `version` (a sequence), a `width`
+(`inline`, `sidebar`, or 320–1200 px) and a `theme` (`light` or `dark`). The
+layout warnings are computed from the document and the target width alone and
+are typed values — a clipped label, a legend over its row, an empty series, an
+inline document past the block cap, and ink below its contrast target — so a
+build reports them whether or not a browser rendered the picture. The picture is
+a screenshot of the web app's own Canvas renderer: the host's headless Chromium,
+found through the same executable list the browser runtime and the Canvas
+browser smokes use, loads the Canvas preview page built with the web assets
+(`apps/web/canvas-preview.html`, built into `dist/canvas-preview/`), which draws
+the version with the same blocks and stylesheet the thread uses, in the chosen
+theme and at the chosen width. The host writes the document into that page as
+inert JSON and answers only the page's own built files from disk; every other
+request is aborted, and the page's content security policy forbids connections,
+so the network is off and the page holds no server address or credential. The
+operation is bounded: one preview in flight per thread, a small allowance per
+minute, and an image no wider than 1,600 px and no taller than 4,096 px. When no
+Chromium is present, the build carries no preview page, the page fails to
+settle, or the model driving the turn does not accept images in a tool result,
+the warnings still return and the result names which (`no-browser`,
+`no-renderer`, `render-failed`, `provider-cannot-take-images`). Whether a model
+accepts images is read from its own input modalities, the same signal the
+computer-use screenshots use; there is no separate provider capability for
+images in a tool result.
+The signed desktop app bundles the `playwright-core` driver but no browser
+binary, so it resolves Chromium from the host's installed browsers. On a host
+with none, `preview` is warnings-only, and the user guide says so.
 A thread reference card reports the effective presentation and the first
 version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
 revision or a person's edit, is listed as `sidebar`.
@@ -324,6 +367,26 @@ can sort a matrix's rows by their total and walk the cells with the arrow keys;
 these are view state and are never journaled. The accessible fallback is a table
 of every coordinate and its total for a matrix, or of every dated reading for a
 calendar.
+A bar list is a ranking of magnitudes (`packages/domain/src/canvasBarListLayout.ts`):
+each row is a label, a value, an optional second value, and an optional manifest
+source. Rows sort largest first with a stable tie-break by the author's order,
+a reader can flip the ranking to smallest first, and the list shows a top N with
+Show all; both are view state and are never journaled. A bar's length is its
+share of the largest value, drawn in neutral ink or through the shared
+sequential scale. A path-like label uses the shared
+path style (directory dimmed, file name at full ink), and a row that names a
+manifest source offers Open file through the allowlisted open-source action,
+which the host reauthorizes. The pure, deterministic layout is shared by the
+screen, the artifact preview SVG, and the Markdown and HTML export. The domain
+policy refuses a repeated label, a negative or non-finite value, a list past the
+row budget, and a source the manifest does not hold; the accessible fallback is a
+table of every row. A metric block may carry a `format`, a `delta`, a
+`goodDirection` of `up`, `down`, or `neutral` so a delta's tone is never guessed,
+a `sparkline` of at most 256 readings, and a short `caption`; consecutive metric
+blocks are gathered into one responsive row of two to four tiles. The bar list
+and the metric's direction, sparkline, and caption arrive with Canvas schema
+version 7, so a document declaring an older version that carries any of them is
+refused as a future version; a static export carries the same metric fields.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -360,11 +423,23 @@ pure `admitCanvasDiagramLayoutRevision` policy (target must be a diagram,
 every moved node must exist, the sequence must be the head, budgets stand).
 Beside that generic node-and-edge diagram, a `sequence` block is participants,
 ordered messages, activations, and notes, and a `state` block is states that
-may nest by parent id, labeled transitions, and initial and final roles. Both
-use the diagram node and edge budgets. Layout is deterministic. Participants
-and states are node comment anchors; messages and transitions are edge comment
-anchors. Static export draws both through the same artifact SVG path as the
-other blocks.
+may nest by parent id, labeled transitions, and initial and final roles. Three
+further kinds share the same budgets: an `er` block is entities with named,
+typed attributes (an attribute may be a key) and relationships that name a
+cardinality at each end and an optional label; a `swimlane` block is ordered
+lanes of actors or teams, the steps each lane owns (a step may be flagged as a
+decision), and labeled connections; and a `mindmap` block is one root topic
+over children that name their parent, each with an optional note. Both
+sequence and state, and the three later kinds, use the diagram node and edge
+budgets; the er, swimlane, and mindmap kinds are version-gated together at
+Canvas schema version 8, so a document that declares an earlier version and
+carries one is refused as a declared future version. Layout is deterministic.
+Participants and states are node comment anchors; messages and transitions are
+edge comment anchors; entities, steps, and topics are node anchors and
+relationships and connections are edge anchors. Static export draws every kind
+through the same artifact SVG path as the other blocks, and the Markdown/HTML
+document renderer gives the er kind an attribute table, the swimlane kind
+numbered steps per lane, and the mindmap kind a nested list.
 Agent revisions and user layout share one history; a stale drag is refused and
 the renderer reloads rather than overwriting a newer version. Only the head
 version is editable. The route is host-window only; a paired browser reads
@@ -1361,16 +1436,53 @@ modelId }`, and the model picker is provider-first. Discovery can find
   picker), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
   GitHub Copilot, Cline, Qwen Code, fx). The installed OpenCode binary's
-  version selects its routes: 1.x keeps the legacy session API, and 2.x lists
-  providers and models, then runs a turn where the process jail already
-  enforces the permission boundary. Chat turns run. Work and Code writes stay
-  refused until session permission rules can be enforced; resume, interruption,
-  and tool activity are reported, and anything not mapped fails closed. The probe
-  also asks the confined 2.x server to answer for a directory carrying a Git
-  marker: project resolution starts Git, which the Chat and Plan jail refuses
-  (observed with 2.0.22 on macOS as HTTP 500 for any work tree), so a runtime
-  that cannot answer reports `incompatible` with its models listed and every
-  capability unsupported, and no turn is offered. fx runs in a per-instance managed
+  version selects its routes: 1.x keeps the legacy session API and its
+  per-session permission ruleset. 2.x accepts no per-session ruleset, so each
+  launch writes its session posture — the same rules in 2.x action names
+  (`shell`, `subagent`), every namespaced tool and skill denied, and only that
+  connection's app-managed tool bridge allowed — into the private
+  configuration, where OpenCode appends it after every agent's built-in rules
+  (its default agent otherwise allows everything); a launch that names no
+  posture denies all. The bridge allow has nothing to admit yet: Octant
+  registers app-managed tools through the 1.x MCP route, which 2.0.22 does
+  not serve (it lists `/api/experimental/mcp/{server}` instead), so the probe
+  reports app-managed tools unsupported and 2.x runs turns without Octant's
+  app tools until registration supports the 2.x MCP API. Project resolution
+  starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
+  launches get the failing `git` stand-in described under
+  [Security and authority](#security-and-authority), so 2.x offers turns in
+  every mode there; on Linux the probe fails closed and the runtime is listed
+  without turns. Approvals map through 2.0.22's `permission.asked` event and
+  its reply route, whose body is `{decision}`. An approval is answered
+  `once`, never `always`, even when approvals are remembered for the Project:
+  `always` would save a grant in OpenCode's data directory, which it shares
+  with the person's own use, outside Octant's revocation. Approval-gated on
+  2.x honours permission grants the person saved in OpenCode itself for the
+  same repository: OpenCode keys them by the repository's root commit, keeps
+  them in its own data store (shared with the person's own use because
+  provider credentials live there), and applies them as allow after Octant's
+  rules. Octant's denies still win, so Plan and the Work shell and subagent
+  denials hold, and Octant itself never writes such a grant because it
+  answers approvals `once`. An edit allowed this way still fails the turn
+  through the file-change check, after the write; a shell command allowed
+  this way runs without an approval card. Clearing the saved grants in
+  OpenCode restores the prompts. A 2.x reject settles every pending request
+  in the session, so each settled request is forgotten. Questions are
+  unsupported: 2.0.22 serves no question routes and asks through forms, which
+  are not mapped, so the written posture denies `question` and a form that
+  still arrives fails the turn. Resume,
+  interruption, and tool activity are reported; a file change that no allowed
+  or approved edit preceded fails the turn; and anything not mapped fails
+  closed. The probe also asks the confined 2.x server to answer for a
+  directory carrying a Git marker, made in the launch's own scratch directory
+  because every launch profile denies the host temporary directory beneath
+  `/private`; it attests by creating a session there and then deletes that
+  session, best effort, because OpenCode keeps sessions in the data directory
+  it shares with the person's own use and their provider credentials. A
+  failed delete leaves one empty session and does not change the result. A
+  runtime that cannot answer (observed with 2.0.22 on macOS as HTTP 500
+  without the stand-in) reports `incompatible` with its models listed and
+  every capability unsupported, and no turn is offered. fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable; see
   [fx-acp-compatibility.md](fx-acp-compatibility.md) and
   [0130](decisions/0130-fx-runs-in-a-managed-home.md). Image profiles are
@@ -2217,6 +2329,11 @@ mechanisms are:
   and records the posture the turn ran under. Compatible harnesses may
   answer those prompts themselves when the thread opts in
   (`docs/decisions/0104`); categories and confinement stay Octant's.
+  One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
+  honours permission grants the person saved in OpenCode itself for the same
+  repository, so such an action runs without an Octant prompt. Octant's
+  denies still win, and Octant never writes such a grant; the
+  [providers](#providers) entry on OpenCode states the details.
   The access picker also offers "Lower thread" to durably return a thread to
   approval-gated and revoke a session-only Full-access grant for that window
   without confirmation.
@@ -2312,6 +2429,22 @@ mechanisms are:
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
+  OpenCode 2 runs `git rev-parse` at startup to resolve its project, and the
+  Chat, Plan, and Work jail denies fork and exec outright. Rather than widen
+  the jail to a real Git binary, a macOS 2.x launch gets a private stand-in: a
+  `<TMPDIR>/git-standin-*/bin/git` symlink to `/usr/bin/false` placed first on
+  the child's PATH, with `allowProcessFork` and exactly one exec grant,
+  `(allow process-exec (literal "/usr/bin/false"))`. The spawn succeeds and
+  git exits non-zero, which OpenCode reads as "not a git project" and serves
+  the directory anyway. No real git, no shell, and no other exec becomes
+  possible; OpenCode 1.x and Code mode are unchanged. The readiness probe
+  attests at a directory with a `.git` marker under the Chat/Plan
+  confinement and fails closed — listing-only, no turns — if a future
+  OpenCode treats the failing git as fatal. Linux confinement cannot express
+  that one exec without also allowing fork, which is the hole the Plan jail
+  exists to close, so a 2.x Chat, Plan, or Work launch on Linux keeps fork
+  and exec denied. The probe fails closed and the runtime stays listing-only
+  there until Linux confinement can express the narrow per-path exec grant.
   Toolchain commands the Android workbench issues keep their own deliberate
   carve-out: `~/.android` — the AVD store, adb keys, and emulator lock files —
   plus a non-empty `ANDROID_AVD_HOME` when configured are bound read-write even
@@ -2487,6 +2620,35 @@ mechanisms are:
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
   into authority on another.
+- **Local servers and Running services.** Listener observation is ephemeral,
+  scoped to listening sockets of the current user, and never journaled. One
+  classifier decides what may be listed at all: a system daemon, another user's
+  process, or an interpreter with no project and no editor lineage is omitted
+  rather than shown disabled, so no surface can be read as a host process
+  inventory. The Code Environment reads it per thread. The start screen's
+  Running services reads the same service host-wide (`list-running-services`
+  on the same authenticated route; no thread or Project in the command) and
+  adds one filter before anything is probed: a listener is published only when
+  its working directory sits inside an active Code Project the Project
+  bootstrap lists (today every active Code Project on the host, the same set
+  the per-thread route resolves against; it does not vary by window), or inside
+  the worktree of one thread of such a Project, which a host-written ownership
+  receipt vouches for. A listener outside those roots gets no row and no health
+  probe. Rows are Octant-owned (a live terminal descendant) or not owned. A
+  not-owned row is any other admitted current-user listener in those roots
+  whose lineage names no editor; an earlier Octant session, a terminal, Claude
+  Code, or Codex could have started it, and Octant cannot tell which, so the
+  row and its Stop confirmation say only that Octant does not own it. The same bounded scan, health phase and
+  deadline apply, and a scan that cannot finish is a refusal, never an empty
+  list. Open and Stop re-observe and re-classify by an opaque id that is not a
+  process id and differs from the per-thread id for the same listener. Stop is
+  judged under the origin's posture (a server in a Plan thread's own worktree is
+  never stoppable; the Project folder is no one thread's, so a server there is
+  judged approval-gated even when a Plan thread works in it), a server Octant
+  does not own needs the confirmation naming process, folder and port, and a
+  paired device may stop only a server Octant owns; the actor comes
+  from the request's authenticated principal. A window reads the host it is
+  connected to; All Hosts federation does not carry these rows.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and

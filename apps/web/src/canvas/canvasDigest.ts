@@ -68,7 +68,13 @@ export function canvasDigest(definition: CanvasDefinition): CanvasDigest {
   }
   if (
     blocks.some(
-      (block) => block.kind === "diagram" || block.kind === "sequence" || block.kind === "state",
+      (block) =>
+        block.kind === "diagram" ||
+        block.kind === "sequence" ||
+        block.kind === "state" ||
+        block.kind === "er" ||
+        block.kind === "swimlane" ||
+        block.kind === "mindmap",
     )
   ) {
     return { kind: "diagram", label: "Diagram", facts: [] };

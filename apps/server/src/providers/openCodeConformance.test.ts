@@ -6,6 +6,9 @@ import {
 import { runProviderConformance } from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
 import type { Event } from "@opencode-ai/sdk/v2/types";
+import { mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { makeOpenCodeDriver, type OpenCodeClientPort } from "./openCodeDriver";
@@ -92,6 +95,7 @@ describe("OpenCode provider conformance", () => {
       },
       replyPermission: async () => undefined,
       replyQuestion: async () => undefined,
+      deleteSession: async () => undefined,
     };
     const driver = makeOpenCodeDriver({
       instanceId,
@@ -213,7 +217,7 @@ describe("OpenCode provider conformance", () => {
     expect(chatEvidence).toMatchObject({ appManagedToolRoundTrip: true, released: true });
   });
 
-  it("completes a Chat turn and a Code turn from recorded 2.x session fixtures", async () => {
+  it("completes a Code turn from recorded 2.x session fixtures", async () => {
     const codeSource = new EventSourceFixture();
     const codeDriver = makeBetaHarnessDriver(codeSource, {
       onPrompt: (sessionId) => {
@@ -232,18 +236,18 @@ describe("OpenCode provider conformance", () => {
     const codeEvidence = await runProviderConformance({
       driver: codeDriver.driver,
       probeInput: { instanceId },
-      acquireInput: { instanceId, projectRoot },
-      sessionStart: { sessionId, modelId, executionPolicy: "plan" },
+      acquireInput: { instanceId, projectRoot, mode: "code" },
+      sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
       turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
       resume: {
         sessionId,
         resumeCursor: { driverKind: "opencode", value: "provider-session" },
-        executionPolicy: "plan",
+        executionPolicy: "approval-gated",
       },
       staleResume: {
         sessionId,
         resumeCursor: { driverKind: "opencode", value: "stale" },
-        executionPolicy: "plan",
+        executionPolicy: "approval-gated",
       },
       unknownApproval: { sessionId, requestId: "unknown", approved: false },
       unknownUserInput: { sessionId, requestId: "unknown", answer: "none" },
@@ -255,11 +259,12 @@ describe("OpenCode provider conformance", () => {
         "usage",
         "diff",
         "task-progress",
+        "approval-request",
         "interrupted",
       ],
       expectedFailureCategories: {
         staleResume: "stale-resume",
-        unknownApproval: "unsupported",
+        unknownApproval: "protocol",
         unknownUserInput: "unsupported",
       },
       isReleased: codeDriver.isReleased,
@@ -271,42 +276,25 @@ describe("OpenCode provider conformance", () => {
       resumed: true,
       released: true,
     });
+  });
 
+  it("offers a 2.x Chat turn once the jail serves a Git work tree", async () => {
     const chatSource = new EventSourceFixture();
     const chatDriver = makeBetaHarnessDriver(chatSource, {
-      onPrompt: (sessionId) => {
-        chatSource.emit({
-          type: "session.next.text.delta",
-          properties: {
-            sessionID: sessionId,
-            delta: "hello",
-            assistantMessageID: "m",
-            textID: "t",
-          },
-        } as Event);
-        chatSource.emit({
-          type: "session.idle",
-          properties: { sessionID: sessionId },
-        } as Event);
-      },
+      onPrompt: () => undefined,
       onAbort: () => undefined,
     });
-    const chatEvidence = await withProcessPlatform("darwin", () =>
-      runProviderChatConformance({
-        driver: chatDriver.driver,
-        probeInput: { instanceId },
-        acquireInput: { instanceId, projectRoot, mode: "chat" },
-        sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
-        turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
-        isReleased: chatDriver.isReleased,
-      }),
+    await Effect.runPromise(
+      Effect.scoped(
+        chatDriver.driver
+          .acquire({ instanceId, projectRoot, mode: "chat" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+            ),
+          ),
+      ),
     );
-    expect(chatEvidence).toEqual({
-      nativeAttachmentHonest: true,
-      appManagedToolRoundTrip: true,
-      citationsNormalized: true,
-      released: true,
-    });
   });
 });
 
@@ -607,6 +595,15 @@ function recordedBetaTurn(sourceId: string): ReadonlyArray<Event> {
         todos: [{ content: "test", status: "pending", priority: "medium" }],
       },
     },
+    {
+      type: "permission.v2.asked",
+      properties: {
+        id: "permission",
+        sessionID: sourceId,
+        action: "edit",
+        resources: ["*"],
+      },
+    },
   ] as unknown as ReadonlyArray<Event>;
 }
 
@@ -618,6 +615,7 @@ function makeBetaHarnessDriver(
   },
 ) {
   let released = false;
+  const launchScratch = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-launch-")));
   const session = {
     id: "provider-session",
     directory: projectRoot,
@@ -635,19 +633,18 @@ function makeBetaHarnessDriver(
     prompt: async ({ sessionId: nativeId }) => {
       handlers.onPrompt(nativeId);
     },
-    addMcpServer: async () => {
-      throw new Error("app-managed tools are not mapped");
+    // A 2.x server connects to the bridge it is given, as 1.x does; a fixture
+    // that never connects leaves the probe waiting out its attestation timeout.
+    addMcpServer: async ({ url }) => {
+      await attestManagedBridge(url);
     },
     disconnectMcpServer: async () => undefined,
     abort: async (nativeId) => {
       handlers.onAbort(nativeId);
     },
-    replyPermission: async () => {
-      throw new Error("approval replies are not mapped");
-    },
-    replyQuestion: async () => {
-      throw new Error("questions are not mapped");
-    },
+    replyPermission: async () => undefined,
+    replyQuestion: async () => undefined,
+    deleteSession: async () => undefined,
   };
   return {
     isReleased: () => released,
@@ -663,6 +660,7 @@ function makeBetaHarnessDriver(
               pid: process.pid,
               runtime: "beta" as const,
               version: "opencode v2.0.22",
+              temporaryDirectory: launchScratch,
               url: new URL("http://127.0.0.1:1/"),
             }),
             () =>

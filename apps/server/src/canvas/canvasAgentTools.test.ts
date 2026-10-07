@@ -252,6 +252,60 @@ describe("createCanvasAgentTools", () => {
     );
   });
 
+  it("lets an agent create an entity-relationship, a swimlane, and a mind map from the examples describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "describe",
+        blockKinds: ["er", "swimlane", "mindmap"],
+      }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.kind)).toEqual(["er", "swimlane", "mindmap"]);
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks[0]).toMatchObject({
+      kind: "er",
+      entities: expect.arrayContaining([expect.objectContaining({ label: "Person" })]),
+      relationships: expect.arrayContaining([
+        expect.objectContaining({ label: "places", sourceCardinality: "one" }),
+      ]),
+    });
+    expect(blocks[1]).toMatchObject({
+      kind: "swimlane",
+      lanes: expect.arrayContaining([expect.objectContaining({ label: "Support", kind: "team" })]),
+      steps: expect.arrayContaining([expect.objectContaining({ label: "Is it a defect?" })]),
+    });
+    expect(blocks[2]).toMatchObject({
+      kind: "mindmap",
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ nodeId: "tests", parentId: "release" }),
+      ]),
+    });
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Order flow",
+        blocks: examples,
+      }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Order flow" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+  });
+
   it("lets an agent create a pie, a donut, stacked and grouped bars, and a bar and line chart from the examples describe returns", async () => {
     const { create, set } = tools();
     const described = await set.execute({
@@ -406,6 +460,59 @@ describe("createCanvasAgentTools", () => {
       layout: "calendar",
       scale: "diverging",
     });
+  });
+
+  it("lets an agent create a hottest-files list from the bar-list example describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["bar-list"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.blockId)).toContain("hottest-files");
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks.every((block) => block.kind === "bar-list")).toBe(true);
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Hot files", blocks: examples }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Hot files" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+    expect(examples[0]).toMatchObject({ kind: "bar-list", scale: "sequential" });
+  });
+
+  it("lets an agent create a repo-stats tile row from the metric examples describe returns", async () => {
+    const { set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["metric"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.blockId)).toEqual([
+      "repo-file-count",
+      "repo-lines",
+      "repo-coverage",
+    ]);
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks.every((block) => block.kind === "metric")).toBe(true);
+    expect(examples[1]).toMatchObject({ kind: "metric", goodDirection: "up", format: "compact" });
   });
 
   it("lets an agent create and then revise a settings screen mockup from the example describe returns", async () => {
@@ -990,5 +1097,93 @@ describe("a managed child's Canvas tool", () => {
     expect(outcome.isError).toBe(true);
     expect(outcome.result).toEqual({ error: "The Canvas Project is unavailable." });
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe("Canvas preview through the tool", () => {
+  const previewCanvasId = "77777777-7777-4777-8777-777777777777";
+
+  function previewPort(
+    imagesInToolResults: (input: unknown) => boolean,
+    preview: (request: { readonly imagesInToolResults: boolean }) => unknown,
+  ) {
+    return tools({
+      imagesInToolResults: vi.fn(imagesInToolResults),
+      preview: { preview: vi.fn(async (request: unknown) => preview(request as never)) },
+    }).set;
+  }
+
+  it("reports the warnings and the reason a model that cannot take images got no picture", async () => {
+    const set = previewPort(
+      () => false,
+      (request) => ({
+        kind: "preview",
+        canvasId: previewCanvasId,
+        sequence: 1,
+        width: 380,
+        height: 360,
+        warnings: [{ kind: "empty-series", blockId: "revenue" }],
+        ...(request.imagesInToolResults
+          ? {}
+          : { imageOmitted: "provider-cannot-take-images" as const }),
+      }),
+    );
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "preview",
+        canvasId: previewCanvasId,
+        width: "inline",
+      }),
+    });
+    expect(outcome.isError).not.toBe(true);
+    expect(outcome.images).toBeUndefined();
+    expect(outcome.result).toMatchObject({
+      canvasId: previewCanvasId,
+      warnings: [{ kind: "empty-series", blockId: "revenue" }],
+      imagesInToolResults: false,
+      imageIncluded: false,
+      imageOmitted: "provider-cannot-take-images",
+    });
+  });
+
+  it("attaches the picture to a model that takes images in a tool result", async () => {
+    const set = previewPort(
+      () => true,
+      () => ({
+        kind: "preview",
+        canvasId: previewCanvasId,
+        sequence: 1,
+        width: 720,
+        height: 360,
+        warnings: [],
+        image: { mimeType: "image/png" as const, data: "AAAA" },
+      }),
+    );
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "preview", canvasId: previewCanvasId }),
+    });
+    expect(outcome.isError).not.toBe(true);
+    expect(outcome.images).toEqual([{ mimeType: "image/png", data: "AAAA" }]);
+    expect(outcome.result).toMatchObject({
+      imagesInToolResults: true,
+      imageIncluded: true,
+    });
+  });
+
+  it("refuses a preview that names no Canvas", async () => {
+    const set = previewPort(
+      () => true,
+      () => ({ kind: "unavailable", message: "unused" }),
+    );
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "preview" }),
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.result).toEqual({
+      error: "A preview needs the canvasId of the Canvas to look at.",
+    });
   });
 });

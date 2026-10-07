@@ -5,11 +5,16 @@ import {
 } from "@octant/contracts/canvas";
 import { MAX_ARTIFACT_PREVIEW_CHARACTERS } from "@octant/contracts/artifact-library";
 import { CHART_BAR_RADIUS, CHART_LINE_WIDTH } from "@octant/theme";
+import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { layoutCanvasTreemap } from "@octant/domain/canvas-treemap-layout";
 import {
   layoutCanvasHeatmapCalendar,
   layoutCanvasHeatmapMatrix,
 } from "@octant/domain/canvas-heatmap-layout";
+import {
+  BAR_LIST_DEFAULT_VISIBLE_ROWS,
+  layoutCanvasBarList,
+} from "@octant/domain/canvas-bar-list-layout";
 
 /**
  * Drawing an artifact, once.
@@ -43,10 +48,14 @@ const DRAWN_KINDS = new Set<CanvasBlock["kind"]>([
   "diagram",
   "sequence",
   "state",
+  "er",
+  "swimlane",
+  "mindmap",
   "mockup",
   "treemap",
   "heatmap",
   "design",
+  "bar-list",
   "code-excerpt",
   "pseudocode",
   "diff",
@@ -180,6 +189,7 @@ function drawBlock(
         height: 20,
       };
     case "metric":
+      return { markup: metric(block, y, width, palette), height: 30 };
     case "status":
       return {
         markup:
@@ -207,6 +217,12 @@ function drawBlock(
       return { markup: sequence(block, y, width, palette), height: 64 };
     case "state":
       return { markup: stateMachine(block, y, width, palette), height: 64 };
+    case "er":
+      return { markup: erThumbnail(block, y, width, palette), height: 60 };
+    case "swimlane":
+      return { markup: swimlaneThumbnail(block, y, width, palette), height: 56 };
+    case "mindmap":
+      return { markup: mindmapThumbnail(block, y, width, palette), height: 54 };
     case "mockup":
       return { markup: mockupFrame(block, y, width, palette), height: 52 };
     case "treemap":
@@ -215,6 +231,8 @@ function drawBlock(
       return { markup: heatmap(block, y, width, palette), height: CHART_HEIGHT };
     case "design":
       return { markup: designFrames(block, y, width, palette), height: 52 };
+    case "bar-list":
+      return { markup: barList(block, y, width, palette), height: barListHeight(block) };
     case "code-excerpt":
     case "pseudocode":
     case "diff":
@@ -614,6 +632,131 @@ function stateMachine(
   return arrows.join("") + boxes;
 }
 
+/**
+ * A schema thumbnail: entity boxes with a header bar and attribute lines, and
+ * one connector between the first two, so the picture reads as a data model.
+ */
+function erThumbnail(
+  block: Extract<CanvasBlock, { readonly kind: "er" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const entities = block.entities.slice(0, 3);
+  if (entities.length === 0) return lines(y, 2, width, palette);
+  const slot = width / entities.length;
+  const boxWidth = Math.max(40, Math.round(slot - 12));
+  const boxes = entities
+    .map((entity, index) => {
+      const x = Math.round(PADDING + index * slot);
+      const rows = Math.min(entity.attributes.length, 3);
+      const height = 14 + rows * 8;
+      const header = `<rect x="${String(x)}" y="${String(y)}" width="${String(boxWidth)}" height="12" rx="2" fill="${palette.accent}" opacity="0.35"/>`;
+      const frame = `<rect x="${String(x)}" y="${String(y)}" width="${String(boxWidth)}" height="${String(height)}" rx="3" fill="none" stroke="${palette.accent}" stroke-width="1.2"/>`;
+      const attrLines = Array.from(
+        { length: rows },
+        (_unused, row) =>
+          `<rect x="${String(x + 4)}" y="${String(y + 16 + row * 8)}" width="${String(Math.round(boxWidth * 0.62))}" height="3" rx="1.5" fill="${palette.muted}" opacity="0.6"/>`,
+      ).join("");
+      return (
+        header +
+        frame +
+        attrLines +
+        text(x, y + height + 9, clamp(entity.label, 14), 7, palette.ink)
+      );
+    })
+    .join("");
+  const connector =
+    entities.length > 1
+      ? `<line x1="${String(PADDING + boxWidth)}" y1="${String(y + 12)}" x2="${String(PADDING + slot)}" y2="${String(y + 12)}" stroke="${palette.muted}" stroke-width="1"/>`
+      : "";
+  return connector + boxes;
+}
+
+/**
+ * A lane thumbnail: stacked bands with a header column and the lane's first
+ * step, so the picture reads as a process handed between owners. The lane and
+ * its step are named, clamped, because the bundle's Markdown points readers at
+ * this picture.
+ */
+function swimlaneThumbnail(
+  block: Extract<CanvasBlock, { readonly kind: "swimlane" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const lanes = block.lanes.slice(0, 3);
+  if (lanes.length === 0) return lines(y, 2, width, palette);
+  const laneHeight = 16;
+  const headerWidth = Math.round(width * 0.22);
+  return lanes
+    .map((lane, index) => {
+      const top = y + index * laneHeight;
+      const band = `<rect x="${String(PADDING)}" y="${String(top)}" width="${String(width)}" height="${String(laneHeight - 3)}" rx="2" fill="none" stroke="${palette.muted}" opacity="0.7"/>`;
+      const divider = `<line x1="${String(PADDING + headerWidth)}" y1="${String(top)}" x2="${String(PADDING + headerWidth)}" y2="${String(top + laneHeight - 3)}" stroke="${palette.muted}" opacity="0.7"/>`;
+      const name = text(PADDING + 4, top + 10, clamp(lane.label, 12), 7, palette.ink, 600);
+      const stepWidth = Math.round(width * 0.3);
+      const step = `<rect x="${String(PADDING + headerWidth + 8)}" y="${String(top + 2)}" width="${String(stepWidth)}" height="9" rx="2" fill="${palette.accent}" opacity="0.5"/>`;
+      const firstStep = block.steps.find((entry) => String(entry.laneId) === String(lane.laneId));
+      const stepName =
+        firstStep === undefined
+          ? ""
+          : text(
+              PADDING + headerWidth + 11,
+              top + 9,
+              clamp(firstStep.label, Math.max(4, Math.floor((stepWidth - 6) / 4))),
+              6,
+              palette.ink,
+            );
+      return band + divider + name + step + stepName;
+    })
+    .join("");
+}
+
+/**
+ * A mind map thumbnail: a root box with up to three branches to the right, so
+ * the picture reads as one topic and its children. Each box carries its topic,
+ * clamped, because the bundle's Markdown points readers at this picture.
+ */
+function mindmapThumbnail(
+  block: Extract<CanvasBlock, { readonly kind: "mindmap" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const root = block.nodes.find((node) => node.parentId === undefined);
+  if (root === undefined) return lines(y, 2, width, palette);
+  const children = block.nodes
+    .filter((node) => String(node.parentId) === String(root.nodeId))
+    .slice(0, 3);
+  const rootX = PADDING;
+  const rootY = y + 18;
+  const rootBox = `<rect x="${String(rootX)}" y="${String(rootY)}" width="70" height="16" rx="3" fill="${palette.accent}" opacity="0.45"/>`;
+  const childX = PADDING + 90;
+  const links = children
+    .map(
+      (_child, index) =>
+        `<line x1="${String(rootX + 70)}" y1="${String(rootY + 8)}" x2="${String(childX)}" y2="${String(y + 6 + index * 16)}" stroke="${palette.muted}" stroke-width="1"/>`,
+    )
+    .join("");
+  const childWidth = Math.min(120, width - childX);
+  const childBoxes = children
+    .map(
+      (child, index) =>
+        `<rect x="${String(childX)}" y="${String(y + index * 16)}" width="${String(childWidth)}" height="12" rx="2" fill="none" stroke="${palette.accent}" stroke-width="1"/>` +
+        text(
+          childX + 4,
+          y + index * 16 + 9,
+          clamp(child.label, Math.max(4, Math.floor((childWidth - 8) / 4))),
+          7,
+          palette.ink,
+        ),
+    )
+    .join("");
+  const rootLabel = text(rootX + 4, rootY + 11, clamp(root.label, 15), 7, palette.ink, 600);
+  return links + rootBox + rootLabel + childBoxes;
+}
+
 function mockupFrame(
   block: Extract<CanvasBlock, { readonly kind: "mockup" }>,
   y: number,
@@ -736,6 +879,107 @@ function heatCell(
   const span = max - min;
   const ratio = span > 0 ? (value - min) / span : 0.5;
   return `<rect x="${left}" y="${top}" width="${boxWidth}" height="${boxHeight}" fill="${palette.accent}" opacity="${opacityFor(0.2 + 0.65 * clampUnit(ratio))}"/>`;
+}
+
+/**
+ * A metric thumbnail: its label and value, an optional caption, and the same
+ * sparkline the screen draws, scaled into a strip on the right. The numbers
+ * read through the shared formatter so the preview matches the document.
+ */
+function metric(
+  block: Extract<CanvasBlock, { readonly kind: "metric" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const parts = [
+    text(PADDING, y + 8, clamp(block.label, 20), 8, palette.muted),
+    text(PADDING, y + 20, clamp(String(block.value), 14), 13, palette.ink, 600),
+  ];
+  if (block.caption !== undefined) {
+    parts.push(text(PADDING, y + 28, clamp(block.caption, titleLength(width)), 7, palette.muted));
+  }
+  const spark = block.sparkline;
+  if (spark !== undefined && spark.length >= 2) {
+    const sparkWidth = Math.min(80, Math.max(24, Math.round(width / 3)));
+    parts.push(sparkline(spark, PADDING + width - sparkWidth, y + 9, sparkWidth, 11, palette));
+  }
+  return parts.join("");
+}
+
+function sparkline(
+  values: ReadonlyArray<number>,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  const span = max - min;
+  const points = values
+    .map((value, index) => {
+      const px = values.length <= 1 ? x + width / 2 : x + (index / (values.length - 1)) * width;
+      const share = span > 0 ? (value - min) / span : 0.5;
+      return `${String(round(px))},${String(round(y + height - share * height))}`;
+    })
+    .join(" ");
+  return `<polyline points="${points}" fill="none" stroke="${palette.accent}" stroke-width="${String(CHART_LINE_WIDTH)}" opacity="0.85"/>`;
+}
+
+/** One row of a bar list in a thumbnail, and the band each row gets. */
+const BAR_LIST_ROW_HEIGHT = 9;
+const BAR_LIST_BAR_HEIGHT = 4;
+
+function barListHeight(block: Extract<CanvasBlock, { readonly kind: "bar-list" }>): number {
+  const visible = Math.min(block.rows.length, BAR_LIST_DEFAULT_VISIBLE_ROWS);
+  return Math.max(BAR_LIST_ROW_HEIGHT, visible * BAR_LIST_ROW_HEIGHT) + 2;
+}
+
+/**
+ * A bar list drawn from the shared layout: a label, a bar whose length is the
+ * row's share of the largest value, and its formatted value. The top rows are
+ * drawn, matching what the screen shows before Show all.
+ */
+function barList(
+  block: Extract<CanvasBlock, { readonly kind: "bar-list" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const layout = layoutCanvasBarList(block, { limit: BAR_LIST_DEFAULT_VISIBLE_ROWS });
+  const labelWidth = Math.round(width * 0.46);
+  const valueWidth = Math.round(width * 0.18);
+  const barX = PADDING + labelWidth + 4;
+  const barWidth = Math.max(8, width - labelWidth - valueWidth - 12);
+  return layout.rows
+    .map((row, index) => {
+      const top = y + index * BAR_LIST_ROW_HEIGHT;
+      const filled = Math.max(1, Math.round(barWidth * row.fraction));
+      const bar = `<rect x="${String(round(barX))}" y="${String(round(top + (BAR_LIST_ROW_HEIGHT - BAR_LIST_BAR_HEIGHT) / 2))}" width="${String(filled)}" height="${String(BAR_LIST_BAR_HEIGHT)}" rx="${String(CHART_BAR_RADIUS)}" fill="${palette.accent}" opacity="${opacityFor(0.3 + 0.6 * row.fraction)}"/>`;
+      const label = text(
+        PADDING,
+        top + 7,
+        clamp(row.label, Math.max(6, Math.floor(labelWidth / 5))),
+        7,
+        palette.ink,
+      );
+      const value = text(
+        round(PADDING + width - valueWidth),
+        top + 7,
+        clamp(formatCanvasNumber(row.value, block.format), 12),
+        7,
+        palette.muted,
+      );
+      return label + bar + value;
+    })
+    .join("");
 }
 
 /** A row of frame outlines in the design's own proportions, as many as fit. */

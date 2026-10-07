@@ -209,4 +209,146 @@ describe("rendering a canvas as a document", () => {
     expect(rendered.body).toContain("| 2026-09-01 | 0 |  |");
     expect(rendered.body).toContain("| 2026-09-02 | 4 | Flaky suite |");
   });
+
+  it("writes a bar list as a ranked table with an optional second reading", () => {
+    const barList = decodeCanvasBlock({
+      blockId: "hottest-files",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "bar-list",
+      valueLabel: "Edits",
+      secondaryLabel: "Lines",
+      rows: [
+        { label: "packages/domain", value: 33 },
+        { label: "apps/web", value: 41, secondaryValue: 1189 },
+      ],
+    });
+
+    const rendered = renderArtifactMarkdown(definition([barList]));
+
+    expect(rendered.kind).toBe("rendered");
+    if (rendered.kind !== "rendered") return;
+    expect(rendered.body).toContain("| Item | Edits | Lines |");
+    // A row without a second reading leaves an empty cell rather than a zero.
+    const largest = `| apps/web | 41 | ${formatCanvasNumber(1189)} |`;
+    const smaller = "| packages/domain | 33 |  |";
+    expect(rendered.body).toContain(largest);
+    expect(rendered.body).toContain(smaller);
+    // The export ranks largest first, as the screen and the preview do.
+    expect(rendered.body.indexOf(largest)).toBeLessThan(rendered.body.indexOf(smaller));
+  });
+
+  it("carries a metric caption into its reading", () => {
+    const captioned = {
+      blockId: "metric-caption",
+      schemaVersion: 6,
+      kind: "metric",
+      label: "Signups",
+      value: 12,
+      caption: "since last release",
+    } as unknown as CanvasBlock;
+
+    const rendered = renderArtifactMarkdown(definition([captioned]));
+
+    expect(rendered.kind).toBe("rendered");
+    if (rendered.kind !== "rendered") return;
+    expect(rendered.body).toContain("Signups: 12 — since last release");
+  });
+
+  it("writes an entity-relationship model as an attribute table and a relationship list", () => {
+    const er = {
+      blockId: "order-schema",
+      schemaVersion: 8,
+      kind: "er",
+      entities: [
+        {
+          entityId: "person",
+          label: "Person",
+          attributes: [{ attributeId: "person-id", name: "id", type: "uuid", key: true }],
+        },
+        {
+          entityId: "order",
+          label: "Order",
+          attributes: [
+            { attributeId: "order-id", name: "id", type: "uuid", key: true },
+            { attributeId: "order-person", name: "person_id", type: "uuid" },
+          ],
+        },
+      ],
+      relationships: [
+        {
+          relationshipId: "person-places-order",
+          source: "person",
+          target: "order",
+          sourceCardinality: "one",
+          targetCardinality: "many",
+          label: "places",
+        },
+      ],
+    } as unknown as CanvasBlock;
+
+    const rendered = renderArtifactMarkdown(definition([er]));
+
+    expect(rendered.kind).toBe("rendered");
+    if (rendered.kind !== "rendered") return;
+    expect(rendered.body).toContain("| Entity | Attribute | Type | Key |");
+    expect(rendered.body).toContain("| Person | id | uuid | key |");
+    expect(rendered.body).toContain("| Order | person_id | uuid |  |");
+    expect(rendered.body).toContain("- Person one — many Order (places)");
+  });
+
+  it("writes a swimlane as numbered steps per lane and a connection list", () => {
+    const swimlane = {
+      blockId: "support-flow",
+      schemaVersion: 8,
+      kind: "swimlane",
+      lanes: [
+        { laneId: "customer", label: "Customer", kind: "actor" },
+        { laneId: "support", label: "Support", kind: "team" },
+      ],
+      steps: [
+        { stepId: "report", laneId: "customer", label: "Report a problem" },
+        { stepId: "triage", laneId: "support", label: "Is it a defect?", decision: true },
+      ],
+      connections: [
+        { connectionId: "report-triage", source: "report", target: "triage", label: "then" },
+      ],
+    } as unknown as CanvasBlock;
+
+    const rendered = renderArtifactMarkdown(definition([swimlane]));
+
+    expect(rendered.kind).toBe("rendered");
+    if (rendered.kind !== "rendered") return;
+    expect(rendered.body).toContain("### Customer");
+    expect(rendered.body).toContain("1. Report a problem");
+    expect(rendered.body).toContain("### Support");
+    expect(rendered.body).toContain("1. Is it a defect?");
+    expect(rendered.body).toContain("- Report a problem → Is it a defect?: then");
+  });
+
+  it("writes a mind map as a nested list, nesting the HTML branches as real lists", () => {
+    const mindmap = {
+      blockId: "release-mindmap",
+      schemaVersion: 8,
+      kind: "mindmap",
+      nodes: [
+        { nodeId: "release", label: "Release readiness" },
+        { nodeId: "tests", label: "Test coverage", parentId: "release", note: "green on head" },
+        { nodeId: "docs", label: "Documentation", parentId: "release" },
+        { nodeId: "guide", label: "User guide", parentId: "docs" },
+      ],
+    } as unknown as CanvasBlock;
+
+    const markdown = renderArtifactMarkdown(definition([mindmap]));
+    const html = renderArtifactHtml(definition([mindmap]));
+
+    expect(markdown.kind).toBe("rendered");
+    expect(html.kind).toBe("rendered");
+    if (markdown.kind !== "rendered" || html.kind !== "rendered") return;
+    expect(markdown.body).toContain("- Release readiness");
+    expect(markdown.body).toContain("  - Test coverage — green on head");
+    expect(markdown.body).toContain("    - User guide");
+    expect(html.body).toContain(
+      "<ul><li>Release readiness<ul><li>Test coverage — green on head</li><li>Documentation<ul><li>User guide</li></ul></li></ul></li></ul>",
+    );
+  });
 });

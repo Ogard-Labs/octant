@@ -578,6 +578,7 @@ import {
   createLiveLocalServerStopPort,
 } from "./localServers/localServerHostPorts";
 import { createCodeThreadLocalServerScopeResolver } from "./localServers/localServerScopeResolver";
+import { createRunningServiceScopeResolver } from "./localServers/runningServiceScopeResolver";
 import { LocalServerService } from "./localServers/localServerService";
 import { createDiagnosticsExportRouteHandler } from "./diagnosticsExportRoutes";
 import {
@@ -812,6 +813,8 @@ import {
   createChildCanvasAgentTools,
   type CanvasAgentToolPort,
 } from "./canvas/canvasAgentTools";
+import { createCanvasPreviewService } from "./canvas/canvasPreviewService";
+import { createPlaywrightCanvasPreviewRenderer } from "./canvas/canvasPreviewRenderer";
 import { loadChildCanvasWorkspace } from "./canvas/childCanvasWorkspace";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "./providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "./providers/appManagedToolTaint";
@@ -835,6 +838,7 @@ import {
   createHostControlRouteHandler,
   type HostControlServicePolicyPort,
 } from "./hostControlRoutes";
+import { createHostResourceRouteHandler } from "./hostResourceRoutes";
 import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
 import { createLiveHostExportService } from "./hostExportService";
@@ -5222,7 +5226,10 @@ export function startOctantServer(
           metadata: codeThreadMetadataService,
           runtime: {
             observe: (threadId) =>
-              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId)),
+              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
+                turnParkedOnPerson:
+                  codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true,
+              }),
           },
           pullRequests: {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
@@ -5668,6 +5675,31 @@ export function startOctantServer(
             resolveCheckoutRoot: async (windowId, thread, checkout) =>
               (await roots.resolve(windowId, thread, checkout, codeWorkingDirectoryProbePath))
                 ?.rootPath,
+            ownedPids: () => new Set<number>(),
+          },
+        }),
+        hostScopes: createRunningServiceScopeResolver({
+          projects: projectService,
+          source: {
+            readThreads: persistence.readCodeThreads,
+            readCheckout: persistence.readCodeCheckout,
+            // Only the ownership receipt the host wrote for this thread's own
+            // worktree vouches for the folder; the same fields the Code file
+            // root authority demands, without its Git observation, because this
+            // only names where a listener came from and authorizes nothing.
+            managedWorktreeRoot: async (thread, checkout, repositoryRoot) => {
+              const receipt = await managedWorktreeReceipts.load(checkout.ownershipReceiptId);
+              return receipt !== undefined &&
+                receipt.state === "ready" &&
+                receipt.receiptId === checkout.ownershipReceiptId &&
+                receipt.threadId === thread.id &&
+                receipt.checkoutId === checkout.id &&
+                receipt.repositoryId === thread.repositoryId &&
+                receipt.repositoryId === checkout.repositoryId &&
+                receipt.canonicalRepositoryPath === repositoryRoot
+                ? receipt.canonicalWorktreePath
+                : undefined;
+            },
             ownedPids: () => new Set<number>(),
           },
         }),
@@ -8729,6 +8761,21 @@ export function startOctantServer(
           : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
       },
       canvas: canvasService,
+      preview: createCanvasPreviewService({
+        canvas: canvasService,
+        renderer: createPlaywrightCanvasPreviewRenderer({
+          // The preview page ships beside the web build, so it follows the
+          // same folder a host injects for the app; otherwise every preview
+          // would report no renderer on that host.
+          webAssetsPath: options.webAssetsPath ?? resolveWebAssetsPath(),
+        }),
+      }),
+      imagesInToolResults: ({ providerInstanceId, modelId }) => {
+        const model = providerRuntimeRegistry
+          .observedState(providerInstanceId)
+          ?.models.find((candidate) => String(candidate.id) === String(modelId));
+        return model?.inputModalities.includes("image") === true;
+      },
       uuid: randomUUID,
       hostId: LOCAL_HOST_ID,
       resolveWorkspace: resolveCanvasWorkspace,
@@ -9554,6 +9601,7 @@ export function startOctantServer(
     // gives this chain a loopback-shaped internal request; individual handlers
     // resolve the bound context through principalRouteContext before effects.
     const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
+      (await hostResourceRoutes(request)) ??
       (await projectBindingRoutes(request)) ??
       (await launchSessionRoutes(request)) ??
       (await machineChangeRoutes(request)) ??
@@ -9814,6 +9862,11 @@ export function startOctantServer(
     });
     const hostRuntimePlatform =
       process.platform === "darwin" || process.platform === "linux" ? process.platform : undefined;
+    const hostResourceRoutes = createHostResourceRouteHandler({
+      windowAuthorityStore,
+      dataDirectory: persistence.dataDirectory,
+      hostId: () => readHostIdentity(persistence.connection)?.host_id,
+    });
     const hostControlRoutes = createHostControlRouteHandler({
       windowAuthorityStore,
       diagnostics: composeHostDiagnostics,
