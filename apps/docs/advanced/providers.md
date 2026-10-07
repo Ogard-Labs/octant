@@ -171,14 +171,17 @@ not by that name: a 1.x binary keeps the legacy session API, and a 2.x binary
 lists providers and models from its HTTP catalogue and runs turns under the
 thread's approval setting, which Octant writes into OpenCode's private
 configuration: edits and shell commands ask unless the setting allows them,
-and only Octant's own app tools are available. OpenCode 2 resolves a project
+and other providers' tools and skills are refused. 2.x runs turns without
+Octant's app tools until Octant registers them through the 2.x MCP API: with
+OpenCode 2.0.22 they are reported as unsupported. OpenCode 2 resolves a project
 inside a Git work tree by starting Git, which the Chat, Plan, and Work jail
 does not allow. On macOS Octant gives those launches a stand-in `git` that
 always fails, so OpenCode serves the folder without Git and every mode runs.
 Linux has no such stand-in yet. A runtime whose confined server cannot answer
 for a work tree, including every 2.x runtime on Linux, is shown as
-**Incompatible**: its models are listed and no turn is offered. Octant never falls back to an
-unconfined session or treats the 2.x version as the legacy runtime.
+**Incompatible**: its models are listed and no turn is offered. Octant never
+falls back to an unconfined session or treats the 2.x version as the legacy
+runtime.
 
 ### API endpoints
 
