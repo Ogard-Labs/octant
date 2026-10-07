@@ -1549,7 +1549,10 @@ modelId }`, and the model picker is provider-first. Discovery can find
   Provider OAuth has two postures ([0111](decisions/0111-host-driven-provider-oauth.md)).
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
-  those tokens. **Host-driven** (`subscription-oauth`, direct HTTP drivers):
+  those tokens, except the opt-in Claude for helpers token that a confined
+  Claude launch signs in with, which the credential broker holds as the Sandbox
+  paragraph of [security and authority](#security-and-authority) states.
+  **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
   id). Direct endpoint drivers accept a `subscription-oauth` credential
@@ -2443,8 +2446,11 @@ mechanisms are:
   in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
   runtime never refreshes a handed-in token, so one it refuses is marked
   expired and the same reconnect step is reported. Only a local window may
-  connect or disconnect. A bound root a launch may not write is denied in
-  the profile, so a checkout under that launch's own temporary directory is not
+  connect or disconnect. Disconnecting deletes the token from the broker and
+  reports a broker it cannot reach. Removing the Claude Code provider clears
+  it best-effort: the removal completes even when the broker is unreachable and
+  the token can remain. Octant has no call that revokes it with Anthropic. A
+  bound root a launch may not write is denied in the profile, so a checkout under that launch's own temporary directory is not
   writable through it. The `--version` read every family and the discovery
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
