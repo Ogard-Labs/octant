@@ -1567,7 +1567,10 @@ finish guessed into a reason.
 Chat Completions maps `finish_reason` `length` to `max-tokens` and
 `content_filter` to `content-filter`. The Responses protocol maps
 `incomplete_details.reason` `max_output_tokens` and `content_filter` the same
-way. The Messages protocol maps `stop_reason` `max_tokens`. Claude's result
+way. The Messages protocol maps `stop_reason` `max_tokens`, and `refusal`
+(its safety classifier stopping the reply) to `content-filter`; an ACP prompt
+result's `refusal` names the agent declining to continue, not a filter, so it
+leaves the field absent. Claude's result
 `stop_reason`, Pi's assistant `stopReason` of `length`, OpenCode's step
 `finish` of `length`, and an ACP prompt result that names one of those
 strings, map when the protocol reports them. A local runtime's `done_reason`

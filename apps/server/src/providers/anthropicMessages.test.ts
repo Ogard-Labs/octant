@@ -132,7 +132,10 @@ describe("sendAnthropicMessagesTurn", () => {
     expect(body.max_tokens).toBeGreaterThan(0);
   });
 
-  it("records a max_tokens stop as the output limit and keeps the partial reply", async () => {
+  it.each([
+    ["max_tokens", "max-tokens"],
+    ["refusal", "content-filter"],
+  ] as const)("records a %s stop as %s and keeps the partial reply", async (raw, expected) => {
     const fetch = fixture(
       sse([
         {
@@ -156,7 +159,7 @@ describe("sendAnthropicMessagesTurn", () => {
         { type: "content_block_stop", index: 0 },
         {
           type: "message_delta",
-          delta: { stop_reason: "max_tokens" },
+          delta: { stop_reason: raw },
           usage: { output_tokens: 4 },
         },
         { type: "message_stop" },
@@ -173,7 +176,7 @@ describe("sendAnthropicMessagesTurn", () => {
     );
 
     expect(result.text).toBe("partial");
-    expect(result.outputStopReason).toBe("max-tokens");
+    expect(result.outputStopReason).toBe(expected);
   });
 
   it("accepts output-only usage on message_delta", async () => {

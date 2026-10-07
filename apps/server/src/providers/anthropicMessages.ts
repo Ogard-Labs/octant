@@ -554,9 +554,13 @@ function normalizeMessageDelta(
     ) {
       throw protocol("The provider stream contained an unsupported stop reason.");
     }
-    const stop = outputStopReason(
-      typeof delta.stop_reason === "string" ? delta.stop_reason : undefined,
-    );
+    // The Messages protocol's `refusal` is its streaming safety classifier
+    // stopping the reply, which is a filter stop. Only this protocol's
+    // `refusal` means that: ACP's names an agent declining to continue.
+    const stop =
+      delta.stop_reason === "refusal"
+        ? "content-filter"
+        : outputStopReason(typeof delta.stop_reason === "string" ? delta.stop_reason : undefined);
     if (stop !== undefined) state.outputStopReason = stop;
   }
   const usage = event.usage;
