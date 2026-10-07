@@ -972,6 +972,52 @@ describe("WorkThreadWorkspace", () => {
     expect(await screen.findByText("Claude message stream failed.")).toBeVisible();
   });
 
+  it("shows a delivered subagent result as its own labelled entry, not as the person's message", async () => {
+    const delivered = [
+      "A subagent you delegated has finished.",
+      "",
+      "Subagent: research (20000000-0000-4000-8000-000000000001/haiku)",
+      "Run: 0b9d3f40-5a52-4a1e-8c11-111111111111 (generation 1)",
+      "Task: Measure the cache.",
+      "",
+      "Result:",
+      "MATRIX-A3",
+    ].join("\n");
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({
+        threadId,
+        turns: [
+          workTurn({
+            prompt: delivered,
+            transcript: [{ role: "user", text: delivered }],
+            delivery: { kind: "agent-result", runId: "0b9d3f40-5a52-4a1e-8c11-111111111111" },
+          }),
+        ],
+      })),
+    };
+    const requestClient = { list: vi.fn(async () => ({ requests: [] })) };
+
+    render(
+      <WorkThreadWorkspace
+        requestClient={requestClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    const entry = await screen.findByRole("article", { name: "Subagent results" });
+    expect(
+      within(entry).getByRole("article", { name: "Research subagent finished" }),
+    ).toHaveTextContent("MATRIX-A3");
+    expect(screen.queryByRole("article", { name: "Your message" })).not.toBeInTheDocument();
+  });
+
   it("windows long Work transcripts instead of mounting every message", async () => {
     const turns = Array.from({ length: 200 }, (_, index) =>
       workTurn({

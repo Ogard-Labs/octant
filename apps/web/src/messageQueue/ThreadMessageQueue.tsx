@@ -21,12 +21,22 @@ const holdMessage: Readonly<Record<ThreadMessageQueueHoldReason, string>> = {
   "admission-refused": "The host refused to start the message. Review the thread before resuming.",
 };
 
+const QUEUE_UNAVAILABLE = "The host message queue is unavailable. Your draft stays here.";
+
 export function ThreadMessageQueue({
   queue,
   showUnavailable = false,
+  connectionLost = false,
 }: {
   readonly queue: QueueState;
   readonly showUnavailable?: boolean;
+  /**
+   * The thread already says its host connection is lost. The queue then only
+   * dims and disables its controls: repeating the loss here made one condition
+   * read as several. A queue change still waiting on confirmation is the
+   * queue's own news and keeps speaking.
+   */
+  readonly connectionLost?: boolean;
 }) {
   const [editing, setEditing] = useState<{
     readonly id: string;
@@ -46,11 +56,24 @@ export function ThreadMessageQueue({
     !queue.uncertain
   )
     return null;
+  const quiet = connectionLost && !queue.uncertain;
   if (!showUnavailable && snapshot === undefined) return null;
-  const disabled = !queue.available || queue.busy || queue.uncertain;
+  // Nothing queued and nothing held leaves nothing to dim.
+  if (
+    quiet &&
+    (snapshot === undefined ||
+      (snapshot.items.length === 0 && !snapshot.paused && snapshot.holdReason === undefined))
+  )
+    return null;
+  const message = queue.message ?? (queue.available || quiet ? undefined : QUEUE_UNAVAILABLE);
+  const disabled = quiet || !queue.available || queue.busy || queue.uncertain;
   const queued = snapshot?.items.filter((item) => item.status === "queued") ?? [];
   return (
-    <section aria-label="Message queue" className="thread-message-queue">
+    <section
+      aria-label="Message queue"
+      className="thread-message-queue"
+      data-connection={quiet ? "lost" : "ok"}
+    >
       <div className="thread-message-queue__heading">
         <OctantButton
           type="button"
@@ -86,8 +109,8 @@ export function ThreadMessageQueue({
       {snapshot?.holdReason !== undefined && (
         <p role="status">Queue held. {holdMessage[snapshot.holdReason]}</p>
       )}
-      {queue.message !== undefined && <p role="status">{queue.message}</p>}
-      {(queue.uncertain || !queue.available) && (
+      {message !== undefined && <p role="status">{message}</p>}
+      {(queue.uncertain || !queue.available) && !quiet && (
         <OctantButton
           type="button"
           size="sm"

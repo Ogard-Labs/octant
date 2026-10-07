@@ -345,6 +345,9 @@ function toHierarchyEntry(entry: AgentRunParentSummaryClientEntry): AgentHierarc
     resultAcknowledgement: entry.resultAcknowledgement,
     ...(entry.route === undefined ? {} : { route: entry.route }),
     ...(entry.recoveryReason === undefined ? {} : { recoveryReason: entry.recoveryReason }),
+    ...(entry.resultDeliveryOutcome === undefined
+      ? {}
+      : { resultDeliveryOutcome: entry.resultDeliveryOutcome }),
     ...(entry.result === undefined ? {} : { result: entry.result }),
     ...(entry.resultPackets === undefined ? {} : { resultPackets: entry.resultPackets }),
     ...(entry.resultsTruncated === undefined ? {} : { resultsTruncated: entry.resultsTruncated }),
