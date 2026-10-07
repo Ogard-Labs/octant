@@ -45,9 +45,16 @@ export interface NativeHarnessUsage {
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
   readonly reasoningTokens?: number;
+  /** What the endpoint charged, in US dollars; absent when any request in the sum did not say. */
+  readonly costUsd?: number;
 }
 
-/** A figure only appears in the total once some request has reported it. */
+/**
+ * A token figure only appears in the total once some request has reported it.
+ * Cost is stricter: a total is only a cost when every request in it reported
+ * one, because a sum with a hole in it would read as the whole charge. The
+ * empty total a turn starts from therefore carries a cost of zero.
+ */
 export function addNativeHarnessUsage(
   total: NativeHarnessUsage,
   step: NativeHarnessUsage,
@@ -57,12 +64,17 @@ export function addNativeHarnessUsage(
   const cacheRead = sum(total.cacheReadInputTokens, step.cacheReadInputTokens);
   const cacheWrite = sum(total.cacheWriteInputTokens, step.cacheWriteInputTokens);
   const reasoning = sum(total.reasoningTokens, step.reasoningTokens);
+  const cost =
+    total.costUsd === undefined || step.costUsd === undefined
+      ? undefined
+      : total.costUsd + step.costUsd;
   return {
     inputTokens: total.inputTokens + step.inputTokens,
     outputTokens: total.outputTokens + step.outputTokens,
     ...(cacheRead === undefined ? {} : { cacheReadInputTokens: cacheRead }),
     ...(cacheWrite === undefined ? {} : { cacheWriteInputTokens: cacheWrite }),
     ...(reasoning === undefined ? {} : { reasoningTokens: reasoning }),
+    ...(cost === undefined ? {} : { costUsd: cost }),
   };
 }
 

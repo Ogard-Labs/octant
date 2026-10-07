@@ -2012,6 +2012,7 @@ describe("ChatTurnRunner", () => {
             providerExecutionDurationMs: 42,
             contextTokens: 17,
             contextWindow: 200_000,
+            costUsd: 0.0421,
           } as never);
           yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Done" } as never);
           yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
@@ -2078,6 +2079,7 @@ describe("ChatTurnRunner", () => {
         providerExecutionDurationMs: 42,
         contextTokens: 17,
         contextWindow: 200_000,
+        costUsd: 0.0421,
       }),
     );
     expect(updates.at(-1)?.usage).toEqual({ inputTokens: 12, outputTokens: 8 });

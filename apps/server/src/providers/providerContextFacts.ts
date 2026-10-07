@@ -51,6 +51,9 @@ export function usageFromRuntimeEvent(
   if (event.providerExecutionDurationMs !== undefined) {
     assertNonNegativeSafeInteger(event.providerExecutionDurationMs, "Provider execution duration");
   }
+  if (event.costUsd !== undefined && (!Number.isFinite(event.costUsd) || event.costUsd < 0)) {
+    throw new ProviderContextFactsRejected("Provider cost must be a non-negative finite number.");
+  }
   return {
     providerInstanceId: event.instanceId,
     sessionId: event.sessionId,
@@ -66,6 +69,7 @@ export function usageFromRuntimeEvent(
     ...(event.providerExecutionDurationMs === undefined
       ? {}
       : { providerExecutionDurationMs: event.providerExecutionDurationMs }),
+    ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
     accuracy: "provider-reported",
     observedAt: event.occurredAt,
   };

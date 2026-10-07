@@ -7,7 +7,7 @@ import {
   type UsageQuality,
   type UsageRecord,
 } from "@octant/contracts";
-import { buildAttribution, classifyUsageQuality } from "@octant/domain";
+import { buildAttribution, classifyUsageQuality, ledgerUsageCost } from "@octant/domain";
 import type { Projection } from "./projection";
 import type { UsageProjectScope } from "../usageProjectScope";
 import { readContextManifest, readContextPlan } from "./contextProjection";
@@ -220,6 +220,19 @@ export class CodeUsageProjection implements Projection {
     assertProjection(started.event.kind === "conversation-turn-started");
     assertProjection(String(started.threadId) === String(frame.threadId));
     const usage = frame.event;
+    // The report's cost covers the same turn its tokens do, so it replaces the
+    // previous cost too; a report without one leaves the turn unpriced.
+    const cost = ledgerUsageCost(String(started.event.modelId), {
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      ...(usage.cacheReadInputTokens === undefined
+        ? {}
+        : { cacheReadInputTokens: usage.cacheReadInputTokens }),
+      ...(usage.cacheWriteInputTokens === undefined
+        ? {}
+        : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
+      ...(usage.costUsd === undefined ? {} : { costUsd: usage.costUsd }),
+    });
     // Code reports replace the turn's previous totals, just as its transcript
     // does. The operation id keeps live updates and replay on the same row.
     connection
@@ -227,12 +240,15 @@ export class CodeUsageProjection implements Projection {
       INSERT INTO usage_record_projection (
         reconciliation_id, subject_type, subject_id, provider_instance_id,
         model_id, request_shape, quality, input_tokens, output_tokens,
+        cost_usd_micros, cost_kind,
         planned_input_tokens, variance_tokens, schema_version,
         attribution_json, observed_at, last_sequence, host_id, planning_available
-      ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'exact', ?, ?, 0, 0, ?, '[]', ?, ?, ?, 0)
+      ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'exact', ?, ?, ?, ?, 0, 0, ?, '[]', ?, ?, ?, 0)
       ON CONFLICT (reconciliation_id) DO UPDATE SET
         input_tokens = excluded.input_tokens,
         output_tokens = excluded.output_tokens,
+        cost_usd_micros = excluded.cost_usd_micros,
+        cost_kind = excluded.cost_kind,
         observed_at = excluded.observed_at,
         last_sequence = excluded.last_sequence
       WHERE excluded.last_sequence > usage_record_projection.last_sequence
@@ -244,6 +260,8 @@ export class CodeUsageProjection implements Projection {
         String(started.event.modelId),
         usage.inputTokens,
         usage.outputTokens,
+        cost?.usdMicros ?? null,
+        cost?.kind ?? null,
         USAGE_PROJECTION_SCHEMA_VERSION,
         frame.occurredAt,
         event.globalSequence,

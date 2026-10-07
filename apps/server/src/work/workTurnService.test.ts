@@ -376,6 +376,100 @@ describe("WorkTurnService", () => {
     }
   });
 
+  it("records a Work turn once, at its latest usage report and the provider's cost", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
+    attachmentRoots.push(root);
+    const connection = openSqlite(join(root, "context.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      let sequence = 0;
+      const contextHarness = new ContextHarnessService({
+        persistence: { connection, journal, status: () => ({ state: "current", integrity: "ok" }) },
+        uuid: () => `83000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+        clock: () => now,
+      });
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        const report = (sequence: number, fields: Record<string, number>) => {
+          const usage = decodeProviderRuntimeEvent({
+            instanceId: ids.provider,
+            sessionId: input.providerSessionId,
+            sequence,
+            correlationId: ids.request,
+            occurredAt: now,
+            kind: "usage",
+            contextWindow: 1000,
+            ...fields,
+          });
+          if (usage.kind !== "usage") throw new Error("Expected usage fixture");
+          input.onUsage?.(usage);
+        };
+        // One step's report, then the whole turn's, as a Claude turn reports.
+        report(1, { inputTokens: 100, outputTokens: 4, contextTokens: 104 });
+        report(2, { inputTokens: 180, outputTokens: 8, contextTokens: 188, costUsd: 0.0123 });
+        return { kind: "completed" as const, response: "Ready" };
+      });
+      const close = vi.fn(async () => undefined);
+      const fixture = serviceFixture({
+        contextHarness,
+        turnRuntime: { run },
+        resolveAppManagedTools: () => ({
+          definitions: [],
+          execute: async () => ({ result: {} }),
+          close,
+        }),
+        contextFacts: {
+          observeModelLimits: () =>
+            Effect.succeed([
+              {
+                providerInstanceId: decodeProviderInstanceId(ids.provider),
+                modelId: decodeProviderModelId("model-a"),
+                contextWindow: 1000,
+                maxOutput: 20,
+                source: "runtime-reported",
+                confidence: "high",
+                observedAt: now,
+              },
+            ]),
+          observeServiceLimits: () =>
+            Effect.succeed(
+              unavailableProviderServiceLimits(
+                decodeProviderInstanceId(ids.provider),
+                now,
+                "runtime-reported",
+              ),
+            ),
+        },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(run).toHaveBeenCalledOnce();
+      expect(
+        connection
+          .prepare(
+            `SELECT input_tokens, output_tokens, cost_usd_micros, cost_kind
+            FROM usage_record_projection WHERE subject_type = 'work-thread' AND subject_id = ?`,
+          )
+          .all(String(ids.thread)),
+      ).toEqual([
+        {
+          input_tokens: 180,
+          output_tokens: 8,
+          cost_usd_micros: 12_300,
+          cost_kind: "provider-recorded",
+        },
+      ]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("keeps a Work turn completed when usage reconciliation refuses the report", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
     attachmentRoots.push(root);

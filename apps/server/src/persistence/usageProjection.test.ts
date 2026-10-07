@@ -228,6 +228,59 @@ describe("UsageProjection", () => {
     connection.close();
   });
 
+  it("prices a Code turn at its latest report's own cost and keeps it through replay", () => {
+    const { connection, journal } = openDatabase();
+    const events = [
+      {
+        kind: "conversation-turn-started",
+        providerInstanceId: ids.provider,
+        modelId: "code-model",
+        sessionId: ids.entry,
+        prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+      },
+      { kind: "usage", inputTokens: 10, outputTokens: 2, costUsd: 0.01 },
+      { kind: "usage", inputTokens: 30, outputTokens: 6, costUsd: 0.0375 },
+      { kind: "operation-state", state: "completed" },
+    ];
+    journal.append({
+      aggregate: { aggregateType: "code-operation", aggregateId: ids.usage },
+      expectedVersion: 0,
+      events: events.map((event, index) =>
+        pending("code.operation-event-recorded@1", {
+          threadId: ids.aggregate,
+          operationId: ids.usage,
+          cursor: index + 1,
+          occurredAt: now,
+          event,
+        }),
+      ),
+    });
+    const priced = { kind: "provider-recorded", usdMicros: 37_500 };
+    expect(readAllUsageRecords(connection)[0]?.cost).toEqual(priced);
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(readAllUsageRecords(connection)[0]?.cost).toEqual(priced);
+
+    // A later report for the turn that carries no cost leaves it unpriced:
+    // "code-model" has no standard rate to estimate from.
+    journal.append({
+      aggregate: { aggregateType: "code-operation", aggregateId: ids.usage },
+      expectedVersion: events.length,
+      events: [
+        pending("code.operation-event-recorded@1", {
+          threadId: ids.aggregate,
+          operationId: ids.usage,
+          cursor: events.length + 1,
+          occurredAt: now,
+          event: { kind: "usage", inputTokens: 40, outputTokens: 7 },
+        }),
+      ],
+    });
+    expect(readAllUsageRecords(connection)[0]?.cost).toBeUndefined();
+    connection.close();
+  });
+
   it("keeps a completed request without provider usage as unavailable, not zero", () => {
     const { connection, journal } = openDatabase();
     appendFullUsageCycle(journal, {

@@ -22,7 +22,9 @@ import {
   decodeWorkTurnRequestId,
   decodeWorkTurnState,
   decodeStartWorkThreadTurnCommand,
+  type ContextInspectorSnapshot,
   type MentionableThreadId,
+  type ProviderRuntimeEvent,
   type WorkAttachmentId,
   type WorkAttachmentMediaType,
   type WorkAttachmentReference,
@@ -1145,6 +1147,12 @@ export class WorkTurnService {
           };
     if (harnessScope !== undefined) this.#nativeHarness?.turnStarted(harnessScope);
     let endedTurn: TurnEndSummary | undefined;
+    // A usage report covers the whole turn so far and a later one replaces it,
+    // so the turn is reconciled once, with its latest report. Reconciling each
+    // report as it arrived recorded every step again beside the turn's total
+    // (a Claude turn's per-message reports and its final result), counting
+    // its tokens and cost twice.
+    let latestUsage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }> | undefined;
     try {
       let usageReported = false;
       if (input.access !== undefined) {
@@ -1244,38 +1252,8 @@ export class WorkTurnService {
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
           });
-          if (published === undefined || this.#contextHarness === undefined) return;
-          const snapshot = published.snapshot;
-          try {
-            usageReported = true;
-            this.#contextHarness.reconcileUsage({
-              subject: snapshot.subject,
-              planId: snapshot.next.plan.id,
-              requestShape: "work-turn",
-              actualInputTokens: usage.inputTokens,
-              actualOutputTokens: usage.outputTokens,
-              ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
-              ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
-              ...(usage.reasoningTokens === undefined
-                ? {}
-                : { reasoningTokens: usage.reasoningTokens }),
-              ...(usage.cacheReadInputTokens === undefined
-                ? {}
-                : { cacheReadInputTokens: usage.cacheReadInputTokens }),
-              ...(usage.cacheWriteInputTokens === undefined
-                ? {}
-                : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
-              ...(usage.providerExecutionDurationMs === undefined
-                ? {}
-                : { providerExecutionDurationMs: usage.providerExecutionDurationMs }),
-              currentVarianceReserve: snapshot.next.plan.reserves.variance,
-              maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
-            });
-          } catch {
-            // Usage reconciliation is best-effort during a live Work turn. A
-            // stale or rejected variance must not convert the provider run into
-            // a failed outcome.
-          }
+          usageReported = true;
+          latestUsage = usage;
         },
         onChildActivity: (event) => {
           if (input.signal.aborted) return;
@@ -1370,8 +1348,46 @@ export class WorkTurnService {
       const settled = this.#projection.lookup(input.command.requestId);
       if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
     } finally {
+      if (latestUsage !== undefined && published !== undefined) {
+        this.#reconcileWorkUsage(published.snapshot, latestUsage);
+      }
       // A completed turn closed itself above; this closes one that did not.
       if (harnessScope !== undefined) this.#nativeHarness?.turnEnded?.(harnessScope, endedTurn);
+    }
+  }
+
+  #reconcileWorkUsage(
+    snapshot: ContextInspectorSnapshot,
+    usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>,
+  ): void {
+    if (this.#contextHarness === undefined) return;
+    try {
+      this.#contextHarness.reconcileUsage({
+        subject: snapshot.subject,
+        planId: snapshot.next.plan.id,
+        requestShape: "work-turn",
+        actualInputTokens: usage.inputTokens,
+        actualOutputTokens: usage.outputTokens,
+        ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
+        ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
+        ...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
+        ...(usage.cacheReadInputTokens === undefined
+          ? {}
+          : { cacheReadInputTokens: usage.cacheReadInputTokens }),
+        ...(usage.cacheWriteInputTokens === undefined
+          ? {}
+          : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
+        ...(usage.providerExecutionDurationMs === undefined
+          ? {}
+          : { providerExecutionDurationMs: usage.providerExecutionDurationMs }),
+        ...(usage.costUsd === undefined ? {} : { costUsd: usage.costUsd }),
+        currentVarianceReserve: snapshot.next.plan.reserves.variance,
+        maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
+      });
+    } catch {
+      // Usage reconciliation is best-effort for a Work turn. A stale or
+      // rejected variance must not convert the provider run into a failed
+      // outcome.
     }
   }
 

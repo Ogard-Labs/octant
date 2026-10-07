@@ -307,6 +307,9 @@ export class ChatTurnRunner {
       let cacheReadInputTokens: number | undefined;
       let cacheWriteInputTokens: number | undefined;
       let providerExecutionDurationMs: number | undefined;
+      // The latest report covers the whole turn, so its cost replaces any
+      // earlier one; a later report without a cost leaves the turn unpriced.
+      let costUsd: number | undefined;
       let sawUsage = false;
       let sawVisibleResponse = false;
       let terminalOutcome: ChatAttemptOutcome | undefined;
@@ -655,6 +658,7 @@ export class ChatTurnRunner {
                 ...(providerExecutionDurationMs === undefined
                   ? {}
                   : { providerExecutionDurationMs }),
+                ...(costUsd === undefined ? {} : { costUsd }),
                 ...(sawUsage ? {} : { providerReported: false }),
                 currentVarianceReserve: input.varianceReserve,
                 maxAdjustmentTokens: input.varianceReserve,
@@ -895,6 +899,7 @@ export class ChatTurnRunner {
                       observation.cacheWriteInputTokens ?? cacheWriteInputTokens;
                     providerExecutionDurationMs =
                       observation.providerExecutionDurationMs ?? providerExecutionDurationMs;
+                    costUsd = observation.costUsd;
                   }
                   return;
                 }
