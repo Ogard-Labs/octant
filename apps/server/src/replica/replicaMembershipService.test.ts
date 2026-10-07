@@ -591,6 +591,126 @@ describe("replica membership service", () => {
     });
   });
 
+  it("lets a computer approved by a non-founder trust the founder's chain and apply its revocations", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const east = computer({ store: selected(store), instanceId: ids.east });
+    const eastRequest = expectKind(
+      await east.service.execute({ kind: "write-join-request", displayName: "Studio" }),
+      "join-requested",
+    );
+    const code = deriveReplicaJoinMatchingCode({
+      joinRequest: eastRequest.entry,
+      approverInstanceId: ids.south,
+    });
+    expectKind(
+      await south.service.execute({
+        kind: "approve-join",
+        joinRequest: eastRequest.entry,
+        confirmationCode: code,
+      }),
+      "join-approved",
+    );
+    expectKind(
+      await east.service.execute({
+        kind: "confirm-join",
+        approver: ids.south,
+        confirmationCode: code,
+      }),
+      "join-confirmed",
+    );
+    const first = expectKind(await east.service.execute({ kind: "pull" }), "pulled");
+    expect(first.refused).toEqual([]);
+    expect(east.projection.state().members.map((m) => m.instanceId)).toContain(ids.north);
+
+    await north.service.execute({ kind: "pull" });
+    expectKind(await north.service.execute({ kind: "revoke", subject: ids.south }), "revoked");
+    const zed = computer({ store: selected(store), instanceId: ids.zed });
+    const zedRequest = expectKind(
+      await zed.service.execute({ kind: "write-join-request", displayName: "Unknown" }),
+      "join-requested",
+    );
+    expectKind(
+      await south.service.execute({
+        kind: "approve-join",
+        joinRequest: zedRequest.entry,
+        confirmationCode: deriveReplicaJoinMatchingCode({
+          joinRequest: zedRequest.entry,
+          approverInstanceId: ids.south,
+        }),
+      }),
+      "join-approved",
+    );
+
+    await east.service.execute({ kind: "pull" });
+    const state = east.projection.state();
+    expect(state.revocations.map((cut) => cut.instanceId)).toEqual([ids.south]);
+    expect(state.members.map((m) => m.instanceId)).not.toContain(ids.zed);
+    // East's own admission came through South before the cut, so it stays.
+    expect(state.members.map((m) => m.instanceId)).toContain(ids.east);
+  });
+
+  it("refuses a join confirmation when a second founder also approved the approver", async () => {
+    const store = memoryStore();
+    const { south } = await joinedPair(store);
+    const east = computer({ store: selected(store), instanceId: ids.east });
+    const eastRequest = expectKind(
+      await east.service.execute({ kind: "write-join-request", displayName: "Studio" }),
+      "join-requested",
+    );
+    const code = deriveReplicaJoinMatchingCode({
+      joinRequest: eastRequest.entry,
+      approverInstanceId: ids.south,
+    });
+    await south.service.execute({
+      kind: "approve-join",
+      joinRequest: eastRequest.entry,
+      confirmationCode: code,
+    });
+    // A stranger with write access founds a store of its own and approves
+    // South's real key with it.
+    const strangerKeys = memoryCredentialStore();
+    const stranger = ids.southAgain;
+    const strangerKey = await ensureReplicaDeviceKey(strangerKeys, stranger);
+    const southKey = south.projection.state().local?.publicKey ?? "";
+    const write = async (entry: ReplicaMembershipEntry) => {
+      const bytes = new TextEncoder().encode(encodeReplicaEntry(entry));
+      const { signature } = await makeReplicaDeviceSigner(strangerKeys, stranger).sign(bytes);
+      store.files.set(`${stranger}/${entry.origin.sequence}.json`, bytes);
+      store.files.set(
+        `${stranger}/${entry.origin.sequence}.sig`,
+        new TextEncoder().encode(signature),
+      );
+    };
+    await write(
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-approved",
+        origin: { instanceId: stranger, displayName: "Fake", sequence: 1 },
+        subject: stranger,
+        subjectDisplayName: "Fake",
+        subjectDeviceKey: strangerKey.publicKey,
+      }),
+    );
+    await write(
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-approved",
+        origin: { instanceId: stranger, displayName: "Fake", sequence: 2 },
+        subject: ids.south,
+        subjectDisplayName: "Mac mini",
+        subjectDeviceKey: southKey,
+      }),
+    );
+    const outcome = await east.service.execute({
+      kind: "confirm-join",
+      approver: ids.south,
+      confirmationCode: code,
+    });
+    expect(outcome).toMatchObject({ kind: "refused", reason: "unknown-instance" });
+    expect(east.projection.state().members).toEqual([]);
+  });
+
   it("refuses an entry whose bytes were changed after it was signed, and applies nothing past it", async () => {
     const store = memoryStore();
     const north = computer({ store: selected(store), instanceId: ids.north });
