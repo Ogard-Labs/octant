@@ -470,6 +470,19 @@ export const UsageCost = Schema.Struct({
 }).annotations(strict);
 export type UsageCost = typeof UsageCost.Type;
 
+/**
+ * A managed child run's turn. The context planner is not on the child path, so
+ * this is the one non-image request reconciled without a plan.
+ */
+export const AGENT_RUN_TURN_REQUEST_SHAPE = "agent-run-turn";
+
+/**
+ * The per-run aggregate a child run's usage is journaled on. The `agent-run`
+ * aggregate's versions belong to its lifecycle commands, so usage cannot be
+ * appended there without invalidating the version a command expects.
+ */
+export const AGENT_RUN_USAGE_AGGREGATE_TYPE = "agent-run-usage";
+
 export const UsageReconciliation = Schema.Struct({
   id: UsageReconciliationId,
   planId: Schema.optional(ContextPlanId),
@@ -506,6 +519,9 @@ export const UsageReconciliation = Schema.Struct({
       }
       const imageGeneration = reconciliation.requestShape === "image-generation";
       if (imageGeneration) return reconciliation.imageUnits !== undefined;
+      if (reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE) {
+        return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;
+      }
       return reconciliation.planId !== undefined && reconciliation.imageUnits === undefined;
     }),
   );

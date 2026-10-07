@@ -25,9 +25,10 @@ import {
   type ProviderResumeCursor,
   type ProviderServiceLimits,
   type ProviderSessionId,
+  type TurnUsage,
   type UtcTimestamp,
 } from "@octant/contracts";
-import { defaultAgentRunAuthorityCeilingForMode } from "@octant/domain";
+import { accumulateTurnUsage, defaultAgentRunAuthorityCeilingForMode } from "@octant/domain";
 import {
   AgentRunPolicyRejected,
   clampAgentRunAuthority,
@@ -215,6 +216,17 @@ export interface AgentRunSessionRuntimeOptions {
     readonly admit: SpendCeilingService["admit"];
     readonly settle: SpendCeilingService["settle"];
   };
+  /**
+   * Records one child turn in the usage ledger under the run's own subject.
+   * Called once for every turn that reached the provider, however it ended;
+   * `usage` is absent when the provider reported none.
+   */
+  readonly recordUsage?: (input: {
+    readonly run: AgentRun;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+    readonly usage?: TurnUsage;
+  }) => void;
   readonly context: AgentRunContextSnapshotPort;
   readonly uuid: () => string;
   /** Filesystem root for Chat children, which own no workspace of their own. */
@@ -498,13 +510,16 @@ export function createAgentRunSessionRuntime(
           : run.workspaceReceipt.kind === "code-worktree"
             ? ("code-thread" as const)
             : ("chat-thread" as const);
+      // A Chat child's workspace names no Project, but its route records the
+      // parent thread's: without it a Project ceiling never gated a Chat child.
+      const projectId =
+        run.routingReceipt.projectId ??
+        ("projectId" in run.workspaceReceipt ? run.workspaceReceipt.projectId : undefined);
       const spendAdmission = options.spendCeiling.admit({
         reservationId: spendReservationId,
         threadId: String(run.parentThreadId),
         threadType,
-        ...("projectId" in run.workspaceReceipt
-          ? { projectId: String(run.workspaceReceipt.projectId) }
-          : {}),
+        ...(projectId === undefined ? {} : { projectId: String(projectId) }),
         turnUpperBoundTokens: estimatedTokens,
         childSubjectIds: [String(run.id)],
       });
@@ -826,6 +841,7 @@ export function createAgentRunSessionRuntime(
           reservationId,
           ...(spendReservationId === undefined ? {} : { spendReservationId }),
           ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
+          ...(options.recordUsage === undefined ? {} : { recordUsage: options.recordUsage }),
           capacityScheduler: options.capacityScheduler,
           providerInstanceId: target.providerInstanceId,
           modelId: target.modelId,
@@ -1176,6 +1192,7 @@ interface ManagedSessionInput {
   readonly reservationId: CapacityReservationId;
   readonly spendReservationId?: ReturnType<typeof decodeSpendCeilingReservationId>;
   readonly spendCeiling?: AgentRunSessionRuntimeOptions["spendCeiling"];
+  readonly recordUsage?: AgentRunSessionRuntimeOptions["recordUsage"];
   readonly capacityScheduler: ProviderCapacityScheduler;
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
@@ -1211,9 +1228,10 @@ interface ManagedSessionState {
   toolExecutions: Array<AgentRunResultEvidence["checks"]["items"][number]>;
   filesTruncated: boolean;
   toolsTruncated: boolean;
-  inputTokens: number;
-  outputTokens: number;
-  sawUsage: boolean;
+  /** The turn's usage so far, accumulated as `accumulateTurnUsage` defines. */
+  usage: TurnUsage | undefined;
+  /** Whether the prompt went to the provider, so the turn may have been charged. */
+  promptSent: boolean;
   handledEvents: number;
   /** Whether a provider connection was acquired at all. */
   acquired: boolean;
@@ -1243,9 +1261,8 @@ function runManagedSession(
         toolExecutions: [],
         filesTruncated: false,
         toolsTruncated: false,
-        inputTokens: 0,
-        outputTokens: 0,
-        sawUsage: false,
+        usage: undefined,
+        promptSent: false,
         handledEvents: 0,
         acquired: false,
         timedOut: false,
@@ -1255,20 +1272,20 @@ function runManagedSession(
       const releaseCapacity = (): void => {
         if (released) return;
         released = true;
+        const observedTokens =
+          state.outcome?.kind === "completed" && state.usage !== undefined
+            ? state.usage.inputTokens + state.usage.outputTokens
+            : undefined;
         if (input.spendReservationId !== undefined) {
           input.spendCeiling?.settle({
             reservationId: input.spendReservationId,
-            ...(state.outcome?.kind === "completed" && state.sawUsage
-              ? { observedTokens: state.inputTokens + state.outputTokens }
-              : {}),
+            ...(observedTokens === undefined ? {} : { observedTokens }),
           });
         }
         input.capacityScheduler.recordTerminal({
           reservationId: input.reservationId,
           outcome: capacityOutcomeFor(state),
-          ...(state.outcome?.kind === "completed" && state.sawUsage
-            ? { actualTokens: state.inputTokens + state.outputTokens }
-            : {}),
+          ...(observedTokens === undefined ? {} : { actualTokens: observedTokens }),
         });
       };
 
@@ -1295,6 +1312,30 @@ function runManagedSession(
           // the moment it also reclaims the session.
           if (input.shutdown.unconfirmed !== undefined) return;
           releaseCapacity();
+        }),
+      );
+
+      // Runs after provider teardown, so the usage is the turn's last word.
+      // Every turn that reached the provider leaves one ledger row, whatever
+      // its outcome: one that reported nothing is recorded as unreported, so a
+      // spend ceiling refuses rather than counting it as free. Unlike capacity,
+      // this does not wait for an unconfirmed shutdown: what was reported has
+      // already been spent.
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          const reachedProvider =
+            state.promptSent || state.usage !== undefined || state.outcome?.kind === "completed";
+          if (!reachedProvider) return;
+          try {
+            input.recordUsage?.({
+              run: input.run,
+              providerInstanceId: input.providerInstanceId,
+              modelId: input.modelId,
+              ...(state.usage === undefined ? {} : { usage: state.usage }),
+            });
+          } catch {
+            // Usage reconciliation is best-effort once a turn has ended.
+          }
         }),
       );
 
@@ -1434,6 +1475,7 @@ function runSessionTurn(
             category: "stale-resume",
             message: "The follow-up could not be recorded before provider delivery.",
           } satisfies ProviderFailure);
+        state.promptSent = true;
         return connection.send({
           sessionId: input.sessionId,
           prompt: input.prompt,
@@ -1632,11 +1674,8 @@ function collectSessionEvents(
               return;
             }
             if (event.kind === "usage") {
-              const observation = usageFromRuntimeEvent(event);
-              if (observation !== undefined) {
-                state.sawUsage = true;
-                state.inputTokens = observation.inputTokens;
-                state.outputTokens = observation.outputTokens;
+              if (usageFromRuntimeEvent(event) !== undefined) {
+                state.usage = accumulateTurnUsage(state.usage, event);
               }
               return;
             }
@@ -1824,14 +1863,14 @@ function collectSessionEvents(
                   : {
                       kind: "completed",
                       responseText: state.responseText,
-                      ...(state.sawUsage
-                        ? {
+                      ...(state.usage === undefined
+                        ? {}
+                        : {
                             usage: {
-                              inputTokens: state.inputTokens,
-                              outputTokens: state.outputTokens,
+                              inputTokens: state.usage.inputTokens,
+                              outputTokens: state.usage.outputTokens,
                             },
-                          }
-                        : {}),
+                          }),
                     };
             }
           }),

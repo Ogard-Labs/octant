@@ -394,11 +394,7 @@ export class SpendCeilingService {
     childIds: ReadonlyArray<string>,
     from: string | undefined,
   ): number | undefined {
-    const subjects: Array<{ readonly type: string; readonly id: string }> = [];
-    if (scope.kind === "thread") {
-      subjects.push({ type: scope.threadType, id: String(scope.threadId) });
-    }
-    for (const id of childIds) subjects.push({ type: "agent-run", id });
+    const subjects = ledgerSubjects(scope, childIds);
     if (subjects.length === 0 && scope.kind !== "project") return undefined;
     const conditions: Array<string> = [];
     const params: Array<string | number> = [];
@@ -501,11 +497,7 @@ export class SpendCeilingService {
     childIds: ReadonlyArray<string>,
     from: string | undefined,
   ): SpendTokenTotal {
-    const subjects: Array<{ readonly type: string; readonly id: string }> = [];
-    if (scope.kind === "thread") {
-      subjects.push({ type: scope.threadType, id: String(scope.threadId) });
-    }
-    for (const id of childIds) subjects.push({ type: "agent-run", id });
+    const subjects = ledgerSubjects(scope, childIds);
     return sumUsageTokens(this.#connection, {
       subjects,
       ...(scope.kind === "project" ? { projectId: String(scope.projectId) } : {}),
@@ -630,6 +622,23 @@ export class SpendCeilingService {
       ],
     });
   }
+}
+
+/**
+ * The usage subjects a thread ceiling counts by identity: the thread and its
+ * child runs. A Project ceiling names none, because the Project predicate
+ * already places every thread of the Project and every child run whose parent
+ * belongs to it, including children of threads other than the one admitting.
+ */
+function ledgerSubjects(
+  scope: SpendCeilingScope,
+  childIds: ReadonlyArray<string>,
+): Array<{ readonly type: string; readonly id: string }> {
+  if (scope.kind === "project") return [];
+  return [
+    { type: scope.threadType, id: String(scope.threadId) },
+    ...childIds.map((id) => ({ type: "agent-run", id })),
+  ];
 }
 
 function sumUsageTokens(

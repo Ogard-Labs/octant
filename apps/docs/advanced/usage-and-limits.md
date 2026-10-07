@@ -134,8 +134,11 @@ A spend ceiling stops new provider turns once a thread or Project has used its
 budget. Set one for a thread under **Usage** in the thread's Environment panel,
 and for a Project in its overview. A thread ceiling covers the thread's whole
 life; a Project ceiling covers a calendar day, week, or month in your time zone.
-A turn must fit both ceilings when both exist. Setting, raising, and clearing a
-ceiling is a host owner command: open the host locally to change one.
+A turn must fit both ceilings when both exist. Child agents a thread delegates
+count too: their turns are charged to that thread's ceiling and to its Project's,
+so a Project ceiling covers every child of every thread in the Project. Setting,
+raising, and clearing a ceiling is a host owner command: open the host locally to
+change one.
 
 Each ceiling can combine four budgets, and a turn must fit every one you set:
 

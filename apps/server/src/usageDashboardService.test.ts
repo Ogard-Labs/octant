@@ -29,6 +29,7 @@ const ids = {
   otherProject: "67000000-0000-4000-8000-000000000005",
   otherChatThread: "67000000-0000-4000-8000-000000000006",
   workThread: "67000000-0000-4000-8000-000000000007",
+  childRun: "67000000-0000-4000-8000-000000000008",
 } as const;
 
 afterEach(() => {
@@ -225,6 +226,38 @@ describe("readUsageDashboard", () => {
     expect(
       dashboard.dimensionSources.find((source) => source.dimension === "project")?.status,
     ).toBe("recorded");
+  });
+
+  it("shows a child run's usage under its parent thread's Project", () => {
+    const connection = connect();
+    seedWorkThread(connection, ids.workThread, ids.project);
+    connection
+      .prepare(`
+        INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+          event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+        ) VALUES (?, 'agent-run', ?, 1, 'agent.run-requested@1', 1, ?, 'system', ?, ?, ?)
+      `)
+      .run(
+        `event-${ids.childRun}`,
+        ids.childRun,
+        `correlation-${ids.childRun}`,
+        ids.provider,
+        now,
+        JSON.stringify({
+          run: {
+            id: ids.childRun,
+            parentThreadId: ids.workThread,
+            routingReceipt: { mode: "work" },
+          },
+        }),
+      );
+    seedUsageRow(connection, { subjectType: "agent-run", subjectId: ids.childRun });
+
+    // The Project-scoped read admits the row, so it must also name the Project.
+    const dashboard = read(connection, {}, { kind: "projects", projectIds: [ids.project] });
+    expect(dashboard.detail[0]?.projectId).toBe(ids.project);
+    expect(read(connection).detail).toEqual([]);
   });
 
   it("filters Chat and Code thread usage by the durable Project", () => {

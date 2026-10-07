@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_RUN_TURN_REQUEST_SHAPE,
   CONTEXT_EVENT_NAMES,
   decodeCapacityReservation,
   decodeContextCapacityReservationUpdated,
@@ -298,6 +299,19 @@ describe("context contracts", () => {
         actualInputTokens: 0,
         varianceTokens: 0,
       }),
+    ).toThrow();
+    // A child run's turn has no plan to reconcile against; any other request
+    // shape still needs one.
+    const childTurn = {
+      ...reconciliationWithoutPlan,
+      requestShape: AGENT_RUN_TURN_REQUEST_SHAPE,
+      plannedInputTokens: 125,
+      varianceTokens: 0,
+    };
+    expect(decodeUsageReconciliation(childTurn).planId).toBeUndefined();
+    expect(() => decodeUsageReconciliation({ ...childTurn, planId: ids.plan })).toThrow();
+    expect(() =>
+      decodeUsageReconciliation({ ...childTurn, requestShape: "chat-streaming" }),
     ).toThrow();
 
     const reservation = {

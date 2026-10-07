@@ -1243,6 +1243,126 @@ describe("createAgentRunSessionRuntime", () => {
     });
   });
 
+  it("records every request of a child turn in the usage ledger once, with its cost", async () => {
+    const recordUsage = vi.fn();
+    const provider = fakeProvider({
+      onSend: (emit) => {
+        void emit({ kind: "text-delta", sessionId, text: "Report ready." })
+          .then(() =>
+            emit({
+              kind: "usage",
+              sessionId,
+              inputTokens: 20,
+              outputTokens: 5,
+              requestStartedAt: now,
+              costUsd: 0.25,
+            }),
+          )
+          .then(() =>
+            emit({
+              kind: "usage",
+              sessionId,
+              inputTokens: 30,
+              outputTokens: 10,
+              requestStartedAt: now,
+              costUsd: 0.5,
+            }),
+          )
+          .then(() => emit({ kind: "completed", sessionId }));
+      },
+    });
+    const runtime = createAgentRunSessionRuntime(runtimeOptions(provider, { recordUsage }));
+
+    const outcome = await settled(runtime.start(agentRun()));
+
+    expect(outcome).toMatchObject({ usage: { inputTokens: 50, outputTokens: 15 } });
+    expect(recordUsage).toHaveBeenCalledExactlyOnceWith({
+      run: agentRun(),
+      providerInstanceId,
+      modelId: "gpt-4o",
+      usage: { inputTokens: 50, outputTokens: 15, costUsd: 0.75 },
+    });
+  });
+
+  it("records a child turn that failed after its prompt was sent as unreported", async () => {
+    const recordUsage = vi.fn();
+    const provider = fakeProvider({
+      onSend: (emit) => {
+        void emit({
+          kind: "failed",
+          sessionId,
+          failure: { category: "provider-failed", message: "The endpoint closed." },
+        });
+      },
+    });
+    const runtime = createAgentRunSessionRuntime(runtimeOptions(provider, { recordUsage }));
+
+    await settled(runtime.start(agentRun()));
+
+    // No usage: the ledger row is unreported, so no ceiling counts it as free.
+    expect(recordUsage).toHaveBeenCalledExactlyOnceWith({
+      run: agentRun(),
+      providerInstanceId,
+      modelId: "gpt-4o",
+    });
+  });
+
+  it("leaves no ledger row for a child that never reached the provider", async () => {
+    const recordUsage = vi.fn();
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(fakeProvider(), {
+        recordUsage,
+        verifyCodeWorkspace: async () => ({ status: "refused", reason: "Worktree moved." }),
+      }),
+    );
+
+    const outcome = await settled(
+      runtime.start(
+        agentRun({
+          workspaceReceipt: {
+            kind: "code-worktree",
+            mode: "code",
+            projectId: "88888888-8888-4888-8888-888888888888" as never,
+            checkoutRoot: "/repo",
+            worktreeRoot: "/repo/.worktrees/child",
+            verified: true,
+          },
+        }),
+      ),
+    );
+
+    expect(outcome.kind).toBe("interrupted");
+    expect(recordUsage).not.toHaveBeenCalled();
+  });
+
+  it("admits a Chat child against its parent thread's Project ceiling", () => {
+    const admit = vi.fn().mockReturnValue({
+      status: "refused",
+      refusal: { kind: "exhausted", message: "The Project ceiling is used up." },
+    });
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(fakeProvider(), { spendCeiling: { admit, settle: vi.fn() } }),
+    );
+    const run = agentRun();
+    const inProject = {
+      ...run,
+      routingReceipt: {
+        ...run.routingReceipt,
+        projectId: "88888888-8888-4888-8888-888888888888" as never,
+      },
+    };
+
+    expect(() => runtime.start(inProject)).toThrowError(
+      expect.objectContaining({ reason: "spend-ceiling-exhausted" }),
+    );
+    expect(admit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadType: "chat-thread",
+        projectId: "88888888-8888-4888-8888-888888888888",
+      }),
+    );
+  });
+
   it("fails closed when provider capacity facts are unavailable", () => {
     const options = runtimeOptions(fakeProvider());
     const runtime = createAgentRunSessionRuntime({

@@ -261,16 +261,56 @@ function resolveProjectId(
         AND event_name = 'work.thread-created@1'`,
   };
 
-  const sql = ownership[subjectType];
+  const projectId =
+    subjectType === "agent-run"
+      ? resolveChildRunProjectId(connection, cache, subjectId, cacheStats)
+      : readOwningProjectId(connection, ownership[subjectType], subjectId);
+  cache.set(key, projectId);
+  return projectId;
+}
+
+function readOwningProjectId(
+  connection: SqliteConnection,
+  sql: string | undefined,
+  subjectId: string,
+): string | undefined {
   const row =
     sql === undefined
       ? undefined
       : (connection.prepare(sql).get(subjectId) as
           | { readonly project_id: string | null }
           | undefined);
-  const projectId = row?.project_id ?? undefined;
-  cache.set(key, projectId);
-  return projectId;
+  return row?.project_id ?? undefined;
+}
+
+/** A child run is shown under its parent thread's Project, as it is scoped. */
+function resolveChildRunProjectId(
+  connection: SqliteConnection,
+  cache: Map<string, string | undefined>,
+  runId: string,
+  cacheStats: CacheStatsRecorder | undefined,
+): string | undefined {
+  const parent = connection
+    .prepare(
+      `SELECT json_extract(payload_json, '$.run.routingReceipt.mode') AS mode,
+         json_extract(payload_json, '$.run.parentThreadId') AS parent_thread_id
+       FROM event_journal
+       WHERE aggregate_type = 'agent-run'
+         AND aggregate_id = ?
+         AND event_name = 'agent.run-requested@1'`,
+    )
+    .get(runId) as
+    | { readonly mode: string | null; readonly parent_thread_id: string | null }
+    | undefined;
+  if (parent === undefined || parent.parent_thread_id === null) return undefined;
+  if (parent.mode !== "chat" && parent.mode !== "work" && parent.mode !== "code") return undefined;
+  return resolveProjectId(
+    connection,
+    cache,
+    `${parent.mode}-thread`,
+    parent.parent_thread_id,
+    cacheStats,
+  );
 }
 
 function assertTimeZone(timeZone: string): void {

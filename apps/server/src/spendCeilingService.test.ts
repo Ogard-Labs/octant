@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { decodeAggregateVersion, decodeProjectId } from "@octant/contracts";
+import { decodeAggregateVersion, decodeAgentRunId, decodeProjectId } from "@octant/contracts";
+import { recordAgentRunTurnUsage } from "./agentRun/agentRunUsageLedger";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
@@ -108,6 +109,44 @@ function insertUsage(
     );
 }
 
+function seedChatThread(
+  connection: ReturnType<typeof openSqlite>,
+  threadId: string,
+  projectId: string | null,
+): void {
+  connection
+    .prepare(
+      `INSERT INTO chat_thread_projection (
+        thread_id, project_id, lifecycle, schema_version, thread_json,
+        aggregate_version, updated_at, last_sequence
+      ) VALUES (?, ?, 'active', 1, '{}', 1, ?, 1)`,
+    )
+    .run(threadId, projectId, now);
+}
+
+/** The journaled request that names a child run's parent thread and mode. */
+function seedChildRun(
+  connection: ReturnType<typeof openSqlite>,
+  runId: string,
+  parentThreadId: string,
+): void {
+  connection
+    .prepare(
+      `INSERT INTO event_journal (
+        event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+        event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+      ) VALUES (?, 'agent-run', ?, 1, 'agent.run-requested@1', 1, ?, 'system', ?, ?, ?)`,
+    )
+    .run(
+      crypto.randomUUID(),
+      runId,
+      crypto.randomUUID(),
+      ids.provider,
+      now,
+      JSON.stringify({ run: { id: runId, parentThreadId, routingReceipt: { mode: "chat" } } }),
+    );
+}
+
 describe("SpendCeilingService", () => {
   it("reserves remaining tokens so concurrent turns cannot both admit past the ceiling", () => {
     const { service } = openService();
@@ -166,6 +205,59 @@ describe("SpendCeilingService", () => {
     expect(admission.status).toBe("refused");
     if (admission.status !== "refused") return;
     expect(admission.refusal.kind).toBe("exhausted");
+  });
+
+  it("counts a child run under another thread of the same Project against the Project ceiling", () => {
+    const { connection, journal, service } = openService();
+    const sibling = "73000000-0000-4000-8000-000000000011";
+    const otherProject = "73000000-0000-4000-8000-000000000012";
+    const otherThread = "73000000-0000-4000-8000-000000000013";
+    const elsewhereChild = "73000000-0000-4000-8000-000000000014";
+    seedChatThread(connection, ids.thread, ids.project);
+    seedChatThread(connection, sibling, ids.project);
+    seedChatThread(connection, otherThread, otherProject);
+    seedChildRun(connection, ids.child, sibling);
+    seedChildRun(connection, elsewhereChild, otherThread);
+    const ledger = { connection, journal, clock: () => now, uuid: () => crypto.randomUUID() };
+    // The sibling thread's child spent 900 tokens and $0.50, through the same
+    // path a managed child's settle takes; a child in another Project spent more.
+    recordAgentRunTurnUsage(ledger, {
+      runId: decodeAgentRunId(ids.child),
+      providerInstanceId: ids.provider as never,
+      modelId: "gpt-4o" as never,
+      usage: { inputTokens: 800, outputTokens: 100, costUsd: 0.5 },
+    });
+    recordAgentRunTurnUsage(ledger, {
+      runId: decodeAgentRunId(elsewhereChild),
+      providerInstanceId: ids.provider as never,
+      modelId: "gpt-4o" as never,
+      usage: { inputTokens: 5_000, outputTokens: 0, costUsd: 9 },
+    });
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { tokenBudget: 1_000, costBudgetUsdCents: 100 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+
+    // The Project overview reads the child's spend without naming any thread.
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({ committedTokens: 900, usedUsdCents: 50, remainingUsdCents: 50 });
+    const admission = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      turnUpperBoundTokens: 200,
+    });
+    expect(admission.status).toBe("refused");
+    if (admission.status !== "refused") return;
+    expect(admission.refusal).toMatchObject({ kind: "exhausted", scopeKind: "project" });
   });
 
   it("refuses unavailable usage instead of treating missing tokens as zero", () => {

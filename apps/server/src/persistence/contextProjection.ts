@@ -1,4 +1,5 @@
 import {
+  AGENT_RUN_USAGE_AGGREGATE_TYPE,
   decodeCapacityReservation,
   decodeContextCapacityReservationUpdated,
   decodeContextManifest,
@@ -70,7 +71,13 @@ export class ContextProjection implements Projection {
 
   apply(connection: SqliteConnection, event: EventEnvelope): void {
     if (!contextEventNames.has(event.eventName)) return;
-    if (event.eventName === "context.usage-reconciled@1" && event.aggregateType === "image-job") {
+    // Image jobs and child runs reconcile usage without a context plan; only
+    // the usage ledger reads them.
+    if (
+      event.eventName === "context.usage-reconciled@1" &&
+      (event.aggregateType === "image-job" ||
+        event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE)
+    ) {
       return;
     }
     assertProjection(event.eventVersion === 1 && event.aggregateType === "context-ledger");

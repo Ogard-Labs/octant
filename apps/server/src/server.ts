@@ -399,6 +399,7 @@ import {
   createRecordedAgentRunContextSnapshotPort,
 } from "./agentRun/agentRunSessionRuntime";
 import { AgentRunSessionSupervisor } from "./agentRun/agentRunSessionSupervisor";
+import { recordAgentRunTurnUsage } from "./agentRun/agentRunUsageLedger";
 import { AgentRunSessionStore } from "./agentRun/agentRunSessionStore";
 import { createAgentRunClaudeResumeIdentityPort } from "./agentRun/agentRunClaudeResumeIdentity";
 import { AgentRunLiveConversationStore } from "./agentRun/agentRunLiveConversationStore";
@@ -2095,6 +2096,21 @@ export function startOctantServer(
         },
         capacityScheduler,
         spendCeiling,
+        recordUsage: (input) =>
+          recordAgentRunTurnUsage(
+            {
+              connection: persistence.connection,
+              journal: persistence.journal,
+              clock: () => new Date().toISOString(),
+              uuid: randomUUID,
+            },
+            {
+              runId: input.run.id,
+              providerInstanceId: input.providerInstanceId,
+              modelId: input.modelId,
+              ...(input.usage === undefined ? {} : { usage: input.usage }),
+            },
+          ),
         sessionStore: agentRunSessionStore.sessions,
         verifyCodeWorkspace: async ({ run, signal }) => {
           const workspace = run.workspaceReceipt;
