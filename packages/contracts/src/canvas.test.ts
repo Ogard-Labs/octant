@@ -1094,6 +1094,38 @@ describe("metric additions", () => {
     expect(block).not.toHaveProperty("caption");
   });
 
+  it("admits the new metric fields only under the version that introduced them", () => {
+    // A heatmap-era v6 document carrying a sparkline, a direction, or a caption
+    // is a declared future version; a plain v6 metric still decodes.
+    for (const field of ["sparkline", "goodDirection", "caption"] as const) {
+      expect(() =>
+        decodeCanvasDefinition({
+          ...definition,
+          schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION,
+          blocks: [
+            { ...metric, schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION, [field]: metric[field] },
+          ],
+        }),
+      ).toThrow();
+    }
+    const {
+      sparkline: _sparkline,
+      goodDirection: _goodDirection,
+      caption: _caption,
+      ...plain
+    } = metric;
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION,
+        blocks: [{ ...plain, schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION }],
+      }),
+    ).not.toThrow();
+    expect(decodeCanvasDefinition({ ...definition, blocks: [metric] })).toMatchObject({
+      blocks: [metric],
+    });
+  });
+
   it("rejects a direction outside the closed set and a sparkline past the budget", () => {
     expect(() => decodeCanvasBlock({ ...metric, goodDirection: "sideways" })).toThrow();
     expect(() =>

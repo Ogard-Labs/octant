@@ -86,6 +86,23 @@ export const CANVAS_PRESENTATION_SCHEMA_VERSION = 4;
 export const CANVAS_TREEMAP_SCHEMA_VERSION = 5;
 export const CANVAS_HEATMAP_SCHEMA_VERSION = 6;
 export const CANVAS_BAR_LIST_SCHEMA_VERSION = 7;
+// The metric's sparkline, goodDirection, and caption arrived with the bar list.
+export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
+
+/** Whether a block uses a metric field introduced at the metric-trend version. */
+export function canvasMetricUsesTrendFields(block: {
+  readonly kind?: unknown;
+  readonly sparkline?: unknown;
+  readonly goodDirection?: unknown;
+  readonly caption?: unknown;
+}): boolean {
+  return (
+    block.kind === "metric" &&
+    (block.sparkline !== undefined ||
+      block.goodDirection !== undefined ||
+      block.caption !== undefined)
+  );
+}
 
 // Descriptive aliases keep budget names discoverable without creating a
 // second source of truth.
@@ -1239,7 +1256,8 @@ export const CanvasDefinition = Schema.Struct({
   .annotations(strict)
   .pipe(
     // Version-gated blocks and hints: a mockup is admitted from version 3, the
-    // thread presentation from version 4, and a treemap from version 5. A
+    // thread presentation from version 4, a treemap from version 5, a heatmap
+    // from version 6, and a bar list and the metric trend fields from version 7. A
     // rolled-back runtime that never learned a kind or hint must see a document
     // carrying it as a declared future version, not as a document that failed
     // to decode. Each keeps its own floor so an earlier document stays valid.
@@ -1286,6 +1304,15 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `Bar-list blocks require Canvas schema version ${String(CANVAS_BAR_LIST_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_METRIC_TREND_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasMetricUsesTrendFields),
+      {
+        message: () =>
+          `A metric sparkline, goodDirection, or caption requires Canvas schema version ${String(CANVAS_METRIC_TREND_SCHEMA_VERSION)}.`,
       },
     ),
   );

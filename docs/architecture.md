@@ -328,8 +328,9 @@ A bar list is a ranking of magnitudes (`packages/domain/src/canvasBarListLayout.
 each row is a label, a value, an optional second value, and an optional manifest
 source. Rows sort largest first with a stable tie-break by the author's order,
 a reader can flip the ranking to smallest first, and the list shows a top N with
-Show all; both are view state and are never journaled. A bar's length is its share of the largest value, drawn in neutral
-ink or through the shared sequential scale. A path-like label uses the shared
+Show all; both are view state and are never journaled. A bar's length is its
+share of the largest value, drawn in neutral ink or through the shared
+sequential scale. A path-like label uses the shared
 path style (directory dimmed, file name at full ink), and a row that names a
 manifest source offers Open file through the allowlisted open-source action,
 which the host reauthorizes. The pure, deterministic layout is shared by the
@@ -339,7 +340,10 @@ row budget, and a source the manifest does not hold; the accessible fallback is 
 table of every row. A metric block may carry a `format`, a `delta`, a
 `goodDirection` of `up`, `down`, or `neutral` so a delta's tone is never guessed,
 a `sparkline` of at most 256 readings, and a short `caption`; consecutive metric
-blocks are gathered into one responsive row of two to four tiles.
+blocks are gathered into one responsive row of two to four tiles. The bar list
+and the metric's direction, sparkline, and caption arrive with Canvas schema
+version 7, so a document declaring an older version that carries any of them is
+refused as a future version; a static export carries the same metric fields.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
