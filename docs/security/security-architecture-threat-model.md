@@ -348,10 +348,25 @@ window, or approves an action class the host policy reserves for the local user.
   authoring host, so both the modern and legacy entry points are opened.
 - **The keychain stays closed to a confined runtime.** Measured on macOS 27, the Claude runtime
   reads its subscription sign-in by running `/usr/bin/security`, which opens the login keychain
-  file itself, so the lookup above does not sign a confined launch in: a Claude Plan launch on
-  subscription sign-in, Chat children included, reports itself signed out. Opening the tool and
+  file itself, so the lookup above does not sign a confined launch in: without Claude for helpers
+  (below), a Claude Plan launch on subscription sign-in, Chat children included, reports itself
+  signed out. Opening the tool and
   the keychain file was rejected, because the tool returns any item whose access list trusts it,
   such as tokens other command-line programs store through it. A confined launch may run neither.
+- **Claude for helpers is a host-held, inference-only token.** A confined Claude launch on
+  subscription sign-in signs in with a long-lived token minted by the runtime's own
+  `claude setup-token` after one browser approval the person gives. The host runs that command
+  on a host-owned pseudo-terminal outside any sandbox, holds its output in memory only, never logs
+  it or writes it to the journal, and stores the token in the credential broker under that Claude
+  Code instance, in an envelope that never reads as the instance's API key. The token reaches a
+  confined launch only as `CLAUDE_CODE_OAUTH_TOKEN` in that launch's environment, removed when the
+  launch scope closes; argv carrying it is refused, and such a launch opens no keychain lookup at
+  all. Unconfined launches never receive it. The settings route returns state only, never the
+  token, and refuses a remote device for connect and disconnect. A model-generated command inside
+  the confined launch can read the token from the runtime's environment, which is the same reach
+  an API-key launch already gives its key; the token is scoped to inference, and a refused token
+  is marked expired rather than retried. Disconnect, or removing that Claude Code provider, deletes
+  it from the broker; an API-key launch never reads the envelope as its key.
 - Vibe disables its keyring lookup in the confined launch and receives its Mistral API key through
   Octant's `api-key` authentication instead.
 - **Version reads are confined; three readiness probes are not.** Every `--version` read prepares

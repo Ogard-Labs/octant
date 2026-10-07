@@ -1,4 +1,8 @@
-import type { CanvasBlock } from "@octant/contracts/canvas";
+import {
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasBlock,
+  type CanvasBlock,
+} from "@octant/contracts/canvas";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { describe, expect, it } from "vitest";
 import { renderArtifactHtml, renderArtifactMarkdown } from "./artifactDocumentRender";
@@ -123,5 +127,33 @@ describe("rendering a canvas as a document", () => {
     if (formatted.kind !== "rendered") return;
     expect(formatted.body).toContain(`Requests: ${formatCanvasNumber(1_360_000, "compact")}`);
     expect(formatted.body).not.toContain("1360000");
+  });
+
+  it("writes a treemap as an indented table of every measure", () => {
+    const treemap = decodeCanvasBlock({
+      blockId: "map-1",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "treemap",
+      measures: [
+        { measureId: "loc", label: "Lines of code" },
+        { measureId: "edits", label: "Edits" },
+      ],
+      sizeBy: "loc",
+      colorBy: "edits",
+      nodes: [
+        { nodeId: "root", label: "Root" },
+        { nodeId: "a", label: "A", parentId: "root", values: { loc: 10, edits: 2 } },
+        { nodeId: "b", label: "B", parentId: "root", values: { loc: 30, edits: 5 } },
+      ],
+    });
+
+    const rendered = renderArtifactMarkdown(definition([treemap]));
+
+    expect(rendered.kind).toBe("rendered");
+    if (rendered.kind !== "rendered") return;
+    expect(rendered.body).toContain("| Item | Lines of code | Edits |");
+    // A leaf row is indented under its group, and the group's readings are its sum.
+    expect(rendered.body).toContain("| \u00A0\u00A0A | 10 | 2 |");
+    expect(rendered.body).toContain("| Root | 40 | 7 |");
   });
 });

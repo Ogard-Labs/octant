@@ -225,6 +225,34 @@ describe("Pi provider driver", () => {
     },
   );
 
+  it("records a length stop on the completed event", async () => {
+    const { driver, client } = fixture();
+    const scope = Effect.runSync(Scope.make());
+    const connection = await Effect.runPromise(
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    await Effect.runPromise(
+      connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+    );
+    client.emit({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "length",
+        usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+      },
+    });
+    client.emit({ type: "agent_settled" });
+    const completed = (await collected).find((event) => event.kind === "completed");
+    expect(completed).toMatchObject({ kind: "completed", stopReason: "max-tokens" });
+    await Effect.runPromise(connection.stop(sessionId));
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
   it("refuses concurrent owners of one native history and releases ownership after stop", async () => {
     const f = fixture();
     await Effect.runPromise(

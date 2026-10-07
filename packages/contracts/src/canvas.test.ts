@@ -88,10 +88,15 @@ describe("Canvas contracts", () => {
   });
 
   it("rejects unknown or malformed schema versions", () => {
-    expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: 5 })).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: CANVAS_SCHEMA_VERSION + 1 }),
+    ).toThrow();
     expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: "1" })).toThrow();
     expect(() =>
-      decodeCanvasDefinition({ ...definition, blocks: [{ ...heading, schemaVersion: 5 }] }),
+      decodeCanvasDefinition({
+        ...definition,
+        blocks: [{ ...heading, schemaVersion: CANVAS_SCHEMA_VERSION + 1 }],
+      }),
     ).toThrow();
   });
 
@@ -115,9 +120,13 @@ describe("Canvas contracts", () => {
     expect(decodeCanvasDefinition({ ...definition, blocks: [mockup] })).toMatchObject({
       blocks: [mockup],
     });
-    // Version 3 documents written before the presentation hint keep decoding.
+    // Version 3 documents written before the presentation hint keep decoding,
+    // and a version 4 document with a mockup still does too.
     expect(
       decodeCanvasDefinition({ ...definition, schemaVersion: 3, blocks: [mockup] }),
+    ).toMatchObject({ blocks: [mockup] });
+    expect(
+      decodeCanvasDefinition({ ...definition, schemaVersion: 4, blocks: [mockup] }),
     ).toMatchObject({ blocks: [mockup] });
   });
 
@@ -802,5 +811,66 @@ describe("canvas number formats", () => {
         rows: [[1]],
       }),
     ).toThrow();
+  });
+});
+
+describe("treemap blocks", () => {
+  const treemap = {
+    blockId: "repository-map",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "treemap",
+    measures: [
+      { measureId: "loc", label: "Lines of code", format: "compact" },
+      { measureId: "edits60", label: "Edits (60 days)" },
+    ],
+    sizeBy: "loc",
+    colorBy: "edits60",
+    colorScale: "sequential",
+    startNodeId: "packages",
+    nodes: [
+      { nodeId: "octant", label: "octant" },
+      { nodeId: "packages", label: "packages", parentId: "octant" },
+      {
+        nodeId: "domain",
+        label: "domain",
+        parentId: "packages",
+        sourceId: ids.source,
+        values: { loc: 52_100, edits60: 61 },
+      },
+    ],
+  };
+
+  it("decodes a hierarchy with measures, a size, a colour, and a start node", () => {
+    const block = decodeCanvasBlock(treemap);
+
+    expect(block).toMatchObject({
+      kind: "treemap",
+      sizeBy: "loc",
+      colorBy: "edits60",
+      colorScale: "sequential",
+      startNodeId: "packages",
+    });
+  });
+
+  it("admits a treemap only under the version that declared it", () => {
+    // A treemap arrived at version 5: both the mockup-era v3 bound and the
+    // presentation-era v4 bound refuse it as a declared future version.
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 3, blocks: [treemap] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 4, blocks: [treemap] }),
+    ).toThrow();
+    expect(decodeCanvasDefinition({ ...definition, blocks: [treemap] })).toMatchObject({
+      blocks: [treemap],
+    });
+  });
+
+  it("rejects a long label, an unknown scale, and executable fields", () => {
+    expect(() =>
+      decodeCanvasBlock({ ...treemap, nodes: [{ nodeId: "root", label: "x".repeat(121) }] }),
+    ).toThrow();
+    expect(() => decodeCanvasBlock({ ...treemap, colorScale: "rainbow" })).toThrow();
+    expect(() => decodeCanvasBlock({ ...treemap, onClick: "alert(1)" })).toThrow();
   });
 });

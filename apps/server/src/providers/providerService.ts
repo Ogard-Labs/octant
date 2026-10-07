@@ -192,6 +192,8 @@ export interface ProviderServiceOptions {
   readonly driver?: (instance: ProviderInstance) => ProviderDriver;
   readonly isDriverPluginEffective?: (driverKind: ProviderDriverKind) => boolean;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
+  /** Removes the long-lived Claude for helpers token a removed Claude provider held. */
+  readonly clearClaudeHelperSignIn?: (instanceId: ProviderInstanceId) => Promise<void>;
   /** Clears process-local provider limit evidence when identity/configuration changes. */
   readonly clearRuntimeUsageLimits?: (instanceId: ProviderInstanceId) => void;
   readonly runCliUpdate?: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
@@ -223,6 +225,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #driverProvider: ProviderServiceOptions["driver"];
   readonly #isDriverPluginEffective: (driverKind: ProviderDriverKind) => boolean;
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
+  readonly #clearClaudeHelperSignIn: ProviderServiceOptions["clearClaudeHelperSignIn"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
   readonly #runCliUpdate: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
   readonly #isProviderExecutableAvailable: (instance: ProviderInstance) => boolean;
@@ -257,6 +260,7 @@ export class ProviderService implements ProviderServiceApi {
       options.isDriverPluginEffective ??
       ((driverKind) => admittedBundledProviderDriverKinds().has(driverKind));
     this.#clearResumeIdentities = options.clearResumeIdentities;
+    this.#clearClaudeHelperSignIn = options.clearClaudeHelperSignIn;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
     this.#runCliUpdate = options.runCliUpdate ?? runProviderCliUpdate;
     this.#isProviderExecutableAvailable = options.isProviderExecutableAvailable ?? (() => true);
@@ -826,6 +830,10 @@ export class ProviderService implements ProviderServiceApi {
           }
           if (current.driverKind === "claude") {
             await this.#clearResumeIdentities?.(current.id);
+            // The renderer clears a removed provider's API key, but nothing
+            // else names this token once the instance is gone, and it stays
+            // valid for a year.
+            await this.#clearClaudeHelperSignIn?.(current.id);
           }
           this.#invalidateCatalog(current.id, { kind: "all" }, "provider removed", updatedAt);
           this.#clearRuntimeUsageLimits?.(current.id);

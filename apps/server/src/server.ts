@@ -474,6 +474,15 @@ import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
 import { createProviderOAuthRouteHandler } from "./providers/oauth/providerOAuthRoutes";
+import {
+  claudeHelperSignInFromBroker,
+  type ClaudeHelperSignInPort,
+} from "./providers/claudeHelperSignIn";
+import {
+  createClaudeHelperSignInRouteHandler,
+  createClaudeHelperSignInService,
+} from "./providers/claudeHelperSignInRoutes";
+import { runInstalledClaudeSetupToken } from "./providers/claudeSetupToken";
 import { subscriptionOAuthHostFromBroker } from "./providers/oauth/subscriptionOAuthHost";
 import type { CompatibleFetch } from "./providers/openAiCompatibleEndpoint";
 import { makeClaudeAgentSdkPort, type ClaudeAgentSdkPort } from "./providers/claudeAgentSdkPort";
@@ -929,6 +938,7 @@ interface ConfiguredProviderDriverOptions {
   readonly claudeProcess?: ClaudeProcessPort;
   readonly claudeSdk?: ClaudeAgentSdkPort;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
+  readonly claudeHelperSignIn?: ClaudeHelperSignInPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly permissionPersistence: () => PermissionPersistence;
@@ -1027,6 +1037,9 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeResumeIdentityPort === undefined
         ? {}
         : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
+      ...(options.claudeHelperSignIn === undefined
+        ? {}
+        : { claudeHelperSignIn: options.claudeHelperSignIn }),
       ...(options.isProjectConfinedPath === undefined
         ? {}
         : { isProjectConfinedPath: options.isProjectConfinedPath }),
@@ -4147,6 +4160,10 @@ export function startOctantServer(
             url: options.credentialBrokerUrl,
             token: options.credentialBrokerToken,
           });
+    const claudeHelperSignIn =
+      credentialResolver === undefined
+        ? undefined
+        : claudeHelperSignInFromBroker(credentialResolver);
     const oauthBroker =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
@@ -4190,6 +4207,11 @@ export function startOctantServer(
           agentRunSessionStore.removeProviderIdentities(instanceId, signal),
         ]);
       },
+      // The provider is already gone; a store that cannot be reached leaves the
+      // token behind rather than reporting the removal as failed.
+      clearClaudeHelperSignIn: async (instanceId) => {
+        await claudeHelperSignIn?.disconnect(String(instanceId)).catch(() => undefined);
+      },
       clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
       driver: (instance) =>
         attachWorkRequestRuntime(
@@ -4213,6 +4235,7 @@ export function startOctantServer(
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
             onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
+            ...(claudeHelperSignIn === undefined ? {} : { claudeHelperSignIn }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
           }),
           () => workRequestRuntime,
@@ -4235,6 +4258,27 @@ export function startOctantServer(
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
+    });
+    // A host without the credential broker has nowhere safe to keep the token,
+    // so Settings is told that instead of a Connect button that cannot work.
+    const brokerMissing = async () =>
+      ({
+        kind: "refused",
+        reason: "Claude for helpers needs Octant's credential store, which this host does not run.",
+      }) as const;
+    const claudeHelperSignInRoutes = createClaudeHelperSignInRouteHandler({
+      service:
+        claudeHelperSignIn === undefined
+          ? { status: brokerMissing, connect: brokerMissing, disconnect: brokerMissing }
+          : createClaudeHelperSignInService({
+              store: claudeHelperSignIn,
+              readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+              runSetupToken: runInstalledClaudeSetupToken,
+            }),
+      windowAuthorityStore,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
     const providerOAuthRoutes =
       hostOAuth === undefined
@@ -4328,6 +4372,7 @@ export function startOctantServer(
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
+      ...(claudeHelperSignIn === undefined ? {} : { claudeHelperSignIn }),
       ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
       localUsageHistorySourceForInstance: (instance) =>
         createLocalUsageHistorySourceForDriver({
@@ -9561,6 +9606,7 @@ export function startOctantServer(
       (await androidToolchainRoutes(request)) ??
       (await providerRoutes(request)) ??
       (await providerOAuthRoutes(request)) ??
+      (await claudeHelperSignInRoutes(request)) ??
       (await providerUsageLimitsRoutes(request)) ??
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??

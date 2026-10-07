@@ -2,7 +2,7 @@ import "../styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts/canvas";
-import { chartExampleBlocks } from "@octant/domain";
+import { chartExampleBlocks, treemapExampleBlocks } from "@octant/domain";
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, getThemePreset } from "@octant/theme";
 import { CanvasDocument } from "./CanvasDocument";
 import { canvasFixture } from "./test-fixtures";
@@ -160,7 +160,18 @@ const timeline = decodeCanvasBlock({
 
 const definition = {
   ...canvasFixture,
-  blocks: [line, bar, area, scatter, distribution, ...chartExampleBlocks, metric, table, timeline],
+  blocks: [
+    line,
+    bar,
+    area,
+    scatter,
+    distribution,
+    ...chartExampleBlocks,
+    ...treemapExampleBlocks,
+    metric,
+    table,
+    timeline,
+  ],
 };
 
 type ChartThemeScenario = "default-light" | "default-dark" | "vivid" | "contrast";

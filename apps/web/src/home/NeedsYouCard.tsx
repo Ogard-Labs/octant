@@ -1,31 +1,23 @@
-import type { PendingRequestClient } from "@octant/client-runtime/pending-request-client";
-import type { OctantMode } from "@octant/contracts";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
 import { BellRing } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ThreadProviderIdentity } from "../shell/navigationModel";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
-import { PendingRequestRow } from "./PendingRequestRow";
+import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
+import { NEEDS_YOU_ROW_LIMIT, pendingRequestKey } from "../pendingRequests/pendingRequests";
 import {
-  answerPendingRequest,
-  NEEDS_YOU_ROW_LIMIT,
-  pendingRequestKey,
-  pendingRequestsForModes,
-  type PendingRequestAnswerClients,
-  type PendingRequestResponse,
-} from "./pendingRequests";
-import { usePendingRequests, type PendingRequestFreshness } from "./usePendingRequests";
+  usePendingRequestRows,
+  type PendingRequestRowsSource,
+} from "../pendingRequests/usePendingRequestRows";
 
 export const NEEDS_YOU_CARD_ID = "needs-you";
 
-export interface NeedsYouCardSource extends PendingRequestFreshness {
-  /** This window's reader; without one (a remote window) the card is unavailable. */
-  readonly pendingRequestClient: PendingRequestClient | undefined;
-  /** The clients each thread view already answers through. */
-  readonly answerClients: PendingRequestAnswerClients;
-  /** The modes this start screen speaks for; Work's is Chat and Work, Code's is Code. */
-  readonly modes: ReadonlyArray<OctantMode>;
+/**
+ * The reader and answer clients come from {@link PendingRequestRowsSource}: a
+ * start screen speaks for some modes (Work's is Chat and Work, Code's is
+ * Code), and without a reader (a remote window) the card is unavailable.
+ */
+export interface NeedsYouCardSource extends PendingRequestRowsSource {
   readonly projectNames: ReadonlyMap<string, string>;
   /** The provider of each thread the shell knows, by thread id. */
   readonly threadProviders: ReadonlyMap<string, ThreadProviderIdentity>;
@@ -56,80 +48,14 @@ export function createNeedsYouCard(source: NeedsYouCardSource): HomeCardDefiniti
   };
 }
 
-/**
- * A request whose answer was refused. If the host stops listing it, the row
- * stays so its refusal line can be read, until the next read or the shell's
- * next minute tick, whichever comes first; a quiet host may send no next read.
- */
-interface RefusedRequest {
-  readonly request: PendingRequest;
-  readonly unlisted: boolean;
-}
-
 function useNeedsYouContent(source: NeedsYouCardSource): HomeCardContent {
-  const { pendingRequestClient, answerClients, modes, now, onOpenThread, onOpenInbox } = source;
-  const { read, refresh } = usePendingRequests(pendingRequestClient, {
-    feedRevision: source.feedRevision,
-    settings: source.settings,
-    workspace: source.workspace,
-  });
-  const [refused, setRefused] = useState<ReadonlyMap<string, RefusedRequest>>(new Map());
-  const listed = useMemo(
-    () => (read.status === "ready" ? pendingRequestsForModes(read.requests, modes) : []),
-    [modes, read],
-  );
-
-  // Each completed read reconciles what a refusal kept on screen: a request
-  // the host no longer lists gets one read of grace, then leaves.
-  useEffect(() => {
-    setRefused((current) => {
-      if (current.size === 0) return current;
-      const live = new Set(listed.map(pendingRequestKey));
-      const next = new Map<string, RefusedRequest>();
-      for (const [key, entry] of current) {
-        if (live.has(key)) next.set(key, entry);
-        else if (!entry.unlisted) next.set(key, { request: entry.request, unlisted: true });
-      }
-      return next;
-    });
-  }, [listed]);
-
-  useEffect(() => {
-    setRefused((current) => {
-      if (![...current.values()].some((entry) => entry.unlisted)) return current;
-      return new Map([...current].filter(([, entry]) => !entry.unlisted));
-    });
-  }, [now]);
-
-  const answer = useCallback(
-    async (request: PendingRequest, response: PendingRequestResponse) => {
-      const key = pendingRequestKey(request);
-      setRefused((current) => {
-        const next = new Map(current);
-        next.delete(key);
-        return next;
-      });
-      const result = await answerPendingRequest(answerClients, request, response);
-      if (result.status === "refused") {
-        setRefused((current) => new Map(current).set(key, { request, unlisted: false }));
-      }
-      refresh();
-      return result;
-    },
-    [answerClients, refresh],
-  );
+  const { now, onOpenThread, onOpenInbox } = source;
+  const { rows, answer } = usePendingRequestRows(source);
 
   // Before the first read the card says nothing rather than "Looking…": it
   // leaves the grid when nothing waits, so a loading line would flash on
   // every start screen and then disappear.
-  if (read.status === "loading") return { status: "ready", count: 0, body: null };
-  const liveKeys = new Set(listed.map(pendingRequestKey));
-  const rows = [
-    ...listed.map((request) => ({ request, unlisted: false })),
-    ...[...refused]
-      .filter(([key]) => !liveKeys.has(key))
-      .map(([, entry]) => ({ request: entry.request, unlisted: true })),
-  ].toSorted((a, b) => a.request.requestedAt.localeCompare(b.request.requestedAt));
+  if (rows === undefined) return { status: "ready", count: 0, body: null };
   const shown = rows.slice(0, NEEDS_YOU_ROW_LIMIT);
   const hidden = rows.length - shown.length;
   return {

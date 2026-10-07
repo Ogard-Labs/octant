@@ -60,7 +60,7 @@ export interface PtyProcess {
   resume(): void;
 }
 
-interface PtyForkOptions {
+export interface PtyForkOptions {
   readonly name: string;
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
@@ -623,6 +623,24 @@ function spawnBunPty(shell: string, args: readonly string[], options: PtyForkOpt
       flushOutput();
     },
   };
+}
+
+/**
+ * A host-owned pseudo-terminal for a short program Octant drives itself, such
+ * as a provider's own sign-in command that refuses to run without a terminal.
+ * It is not a person's shell and carries no confinement, so it is never handed
+ * a model's input.
+ */
+export function spawnHostPty(
+  command: string,
+  args: readonly string[],
+  options: PtyForkOptions,
+): PtyProcess {
+  if (typeof globalThis.Bun !== "undefined" && typeof globalThis.Bun.Terminal === "function") {
+    return spawnBunPty(command, args, options);
+  }
+  ensureNodePtySpawnHelperExecutable();
+  return nodePty.spawn(command, [...args], options);
 }
 
 function resolveNodePtyPackageRoot(): string {

@@ -150,6 +150,17 @@ Normally that is the last completed reading. On a view that has never produced
 a completed reading yet, the last unfinished reading is the fallback that is
 kept, and it is replaced when a scan finishes.
 
+## Replies cut off at the output limit
+
+When the provider says a reply stopped because it reached its output limit,
+the transcript keeps the partial reply and, while it is the thread's latest
+turn, shows a quiet note under it: _This reply was cut off at the output
+limit._ **Continue** puts a short follow-up
+asking the model to pick up where it left off into the composer, after any
+draft you already have; nothing is sent until you send it. The turn's details
+say **Cut off at the output limit**. A provider that does not report why a
+reply ended shows no note: Octant does not guess.
+
 ## Turns stopped by a provider limit
 
 When a provider's own protocol signal stops a turn on a usage limit, the

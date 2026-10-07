@@ -16,6 +16,7 @@
 @import "./styles/code.css";
 @import "./styles/github.css";
 @import "./styles/inbox.css";
+@import "./styles/review.css";
 @import "./styles/apple.css";
 @import "./styles/preview.css";
 @import "./styles/zen.css";
@@ -1388,6 +1389,7 @@ html[data-octant-native-host="true"]
   .primary-workspace-layer:has(
     > .rail-placeholder,
     > .inbox-layer,
+    > .review-layer,
     > .code-board-layer,
     > .archive-layer,
     > .artifact-library-layer,
