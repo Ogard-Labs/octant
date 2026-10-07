@@ -1475,7 +1475,7 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("stops a provider turn whose tool requests were denied for the third time", async () => {
+  it("stops a provider turn on its third denied tool request and reports that denial as delivered", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const fixture = runtimeFixture({
@@ -1547,7 +1547,11 @@ describe("CodeOperationRuntime", () => {
         approvalId: approvals[2]!.event.approvalId,
         decision: "denied",
       }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    ).resolves.toEqual({
+      kind: "provider-turn-state",
+      operationId: operationId(133),
+      state: "interrupted",
+    });
 
     expect(connection.answerApproval).toHaveBeenCalledTimes(3);
     expect(connection.answerApproval).toHaveBeenLastCalledWith({
@@ -3825,7 +3829,15 @@ it("settles an answer to an approval a host exit left waiting as interrupted", a
         approvalId: "90000000-0000-4000-8000-000000000094",
         decision: "approved",
       }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    ).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "interrupted",
+      failure: {
+        category: "failed",
+        message:
+          "The provider session that asked ended when Octant stopped. Send a new message to continue.",
+      },
+    });
 
     const replay = fixture.operationEvents.replay({
       threadId,
@@ -3886,7 +3898,15 @@ it("settles an answer to a provider question a host exit left waiting as interru
         requestId: "provider-question-1",
         response: fixture.response,
       }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    ).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "interrupted",
+      failure: {
+        category: "failed",
+        message:
+          "The provider session that asked ended when Octant stopped. Send a new message to continue.",
+      },
+    });
 
     const replay = fixture.operationEvents.replay({
       threadId,

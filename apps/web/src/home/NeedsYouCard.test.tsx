@@ -372,6 +372,10 @@ describe("the Needs you card", () => {
       kind: "provider-turn-state",
       operationId: "operation-1",
       state: "interrupted",
+      failure: {
+        category: "failed",
+        message: "The turn that asked has ended. Send a new message to continue.",
+      },
     } as never);
     renderCard(
       createNeedsYouCard(

@@ -295,9 +295,11 @@ it, such as one in Plan mode, an unreachable host) shows one quiet line in the
 row saying why, and then the card re-reads; a row the host no longer lists stays
 until the next read or the next minute so the line can be seen. A Code answer
 counts as refused when the host says `operation-failed` or reports the turn
-`failed` or `interrupted`; the command palette and the open Code thread read Code
-answers the same way, and the open thread keeps the request and adds the host's
-reason to its waiting line.
+`failed`, or `interrupted` with a reason. A bare `interrupted` is the third
+denial in one turn: the provider received that Deny and the host then stopped
+the turn, so it counts as answered. The command palette and the open Code
+thread read Code answers the same way, and the open thread keeps a refused
+request and adds the host's reason to its waiting line.
 The card reads the list when it mounts, on the navigation topics named below,
 and when the shell settings or the window workspace change (neither has a feed
 topic). Signals that arrive while a read is in flight become one more read once
