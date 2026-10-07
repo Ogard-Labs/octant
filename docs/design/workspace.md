@@ -122,6 +122,19 @@ server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
 
+Dragging a sidebar thread onto a Chat, Work, or Code composer attaches that
+thread as context. The drop uses the same mention path as typing `#` and
+choosing a thread: the host decides whether this window can Open it, the
+chip is a bounded reference, and the draft is not sent. The source thread
+is not moved or opened. While the pointer is over the composer, the
+composer itself is the drop target, not the pane behind it. The row menu's
+**Attach as context** does the same thing for the composer that has focus,
+or the only composer when one is open. Dropping the composer's own thread,
+a thread already attached, something that is not a thread, or a thread this
+window cannot Open leaves the draft unchanged and says so without reading
+the thread. Image and file drops, and dropping a thread on a pane rather
+than its composer, stay pane and attachment behaviour.
+
 ## Start-screen cards
 
 Under the composer, every start screen carries a card area: Chat, Work, and

@@ -24,6 +24,15 @@ export interface ThreadMentionClient {
     query: string,
     signal?: AbortSignal,
   ): Promise<ReadonlyArray<ThreadMentionCandidate>>;
+  /**
+   * The one thread with this id, when the host says this principal can Open
+   * it; empty otherwise. Unlike `search`, where it would rank does not matter.
+   */
+  searchThread(
+    requestId: ThreadMentionRequestId,
+    threadId: MentionableThreadId,
+    signal?: AbortSignal,
+  ): Promise<ReadonlyArray<ThreadMentionCandidate>>;
   /** Turns chips into bounded read-only context at send time. */
   resolve(
     requestId: ThreadMentionRequestId,
@@ -105,6 +114,13 @@ export function createThreadMentionClient(
     async search(requestId, query, signal) {
       const result = await execute(
         { kind: "search-mentions", requestId, query },
+        ...(signal === undefined ? [] : [signal]),
+      );
+      return result.kind === "mentions-searched" ? result.candidates : [];
+    },
+    async searchThread(requestId, threadId, signal) {
+      const result = await execute(
+        { kind: "search-mentions", requestId, query: "", threadId },
         ...(signal === undefined ? [] : [signal]),
       );
       return result.kind === "mentions-searched" ? result.candidates : [];

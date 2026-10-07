@@ -796,7 +796,11 @@ ambiguous state resolves to Waiting.
 
 A `#thread` mention points at another thread the sender can already Open. The
 host resolves a bounded, read-only title, status, and transcript window at send
-time. In Chat, an explicit mention also grants the source provider the bounded
+time. Dragging a sidebar thread onto a composer, or choosing Attach as context
+from that thread's row menu, uses this same path: the mention search, given
+the thread's id, returns that thread only when this window can Open it, so
+where its title would rank does not matter, and the renderer does not read the
+transcript to attach the chip. In Chat, an explicit mention also grants the source provider the bounded
 `octant_thread_message` tool for that turn: it may send one of the user's
 instructions to the mentioned Chat thread and receive its completed reply. The
 target's own Chat turn, provider, Project, and authority remain authoritative;

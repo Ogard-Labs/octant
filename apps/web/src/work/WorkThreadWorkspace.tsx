@@ -90,6 +90,7 @@ import {
   useThreadMentionTypeahead,
 } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
+import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
@@ -626,6 +627,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     onDraftChange: composerDraft.setDraft,
     textarea: () => textareaRef.current,
     disabled: creating || completionLocked,
+  });
+  const threadDropKey = useComposerThreadDropRegistration({
+    enabled: threadMentions.composer !== undefined,
+    currentThreadId: String(props.threadId),
+    onDraftChange: composerDraft.setDraft,
+    attachDroppedThread: threadMentions.attachDroppedThread,
   });
   const fileMentions = useWorkFileMentions({
     ...(props.fileMentionClient === undefined ? {} : { client: props.fileMentionClient }),
@@ -1767,6 +1774,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       <ThreadComposer
         queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
         presentation="follow-up"
+        {...(threadDropKey === undefined ? {} : { threadDropKey })}
         context={
           <div className="work-folder-bar" role="group" aria-label="Project and folder">
             <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />

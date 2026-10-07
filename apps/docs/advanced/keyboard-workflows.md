@@ -50,6 +50,14 @@ Home, and End move, Enter opens, and Escape dismisses.
 The palette command **Search Chat threads**, **Search Work threads**, or
 **Search Code threads** opens the same overlay.
 
+## Attaching a thread as context
+
+Focus a thread row and open its menu (the context-menu key, or Shift+F10),
+then choose **Attach as context**. That attaches the thread to the composer
+that has focus, or to the only composer when one is open, the same bounded
+reference as dragging the row onto the composer or typing `#` and choosing
+it. The draft is not sent, and the source thread is not opened.
+
 ## Mode switcher
 
 The sidebar mode switcher selects **Chat**, **Work**, or **Code**. In

@@ -13,11 +13,16 @@ import {
   type WorkspaceSurfaceDragSnapshot,
 } from "./workspaceTabDragController";
 import {
+  resolveSidebarComposerDrop,
   resolveWorkspaceSurfaceDropDestination,
   type WorkspaceDragPaneGeometry,
   type WorkspaceSurfaceDragSource,
   type WorkspaceSurfaceDropDestination,
 } from "./workspaceTabDragGeometry";
+import {
+  measureComposerThreadDropZones,
+  setActiveComposerThreadDropKey,
+} from "../chat/composerThreadDrop";
 
 export interface WorkspaceSurfaceDragState {
   readonly destination: WorkspaceSurfaceDropDestination | null;
@@ -88,6 +93,15 @@ export function useWorkspaceSurfaceDrag(options: {
   );
   onDrop.current = options.onDrop;
   resolveDestination.current = (point, source) => {
+    const composer = resolveSidebarComposerDrop({
+      point,
+      source,
+      composerZones: measureComposerThreadDropZones().map((zone) => ({
+        key: zone.key,
+        rect: toRect(zone.rect),
+      })),
+    });
+    if (composer !== null) return composer;
     const root = rootRef.current;
     if (root === null) return null;
     return resolveWorkspaceSurfaceDropDestination({
@@ -103,7 +117,13 @@ export function useWorkspaceSurfaceDrag(options: {
     controller.current = new PointerDragController({
       onDrop: (source, destination) => onDrop.current(source, destination),
       resolveDestination: (point, source) => resolveDestination.current(point, source),
-      onSnapshotChange: (snapshot) => setActive(activeSnapshot(snapshot)),
+      onSnapshotChange: (snapshot) => {
+        const next = activeSnapshot(snapshot);
+        setActive(next);
+        setActiveComposerThreadDropKey(
+          next?.destination?.kind === "composer" ? next.destination.composerKey : undefined,
+        );
+      },
     });
   }
 
