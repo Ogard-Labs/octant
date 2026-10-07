@@ -13,8 +13,9 @@ import type {
   Session,
 } from "@opencode-ai/sdk/v2/types";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -1277,6 +1278,7 @@ describe("OpenCode driver", () => {
               pid: process.pid,
               runtime: "beta" as const,
               version: "opencode v2.0.22",
+              temporaryDirectory: launchScratchDirectory(),
               url: new URL("http://127.0.0.1:1/"),
             }),
             () => Effect.void,
@@ -1310,6 +1312,23 @@ describe("OpenCode driver", () => {
     const marker = fixture.catalogueRoots.find((root) => root.includes("octant-opencode-probe-"));
     expect(marker).toBeDefined();
     expect(existsSync(marker!)).toBe(false);
+  });
+
+  it("attests a 2.x Git work tree at a marker the confined launch can read", async () => {
+    const fixture = betaDriver();
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("ready");
+    expect(probe.capabilities.approvals).toBe("supported");
+    const marker = fixture.catalogueRoots.find((root) => root.includes("octant-opencode-probe-"));
+    expect(marker?.startsWith(`${fixture.launchScratch}/`)).toBe(true);
+  });
+
+  it("lists a 2.x runtime without offering turns when its launch reports no readable scratch directory", async () => {
+    const fixture = betaDriver({ launchScratch: "unreported" });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("incompatible");
+    expect(probe.reason).toBe("runtime-incompatible");
+    expect(probe.models.length).toBeGreaterThan(0);
   });
 
   it("refuses a 2.x Chat, Plan, or Work turn and allows a Code turn", async () => {
@@ -1728,6 +1747,8 @@ describe("OpenCode driver", () => {
     ["plan", "edit", "deny"],
     ["plan", "bash", "deny"],
     ["plan", "task", "deny"],
+    ["plan", "shell", "deny"],
+    ["plan", "subagent", "deny"],
     ["plan", "external_directory", "deny"],
     ["plan", "todowrite", "deny"],
     ["plan", "webfetch", "deny"],
@@ -1735,6 +1756,7 @@ describe("OpenCode driver", () => {
     ["plan", "read", "ask"],
     ["approval-gated", "edit", "ask"],
     ["approval-gated", "bash", "ask"],
+    ["approval-gated", "shell", "ask"],
     ["approval-gated", "external_directory", "deny"],
     ["auto-accept-edits", "edit", "allow"],
     ["auto-accept-edits", "bash", "ask"],
@@ -1747,11 +1769,45 @@ describe("OpenCode driver", () => {
     expect(evaluateV2Permission(rules, action)).toBe(effect);
   });
 
-  it("denies bash and task in 2.x Work mode agent permission rules", () => {
+  it("denies the shell and child agents in 2.x Work mode agent permission rules", () => {
     const rules = betaAgentPermissionRules("approval-gated", "work");
     expect(evaluateV2Permission(rules, "bash")).toBe("deny");
+    expect(evaluateV2Permission(rules, "shell")).toBe("deny");
     expect(evaluateV2Permission(rules, "task")).toBe("deny");
+    expect(evaluateV2Permission(rules, "subagent")).toBe("deny");
     expect(evaluateV2Permission(rules, "edit")).toBe("ask");
+  });
+
+  it("launches a 2.x Code session with its posture and only its own app tool bridge allowed", async () => {
+    const fixture = betaDriver();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* fixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "code",
+          });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+          });
+        }),
+      ),
+    );
+    const launched = fixture.processInputs.at(-1)?.betaPermissions;
+    expect(launched).toBeDefined();
+    const rules = [...(launched ?? [])];
+    const bridge = fixture.calls.find((call) => call.startsWith("mcp.add:"))?.slice(8);
+    expect(bridge).toBeDefined();
+    expect(evaluateV2Permission(rules, "edit")).toBe("ask");
+    expect(evaluateV2Permission(rules, "shell")).toBe("ask");
+    expect(evaluateV2Permission(rules, "external_directory")).toBe("deny");
+    expect(evaluateV2Permission(rules, "skill")).toBe("deny");
+    expect(evaluateV2Permission(rules, "other-server_tool")).toBe("deny");
+    expect(evaluateV2Permission(rules, `${bridge}_octant_browser`)).toBe("allow");
   });
 
   it("adapts a 2.x event from data when properties is not an object", () => {
@@ -1779,25 +1835,42 @@ describe("OpenCode driver", () => {
 });
 
 function betaDriver(
-  options: { readonly worktreeProviders?: "refused"; readonly events?: ReadonlyArray<Event> } = {},
+  options: {
+    readonly worktreeProviders?: "refused";
+    readonly events?: ReadonlyArray<Event>;
+    readonly launchScratch?: "unreported";
+  } = {},
 ) {
-  return driverFixture({
+  const launchScratch = launchScratchDirectory();
+  const processInputs: OpenCodeProcessStartInput[] = [];
+  const fixture = driverFixture({
     ...options,
     process: {
-      start: () =>
+      start: (input) =>
         Effect.acquireRelease(
-          Effect.succeed({
-            isolatedConfiguration: true as const,
-            authorization: "Basic redacted",
-            pid: process.pid,
-            runtime: "beta" as const,
-            version: "opencode v2.0.22",
-            url: new URL("http://127.0.0.1:1/"),
+          Effect.sync(() => {
+            processInputs.push(input);
+            return {
+              isolatedConfiguration: true as const,
+              authorization: "Basic redacted",
+              pid: process.pid,
+              runtime: "beta" as const,
+              version: "opencode v2.0.22",
+              ...(options.launchScratch === "unreported"
+                ? {}
+                : { temporaryDirectory: launchScratch }),
+              url: new URL("http://127.0.0.1:1/"),
+            };
           }),
           () => Effect.void,
         ),
     },
   });
+  return { ...fixture, launchScratch, processInputs };
+}
+
+function launchScratchDirectory(): string {
+  return realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-launch-")));
 }
 
 function driverFixture(
@@ -1925,11 +1998,21 @@ function driverFixture(
       binaryPath: "/opt/homebrew/bin/opencode",
       process: options.process ?? processPort,
       runtimeRegistry: registry,
-      clientFactory: (_runtime, root) => ({
+      clientFactory: (runtime, root) => ({
         ...client,
         providers: async () => {
           catalogueRoots.push(root);
           if (options.worktreeProviders === "refused" && existsSync(join(root, ".git"))) {
+            throw new Error("opencode server GET /api/provider -> 500");
+          }
+          // Like the launch profile, which denies `/private`: a 2.x server can
+          // read only its project root and its own scratch directory.
+          const scratch = runtime.temporaryDirectory;
+          if (
+            runtime.runtime === "beta" &&
+            root !== resolve(process.cwd()) &&
+            (scratch === undefined || !root.startsWith(`${scratch}/`))
+          ) {
             throw new Error("opencode server GET /api/provider -> 500");
           }
           return client.providers();

@@ -1,6 +1,5 @@
 import { OpenCodeMessageParts } from "./openCodeMessageParts";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import {
   type CorrelationId,
@@ -247,9 +246,12 @@ const BETA_LISTING_ONLY_CAPABILITIES = {
  * work tree and 200 for a plain directory, while the same binary unconfined
  * answered 200 for both. A `.git` marker is enough to take the Git path, so
  * the probe can attest the jail without a real repository or a Git binary.
+ * The marker lives in the launch's own scratch directory: every launch profile
+ * denies reading `/private`, where the host temporary directory resolves, so
+ * a marker there was refused for being unreadable, not for being a work tree.
  */
-function makeBetaWorktreeMarker(): string {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-probe-")));
+function makeBetaWorktreeMarker(parent: string): string {
+  const root = realpathSync(mkdtempSync(join(parent, "octant-opencode-probe-")));
   try {
     mkdirSync(join(root, ".git", "objects"), { recursive: true });
     mkdirSync(join(root, ".git", "refs"));
@@ -797,17 +799,26 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               runtime.isolatedConfiguration === true && mcpAccepted,
             );
             if (runtime.runtime === "beta" && normalized.models.length > 0) {
-              const marker = yield* Effect.acquireRelease(
-                Effect.try({
-                  try: makeBetaWorktreeMarker,
-                  catch: () => fail("unavailable", "OpenCode probe workspace is unavailable."),
-                }),
-                (owned) => Effect.sync(() => rmSync(owned, { recursive: true, force: true })),
-              );
-              const servesWorktree = yield* request(clientFactory(runtime, marker).providers).pipe(
-                Effect.as(true),
-                Effect.orElseSucceed(() => false),
-              );
+              // A launch that reports no scratch directory cannot be attested.
+              const scratch = runtime.temporaryDirectory;
+              const servesWorktree =
+                scratch === undefined
+                  ? false
+                  : yield* Effect.acquireRelease(
+                      Effect.try({
+                        try: () => makeBetaWorktreeMarker(scratch),
+                        catch: () =>
+                          fail("unavailable", "OpenCode probe workspace is unavailable."),
+                      }),
+                      (owned) => Effect.sync(() => rmSync(owned, { recursive: true, force: true })),
+                    ).pipe(
+                      Effect.flatMap((marker) =>
+                        request(clientFactory(runtime, marker).providers).pipe(
+                          Effect.as(true),
+                          Effect.orElseSucceed(() => false),
+                        ),
+                      ),
+                    );
               if (!servesWorktree) {
                 return decodeProviderProbeResult({
                   ...normalized,
@@ -867,6 +878,7 @@ function acquireRuntime(
   probeMode: "chat" | "work" | "code" = "chat",
   probePolicy: ProviderExecutionPolicy = "plan",
 ) {
+  const betaPermissions = betaSessionPermissionRules(probePolicy, probeMode);
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
     idleMs: options.idleLeaseMs ?? 30_000,
     start: async () => {
@@ -880,6 +892,7 @@ function acquireRuntime(
               cwd: projectRoot,
               mode: probeMode,
               executionPolicy: probePolicy,
+              betaPermissions,
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
@@ -1095,6 +1108,7 @@ function makeConnection(
     const ensureRuntime = (
       executionPolicy: ProviderExecutionPolicy,
       loopbackPorts: ReadonlyArray<number>,
+      managedToolServerName: string | undefined,
     ): Effect.Effect<OpenCodeClientPort, ProviderFailure> =>
       Effect.tryPromise({
         try: async () => {
@@ -1122,6 +1136,11 @@ function makeConnection(
                   cwd: projectRoot,
                   mode,
                   executionPolicy,
+                  betaPermissions: betaSessionPermissionRules(
+                    executionPolicy,
+                    mode,
+                    managedToolServerName,
+                  ),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
                   onProcessStarted: (process) =>
                     options.runtimeRegistry.trackProcess(options.instanceId, process),
@@ -1414,6 +1433,7 @@ function makeConnection(
               ensureRuntime(
                 input.executionPolicy,
                 state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
+                state.managedTools?.serverName,
               ),
             ),
             Effect.flatMap((runtimeClient) => {
@@ -1546,6 +1566,7 @@ function makeConnection(
                   ensureRuntime(
                     input.executionPolicy,
                     state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
+                    state.managedTools?.serverName,
                   ),
                 ),
                 Effect.flatMap((runtimeClient) => {
@@ -1752,11 +1773,10 @@ function makeConnection(
                     ).pipe(
                       Effect.tap(() =>
                         Effect.sync(() => {
-                          if (
-                            input.approved &&
-                            state.approvalActions.get(input.requestId) === "edit"
-                          ) {
-                            state.grantedEdits = true;
+                          // A rejected edit withdraws the grant, so a file change
+                          // reported after it fails the turn again.
+                          if (state.approvalActions.get(input.requestId) === "edit") {
+                            state.grantedEdits = input.approved;
                           }
                           state.approvalActions.delete(input.requestId);
                           state.approvals.delete(input.requestId);
@@ -1947,7 +1967,14 @@ function mapAndOffer(
     const effect =
       requestId === "" || action === ""
         ? undefined
-        : betaPermissionEffect(betaAgentPermissionRules(state.executionPolicy, beta.mode), action);
+        : betaPermissionEffect(
+            betaSessionPermissionRules(
+              state.executionPolicy,
+              beta.mode,
+              state.managedTools?.serverName,
+            ),
+            action,
+          );
     if (effect === undefined) {
       offer(
         unmappedBetaFailure(
@@ -2107,13 +2134,23 @@ function splitModelId(value: string): { providerId: string; modelId: string } {
   return { providerId: value.slice(0, separator), modelId: value.slice(separator + 1) };
 }
 
+const BETA_SHELL_AND_SUBAGENT_DENY: PermissionV2Ruleset = [
+  { action: "bash", resource: "*", effect: "deny" },
+  { action: "shell", resource: "*", effect: "deny" },
+  { action: "task", resource: "*", effect: "deny" },
+  { action: "subagent", resource: "*", effect: "deny" },
+];
+
 /**
  * Maps Octant's approval posture onto the 2.x agent permission ruleset. The
- * 2.x session create API does not accept a ruleset, so these rules are not
- * sent. The host applies the last matching rule when a `permission.v2.asked`
- * event arrives: deny is rejected without asking, allow is replied once
- * without asking, and ask is surfaced. OpenCode applies the last matching
- * rule; this function uses the same order.
+ * 2.x session create API does not accept a ruleset, so the process writes
+ * these rules into its private configuration, where OpenCode appends them
+ * after every agent's built-in rules. The host also applies the last matching
+ * rule when a `permission.v2.asked` event arrives: deny is rejected without
+ * asking, allow is replied once without asking, and ask is surfaced.
+ *
+ * 2.0.22 names the shell `shell` and child agents `subagent`; the 1.x names
+ * stay denied too so neither spelling reopens what the posture refuses.
  */
 export function betaAgentPermissionRules(
   policy: ProviderExecutionPolicy,
@@ -2137,19 +2174,34 @@ export function betaAgentPermissionRules(
     rules = [
       { action: "*", resource: "*", effect: "ask" },
       { action: "edit", resource: "*", effect: "deny" },
-      { action: "bash", resource: "*", effect: "deny" },
-      { action: "task", resource: "*", effect: "deny" },
+      ...BETA_SHELL_AND_SUBAGENT_DENY,
       { action: "external_directory", resource: "*", effect: "deny" },
       { action: "todowrite", resource: "*", effect: "deny" },
       { action: "webfetch", resource: "*", effect: "deny" },
       { action: "websearch", resource: "*", effect: "deny" },
     ];
   }
-  if (mode === "work") {
-    rules.push(
-      { action: "bash", resource: "*", effect: "deny" },
-      { action: "task", resource: "*", effect: "deny" },
-    );
+  if (mode === "work") rules.push(...BETA_SHELL_AND_SUBAGENT_DENY);
+  return rules;
+}
+
+/**
+ * The whole 2.x ruleset a process serves, in the same order as the 1.x
+ * session ruleset: the posture, then every namespaced tool and skill denied,
+ * then only this connection's app-managed tool bridge allowed.
+ */
+export function betaSessionPermissionRules(
+  policy: ProviderExecutionPolicy,
+  mode: "chat" | "work" | "code",
+  managedToolServerName?: string,
+): PermissionV2Ruleset {
+  const rules: PermissionV2Ruleset = [
+    ...betaAgentPermissionRules(policy, mode),
+    { action: "*_*", resource: "*", effect: "deny" },
+    { action: "skill", resource: "*", effect: "deny" },
+  ];
+  if (managedToolServerName !== undefined) {
+    rules.push({ action: `${managedToolServerName}_*`, resource: "*", effect: "allow" });
   }
   return rules;
 }
