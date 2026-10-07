@@ -25,6 +25,11 @@ export interface PendingRequestRowProps {
    * its refusal line but offers no answer.
    */
   readonly settled?: boolean;
+  /**
+   * The row sits inside a card that already names the thread, its Project, and
+   * its provider: it keeps the wait, the text, and the answers.
+   */
+  readonly embedded?: boolean;
   /** Deliver the answer through the mode's own command; the row never knows how. */
   readonly onAnswer: (
     request: PendingRequest,
@@ -80,41 +85,47 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
     void answer({ kind: "choice", label: choice.label });
   }
 
+  const embedded = props.embedded === true;
   const ModeIcon = modeIcons[request.mode];
   return (
     <div
       aria-label={`${request.threadTitle} is waiting for you`}
       className="pending-request"
+      data-embedded={embedded ? "true" : "false"}
       data-kind={request.kind}
       onKeyDown={pickByNumber}
       role="group"
     >
       <div className="pending-request__head">
-        {props.provider === undefined ? (
-          <ModeIcon aria-hidden="true" className="pending-request__mark" size={16} />
-        ) : (
-          <ProviderGlyph
-            className="pending-request__mark"
-            displayName={props.provider.displayName}
-            driverKind={props.provider.driverKind}
-            size={16}
-          />
+        {embedded ? null : (
+          <>
+            {props.provider === undefined ? (
+              <ModeIcon aria-hidden="true" className="pending-request__mark" size={16} />
+            ) : (
+              <ProviderGlyph
+                className="pending-request__mark"
+                displayName={props.provider.displayName}
+                driverKind={props.provider.driverKind}
+                size={16}
+              />
+            )}
+            <OctantButton
+              className="oct-row-label pending-request__title window-no-drag"
+              onClick={() => props.onOpenThread(request)}
+              title={request.threadTitle}
+              type="button"
+              variant="bare"
+            >
+              {request.threadTitle}
+            </OctantButton>
+          </>
         )}
-        <OctantButton
-          className="oct-row-label pending-request__title window-no-drag"
-          onClick={() => props.onOpenThread(request)}
-          title={request.threadTitle}
-          type="button"
-          variant="bare"
-        >
-          {request.threadTitle}
-        </OctantButton>
         <span className="oct-meta pending-request__wait">
           <CirclePause aria-hidden="true" size={12} strokeWidth={1.8} />
           {`Waiting ${elapsedLabel(request.requestedAt, props.now)}`}
         </span>
       </div>
-      {props.projectName === undefined ? null : (
+      {embedded || props.projectName === undefined ? null : (
         <span className="oct-meta pending-request__project">{props.projectName}</span>
       )}
       <p className="oct-row-detail pending-request__text" title={request.text}>

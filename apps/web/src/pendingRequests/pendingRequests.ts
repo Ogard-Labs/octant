@@ -26,7 +26,8 @@ export type PendingRequestAnswerResult =
   | { readonly status: "answered" }
   | { readonly status: "refused"; readonly message: string };
 
-const NOT_DELIVERED: PendingRequestAnswerResult = {
+/** The line a row shows when the host gave no reason of its own. */
+export const NOT_DELIVERED: PendingRequestAnswerResult = {
   status: "refused",
   message: "The answer was not delivered. The request may have changed.",
 };

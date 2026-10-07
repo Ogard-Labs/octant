@@ -2,7 +2,13 @@ import "../styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts/canvas";
-import { chartExampleBlocks, treemapExampleBlocks } from "@octant/domain";
+import {
+  chartExampleBlocks,
+  treemapExampleBlocks,
+  heatmapExampleBlocks,
+  barListExampleBlocks,
+  metricExampleBlocks,
+} from "@octant/domain";
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, getThemePreset } from "@octant/theme";
 import { CanvasDocument } from "./CanvasDocument";
 import { canvasFixture } from "./test-fixtures";
@@ -124,6 +130,33 @@ const metric = decodeCanvasBlock({
   value: 1_360_000,
   format: "compact",
   delta: 42_000,
+  goodDirection: "up",
+  sparkline: [980_000, 1_010_000, 1_120_000, 1_180_000, 1_360_000],
+  caption: "since last release",
+});
+
+const hotFiles = decodeCanvasBlock({
+  ...base,
+  blockId: "bar-list-qa",
+  kind: "bar-list",
+  valueLabel: "Edits",
+  secondaryLabel: "Lines",
+  format: "number",
+  scale: "sequential",
+  rows: [
+    { label: "apps/web/src/canvas/blocks/ChartBlock.tsx", value: 41, secondaryValue: 1189 },
+    { label: "packages/domain/src/canvasPolicy.ts", value: 33, secondaryValue: 1255 },
+    { label: "apps/server/src/canvas/artifactRender.ts", value: 27, secondaryValue: 769 },
+    { label: "packages/contracts/src/canvas.ts", value: 19, secondaryValue: 1290 },
+    { label: "apps/web/src/styles/canvas.css", value: 16, secondaryValue: 2607 },
+    { label: "packages/theme/src/chartScales.ts", value: 12, secondaryValue: 507 },
+    { label: "apps/web/src/canvas/ChartTooltip.tsx", value: 10, secondaryValue: 360 },
+    { label: "packages/domain/src/canvasHeatmapLayout.ts", value: 8, secondaryValue: 359 },
+    { label: "apps/web/src/canvas/blocks/TreemapBlock.tsx", value: 6, secondaryValue: 670 },
+    { label: "packages/domain/src/canvasBarListLayout.ts", value: 4, secondaryValue: 210 },
+    { label: "apps/server/src/canvas/canvasAgentTools.ts", value: 3, secondaryValue: 817 },
+    { label: "packages/contracts/src/canvasIdentity.ts", value: 2, secondaryValue: 65 },
+  ],
 });
 
 const table = decodeCanvasBlock({
@@ -132,14 +165,20 @@ const table = decodeCanvasBlock({
   kind: "table",
   columns: [
     { id: "asset", label: "Asset", type: "text" },
-    { id: "size", label: "Size", type: "number", format: "bytes" },
-    { id: "requests", label: "Requests", type: "number", format: "compact" },
+    { id: "requests", label: "Requests", type: "number", format: "compact", display: "bar" },
+    { id: "errors", label: "Errors", type: "number", display: "heat" },
     { id: "p95", label: "p95", type: "number", format: "duration" },
+    { id: "state", label: "State", type: "text", display: "status" },
   ],
   rows: [
-    ["bundle.js", 1_536_000, 1_360_000, 3725],
-    ["styles.css", 245_760, 980_000, 160],
-    ["hero.png", 1_048_576, 120_000, 45],
+    ["apps/web/src/canvas/blocks/TableBlock.tsx", 1_360_000, 3, 3725, "Ready"],
+    ["packages/domain/src/canvasPolicy.ts", 300_000, 0, 160, "Ready"],
+    ["apps/server/src/canvas/artifactRender.ts", 980_000, 7, 240, "Blocked"],
+    ["apps/web/src/styles/canvas.css", 60_000, 12, 45, "Ready"],
+    ["packages/contracts/src/canvas.ts", 420_000, 1, 90, "Ready"],
+    ["packages/theme/src/chartScales.ts", 150_000, 5, 30, "Warning"],
+    ["apps/web/src/canvas/ChartTooltip.tsx", 88_000, 2, 12, "Ready"],
+    ["scripts/capture-canvas-charts.ts", 12_000, 0, 8, "Ready"],
   ],
 });
 
@@ -168,6 +207,10 @@ const definition = {
     distribution,
     ...chartExampleBlocks,
     ...treemapExampleBlocks,
+    ...heatmapExampleBlocks,
+    ...barListExampleBlocks,
+    hotFiles,
+    ...metricExampleBlocks,
     metric,
     table,
     timeline,

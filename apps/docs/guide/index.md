@@ -56,6 +56,31 @@ is showing another computer's work, the row names that computer. Up to five rows
 show, then **+N more** opens Running. Choose a row to open its thread. When
 nothing is running, the card says so in one line.
 
+**Running services** lists the dev servers running in your Code Projects: the
+port, the Project and the branch or thread, what is running (`vite`, `node`,
+`bun`), and whether it is answering. A server Octant does not own is marked
+**Not owned by Octant**: it may be one left from an earlier session, or one you
+started yourself in a terminal or with another tool, and Octant cannot tell
+which. **Open** shows the page in a Browser tab for that thread, or in your own
+browser; **Stop** stops it. A server Octant owns can stop at once; one it does
+not own asks you to confirm first, and from a paired device it can only be
+stopped at the computer itself.
+A server an editor such as VS Code started is not listed, and neither is
+anything outside your Code Projects. Up to five show, then **+N more
+listening**. The card refreshes about every five seconds while the window is
+showing, and not at all when it is hidden or turned off. When the window shows
+another computer's work, the row names that computer.
+
+Above the composer, two tabs sit on its top-left edge: **New task**, which is the
+composer, and **Running**, with the number of threads running now (the same
+number the sidebar's Running tile shows). Running lists every running row, not
+just five, each with **Open** and **Stop**. Stop asks "Stop this turn?" first,
+or "Stop this agent run?" on an agent run's row; choose **Stop** to end it or
+**Keep running** to leave it. Switching tabs never
+loses what you were typing: the draft, Project, and model are kept while you
+look. The tabs work from the keyboard: arrow keys move between them, and Enter
+chooses.
+
 **Needs you** comes first and appears only while an agent is waiting on you. It
 lists every approval and question across your Projects, oldest first: the
 provider mark, the thread's title, how long it has waited, and what it asked.

@@ -16,7 +16,14 @@ import {
   ThreadBoardCardMeta,
   type ThreadBoardCardMetaProps,
 } from "../threadBoard/ThreadBoardCardParts";
+import { ThreadBoardCardRequest } from "../threadBoard/ThreadBoardCardRequest";
+import { waitingColumnOldestFirst } from "../threadBoard/threadBoardGrouping";
 import { cardViewExtras, ThreadBoardBody } from "../threadBoard/ThreadBoardView";
+import {
+  useBoardPendingRequests,
+  type BoardCardRequest,
+  type BoardPendingRequestSource,
+} from "../threadBoard/useBoardPendingRequests";
 import {
   activityLabel,
   defaultBoardStorage,
@@ -80,6 +87,8 @@ export interface CodeThreadBoardProps {
   readonly providerKinds?: ReadonlyMap<string, string>;
   /** Narrow view is a grouped list; wide view is compact columns. */
   readonly isNarrow?: boolean;
+  /** Lets a waiting card answer its thread's question; without it cards look as they always did. */
+  readonly pendingRequests?: BoardPendingRequestSource;
 }
 
 interface FilterState {
@@ -130,6 +139,9 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
 
   const query = useMemo(() => buildQuery(filters), [filters]);
   const queryKey = JSON.stringify(query);
+  const pending = useBoardPendingRequests(props.pendingRequests, "code", () =>
+    setRefreshNonce((nonce) => nonce + 1),
+  );
 
   // The shell re-renders while threads stream, and its `loadBoard` is an inline
   // arrow, so the prop's identity changes on every one of those renders. Keying
@@ -452,7 +464,12 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
           emptyFilteredTitle: "No Code threads match these filters",
           emptyDetail: "Create a Code thread to see it here.",
         }}
-        groupCards={(cards) => groupCodeBoardCards(cards, grouping, { projects: props.projects })}
+        groupCards={(cards) =>
+          waitingColumnOldestFirst(
+            groupCodeBoardCards(cards, grouping, { projects: props.projects }),
+            pending.oldestRequestedAt,
+          )
+        }
         grouping={grouping}
         isNarrow={props.isNarrow === true || layout === "list"}
         layout={props.isNarrow === true || layout === "list" ? "list" : "columns"}
@@ -463,6 +480,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             layout={presentation.layout}
             statusPresentation={presentation.statusPresentation}
             unread={props.unreadThreadIds?.has(String(card.threadId)) === true}
+            request={pending.forCard(card)}
             {...cardViewExtras(card, {
               projectNames,
               ...(props.providerLabels === undefined
@@ -488,6 +506,8 @@ function CodeBoardCardView(props: {
   readonly layout: "card" | "list";
   readonly statusPresentation: "visible" | "screen-reader";
   readonly unread: boolean;
+  /** The question or approval this waiting card can answer in place. */
+  readonly request?: BoardCardRequest | undefined;
   readonly projectName?: string;
   readonly providerLabel?: string;
   readonly providerKind?: string;
@@ -498,6 +518,7 @@ function CodeBoardCardView(props: {
   const statusLabel = codeBoardStatusLabel(card.status);
   const waitingReason = waitingReasonText(card);
   const className = props.layout === "list" ? "issuerow" : "board-card";
+  const onOpenThread = () => props.onOpen?.({ threadId: card.threadId, projectId: card.projectId });
   return (
     <article
       className={className}
@@ -537,8 +558,10 @@ function CodeBoardCardView(props: {
           {statusLabel}
         </span>
       </span>
-      {/* An executing thread says what it is doing under its title. */}
-      {props.layout === "card" && card.executing ? (
+      {/* An executing thread says what it is doing under its title, unless it
+          is parked on a question: then the question is the card's news and a
+          turning "Working…" would contradict it. */}
+      {props.layout === "card" && card.executing && props.request === undefined ? (
         <ThreadBoardCardLive summary={card.childAgents.latestSummary} />
       ) : null}
       {/* A card says what the thread is waiting on or doing now; the footer
@@ -560,6 +583,9 @@ function CodeBoardCardView(props: {
           </span>
         ))}
       </span>
+      {props.request === undefined ? null : (
+        <ThreadBoardCardRequest onOpenThread={onOpenThread} request={props.request} />
+      )}
       <ThreadBoardPullRequestSummaries
         {...(props.onSelectPullRequest === undefined
           ? {}

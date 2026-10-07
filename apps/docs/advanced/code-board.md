@@ -50,6 +50,23 @@ remembered per client device (not authoritative host state).
 Shared toolbar filters include text search, status, Code Project,
 provider/agent, pull-request and check state, delivery target, and follow-up.
 
+## Answering from a card
+
+A card whose thread is asking you something shows the question or
+approval, how long it has waited, and the answers: **Approve** and **Deny**, a
+numbered button for each choice, or **Reply…**, which opens the thread so you
+can type. A thread whose turn waits on an approval or a question sits under
+**Waiting** until you answer, then returns to **In progress** while the agent
+carries on. If a thread has more than one request, the card shows the oldest and
+**+N more waiting**, which opens the thread. In the Waiting column the thread
+that has waited longest is first. If the answer is not delivered, the card says
+so and stays where it is; it moves to another column only once the host reports
+the thread's new status. While your pointer is on the board, cards keep their
+column and position so a click cannot land on a card that moved; the board
+catches up when the pointer leaves. The list layout shows the same buttons. Where this
+window cannot read requests (a paired remote device), cards look as they always
+did and you answer in the thread.
+
 ## Card metadata
 
 Cards carry thread and Project identity, derived status and reason, delivery

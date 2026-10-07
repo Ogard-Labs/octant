@@ -45,6 +45,11 @@ export interface WorkingNowRow {
   readonly provider?: ThreadProviderIdentity;
   /** The host the work runs on, only when that is not this computer. */
   readonly host?: string;
+  /**
+   * Set only on a row that is an agent run whose thread is resting. Stopping
+   * such a row cancels the run; a thread row stops the thread's own turn.
+   */
+  readonly runId?: string;
 }
 
 /** What the Code board adds to a running Code thread. */
@@ -200,6 +205,7 @@ export function buildWorkingNowRows(input: WorkingNowInput): ReadonlyArray<Worki
     const provider = input.providers.get(String(run.route.executionProviderInstanceId));
     rows.push({
       key: `run:${String(run.runId)}`,
+      runId: String(run.runId),
       mode: run.mode,
       threadId: String(run.childThreadId ?? run.parentThreadId),
       title: run.parentThreadTitle,

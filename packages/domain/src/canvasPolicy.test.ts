@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   CANVAS_MAX_BLOCKS,
+  CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_IMAGES,
+  CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MOCKUP_DEPTH,
   CANVAS_MAX_MOCKUP_NODES,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
@@ -11,8 +13,10 @@ import {
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
   CANVAS_MAX_TREEMAP_DEPTH,
+  CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
+  CANVAS_TREEMAP_SCHEMA_VERSION,
   decodeCanvasDefinition,
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
@@ -905,6 +909,351 @@ describe("treemap validation", () => {
           ]),
         ),
       "missing-source",
+    );
+  });
+});
+
+function heatmapMatrix(overrides: Record<string, unknown> = {}) {
+  return {
+    blockId: "commits-by-hour",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "heatmap" as const,
+    layout: "matrix" as const,
+    valueLabel: "Commits",
+    scale: "sequential" as const,
+    rows: [
+      { rowId: "mon", label: "Mon" },
+      { rowId: "tue", label: "Tue" },
+    ],
+    columns: [
+      { columnId: "h09", label: "09" },
+      { columnId: "h10", label: "10" },
+    ],
+    cells: [
+      { rowId: "mon", columnId: "h09", value: 3 },
+      { rowId: "tue", columnId: "h10", value: 6, note: "After the review" },
+    ],
+    ...overrides,
+  };
+}
+
+function heatmapCalendar(overrides: Record<string, unknown> = {}) {
+  return {
+    blockId: "test-failures",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "heatmap" as const,
+    layout: "calendar" as const,
+    valueLabel: "Test failures",
+    scale: "diverging" as const,
+    days: [
+      { date: "2026-09-01", value: 0 },
+      { date: "2026-09-02", value: 3 },
+    ],
+    ...overrides,
+  };
+}
+
+describe("heatmap validation", () => {
+  it("accepts a matrix whose cells name rows and columns it holds", () => {
+    expect(() => validateCanvasDefinition(withBlocks([heatmapMatrix()]))).not.toThrow();
+  });
+
+  it("accepts a calendar with one reading per date", () => {
+    expect(() => validateCanvasDefinition(withBlocks([heatmapCalendar()]))).not.toThrow();
+  });
+
+  it("refuses a heatmap block inside a document declaring an older schema version", () => {
+    // A heatmap arrived at version 6: a presentation-era v4 document and a
+    // treemap-era v5 document that carry one fail closed as declared future
+    // versions.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_PRESENTATION_SCHEMA_VERSION,
+          blocks: [heatmapMatrix()],
+        }),
+      "unsupported-schema-version",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_TREEMAP_SCHEMA_VERSION,
+          blocks: [heatmapMatrix()],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
+  it("rejects a matrix that lists one row id twice", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              rows: [
+                { rowId: "mon", label: "Mon" },
+                { rowId: "mon", label: "Monday" },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-heatmap-row-id",
+    );
+  });
+
+  it("rejects a cell on a row the matrix does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              cells: [{ rowId: "wed", columnId: "h09", value: 1 }],
+            }),
+          ]),
+        ),
+      "unknown-heatmap-row",
+    );
+  });
+
+  it("rejects a cell on a column the matrix does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              cells: [{ rowId: "mon", columnId: "h23", value: 1 }],
+            }),
+          ]),
+        ),
+      "unknown-heatmap-column",
+    );
+  });
+
+  it("rejects one coordinate listed more than once", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapMatrix({
+              cells: [
+                { rowId: "mon", columnId: "h09", value: 1 },
+                { rowId: "mon", columnId: "h09", value: 2 },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-heatmap-cell",
+    );
+  });
+
+  it("rejects a calendar that repeats a date and one that is not a real day", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapCalendar({
+              days: [
+                { date: "2026-09-01", value: 1 },
+                { date: "2026-09-01", value: 2 },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-heatmap-date",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([heatmapCalendar({ days: [{ date: "2026-02-30", value: 1 }] })]),
+        ),
+      "invalid-schema",
+    );
+  });
+
+  it("rejects a calendar that spans more days than the budget", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            heatmapCalendar({
+              days: [
+                { date: "2026-01-01", value: 1 },
+                { date: "2031-01-01", value: 2 },
+              ],
+            }),
+          ]),
+        ),
+      "heatmap-days-budget-exceeded",
+    );
+  });
+});
+
+function barList(overrides: Record<string, unknown> = {}) {
+  return {
+    blockId: "hottest-files",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "bar-list" as const,
+    valueLabel: "Edits",
+    format: "number" as const,
+    scale: "sequential" as const,
+    rows: [
+      { label: "apps/web", value: 41, secondaryValue: 1189 },
+      { label: "packages/domain", value: 33, secondaryValue: 1255 },
+    ],
+    ...overrides,
+  };
+}
+
+describe("bar list validation", () => {
+  it("accepts a ranked list of unique labels with magnitudes", () => {
+    expect(() => validateCanvasDefinition(withBlocks([barList()]))).not.toThrow();
+  });
+
+  it("refuses a bar list inside a document declaring an older schema version", () => {
+    // A bar list arrived at version 7: a treemap-era v5 document and a
+    // heatmap-era v6 document that carry one fail closed as declared future
+    // versions, not as corrupt documents.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_TREEMAP_SCHEMA_VERSION,
+          blocks: [barList()],
+        }),
+      "unsupported-schema-version",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION,
+          blocks: [barList()],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
+  it("rejects a list that names one label twice", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            barList({
+              rows: [
+                { label: "apps/web", value: 1 },
+                { label: "apps/web", value: 2 },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-bar-list-label",
+    );
+  });
+
+  it("rejects a value or a second value that is negative", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(withBlocks([barList({ rows: [{ label: "app", value: -1 }] })])),
+      "bar-list-negative-value",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([barList({ rows: [{ label: "app", value: 1, secondaryValue: -2 }] })]),
+        ),
+      "bar-list-negative-value",
+    );
+  });
+
+  it("rejects a list past the row budget", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            barList({
+              rows: Array.from({ length: CANVAS_MAX_BAR_LIST_ROWS + 1 }, (_value, index) => ({
+                label: `row-${String(index)}`,
+                value: index,
+              })),
+            }),
+          ]),
+        ),
+      "bar-list-rows-budget-exceeded",
+    );
+  });
+
+  it("rejects a row that names a file the manifest does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            barList({
+              rows: [
+                {
+                  label: "apps/web",
+                  value: 1,
+                  sourceId: "99999999-9999-4999-8999-999999999999",
+                },
+              ],
+            }),
+          ]),
+        ),
+      "missing-source",
+    );
+  });
+});
+
+describe("metric validation", () => {
+  function metric(overrides: Record<string, unknown> = {}) {
+    return {
+      blockId: "repo-lines",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "metric" as const,
+      label: "Lines of code",
+      value: 1_360_000,
+      format: "compact" as const,
+      delta: 12_400,
+      goodDirection: "up" as const,
+      sparkline: [1, 2, 3],
+      caption: "since last release",
+      ...overrides,
+    };
+  }
+
+  it("accepts a metric with a direction, a sparkline, and a caption", () => {
+    expect(() => validateCanvasDefinition(withBlocks([metric()]))).not.toThrow();
+  });
+
+  it("refuses the new metric fields inside a document declaring an older schema version", () => {
+    // A sparkline, a direction, and a caption arrived at version 7; a v6
+    // document carrying one fails closed as a declared future version.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION,
+          blocks: [metric({ schemaVersion: CANVAS_HEATMAP_SCHEMA_VERSION })],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
+  it("rejects a sparkline longer than the budget", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            metric({
+              sparkline: Array.from(
+                { length: CANVAS_MAX_METRIC_SPARKLINE_POINTS + 1 },
+                (_value, index) => index,
+              ),
+            }),
+          ]),
+        ),
+      "metric-sparkline-budget-exceeded",
     );
   });
 });

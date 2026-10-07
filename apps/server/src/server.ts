@@ -578,6 +578,7 @@ import {
   createLiveLocalServerStopPort,
 } from "./localServers/localServerHostPorts";
 import { createCodeThreadLocalServerScopeResolver } from "./localServers/localServerScopeResolver";
+import { createRunningServiceScopeResolver } from "./localServers/runningServiceScopeResolver";
 import { LocalServerService } from "./localServers/localServerService";
 import { createDiagnosticsExportRouteHandler } from "./diagnosticsExportRoutes";
 import {
@@ -5223,7 +5224,10 @@ export function startOctantServer(
           metadata: codeThreadMetadataService,
           runtime: {
             observe: (threadId) =>
-              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId)),
+              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
+                turnParkedOnPerson:
+                  codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true,
+              }),
           },
           pullRequests: {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
@@ -5669,6 +5673,31 @@ export function startOctantServer(
             resolveCheckoutRoot: async (windowId, thread, checkout) =>
               (await roots.resolve(windowId, thread, checkout, codeWorkingDirectoryProbePath))
                 ?.rootPath,
+            ownedPids: () => new Set<number>(),
+          },
+        }),
+        hostScopes: createRunningServiceScopeResolver({
+          projects: projectService,
+          source: {
+            readThreads: persistence.readCodeThreads,
+            readCheckout: persistence.readCodeCheckout,
+            // Only the ownership receipt the host wrote for this thread's own
+            // worktree vouches for the folder; the same fields the Code file
+            // root authority demands, without its Git observation, because this
+            // only names where a listener came from and authorizes nothing.
+            managedWorktreeRoot: async (thread, checkout, repositoryRoot) => {
+              const receipt = await managedWorktreeReceipts.load(checkout.ownershipReceiptId);
+              return receipt !== undefined &&
+                receipt.state === "ready" &&
+                receipt.receiptId === checkout.ownershipReceiptId &&
+                receipt.threadId === thread.id &&
+                receipt.checkoutId === checkout.id &&
+                receipt.repositoryId === thread.repositoryId &&
+                receipt.repositoryId === checkout.repositoryId &&
+                receipt.canonicalRepositoryPath === repositoryRoot
+                ? receipt.canonicalWorktreePath
+                : undefined;
+            },
             ownedPids: () => new Set<number>(),
           },
         }),

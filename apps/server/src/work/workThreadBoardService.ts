@@ -90,8 +90,13 @@ export function boardRuntimeActivityFromTurnsAndSignals(input: {
 }): WorkBoardRuntimeActivity {
   const latest = input.turns.at(-1);
   const interrupted = latest !== undefined && turnInterrupted(latest);
+  // A turn that asked for an approval or an answer keeps its `running` status
+  // while the provider session waits, so the open request is what says the
+  // turn is parked on the person rather than executing.
   const turnExecuting =
-    latest !== undefined && (latest.status === "accepted" || latest.status === "running");
+    latest !== undefined &&
+    (latest.status === "accepted" || latest.status === "running") &&
+    !input.pendingRequest;
   const turnWaiting = latest !== undefined && latest.status === "waiting" && !interrupted;
   const executing = turnExecuting || input.childActive > 0;
   const awaitingInput = input.pendingRequest || turnWaiting || input.childWaiting > 0;
