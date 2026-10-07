@@ -84,7 +84,9 @@ never count toward To review and never list here; the page's Work wiring
 mode's existing commands and show the host's refusal in one line; mark-seen
 moves the read cursor. Its single-key commands are page-scoped keybindings: they
 may be a bare key because only the focused page dispatches them, and the
-window-level listeners never run them. The page holds no pull-request action
+window-level listeners never run them. Focus left on the window's body is not
+the page; when the control holding focus leaves with its thread, the page takes
+focus back so its keys keep working. The page holds no pull-request action
 and no destructive one. The To review tile, Code's **Review N changes** tile and
 the command palette open it.
 
