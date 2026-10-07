@@ -5224,7 +5224,8 @@ export function startOctantServer(
           runtime: {
             observe: (threadId) =>
               boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
-                turnParkedOnPerson: liveTurns.read(String(threadId))?.liveStep?.kind === "waiting",
+                turnParkedOnPerson:
+                  codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true,
               }),
           },
           pullRequests: {

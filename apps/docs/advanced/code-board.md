@@ -56,7 +56,7 @@ A card whose thread is asking you something shows the question or
 approval, how long it has waited, and the answers: **Approve** and **Deny**, a
 numbered button for each choice, or **Reply…**, which opens the thread so you
 can type. A thread whose turn waits on an approval or a question sits under
-**Waiting** until you answer, then returns to **In progress** once the agent
+**Waiting** until you answer, then returns to **In progress** while the agent
 carries on. If a thread has more than one request, the card shows the oldest and
 **+N more waiting**, which opens the thread. In the Waiting column the thread
 that has waited longest is first. If the answer is not delivered, the card says

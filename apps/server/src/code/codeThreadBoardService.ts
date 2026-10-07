@@ -84,9 +84,9 @@ export interface CodeBoardRuntimeSource {
  * because its process is gone, so only the latest provider turn can hold the
  * thread in Waiting from that state.
  *
- * `turnParkedOnPerson` is the live-turn fact that the latest running turn is
- * waiting on an approval or a question; it files the thread Waiting instead of
- * In progress until the agent shows progress again.
+ * `turnParkedOnPerson` says the latest running turn holds an approval or a
+ * question the person has not answered; it files the thread Waiting instead of
+ * In progress until the answer is taken.
  */
 export function boardRuntimeActivityFromWorks(
   works: ReadonlyArray<ProjectedCodeRuntimeWork>,
@@ -109,8 +109,11 @@ export function boardRuntimeActivityFromWorks(
   );
   // A turn waiting on an approval or a question keeps its `running` record:
   // the provider session is still open, so the work journal cannot tell it
-  // from a turn that is thinking. The live-turn registry can, and a parked
-  // turn is owed by the person, not executing.
+  // from a turn that is thinking. The running turn's open requests can, and a
+  // parked turn is owed by the person, not executing. They are the same
+  // requests the board's pending-request read lists, so the read that sees an
+  // answer land also sees the thread leave Waiting; the live step would stay
+  // "waiting" until the provider's next event, which the board never re-reads on.
   const parked =
     live.turnParkedOnPerson === true &&
     latestTurn !== undefined &&

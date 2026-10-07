@@ -477,9 +477,10 @@ change-feed, settings, and workspace signals, and never on a timer. A card is
 matched to its request by thread and mode. A thread whose live turn waits on an
 approval or a question files under Waiting with the awaiting-input reason, not
 In progress: the provider session stays open while it waits, so the host
-reads the wait from the live turn (Code) or the open request (Work) rather than
-from the turn's running record, and the thread returns to In progress when the
-agent shows progress again. Other work still running beside a parked turn (a
+reads the wait from the running turn's open approvals and questions (Code) or
+the open request (Work) rather than from the turn's running record. Those are
+the requests the `pendingRequests` read lists, so the board read that follows an
+answer already files the thread back under In progress. Other work still running beside a parked turn (a
 terminal, a child run) keeps the thread In progress. A card with no listed
 request is drawn as before. A thread with several requests shows the oldest and **+N more
 waiting**, which opens the thread. Answers use each mode's existing command

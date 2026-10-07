@@ -825,7 +825,7 @@ describe("boardRuntimeActivityFromWorks", () => {
 
   it("files a running turn parked on the person as awaiting input, not executing", () => {
     // The turn's record stays `running` while the provider waits on an
-    // approval or a question, so only the live-turn fact can say it is parked.
+    // approval or a question, so only the turn's open requests can say it is parked.
     const works = [work("provider-turn", "running", 1)];
     expect(boardRuntimeActivityFromWorks(works)).toMatchObject({
       executing: true,

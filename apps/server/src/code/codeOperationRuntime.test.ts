@@ -1388,6 +1388,7 @@ describe("CodeOperationRuntime", () => {
       }),
     ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
     await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(false);
     await Effect.runPromise(
       Queue.offer(
         queue,
@@ -1412,6 +1413,7 @@ describe("CodeOperationRuntime", () => {
       }),
     ).toBe(true);
 
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(true);
     const listed = (await fixture.runtime.pendingRequests?.(windowId)) ?? [];
     expect(listed.map((request) => `${request.mode}:${request.kind}`)).toEqual([
       "code:approval",
@@ -1457,6 +1459,8 @@ describe("CodeOperationRuntime", () => {
     expect((await fixture.runtime.pendingRequests?.(windowId))?.map((r) => r.kind)).toEqual([
       "question",
     ]);
+    // Still owed an answer to the question; the board keeps the thread Waiting.
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(true);
 
     await fixture.runtime.execute(windowId, {
       kind: "answer-provider-input",
@@ -1465,6 +1469,9 @@ describe("CodeOperationRuntime", () => {
       response: fixture.response,
     });
     expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
+    // Answered, and the provider has sent nothing since: the turn is no longer
+    // waiting on the person, so the board files it In progress on its next read.
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(false);
     fixture.close();
   });
 
