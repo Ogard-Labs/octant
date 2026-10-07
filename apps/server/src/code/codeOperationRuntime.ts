@@ -15,6 +15,7 @@ import {
   decodeCodeOperationCommand,
   decodeCodeEvidenceBatchResponse,
   decodeCodeRelativePath,
+  decodeHarnessRetryNotice,
   decodeCodeReviewFindingId,
   decodeProviderSessionId,
   type CodeCheckoutIdentity,
@@ -32,6 +33,7 @@ import {
   type CodeOperationApprovalConfirmation,
   type CodeEvidenceContentId,
   type CodeOperationEvent,
+  type HarnessRetryNotice,
   type CodeOperationEventFrame,
   type CodeOperationId,
   type CodeRuntimeWorkId,
@@ -377,6 +379,8 @@ export interface CodeOperationRuntimeOptions {
         readonly turn?: TurnEndSummary;
       },
     ) => Promise<void>;
+    readonly noteRetry?: (scope: NativeHarnessTurnScope, notice: HarnessRetryNotice) => void;
+    readonly clearRetry?: (scope: NativeHarnessTurnScope) => void;
     /** Settles a harness question the person answered through the Code question surface. */
     readonly answerQuestion?: (threadId: string, questionId: string, answer: string) => void;
   };
@@ -2540,6 +2544,33 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
   }
 
+  #noteHarnessRetry(active: ActiveTurn, event: CodeOperationEvent): void {
+    const harness = this.#options.nativeHarness;
+    if (harness === undefined) return;
+    const scope: NativeHarnessTurnScope = {
+      threadId: String(active.thread.id),
+      mode: "code",
+      providerInstanceId: active.thread.providerInstanceId,
+      modelId: active.thread.modelId,
+      projectId: active.thread.projectId,
+    };
+    if (event.kind === "provider-content") {
+      harness.clearRetry?.(scope);
+      return;
+    }
+    if (event.kind !== "provider-retry") return;
+    harness.noteRetry?.(
+      scope,
+      decodeHarnessRetryNotice({
+        attempt: event.attempt,
+        maxAttempts: event.maxAttempts,
+        delayMs: event.delayMs,
+        reason: event.reason,
+        announcedAt: event.announcedAt,
+      }),
+    );
+  }
+
   #persistNormalized(active: ActiveTurn, event: CodeTurnEvent): void {
     const operationEvent = normalizedOperationEvent(
       event,
@@ -2548,6 +2579,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#options.uuid,
     );
     if (operationEvent === undefined) return;
+    this.#noteHarnessRetry(active, operationEvent);
     const frame = this.#events.append({
       threadId: active.thread.id,
       operationId: active.operationId,
@@ -2839,6 +2871,30 @@ function normalizedOperationEvent(
               : "running",
       ...(summary === undefined ? {} : { summary }),
     };
+  }
+  if (
+    event.category === "retry" &&
+    event.attempt !== undefined &&
+    event.maxAttempts !== undefined &&
+    event.delayMs !== undefined &&
+    event.status !== undefined
+  ) {
+    const reason = event.status;
+    if (
+      reason === "rate-limited" ||
+      reason === "unavailable" ||
+      reason === "stream-interrupted" ||
+      reason === "empty-completion"
+    ) {
+      return {
+        kind: "provider-retry",
+        attempt: event.attempt,
+        maxAttempts: event.maxAttempts,
+        delayMs: event.delayMs,
+        reason,
+        announcedAt: event.occurredAt,
+      };
+    }
   }
   if (event.category === "completion") return { kind: "operation-state", state: "completed" };
   if (event.category === "waiting") return { kind: "operation-state", state: "waiting" };

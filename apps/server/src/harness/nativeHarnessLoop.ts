@@ -20,7 +20,7 @@ import {
 import type { ProviderConnection } from "@octant/provider-sdk/driver";
 import { renderProviderTurnPrompt } from "@octant/provider-sdk/chat-conformance";
 import { Effect, PubSub, Stream, type Scope } from "effect";
-import { isEndpointRetriesExhausted } from "../providers/endpointRetry";
+import { isContextOverflowFailure, isEndpointRetriesExhausted } from "../providers/endpointRetry";
 import type { ObservedRateLimitBucket } from "../providers/rateLimitHeaders";
 import { nativeHarnessToolGuide } from "./nativeHarnessInstructions";
 import type {
@@ -60,8 +60,20 @@ const OMITTED_RESULT_JSON = JSON.stringify({
   omitted: true,
   note: "An older tool result was removed to fit the context window. Call the tool again if you still need it.",
 });
+const NOT_RUN_RESULT_JSON = JSON.stringify({
+  notRun: true,
+  note: "This call was not run: the turn stopped after repeated malformed tool calls.",
+});
 const OMITTED_HISTORY_NOTE =
   "Earlier messages of this session were left out to fit the context window. Your task list and the files on disk still reflect that work.";
+
+/**
+ * How many steps in one turn may come back with a malformed tool call before
+ * the turn is failed. Each such step costs a round trip; a model that keeps
+ * asking for a tool that does not exist, reusing a call id, or sending
+ * arguments that are not JSON would otherwise loop forever.
+ */
+const MAX_SELF_CORRECTION_ROUNDS = 3;
 
 export type NativeHarnessDriverKind =
   | "openai-compatible"
@@ -130,6 +142,8 @@ interface SessionState {
   abortController: AbortController | undefined;
   stopped: boolean;
   steps: number;
+  /** Steps this turn whose tool calls arrived malformed; a model that will not correct itself is cut off. */
+  selfCorrections: number;
   /** Everything this turn's requests have cost so far; a figure no request reported stays absent. */
   usage: NativeHarnessUsage;
   /** When the request now in flight was sent, which dates the usage it reports. */
@@ -248,6 +262,7 @@ export function createNativeHarnessConnection(
       abortController: undefined,
       stopped: false,
       steps: 0,
+      selfCorrections: 0,
       usage: { inputTokens: 0, outputTokens: 0 },
       requestStartedAt: undefined,
     });
@@ -362,11 +377,28 @@ export function createNativeHarnessConnection(
         }
         current = refit;
       }
+      // The endpoint accepted the request's size estimate yet still refused it
+      // as too large, so one ladder step is forced and the request sent once
+      // more before the failure is allowed to stand.
+      let recoveredFromOverflow = false;
       for (;;) {
         try {
           state.requestStartedAt = options.clock();
           return await (state.fallback?.endpoint ?? state.endpoint).send(current, stream);
         } catch (error) {
+          if (!signal.aborted && !recoveredFromOverflow) {
+            const refused = sanitizeFailure(error);
+            if (isContextOverflowFailure(refused)) {
+              const refit = fitRequest(state.fallback?.endpoint ?? state.endpoint, current, {
+                reduceOnce: true,
+              });
+              if (refit !== undefined) {
+                recoveredFromOverflow = true;
+                current = refit;
+                continue;
+              }
+            }
+          }
           if (
             options.leadFallback === undefined ||
             state.turn === undefined ||
@@ -410,6 +442,105 @@ export function createNativeHarnessConnection(
       }
     };
 
+    /**
+     * Sends a settled step's results back as the next request. A steering note
+     * queued during the step is offered first, so a person's redirect is
+     * answered before the model continues on its own plan; when nothing fits,
+     * or the latest message alone does not, the turn fails honestly.
+     */
+    const advanceAfterResults = (state: SessionState): void => {
+      const pending = state.pending;
+      if (pending === undefined) return;
+      const results: NativeHarnessMessage = {
+        role: "assistant",
+        text: "",
+        toolResults: pending.calls.flatMap((call) => {
+          const answer = pending.answers.get(call.toolCallId);
+          return answer === undefined
+            ? []
+            : [
+                {
+                  toolCallId: answer.requestId,
+                  resultJson: answer.resultJson,
+                  isError: answer.isError,
+                  ...(answer.images === undefined ? {} : { images: answer.images }),
+                },
+              ];
+        }),
+      };
+      state.messages.push(results);
+      state.pending = undefined;
+      const request = takeSteeringRequest(state) ?? requestFor(state, [...state.messages]);
+      if (request === undefined) {
+        emit(state, {
+          kind: "failed",
+          failure: failure(
+            "invalid-configuration",
+            "The provider request exceeded the configured size limit.",
+          ),
+        });
+        state.inFlight = undefined;
+        state.abortController = undefined;
+        state.acceptingSteering = false;
+        return;
+      }
+      void runStep(state, request);
+    };
+
+    /**
+     * Closes the tool step a cancel caught so the conversation stays valid for
+     * the next send: every call the runner never answered gets the same
+     * interrupted result a resume would have journaled, and the results message
+     * joins the conversation.
+     */
+    const closePendingStep = (state: SessionState): void => {
+      const pending = state.pending;
+      if (pending === undefined) return;
+      const unanswered = pending.calls.filter((call) => !pending.answers.has(call.toolCallId));
+      for (const result of interruptedResults(unanswered)) {
+        options.transcripts.settle(state.transcriptId, result);
+        pending.answers.set(result.toolCallId, {
+          sessionId: state.sessionId,
+          requestId: result.toolCallId,
+          resultJson: result.resultJson,
+          isError: true,
+        });
+      }
+      state.messages.push({
+        role: "assistant",
+        text: "",
+        toolResults: pending.calls.flatMap((call) => {
+          const answer = pending.answers.get(call.toolCallId);
+          return answer === undefined
+            ? []
+            : [
+                {
+                  toolCallId: answer.requestId,
+                  resultJson: answer.resultJson,
+                  isError: answer.isError,
+                },
+              ];
+        }),
+      });
+      state.pending = undefined;
+    };
+
+    /**
+     * Ends the running turn without ending the session. The conversation the
+     * journal already holds stays live, so a cancel is followed by a plain send
+     * that continues it rather than a rebuild from the journal.
+     */
+    const settleTurnWithoutStopping = (state: SessionState) => {
+      state.acceptingSteering = false;
+      for (const note of state.steering.splice(0)) note.resolve("unsupported");
+      state.fallback?.endpoint.release();
+      state.fallback = undefined;
+      state.turn = undefined;
+      state.pending = undefined;
+      state.abortController = undefined;
+      state.inFlight = undefined;
+    };
+
     const settleResponse = (state: SessionState, response: NativeHarnessResponse) => {
       // Header buckets describe the account after this response; they go
       // first so a consumer that stops at the terminal still sees them.
@@ -417,20 +548,77 @@ export function createNativeHarnessConnection(
       if (response.usage !== undefined)
         state.usage = addNativeHarnessUsage(state.usage, response.usage);
       if (response.toolCalls.length > 0) {
-        const refused = refuseToolCalls(state.tools, response.toolCalls);
-        if (refused !== undefined) {
-          emit(state, { kind: "failed", failure: failure("protocol", refused) });
-          return;
-        }
+        const calls = response.toolCalls;
+        // The model's own call is journaled either way: a malformed call is
+        // answered with what was wrong so the model can correct itself, and it
+        // must be able to read the call it is correcting.
         const message: NativeHarnessMessage = {
           role: "assistant",
           text: response.text,
-          toolCalls: response.toolCalls,
+          toolCalls: calls,
         };
         options.transcripts.append(state.transcriptId, message);
         state.messages.push(message);
-        state.pending = { calls: response.toolCalls, answers: new Map() };
-        for (const call of response.toolCalls) {
+        const answers = new Map<string, ProviderToolAnswer>();
+        const malformed = new Set<string>();
+        const idCounts = new Map<string, number>();
+        for (const call of calls) {
+          idCounts.set(call.toolCallId, (idCounts.get(call.toolCallId) ?? 0) + 1);
+        }
+        for (const call of calls) {
+          const problem = toolCallProblem(state.tools, call, idCounts);
+          if (problem === undefined) continue;
+          malformed.add(call.toolCallId);
+          answers.set(call.toolCallId, {
+            sessionId: state.sessionId,
+            requestId: call.toolCallId,
+            resultJson: problem,
+            isError: true,
+          });
+          options.transcripts.settle(state.transcriptId, {
+            toolCallId: call.toolCallId,
+            resultJson: problem,
+            isError: true,
+          });
+        }
+        state.pending = { calls, answers };
+        if (malformed.size > 0) {
+          state.selfCorrections += 1;
+          if (state.selfCorrections > MAX_SELF_CORRECTION_ROUNDS) {
+            // The well-formed calls of this step will never run. Each gets a
+            // result that says so and the step is closed, so the journal and
+            // the next send do not carry calls without results.
+            for (const call of calls) {
+              if (malformed.has(call.toolCallId)) continue;
+              options.transcripts.settle(state.transcriptId, {
+                toolCallId: call.toolCallId,
+                resultJson: NOT_RUN_RESULT_JSON,
+                isError: true,
+              });
+              answers.set(call.toolCallId, {
+                sessionId: state.sessionId,
+                requestId: call.toolCallId,
+                resultJson: NOT_RUN_RESULT_JSON,
+                isError: true,
+              });
+            }
+            closePendingStep(state);
+            // This branch returns normally, so the step's catch does not run.
+            // A note queued during the step would otherwise stay pending.
+            state.acceptingSteering = false;
+            for (const note of state.steering.splice(0)) note.resolve("unsupported");
+            emit(state, {
+              kind: "failed",
+              failure: failure(
+                "protocol",
+                "The provider repeatedly returned tool calls the harness could not run.",
+              ),
+            });
+            return;
+          }
+        }
+        for (const call of calls) {
+          if (malformed.has(call.toolCallId)) continue;
           emit(state, {
             kind: "tool-request",
             requestId: call.toolCallId,
@@ -438,6 +626,9 @@ export function createNativeHarnessConnection(
             inputJson: call.argumentsJson,
           });
         }
+        // A step with nothing left for the runner to do continues at once,
+        // carrying the error results back to the model.
+        if (calls.every((call) => malformed.has(call.toolCallId))) advanceAfterResults(state);
         return;
       }
       const message: NativeHarnessMessage = { role: "assistant", text: response.text };
@@ -454,7 +645,13 @@ export function createNativeHarnessConnection(
         emit(state, { kind: "usage", ...state.usage });
       }
       state.acceptingSteering = false;
-      emit(state, { kind: "completed", resumeCursor: cursorFor(state) });
+      emit(state, {
+        kind: "completed",
+        resumeCursor: cursorFor(state),
+        ...(response.outputStopReason === undefined
+          ? {}
+          : { stopReason: response.outputStopReason }),
+      });
     };
 
     const emitBucket = (state: SessionState, bucket: ObservedRateLimitBucket) =>
@@ -589,6 +786,7 @@ export function createNativeHarnessConnection(
             state.attempted = [];
             state.turn = input;
             state.steps = 0;
+            state.selfCorrections = 0;
             state.usage = { inputTokens: 0, outputTokens: 0 };
             state.acceptingSteering = true;
             void runStep(state, request);
@@ -622,13 +820,24 @@ export function createNativeHarnessConnection(
             state.abortController.abort();
             await state.inFlight;
             // During the tool phase the request already settled, so nothing
-            // else reports the cancellation. The unanswered calls stay
-            // unsettled in the journal; a resume closes them honestly.
+            // else reports the cancellation; the calls the runner never
+            // answered are closed here so the conversation stays valid.
             if (state.pending !== undefined) {
-              state.pending = undefined;
+              // A journal write that fails here must drop the live session.
+              // Clearing the turn in memory would discard the open step without
+              // a durable results message, and leaving it in flight rejects
+              // every later send. Resume rebuilds that step from the journal.
+              try {
+                closePendingStep(state);
+              } catch (error) {
+                release(state);
+                throw error;
+              }
               emit(state, { kind: "interrupted", message: "The provider request was cancelled." });
             }
-            release(state);
+            // The session and its conversation stay live, so the next send
+            // continues this session instead of rebuilding it from the journal.
+            settleTurnWithoutStopping(state);
           },
           catch: sanitizeFailure,
         }),
@@ -677,40 +886,7 @@ export function createNativeHarnessConnection(
             if (!pending.calls.every((call) => pending.answers.has(call.toolCallId))) {
               return undefined;
             }
-            const results: NativeHarnessMessage = {
-              role: "assistant",
-              text: "",
-              toolResults: pending.calls.flatMap((call) => {
-                const answer = pending.answers.get(call.toolCallId);
-                return answer === undefined
-                  ? []
-                  : [
-                      {
-                        toolCallId: answer.requestId,
-                        resultJson: answer.resultJson,
-                        isError: answer.isError,
-                        ...(answer.images === undefined ? {} : { images: answer.images }),
-                      },
-                    ];
-              }),
-            };
-            state.messages.push(results);
-            state.pending = undefined;
-            const request = takeSteeringRequest(state) ?? requestFor(state, [...state.messages]);
-            if (request === undefined) {
-              emit(state, {
-                kind: "failed",
-                failure: failure(
-                  "invalid-configuration",
-                  "The provider request exceeded the configured size limit.",
-                ),
-              });
-              state.inFlight = undefined;
-              state.abortController = undefined;
-              state.acceptingSteering = false;
-              return undefined;
-            }
-            void runStep(state, request);
+            advanceAfterResults(state);
             return undefined;
           },
           catch: sanitizeFailure,
@@ -745,24 +921,42 @@ function composeSystem(
 }
 
 /**
- * Fails closed on a step the server must not execute: a call id used twice
- * would let one answer satisfy several calls, and a tool the turn never
- * offered has no authority behind it.
+ * Why a tool call the model made cannot be run, as the error result that goes
+ * back to the model, or undefined when the call is well formed. A call whose
+ * id repeats would let one answer satisfy several calls, a tool the turn never
+ * offered has no authority behind it, and arguments that are not JSON cannot
+ * be decoded; each goes back as an error the model can correct. Arguments are
+ * never replaced by an empty object — the exact bytes the model sent are what
+ * is refused.
  */
-function refuseToolCalls(
+function toolCallProblem(
   offered: ReadonlyArray<ProviderToolDefinition>,
-  calls: ReadonlyArray<NativeHarnessTranscriptToolCall>,
+  call: NativeHarnessTranscriptToolCall,
+  idCounts: ReadonlyMap<string, number>,
 ): string | undefined {
-  const seen = new Set<string>();
-  for (const call of calls) {
-    if (seen.has(call.toolCallId)) return "The provider returned duplicate tool call identifiers.";
-    seen.add(call.toolCallId);
+  if ((idCounts.get(call.toolCallId) ?? 0) > 1) {
+    // One answer could satisfy several calls, so no call in a step that
+    // reuses an id can run; every one of them goes back as an error.
+    return JSON.stringify({
+      error: "The tool call id was reused within this step.",
+      toolCallId: call.toolCallId,
+    });
   }
-  const names = new Set(offered.map((tool) => tool.name));
-  const unoffered = calls.find((call) => !names.has(call.toolName));
-  return unoffered === undefined
-    ? undefined
-    : `The provider requested an unsupported tool: ${unoffered.toolName}.`;
+  if (!offered.some((tool) => tool.name === call.toolName)) {
+    return JSON.stringify({
+      error: `No tool named "${call.toolName}" was offered.`,
+      tool: call.toolName,
+    });
+  }
+  try {
+    JSON.parse(call.argumentsJson);
+  } catch {
+    return JSON.stringify({
+      error: "arguments were not valid JSON",
+      arguments: call.argumentsJson.slice(0, 512),
+    });
+  }
+  return undefined;
 }
 
 /**
@@ -850,18 +1044,28 @@ export function sortToolDefinitionsByName(
  * replaced by a marker, oldest first, then whole earlier exchanges are left
  * out behind a note. The latest message is never cut. Undefined means even
  * that does not fit.
+ *
+ * `reduceOnce` forces at least one step of the ladder even when the endpoint's
+ * own size estimate says the request fits. It is used after the endpoint has
+ * refused a request as too large: the estimate was wrong, so the request must
+ * actually shrink before it is sent again. A step that would leave the request
+ * as it was (a result already omitted, a note already in front) is skipped,
+ * since the refused request may itself have been reduced already; resending
+ * the same bytes would only be refused again.
  */
 export function fitRequest(
   endpoint: Pick<NativeHarnessTransportSession, "fits">,
   request: NativeHarnessRequest,
+  options?: { readonly reduceOnce?: boolean | undefined },
 ): NativeHarnessRequest | undefined {
-  if (endpoint.fits(request)) return request;
+  if (options?.reduceOnce !== true && endpoint.fits(request)) return request;
   const history = [...request.history];
   const fits = (candidate: ReadonlyArray<NativeHarnessMessage>) =>
     endpoint.fits({ ...request, history: candidate });
   for (let index = 0; index < history.length - 1; index += 1) {
     const message = history[index];
     if (message?.toolResults === undefined) continue;
+    if (message.toolResults.every((result) => result.resultJson === OMITTED_RESULT_JSON)) continue;
     history[index] = {
       ...message,
       toolResults: message.toolResults.map((result) => ({
@@ -880,11 +1084,13 @@ export function fitRequest(
     while (next < history.length - 1 && !isPlainUserMessage(history[next])) next += 1;
     if (next >= history.length - 1 && !isPlainUserMessage(history[next])) return undefined;
     start = next;
+    // Cutting only an earlier note and putting the same note back changes nothing.
+    const unchanged = start === 1 && history[0]?.text === OMITTED_HISTORY_NOTE;
     const candidate = [
       { role: "user" as const, text: OMITTED_HISTORY_NOTE },
       ...history.slice(start),
     ];
-    if (fits(candidate)) return { ...request, history: candidate };
+    if (!unchanged && fits(candidate)) return { ...request, history: candidate };
     if (start >= history.length - 1) return undefined;
   }
 }

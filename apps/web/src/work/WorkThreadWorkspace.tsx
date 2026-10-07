@@ -22,6 +22,7 @@ import {
   type WorkTurnId,
   type WorkTurnState,
   type WorkTurnStreamFrame,
+  type HarnessRetryNotice,
 } from "@octant/contracts";
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
@@ -97,6 +98,7 @@ import { useWorkFileMentions } from "./useWorkFileMentions";
 import { samePollingData } from "../polling/samePollingData";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
+import { ChildResultCards } from "../agents/ChildResultCards";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
   documentIsVisible,
@@ -116,6 +118,7 @@ import {
   turnWorkedFor,
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
+import { HarnessRetryStatus, type HarnessRetryStreamEvent } from "../transcript/HarnessRetryStatus";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import { providerFamilyForThread } from "../providers/providerFamily";
@@ -134,6 +137,8 @@ type WorkTranscriptRow =
       readonly streaming: boolean;
       /** When the person's message was accepted; assistant entries carry the time on their header. */
       readonly at?: string;
+      /** The host wrote this user entry to carry a subagent's result into the thread. */
+      readonly delivered?: true;
       /** The turn header, when this is the turn's first reply and so opens with it. */
       readonly head?: WorkTurnState;
     }
@@ -297,6 +302,56 @@ function artifactNameFromPrompt(prompt: string): string {
   return `${slug.length > 0 ? slug : "notes"}.md`;
 }
 
+function workRetryEvents(
+  retries: ReadonlyMap<string, HarnessRetryNotice>,
+  requestId: string,
+): readonly HarnessRetryStreamEvent[] {
+  const notice = retries.get(requestId);
+  if (notice === undefined) return [];
+  return [
+    {
+      kind: "retrying",
+      attempt: notice.attempt,
+      maxAttempts: notice.maxAttempts,
+      delayMs: notice.delayMs,
+      reason: notice.reason,
+      announcedAt: notice.announcedAt,
+    },
+  ];
+}
+
+function applyWorkRetryFrame(
+  current: ReadonlyMap<string, HarnessRetryNotice>,
+  frame: WorkTurnStreamFrame,
+): ReadonlyMap<string, HarnessRetryNotice> {
+  if (frame.kind === "snapshot-required" || frame.kind === "turn-settled") {
+    if (frame.kind === "turn-settled") {
+      if (!current.has(String(frame.turn.requestId))) return current;
+      const next = new Map(current);
+      next.delete(String(frame.turn.requestId));
+      return next;
+    }
+    return new Map();
+  }
+  if (frame.kind === "provider-retry") {
+    const next = new Map(current);
+    next.set(String(frame.requestId), {
+      attempt: frame.attempt,
+      maxAttempts: frame.maxAttempts,
+      delayMs: frame.delayMs,
+      reason: frame.reason,
+      announcedAt: frame.announcedAt,
+    });
+    return next;
+  }
+  if (frame.kind === "response-delta" && current.has(String(frame.requestId))) {
+    const next = new Map(current);
+    next.delete(String(frame.requestId));
+    return next;
+  }
+  return current;
+}
+
 function applyWorkTurnStreamFrame(
   turns: ReadonlyArray<WorkTurnState>,
   frame: WorkTurnStreamFrame,
@@ -321,6 +376,7 @@ function applyWorkTurnStreamFrame(
     next[index] = { ...current, tasks: frame.tasks };
     return next;
   }
+  if (frame.kind === "provider-retry") return turns;
   if (index === -1) return turns;
   const current = turns[index];
   if (current === undefined) return turns;
@@ -435,6 +491,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     onResolveExtensionReference: extensionDraft.resolveReference,
   });
   const [turns, setTurns] = useState<ReadonlyArray<WorkTurnState>>([]);
+  const [retries, setRetries] = useState<ReadonlyMap<string, HarnessRetryNotice>>(() => new Map());
   const [pendingRequests, setPendingRequests] = useState<ReadonlyArray<WorkRequest>>([]);
   const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
   const [browserApprovalBusy, setBrowserApprovalBusy] = useState(false);
@@ -616,6 +673,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           streaming:
             turn.status === "running" || turn.status === "accepted" || turn.status === "waiting",
           ...(entry.role === "user" ? { at: turn.acceptedAt } : {}),
+          ...(entry.role === "user" && turn.delivery !== undefined
+            ? { delivered: true as const }
+            : {}),
           ...(opensTurn ? { head: turn } : {}),
         });
       }
@@ -707,11 +767,16 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               afterSequence: transcript.liveCursor,
               signal: streamAbort.signal,
               active: () => !cancelled && requestGeneration === transcriptGeneration.current,
-              apply: (frame) => setTurns((current) => applyWorkTurnStreamFrame(current, frame)),
-              replace: (next) =>
+              apply: (frame) => {
+                setTurns((current) => applyWorkTurnStreamFrame(current, frame));
+                setRetries((current) => applyWorkRetryFrame(current, frame));
+              },
+              replace: (next) => {
                 setTurns((current) =>
                   samePollingData(current, next.turns) ? current : next.turns,
-                ),
+                );
+                setRetries(new Map());
+              },
             });
           }
         };
@@ -1438,6 +1503,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           }
           if (row.kind === "message") {
             if (row.entry.role === "user") {
+              if (row.delivered === true) {
+                return (
+                  <article aria-label="Subagent results" className="turn-child-result">
+                    <ChildResultCards providerGroups={props.providerGroups} text={row.entry.text} />
+                  </article>
+                );
+              }
               return (
                 <article aria-label="Your message" className="turn-user">
                   <div className="bubble">
@@ -1454,25 +1526,30 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             return (
               <article aria-label="Assistant message" className="turn-agent">
                 {row.head === undefined ? null : (
-                  <WorkTurnHeader
-                    copyValue={row.entry.text}
-                    onRestorePrompt={composerDraft.setDraft}
-                    onCancelResume={cancelUsageResume}
-                    onScheduleResume={scheduleUsageResume}
-                    providerGroups={props.providerGroups ?? []}
-                    resumable={
-                      String(row.head.turnId) === String(turns.at(-1)?.turnId) &&
-                      row.head.status === "waiting"
-                    }
-                    {...(thread?.snooze === undefined
-                      ? { onSnoozeAtReset: snoozeAtUsageReset }
-                      : {})}
-                    turn={row.head}
-                    {...(thread?.usageResume === undefined ||
-                    String(thread.usageResume.record.turnId) !== String(row.head.turnId)
-                      ? {}
-                      : { usageResume: thread.usageResume })}
-                  />
+                  <>
+                    <WorkTurnHeader
+                      copyValue={row.entry.text}
+                      onRestorePrompt={composerDraft.setDraft}
+                      onCancelResume={cancelUsageResume}
+                      onScheduleResume={scheduleUsageResume}
+                      providerGroups={props.providerGroups ?? []}
+                      resumable={
+                        String(row.head.turnId) === String(turns.at(-1)?.turnId) &&
+                        row.head.status === "waiting"
+                      }
+                      {...(thread?.snooze === undefined
+                        ? { onSnoozeAtReset: snoozeAtUsageReset }
+                        : {})}
+                      turn={row.head}
+                      {...(thread?.usageResume === undefined ||
+                      String(thread.usageResume.record.turnId) !== String(row.head.turnId)
+                        ? {}
+                        : { usageResume: thread.usageResume })}
+                    />
+                    <HarnessRetryStatus
+                      events={workRetryEvents(retries, String(row.head.requestId))}
+                    />
+                  </>
                 )}
                 {row.entry.text === "" ? null : (
                   <AssistantMessageBody body={row.entry.text} streaming={row.streaming} />
@@ -1499,6 +1576,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     ? {}
                     : { usageResume: thread.usageResume })}
                 />
+                <HarnessRetryStatus events={workRetryEvents(retries, String(row.turn.requestId))} />
               </div>
             );
           }

@@ -41,6 +41,43 @@ export type EndpointRetryReason =
   | "stream-interrupted"
   | "empty-completion";
 
+/**
+ * How providers word a refusal that the model's context window is too small.
+ * OpenAI reports `context_length_exceeded`, Anthropic says the "prompt is too
+ * long", and OpenAI-compatible hosts answer a 400 or 413 with a comparable
+ * sentence or code. One predicate reads every shape so a driver that surfaces
+ * the provider's own text and one that normalizes it are recognised alike.
+ */
+const CONTEXT_OVERFLOW_MESSAGE =
+  /context_length_exceeded|prompt is too long|context length|context window|context limit|maximum context|too many tokens|reduce the length of/i;
+
+/** The sentence a driver substitutes when it recognizes an overflow body but keeps no raw text. */
+export const CONTEXT_OVERFLOW_FAILURE_MESSAGE =
+  "The provider rejected the request because it exceeded the model's context length.";
+
+/**
+ * Whether the endpoint refused a request because it outgrew the model's
+ * context window. Unlike the retryable reasons this failure does not clear on
+ * its own: sending the same request again fails the same way, so the recovery
+ * is to shrink the request (below) rather than to wait. Rate-limit and
+ * unavailability failures are never overflow even when their text mentions a
+ * window, because those do lift on their own.
+ */
+export function isContextOverflowFailure(failure: ProviderFailure): boolean {
+  if (failure.category === "rate-limited" || failure.category === "unavailable") return false;
+  if (failure.usageLimit !== undefined && failure.usageLimit.kind !== "temporary") return false;
+  return (
+    failure.message === CONTEXT_OVERFLOW_FAILURE_MESSAGE ||
+    CONTEXT_OVERFLOW_MESSAGE.test(failure.message)
+  );
+}
+
+/** The overflow failure a rejection body that names a filled window becomes, or undefined if it is another error. */
+export function contextOverflowFromBody(text: string): ProviderFailure | undefined {
+  if (!CONTEXT_OVERFLOW_MESSAGE.test(text)) return undefined;
+  return { category: "provider-failed", message: CONTEXT_OVERFLOW_FAILURE_MESSAGE };
+}
+
 // The stream parsers report a stream that closed before its terminal event as
 // a protocol failure with one of these sentences. The retry conformance test
 // feeds each parser a truncated stream so a reworded message fails loudly.
