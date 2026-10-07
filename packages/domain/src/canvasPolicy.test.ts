@@ -754,11 +754,22 @@ describe("design frames", () => {
       '<a x"y href>Shop</a>',
       '<a x"y href=>Shop</a>',
       `<a x"y href="'//example.test/a">Shop</a>`,
+      // An empty fragment clears the shown frame, so Play falls back to the
+      // first screen instead of the top of this one.
+      '<a href="#">Top</a>',
     ]) {
       expect(refusalOf(design([{ frameId: "home", html }]))).toMatch(
         /^design-markup-refused: .*(links to|leaves the design)/,
       );
     }
+  });
+
+  it("reads a frame full of unclosed tags in about the time it takes to read it once", () => {
+    const started = performance.now();
+    expect(refusalOf(design([{ frameId: "home", html: "<a ".repeat(10_000) }]))).toBe("accepted");
+    // A pattern that paired quotes across the whole frame took over a second
+    // here, and every renderer validates a Canvas when it draws one.
+    expect(performance.now() - started).toBeLessThan(250);
   });
 
   it("keeps links between frames and sections, and the attributes that only look like them", () => {
@@ -767,7 +778,7 @@ describe("design frames", () => {
         design([
           {
             frameId: "home",
-            html: '<a href="#pay">Pay</a><a href="#">Top</a><details open><summary>More</summary></details><div data-href="x"></div>',
+            html: '<a href="#pay">Pay</a><details open><summary>More</summary></details><div data-href="x"></div>',
           },
           { frameId: "pay", html: '<a href="#home">Back</a>' },
         ]),
@@ -781,6 +792,27 @@ describe("design frames", () => {
         design([{ frameId: "home", html: '<img src="https://example.test/a.png" alt="">' }]),
       ),
     ).toContain("images must be data:image URLs");
+    // A browser may pick any candidate of a srcset, so every one must be inline.
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "home",
+            html: '<img srcset="data:image/png;base64,AA,BB 1x, https://example.test/a.png 2x" alt="">',
+          },
+        ]),
+      ),
+    ).toContain("images must be data:image URLs");
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "home",
+            html: '<img srcset="data:image/png;base64,AA,BB 1x,data:image/png;base64,CC 2x" alt="">',
+          },
+        ]),
+      ),
+    ).toBe("accepted");
     expect(
       refusalOf(
         design([{ frameId: "home", html: "<p>Hi</p>" }], "@import url(https://fonts.test/a.css);"),
