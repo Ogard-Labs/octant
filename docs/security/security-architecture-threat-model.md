@@ -365,7 +365,8 @@ window, or approves an action class the host policy reserves for the local user.
   token, and refuses a remote device for connect and disconnect. A model-generated command inside
   the confined launch can read the token from the runtime's environment, which is the same reach
   an API-key launch already gives its key; the token is scoped to inference, and a refused token
-  is marked expired rather than retried. Disconnect deletes it from the broker.
+  is marked expired rather than retried. Disconnect, or removing that Claude Code provider, deletes
+  it from the broker; an API-key launch never reads the envelope as its key.
 - Vibe disables its keyring lookup in the confined launch and receives its Mistral API key through
   Octant's `api-key` authentication instead.
 - **Version reads are confined; three readiness probes are not.** Every `--version` read prepares

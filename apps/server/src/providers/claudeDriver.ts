@@ -65,6 +65,7 @@ import { CONFINED_CLAUDE_EXECUTION_POLICIES, type ClaudeProcessPort } from "./cl
 import {
   CLAUDE_HELPER_EXPIRED_MESSAGE,
   CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
+  readClaudeHelperSignIn,
   type ClaudeHelperSignInPort,
 } from "./claudeHelperSignIn";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
@@ -614,7 +615,9 @@ function brokerResolve(options: ClaudeDriverOptions): Effect.Effect<string, Prov
   return Effect.tryPromise({
     try: async () => {
       const value = await options.credentialResolver!.resolve(options.instanceId);
-      if (value.trim().length === 0) {
+      // The broker keeps one entry per instance; a Claude for helpers token left
+      // there must never ride out as an API key to an unconfined launch.
+      if (value.trim().length === 0 || readClaudeHelperSignIn(value) !== undefined) {
         throw failure("unauthenticated", "Claude API-key credential is missing.");
       }
       return value;

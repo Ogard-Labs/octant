@@ -26,6 +26,7 @@ import type { ClaudeEnvironmentScope } from "./claudeEnvironment";
 import {
   CLAUDE_HELPER_EXPIRED_MESSAGE,
   CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
+  encodeClaudeHelperSignIn,
   type ClaudeHelperSignInPort,
 } from "./claudeHelperSignIn";
 import type { ClaudeProcessPort } from "./claudeProcess";
@@ -4191,6 +4192,23 @@ describe("Claude exact resume", () => {
 });
 
 describe("Claude for helpers", () => {
+  it("never hands a stored helper token to an API-key launch as its key", async () => {
+    const f = harness("api-key");
+    vi.mocked(f.credentialResolver.resolve).mockResolvedValue(
+      encodeClaudeHelperSignIn({ state: "connected", token: HELPER_TOKEN }),
+    );
+    const acquired = await acquire(f.driver);
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      expect(String(exit)).toContain("Claude API-key credential is missing.");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
   it("signs a confined subscription launch in with the connected helper token and nothing else", async () => {
     const f = harness("subscription");
     const acquired = await acquire(f.driver, "chat");

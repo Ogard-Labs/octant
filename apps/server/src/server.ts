@@ -4199,6 +4199,11 @@ export function startOctantServer(
           agentRunSessionStore.removeProviderIdentities(instanceId, signal),
         ]);
       },
+      // The provider is already gone; a store that cannot be reached leaves the
+      // token behind rather than reporting the removal as failed.
+      clearClaudeHelperSignIn: async (instanceId) => {
+        await claudeHelperSignIn?.disconnect(String(instanceId)).catch(() => undefined);
+      },
       clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
       driver: (instance) =>
         attachWorkRequestRuntime(
