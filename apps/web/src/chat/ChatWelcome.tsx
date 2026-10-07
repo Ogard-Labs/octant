@@ -4,7 +4,7 @@ import {
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
 import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
-import { useCallback, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
@@ -41,6 +41,8 @@ export interface ChatWelcomeProps {
   readonly recentThreads?: ReadonlyArray<DraftRecentThread>;
   /** The person's name from their profile, for the greeting on the hero. */
   readonly greetingName?: string | undefined;
+  /** The card area under the composer, ahead of the starter ideas. */
+  readonly homeStart?: ReactNode;
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly hosts?: ReadonlyArray<HostIdentity>;
@@ -263,6 +265,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             Retry Chat
           </OctantButton>
         ) : null}
+        {props.homeStart}
         {(props.recentThreads?.length ?? 0) === 0 ? (
           <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
             {starterIdeas.map((idea) => {

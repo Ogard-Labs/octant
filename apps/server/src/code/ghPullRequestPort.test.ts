@@ -578,6 +578,7 @@ describe("GhPullRequestPort active list", () => {
           url: activeRow.url,
           checks: "passing",
           review: "approved",
+          reviewRequestedFrom: [],
         },
         {
           number: 13,
@@ -592,6 +593,7 @@ describe("GhPullRequestPort active list", () => {
           url: activeRow.url,
           checks: "passing",
           review: "approved",
+          reviewRequestedFrom: [],
         },
       ],
     });
@@ -605,9 +607,37 @@ describe("GhPullRequestPort active list", () => {
       "--limit",
       "100",
       "--json",
-      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,statusCheckRollup,reviewDecision",
+      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,statusCheckRollup,reviewDecision,reviewRequests",
     ]);
     expect(vi.mocked(command.run).mock.calls.some(([args]) => args.includes("merge"))).toBe(false);
+  });
+
+  it("keeps the logins asked to review and ignores a team request", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          {
+            ...activeRow,
+            reviewRequests: [
+              { login: "reviewer" },
+              { login: "Reviewer" },
+              { name: "engineering", slug: "engineering" },
+              { login: "not a login" },
+            ],
+          },
+        ]),
+      },
+    ]);
+
+    const result = await port.listActive(
+      { owner: "octant", name: "octant", limit: 100 },
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({
+      status: "ok",
+      rows: [{ reviewRequestedFrom: ["reviewer"] }],
+    });
   });
 
   it("normalizes the active list state and mergeability", async () => {

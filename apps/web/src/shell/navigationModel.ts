@@ -1,4 +1,4 @@
-import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
+import type { ThreadBoardPullRequestSummaries, ThreadLiveStep } from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { SidebarThreadStatusInput } from "@octant/domain/sidebar-thread-status-policy";
 import type {
@@ -69,8 +69,25 @@ export interface SidebarNavigationInput {
   readonly imageLibrary?: NavigationAvailability;
 }
 
+/** The live-turn facts a navigation row carries while its turn runs. */
+export interface LiveTurnFacts {
+  readonly turnStartedAt: string;
+  readonly liveStep?: ThreadLiveStep;
+}
+
+/** Whether two reads of a thread's live turn say the same thing, so a poll that repeats one does not re-render. */
+export function sameLiveTurn(a: LiveTurnFacts | undefined, b: LiveTurnFacts | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return (
+    a.turnStartedAt === b.turnStartedAt && JSON.stringify(a.liveStep) === JSON.stringify(b.liveStep)
+  );
+}
+
 export interface ChatThreadNavigationSource {
   readonly executing?: boolean;
+  /** When the running turn began and what it is doing; absent outside a live turn. */
+  readonly turnStartedAt?: string | undefined;
+  readonly liveStep?: ThreadLiveStep | undefined;
   readonly followUpOpen?: boolean;
   readonly lastSequence?: number;
   /**
@@ -125,6 +142,13 @@ export interface ThreadCheckoutChip {
 export interface ChatThreadNavigationItem {
   /** Absent leaves the row's dot idle rather than inventing a state. */
   readonly activity?: ThreadRowActivity;
+  /**
+   * When the host says the running turn began, and its latest step (a tool and
+   * a redacted argument, or a wait on the person). Both are absent while the
+   * thread is idle and from a host that does not report them.
+   */
+  readonly turnStartedAt?: string;
+  readonly liveStep?: ThreadLiveStep;
   /** The kind of Work request currently waiting on the person, when known. */
   readonly awaitingKind?: "approval" | "user-input";
   /** Present when the host projected a Git checkout for this row. */
@@ -228,6 +252,8 @@ export function buildChatThreadNavigation(
 ): ReadonlyArray<ChatThreadNavigationItem> {
   return threads.map((thread) => ({
     ...(thread.executing === true ? { activity: "working" as const } : {}),
+    ...(thread.turnStartedAt === undefined ? {} : { turnStartedAt: thread.turnStartedAt }),
+    ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
     ...(thread.followUpOpen === undefined ? {} : { followUp: thread.followUpOpen }),
     ...(thread.lineageParentThreadId === undefined
       ? {}

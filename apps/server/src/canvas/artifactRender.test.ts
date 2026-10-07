@@ -1,5 +1,9 @@
 import { decodeArtifactLibraryEntry } from "@octant/contracts/artifact-library";
-import type { CanvasBlock } from "@octant/contracts/canvas";
+import {
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasBlock,
+  type CanvasBlock,
+} from "@octant/contracts/canvas";
 import { describe, expect, it } from "vitest";
 import { renderArtifactThumbnail } from "./artifactRender";
 
@@ -24,9 +28,9 @@ const chart = {
   ],
 } as unknown as CanvasBlock;
 
-const treemap = {
+const treemap = decodeCanvasBlock({
   blockId: "map-1",
-  schemaVersion: 4,
+  schemaVersion: CANVAS_SCHEMA_VERSION,
   kind: "treemap",
   measures: [
     { measureId: "loc", label: "Lines of code" },
@@ -39,7 +43,7 @@ const treemap = {
     { nodeId: "a", label: "A", parentId: "root", values: { loc: 10, edits: 2 } },
     { nodeId: "b", label: "B", parentId: "root", values: { loc: 30, edits: 5 } },
   ],
-} as unknown as CanvasBlock;
+});
 
 describe("drawing a preview of an artifact", () => {
   it("draws a treemap from the shared squarified layout, with no script", () => {
@@ -52,10 +56,7 @@ describe("drawing a preview of an artifact", () => {
   });
 
   it("starts a treemap export from the node the author chose", () => {
-    const fromLeaf = {
-      ...(treemap as unknown as Record<string, unknown>),
-      startNodeId: "a",
-    } as unknown as CanvasBlock;
+    const fromLeaf = decodeCanvasBlock({ ...treemap, startNodeId: "a" });
     const whole = (renderArtifactThumbnail(definition([treemap])).match(/<rect/g) ?? []).length;
     const zoomed = (renderArtifactThumbnail(definition([fromLeaf])).match(/<rect/g) ?? []).length;
 
