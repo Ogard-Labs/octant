@@ -1279,7 +1279,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   connection's app-managed tool bridge allowed — into the private
   configuration, where OpenCode appends it after every agent's built-in rules
   (its default agent otherwise allows everything); a launch that names no
-  posture denies all. 2.x offers Code turns only, because project resolution
+  posture denies all. The bridge allow has nothing to admit yet: Octant
+  registers app-managed tools through the 1.x MCP route, which 2.0.22 does
+  not serve (it lists `/api/experimental/mcp/{server}` instead), so the probe
+  reports app-managed tools unsupported and 2.x runs turns without Octant's
+  app tools until registration supports the 2.x MCP API. 2.x offers Code turns only, because project resolution
   starts Git, which the Chat, Plan, and Work jail refuses. Approvals and
   questions map through the v2 routes; resume, interruption, and tool activity
   are reported; a file change that no allowed or approved edit preceded fails
