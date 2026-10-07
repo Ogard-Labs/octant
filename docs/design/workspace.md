@@ -246,8 +246,9 @@ the host cannot scan, the card says it could not check rather than that nothing
 is running, and a refused refresh keeps the last listing. A window with no Code
 Project sees an empty card.
 
-Above the composer the same screens carry two tabs on its top-left edge,
-**New task** and **Running**. New task is selected first and is the composer as
+Above the composer the same screens, the Chat screen that lists the threads to
+continue among them, carry two tabs on its top-left edge, **New task** and
+**Running**. New task is selected first and is the composer as
 it was: the Running tab never takes the focus the composer takes on arrival. The
 Running label carries the sidebar's own Running count for the current mode, read
 from the same place as the tile (nothing is added at zero), so the two cannot
