@@ -6,6 +6,11 @@ import {
 } from "@octant/contracts/canvas-export";
 import { isCanvasShareSafeText } from "@octant/contracts/canvas-share";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
+import {
+  treemapChildren,
+  treemapRootId,
+  treemapTotals,
+} from "@octant/domain/canvas-treemap-layout";
 import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
 
 /**
@@ -273,6 +278,37 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           items: block.nodes.map((node) => `${node.component}: ${reading(node.label)}`),
         },
       ];
+    case "treemap": {
+      // The hierarchy as a table: one row per node, indented by depth, so the
+      // exported document carries the same readings the picture shows.
+      const children = treemapChildren(block);
+      const rootId = treemapRootId(block);
+      const totals = block.measures.map((measure) =>
+        treemapTotals(block, String(measure.measureId)),
+      );
+      const nodesById = new Map(block.nodes.map((node) => [String(node.nodeId), node]));
+      const rows: Array<ReadonlyArray<string>> = [];
+      const indent = (depth: number) => "\u00A0".repeat(depth * 2);
+      const walk = (nodeId: string, depth: number) => {
+        const node = nodesById.get(nodeId);
+        if (node === undefined) return;
+        rows.push([
+          `${indent(depth)}${reading(node.label)}`,
+          ...block.measures.map((measure, index) =>
+            scalar(totals[index]?.get(nodeId) ?? 0, measure.format),
+          ),
+        ]);
+        for (const child of children.get(nodeId) ?? []) walk(child, depth + 1);
+      };
+      walk(rootId, 0);
+      return [
+        {
+          kind: "table",
+          headers: ["Item", ...block.measures.map((measure) => reading(measure.label))],
+          rows,
+        },
+      ];
+    }
     case "design":
       // The reading form names each screen or slide. Its markup is drawn only
       // inside Octant's sandboxed frame, so it never travels in an export.

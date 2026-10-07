@@ -174,7 +174,7 @@ export class ThreadMentionService {
         return decodeThreadMentionCommandResult({
           kind: "mentions-searched",
           requestId: command.requestId,
-          candidates: await this.#search(context.windowId, command.query),
+          candidates: await this.#search(context.windowId, command.query, command.threadId),
         });
       case "resolve-mentions":
         return decodeThreadMentionCommandResult({
@@ -283,26 +283,40 @@ export class ThreadMentionService {
     return openable;
   }
 
-  async #search(windowId: WindowId, query: string): Promise<ReadonlyArray<ThreadMentionCandidate>> {
-    const openable = [...(await this.#openable(windowId)).values()].sort((left, right) =>
+  async #search(
+    windowId: WindowId,
+    query: string,
+    threadId: MentionableThreadId | undefined,
+  ): Promise<ReadonlyArray<ThreadMentionCandidate>> {
+    const directory = await this.#openable(windowId);
+    if (threadId !== undefined) {
+      // A drop already names its thread. Ranking by its title would cap it out
+      // behind eight similar or newer threads, so answer by id from the same
+      // openable set, reading no transcript.
+      const thread = directory.get(String(threadId));
+      return thread === undefined ? [] : [this.#candidate(thread)];
+    }
+    const openable = [...directory.values()].sort((left, right) =>
       left.updatedAt === right.updatedAt
         ? left.title.localeCompare(right.title)
         : left.updatedAt < right.updatedAt
           ? 1
           : -1,
     );
-    const candidates = openable.map((thread) => {
-      const sidecar = this.#sidecars.find(thread.threadId);
-      return {
-        threadId: thread.threadId,
-        mode: thread.mode,
-        title: thread.title,
-        placement: thread.placement,
-        updatedAt: thread.updatedAt,
-        ...(sidecar === undefined ? {} : { sideChatThreadId: sidecar.sidecarThreadId }),
-      } satisfies ThreadMentionCandidate;
-    });
+    const candidates = openable.map((thread) => this.#candidate(thread));
     return rankThreadMentionCandidates(candidates, query, MAX_THREAD_MENTION_CANDIDATES);
+  }
+
+  #candidate(thread: ThreadMentionDirectoryThread): ThreadMentionCandidate {
+    const sidecar = this.#sidecars.find(thread.threadId);
+    return {
+      threadId: thread.threadId,
+      mode: thread.mode,
+      title: thread.title,
+      placement: thread.placement,
+      updatedAt: thread.updatedAt,
+      ...(sidecar === undefined ? {} : { sideChatThreadId: sidecar.sidecarThreadId }),
+    } satisfies ThreadMentionCandidate;
   }
 
   async #resolve(

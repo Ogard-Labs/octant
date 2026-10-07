@@ -487,6 +487,231 @@
   }
 }
 
+/* ── Treemap ─────────────────────────────────────────────────────────────
+   The same data-visualisation system as a chart: shared scale roles, marks
+   that transition only on a size or colour change, and a disclosed table. */
+
+.canvas-block__treemap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.canvas-block__treemap-header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--oct-space-2);
+}
+
+.canvas-block__treemap-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.canvas-block__treemap-control-label {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__treemap-plot {
+  position: relative;
+}
+
+.canvas-block__treemap-plot:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.canvas-block__treemap-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 420px;
+}
+
+.canvas-block__treemap-group-frame {
+  fill: none;
+  stroke: var(--oct-border);
+  stroke-width: 1;
+}
+
+.canvas-block__treemap-group-label {
+  fill: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  /* A group reads as a heading over its cells, not as one more cell label. */
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.canvas-block__treemap-mark {
+  cursor: pointer;
+  /* A visible hairline keeps neighbouring cells apart, so two similar readings
+     do not read as one cell. */
+  stroke: var(--oct-border);
+  stroke-width: 1;
+  transition:
+    opacity var(--oct-motion-fast) var(--oct-ease-standard),
+    fill var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.canvas-block__treemap-cell.is-active .canvas-block__treemap-mark,
+.canvas-block__treemap-group[data-active="true"] .canvas-block__treemap-group-frame {
+  stroke: var(--octant-focus-ring);
+  stroke-width: 2;
+}
+
+.canvas-block__treemap-label {
+  fill: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  pointer-events: none;
+  /* A label sits on a cell whose colour is the data, so it keeps a surface
+     halo: the reading is legible whatever the cell's hue, in either mode. */
+  paint-order: stroke;
+  stroke: var(--oct-surface);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+}
+
+.canvas-block__treemap-breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0 0 var(--oct-space-2);
+  padding: 0;
+  list-style: none;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-meta);
+}
+
+.canvas-block__treemap-breadcrumb li + li::before {
+  content: "/";
+  margin-right: var(--oct-space-1);
+  color: var(--oct-muted);
+}
+
+.canvas-block__treemap-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-fg-2);
+}
+
+.canvas-block__treemap-legend ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas-block__treemap-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.canvas-block__treemap-swatch,
+.canvas-block__treemap-scale-step {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.canvas-block__treemap-scale {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas-block__treemap-scale-step {
+  width: 20px;
+}
+
+.canvas-block__treemap-scale-bound {
+  font-variant-numeric: tabular-nums;
+  color: var(--oct-meta);
+}
+
+.canvas-block__treemap-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.canvas-block__treemap-table:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.canvas-block__treemap-table th button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.canvas-block__treemap-data {
+  margin-top: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__treemap-data summary {
+  cursor: pointer;
+}
+
+.canvas-block__treemap-open {
+  font-size: var(--oct-text-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-block__treemap-mark {
+    transition: none;
+  }
+}
+
+[data-octant-reduced-motion="true"] .canvas-block__treemap-mark {
+  transition: none;
+}
+
+/* System colours keep the cells legible when the palette is replaced. */
+@media (forced-colors: active) {
+  .canvas-block__treemap-mark {
+    fill: ButtonFace;
+    stroke: CanvasText;
+    stroke-width: 2;
+  }
+
+  .canvas-block__treemap-group-frame {
+    stroke: CanvasText;
+  }
+
+  .canvas-block__treemap-group-label,
+  .canvas-block__treemap-label {
+    fill: CanvasText;
+  }
+
+  .canvas-block__treemap-label {
+    stroke: Canvas;
+  }
+
+  .canvas-block__treemap-cell.is-active .canvas-block__treemap-mark,
+  .canvas-block__treemap-group[data-active="true"] .canvas-block__treemap-group-frame {
+    stroke: Highlight;
+  }
+}
+
 .canvas-block__timeline {
   list-style: none;
   margin: 0;

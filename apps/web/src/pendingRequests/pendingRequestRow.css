@@ -1,0 +1,97 @@
+/* One waiting approval or question. Neutral ink and a hairline between rows:
+   the waiting state is a glyph and words, never a hue or a tinted fill. */
+
+.pending-request {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: var(--oct-space-2) var(--oct-space-1);
+  color: var(--oct-fg);
+}
+
+.pending-request__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.pending-request__mark {
+  flex: 0 0 auto;
+  color: var(--oct-fg-2);
+}
+
+.pending-request__title.pending-request__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  overflow: hidden;
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-request__title:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.pending-request__wait {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.pending-request__project {
+  overflow: hidden;
+  padding-inline-start: calc(16px + var(--oct-space-2));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-request__text {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.pending-request__actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+  padding-top: var(--oct-space-1);
+}
+
+.pending-request__choice.pending-request__choice {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.pending-request__number {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.pending-request__choice-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pending-request__notice {
+  margin: 0;
+  padding-top: var(--oct-space-1);
+}
+
+/* Inside a card that already names the thread: no padding of its own, and the
+   wait reads as a quiet line above the text. */
+.pending-request[data-embedded="true"] {
+  padding: 0;
+}

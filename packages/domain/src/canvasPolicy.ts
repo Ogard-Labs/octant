@@ -13,7 +13,13 @@ import {
   CANVAS_MAX_SERIES,
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
+  CANVAS_MAX_TREEMAP_DEPTH,
+  CANVAS_MAX_TREEMAP_LEAVES,
+  CANVAS_MOCKUP_SCHEMA_VERSION,
+  CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
+  CANVAS_TREEMAP_SCHEMA_VERSION,
+  CANVAS_DESIGN_SCHEMA_VERSION,
   CanvasBlock,
   CanvasDefinition,
   CanvasVersion,
@@ -28,7 +34,24 @@ const encoder = new TextEncoder();
 // Versions this runtime decodes: every historical version plus the current
 // one. A document declaring anything else is refused as a future version,
 // before its blocks are read, so a newer contract never reaches a renderer.
-const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, CANVAS_SCHEMA_VERSION];
+const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
+  1,
+  2,
+  3,
+  CANVAS_PRESENTATION_SCHEMA_VERSION,
+  CANVAS_TREEMAP_SCHEMA_VERSION,
+  CANVAS_SCHEMA_VERSION,
+];
+
+// A block kind that a document may only carry from the version that
+// introduced it. A document declaring an older version but carrying the kind
+// fails closed as a declared future version rather than a corrupt document.
+const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly since: number }> =
+  [
+    { kind: "mockup", since: CANVAS_MOCKUP_SCHEMA_VERSION },
+    { kind: "treemap", since: CANVAS_TREEMAP_SCHEMA_VERSION },
+    { kind: "design", since: CANVAS_DESIGN_SCHEMA_VERSION },
+  ];
 
 export type CanvasPolicyRejectionCode =
   | "invalid-schema"
@@ -66,6 +89,13 @@ export type CanvasPolicyRejectionCode =
   | "mockup-text-budget-exceeded"
   | "dangling-mockup-parent"
   | "mockup-nesting-cycle"
+  | "duplicate-measure-id"
+  | "unknown-treemap-measure"
+  | "treemap-roots"
+  | "treemap-nesting-cycle"
+  | "dangling-treemap-parent"
+  | "treemap-value-placement"
+  | "treemap-negative-value"
   | "design-frame-budget-exceeded"
   | "design-markup-budget-exceeded"
   | "duplicate-design-frame-id"
@@ -183,6 +213,8 @@ function sourceIdsForBlock(block: CanvasBlock): ReadonlyArray<CanvasSourceId> {
       return "sourceId" in block && block.sourceId !== undefined ? [block.sourceId] : [];
     case "plan":
       return block.tasks.flatMap((task) => task.sourceIds ?? []);
+    case "treemap":
+      return block.nodes.flatMap((node) => (node.sourceId === undefined ? [] : [node.sourceId]));
     default:
       return [];
   }
@@ -254,8 +286,8 @@ function calculateBudgetUsage(
 /**
  * A document a newer runtime declared with a version this runtime has never
  * seen — either a future schema version or a version-gated field (a mockup
- * block from version 3, a thread presentation from version 4, a design block
- * from version 5) inside a
+ * block from version 3, a thread presentation from version 4, a treemap from
+ * version 5, a design block from version 6) inside a
  * document that declares an older version — must fail closed as an
  * unsupported schema version, before any content is read, rather than
  * collapsing into a generic "corrupt" decode failure. Works on both a
@@ -273,21 +305,27 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
   const declared = envelope.schemaVersion;
   if (typeof declared !== "number") return undefined;
   if (!SUPPORTED_CANVAS_SCHEMA_VERSIONS.includes(declared)) return "unsupported-schema-version";
-  if (declared === CANVAS_SCHEMA_VERSION) return undefined;
   const presentation = envelope.presentation ?? envelope.definition?.presentation;
-  if (declared < 4 && presentation !== undefined) return "unsupported-schema-version";
+  if (declared < CANVAS_PRESENTATION_SCHEMA_VERSION && presentation !== undefined) {
+    return "unsupported-schema-version";
+  }
   const blocks = Array.isArray(envelope.blocks)
     ? envelope.blocks
     : Array.isArray(envelope.definition?.blocks)
       ? envelope.definition?.blocks
       : undefined;
-  const carries = (kind: string) =>
+  if (
     blocks?.some(
       (block) =>
-        typeof block === "object" && block !== null && (block as { kind?: unknown }).kind === kind,
-    ) === true;
-  if (declared < 3 && carries("mockup")) return "unsupported-schema-version";
-  if (declared < 5 && carries("design")) return "unsupported-schema-version";
+        typeof block === "object" &&
+        block !== null &&
+        VERSION_GATED_BLOCK_KINDS.some(
+          (gated) => gated.kind === (block as { kind?: unknown }).kind && declared < gated.since,
+        ),
+    )
+  ) {
+    return "unsupported-schema-version";
+  }
   return undefined;
 }
 
@@ -412,6 +450,13 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
         }
       }
     }
+    if (
+      block.kind === "treemap" &&
+      Array.isArray(block.nodes) &&
+      block.nodes.length > CANVAS_MAX_TREEMAP_LEAVES
+    ) {
+      return "node-budget-exceeded";
+    }
   }
   if (imageCount > CANVAS_MAX_IMAGES) return "image-budget-exceeded";
   return undefined;
@@ -511,6 +556,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "state") validateState(block);
     if (block.kind === "mockup") validateMockup(block);
     if (block.kind === "design") validateDesign(block);
+    if (block.kind === "treemap") validateTreemap(block);
   }
 }
 
@@ -798,6 +844,143 @@ function validatePlan(block: Extract<CanvasBlock, { readonly kind: "plan" }>): v
     settled.add(taskId);
   };
   for (const taskId of tasks.keys()) visit(taskId);
+}
+
+/**
+ * A treemap is one root over leaves that carry every declared measure. A
+ * group's reading is the sum of its children, so a group carrying its own
+ * value, a leaf missing one, a dangling parent, a cycle, or a chain past the
+ * depth budget would each draw a picture the data does not support. Sizes are
+ * areas, so every value must be finite and not negative.
+ */
+function validateTreemap(block: Extract<CanvasBlock, { readonly kind: "treemap" }>): void {
+  if (block.nodes.length > CANVAS_MAX_TREEMAP_LEAVES) {
+    reject(
+      "node-budget-exceeded",
+      `Canvas treemap ${block.blockId} has more than ${String(CANVAS_MAX_TREEMAP_LEAVES)} nodes.`,
+    );
+  }
+  const measures = new Set<string>();
+  for (const measure of block.measures) {
+    const id = String(measure.measureId);
+    if (measures.has(id)) {
+      reject("duplicate-measure-id", `Canvas treemap ${block.blockId} has duplicate measures.`);
+    }
+    measures.add(id);
+  }
+  if (!measures.has(String(block.sizeBy))) {
+    reject(
+      "unknown-treemap-measure",
+      `Canvas treemap ${block.blockId} sizes by a measure it does not declare.`,
+    );
+  }
+  if (!measures.has(String(block.colorBy))) {
+    reject(
+      "unknown-treemap-measure",
+      `Canvas treemap ${block.blockId} colours by a measure it does not declare.`,
+    );
+  }
+
+  const parents = new Map<string, string | undefined>();
+  const valued = new Set<string>();
+  for (const node of block.nodes) {
+    const id = String(node.nodeId);
+    if (parents.has(id)) {
+      reject("duplicate-node-id", `Canvas treemap ${block.blockId} has duplicate nodes.`);
+    }
+    if (node.values !== undefined) valued.add(id);
+    parents.set(id, node.parentId === undefined ? undefined : String(node.parentId));
+  }
+
+  const childrenOf = new Map<string, string[]>();
+  let roots = 0;
+  for (const [id, parentId] of parents) {
+    if (parentId === undefined) {
+      roots += 1;
+      continue;
+    }
+    if (!parents.has(parentId)) {
+      reject(
+        "dangling-treemap-parent",
+        `Canvas treemap ${block.blockId} nests a node it does not hold.`,
+      );
+    }
+    const siblings = childrenOf.get(parentId) ?? [];
+    siblings.push(id);
+    childrenOf.set(parentId, siblings);
+  }
+  // One root: a forest draws no single whole to read.
+  if (roots !== 1) {
+    reject("treemap-roots", `Canvas treemap ${block.blockId} does not have exactly one root.`);
+  }
+
+  for (const [id, parentId] of parents) {
+    const seen = new Set<string>([id]);
+    let current = parentId;
+    let depth = 1;
+    while (current !== undefined) {
+      if (seen.has(current)) {
+        reject(
+          "treemap-nesting-cycle",
+          `Canvas treemap ${block.blockId} nests a node inside itself.`,
+        );
+      }
+      seen.add(current);
+      depth += 1;
+      if (depth > CANVAS_MAX_TREEMAP_DEPTH) {
+        reject(
+          "depth-budget-exceeded",
+          `Canvas treemap ${block.blockId} nests deeper than ${String(CANVAS_MAX_TREEMAP_DEPTH)}.`,
+        );
+      }
+      current = parents.get(current);
+    }
+  }
+
+  // Values sit on leaves; a group sums its children, so it carries none.
+  for (const id of parents.keys()) {
+    const isLeaf = (childrenOf.get(id)?.length ?? 0) === 0;
+    const carriesValues = valued.has(id);
+    if (isLeaf && !carriesValues) {
+      reject(
+        "treemap-value-placement",
+        `Canvas treemap ${block.blockId} has a leaf with no value.`,
+      );
+    }
+    if (!isLeaf && carriesValues) {
+      reject(
+        "treemap-value-placement",
+        `Canvas treemap ${block.blockId} puts a value on a group it sums instead.`,
+      );
+    }
+  }
+
+  for (const node of block.nodes) {
+    const values = node.values;
+    if (values === undefined) continue;
+    for (const [key, value] of Object.entries(values)) {
+      if (!measures.has(key)) {
+        reject(
+          "unknown-treemap-measure",
+          `Canvas treemap ${block.blockId} carries a value for a measure it does not declare.`,
+        );
+      }
+      if (!Number.isFinite(value) || value < 0) {
+        reject(
+          "treemap-negative-value",
+          `Canvas treemap ${block.blockId} has a value that is negative or not finite.`,
+        );
+      }
+    }
+    for (const measure of measures) {
+      if (!Object.prototype.hasOwnProperty.call(values, measure)) {
+        reject(
+          "treemap-value-placement",
+          `Canvas treemap ${block.blockId} has a leaf missing a declared measure.`,
+        );
+      }
+    }
+  }
 }
 
 function enforceBudgets(usage: CanvasBudgetUsage): void {

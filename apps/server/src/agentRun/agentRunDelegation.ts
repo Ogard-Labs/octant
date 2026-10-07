@@ -6,6 +6,7 @@ import {
   decodeProjectId,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  ProviderFailureCategory,
   type AgentRun,
   type AgentRunRole,
   type AgentRunControlRequest,
@@ -544,7 +545,18 @@ export function agentRunStopReason(run: AgentRun): string | undefined {
   )
     return undefined;
   if (run.recoveryReason === undefined) return undefined;
-  const redacted = redactDiagnosticText(run.recoveryReason).text.trim();
+  // Orchestration journals a provider failure as `category: message`. The
+  // category is for the host; the parent's agent relays the message, which
+  // already says what to do, such as connecting Claude for helpers.
+  const separator = run.recoveryReason.indexOf(": ");
+  const spoken =
+    separator > 0 &&
+    (ProviderFailureCategory.literals as ReadonlyArray<string>).includes(
+      run.recoveryReason.slice(0, separator),
+    )
+      ? run.recoveryReason.slice(separator + 2)
+      : run.recoveryReason;
+  const redacted = redactDiagnosticText(spoken).text.trim();
   if (redacted.length === 0) return undefined;
   return redacted.length <= MAX_AGENT_RUN_STOP_REASON_CHARACTERS
     ? redacted

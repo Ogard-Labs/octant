@@ -38,7 +38,7 @@ stylesheet. Frames link to each other by fragment (`href="#checkout"`).
   and the construct. The sandbox is the boundary; these checks are advice
   that keeps a broken frame from being stored, except the link rule, which is
   part of the boundary.
-- **It is version 5 of the Canvas schema.** An older runtime refuses a
+- **It is version 6 of the Canvas schema.** An older runtime refuses a
   design-carrying document as a future version. An authored revision declares
   the current version, so an older document can gain a design.
 - **It does not leave the host as markup.** A shared snapshot refuses a

@@ -25,6 +25,17 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+The Add folder browser reads one directory at a time from the confined home root.
+Because a filesystem call on a cloud-synced or network-mounted entry can block
+indefinitely, the host checks a few entries at a time, bounds each entry's checks
+and the whole listing, and lists an entry it cannot verify within the budget as a
+plain folder. Such an entry carries only its unresolved name: binding it, or
+choosing it as an export folder, measures the path again and refuses it when that
+fails, stalls, or resolves outside the root. The client's request budget also
+covers reading the response body. A browse that fails returns an explicit
+failure the picker shows with Retry, and Retry re-issues the same folder and
+search rather than restarting at the root.
+
 The Project tree places each active thread under its listed Project or under
 **No project**, never both. No project is a collapsible folder row following
 the Projects with no horizontal divider or separate section heading. It is
@@ -60,6 +71,22 @@ completed threads of every mode once their completion is older than the
 for never), re-deciding against each mode's authoritative record and
 journaling the ordinary thread update as the `system` actor. It archives only;
 see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-completed-and-snoozed-threads.md).
+
+The **Review page** lists the threads the sidebar's To review count counts, by
+the same predicate (`isWaitingForReview`: unread, not working, not on a shelf),
+so the tile's number and the page's rows never disagree. Rows run oldest
+first, by the host's reported finish time where it has one. The detail panel
+reads the thread's last reply, the Code board's check facts, an Octant-run
+check after the last turn where one exists, and the checkout's diff; Chat rows
+show the reply only. Work navigation projects no unread flag, so Work threads
+never count toward To review and never list here; the page's Work wiring
+(send-back refuses and points at the thread's composer) waits for that flag. Complete, Snooze and send-back go through each
+mode's existing commands and show the host's refusal in one line; mark-seen
+moves the read cursor. Its single-key commands are page-scoped keybindings: they
+may be a bare key because only the focused page dispatches them, and the
+window-level listeners never run them. The page holds no pull-request action
+and no destructive one. The To review tile, Code's **Review N changes** tile and
+the command palette open it.
 
 A thread stopped on a provider usage limit that disclosed a reset can also be
 hidden until that reset — a distinct command whose wake time the host derives
@@ -111,6 +138,19 @@ server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
 
+Dragging a sidebar thread onto a Chat, Work, or Code composer attaches that
+thread as context. The drop uses the same mention path as typing `#` and
+choosing a thread: the host decides whether this window can Open it, the
+chip is a bounded reference, and the draft is not sent. The source thread
+is not moved or opened. While the pointer is over the composer, the
+composer itself is the drop target, not the pane behind it. The row menu's
+**Attach as context** does the same thing for the composer that has focus,
+or the only composer when one is open. Dropping the composer's own thread,
+a thread already attached, something that is not a thread, or a thread this
+window cannot Open leaves the draft unchanged and says so without reading
+the thread. Image and file drops, and dropping a thread on a pane rather
+than its composer, stay pane and attachment behaviour.
+
 ## Start-screen cards
 
 Under the composer, every start screen carries a card area: Chat, Work, and
@@ -143,7 +183,7 @@ so a card shipped later arrives with its own default). Ids are an open
 vocabulary: an id the registry does not know is ignored, and adding a card never
 changes the contract. A store from before the cards decodes to the defaults.
 
-**Working now** is the first card, on by default, never unavailable. It lists
+**Working now** follows Needs you, on by default, never unavailable. It lists
 the threads executing now (the navigation rows the host projects as `working`,
 the sidebar's Running rule, so a snoozed or completed row is never listed) and
 the agent runs in progress from the AgentRun projection, most recently moved
@@ -169,6 +209,38 @@ start and step ride on the same navigation rows as the executing flag (see
 [Architecture: persistence](../architecture.md#persistence), fast thread
 reads), so a remote window sees them for exactly the threads it can already
 list.
+
+**Needs you** is the card before Working now, on by default. It lists the
+approvals and questions a provider is waiting on, from one host list of every
+approval and question this window can answer across Chat, Work, and Code and
+across Projects, oldest waiting first. Work's start screen shows Chat and Work
+requests, Code's shows Code's. A row (`PendingRequestRow`, reused by other
+surfaces) shows the provider mark when the shell knows the thread's provider and
+its mode's glyph when it does not, the thread title (which opens the thread),
+the Project, how long it has waited (minute resolution from the shell's
+once-a-minute clock), and the text clamped to two lines. An approval offers
+**Approve** and **Deny**. A question offers one numbered button per choice (the
+matching number key picks it while the row has focus) and **Reply…**, which
+opens the thread so the answer is typed in its composer; a question without
+choices offers Reply… alone. At most five rows show, then **+N more**, which
+opens the Inbox. The card is hidden while nothing waits, and unavailable where
+this window has no reader (a remote window).
+
+The card holds no authority. An answer goes through the mode's own command with
+the handle the host listed: `resolve-work-request`, `answer-provider-approval`,
+`answer-provider-input` (the response is kept as evidence first, with a fresh
+operation id), or `answer-chat-turn-question`, the same calls the open thread
+makes. After an answer the card re-reads and the row leaves with the next read.
+A refused answer (a stale version, a turn that ended, a turn that cannot take
+it, such as one in Plan mode, an unreachable host) shows one quiet line in the
+row saying why, and then the card re-reads; a row the host no longer lists stays
+until the next read or the next minute so the line can be seen. A Code answer
+counts as refused when the host says `operation-failed` or reports the turn
+`failed` or `interrupted`; the command palette reads Code answers the same way.
+The card reads the list when it mounts, on the navigation topics named below,
+and when the shell settings or the window workspace change (neither has a feed
+topic). Signals that arrive while a read is in flight become one more read once
+it lands, so a streaming reply does not start a host read per delta.
 
 **Pull requests** is the next card, on by default, and only on a Code start
 screen. It is hidden — and left out of Customize — unless the Pull requests
@@ -273,8 +345,11 @@ Subagents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every
 other AgentRun control stay. A compact, collapsible Subagents card sits above
-the composer in normal layout. Its counts keep failures, waits and unreviewed
-results visible while collapsed; expansion previews up to three active or
+the composer in normal layout, as wide as the message surface. Its head counts each
+state (failed, waiting, to review, working, done) and keeps failures, waits and
+unreviewed results first while collapsed; a result the parent already received is
+done, not to review. While a Chat thread's host connection is lost it dims and
+withholds Stop without repeating the connection notice; expansion previews up to three active or
 unresolved children. Rows open the corresponding detail in Agents, and View all
 keeps completed history reachable. Provider-observed children carry an explicit
 observation-only label and no managed controls. Task-plan progress remains a
@@ -285,7 +360,8 @@ without starting them: only the thread's agent starts one, through the Octant
 Harness `delegate` tool, and collects its result. The list has one title, then
 Working and Finished sections of one-button rows —
 status icon, task, and state, role, model, and age in words — with finished
-rows newest first and an unreviewed result marked "Needs review". A row opens
+rows newest first and an unreviewed result marked "Needs review" unless the
+parent already received it. A row opens
 that subagent's page in place of the list, with a back control: its task as
 the title, a status line, and a small transcript that starts with the task as
 the brief, then the replies as rendered Markdown and status events as quiet
@@ -339,6 +415,29 @@ host restart and is cleared when GitHub authority is revoked (see
 [decisions/0064-pull-request-observation-cadence.md](../decisions/0064-pull-request-observation-cadence.md)
 and
 [decisions/0076-pull-request-snapshot-survives-restart.md](../decisions/0076-pull-request-snapshot-survives-restart.md)).
+
+**Answering from a Board card.** A Work or Code card whose thread waits on the
+person shows what it asks and the answers, so a column of waiting cards is
+cleared without opening threads. The card carries the Needs you row
+(`PendingRequestRow`, embedded: the card already names the thread, so the row
+keeps the wait, the text clamped to two lines, and the answers): **Approve** and
+**Deny**, one numbered button per choice, or **Reply…**, which opens the thread.
+The board reads the same host list as the Needs you card (the `pendingRequests`
+read) once for the whole board, only while the board is mounted, on the same
+change-feed, settings, and workspace signals, and never on a timer. A card is
+matched to its request by thread and mode, whichever column the board files it
+in: a Code thread parked on a tool approval still counts as executing while its
+turn runs, so its card sits in In progress, and it carries the request all the
+same. A card with no listed request is drawn as before. A thread with several requests shows the oldest and **+N more
+waiting**, which opens the thread. Answers use each mode's existing command
+through the listed handle and hold no new authority. A refused answer shows one
+line on the card, and the card does not move: it changes column only when the
+host's next board read says so, and the board re-reads when the set of waiting
+requests changes (answered here or elsewhere, or newly raised). With Status
+grouping the Waiting column lists the oldest waiting request first, then cards
+with no listed request in their usual order. The list layout (narrow width, or
+Code's List view) carries the same actions in its rows. A window with no
+pending-request reader (a remote window) draws cards exactly as before.
 
 **GitHub issue browser.** The first-party GitHub plugin contributes a second
 `sidebar.destination` (`github-issues`) that opens a host-scoped, read-only

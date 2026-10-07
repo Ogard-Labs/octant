@@ -66,6 +66,45 @@ describe("AgentHierarchyPanel", () => {
     expect(rows[1]).not.toHaveTextContent("Needs review");
   });
 
+  it("does not ask to review a result the host already handed to the thread's agent", () => {
+    const unreviewed = entries[2];
+    if (unreviewed === undefined) throw new Error("fixture lost its unreviewed row");
+    render(
+      <AgentHierarchyPanel
+        entries={[
+          {
+            ...unreviewed,
+            runId: "run-delivered",
+            task: "Delivered review",
+            resultDeliveryOutcome: "delivered",
+          },
+          {
+            ...unreviewed,
+            runId: "run-consumed",
+            task: "Consumed review",
+            resultDeliveryOutcome: "consumed",
+          },
+          {
+            ...unreviewed,
+            runId: "run-failed",
+            task: "Undelivered review",
+            resultDeliveryOutcome: "failed",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Delivered review/ })).not.toHaveTextContent(
+      "Needs review",
+    );
+    expect(screen.getByRole("button", { name: /Consumed review/ })).not.toHaveTextContent(
+      "Needs review",
+    );
+    expect(screen.getByRole("button", { name: /Undelivered review/ })).toHaveTextContent(
+      "Needs review",
+    );
+  });
+
   it("opens the subagent whose row is chosen", async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();

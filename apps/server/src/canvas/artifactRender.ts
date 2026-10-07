@@ -5,6 +5,7 @@ import {
 } from "@octant/contracts/canvas";
 import { MAX_ARTIFACT_PREVIEW_CHARACTERS } from "@octant/contracts/artifact-library";
 import { CHART_BAR_RADIUS, CHART_LINE_WIDTH } from "@octant/theme";
+import { layoutCanvasTreemap } from "@octant/domain/canvas-treemap-layout";
 
 /**
  * Drawing an artifact, once.
@@ -39,6 +40,7 @@ const DRAWN_KINDS = new Set<CanvasBlock["kind"]>([
   "sequence",
   "state",
   "mockup",
+  "treemap",
   "design",
   "code-excerpt",
   "pseudocode",
@@ -202,6 +204,8 @@ function drawBlock(
       return { markup: stateMachine(block, y, width, palette), height: 64 };
     case "mockup":
       return { markup: mockupFrame(block, y, width, palette), height: 52 };
+    case "treemap":
+      return { markup: treemap(block, y, width, palette), height: CHART_HEIGHT };
     case "design":
       return { markup: designFrames(block, y, width, palette), height: 52 };
     case "code-excerpt":
@@ -622,6 +626,38 @@ function mockupFrame(
     return `<rect x="${String(x + 4)}" y="${String(y + 6 + index * 10)}" width="${String(rowWidth)}" height="6" rx="1.5" fill="${palette.muted}" opacity="0.5"/>`;
   });
   return frame + rows.join("");
+}
+
+/**
+ * A treemap drawn from the shared layout: group frames plus one cell per leaf.
+ * The same squarified rectangles the on-screen renderer draws, so a preview is
+ * the picture at a smaller size rather than a second silhouette. The export
+ * starts from the node the author chose, or the root when they chose none.
+ */
+function treemap(
+  block: Extract<CanvasBlock, { readonly kind: "treemap" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const layout = layoutCanvasTreemap(block, {
+    width,
+    height: CHART_HEIGHT,
+    ...(block.startNodeId === undefined ? {} : { rootId: String(block.startNodeId) }),
+  });
+  const leaves = layout.nodes.filter((rect) => !rect.isGroup);
+  const peak = leaves.reduce((highest, rect) => Math.max(highest, rect.value), 0) || 1;
+  const frames = layout.nodes
+    .filter((rect) => rect.isGroup && rect.depth > 0)
+    .map(
+      (rect) =>
+        `<rect x="${String(round(PADDING + rect.x))}" y="${String(round(y + rect.y))}" width="${String(Math.max(1, round(rect.width)))}" height="${String(Math.max(1, round(rect.height)))}" fill="none" stroke="${palette.muted}" opacity="0.7"/>`,
+    );
+  const cells = leaves.map(
+    (rect) =>
+      `<rect x="${String(round(PADDING + rect.x))}" y="${String(round(y + rect.y))}" width="${String(Math.max(1, round(rect.width)))}" height="${String(Math.max(1, round(rect.height)))}" fill="${palette.accent}" opacity="${opacityFor(0.25 + 0.6 * (rect.value / peak))}"/>`,
+  );
+  return frames.join("") + cells.join("");
 }
 
 /** A row of frame outlines in the design's own proportions, as many as fit. */

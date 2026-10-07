@@ -5,6 +5,8 @@ import {
   CHART_DIVERGING_STEPS,
   CHART_SEQUENTIAL_ROLE_IDS,
   CHART_SEQUENTIAL_STEPS,
+  chartScaleRoleId,
+  chartScaleStep,
   deriveChartScales,
 } from "./chartScales";
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS } from "./tokens";
@@ -65,5 +67,24 @@ describe("chart scales", () => {
     for (const hex of [...scales.sequential, ...scales.diverging]) {
       expect(hex).toMatch(/^#[0-9a-f]{6}$/);
     }
+  });
+});
+
+describe("reading a value on a scale", () => {
+  it("places the low and high ends on the first and last step", () => {
+    expect(chartScaleStep(0, { min: 0, max: 100 }, 5)).toBe(0);
+    expect(chartScaleStep(100, { min: 0, max: 100 }, 5)).toBe(4);
+    expect(chartScaleStep(50, { min: 0, max: 100 }, 5)).toBe(2);
+  });
+
+  it("clamps a value past either edge to the nearest step", () => {
+    expect(chartScaleStep(1_000, { min: 0, max: 100 }, 5)).toBe(4);
+    expect(chartScaleStep(-50, { min: 0, max: 100 }, 5)).toBe(0);
+  });
+
+  it("reads a flat measure at the middle step rather than an extreme", () => {
+    expect(chartScaleStep(5, { min: 5, max: 5 }, 5)).toBe(2);
+    expect(chartScaleRoleId("sequential", 2)).toBe(CHART_SEQUENTIAL_ROLE_IDS[2]);
+    expect(chartScaleRoleId("diverging", 4)).toBe(CHART_DIVERGING_ROLE_IDS[4]);
   });
 });

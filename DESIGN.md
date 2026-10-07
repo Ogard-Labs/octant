@@ -279,13 +279,19 @@ names the state and claims no elapsed time. See
 
 ### Welcome and composer
 
-A thread's subagents sit in an inset card attached above the composer's message
-surface. The card participates in normal layout so expansion cannot cover the
-preceding task list or transcript. Cross-context notices share the same flow;
+A thread's subagents sit in a card attached above the composer's message
+surface, edge to edge with it so the two read as one stack. The card
+participates in normal layout so expansion cannot cover the preceding task list
+or transcript. Cross-context notices share the same flow;
 they never hide failed children or results needing review. The card starts
-collapsed and remembers the viewer's fold choice. Its head names the total,
-prioritizing failed, waiting, review-needed and unknown states over redundant
-activity counts. A truncated list identifies its count as listed children.
+collapsed and remembers the viewer's fold choice. Its head names every state
+the children are in as counts of that state ("1 failed · 1 to review · 1
+working · 2 done"), attention states first, with no unexplained total. A result
+counts as to review only while a person can still act on it: one the host has
+already delivered to the parent, or the parent consumed through its own tool,
+is done, because it sits in the thread as a child-result card. A truncated list
+says earlier children are not retained. While a Chat thread's host cannot be
+reached the card dims and withholds Stop; the thread's connection notice says why.
 Task-plan completion is never counted as child completion. View all opens the
 full Agents list even when every child has finished. Expansion previews at most
 three active or unresolved children; longer history stays in Environment and
@@ -296,6 +302,17 @@ in details. Rows open the child in Agents. Only managed active children offer
 Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
 narrow widths, disclosures work with the keyboard and retain visible focus,
 and expanded lists have bounded height.
+
+A result the host delivers into the parent thread is a turn the person did
+not write, so it never renders as their right-aligned bubble. It is a
+left-aligned child-result card in the thread's measure: a status mark and
+"<Role> subagent finished" (or the state it stopped in), the provider and
+model, the task in meta ink, then the reply as Markdown, folded after about
+eight lines behind Show full result. A subagent that stopped gives the host's
+recorded reason in place of a reply. Run ID, generation and provider ID sit
+behind a Details disclosure. The card is one component in Chat, Work and
+Code; a delivery the card cannot read is shown as its text under a plain
+"Subagent result" head.
 
 Provider-observed children remain separate from managed runs. Their detail shows
 reported activity, observation timing, available lineage and explicit partial,
@@ -374,7 +391,7 @@ and **Review N changes** (Finished threads that wait for you) when N is above
 zero, where N counts unread threads that are not running or rested, the
 sidebar's To review rule. Open terminal starts a Project terminal and pins it in
 Zen, the only place one lives. Work offers the same tiles without a terminal,
-because Work has no shell. Review opens the Inbox. The tiles leave when they
+because Work has no shell. Review opens the Review page. The tiles leave when they
 have nothing to show.
 
 The card area is a ghost **Customize** button right-aligned under the tiles
@@ -389,7 +406,14 @@ fills at 5% ink on hover and focus, the provider mark and a row label on its
 first line, and a mono meta line for what is happening. The Customize panel is a
 popover at most 340px wide: one row per card with a drag grip, the icon, the
 title, up and down icon buttons, and a switch, then **Reset to default**; a
-dragged row marks its drop target with a hairline above it. **Working now**
+dragged row marks its drop target with a hairline above it. **Needs you**
+comes first and leaves the grid while nothing waits: each row is the provider
+mark (or the mode's glyph), the thread title, "Waiting 4m" with a pause glyph
+at the 12px step, the Project as meta text, and the request text clamped to two
+lines, with small buttons below (Approve filled, Deny ghost; a question's
+choices as outline buttons with a leading number, then a ghost Reply…). Rows
+are told apart by a hairline, never a tinted fill, and the waiting state is a
+glyph and words with no hue. **Working now**
 lists up to five rows of threads and agent runs in progress, each with the
 provider mark, the title, a time, and a one-line step; it says "Nothing is
 running right now." when empty. A running tool is shown in mono
@@ -738,6 +762,19 @@ entrance motion.
 
 **Path labels.** A file label is read from the right: the directory is dimmed and
 the file name is at full ink, in the code font.
+
+**Treemap.** A hierarchy is drawn as squarified rectangles
+(`packages/domain/src/canvasTreemapLayout.ts`): each leaf's area is a size
+measure and its colour is a colour measure, and a group's reading is the sum of
+its children, so the picture never states a total the leaves do not. The screen
+renderer and the static SVG export draw the same deterministic layout. The size
+and colour measures are switches in the block header; those switches, and a zoom
+into a group (by click, breadcrumb, Escape, or right-click; arrow keys move
+between cells and Enter zooms in), are view state and revise nothing. A colour
+scale is sequential, diverging (centred on the mid-point of the colour domain),
+or categorical by top-level group, and reads through the shared scale roles.
+Cell labels are drawn only where they fit, and the disclosed table is the
+accessible reading, sortable by each measure.
 
 **Motion.** A chart transitions only on a state change — a legend toggle, a zoom
 — never on entrance. A transition lasts at most 200ms and is off under
@@ -1101,7 +1138,7 @@ executing), To review (finished turns not opened since), and Done today
 (threads completed since local midnight). Each tile is one button whose name
 carries its count ("Running, 2"); Inbox opens the Inbox, Running opens the
 Board (the Activity feed in Chat, which has no board), To review opens the
-Activity feed, and Done today opens the Completed shelf. With the tiles on,
+Review page, and Done today opens the Completed shelf. With the tiles on,
 the Inbox and Board rows are left out because their tiles go to the same
 place. Settings › Sidebar › Count tiles turns them off and brings the rows
 back. Tiles are neutral faces in the Default style; under Vivid each takes a
@@ -1470,6 +1507,16 @@ and Tooltip. Composition rules:
   panels stay anchored in the surface; `OctantDialog` would add a backdrop,
   focus trap, and portal. The recipe owners (`OctantAlert`, `OctantToast`,
   `OctantApprovalCard`, `FieldError`, and `ShellState`) set the role themselves.
+- A lost host connection is one condition with one voice. A Chat thread shows a
+  single `OctantAlert` in plain words ("Can't reach the host" with Retry now),
+  above its transcript in the thread's own measure; it becomes a success alert,
+  "Reconnected", for a few seconds when the host answers, then goes quiet. The
+  thread's other surfaces (the subagent card, the message queue, the composer's
+  status line) never repeat the loss: they dim and disable their controls. Use
+  no other wording for it, and never show internal vocabulary such as "the
+  authoritative transcript". A failure unrelated to the connection keeps its own
+  alert. Work and Code threads keep their own connection messages until they
+  adopt this notice.
 - Product notices use `OctantToast`: a semantic icon, short title, supporting
   detail, and an explicit Dismiss button. An optional inline action can open the
   relevant destination without implicitly dismissing the notice. Success and

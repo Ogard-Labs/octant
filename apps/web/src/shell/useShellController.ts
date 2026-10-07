@@ -987,6 +987,7 @@ export function useShellController(options: ShellControllerOptions) {
     destination: WorkspaceSurfaceDropDestination,
     projectId?: ProjectId,
   ): Promise<void> {
+    if (destination.kind === "composer") return;
     // Cross-Project denial for preview surfaces: a preview carries its own
     // opaque Project binding. Dropping it into a pane whose mode context is
     // bound to a different Project (or no Project) would violate the
@@ -1089,6 +1090,8 @@ export function useShellController(options: ShellControllerOptions) {
   return {
     activatePane,
     announcement: announcementEvent.message,
+    // The host reads a window's Code threads only in this Project.
+    boundCodeProjectId: authoritative?.workspace.contextByMode.code.projectId ?? undefined,
     announcementSequence: announcementEvent.sequence,
     availableSurfaces,
     clearFocus,

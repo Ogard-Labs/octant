@@ -3,6 +3,7 @@ import type {
   ProviderFailure,
   ProviderInstanceId,
   ProviderModelId,
+  ProviderOutputStopReason,
   ProviderRuntimeEvent,
   ProviderSessionId,
   ProviderToolDefinition,
@@ -99,6 +100,11 @@ export interface NativeHarnessResponse {
   readonly toolCalls: ReadonlyArray<NativeHarnessTranscriptToolCall>;
   readonly usage?: NativeHarnessUsage;
   readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
+  /**
+   * Why this reply stopped, when the endpoint said. Absent for a normal
+   * finish and for a step that continued into tool calls.
+   */
+  readonly outputStopReason?: ProviderOutputStopReason;
 }
 
 /**

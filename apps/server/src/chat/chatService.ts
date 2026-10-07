@@ -46,6 +46,7 @@ import {
   type ChatEventFrame,
   type ChatFailure,
   type ChatHandoffWarning,
+  type HarnessRetryNotice,
   type ChatSettings,
   type ChatThread,
   type ChatThreadId,
@@ -595,6 +596,8 @@ export interface ChatServiceOptions {
         readonly contextSubject?: ContextSubjectRef;
       },
     ) => Promise<void>;
+    readonly noteRetry?: (scope: NativeHarnessTurnScope, notice: HarnessRetryNotice) => void;
+    readonly clearRetry?: (scope: NativeHarnessTurnScope) => void;
   };
   /**
    * Chat threads that are hidden sidecars. A Side Chat sidecar is an
@@ -5071,6 +5074,12 @@ export class ChatService {
                 : {
                     liveTurn: this.#liveTurns.tracker(String(input.thread.id), "chat-navigation"),
                   }),
+              onHarnessRetry: (notice) => {
+                this.#nativeHarness?.noteRetry?.(harnessScope, notice);
+              },
+              onHarnessRetryCleared: () => {
+                this.#nativeHarness?.clearRetry?.(harnessScope);
+              },
               ...(this.#nativeHarness === undefined
                 ? {}
                 : {

@@ -272,7 +272,7 @@ describe("WindowChrome", () => {
       ]),
     );
 
-    const railStyles = ["inbox", "artifacts", "automation", "agents-center"]
+    const railStyles = ["inbox", "review", "artifacts", "automation", "agents-center"]
       .map((sheet) => readFileSync(resolve(process.cwd(), `src/styles/${sheet}.css`), "utf8"))
       .join("\n")
       .replace(/\/\*[\s\S]*?\*\//g, "");

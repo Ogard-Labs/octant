@@ -47,9 +47,13 @@ tombstone rather than leaving a hole with no explanation.
 - **Local clients**: reopening Electron or the canonical browser URL after
   sleep or a host restart renews process-local client context automatically.
   It does not create another store or require a recovery workflow.
+- **Connection lost**: a Chat thread that cannot reach the host shows one notice,
+  **Can't reach the host**, with **Retry now**, and changes to **Reconnected** for a
+  moment when the host answers. The subagent card and the message queue only dim
+  and disable their controls meanwhile; your draft is kept.
 - **Threads**: reconnect resumes from bounded live cursors. If a cursor belongs
   to an older host process or fell outside replay, the client reloads the
-  authoritative transcript before applying more updates.
+  thread from the host before applying more updates.
 - **Queued messages**: once Octant acknowledges a queued message, the host
   retains it and its attachments when you close the conversation. You can
   inspect, edit, reorder or remove pending messages from the queue. Normal

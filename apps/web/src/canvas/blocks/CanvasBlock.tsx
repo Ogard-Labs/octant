@@ -9,17 +9,25 @@ import { DesignBlock } from "./DesignBlock";
 import { MockupBlock } from "./MockupBlock";
 import { StructuredBlocks } from "./StructuredBlocks";
 import { TextBlocks } from "./TextBlocks";
+import { TreemapBlock } from "./TreemapBlock";
+import type { CanvasActionRuntime } from "../canvasActionRuntime";
 
 export function CanvasBlockRenderer({
   block,
   layoutRuntime,
   planRuntime,
+  actionRuntime,
 }: {
   readonly block: CanvasBlock;
   /** Lets a diagram journal a drag; absent on surfaces that cannot. */
   readonly layoutRuntime?: DiagramBoardLayoutRuntime;
   /** Lets a plan journal a task's status; absent on surfaces that cannot. */
   readonly planRuntime?: PlanTaskRuntime;
+  /**
+   * Lets a block offer an allowlisted action, such as a treemap leaf opening
+   * its file; absent on surfaces that cannot dispatch one.
+   */
+  readonly actionRuntime?: CanvasActionRuntime;
 }) {
   switch (block.kind) {
     case "heading":
@@ -50,6 +58,10 @@ export function CanvasBlockRenderer({
       return <StateDiagram block={block} />;
     case "mockup":
       return <MockupBlock block={block} />;
+    case "treemap":
+      return (
+        <TreemapBlock block={block} {...(actionRuntime === undefined ? {} : { actionRuntime })} />
+      );
     case "design":
       return <DesignBlock block={block} />;
     case "code-excerpt":
