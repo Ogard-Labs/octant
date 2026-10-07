@@ -1,5 +1,6 @@
 import type {
   CorrelationId,
+  ProviderContextBreakdown,
   ProviderFailure,
   ProviderInstanceId,
   ProviderRuntimeEvent,
@@ -94,6 +95,18 @@ export interface ClaudeEventContext {
   readonly claudeSessionId: string;
   sequence: number;
   terminal: boolean;
+  /**
+   * Where the runtime compacts the session by itself, in tokens, as it
+   * reported when the session opened. It is a property of the session, so the
+   * driver carries it into each turn's context.
+   */
+  autoCompactThreshold?: number;
+  /**
+   * What the latest request put in the window: the input the model read,
+   * cached or not. A turn's usage is a sum over its requests, so the window's
+   * fill is this and nothing else.
+   */
+  contextTokens?: number;
   readonly requestIds: Map<string, ClaudeRequestCorrelation>;
   readonly taskIds: Map<string, ClaudeTaskState>;
   readonly toolStates: Map<string, ClaudeToolState>;
@@ -199,6 +212,7 @@ function usageEvent(
   value: ClaudeUsage,
   providerExecutionDurationMs?: number,
   costUsd?: number,
+  contextBreakdown?: ProviderContextBreakdown,
 ): ClaudeMappedMessage {
   return event(context, {
     kind: "usage",
@@ -209,6 +223,11 @@ function usageEvent(
     cacheWriteInputTokens: value.cacheCreationInputTokens,
     ...(providerExecutionDurationMs === undefined ? {} : { providerExecutionDurationMs }),
     ...(costUsd === undefined || !Number.isFinite(costUsd) || costUsd < 0 ? {} : { costUsd }),
+    ...(context.contextTokens === undefined ? {} : { contextTokens: context.contextTokens }),
+    ...(context.autoCompactThreshold === undefined
+      ? {}
+      : { autoCompactThreshold: context.autoCompactThreshold }),
+    ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
   });
 }
 
@@ -429,6 +448,10 @@ function mapAssistant(
     if (content.kind !== "tool-use") continue;
     results.push(...mapToolUse(context, content, true, fileChanges.get(content.toolUseId)));
   }
+  context.contextTokens =
+    message.usage.inputTokens +
+    message.usage.cacheReadInputTokens +
+    message.usage.cacheCreationInputTokens;
   results.push(usageEvent(context, message.usage));
   if (message.error !== undefined) {
     if (context.terminal) return [failure("Claude returned a duplicate terminal message.")];
@@ -776,7 +799,13 @@ function mapResult(
     return [failure("Claude returned invalid usage metadata.")];
   }
   const results: ClaudeMappedMessage[] = [
-    usageEvent(context, message.usage, message.durationMs, message.totalCostUsd),
+    usageEvent(
+      context,
+      message.usage,
+      message.durationMs,
+      message.totalCostUsd,
+      message.contextBreakdown,
+    ),
   ];
   if (message.outcome === "success") {
     results.push(

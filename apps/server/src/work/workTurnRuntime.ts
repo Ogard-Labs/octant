@@ -22,6 +22,7 @@ import {
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
 import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
+import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { normalizedProviderCallbackId } from "./workRequestRuntime";
@@ -70,6 +71,8 @@ export interface WorkTurnRuntimePort {
     ) => () => void;
     /** Told once when the turn is over, whatever its outcome, with what it cost and how it ran. */
     readonly onTurnEnded?: (turn: TurnEndSummary) => void;
+    /** Tells the navigation read what the running turn is doing, from its start to its end. */
+    readonly liveTurn?: LiveTurnTracker;
     /** The wall clock the turn is timed against. */
     readonly clock?: () => string;
   }): Promise<WorkTurnRuntimeOutcome>;
@@ -107,14 +110,21 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     // Re-based when the prompt is sent, so the wait for a first token never
     // includes starting the provider's session.
     let timing = startTurnMetrics(startedAt);
-    const outcome = await this.#runTurn(input, {
-      observe: (event) => {
-        timing = observeTurnMetrics(timing, event);
-      },
-      sent: () => {
-        timing = startTurnMetrics(clock());
-      },
-    });
+    input.liveTurn?.begin(startedAt);
+    let outcome: WorkTurnRuntimeOutcome;
+    try {
+      outcome = await this.#runTurn(input, {
+        observe: (event) => {
+          timing = observeTurnMetrics(timing, event);
+          input.liveTurn?.observe(event);
+        },
+        sent: () => {
+          timing = startTurnMetrics(clock());
+        },
+      });
+    } finally {
+      input.liveTurn?.end();
+    }
     try {
       input.onTurnEnded?.(
         summarizeTurnEnd({

@@ -143,11 +143,13 @@ class FakeQuery implements ClaudeQueryPort {
     },
     announcesSession = true,
     models: ClaudeQueryPort["initialization"]["models"] = [],
+    autoCompactThreshold?: number,
   ) {
     this.initialization = {
       ...this.initialization,
       account,
       ...(models.length === 0 ? {} : { models }),
+      ...(autoCompactThreshold === undefined ? {} : { autoCompactThreshold }),
     };
     this.sessionId = announcesSession ? Effect.succeed(sdkSessionId) : Effect.never;
     this.messages =
@@ -170,7 +172,10 @@ class FakeQuery implements ClaudeQueryPort {
 function harness(
   authentication: ClaudeAuthentication = "subscription",
   permissionPersistence: PermissionPersistence = "current-session",
-  options: { readonly models?: ClaudeQueryPort["initialization"]["models"] } = {},
+  options: {
+    readonly models?: ClaudeQueryPort["initialization"]["models"];
+    readonly autoCompactThreshold?: number;
+  } = {},
 ) {
   const queries: FakeQuery[] = [];
   const opens: ClaudeOpenQueryInput[] = [];
@@ -188,6 +193,7 @@ function harness(
           undefined,
           true,
           options.models ?? [],
+          options.autoCompactThreshold,
         );
         queries.push(query);
         sessions.set(query.sdkSessionId, {
@@ -2133,6 +2139,64 @@ describe("Claude execution policy", () => {
       }),
     );
     await expect(callback).resolves.toMatchObject({ behavior: "allow" });
+    await acquired.close();
+  });
+
+  it("reports the runtime's compaction point and the window's fill with each turn's usage", async () => {
+    const f = harness("subscription", "current-session", { autoCompactThreshold: 167_000 });
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const usage: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "usage") usage.push(event);
+        }),
+      ),
+    );
+    const settle = () => new Promise((done) => setTimeout(done, 20));
+    const query = f.queries[0]!;
+    const request = (inputTokens: number): ClaudeDecodedMessage => ({
+      kind: "assistant",
+      sessionId: "sdk-session-1",
+      messageId: `message-${String(inputTokens)}`,
+      content: [{ kind: "text", text: "ok" }],
+      usage: {
+        inputTokens,
+        outputTokens: 1,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+    });
+
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
+    );
+    await query.emit(request(14_000));
+    await query.emit(completed("sdk-session-1"));
+    await settle();
+    // The point is the session's, so a later turn reports it as well, with the
+    // fill that turn's own request measured, on its closing report too.
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
+    );
+    await query.emit(request(20_000));
+    await query.emit(completed("sdk-session-1"));
+    await settle();
+
+    expect(
+      usage.map((event) =>
+        event.kind === "usage" ? [event.contextTokens, event.autoCompactThreshold] : [],
+      ),
+    ).toEqual([
+      [14_000, 167_000],
+      [14_000, 167_000],
+      [20_000, 167_000],
+      [20_000, 167_000],
+    ]);
+    await Effect.runPromise(Fiber.interrupt(subscription));
     await acquired.close();
   });
 
