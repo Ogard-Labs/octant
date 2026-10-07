@@ -504,10 +504,8 @@ export class ReplicaMembershipService {
         approver,
       );
     }
-    // The approver's first entry names its own device key and is signed by
-    // it: a founding self-approval, or its own join request.
-    const founding = await this.#readSigned(store, approver, 1);
-    if (founding.status === "unavailable") {
+    const records = await this.#readMembershipLogs(store);
+    if (records === undefined) {
       return this.#refuse(
         "confirm-join",
         "store-unavailable",
@@ -515,60 +513,54 @@ export class ReplicaMembershipService {
         approver,
       );
     }
-    const identity =
-      founding.status === "ready" &&
-      (founding.entry.kind === "join-approved" || founding.entry.kind === "join-request") &&
-      String(founding.entry.subject) === String(approver)
-        ? founding.entry
-        : undefined;
-    const approverKey = identity?.subjectDeviceKey;
-    if (
-      founding.status !== "ready" ||
-      identity === undefined ||
-      approverKey === undefined ||
-      verdictFor(approverKey, founding) !== "verified"
-    ) {
+    const chains = founderChainsTo(records, approver, local);
+    if (chains.length !== 1) {
       return this.#refuse(
         "confirm-join",
         "unknown-instance",
-        "That computer has no signed identity in the store.",
+        chains.length === 0
+          ? "No signed chain of approvals from the founder to this computer is in the store."
+          : "The store holds more than one founder that approved that computer; joining is refused.",
         approver,
       );
     }
-    for (let sequence = 2; sequence <= MAX_ENTRIES_PER_INSTANCE; sequence += 1) {
-      const read = await this.#readSigned(store, approver, sequence);
-      if (read.status === "unavailable") {
-        return this.#refuse(
-          "confirm-join",
-          "store-unavailable",
-          "The replica store cannot be read.",
-          approver,
-        );
-      }
-      if (read.status === "missing") break;
-      if (read.status !== "ready") continue;
-      const approval = read.entry;
-      if (
-        approval.kind === "join-approved" &&
-        String(approval.subject) === String(local.instanceId) &&
-        approval.subjectDeviceKey === local.publicKey &&
-        verdictFor(approverKey, read) === "verified"
-      ) {
-        this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.joinConfirmed, {
-          approver,
-          approverDisplayName: identity.subjectDisplayName,
-          approverDeviceKey: approverKey,
-          approvalSequence: sequence,
-        });
-        return { kind: "join-confirmed", approver };
+    const [chain] = chains;
+    if (chain === undefined) {
+      throw new Error("A single founder chain was counted but not found.");
+    }
+    const final = chain.links.at(-1);
+    if (final === undefined) throw new Error("A founder chain without its final approval.");
+    this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.joinConfirmed, {
+      approver,
+      approverDisplayName: chain.approverDisplayName,
+      approverDeviceKey: chain.approverKey,
+      approvalSequence: final.sequence,
+      founder: chain.founder,
+      links: chain.links,
+    });
+    return { kind: "join-confirmed", approver };
+  }
+
+  /** Every instance's verifiable-in-principle membership records, by instance and sequence. */
+  async #readMembershipLogs(
+    store: ReplicaStore,
+  ): Promise<ReadonlyArray<MembershipRecord> | undefined> {
+    const listing = await this.#listInstances(store);
+    if (listing === undefined) return undefined;
+    const records: MembershipRecord[] = [];
+    for (const [id, sequences] of listing) {
+      const instanceId = decodeInstanceId(id);
+      const highest = Math.min(Math.max(0, ...sequences), MAX_ENTRIES_PER_INSTANCE);
+      for (let sequence = 1; sequence <= highest; sequence += 1) {
+        if (!sequences.has(sequence)) break;
+        const read = await this.#readSigned(store, instanceId, sequence);
+        if (read.status === "unavailable") return undefined;
+        if (read.status !== "ready") break;
+        const entry = read.entry;
+        if (entry.kind === "join-approved") records.push({ entry, read });
       }
     }
-    return this.#refuse(
-      "confirm-join",
-      "unknown-instance",
-      "No signed approval of this computer from that member is in the store.",
-      approver,
-    );
+    return records;
   }
 
   async #revoke(
@@ -1082,6 +1074,135 @@ type SignedRead =
   | { readonly status: "unreadable" }
   | { readonly status: "path-mismatch" }
   | { readonly status: "unavailable" };
+
+interface MembershipRecord {
+  readonly entry: ReplicaMembershipEntry;
+  readonly read: Extract<SignedRead, { status: "ready" }>;
+}
+
+interface FounderChainLink {
+  readonly approver: ReplicaInstanceId;
+  readonly sequence: number;
+  readonly subject: ReplicaInstanceId;
+  readonly subjectDisplayName: string;
+  readonly subjectDeviceKey: string;
+}
+
+interface FounderChain {
+  readonly founder: {
+    readonly instanceId: ReplicaInstanceId;
+    readonly displayName: string;
+    readonly publicKey: string;
+  };
+  readonly approverDisplayName: string;
+  readonly approverKey: string;
+  /** Founder to approver, then the approver's approval of this computer. */
+  readonly links: ReadonlyArray<FounderChainLink>;
+}
+
+/**
+ * The chains of approvals from a founder to `approver`, ending in the
+ * approver's approval of this computer.
+ *
+ * A founding record is the sequence-1 self-approval an instance signed with
+ * the key it names; it counts only as the start of a chain. Each approval
+ * after it must verify against the key the previous verified link named for
+ * its approver, so a record anyone could write - a self-approval, or an
+ * approval signed with a key nobody vouched for - cannot enter a chain. One
+ * chain is kept per founder; a caller refuses when more than one founder
+ * reaches the approver, because a second founding record is what a stranger
+ * with write access to the store would add.
+ */
+function founderChainsTo(
+  records: ReadonlyArray<MembershipRecord>,
+  approver: ReplicaInstanceId,
+  local: ReplicaLocalIdentity,
+): ReadonlyArray<FounderChain> {
+  const chains: FounderChain[] = [];
+  for (const founding of records) {
+    const { entry } = founding;
+    const key = entry.subjectDeviceKey;
+    if (
+      entry.origin.sequence !== 1 ||
+      String(entry.subject) !== String(entry.origin.instanceId) ||
+      key === undefined ||
+      verdictFor(key, founding.read) !== "verified"
+    ) {
+      continue;
+    }
+    const founder = {
+      instanceId: entry.origin.instanceId,
+      displayName: entry.subjectDisplayName,
+      publicKey: key,
+    };
+    // Breadth first from the founder: each reached instance with the key the
+    // link that reached it named, and the links that reached it.
+    const reached = new Map<
+      string,
+      { readonly key: string; readonly name: string; readonly links: FounderChainLink[] }
+    >([[String(founder.instanceId), { key, name: founder.displayName, links: [] }]]);
+    const queue = [String(founder.instanceId)];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (current === undefined) break;
+      const at = reached.get(current);
+      if (at === undefined) continue;
+      for (const approval of records) {
+        const subjectKey = approval.entry.subjectDeviceKey;
+        if (
+          String(approval.entry.origin.instanceId) !== current ||
+          String(approval.entry.subject) === current ||
+          subjectKey === undefined ||
+          reached.has(String(approval.entry.subject)) ||
+          verdictFor(at.key, approval.read) !== "verified"
+        ) {
+          continue;
+        }
+        reached.set(String(approval.entry.subject), {
+          key: subjectKey,
+          name: approval.entry.subjectDisplayName,
+          links: [
+            ...at.links,
+            {
+              approver: approval.entry.origin.instanceId,
+              sequence: approval.entry.origin.sequence,
+              subject: approval.entry.subject,
+              subjectDisplayName: approval.entry.subjectDisplayName,
+              subjectDeviceKey: subjectKey,
+            },
+          ],
+        });
+        queue.push(String(approval.entry.subject));
+      }
+    }
+    const atApprover = reached.get(String(approver));
+    if (atApprover === undefined) continue;
+    const approval = records.find(
+      (record) =>
+        String(record.entry.origin.instanceId) === String(approver) &&
+        String(record.entry.subject) === String(local.instanceId) &&
+        record.entry.subjectDeviceKey === local.publicKey &&
+        verdictFor(atApprover.key, record.read) === "verified",
+    );
+    if (approval === undefined) continue;
+    chains.push({
+      founder,
+      approverDisplayName: atApprover.name,
+      approverKey: atApprover.key,
+      links: [
+        ...atApprover.links,
+        {
+          approver,
+          sequence: approval.entry.origin.sequence,
+          subject: local.instanceId,
+          subjectDisplayName: approval.entry.subjectDisplayName,
+          subjectDeviceKey: local.publicKey,
+        },
+      ],
+    });
+  }
+  return chains;
+}
 
 function verdictFor(
   publicKey: string,

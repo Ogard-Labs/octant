@@ -79,11 +79,27 @@ export const ReplicaJoinApproved = Schema.Struct({
  * this computer's request. The approver becomes a member here, and so does
  * this computer, with the key its own request carried.
  */
+const ReplicaChainLink = Schema.Struct({
+  approver: ReplicaInstanceId,
+  sequence: Sequence,
+  subject: ReplicaInstanceId,
+  subjectDisplayName: ReplicaDisplayName,
+  subjectDeviceKey: ReplicaDevicePublicKey,
+}).annotations(strict);
+
 export const ReplicaJoinConfirmed = Schema.Struct({
   approver: ReplicaInstanceId,
   approverDisplayName: ReplicaDisplayName,
   approverDeviceKey: ReplicaDevicePublicKey,
   approvalSequence: Sequence,
+  /** The founding self-approval the chain starts from: this host's only root. */
+  founder: Schema.Struct({
+    instanceId: ReplicaInstanceId,
+    displayName: ReplicaDisplayName,
+    publicKey: ReplicaDevicePublicKey,
+  }).annotations(strict),
+  /** Each approval from the founder to the approver, then the approver's of this host. */
+  links: Schema.NonEmptyArray(ReplicaChainLink),
 }).annotations(strict);
 
 /** This host, a member, published a revocation of another computer. */
@@ -287,16 +303,15 @@ export class ReplicaMembershipProjection implements Projection {
       }
       case names.joinConfirmed: {
         const confirmed = decodeConfirmed(event.payload);
-        this.#roots.set(String(confirmed.approver), {
-          instanceId: confirmed.approver,
-          displayName: confirmed.approverDisplayName,
-          publicKey: confirmed.approverDeviceKey,
-        });
-        if (this.#local !== undefined) {
-          this.#admit(confirmed.approver, confirmed.approvalSequence, {
-            instanceId: this.#local.instanceId,
-            displayName: this.#local.displayName,
-            publicKey: this.#local.publicKey,
+        // The founder is the only root; everyone else on the chain, this host
+        // included, is admitted by the approval that names them, so a later
+        // revocation cuts them the same way it cuts anyone.
+        this.#roots.set(String(confirmed.founder.instanceId), confirmed.founder);
+        for (const link of confirmed.links) {
+          this.#admit(link.approver, link.sequence, {
+            instanceId: link.subject,
+            displayName: link.subjectDisplayName,
+            publicKey: link.subjectDeviceKey,
           });
         }
         return;

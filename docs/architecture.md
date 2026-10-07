@@ -1261,9 +1261,16 @@ flowchart LR
   also carries membership: a computer that is not yet a member writes a join
   request at its own next sequence and names itself, and a member returns that
   request for approval instead of refusing it. Approving journals the new
-  instance on the member; confirming the same approval on the joining computer
-  journals the member there, which is how a computer that was never part of
-  the store learns who the members are. A pull walks each instance's entries in
+  instance on the member. Confirming the approval on the joining computer
+  imports a chain: the founder's sequence-1 self-approval, then each approval
+  from the founder to the approver, each verified with the key the previous
+  link named, then the approver's approval of the joining computer. The
+  founder becomes that computer's only root and everyone on the chain is
+  admitted by the approval that names them, which is how a computer that was
+  never part of the store learns who the members are and later applies the
+  founder's revocations. A founding self-approval counts only as the start of
+  such a chain; if the store holds a second founder that also reaches the
+  approver, joining is refused. A pull walks each instance's entries in
   sequence order from the start, because the sequence is per instance and a
   host that joins in the middle cannot have seen anything earlier. A member's
   revocation is an entry the member writes; it is refused for a revoked
@@ -2639,8 +2646,8 @@ mechanisms are:
   person that the request the member is approving, and the member approving
   it, are the ones the joining computer means; it is not a secret, and the
   signatures, not the code, make the records authoritative. The joining
-  computer confirms the approval after the codes agree, which is how it learns
-  its first member. Revoke writes a signed revocation. Store setup, joining, and
+  computer confirms the approval after the codes agree and imports the verified
+  chain of approvals from the founder to its approver. Revoke writes a signed revocation. Store setup, joining, and
   revoking happen on the host, never from a paired phone. Store credentials
   live in the host credential store — macOS Keychain or freedesktop Secret
   Service — and are not written into the replica. An S3-compatible store is
