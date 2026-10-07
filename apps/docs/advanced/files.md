@@ -228,6 +228,10 @@ the host, so they survive restart and reload. Every comment is authored as you,
 with the device it came through noted ("paired device" when it arrived from a
 paired phone or browser). A comment whose block has since left the canvas is
 kept and marked rather than dropped. Shared snapshots never include comments.
+A shared snapshot keeps every block, including charts, tables, treemaps,
+heatmaps, and bar lists with their number formats; only a design stops a share.
+A treemap or bar list in a shared snapshot offers no **Open file**, because
+those files are on your Mac.
 Board templates are not available yet. Revisions
 do not force a document the user closed to reopen. Agents should identify the
 created document rather than invent a download URL or claim a preview opened

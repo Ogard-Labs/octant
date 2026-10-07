@@ -1,12 +1,25 @@
 import { Schema } from "effect";
 import {
+  CANVAS_MAX_BAR_LIST_ROWS,
+  CANVAS_MAX_HEATMAP_CELLS,
+  CANVAS_MAX_HEATMAP_COLUMNS,
+  CANVAS_MAX_HEATMAP_DAYS,
+  CANVAS_MAX_HEATMAP_ROWS,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
+  CANVAS_MAX_TREEMAP_LEAVES,
+  CANVAS_MAX_TREEMAP_MEASURES,
   CanvasActor,
+  CanvasBarListScale,
   CanvasBlock,
+  CanvasDiagramLayoutKind,
+  CanvasHeatmapDate,
+  CanvasHeatmapScale,
   CanvasId,
   CanvasMetricDirection,
   CanvasNumberFormat,
   CanvasSchemaVersion,
+  CanvasTableColumnDisplay,
+  CanvasTreemapScale,
   CanvasVersionId,
   canvasChartSeriesIssue,
   decodeCanvasDefinition,
@@ -34,11 +47,20 @@ const boundedToken = <B extends string>(brand: B) =>
 // current one, so a rolled-forward snapshot stays readable here, while a
 // rolled-back runtime whose literal stops at the older number refuses a
 // document that declares the newer version cleanly at the schemaVersion field
-// — before any block decodes — instead of partially decoding it. Version 2
-// accompanies Canvas schema version 3: static exports and snapshots may now
-// carry mockup blocks.
-export const CANVAS_SHARE_SCHEMA_VERSION = 2 as const;
-export const CanvasShareSchemaVersion = Schema.Literal(1, CANVAS_SHARE_SCHEMA_VERSION);
+// — before any block decodes — instead of partially decoding it. Each gated
+// kind or field below is admitted only in a document declaring the version that
+// introduced it, so an older document carrying one is refused, not misdrawn.
+//
+// Version 2 accompanies Canvas schema version 3: a share may carry a mockup.
+export const CANVAS_SHARE_MOCKUP_SCHEMA_VERSION = 2;
+// Version 3 catches the share up with the Canvas data visuals: treemap,
+// heatmap, and bar-list blocks, a chart's and a table column's number format,
+// a table column's display, and a board's own layout (a diagram's `layout` and
+// a node's `positioned`). Until then a Canvas holding any of them could not be
+// shared at all.
+export const CANVAS_SHARE_VISUALS_SCHEMA_VERSION = 3;
+export const CANVAS_SHARE_SCHEMA_VERSION = 3 as const;
+export const CanvasShareSchemaVersion = Schema.Literal(1, 2, CANVAS_SHARE_SCHEMA_VERSION);
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
 
 export const CanvasExportId = brandedUuid("CanvasExportId");
@@ -220,6 +242,14 @@ const ExportUrl = Schema.String.pipe(
 );
 const ExportScalar = Schema.Union(ExportText, Schema.Number, Schema.Boolean, Schema.Null);
 
+const exportHeatmapFields = {
+  ...exportBlockFields,
+  kind: Schema.Literal("heatmap"),
+  valueLabel: Schema.optional(ExportLabel),
+  format: Schema.optional(CanvasNumberFormat),
+  scale: Schema.optional(CanvasHeatmapScale),
+} as const;
+
 /**
  * Sanitized first-party export blocks. Live sourceId authority is never present.
  * Unsupported or secret-bearing shapes must fail closed at decode time.
@@ -311,6 +341,8 @@ export const CanvasStaticExportBlock = Schema.Union(
         id: boundedToken("CanvasTableColumnId"),
         label: ExportLabel,
         type: Schema.Literal("text", "number", "boolean", "date", "status"),
+        format: Schema.optional(CanvasNumberFormat),
+        display: Schema.optional(CanvasTableColumnDisplay),
       }).annotations(strict),
     ).pipe(Schema.maxItems(64)),
     rows: Schema.Array(Schema.Array(ExportScalar).pipe(Schema.maxItems(64))).pipe(
@@ -345,6 +377,7 @@ export const CanvasStaticExportBlock = Schema.Union(
         mark: Schema.optional(Schema.Literal("bar", "line")),
       }).annotations(strict),
     ).pipe(Schema.maxItems(64)),
+    format: Schema.optional(CanvasNumberFormat),
   })
     .annotations(strict)
     .pipe(
@@ -411,6 +444,7 @@ export const CanvasStaticExportBlock = Schema.Union(
         role: Schema.optional(boundedToken("CanvasNodeRole")),
         x: Schema.optional(Schema.Number),
         y: Schema.optional(Schema.Number),
+        positioned: Schema.optional(Schema.Literal(true)),
       }).annotations(strict),
     ).pipe(Schema.maxItems(512)),
     edges: Schema.Array(
@@ -431,6 +465,7 @@ export const CanvasStaticExportBlock = Schema.Union(
       ).pipe(Schema.maxItems(64)),
     ),
     flow: Schema.optional(Schema.Literal("down", "right")),
+    layout: Schema.optional(CanvasDiagramLayoutKind),
   }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,
@@ -585,6 +620,84 @@ export const CanvasStaticExportBlock = Schema.Union(
       }).annotations(strict),
     ).pipe(Schema.maxItems(64)),
   }).annotations(strict),
+  // A shared treemap or bar list keeps its readings but drops each leaf's or
+  // row's source id, which only resolves against the host that wrote it.
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("treemap"),
+    nodes: Schema.Array(
+      Schema.Struct({
+        nodeId: boundedToken("CanvasNodeId"),
+        parentId: Schema.optional(boundedToken("CanvasNodeId")),
+        label: ExportLabel,
+        values: Schema.optional(
+          Schema.Record({ key: boundedToken("CanvasTreemapMeasureId"), value: Schema.Number }),
+        ),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_TREEMAP_LEAVES)),
+    measures: Schema.NonEmptyArray(
+      Schema.Struct({
+        measureId: boundedToken("CanvasTreemapMeasureId"),
+        label: ExportLabel,
+        format: Schema.optional(CanvasNumberFormat),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_TREEMAP_MEASURES)),
+    sizeBy: boundedToken("CanvasTreemapMeasureId"),
+    colorBy: boundedToken("CanvasTreemapMeasureId"),
+    colorScale: Schema.optional(CanvasTreemapScale),
+    startNodeId: Schema.optional(boundedToken("CanvasNodeId")),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportHeatmapFields,
+    layout: Schema.Literal("matrix"),
+    rows: Schema.NonEmptyArray(
+      Schema.Struct({
+        rowId: boundedToken("CanvasHeatmapRowId"),
+        label: ExportLabel,
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_ROWS)),
+    columns: Schema.NonEmptyArray(
+      Schema.Struct({
+        columnId: boundedToken("CanvasHeatmapColumnId"),
+        label: ExportLabel,
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_COLUMNS)),
+    cells: Schema.Array(
+      Schema.Struct({
+        rowId: boundedToken("CanvasHeatmapRowId"),
+        columnId: boundedToken("CanvasHeatmapColumnId"),
+        value: Schema.Number,
+        note: Schema.optional(ExportText),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_CELLS)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportHeatmapFields,
+    layout: Schema.Literal("calendar"),
+    days: Schema.NonEmptyArray(
+      Schema.Struct({
+        date: CanvasHeatmapDate,
+        value: Schema.Number,
+        note: Schema.optional(ExportText),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_DAYS)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("bar-list"),
+    rows: Schema.NonEmptyArray(
+      Schema.Struct({
+        label: ExportLabel,
+        value: Schema.Number,
+        secondaryValue: Schema.optional(Schema.Number),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_BAR_LIST_ROWS)),
+    valueLabel: Schema.optional(ExportLabel),
+    secondaryLabel: Schema.optional(ExportLabel),
+    format: Schema.optional(CanvasNumberFormat),
+    secondaryFormat: Schema.optional(CanvasNumberFormat),
+    scale: Schema.optional(CanvasBarListScale),
+  }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("code-excerpt"),
@@ -714,12 +827,43 @@ export const CanvasStaticExportDocument = Schema.Struct({
     // document carrying one is refused at decode, not partially rendered.
     Schema.filter(
       (document) =>
-        document.schemaVersion === CANVAS_SHARE_SCHEMA_VERSION ||
+        document.schemaVersion >= CANVAS_SHARE_MOCKUP_SCHEMA_VERSION ||
         !document.blocks.some((block) => block.kind === "mockup"),
       { message: () => "Mockup blocks require Canvas share version 2." },
     ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_VISUALS_SCHEMA_VERSION ||
+        !document.blocks.some(exportBlockUsesVisuals),
+      {
+        message: () =>
+          "Treemap, heatmap, and bar-list blocks, number formats on charts and table columns, table column displays, and a board's own layout require Canvas share version 3.",
+      },
+    ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;
+
+/** Whether a shared block uses a kind or field introduced at share version 3. */
+function exportBlockUsesVisuals(block: CanvasStaticExportBlock): boolean {
+  switch (block.kind) {
+    case "treemap":
+    case "heatmap":
+    case "bar-list":
+      return true;
+    case "chart":
+      return block.format !== undefined;
+    case "table":
+      return block.columns.some(
+        (column) => column.format !== undefined || column.display !== undefined,
+      );
+    case "diagram":
+      return (
+        block.layout !== undefined || block.nodes.some((node) => node.positioned !== undefined)
+      );
+    default:
+      return false;
+  }
+}
 
 export const CanvasStaticExportReceipt = Schema.Struct({
   schemaVersion: CanvasShareSchemaVersion,
