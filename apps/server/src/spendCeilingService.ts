@@ -8,6 +8,7 @@ import {
   SPEND_TURN_AGGREGATE_TYPE,
   decodeSpendCeilingReservationId,
   decodeUtcTimestamp,
+  type ProjectId,
   type SpendCeilingCommand,
   type SpendCeilingCommandResult,
   type SpendCeilingRefusal,
@@ -80,7 +81,7 @@ export interface SpendCeilingServiceOptions {
   readonly journal: Journal;
   readonly clock: () => string;
   readonly uuid: () => string;
-  readonly agentRuns?: Pick<AgentRunProjection, "parentSummary">;
+  readonly agentRuns?: Pick<AgentRunProjection, "parentSummary" | "projectRunIds">;
   readonly threadExists?: (input: {
     readonly threadType: SpendCeilingThreadType;
     readonly threadId: string;
@@ -100,7 +101,7 @@ export class SpendCeilingService {
   readonly #journal: Journal;
   readonly #clock: () => string;
   readonly #uuid: () => string;
-  readonly #agentRuns: Pick<AgentRunProjection, "parentSummary"> | undefined;
+  readonly #agentRuns: Pick<AgentRunProjection, "parentSummary" | "projectRunIds"> | undefined;
   readonly #threadExists: SpendCeilingServiceOptions["threadExists"];
   readonly #projectExists: SpendCeilingServiceOptions["projectExists"];
   readonly #reservations = new Map<string, LiveReservation>();
@@ -358,17 +359,21 @@ export class SpendCeilingService {
   #facts(ceiling: SpendCeilingState, childIds: ReadonlyArray<string>): SpendCeilingScopeFacts {
     const now = decodeUtcTimestamp(this.#clock());
     const from = spendCeilingWindowStart(ceiling.window, now);
+    const scopeChildIds =
+      ceiling.scope.kind === "project"
+        ? this.#projectChildSubjectIds(ceiling.scope.projectId, childIds)
+        : childIds;
     const committed: SpendTokenTotal =
       ceiling.policy.tokenBudget === undefined
         ? { status: "known", tokens: 0 }
-        : this.#committedSpend(ceiling.scope, childIds, from);
+        : this.#committedSpend(ceiling.scope, scopeChildIds, from);
     const needsTurns =
       ceiling.policy.turnBudget !== undefined || ceiling.policy.runTimeBudgetSeconds !== undefined;
     const used = needsTurns ? this.#turnUse(ceiling.scope, from, now) : undefined;
     const cost =
       ceiling.policy.costBudgetUsdCents === undefined
         ? undefined
-        : this.#costUse(ceiling.scope, childIds, from);
+        : this.#costUse(ceiling.scope, scopeChildIds, from);
     return {
       scopeKind: ceiling.scope.kind,
       scopeId:
@@ -522,6 +527,21 @@ export class SpendCeilingService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * A Project's child runs, not only the admitted thread's. Counting one
+   * thread's runs left the spend of runs under the Project's other threads —
+   * and of every run in the Project overview, which admits no thread —
+   * outside the Project ceiling, so it read money left after it was spent.
+   */
+  #projectChildSubjectIds(
+    projectId: ProjectId,
+    threadChildIds: ReadonlyArray<string>,
+  ): ReadonlyArray<string> {
+    const ids = new Set(threadChildIds);
+    for (const runId of this.#agentRuns?.projectRunIds(projectId) ?? []) ids.add(String(runId));
+    return [...ids];
   }
 
   #reservedFor(scope: SpendCeilingScope): number {

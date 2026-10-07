@@ -1788,7 +1788,10 @@ cannot cover a declared per-turn bound, when the turn count is used up, when
 settled plus in-flight run time has reached the budget, or when settled money
 spend has reached the budget, and the composer and Environment name the
 exhausted dimension and a recovery. Token spend is the existing `UsageRecord`
-ledger, never imported provider history. Turns and run time come from journaled
+ledger, never imported provider history. Token and money spend include child
+runs: a thread ceiling counts its own runs, and a Project ceiling counts every
+run whose routing receipt names the Project, whichever thread started it, at
+admission and in the Project overview. Turns and run time come from journaled
 `spend.turn-recorded@1` facts, one per admitted turn or child run, charged its
 actual admitted-to-settled time; a turn still in flight counts its elapsed time,
 and a turn a host exit interrupted records nothing.
