@@ -316,8 +316,11 @@ Subagents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every
 other AgentRun control stay. A compact, collapsible Subagents card sits above
-the composer in normal layout. Its counts keep failures, waits and unreviewed
-results visible while collapsed; expansion previews up to three active or
+the composer in normal layout, as wide as the message surface. Its head counts each
+state (failed, waiting, to review, working, done) and keeps failures, waits and
+unreviewed results first while collapsed; a result the parent already received is
+done, not to review. While a Chat thread's host connection is lost it dims and
+withholds Stop without repeating the connection notice; expansion previews up to three active or
 unresolved children. Rows open the corresponding detail in Agents, and View all
 keeps completed history reachable. Provider-observed children carry an explicit
 observation-only label and no managed controls. Task-plan progress remains a
@@ -328,7 +331,8 @@ without starting them: only the thread's agent starts one, through the Octant
 Harness `delegate` tool, and collects its result. The list has one title, then
 Working and Finished sections of one-button rows —
 status icon, task, and state, role, model, and age in words — with finished
-rows newest first and an unreviewed result marked "Needs review". A row opens
+rows newest first and an unreviewed result marked "Needs review" unless the
+parent already received it. A row opens
 that subagent's page in place of the list, with a back control: its task as
 the title, a status line, and a small transcript that starts with the task as
 the brief, then the replies as rendered Markdown and status events as quiet
