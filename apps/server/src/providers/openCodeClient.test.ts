@@ -390,37 +390,74 @@ describe("official OpenCode client routing", () => {
     ).toBe(true);
   });
 
-  it("refuses a 2.x session whose rules would allow an unasked write", async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
+  it("replies to 2.x approvals with the decision body 2.0.22 requires and refuses 2.x questions", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        requests.push(request.clone());
+        return new Response(null, { status: 204 });
+      }),
+    );
     const client = makeOfficialOpenCodeClient(
       {
         authorization: "Basic redacted",
         pid: 1,
         runtime: "beta",
         version: "opencode v2.0.22",
-        url: new URL("http://127.0.0.1:41724/"),
+        url: new URL("http://127.0.0.1:41728/"),
       },
       "/tmp/project",
     );
 
-    await expect(
-      client.createSession({
-        permission: [
-          { permission: "*", pattern: "*", action: "allow" },
-          { permission: "external_directory", pattern: "*", action: "deny" },
-        ],
+    await client.replyPermission("ses_1", "req-1", "once");
+    await client.replyPermission("ses_1", "req-2", "reject");
+    await expect(client.replyQuestion("ses_1", "q-1", ["Yes"])).rejects.toMatchObject({
+      category: "unsupported",
+    });
+
+    expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
+      ["POST", "/api/session/ses_1/permission/req-1/reply"],
+      ["POST", "/api/session/ses_1/permission/req-2/reply"],
+    ]);
+    // 2.0.22 answers the SDK's `{reply}` body with 400.
+    expect(await requests[0]?.json()).toEqual({ decision: "once" });
+    expect(await requests[1]?.json()).toEqual({ decision: "reject" });
+    expect(requests[0]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
+  });
+
+  it("registers and disconnects app-managed MCP servers on the 2.x API", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (request: Request) => {
+        requests.push(request.clone());
+        return new Response(null, { status: 204 });
       }),
-    ).rejects.toMatchObject({ category: "unsupported" });
-    await expect(client.replyPermission("request", "once")).rejects.toMatchObject({
-      category: "unsupported",
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode v2.0.22",
+        url: new URL("http://127.0.0.1:41729/"),
+      },
+      "/tmp/project",
+    );
+
+    await client.addMcpServer({ name: "octant-bridge", url: "http://127.0.0.1:9999/" });
+    await client.disconnectMcpServer("octant-bridge");
+
+    expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
+      ["POST", "/mcp"],
+      ["POST", "/mcp/octant-bridge/disconnect"],
+    ]);
+    expect(await requests[0]?.json()).toEqual({
+      name: "octant-bridge",
+      config: { type: "remote", url: "http://127.0.0.1:9999/", enabled: true, oauth: false },
     });
-    await expect(client.replyQuestion("request", ["yes"])).rejects.toMatchObject({
-      category: "unsupported",
-    });
-    await expect(
-      client.addMcpServer({ name: "octant", url: "http://127.0.0.1:9/" }),
-    ).rejects.toMatchObject({ category: "unsupported" });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(requests[0]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
   });
 });

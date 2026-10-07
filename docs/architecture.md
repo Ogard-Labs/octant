@@ -1356,16 +1356,46 @@ modelId }`, and the model picker is provider-first. Discovery can find
   picker), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
   GitHub Copilot, Cline, Qwen Code, fx). The installed OpenCode binary's
-  version selects its routes: 1.x keeps the legacy session API, and 2.x lists
-  providers and models, then runs a turn where the process jail already
-  enforces the permission boundary. Chat turns run. Work and Code writes stay
-  refused until session permission rules can be enforced; resume, interruption,
-  and tool activity are reported, and anything not mapped fails closed. The probe
-  also asks the confined 2.x server to answer for a directory carrying a Git
-  marker: project resolution starts Git, which the Chat and Plan jail refuses
-  (observed with 2.0.22 on macOS as HTTP 500 for any work tree), so a runtime
-  that cannot answer reports `incompatible` with its models listed and every
-  capability unsupported, and no turn is offered. fx runs in a per-instance managed
+  version selects its routes: 1.x keeps the legacy session API and its
+  per-session permission ruleset. 2.x accepts no per-session ruleset, so each
+  launch writes its session posture — the same rules in 2.x action names
+  (`shell`, `subagent`), every namespaced tool and skill denied, and only that
+  connection's app-managed tool bridge allowed — into the private
+  configuration, where OpenCode appends it after every agent's built-in rules
+  (its default agent otherwise allows everything); a launch that names no
+  posture denies all. The bridge allow has nothing to admit yet: Octant
+  registers app-managed tools through the 1.x MCP route, which 2.0.22 does
+  not serve (it lists `/api/experimental/mcp/{server}` instead), so the probe
+  reports app-managed tools unsupported and 2.x runs turns without Octant's
+  app tools until registration supports the 2.x MCP API. 2.x offers Code
+  turns outside Plan only, because project resolution starts Git, which every
+  jail that denies process execution refuses: Chat, Work, and Plan. Approvals
+  map through 2.0.22's `permission.asked` event and its reply route, whose
+  body is `{decision}`. An approval is answered `once`, never `always`, even
+  when approvals are remembered for the Project: `always` would save a grant
+  in OpenCode's data directory, which it shares with the person's own use,
+  outside Octant's revocation. Approval-gated on 2.x honours permission
+  grants the person saved in OpenCode itself for the same repository: OpenCode
+  keys them by the repository's root commit, keeps them in its own data store
+  (shared with the person's own use because provider credentials live there),
+  and applies them as allow after Octant's rules. Octant's denies still win,
+  so Plan and the Work shell and subagent denials hold, and Octant itself
+  never writes such a grant because it answers approvals `once`. An edit
+  allowed this way still fails the turn through the file-change check, after
+  the write; a shell command allowed this way runs without an approval card.
+  Clearing the saved grants in OpenCode restores the prompts. A 2.x reject
+  settles every pending request in the session, so each settled request is
+  forgotten. Questions are
+  unsupported: 2.0.22 serves no question routes and asks through forms, which
+  are not mapped, so the written posture denies `question` and a form that
+  still arrives fails the turn. Resume, interruption, and tool
+  activity are reported; a file change that no allowed or approved edit
+  preceded fails the turn; and anything not mapped fails closed. The probe also asks the
+  confined 2.x server to answer for a directory carrying a Git marker, made in
+  the launch's own scratch directory because every launch profile denies the
+  host temporary directory beneath `/private`; a runtime that cannot answer
+  (observed with 2.0.22 on macOS as HTTP 500) reports `incompatible` with its
+  models listed and every capability unsupported, and no turn is offered. fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable; see
   [fx-acp-compatibility.md](fx-acp-compatibility.md) and
   [0130](decisions/0130-fx-runs-in-a-managed-home.md). Image profiles are
@@ -2212,6 +2242,11 @@ mechanisms are:
   and records the posture the turn ran under. Compatible harnesses may
   answer those prompts themselves when the thread opts in
   (`docs/decisions/0104`); categories and confinement stay Octant's.
+  One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
+  honours permission grants the person saved in OpenCode itself for the same
+  repository, so such an action runs without an Octant prompt. Octant's
+  denies still win, and Octant never writes such a grant; the
+  [providers](#providers) entry on OpenCode states the details.
   The access picker also offers "Lower thread" to durably return a thread to
   approval-gated and revoke a session-only Full-access grant for that window
   without confirmation.
