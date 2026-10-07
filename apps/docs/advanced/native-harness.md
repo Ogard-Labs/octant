@@ -22,6 +22,10 @@ the set to what it may reach:
 | Work | inside the bound folder | none      | yes                 | yes        |
 | Code | inside the checkout     | sandboxed | yes                 | yes        |
 
+Web means `web-fetch`, plus `web-search` once a SearXNG search endpoint is
+set. A Chat thread gets neither, and cannot open a page, until you turn
+research on for it.
+
 Every call passes the same server authority check as any other tool. A Chat
 thread holds that authority with or without a Project. A thread that can no
 longer act (archived, its folder or Project changed, or its provider turned
