@@ -372,9 +372,10 @@ function openAiCompatibleTransport(
       let endpoint: OpenAiCompatibleEndpoint | undefined = endpointFor(options, resolver, profile);
       // The ChatGPT plan request profile applies when the resolved
       // credential's descriptor is the plan offer; plan usage is disabled
-      // when the granted scopes did not include the plan-usage scope.
+      // when the sign-in did not grant use of the subscription.
       const planProfile = planProfileOf(options);
-      const planUsageEnabled = gate.kind === "oauth" ? gate.planUsageEnabled : undefined;
+      const subscriptionUsageGranted =
+        gate.kind === "oauth" ? gate.subscriptionUsageGranted : undefined;
       // What each protocol's last successful call measured and billed. A
       // responses token count must not calibrate a request automatic mode may
       // send as chat completions.
@@ -392,7 +393,7 @@ function openAiCompatibleTransport(
             attempt: async (attempt) => {
               const result = await sendCompatibleRequest(options, active, request, attempt, {
                 profile: planProfile,
-                planUsageEnabled,
+                subscriptionUsageGranted,
               });
               recordObservedTurn(options, result, clock);
               if (result.usage !== undefined && result.usage.inputTokens > 0) {
@@ -459,8 +460,8 @@ async function sendCompatibleRequest(
   },
   plan: {
     readonly profile: "chatgpt-plan" | undefined;
-    readonly planUsageEnabled: boolean | undefined;
-  } = { profile: undefined, planUsageEnabled: undefined },
+    readonly subscriptionUsageGranted: boolean | undefined;
+  } = { profile: undefined, subscriptionUsageGranted: undefined },
 ): Promise<CompatibleTurnResult> {
   const { history, prompt, toolAnswers } = protocolInput(request);
   const onEvent = (event: ProtocolTurnEvent) => {
@@ -482,7 +483,9 @@ async function sendCompatibleRequest(
     ...(request.tools.length === 0 ? {} : { tools: request.tools }),
     ...(toolAnswers === undefined ? {} : { toolAnswers }),
     ...(plan.profile === undefined ? {} : { profile: plan.profile }),
-    ...(plan.planUsageEnabled === undefined ? {} : { planUsageEnabled: plan.planUsageEnabled }),
+    ...(plan.subscriptionUsageGranted === undefined
+      ? {}
+      : { subscriptionUsageGranted: plan.subscriptionUsageGranted }),
     signal: stream.signal,
     onEvent,
   };

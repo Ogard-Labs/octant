@@ -751,7 +751,7 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
         access: async () => ({
           kind: "granted" as const,
           accessToken: "plan-access-token",
-          planUsageEnabled: true,
+          subscriptionUsageGranted: true,
         }),
       },
       fetch: options.fetch,

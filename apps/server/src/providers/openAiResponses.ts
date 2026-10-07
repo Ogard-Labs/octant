@@ -117,10 +117,11 @@ export interface ResponsesTurnInput {
    */
   readonly profile?: "chatgpt-plan" | undefined;
   /**
-   * Whether the resolved credential granted the plan-usage scope. False means
-   * the sign-in is identity-only: the turn is refused before send.
+   * Whether the resolved credential granted use of the person's subscription.
+   * False means the sign-in is identity-only: a plan turn is refused before
+   * send.
    */
-  readonly planUsageEnabled?: boolean | undefined;
+  readonly subscriptionUsageGranted?: boolean | undefined;
   readonly sequenceStart?: number;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: ProtocolTurnEvent) => void;
@@ -199,7 +200,7 @@ async function runResponsesTurn(
 ): Promise<ProtocolTurnResult> {
   // The ChatGPT plan profile refuses an identity-only sign-in before any
   // request leaves the process.
-  if (input.profile === "chatgpt-plan" && input.planUsageEnabled === false) {
+  if (input.profile === "chatgpt-plan" && input.subscriptionUsageGranted === false) {
     throw chatGptPlanRefusalFailure({ kind: "plan-usage-disabled" });
   }
   const tools = input.tools === undefined ? undefined : encodeResponsesTools(input.tools);

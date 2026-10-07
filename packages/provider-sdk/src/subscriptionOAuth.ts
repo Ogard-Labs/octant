@@ -40,11 +40,13 @@ export interface SubscriptionOAuthHost {
         /** Absent means the credential does not expire (e.g. an OpenRouter key). */
         readonly expiresAt?: string;
         /**
-         * ChatGPT plan dialect only: false when the granted scopes do not
-         * include the plan-usage scope. The bearer is still valid for
-         * identity; plan usage is disabled.
+         * False when the sign-in identifies the person but the issuer did
+         * not grant the scope that lets requests draw on their subscription.
+         * The bearer is still valid; a driver must refuse requests that would
+         * bill the subscription. Absent when the provider makes no such
+         * distinction.
          */
-        readonly planUsageEnabled?: boolean;
+        readonly subscriptionUsageGranted?: boolean;
       }
     | { readonly kind: "sign-in-again"; readonly reason: SubscriptionOAuthSignInAgainReason }
     | { readonly kind: "unavailable" }
@@ -56,11 +58,12 @@ export type SubscriptionOAuthResolution =
       readonly kind: "bearer";
       readonly token: string;
       /**
-       * ChatGPT plan dialect only: false when the granted scopes do not
-       * include the plan-usage scope. The bearer is still valid for
-       * identity; plan usage is disabled.
+       * False when the sign-in identifies the person but the issuer did not
+       * grant the scope that lets requests draw on their subscription. The
+       * bearer is still valid; a driver must refuse requests that would bill
+       * the subscription. Absent when the provider makes no such distinction.
        */
-      readonly planUsageEnabled?: boolean;
+      readonly subscriptionUsageGranted?: boolean;
     }
   | { readonly kind: "unauthenticated"; readonly reason: "missing" | "expired" | "revoked" }
   | { readonly kind: "unavailable" }
@@ -193,9 +196,9 @@ async function accessOrRefresh(
   return {
     kind: "bearer",
     token: granted.accessToken,
-    ...(granted.planUsageEnabled === undefined
+    ...(granted.subscriptionUsageGranted === undefined
       ? {}
-      : { planUsageEnabled: granted.planUsageEnabled }),
+      : { subscriptionUsageGranted: granted.subscriptionUsageGranted }),
   };
 }
 

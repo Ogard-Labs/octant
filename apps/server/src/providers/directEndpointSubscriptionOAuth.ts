@@ -44,11 +44,10 @@ export type DirectEndpointCredentialGate =
       readonly credential: SubscriptionOAuthCredential;
       readonly resolve: () => Promise<string>;
       /**
-       * ChatGPT plan dialect only: false when the granted scopes do not
-       * include the plan-usage scope. The bearer is still valid for
-       * identity; plan usage is disabled.
+       * False when the sign-in identifies the person but did not grant use of
+       * their subscription; requests that would bill it must be refused.
        */
-      readonly planUsageEnabled?: boolean;
+      readonly subscriptionUsageGranted?: boolean;
     }
   | {
       readonly kind: "report";
@@ -107,9 +106,9 @@ export async function inspectDirectEndpointCredential(input: {
     kind: "oauth",
     credential: pointer,
     resolve: () => resolveBearerForRequest(input, pointer),
-    ...(resolution.planUsageEnabled === undefined
+    ...(resolution.subscriptionUsageGranted === undefined
       ? {}
-      : { planUsageEnabled: resolution.planUsageEnabled }),
+      : { subscriptionUsageGranted: resolution.subscriptionUsageGranted }),
   };
 }
 

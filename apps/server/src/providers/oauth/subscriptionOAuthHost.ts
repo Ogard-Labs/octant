@@ -37,7 +37,8 @@ export function subscriptionOAuthHostFromBroker(
         typeof raw.accessToken !== "string" ||
         raw.accessToken.length === 0 ||
         (raw.expiresAt !== undefined && typeof raw.expiresAt !== "string") ||
-        (raw.planUsageEnabled !== undefined && typeof raw.planUsageEnabled !== "boolean")
+        (raw.subscriptionUsageGranted !== undefined &&
+          typeof raw.subscriptionUsageGranted !== "boolean")
       ) {
         return { kind: "unavailable" };
       }
@@ -45,7 +46,9 @@ export function subscriptionOAuthHostFromBroker(
         kind: "granted",
         accessToken: raw.accessToken,
         ...(raw.expiresAt === undefined ? {} : { expiresAt: raw.expiresAt }),
-        ...(raw.planUsageEnabled === undefined ? {} : { planUsageEnabled: raw.planUsageEnabled }),
+        ...(raw.subscriptionUsageGranted === undefined
+          ? {}
+          : { subscriptionUsageGranted: raw.subscriptionUsageGranted }),
       };
     },
   };

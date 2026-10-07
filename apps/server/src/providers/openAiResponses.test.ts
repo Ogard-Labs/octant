@@ -1803,7 +1803,7 @@ describe("sendResponsesTurn under the ChatGPT plan profile", () => {
     const fetch = vi.fn(async () => sse(created(1), completed(2)));
 
     const failure = await failureOf(
-      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: false })),
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", subscriptionUsageGranted: false })),
     );
 
     expect(failure.category).toBe("unauthorized");
@@ -1817,7 +1817,7 @@ describe("sendResponsesTurn under the ChatGPT plan profile", () => {
       sendResponsesTurn(
         input(fetch, {
           profile: "chatgpt-plan",
-          planUsageEnabled: true,
+          subscriptionUsageGranted: true,
           promptCacheKey: "cache-key-must-not-leak",
           system: "You are helpful.",
         }),
@@ -1860,7 +1860,7 @@ describe("sendResponsesTurn under the ChatGPT plan profile", () => {
     );
 
     const failure = await failureOf(
-      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", subscriptionUsageGranted: true })),
     );
 
     expect(failure.category).toBe("rate-limited");
@@ -1879,7 +1879,7 @@ describe("sendResponsesTurn under the ChatGPT plan profile", () => {
     );
 
     const failure = await failureOf(
-      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", subscriptionUsageGranted: true })),
     );
 
     expect(failure.category).toBe("unsupported");
@@ -1897,7 +1897,7 @@ describe("sendResponsesTurn under the ChatGPT plan profile", () => {
     );
 
     const failure = await failureOf(
-      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", subscriptionUsageGranted: true })),
     );
 
     expect(failure.category).toBe("unauthenticated");
@@ -1924,7 +1924,7 @@ describe("sendResponsesTurn under the ChatGPT plan profile", () => {
     );
 
     const failure = await failureOf(
-      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", subscriptionUsageGranted: true })),
     );
 
     expect(failure).toEqual({
@@ -1943,7 +1943,7 @@ describe("sendResponsesTurn under the ChatGPT plan profile", () => {
     );
 
     const failure = await failureOf(
-      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", subscriptionUsageGranted: true })),
     );
 
     expect(failure).toEqual({
@@ -1965,7 +1965,7 @@ describe("sendResponsesTurn under the ChatGPT plan profile", () => {
     );
 
     const failure = await failureOf(
-      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", subscriptionUsageGranted: true })),
     );
 
     expect(failure.category).toBe("unavailable");
@@ -1984,7 +1984,7 @@ describe("sendResponsesTurn under the ChatGPT plan profile", () => {
     );
 
     const failure = await failureOf(
-      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", planUsageEnabled: true })),
+      sendResponsesTurn(input(fetch, { profile: "chatgpt-plan", subscriptionUsageGranted: true })),
     );
 
     expect(failure).toEqual({

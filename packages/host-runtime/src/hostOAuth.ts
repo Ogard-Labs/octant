@@ -135,11 +135,12 @@ export type HostOAuthAccessResult =
       /** Absent when the stored credential does not expire. */
       readonly expiresAt?: string;
       /**
-       * ChatGPT plan dialect only: false when the granted scopes do not
-       * include the plan-usage scope. The bearer is still valid for
-       * identity; plan usage is disabled.
+       * False when the sign-in identifies the person but the issuer did not
+       * grant the scope that lets requests draw on their subscription; the
+       * bearer is valid, subscription-billed requests are not. Absent when
+       * the dialect makes no such distinction.
        */
-      readonly planUsageEnabled?: boolean;
+      readonly subscriptionUsageGranted?: boolean;
     }
   | { readonly kind: "sign-in-again"; readonly reason: HostOAuthSignInAgainReason }
   | { readonly kind: "unavailable" };
@@ -1506,7 +1507,7 @@ export function createHostOAuthRuntime(options: {
             : { expiresAt: new Date(grant.expiresAt).toISOString() }),
           ...(grant.planUsageEnabled === undefined
             ? {}
-            : { planUsageEnabled: grant.planUsageEnabled }),
+            : { subscriptionUsageGranted: grant.planUsageEnabled }),
         };
       } catch (error) {
         if (error instanceof CredentialStoreFailure && error.category === "missing") {
@@ -1641,9 +1642,9 @@ async function accessRoute(
       accessToken: granted.accessToken,
       tokenType: granted.tokenType,
       ...(granted.expiresAt === undefined ? {} : { expiresAt: granted.expiresAt }),
-      ...(granted.planUsageEnabled === undefined
+      ...(granted.subscriptionUsageGranted === undefined
         ? {}
-        : { planUsageEnabled: granted.planUsageEnabled }),
+        : { subscriptionUsageGranted: granted.subscriptionUsageGranted }),
     },
     { headers: { "cache-control": "no-store" } },
   );

@@ -484,7 +484,7 @@ describe("ChatGPT plan (SIWC) dialect", () => {
       expect(access).toMatchObject({
         kind: "granted",
         accessToken: ACCESS,
-        planUsageEnabled: true,
+        subscriptionUsageGranted: true,
       });
     } finally {
       await runtime.close();
@@ -517,7 +517,7 @@ describe("ChatGPT plan (SIWC) dialect", () => {
       >;
       expect(stored.planUsageEnabled).toBe(false);
       const access = await runtime.access(status.credentialRef);
-      expect(access).toMatchObject({ kind: "granted", planUsageEnabled: false });
+      expect(access).toMatchObject({ kind: "granted", subscriptionUsageGranted: false });
     } finally {
       await runtime.close();
       await fake.close();
