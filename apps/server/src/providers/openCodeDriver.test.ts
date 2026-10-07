@@ -1458,6 +1458,43 @@ describe("OpenCode driver", () => {
     });
   });
 
+  it("answers a 2.x approval once even when approvals are remembered for the project", async () => {
+    const fixture = betaDriver({
+      permissionPersistence: "project-default",
+      events: [
+        {
+          type: "permission.v2.asked",
+          properties: {
+            id: "perm-1",
+            sessionID: "provider-session",
+            action: "edit",
+            resources: ["/tmp/project/a.ts"],
+          },
+        } as unknown as Event,
+      ],
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.tap(() =>
+                connection.send({ sessionId, prompt: "edit", attachments: [], tools: [] }),
+              ),
+              Effect.tap(() =>
+                connection.answerApproval({ sessionId, requestId: "perm-1", approved: true }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    // `always` would save a grant in OpenCode's shared data directory,
+    // outside Octant's revocation.
+    expect(fixture.calls).toContain("permission.reply:once");
+    expect(fixture.calls).not.toContain("permission.reply:always");
+  });
+
   it("maps a 2.x permission.v2.asked event to an approval request and replies through the v2 route", async () => {
     const fixture = betaDriver({
       events: [
@@ -1727,21 +1764,27 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.some((call) => call.startsWith("permission.reply:"))).toBe(false);
   });
 
-  it("fails a 2.x question closed, because 2.0.22 asks through forms that are not mapped", async () => {
+  it("fails a 2.x turn closed when 2.0.22 asks a question through a form", async () => {
+    // The shape 2.0.22's question tool publishes: the session sits inside the form.
     const fixture = betaDriver({
       events: [
         {
-          type: "question.v2.asked",
+          type: "form.created",
           properties: {
-            id: "q-1",
-            sessionID: "provider-session",
-            questions: [
-              {
-                question: "Continue?",
-                header: "Continue",
-                options: [{ label: "Yes" }, { label: "No" }],
-              },
-            ],
+            form: {
+              id: "frm_1",
+              sessionID: "provider-session",
+              title: "Questions",
+              metadata: { kind: "question", tool: { messageID: "msg_1", id: "call_1" } },
+              fields: [
+                {
+                  key: "q0",
+                  title: "Continue?",
+                  type: "string",
+                  options: [{ value: "Yes" }, { value: "No" }],
+                },
+              ],
+            },
           },
         } as unknown as Event,
       ],
@@ -1771,7 +1814,12 @@ describe("OpenCode driver", () => {
     const events = Array.from(output);
     expect(events.some((event) => event.kind === "user-input-request")).toBe(false);
     expect(
-      events.some((event) => event.kind === "failed" && event.failure.category === "unsupported"),
+      events.some(
+        (event) =>
+          event.kind === "failed" &&
+          event.failure.category === "unsupported" &&
+          event.failure.message.includes("questions"),
+      ),
     ).toBe(true);
   });
 
@@ -1899,6 +1947,7 @@ describe("OpenCode driver", () => {
     expect(evaluateV2Permission(rules, "shell")).toBe("ask");
     expect(evaluateV2Permission(rules, "external_directory")).toBe("deny");
     expect(evaluateV2Permission(rules, "skill")).toBe("deny");
+    expect(evaluateV2Permission(rules, "question")).toBe("deny");
     expect(evaluateV2Permission(rules, "other-server_tool")).toBe("deny");
     expect(evaluateV2Permission(rules, `${bridge}_octant_browser`)).toBe("allow");
   });
@@ -1934,6 +1983,7 @@ function betaDriver(
     readonly sessionDelete?: "refused";
     readonly events?: ReadonlyArray<Event>;
     readonly launchScratch?: "unreported";
+    readonly permissionPersistence?: "project-default";
   } = {},
 ) {
   const launchScratch = launchScratchDirectory();
