@@ -1321,7 +1321,7 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
 - **Registry.** Providers are multi-instance: each instance has a stable id,
   driver kind, configuration, readiness state, model list, capability report,
   and environment policy. A selected model is `{ hostId, providerInstanceId,
-  modelId }`, and the model picker is provider-first. Discovery can find
+modelId }`, and the model picker is provider-first. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
