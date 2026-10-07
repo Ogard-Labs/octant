@@ -1,9 +1,10 @@
 import { createThreadMentionClient, type ThreadMentionClient } from "@octant/client-runtime";
-import type {
-  MentionableThreadId,
-  SideChatSidecar,
-  ThreadMentionCandidate,
-  ThreadMentionRequestId,
+import {
+  decodeMentionableThreadId,
+  type MentionableThreadId,
+  type SideChatSidecar,
+  type ThreadMentionCandidate,
+  type ThreadMentionRequestId,
 } from "@octant/contracts";
 import { reconcileThreadMentionChips } from "@octant/domain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -49,7 +50,6 @@ export interface ThreadMentionsController {
    */
   readonly attachDroppedThread: (input: {
     readonly threadId: string;
-    readonly searchHint?: string;
     readonly currentThreadId?: string;
     readonly onDraftChange: (draft: string, caretIndex: number) => void;
   }) => Promise<void>;
@@ -175,7 +175,6 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
   const attachDroppedThread = useCallback(
     async (input: {
       readonly threadId: string;
-      readonly searchHint?: string;
       readonly currentThreadId?: string;
       readonly onDraftChange: (draft: string, caretIndex: number) => void;
     }) => {
@@ -185,11 +184,10 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
           existingThreadIds: chipsRef.current.map((chip) => String(chip.threadId)),
           mentionCount: chipsRef.current.length,
           draft: draftRef.current,
-          search: async () => [],
+          searchThread: async () => [],
           onDraftChange: input.onDraftChange,
           onSelectCandidate,
           onStatus: setStatusMessage,
-          ...(input.searchHint === undefined ? {} : { searchHint: input.searchHint }),
           ...(input.currentThreadId === undefined
             ? {}
             : { currentThreadId: input.currentThreadId }),
@@ -202,11 +200,11 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
         existingThreadIds: chipsRef.current.map((chip) => String(chip.threadId)),
         mentionCount: chipsRef.current.length,
         draft: draftRef.current,
-        search: (query: string) => mentionClient.search(newRequestId(), query),
+        searchThread: (threadId: string) =>
+          mentionClient.searchThread(newRequestId(), decodeMentionableThreadId(threadId)),
         onDraftChange: input.onDraftChange,
         onSelectCandidate,
         onStatus: setStatusMessage,
-        ...(input.searchHint === undefined ? {} : { searchHint: input.searchHint }),
         ...(input.currentThreadId === undefined ? {} : { currentThreadId: input.currentThreadId }),
       });
     },

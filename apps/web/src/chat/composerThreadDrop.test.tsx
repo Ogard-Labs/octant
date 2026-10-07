@@ -28,6 +28,7 @@ function candidate(overrides: Partial<ThreadMentionCandidate> = {}): ThreadMenti
 function stubClient(overrides: Partial<ThreadMentionClient> = {}): ThreadMentionClient {
   return {
     search: vi.fn().mockResolvedValue([candidate()]),
+    searchThread: vi.fn().mockResolvedValue([candidate()]),
     resolve: vi.fn().mockResolvedValue({ mentions: [], unavailable: [] }),
     openSideChat: vi.fn(),
     execute: vi.fn(),
@@ -55,7 +56,6 @@ function DropHarness(props: {
         onClick={() =>
           void mentions.attachDroppedThread({
             threadId: "thread-notes",
-            searchHint: "Release notes",
             onDraftChange: setDraft,
             ...(props.currentThreadId === undefined
               ? {}
@@ -70,7 +70,6 @@ function DropHarness(props: {
         onClick={() =>
           void mentions.attachDroppedThread({
             threadId: "thread-secret",
-            searchHint: "Secret transcript body",
             onDraftChange: setDraft,
           })
         }
@@ -113,7 +112,27 @@ describe("attaching a sidebar thread as composer context", () => {
     expect(screen.getByLabelText("chips")).toHaveTextContent("Release notes");
     expect(screen.getByLabelText("status")).toHaveTextContent("not sent");
     expect(client.resolve).not.toHaveBeenCalled();
-    expect(client.search).toHaveBeenCalledWith(requestId, "Release notes");
+    expect(client.searchThread).toHaveBeenCalledWith(requestId, "thread-notes");
+  });
+
+  it("attaches an openable thread the typeahead would rank past its first page", async () => {
+    const user = userEvent.setup();
+    // The ranked search is full of eight newer look-alikes; only the lookup by
+    // id knows the dropped thread is openable.
+    const crowded = Array.from({ length: 8 }, (_, index) =>
+      candidate({ threadId: `thread-newer-${String(index)}` as never }),
+    );
+    const client = stubClient({
+      search: vi.fn().mockResolvedValue(crowded),
+      searchThread: vi.fn().mockResolvedValue([candidate()]),
+    });
+    render(<DropHarness client={client} />);
+
+    await user.click(screen.getByRole("button", { name: "attach notes" }));
+
+    await waitFor(() => expect(screen.getByLabelText("chips")).toHaveTextContent("Release notes"));
+    expect(screen.getByLabelText("status")).toHaveTextContent("not sent");
+    expect(client.search).not.toHaveBeenCalled();
   });
 
   it("keeps the draft when the host will not offer the thread", async () => {
@@ -141,12 +160,12 @@ describe("attaching a sidebar thread as composer context", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("status")).toHaveTextContent("already that thread"),
     );
-    expect(client.search).not.toHaveBeenCalled();
+    expect(client.searchThread).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "attach empty" }));
     await waitFor(() => expect(screen.getByLabelText("status")).toHaveTextContent("not a thread"));
     expect(screen.getByLabelText("draft")).toHaveTextContent("Keep this draft");
-    expect(client.search).not.toHaveBeenCalled();
+    expect(client.searchThread).not.toHaveBeenCalled();
   });
 
   it("does not add a second chip when the thread is already attached", async () => {

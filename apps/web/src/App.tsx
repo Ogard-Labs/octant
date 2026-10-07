@@ -1299,7 +1299,6 @@ function LaunchedShell(
         void deliverComposerThreadDrop({
           composerKey: destination.composerKey,
           threadId: row.threadId,
-          ...(row.title.trim().length === 0 ? {} : { searchHint: row.title }),
         });
         return;
       }
@@ -4285,11 +4284,8 @@ function LaunchedShell(
     onMarkThreadRead: (threadId) => codeController.markThreadRead(decodeCodeThreadId(threadId)),
     onMarkThreadUnread: (threadId) => codeReadCursorStore.unmark(decodeCodeThreadId(threadId)),
     onPinInPane: pinCodeThreadInPane,
-    onAttachAsContext: (threadId, title) => {
-      void deliverComposerThreadDrop({
-        threadId,
-        ...(title.trim().length === 0 ? {} : { searchHint: title }),
-      });
+    onAttachAsContext: (threadId) => {
+      void deliverComposerThreadDrop({ threadId });
     },
     onPinThread: (threadId, pinned) =>
       void codeController.pinThread(decodeCodeThreadId(threadId), pinned),
@@ -4324,11 +4320,8 @@ function LaunchedShell(
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
     onPinInPane: pinChatThreadInPane,
-    onAttachAsContext: (threadId, title) => {
-      void deliverComposerThreadDrop({
-        threadId,
-        ...(title.trim().length === 0 ? {} : { searchHint: title }),
-      });
+    onAttachAsContext: (threadId) => {
+      void deliverComposerThreadDrop({ threadId });
     },
   };
   // Work has no controller of its own for thread metadata: a rest command
@@ -4388,11 +4381,8 @@ function LaunchedShell(
         expectedVersion,
       })),
     onPinInPane: pinWorkThreadInPane,
-    onAttachAsContext: (threadId, title) => {
-      void deliverComposerThreadDrop({
-        threadId,
-        ...(title.trim().length === 0 ? {} : { searchHint: title }),
-      });
+    onAttachAsContext: (threadId) => {
+      void deliverComposerThreadDrop({ threadId });
     },
   };
 

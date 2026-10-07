@@ -14,10 +14,7 @@ import { useEffect, useId, useRef, useSyncExternalStore } from "react";
  */
 export interface ComposerThreadDropTarget {
   readonly key: string;
-  readonly attach: (input: {
-    readonly threadId: string;
-    readonly searchHint?: string;
-  }) => Promise<void>;
+  readonly attach: (input: { readonly threadId: string }) => Promise<void>;
 }
 
 const targets = new Map<string, ComposerThreadDropTarget>();
@@ -117,7 +114,6 @@ export function composerThreadDropTarget(key: string): ComposerThreadDropTarget 
 export async function deliverComposerThreadDrop(input: {
   readonly composerKey?: string;
   readonly threadId: string;
-  readonly searchHint?: string;
 }): Promise<void> {
   const target =
     input.composerKey === undefined
@@ -127,16 +123,12 @@ export async function deliverComposerThreadDrop(input: {
     announceComposerThreadDrop("Focus a composer before attaching a thread.");
     return;
   }
-  await target.attach({
-    threadId: input.threadId,
-    ...(input.searchHint === undefined ? {} : { searchHint: input.searchHint }),
-  });
+  await target.attach({ threadId: input.threadId });
 }
 
 export interface ComposerThreadDropAttach {
   (input: {
     readonly threadId: string;
-    readonly searchHint?: string;
     readonly currentThreadId?: string;
     readonly onDraftChange: (draft: string, caretIndex: number) => void;
   }): Promise<void>;
@@ -163,7 +155,6 @@ export function useComposerThreadDropRegistration(options: {
       attach: (input) =>
         attachRef.current({
           threadId: input.threadId,
-          ...(input.searchHint === undefined ? {} : { searchHint: input.searchHint }),
           ...(currentThreadIdRef.current === undefined
             ? {}
             : { currentThreadId: currentThreadIdRef.current }),
@@ -185,18 +176,18 @@ export function ComposerThreadDropAnnouncer() {
 }
 
 /**
- * Ask the host's mention search whether this id is openable, then insert the
- * same chip an explicit selection would. The search hint only ranks the
- * existing openable set; it never becomes the chip title.
+ * Ask the host's mention search for this exact id, then insert the same chip
+ * an explicit selection would. The lookup is by id, not by the sidebar title,
+ * so a thread the typeahead would rank out of its first page still attaches,
+ * and the title shown is the host's.
  */
 export async function attachComposerThreadMention(input: {
   readonly threadId: string;
-  readonly searchHint?: string;
   readonly currentThreadId?: string;
   readonly existingThreadIds: ReadonlyArray<string>;
   readonly mentionCount: number;
   readonly draft: string;
-  readonly search: (query: string) => Promise<ReadonlyArray<ThreadMentionCandidate>>;
+  readonly searchThread: (threadId: string) => Promise<ReadonlyArray<ThreadMentionCandidate>>;
   readonly onDraftChange: (draft: string, caretIndex: number) => void;
   readonly onSelectCandidate: (candidate: ThreadMentionCandidate) => void;
   readonly onStatus: (message: string) => void;
@@ -214,7 +205,7 @@ export async function attachComposerThreadMention(input: {
   }
   let openable: ReadonlyArray<ThreadMentionCandidate>;
   try {
-    openable = await input.search(input.searchHint ?? "");
+    openable = await input.searchThread(input.threadId);
   } catch {
     const message = composerThreadDropMessage("unreadable");
     input.onStatus(message);

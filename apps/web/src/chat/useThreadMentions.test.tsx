@@ -23,6 +23,7 @@ function candidate(overrides: Partial<ThreadMentionCandidate> = {}): ThreadMenti
 function stubClient(overrides: Partial<ThreadMentionClient> = {}): ThreadMentionClient {
   return {
     search: vi.fn().mockResolvedValue([candidate()]),
+    searchThread: vi.fn().mockResolvedValue([candidate()]),
     resolve: vi.fn().mockResolvedValue({ mentions: [], unavailable: [] }),
     openSideChat: vi.fn(),
     execute: vi.fn(),
