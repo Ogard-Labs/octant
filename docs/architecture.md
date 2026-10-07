@@ -297,6 +297,20 @@ categories across series; a bar-and-line series names itself as a bar or a line.
 The accessible table lists every reading. A pie or donut legend toggles at most
 24 slices; the rest stay in the picture and the table. A shared snapshot keeps
 the chart and drops no series mark.
+A treemap is a hierarchy drawn as squarified rectangles: nodes name a parent,
+one root, values sit on leaves, and a group's reading is the sum of its
+children. A leaf carries a value for every declared measure and may name a
+manifest source, which offers Open file through the allowlisted open-source
+action; the host reauthorizes it. The pure, deterministic layout lives in
+`packages/domain`, so the screen, the artifact preview SVG, and the Markdown and
+HTML export all draw the same rectangles. The person switches the size and
+colour measures and zooms into a group (click, breadcrumb, Escape, right-click,
+or Enter on a keyboard-selected cell); these are view state and are never
+journaled. The domain policy refuses a second root, a cycle, a dangling parent,
+a group that carries its own value or a leaf that does not, a value that is
+negative, a measure that is not declared, and a hierarchy past the depth, node,
+measure, or label budget. The accessible fallback is a hierarchical table
+sortable by each measure.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -1491,7 +1505,10 @@ protocol that reports uncached input, cache reads, and cache writes as disjoint 
 absent rather than zero, a turn of several requests reports the sum of the figures its
 requests reported, and a report whose cache or reasoning figure exceeds its total is
 refused as invalid usage. Unknown fields in a response are ignored; a known field of
-the wrong type still fails the turn. ACP and Pi resume cursors carry a durable
+the wrong type still fails the turn. The input tokens a request reports also
+calibrate the native harness's next size estimate: a model's real bytes-per-token,
+measured from the last call, is preferred over a flat four-bytes-per-token guess, so
+a filled window is caught before the endpoint has to refuse the request. ACP and Pi resume cursors carry a durable
 task binding, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
 follow-ups; Chat retries retain that identity and native scratch files. Native
@@ -1556,6 +1573,32 @@ session's `usage` and `metrics` totals fold them, so a Code turn on a direct
 endpoint no longer records zero tokens. Chat, Work and Code on every provider
 journal the frame; the harness additionally keeps its own record.
 
+### Stop reasons
+
+A completed runtime event may carry an optional stop reason. `max-tokens` means
+the reply was cut off because the output limit was reached. `content-filter`
+means the provider stopped the reply on a content filter. The field is absent
+when the runtime did not say why the turn ended; absence is not a normal
+finish guessed into a reason.
+
+Chat Completions maps `finish_reason` `length` to `max-tokens` and
+`content_filter` to `content-filter`. The Responses protocol maps
+`incomplete_details.reason` `max_output_tokens` and `content_filter` the same
+way. The Messages protocol maps `stop_reason` `max_tokens`, and `refusal`
+(its safety classifier stopping the reply) to `content-filter`; an ACP prompt
+result's `refusal` names the agent declining to continue, not a filter, so it
+leaves the field absent. Claude's result
+`stop_reason`, Pi's assistant `stopReason` of `length`, OpenCode's step
+`finish` of `length`, and an ACP prompt result that names one of those
+strings, map when the protocol reports them. A local runtime's `done_reason`
+of `length` maps the same way. Codex's turn status does not say the output
+was cut off, so its completed event leaves the field absent.
+
+A turn record's stop reason is `max-tokens` when the completed event carried
+that reason. The per-turn detail says "Cut off at the output limit". The
+transcript shows a quiet note with Continue, which drafts a follow-up into
+the composer and sends nothing until the person does.
+
 The ACP and RPC mappers (Devin, Kimi, Grok, Copilot, Mistral Vibe, Oh My Pi)
 report no usage today: the prompt result is read only for its stop reason, and
 the capability is declared `unavailable`, so their turns are `unavailable` and
@@ -1613,7 +1656,24 @@ native harness in `apps/server/src/harness`:
   results return in one message in call order. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
-  alone does not fit.
+  alone does not fit. When the endpoint still rejects a request as too large,
+  the loop recognises the refusal as a filled context window (OpenAI's
+  `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
+  413 shape from an OpenAI-compatible host), shrinks it one further ladder
+  step, and sends it once more; a second refusal stands. That step always
+  changes the refused request, which may itself have been reduced already: a
+  result already omitted or a note already in front is skipped, and when
+  nothing is left to leave out the refusal stands. The size estimate
+  prefers the input tokens the last call reported over a flat
+  four-bytes-per-token guess. A tool call that names no offered tool, reuses a
+  call id, or carries arguments that are not JSON is answered with an error
+  result instead of failing the turn, so the model can correct itself; the
+  arguments the model sent are never replaced by an empty object. A handful of
+  such correction steps is the most a turn takes, so a model that will not
+  correct itself fails rather than loop; the well-formed calls of that last
+  step are answered as not run, so the conversation stays valid for the next
+  send. An unknown stream event type is
+  ignored and logged, never fatal.
 - **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
   each step as it happens (`native-harness-transcript`, one aggregate per
   session): the user message once the request is known to fit, each reply,
@@ -1624,7 +1684,12 @@ native harness in `apps/server/src/harness`:
   stopped in the middle of with a journaled interrupted result that says
   whether the tool only reads (`replay: "safe"`, call it again) or may have
   taken effect (`replay: "unsafe"`, check before repeating); nothing is
-  silently re-run. Chat and Work still rebuild their history on the host and
+  silently re-run. A cancel (`interrupt`) ends only the turn in flight: the
+  session and its conversation stay live, so the next `send` continues it
+  without a resume or a journal rebuild, and a cancel during a tool step first
+  closes the calls its runner never answered with the same interrupted results
+  a resume would write. Only `stop` releases the session. Chat and Work still
+  rebuild their history on the host and
   start a fresh session each turn.
 - **Forks.** A Code fork on a harness model starts its first session from a
   copy of the source's transcript through the fork point
@@ -1715,12 +1780,21 @@ native harness in `apps/server/src/harness`:
   jitter; `Retry-After` replaces the wait, capped at a minute. A request is
   retried only while nothing of it has streamed (text or reasoning); tool calls
   reach the loop only with the settled response, so they never count as output.
-  Each retry is a `retrying` runtime event emitted before its wait, and what a
+  Each retry is a `retrying` runtime event emitted before its wait. The thread's
+  working indicator, the terminal footer, and the phone session panel show
+  "Provider busy, retrying 2/5 in 4 s" and count the wait down, in ordinary
+  text rather than a warning, until the next content arrives or the turn
+  settles; a failed or cancelled attempt keeps no retry line. The turn's
+  detail counts those same events. What a
   failed attempt billed is added to the usage of the attempts after it. A
   cancel ends a wait at once and stays `interrupted`. The stream idle limit is
   120 s and restarts on any byte, so keep-alive comments and reasoning deltas
   count. A spent allowance (`usageLimit` other than `temporary`), a rejected
-  credential, and a malformed event are never retried. Transports reject with
+  credential, and a malformed event are never retried. A refusal that names a
+  filled context window (OpenAI's `context_length_exceeded`, Anthropic's
+  "prompt is too long", or a 400 or 413 shape) is classified as context
+  overflow, which the retry policy never sends again as-is: the loop shrinks
+  the request and retries it once (above). Transports reject with
   the typed `ProviderFailure` (`runProviderEffect`), not the Effect runtime's
   wrapper, because the category is what these rules decide on.
 - **Lead fallback.** When a request's retries are spent, the loop asks its
@@ -1922,8 +1996,9 @@ file it would write, and the card then names that path: approving a card that
 names an existing file is the confirmation to replace it, and a call without
 that confirmation writes a numbered copy beside the file instead of over it.
 The rendered Markdown, HTML, and the artifact preview SVG read numbers through
-the shared Canvas formatter and draw marks to the shared chart specifications,
-so an exported reading matches the screen rather than growing a second reading.
+the shared Canvas formatter and draw marks to the shared chart specifications
+and the shared squarified treemap layout, so an exported reading matches the
+screen rather than growing a second reading.
 
 The folder destination ships in-tree on that same port, so it is offered,
 approved, and journaled exactly as a plugin's contribution is. Its folder comes
@@ -2176,9 +2251,20 @@ mechanisms are:
   reads its subscription sign-in by running `/usr/bin/security`, which would
   return any keychain item that trusts that tool, including other command-line
   programs' tokens, so the profile runs neither the tool nor reads the keychain
-  file. Measured on macOS 27, the security-server lookup alone therefore leaves
-  a Claude Plan launch on subscription sign-in, Chat children included,
-  reporting itself signed out. A bound root a launch may not write is denied in
+  file. Measured on macOS 27, the security-server lookup alone leaves such a
+  launch signed out, so a confined Claude launch on subscription sign-in, Chat
+  children included, signs in with "Claude for helpers" instead: a long-lived
+  token the runtime's own `claude setup-token` mints after one browser approval.
+  The host runs that command on a host-owned pseudo-terminal outside any
+  sandbox, reads the printed token from memory, and keeps it in the credential
+  broker under the Claude Code instance, wrapped so it never reads as that
+  instance's API key. A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
+  and no keychain lookup; unconfined launches keep the runtime's own sign-in.
+  Without a connected token the launch refuses with "Connect Claude for helpers
+  in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
+  runtime never refreshes a handed-in token, so one it refuses is marked
+  expired and the same reconnect step is reported. Only a local window may
+  connect or disconnect. A bound root a launch may not write is denied in
   the profile, so a checkout under that launch's own temporary directory is not
   writable through it. The `--version` read every family and the discovery
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one

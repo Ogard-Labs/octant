@@ -673,6 +673,36 @@ describe("ChatTranscript", () => {
     expect(screen.getByRole("button", { name: "Retry limited response" })).toBeVisible();
   });
 
+  it("shows an endpoint retry only while the attempt is still running", () => {
+    const attempt = viewFixture().turns[0]!.attempts[0]!;
+    const withRetry = (outcome: "streaming" | "failed") =>
+      viewFixture({
+        turns: [
+          {
+            ...viewFixture().turns[0]!,
+            attempts: [
+              {
+                ...attempt,
+                outcome,
+                harnessRetry: {
+                  attempt: 5,
+                  maxAttempts: 5,
+                  delayMs: 4_000,
+                  reason: "unavailable",
+                  announcedAt: new Date().toISOString(),
+                },
+              },
+            ],
+          },
+        ],
+      });
+    const { rerender } = render(<ChatTranscript view={withRetry("streaming")} />);
+    expect(screen.getByText(/Provider busy, retrying 5\/5/)).toBeVisible();
+
+    rerender(<ChatTranscript view={withRetry("failed")} />);
+    expect(screen.queryByText(/Provider busy, retrying/)).not.toBeInTheDocument();
+  });
+
   it("says plainly when the provider gave no reset time", () => {
     const parked = viewFixture().turns[0]!.attempts[0]!;
     render(
