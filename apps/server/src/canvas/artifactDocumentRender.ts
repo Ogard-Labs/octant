@@ -365,12 +365,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       // inside Octant's sandboxed frame, so it never travels in an export.
       return [
         { kind: "heading", level: 2, text: reading(block.title) },
-        {
-          kind: "list",
-          items: block.frames.map(
-            (frame, index) => `${String(index + 1)}. ${reading(frame.title)}`,
-          ),
-        },
+        { kind: "ordered", items: block.frames.map((frame) => reading(frame.title)) },
       ];
     case "bar-list": {
       // The ranking as a table in the order the screen and the preview draw
