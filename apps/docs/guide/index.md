@@ -82,8 +82,10 @@ may see that computer's load, the row shows how many cores and how much memory
 it has, and small bars for processor, memory, and disk with a percentage. A
 computer that is connected but which this window is not allowed to read shows
 as connected with no bars. A computer that is offline shows when it was last
-seen, and no bars. The number of agents running there opens Running filtered to
-that computer. Up to four computers show, then **+N more**. The card asks for
+seen, and no bars. If the load cannot be read for a moment, the bars go away
+until it can. For the computer this window was opened from, the number of agents
+running there opens Running filtered to that computer; other computers do not
+report it, so they show no number. Up to four computers show, then **+N more**. The card asks for
 the load only while you are looking at it and the window is in front, about
 every ten seconds, and stops when the window is hidden.
 

@@ -220,8 +220,11 @@ reconnecting host this window may read shows its core count, total memory, and
 small monochrome bars for CPU, memory, and disk, each with a percentage. Disk
 is left out when the volume could not be read. A host that is connected but
 which this window has no authority to read shows as connected with no figures.
-An offline host shows when it was last seen and no bars. The number of running
-agents on that host opens Running with the environment filter set to the host.
+An offline host shows when it was last seen and no bars. A read that fails
+drops that host's figures until a later read succeeds, rather than showing old
+figures as current. The host this window was opened from reports how many
+agents run there, and that count opens Running with the environment filter set
+to the host; any other host does not report one, so its row shows no count.
 At most four hosts show, then **+N more**. The card reads each host's load only
 while it is visible and the window is in front, about every ten seconds, and
 stops when the window is hidden. It never polls in the background.

@@ -12,7 +12,11 @@ export interface ComputersCardHost {
   readonly connection: ComputerConnection;
   /** False when this window may see the host but not its figures. */
   readonly figuresAllowed: boolean;
-  readonly runningAgents: number;
+  /**
+   * Agents running there. Absent when the host does not report it: only the
+   * host whose AgentRun projection this window holds has a count to show.
+   */
+  readonly runningAgents?: number;
   /** When the host was last ready. Shown for an offline row. */
   readonly lastSeenAt?: string;
 }

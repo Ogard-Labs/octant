@@ -4099,7 +4099,6 @@ function LaunchedShell(
             name: localHostDisplayName(),
             connection: "connected" as const,
             figuresAllowed: props.hostBridge !== undefined,
-            runningAgents: 0,
           },
         ]
       : computerSnapshots.map((snapshot) => {
@@ -4109,7 +4108,6 @@ function LaunchedShell(
             name: snapshot.displayName,
             connection: connection.connection,
             figuresAllowed: connection.figuresAllowed,
-            runningAgents: 0,
             ...(snapshot.lastReadyAt === undefined ? {} : { lastSeenAt: snapshot.lastReadyAt }),
           };
         });

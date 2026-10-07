@@ -29,7 +29,6 @@ function host(
   return {
     connection: "connected",
     figuresAllowed: true,
-    runningAgents: 0,
     ...overrides,
   };
 }
@@ -179,6 +178,41 @@ describe("the Computers card", () => {
     );
     await user.click(await screen.findByRole("button", { name: "3 agents" }));
     expect(onOpenRunning).toHaveBeenCalledWith("studio");
+  });
+
+  it("leaves out the agent count for a host that does not report one", async () => {
+    renderCard(
+      source({
+        hosts: [
+          host({ hostId: "local", name: "This computer", runningAgents: 2 }),
+          host({ hostId: "studio", name: "Studio" }),
+        ],
+      }),
+    );
+    expect(await screen.findByText("Studio")).toBeVisible();
+    expect(screen.getByRole("button", { name: "2 agents" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: /agent/ })).toHaveLength(1);
+  });
+
+  it("drops figures a later read could not refresh instead of showing them as current", async () => {
+    vi.useFakeTimers();
+    const readResources = vi
+      .fn<() => Promise<HostResourceRead>>()
+      .mockResolvedValueOnce({ status: "ready", snapshot: snapshot() })
+      .mockResolvedValue({ status: "unavailable" });
+    renderCard(source({ readResources, pollMs: 10_000 }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("meter", { name: "CPU 42 percent" })).toBeVisible();
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+    expect(readResources).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Connected")).toBeVisible();
+    expect(screen.queryByRole("meter")).not.toBeInTheDocument();
   });
 
   it("lists at most four hosts and says how many more there are", async () => {

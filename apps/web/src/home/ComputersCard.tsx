@@ -27,7 +27,8 @@ export interface ComputersCardSource {
   readonly hosts: ReadonlyArray<ComputersCardHost>;
   /**
    * The host whose AgentRun projection this window already holds. Its running
-   * count is that read; every other host uses `runningAgents` on the row.
+   * count is that read; every other host shows `runningAgents` only when the
+   * row carries one, and no count otherwise.
    */
   readonly launchHostId: string;
   readonly agentRunClient: AgentRunClient | undefined;
@@ -115,10 +116,12 @@ function useVisibleResourceReads(
 
     const apply = (hostId: string, result: HostResourceRead) => {
       if (stopped) return;
+      // A read that fails leaves no figures rather than the last ones: kept,
+      // they read as the host's current load with nothing to say they are old.
       setSnapshots((current) => {
         const next = new Map(current);
         if (result.status === "ready") next.set(hostId, result.snapshot);
-        else if (result.status === "refused") next.delete(hostId);
+        else next.delete(hostId);
         return next;
       });
     };
@@ -251,15 +254,17 @@ function ComputerRow(props: {
           )}
         </span>
       )}
-      <OctantButton
-        className="computers-card__agents window-no-drag"
-        onClick={() => props.onOpenRunning(host.hostId)}
-        size="sm"
-        type="button"
-        variant="link"
-      >
-        {agentCountLabel(host.runningAgents)}
-      </OctantButton>
+      {host.runningAgents === undefined ? null : (
+        <OctantButton
+          className="computers-card__agents window-no-drag"
+          onClick={() => props.onOpenRunning(host.hostId)}
+          size="sm"
+          type="button"
+          variant="link"
+        >
+          {agentCountLabel(host.runningAgents)}
+        </OctantButton>
+      )}
     </li>
   );
 }
