@@ -719,8 +719,8 @@ describe("design frames", () => {
   });
 
   it("refuses a design block inside a document declaring an older schema version", () => {
-    // A design arrived at version 7, after the treemap's 5 and the heatmap's 6.
-    for (const schemaVersion of [4, 5, 6]) {
+    // A design arrived at version 9, after every earlier block kind and hint.
+    for (const schemaVersion of [1, 2, 3, 4, 5, 6, 7, 8]) {
       expect(() =>
         validateCanvasDefinition({
           ...baseDefinition,

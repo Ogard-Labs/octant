@@ -455,7 +455,7 @@ actor the request names, so a renderer can never author a comment as an agent. S
 snapshots serialise the definition and so never carry comments
 ([decisions/0052-canvas-boards.md](decisions/0052-canvas-boards.md)).
 
-A `design` block (Canvas schema version 7) is the one block whose content is
+A `design` block (Canvas schema version 9) is the one block whose content is
 markup: the frames of one design at one size, `phone` (390×844), `tablet`
 (820×1180), `desktop` (1440×900), or `slide` (1920×1080), each a page of
 static HTML, plus one shared stylesheet. The renderer draws each frame in an

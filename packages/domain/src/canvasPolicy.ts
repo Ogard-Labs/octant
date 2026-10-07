@@ -57,6 +57,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_BAR_LIST_SCHEMA_VERSION,
+  CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -68,11 +69,11 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "mockup", since: CANVAS_MOCKUP_SCHEMA_VERSION },
     { kind: "treemap", since: CANVAS_TREEMAP_SCHEMA_VERSION },
     { kind: "heatmap", since: CANVAS_HEATMAP_SCHEMA_VERSION },
-    { kind: "design", since: CANVAS_DESIGN_SCHEMA_VERSION },
     { kind: "bar-list", since: CANVAS_BAR_LIST_SCHEMA_VERSION },
     { kind: "er", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
     { kind: "swimlane", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
     { kind: "mindmap", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
+    { kind: "design", since: CANVAS_DESIGN_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =

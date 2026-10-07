@@ -27,9 +27,10 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // policy have been reviewed together. The current schema version is declared
 // in `canvasIdentity.ts`: version 3 added the mockup block, version 4 the
 // thread presentation, version 5 the treemap block, version 6 the heatmap
-// block, version 7 the ranked bar-list block, and version 8 the
-// entity-relationship, swimlane, and mind map diagram kinds, which the
-// definition filters below admit only under those declared versions.
+// block, version 7 the ranked bar-list block, version 8 the
+// entity-relationship, swimlane, and mind map diagram kinds, and version 9 the
+// design block, which the definition filters below admit only under those
+// declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -101,7 +102,7 @@ export const CANVAS_BAR_LIST_SCHEMA_VERSION = 7;
 // The three remaining diagram kinds shipped as one slice and share a floor:
 // they arrive together in the block catalog, so one bump admits them all.
 export const CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION = 8;
-export const CANVAS_DESIGN_SCHEMA_VERSION = 7;
+export const CANVAS_DESIGN_SCHEMA_VERSION = 9;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -1475,7 +1476,8 @@ export const CanvasDefinition = Schema.Struct({
   .pipe(
     // Version-gated blocks and hints: a mockup is admitted from version 3, the
     // thread presentation from version 4, a treemap from version 5, a heatmap
-    // from version 6, and a bar list and the metric trend fields from version 7. A
+    // from version 6, a bar list and the metric trend fields from version 7, and
+    // a design from version 9. A
     // rolled-back runtime that never learned a kind or hint must see a document
     // carrying it as a declared future version, not as a document that failed
     // to decode. Each keeps its own floor so an earlier document stays valid.
