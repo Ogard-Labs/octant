@@ -2769,6 +2769,58 @@ describe("ProviderService", () => {
     expect(fixture.runtime.observedState(instanceId)).toBeUndefined();
   });
 
+  it("answers probes asked while one is running from that one check, not a queue of full round trips", async () => {
+    const pendingProbe = deferred<ReturnType<typeof observation>>();
+    const fixture = serviceFixture({
+      instances: [provider()],
+      probe: async () => pendingProbe.promise,
+    });
+
+    const first = fixture.service.probe(windowId, instanceId);
+    const second = fixture.service.probe(windowId, instanceId);
+    const third = fixture.service.probe(windowId, instanceId);
+    await vi.waitFor(() => expect(fixture.probe).toHaveBeenCalledOnce());
+    pendingProbe.resolve(observation());
+
+    const results = await Promise.all([first, second, third]);
+    expect(results.map((result) => result.instanceId)).toEqual([
+      instanceId,
+      instanceId,
+      instanceId,
+    ]);
+    expect(fixture.probe).toHaveBeenCalledTimes(1);
+    // Once it settles, the next check is a real one again.
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.probe).toHaveBeenCalledTimes(2);
+    expect(fixture.service.pendingInstanceOperationCount()).toBe(0);
+  });
+
+  it("checks a provider afresh when a change queued behind the running probe", async () => {
+    const pendingProbe = deferred<ReturnType<typeof observation>>();
+    let calls = 0;
+    const fixture = serviceFixture({
+      instances: [provider()],
+      probe: async () => {
+        calls += 1;
+        return calls === 1 ? pendingProbe.promise : observation();
+      },
+    });
+
+    const stale = fixture.service.probe(windowId, instanceId);
+    await vi.waitFor(() => expect(fixture.probe).toHaveBeenCalledOnce());
+    const mutation = fixture.service.execute(windowId, {
+      kind: "change-provider-binary",
+      instanceId,
+      expectedVersion: 1,
+      binaryPath: "/usr/local/bin/opencode",
+    });
+    const afterChange = fixture.service.probe(windowId, instanceId);
+
+    pendingProbe.resolve(observation());
+    await Promise.all([stale, mutation, afterChange]);
+    expect(fixture.probe).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps different instances concurrent and releases completed serialization keys", async () => {
     const pendingProbe = deferred<ReturnType<typeof observation>>();
     const fixture = serviceFixture({
@@ -3239,6 +3291,139 @@ describe("ProviderService", () => {
       fixture.service.execute(windowId, { kind: "update-provider-cli", instanceId }),
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
     expect(() => fixture.runtime.setActiveSessionCount(instanceId, 1)).toThrow(/CLI update/i);
+  });
+
+  describe("verify-model-tools", () => {
+    const toolDriver = (appManagedTools: "supported" | "unsupported") =>
+      vi.fn((instance: ProviderInstance) => ({
+        kind: instance.driverKind,
+        probe: () => Effect.die("unused"),
+        acquire: () => Effect.die("unused"),
+        verifyToolCapability: ({ modelId }: { modelId: never }) =>
+          Effect.succeed({ instanceId, modelId, appManagedTools }),
+      }));
+
+    it("records a verified model of an OpenAI-compatible provider and keeps its siblings unverified", async () => {
+      const driver = toolDriver("supported");
+      const fixture = serviceFixture({
+        instances: [httpProvider()],
+        withCatalogPersistence: true,
+        driver: driver as never,
+      });
+      fixture.runtime.setObservedState(observation());
+
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "verify-model-tools",
+          instanceId,
+          modelId: decodeProviderModelId("model-1"),
+        }),
+      ).resolves.toEqual({
+        kind: "model-tools-verified",
+        instanceId,
+        modelId: "model-1",
+        appManagedTools: "supported",
+      });
+
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String)).toEqual([
+        "model-1",
+      ]);
+      expect(fixture.catalogs()[0]).toMatchObject({ verifiedToolModelIds: ["model-1"] });
+    });
+
+    it("drops a model whose verification found no tool support", async () => {
+      const fixture = serviceFixture({
+        instances: [httpProvider()],
+        withCatalogPersistence: true,
+        driver: toolDriver("unsupported") as never,
+      });
+      fixture.runtime.setObservedState(
+        observation({ verifiedToolModelIds: [decodeProviderModelId("model-1")] }),
+      );
+
+      await fixture.service.execute(windowId, {
+        kind: "verify-model-tools",
+        instanceId,
+        modelId: decodeProviderModelId("model-1"),
+      });
+
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds).toEqual([]);
+    });
+
+    it("refuses a model the endpoint does not list and never calls the driver", async () => {
+      const driver = toolDriver("supported");
+      const fixture = serviceFixture({
+        instances: [httpProvider()],
+        withCatalogPersistence: true,
+        driver: driver as never,
+      });
+      fixture.runtime.setObservedState(observation());
+
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "verify-model-tools",
+          instanceId,
+          modelId: decodeProviderModelId("not-listed"),
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid-configuration" } });
+      expect(driver).not.toHaveBeenCalled();
+    });
+
+    it("limits an Azure AI Foundry provider to its configured deployments", async () => {
+      const driver = toolDriver("supported");
+      const fixture = serviceFixture({
+        instances: [
+          decodeProviderInstance({
+            id: instanceId,
+            displayName: "Foundry",
+            driverKind: "azure-foundry",
+            configuration: {
+              kind: "azure-foundry-openai-http",
+              baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+              authentication: "api-key",
+              protocol: "responses",
+              manualModelIds: ["deployment-a"],
+            },
+            enabled: true,
+            environmentPolicy: "inherit-host",
+            version: 1,
+            createdAt: now,
+            updatedAt: now,
+          }),
+        ],
+        withCatalogPersistence: true,
+        driver: driver as never,
+      });
+      fixture.runtime.setObservedState(observation());
+
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "verify-model-tools",
+          instanceId,
+          modelId: decodeProviderModelId("model-1"),
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid-configuration" } });
+      expect(driver).not.toHaveBeenCalled();
+    });
+
+    it("refuses a provider whose runtime brings its own tools", async () => {
+      const driver = toolDriver("supported");
+      const fixture = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        driver: driver as never,
+      });
+      fixture.runtime.setObservedState(observation());
+
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "verify-model-tools",
+          instanceId,
+          modelId: decodeProviderModelId("model-1"),
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid-configuration" } });
+      expect(driver).not.toHaveBeenCalled();
+    });
   });
 });
 

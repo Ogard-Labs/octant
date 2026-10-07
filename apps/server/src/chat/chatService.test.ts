@@ -105,6 +105,7 @@ import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { ResearchRouter } from "./research/researchRouter";
 import { ThreadWorkService } from "./threadWorkService";
 import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
+import { createChatAgentResultDeliveryPort } from "./chatAgentResultDeliveryPort";
 import { ChatService, ChatServiceError } from "./chatService";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
 
@@ -3601,7 +3602,7 @@ describe("ChatService", () => {
     );
     runtimeRegistry.setObservedState({
       ...observed,
-      capabilities: { ...observed.capabilities, appManagedTools: "supported" },
+      verifiedToolModelIds: observed.models.map((model) => model.id),
     });
     const snapshot = authoritativeExtensionSnapshot();
     const activation = new ExtensionActivationService({
@@ -6638,6 +6639,64 @@ describe("ChatService", () => {
     );
   });
 
+  it("keeps the whole conversation when no one named the model's window", async () => {
+    const [model] = probeFixture().models;
+    if (model === undefined) throw new Error("Expected a fixture model.");
+    const { contextLimit: _contextLimit, ...unsized } = model;
+    const probe = probeFixture({ models: [unsized] });
+    const sent: Array<SentTurn> = [];
+    const fixture = openFixture({ probe, driver: compactionDriver(sent) });
+    const { service, contextHarness } = fixture;
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unsized model",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    let version = created.thread.version;
+    for (let turn = 0; turn < 4; turn += 1) {
+      const accepted = await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: version,
+        prompt: `Turn ${turn}: ${"detail ".repeat(700)}`.trim(),
+      });
+      if (accepted.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      await until(
+        () =>
+          service
+            .read(created.thread.id)
+            .turns.at(-1)
+            ?.attempts.some((attempt) => attempt.outcome === "completed") === true,
+      );
+      await untilThreadSlotReleased(fixture);
+      version = service.read(created.thread.id).thread.version;
+    }
+
+    // About five thousand tokens of earlier turns is nothing to a model that
+    // was never said to be small. The planner's emergency estimate must not
+    // leave them out, nor spend a provider call summarising them.
+    const snapshot = contextHarness.inspect(
+      decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: created.thread.id }),
+    );
+    expect(snapshot.modelLimits.source).toBe("conservative-fallback");
+    expect(snapshot.modelLimits.contextWindow).toBe(256_000);
+    expect(snapshot.next.plan.entries.filter((entry) => entry.reason === "omitted-to-fit")).toEqual(
+      [],
+    );
+    expect(snapshot.next.plan.blocked).toBe(false);
+    expect(sent.some((request) => request.prompt.startsWith(MAINTENANCE_PROMPT_PREFIX))).toBe(
+      false,
+    );
+    const earlier = (sent.at(-1)?.context ?? []).filter((block) => block.kind === "user-message");
+    expect(earlier.map((block) => block.text.slice(0, 7))).toEqual([
+      "Turn 0:",
+      "Turn 1:",
+      "Turn 2:",
+    ]);
+  });
+
   it("sends only the conversation the compacted plan kept", async () => {
     const probe = probeFixture();
     const sent: Array<SentTurn> = [];
@@ -9036,6 +9095,44 @@ describe("agent result delivery", () => {
     if (replayed.kind !== "turn-created") throw new Error("Expected turn-created result.");
     expect(replayed.turn.id).toEqual(delivered.turn.id);
     expect(withRuns.service.read(thread.id).turns).toHaveLength(1);
+  });
+
+  it("delivers a child's result to a Chat parent that has already answered a turn", async () => {
+    const runs = new Map<string, AgentRun>();
+    const fixture = openFixture({
+      agentRuns: {
+        getById: (runId) => runs.get(String(runId)),
+        resultText: () => "the subagent's reply",
+      },
+    });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Parent",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await fixture.service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Delegate a check",
+    });
+    await until(
+      () =>
+        fixture.service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+    );
+    const run = deliveryRunFor(created.thread.id);
+    runs.set(String(run.id), run);
+    const port = createChatAgentResultDeliveryPort({
+      readThread: (threadId) => fixture.persistence.readChatThread(threadId),
+      chat: fixture.service,
+    });
+
+    await expect(port.dispatch([run])).resolves.toMatchObject({
+      kind: "dispatched",
+      runIds: [run.id],
+    });
+    expect(fixture.service.read(created.thread.id).turns).toHaveLength(2);
   });
 
   it("refuses a delivery that names a run the thread never owned or an unfinished run", async () => {
