@@ -25,9 +25,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // Canvas wire contracts are deliberately versioned independently from event
 // envelopes. A decoder must reject a future version until its renderer and
 // policy have been reviewed together. The current schema version is declared
-// in `canvasIdentity.ts`: version 3 added the mockup block and version 4 the
-// thread presentation, which the definition filters below admit only under
-// those declared versions.
+// in `canvasIdentity.ts`: version 3 added the mockup block, version 4 the
+// thread presentation, and version 5 the design block, which the definition
+// filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -57,6 +57,8 @@ export const CANVAS_MAX_PLAN_TASK_SOURCES = 8;
 export const CANVAS_MAX_MOCKUP_DEPTH = 6;
 export const CANVAS_MAX_MOCKUP_NODES = 64;
 export const CANVAS_MAX_MOCKUP_TEXT_LENGTH = 120;
+export const CANVAS_MAX_DESIGN_FRAMES = 24;
+export const CANVAS_MAX_DESIGN_MARKUP_LENGTH = 32_768;
 
 // Descriptive aliases keep budget names discoverable without creating a
 // second source of truth.
@@ -228,6 +230,7 @@ export const CanvasBlockKind = Schema.Literal(
   "image",
   "plan",
   "mockup",
+  "design",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -859,6 +862,56 @@ export const CanvasMockupBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
 
+/**
+ * The viewport a design frame is drawn at, in CSS pixels: a phone, a tablet,
+ * a desktop window or web page, or a 16:9 slide.
+ */
+export const CanvasDesignSize = Schema.Literal("phone", "tablet", "desktop", "slide");
+export type CanvasDesignSize = typeof CanvasDesignSize.Type;
+
+/** The CSS viewport each size is drawn at. Authors lay frames out against it. */
+export const CANVAS_DESIGN_VIEWPORT: Readonly<
+  Record<CanvasDesignSize, { readonly width: number; readonly height: number }>
+> = {
+  phone: { width: 390, height: 844 },
+  tablet: { width: 820, height: 1180 },
+  desktop: { width: 1440, height: 900 },
+  slide: { width: 1920, height: 1080 },
+};
+
+const CanvasDesignFrameId = boundedToken("CanvasDesignFrameId");
+const CanvasDesignMarkup = boundedText(CANVAS_MAX_DESIGN_MARKUP_LENGTH);
+
+/**
+ * One screen or slide. `html` is the body of a static page and `frameId` is
+ * the fragment other frames link to (`href="#checkout"`). The markup is drawn
+ * in a sandboxed frame that runs no script and loads nothing from the network;
+ * the domain policy refuses markup that would need either.
+ */
+export const CanvasDesignFrame = Schema.Struct({
+  frameId: CanvasDesignFrameId,
+  title: CanvasMockupText,
+  html: CanvasDesignMarkup,
+}).annotations(strict);
+export type CanvasDesignFrame = typeof CanvasDesignFrame.Type;
+
+/**
+ * Screens of an app or site, or the slides of a deck, written as HTML and CSS.
+ * `styles` is one stylesheet every frame shares.
+ */
+export const CanvasDesignBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("design"),
+  title: CanvasMockupText,
+  size: CanvasDesignSize,
+  styles: Schema.optional(CanvasDesignMarkup),
+  frames: Schema.Array(CanvasDesignFrame).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(CANVAS_MAX_DESIGN_FRAMES),
+  ),
+}).annotations(strict);
+export type CanvasDesignBlock = typeof CanvasDesignBlock.Type;
+
 export const CanvasPlanBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("plan"),
@@ -944,6 +997,7 @@ export const CanvasBlock = Schema.Union(
   CanvasEvidenceReferenceBlock,
   CanvasImageBlock,
   CanvasMockupBlock,
+  CanvasDesignBlock,
   CanvasPlanBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
@@ -990,6 +1044,14 @@ export const CanvasDefinition = Schema.Struct({
       (definition) => definition.schemaVersion >= 4 || definition.presentation === undefined,
       {
         message: () => "A thread presentation requires Canvas schema version 4.",
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= 5 ||
+        !definition.blocks.some((block) => block.kind === "design"),
+      {
+        message: () => "Design blocks require Canvas schema version 5.",
       },
     ),
   );

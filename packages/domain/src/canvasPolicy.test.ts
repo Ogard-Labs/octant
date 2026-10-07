@@ -14,6 +14,7 @@ import {
   decodeCanvasDefinition,
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
+import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
 import { loginSequenceExample, orderStateExample } from "./canvasDiagramExamples";
 import {
   CanvasPolicyRejected,
@@ -198,7 +199,8 @@ describe("Canvas validation policy", () => {
 
   it("fails closed for unknown schema versions", () => {
     expectPolicyCode(
-      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 5 }),
+      () =>
+        validateCanvasDefinition({ ...baseDefinition, schemaVersion: CANVAS_SCHEMA_VERSION + 1 }),
       "unsupported-schema-version",
     );
     expectPolicyCode(
@@ -669,5 +671,137 @@ describe("mockup limits", () => {
         ),
       "mockup-text-budget-exceeded",
     );
+  });
+});
+
+function design(frames: ReadonlyArray<{ frameId: string; html: string }>, styles?: string) {
+  return {
+    blockId: "design",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "design" as const,
+    title: "Checkout",
+    size: "phone" as const,
+    ...(styles === undefined ? {} : { styles }),
+    frames: frames.map((frame) => ({ ...frame, title: frame.frameId })),
+  };
+}
+
+function refusalOf(block: unknown): string {
+  try {
+    validateCanvasDefinition(withBlocks([block]));
+  } catch (error) {
+    if (error instanceof CanvasPolicyRejected) return `${error.code}: ${error.message}`;
+    throw error;
+  }
+  return "accepted";
+}
+
+describe("design frames", () => {
+  it("accepts the examples an agent is taught from", () => {
+    expect(() =>
+      validateCanvasDefinition(withBlocks([onboardingFlowExample, launchDeckExample])),
+    ).not.toThrow();
+  });
+
+  it("refuses a design block inside a document declaring an older schema version", () => {
+    expect(() =>
+      validateCanvasDefinition({
+        ...baseDefinition,
+        schemaVersion: 4,
+        blocks: [onboardingFlowExample],
+      }),
+    ).toThrow(expect.objectContaining({ code: "unsupported-schema-version" }));
+  });
+
+  it("refuses markup that would need a script, naming the frame", () => {
+    expect(
+      refusalOf(design([{ frameId: "pay", html: "<p>Hi</p><script>alert(1)</script>" }])),
+    ).toBe(
+      "design-markup-refused: Canvas design design frame pay uses a <script> element; design frames run no script and load no other document.",
+    );
+    expect(
+      refusalOf(design([{ frameId: "pay", html: '<button onclick="go()">Pay</button>' }])),
+    ).toContain("has an onclick handler");
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "pay",
+            html: '<svg><a href="#x"><set attributeName="href" to="https://x.test"/></a></svg>',
+          },
+        ]),
+      ),
+    ).toContain("uses a <set> element");
+  });
+
+  it("refuses every link that would leave the design, however it is spelled", () => {
+    for (const html of [
+      '<a href="https://example.test">Shop</a>',
+      "<a href=//example.test>Shop</a>",
+      '<a HREF="&#104;ttps://example.test">Shop</a>',
+      '<a href="javascript:void(0)">Shop</a>',
+      '<a href="https://example.test>Shop</a>',
+      '<svg><a xlink:href="https://example.test"><text>Shop</text></a></svg>',
+    ]) {
+      expect(refusalOf(design([{ frameId: "home", html }]))).toMatch(
+        /^design-markup-refused: .*(links to|leaves the design)/,
+      );
+    }
+  });
+
+  it("keeps links between frames and sections, and the attributes that only look like them", () => {
+    expect(
+      refusalOf(
+        design([
+          {
+            frameId: "home",
+            html: '<a href="#pay">Pay</a><a href="#">Top</a><details open><summary>More</summary></details><div data-href="x"></div>',
+          },
+          { frameId: "pay", html: '<a href="#home">Back</a>' },
+        ]),
+      ),
+    ).toBe("accepted");
+  });
+
+  it("refuses remote images and stylesheets but keeps inline ones", () => {
+    expect(
+      refusalOf(
+        design([{ frameId: "home", html: '<img src="https://example.test/a.png" alt="">' }]),
+      ),
+    ).toContain("images must be data:image URLs");
+    expect(
+      refusalOf(
+        design([{ frameId: "home", html: "<p>Hi</p>" }], "@import url(https://fonts.test/a.css);"),
+      ),
+    ).toContain("stylesheet imports a stylesheet");
+    expect(
+      refusalOf(
+        design([
+          { frameId: "home", html: '<div style="background:url(https://x.test/a.png)"></div>' },
+        ]),
+      ),
+    ).toContain("loads a file with url()");
+    expect(
+      refusalOf(design([{ frameId: "home", html: "<p>Hi</p>" }], "</style><p>out</p>")),
+    ).toContain("closes its own style element");
+    expect(
+      refusalOf(
+        design(
+          [{ frameId: "home", html: '<img src="data:image/png;base64,AAAA" alt="">' }],
+          ".hero { background: url(data:image/png;base64,AAAA); }",
+        ),
+      ),
+    ).toBe("accepted");
+  });
+
+  it("refuses two frames with one id, since a link could only reach the first", () => {
+    expect(
+      refusalOf(
+        design([
+          { frameId: "home", html: "<p>A</p>" },
+          { frameId: "home", html: "<p>B</p>" },
+        ]),
+      ),
+    ).toMatch(/^duplicate-design-frame-id:/);
   });
 });

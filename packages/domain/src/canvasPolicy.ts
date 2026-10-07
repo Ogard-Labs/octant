@@ -3,6 +3,8 @@ import {
   CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_DEPTH,
+  CANVAS_MAX_DESIGN_FRAMES,
+  CANVAS_MAX_DESIGN_MARKUP_LENGTH,
   CANVAS_MAX_IMAGES,
   CANVAS_MAX_MOCKUP_DEPTH,
   CANVAS_MAX_MOCKUP_NODES,
@@ -19,13 +21,14 @@ import {
   decodeCanvasVersion,
   type CanvasSourceId,
 } from "@octant/contracts/canvas";
+import { canvasDesignMarkupRefusal, canvasDesignStylesheetRefusal } from "./canvasDesignPolicy";
 
 const encoder = new TextEncoder();
 
 // Versions this runtime decodes: every historical version plus the current
 // one. A document declaring anything else is refused as a future version,
 // before its blocks are read, so a newer contract never reaches a renderer.
-const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, CANVAS_SCHEMA_VERSION];
+const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, CANVAS_SCHEMA_VERSION];
 
 export type CanvasPolicyRejectionCode =
   | "invalid-schema"
@@ -62,7 +65,11 @@ export type CanvasPolicyRejectionCode =
   | "mockup-node-budget-exceeded"
   | "mockup-text-budget-exceeded"
   | "dangling-mockup-parent"
-  | "mockup-nesting-cycle";
+  | "mockup-nesting-cycle"
+  | "design-frame-budget-exceeded"
+  | "design-markup-budget-exceeded"
+  | "duplicate-design-frame-id"
+  | "design-markup-refused";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -247,7 +254,8 @@ function calculateBudgetUsage(
 /**
  * A document a newer runtime declared with a version this runtime has never
  * seen — either a future schema version or a version-gated field (a mockup
- * block from version 3, a thread presentation from version 4) inside a
+ * block from version 3, a thread presentation from version 4, a design block
+ * from version 5) inside a
  * document that declares an older version — must fail closed as an
  * unsupported schema version, before any content is read, rather than
  * collapsing into a generic "corrupt" decode failure. Works on both a
@@ -268,22 +276,18 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
   if (declared === CANVAS_SCHEMA_VERSION) return undefined;
   const presentation = envelope.presentation ?? envelope.definition?.presentation;
   if (declared < 4 && presentation !== undefined) return "unsupported-schema-version";
-  if (declared >= 3) return undefined;
   const blocks = Array.isArray(envelope.blocks)
     ? envelope.blocks
     : Array.isArray(envelope.definition?.blocks)
       ? envelope.definition?.blocks
       : undefined;
-  if (
+  const carries = (kind: string) =>
     blocks?.some(
       (block) =>
-        typeof block === "object" &&
-        block !== null &&
-        (block as { kind?: unknown }).kind === "mockup",
-    )
-  ) {
-    return "unsupported-schema-version";
-  }
+        typeof block === "object" && block !== null && (block as { kind?: unknown }).kind === kind,
+    ) === true;
+  if (declared < 3 && carries("mockup")) return "unsupported-schema-version";
+  if (declared < 5 && carries("design")) return "unsupported-schema-version";
   return undefined;
 }
 
@@ -335,6 +339,8 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       states?: unknown;
       transitions?: unknown;
       title?: unknown;
+      frames?: unknown;
+      styles?: unknown;
     };
     if (block.kind === "image") imageCount += 1;
     if (
@@ -367,6 +373,26 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       }
       if (Array.isArray(edges) && edges.length > CANVAS_MAX_DIAGRAM_EDGES) {
         return "edge-budget-exceeded";
+      }
+    }
+    if (block.kind === "design") {
+      if (Array.isArray(block.frames) && block.frames.length > CANVAS_MAX_DESIGN_FRAMES) {
+        return "design-frame-budget-exceeded";
+      }
+      if (
+        typeof block.styles === "string" &&
+        block.styles.length > CANVAS_MAX_DESIGN_MARKUP_LENGTH
+      ) {
+        return "design-markup-budget-exceeded";
+      }
+      if (Array.isArray(block.frames)) {
+        for (const frame of block.frames) {
+          if (typeof frame !== "object" || frame === null) continue;
+          const html = (frame as { html?: unknown }).html;
+          if (typeof html === "string" && html.length > CANVAS_MAX_DESIGN_MARKUP_LENGTH) {
+            return "design-markup-budget-exceeded";
+          }
+        }
       }
     }
     if (block.kind === "mockup") {
@@ -484,6 +510,37 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "sequence") validateSequence(block);
     if (block.kind === "state") validateState(block);
     if (block.kind === "mockup") validateMockup(block);
+    if (block.kind === "design") validateDesign(block);
+  }
+}
+
+/**
+ * Frames are linked by id, so two frames sharing one would make a link land
+ * on whichever came first. Markup a sandboxed frame could not draw as written
+ * is refused with the reason, so the author can fix it rather than ship a
+ * broken screen.
+ */
+function validateDesign(block: Extract<CanvasBlock, { readonly kind: "design" }>): void {
+  if (block.styles !== undefined) {
+    const refusal = canvasDesignStylesheetRefusal(block.styles);
+    if (refusal !== undefined) {
+      reject("design-markup-refused", `Canvas design ${block.blockId} stylesheet ${refusal}`);
+    }
+  }
+  const frameIds = new Set<string>();
+  for (const frame of block.frames) {
+    const id = String(frame.frameId);
+    if (frameIds.has(id)) {
+      reject(
+        "duplicate-design-frame-id",
+        `Canvas design ${block.blockId} has two frames with the id ${id}.`,
+      );
+    }
+    frameIds.add(id);
+    const refusal = canvasDesignMarkupRefusal(frame.html);
+    if (refusal !== undefined) {
+      reject("design-markup-refused", `Canvas design ${block.blockId} frame ${id} ${refusal}`);
+    }
   }
 }
 

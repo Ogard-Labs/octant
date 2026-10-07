@@ -5,6 +5,7 @@ import { PlanBlock, type PlanTaskRuntime } from "./PlanBlock";
 import { ReferenceBlocks } from "./ReferenceBlocks";
 import type { DiagramBoardLayoutRuntime } from "./DiagramBoard";
 import { SequenceDiagram, StateDiagram } from "./KindDiagrams";
+import { DesignBlock } from "./DesignBlock";
 import { MockupBlock } from "./MockupBlock";
 import { StructuredBlocks } from "./StructuredBlocks";
 import { TextBlocks } from "./TextBlocks";
@@ -49,6 +50,8 @@ export function CanvasBlockRenderer({
       return <StateDiagram block={block} />;
     case "mockup":
       return <MockupBlock block={block} />;
+    case "design":
+      return <DesignBlock block={block} />;
     case "code-excerpt":
     case "pseudocode":
     case "diff":

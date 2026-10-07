@@ -21,10 +21,11 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // mockup block: a mockup is only valid inside a document declaring version 3,
 // so a rolled-back older runtime refuses a mockup-carrying document as a
 // declared future version instead of reading it as corrupt. Version 4 adds the
-// thread presentation hint under the same rule. Existing v1, v2 and v3
-// documents remain decodable so a host does not lose its history at the bump.
-export const CANVAS_SCHEMA_VERSION = 4 as const;
-export const CanvasSchemaVersion = Schema.Literal(1, 2, 3, CANVAS_SCHEMA_VERSION);
+// thread presentation hint under the same rule, and version 5 adds the design
+// block. Existing documents of every earlier version remain decodable so a
+// host does not lose its history at the bump.
+export const CANVAS_SCHEMA_VERSION = 5 as const;
+export const CanvasSchemaVersion = Schema.Literal(1, 2, 3, 4, CANVAS_SCHEMA_VERSION);
 export type CanvasSchemaVersion = typeof CanvasSchemaVersion.Type;
 export const CanvasBlockSchemaVersion = CanvasSchemaVersion;
 export type CanvasBlockSchemaVersion = CanvasSchemaVersion;

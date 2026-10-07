@@ -116,6 +116,44 @@ describe("canvasRevisionPolicy", () => {
     expect(result.next.definition.blocks.some((block) => block.kind === "callout")).toBe(true);
   });
 
+  it("lets an author turn a document from an older version into a design, and says why a bad frame is refused", () => {
+    const older = version({
+      definition: {
+        ...definition,
+        schemaVersion: 4,
+        blocks: [{ ...definition.blocks[0], schemaVersion: 4 }],
+      },
+    });
+    const design = (html: string) => ({
+      blockId: "screens",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design" as const,
+      title: "Screens",
+      size: "phone" as const,
+      frames: [{ frameId: "home", title: "Home", html }],
+    });
+    const admit = (html: string) =>
+      admitCanvasRevise({
+        request: reviseRequest(),
+        current: older,
+        receiptId: ids.receipt,
+        nextVersionId: ids.version2,
+        now: later as never,
+        blocks: [design(html)] as never,
+      });
+
+    expect(admit("<h1>Home</h1>").next.definition).toMatchObject({
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      blocks: [{ kind: "design" }],
+    });
+    expect(() => admit("<script>go()</script>")).toThrow(
+      expect.objectContaining({
+        denialCode: "malformed-request",
+        message: expect.stringContaining("frame home uses a <script> element"),
+      }),
+    );
+  });
+
   it("rejects implicit authority widening before admission", () => {
     expect(
       canvasReviseDenialReason({

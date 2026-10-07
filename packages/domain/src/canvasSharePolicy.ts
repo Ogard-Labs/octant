@@ -168,6 +168,14 @@ function sanitizeBlock(block: CanvasBlock): CanvasStaticExportBlock {
       assertNoSecretShape(rest, `block.${block.blockId}`);
       return rest as CanvasStaticExportBlock;
     }
+    case "design":
+      // A design's markup is only ever drawn inside Octant's sandboxed frame.
+      // A snapshot would hand it to a viewer this host does not control, and
+      // the secret filter cannot read markup, so a design does not leave.
+      return reject(
+        "unsafe-payload",
+        `Canvas design ${block.blockId} cannot be shared; its screens draw only inside Octant.`,
+      );
     case "plan": {
       const tasks = block.tasks.map(({ sourceIds: _sourceIds, ...task }) => task);
       const shared = { ...block, tasks };

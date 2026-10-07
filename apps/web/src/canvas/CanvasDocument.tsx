@@ -53,6 +53,7 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
     case "state":
       return "State machine";
     case "mockup":
+    case "design":
       return block.title;
     case "plan":
       return block.title;

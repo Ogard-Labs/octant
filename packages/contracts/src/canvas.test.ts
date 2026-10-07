@@ -88,10 +88,10 @@ describe("Canvas contracts", () => {
   });
 
   it("rejects unknown or malformed schema versions", () => {
-    expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: 5 })).toThrow();
+    expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: 99 })).toThrow();
     expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: "1" })).toThrow();
     expect(() =>
-      decodeCanvasDefinition({ ...definition, blocks: [{ ...heading, schemaVersion: 5 }] }),
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...heading, schemaVersion: 99 }] }),
     ).toThrow();
   });
 
@@ -119,6 +119,29 @@ describe("Canvas contracts", () => {
     expect(
       decodeCanvasDefinition({ ...definition, schemaVersion: 3, blocks: [mockup] }),
     ).toMatchObject({ blocks: [mockup] });
+  });
+
+  it("admits design blocks only under the version that declared them", () => {
+    const design = {
+      blockId: "design-1",
+      schemaVersion: 5,
+      kind: "design",
+      title: "Checkout",
+      size: "phone",
+      frames: [{ frameId: "cart", title: "Cart", html: "<h1>Cart</h1>" }],
+    } as const;
+    expect(decodeCanvasDefinition({ ...definition, blocks: [design] })).toMatchObject({
+      blocks: [design],
+    });
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 4, blocks: [design] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...design, frames: [] }] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...design, size: "watch" }] }),
+    ).toThrow();
   });
 
   it("admits a thread presentation only under the version that declared it", () => {

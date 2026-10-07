@@ -273,6 +273,18 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           items: block.nodes.map((node) => `${node.component}: ${reading(node.label)}`),
         },
       ];
+    case "design":
+      // The reading form names each screen or slide. Its markup is drawn only
+      // inside Octant's sandboxed frame, so it never travels in an export.
+      return [
+        { kind: "heading", level: 2, text: reading(block.title) },
+        {
+          kind: "list",
+          items: block.frames.map(
+            (frame, index) => `${String(index + 1)}. ${reading(frame.title)}`,
+          ),
+        },
+      ];
     case "plan": {
       const phases = new Map(
         block.phases.map((phase) => [String(phase.phaseId), reading(phase.title)]),

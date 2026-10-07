@@ -91,9 +91,9 @@ research starts from the matching recipe. Requesting up to three
 
 The agent supplies the actual document as validated blocks. A prompt alone is
 only a provenance note. Revisions replace the block list and must name the
-last observed version sequence; creation starts at sequence 1. Raw HTML,
-JavaScript, CSS, and invented file or artifact references are not Canvas
-content.
+last observed version sequence; creation starts at sequence 1. JavaScript and
+invented file or artifact references are not Canvas content, and HTML and CSS
+appear only in a design's frames.
 
 A created Canvas appears in its thread at the end of the turn that made it, as
 a row you can click to open it. The row shows a live miniature of the Canvas
@@ -154,6 +154,29 @@ window, header, sidebar, list, list row, form field, button, toggle, tabs,
 card, image placeholder, and text. Nodes name a parent rather than nesting.
 The drawing is a wireframe. Its controls are not live: they cannot be focused
 and they do not submit. Ask `describe` for `mockup` to get a settings screen.
+
+### Designs, prototypes, and slides
+
+Ask for an app, a screen, a website, a landing page, or a presentation, and the
+agent builds a design: real screens or slides that look finished. A design has
+one size, phone, tablet, desktop, or slide, and its screens sit side by side
+in the Canvas, numbered in order.
+
+- **Play** opens the design at full size. Click its links and buttons to move
+  between screens. **Restart** goes back to the first screen. Click a screen to
+  play from that one.
+- A deck shows **Present** instead. Use the arrow buttons, or the left and
+  right arrow keys, to move between slides.
+- Some designs react to taps without changing screen, such as a card you can
+  select or a reminder you can tick. That is all they can do: a design runs no
+  script, loads nothing from the internet, and has no links that leave it.
+  Pictures in it are drawn by the agent.
+- A design cannot be shared as a snapshot yet. Exporting it writes the name
+  of each screen, not the screens themselves.
+
+Comments, versions, and **Compare with** work on a design as on any other
+block. To change it, ask the agent: "make the buttons rounder" revises the
+same design.
 
 The document fills the Canvas tab and the dock. Its header holds the version
 picker (choose an earlier version, or **Compare with** the previous one to see

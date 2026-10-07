@@ -91,6 +91,26 @@ const inTreeCanvasDocumentRecipeDocuments = [
       { kind: "plan", role: "The actions that follow." },
     ],
   },
+  {
+    id: "design-prototype",
+    title: "Design prototype",
+    whenToUse:
+      "When someone asks to design an app, a screen, a website, or a landing page, or for a mockup they can click through.",
+    skeleton: [
+      {
+        kind: "design",
+        role: "One frame per screen at phone, tablet, or desktop size, linked with href to each other's frameId.",
+      },
+      { kind: "heading", role: "Notes" },
+      { kind: "rich-text", role: "The choices made, and what is still open." },
+    ],
+  },
+  {
+    id: "slide-deck",
+    title: "Slide deck",
+    whenToUse: "When someone asks for a presentation, a deck, or slides.",
+    skeleton: [{ kind: "design", role: "One slide-size frame per slide, in order." }],
+  },
 ] as const;
 
 const inTreeRecipes = inTreeCanvasDocumentRecipeDocuments.map((recipe) =>

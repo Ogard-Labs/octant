@@ -26,6 +26,8 @@ export * from "./canvasDiagramExamples";
 export * from "./canvasChartExamples";
 export * from "./canvasNumberFormat";
 export * from "./canvasMockupExamples";
+export * from "./canvasDesignPolicy";
+export * from "./canvasDesignExamples";
 export * from "./canvasActionPolicy";
 export * from "./canvasActionExecutionPolicy";
 export * from "./canvasActionAvailabilityPolicy";

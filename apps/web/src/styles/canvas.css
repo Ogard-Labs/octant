@@ -1844,6 +1844,170 @@
   font-size: var(--oct-text-xs);
 }
 
+/* A design: real screens or slides drawn from the author's HTML and CSS in a
+   sandboxed frame. On the board each frame is a scaled picture that opens the
+   player through the button laid over it. */
+.canvas-design {
+  display: grid;
+  gap: var(--oct-space-3);
+  color: var(--oct-fg);
+}
+
+.canvas-design__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.canvas-design__heading {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.canvas-design__title {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+}
+
+.canvas-design__meta {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-design__board {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--oct-space-5) var(--oct-space-4);
+}
+
+.canvas-design__frame {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: 0;
+  min-width: 0;
+}
+
+.canvas-design__caption {
+  display: flex;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-design__index {
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-design__frame-title {
+  overflow: hidden;
+  font-weight: var(--oct-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-design__preview {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+}
+
+.canvas-design__preview:hover {
+  border-color: var(--oct-muted);
+}
+
+/* The button recipe fixes a control height; the cover must fill the frame. */
+.canvas-design__preview > .canvas-design__open {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  cursor: pointer;
+}
+
+.canvas-design__page {
+  position: absolute;
+  inset: 0 auto auto 0;
+  border: 0;
+  transform-origin: 0 0;
+}
+
+.canvas-design__cover {
+  position: absolute;
+  inset: 0;
+}
+
+.octant-dialog__popup.canvas-design-player {
+  --octant-dialog-width: 96vw;
+  --octant-dialog-height: 94vh;
+  height: min(94vh, calc(100vh - 48px));
+  overflow: hidden;
+  padding: 0;
+}
+
+.canvas-design-player__body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+}
+
+.canvas-design-player__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-2) var(--oct-space-2) var(--oct-space-2) var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.canvas-design-player__title {
+  font-weight: var(--oct-weight-strong);
+}
+
+.canvas-design-player__position,
+.canvas-design-player__hint {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-design-player__position {
+  font-family: var(--oct-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-design-player__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin-left: auto;
+}
+
+.canvas-design-player__stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: var(--oct-space-4);
+  overflow: hidden;
+  background: var(--oct-surface);
+}
+
+.canvas-design-player__screen {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
 /* Destination export. The approval card shows the payload and the destination
    before anything leaves. Status is words, not color alone. */
 .canvas-export {
