@@ -126,6 +126,17 @@ available for profiles that support it. Mistral Vibe from Octant requires a
 Mistral API key entered in **Settings → Providers** because its confined launch
 does not read the macOS Keychain.
 
+Claude Code on a Claude subscription has one extra step for subagents and Plan
+turns. Those runs are read-only and cannot reach the keychain where your Claude
+sign-in lives, so **Settings → Providers → Claude Code** offers **Connect Claude
+for helpers**. Octant runs Claude's own `claude setup-token` on this Mac, you
+approve once in the browser window it opens, and Octant keeps the long-lived
+token it prints in its own credential store for that Claude Code provider. You
+never copy the token. Ordinary Claude turns keep using your normal sign-in.
+**Disconnect** removes the token. If Claude later refuses it, Settings shows it
+as expired and asks you to connect again. Connect only from the Mac that runs
+Octant, because the approval opens a browser there.
+
 The **Update CLI** action is shown only for providers with a verified native
 update command. It runs that command against the same configured executable,
 when no active session is using it, and then reports whether the observed

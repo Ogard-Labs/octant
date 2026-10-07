@@ -61,7 +61,12 @@ import {
   type ClaudeEnvironmentScope,
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
-import type { ClaudeProcessPort } from "./claudeProcess";
+import { CONFINED_CLAUDE_EXECUTION_POLICIES, type ClaudeProcessPort } from "./claudeProcess";
+import {
+  CLAUDE_HELPER_EXPIRED_MESSAGE,
+  CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
+  type ClaudeHelperSignInPort,
+} from "./claudeHelperSignIn";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"];
@@ -213,6 +218,11 @@ export interface ClaudeDriverOptions {
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
+  /**
+   * The long-lived token a confined launch on subscription sign-in uses in
+   * place of the keychain it may not reach. Absent, such a launch refuses.
+   */
+  readonly helperSignIn?: ClaudeHelperSignInPort;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly resumeIdentityPort: ClaudeResumeIdentityPort;
   readonly permissionPersistence?: () => PermissionPersistence;
@@ -291,6 +301,8 @@ interface SessionState {
   readonly modelId: ProviderModelId;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly authentication: ClaudeAuthentication;
+  /** Set when this launch runs on the connected helper token rather than the keychain. */
+  readonly helperToken?: string;
   readonly expectedClaudeSessionId?: string;
   readonly expectedRuntimeVersion: string;
   readonly correlationId: CorrelationId;
@@ -614,6 +626,49 @@ function brokerResolve(options: ClaudeDriverOptions): Effect.Effect<string, Prov
         : failure("provider-failed", "Claude credential broker is unavailable.");
     },
   });
+}
+
+/**
+ * The connected helper token for a confined subscription launch, which may not
+ * reach the keychain the runtime's own sign-in lives in. Anything else refuses
+ * with the step that fixes it, so a parent's `wait` can tell the person.
+ */
+async function connectedHelperToken(options: ClaudeDriverOptions): Promise<string> {
+  const signIn =
+    options.helperSignIn === undefined
+      ? ({ kind: "not-connected" } as const)
+      : await options.helperSignIn.read(String(options.instanceId));
+  if (signIn.kind === "connected") return signIn.token;
+  if (signIn.kind === "unavailable") {
+    throw failure("provider-failed", "Octant's credential store is unavailable.");
+  }
+  throw failure(
+    "unauthenticated",
+    signIn.kind === "expired" ? CLAUDE_HELPER_EXPIRED_MESSAGE : CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
+  );
+}
+
+/**
+ * The runtime never refreshes a token it was handed, so a refusal of the helper
+ * token means it stopped working: it is retired and the turn says to reconnect
+ * instead of reporting a bare sign-in failure.
+ */
+function helperTokenRefusal(
+  options: ClaudeDriverOptions,
+  state: SessionState,
+  event: ProviderRuntimeEvent,
+): ProviderRuntimeEvent {
+  if (
+    state.helperToken === undefined ||
+    event.kind !== "failed" ||
+    event.failure.category !== "unauthenticated"
+  ) {
+    return event;
+  }
+  void options.helperSignIn
+    ?.markExpired(String(options.instanceId), state.helperToken)
+    .catch(() => undefined);
+  return { ...event, failure: { ...event.failure, message: CLAUDE_HELPER_EXPIRED_MESSAGE } };
 }
 
 /**
@@ -1076,7 +1131,7 @@ function makeConnection(
           });
           return;
         }
-        publish(mapped.event);
+        publish(helperTokenRefusal(options, state, mapped.event));
         if (isTerminalEvent(mapped.event)) {
           state.terminalResult.resolve(undefined);
           clearAuthorityState(state);
@@ -1185,6 +1240,11 @@ function makeConnection(
           }
           apiKey = await runSetupEffect(brokerResolve(options), signal);
         }
+        const helperToken =
+          options.authentication === "subscription" &&
+          CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy)
+            ? await connectedHelperToken(options)
+            : undefined;
         scope = await runSetupEffect(Scope.make(), signal);
         const initialized = deferred<string>();
         // Startup no longer waits on this: the runtime initializes with the
@@ -1192,16 +1252,21 @@ function makeConnection(
         void initialized.promise.catch(() => undefined);
         const terminalResult = deferred<void>();
         const environment = await runSetupEffect(
-          environmentFactory(options.authentication, apiKey === undefined ? {} : { apiKey }).pipe(
-            Effect.provideService(Scope.Scope, scope),
-          ),
+          environmentFactory(
+            options.authentication,
+            apiKey !== undefined
+              ? { apiKey }
+              : helperToken !== undefined
+                ? { oauthToken: helperToken }
+                : {},
+          ).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
         const runtimeVersion = await runSetupEffect(
           options.process.probeVersion(options.binaryPath),
           signal,
         );
-        if (options.authentication === "subscription") {
+        if (options.authentication === "subscription" && helperToken === undefined) {
           const status = await runSetupEffect(
             options.process.probeSubscription(options.binaryPath, environment.environment),
             signal,
@@ -1536,6 +1601,7 @@ function makeConnection(
           modelId: input.modelId,
           executionPolicy: input.executionPolicy,
           authentication: options.authentication,
+          ...(helperToken === undefined ? {} : { helperToken }),
           ...(resumeSessionId === undefined ? {} : { expectedClaudeSessionId: resumeSessionId }),
           expectedRuntimeVersion: runtimeVersion,
           correlationId: factories.makeCorrelation() as CorrelationId,

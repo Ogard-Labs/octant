@@ -169,4 +169,37 @@ describe("makeClaudeEnvironmentScope", () => {
 
     expect(heldEnvironment.ANTHROPIC_API_KEY).toBeUndefined();
   });
+
+  it("hands a subscription launch the helper token only, and takes it back on release", async () => {
+    const scope = await Effect.runPromise(Scope.make());
+    const acquired = await Effect.runPromise(
+      makeClaudeEnvironmentScope("subscription", {
+        hostEnvironment: {
+          PATH: "/usr/bin",
+          HOME: "/Users/provider-user",
+          CLAUDE_CODE_OAUTH_TOKEN: "ambient-token-must-not-pass",
+        },
+        oauthToken: "helper-token-sentinel-0123456789",
+      }).pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const heldEnvironment = acquired.environment;
+
+    expect(heldEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBe("helper-token-sentinel-0123456789");
+    expect(heldEnvironment.ANTHROPIC_API_KEY).toBeUndefined();
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+
+    expect(heldEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it("never passes an ambient OAuth token to a subscription launch", async () => {
+    const environment = await Effect.runPromise(
+      Effect.scoped(
+        makeClaudeEnvironmentScope("subscription", {
+          hostEnvironment: { PATH: "/usr/bin", CLAUDE_CODE_OAUTH_TOKEN: "ambient-token" },
+        }).pipe(Effect.map((held) => held.environment)),
+      ),
+    );
+
+    expect(environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
 });

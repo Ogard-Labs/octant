@@ -23,6 +23,11 @@ import type {
 import { claudeExecutionOptions, makeClaudeDriver } from "./claudeDriver";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
 import type { ClaudeEnvironmentScope } from "./claudeEnvironment";
+import {
+  CLAUDE_HELPER_EXPIRED_MESSAGE,
+  CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
+  type ClaudeHelperSignInPort,
+} from "./claudeHelperSignIn";
 import type { ClaudeProcessPort } from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -32,6 +37,7 @@ const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000703"
 const otherSessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000704");
 const modelId = "claude-sonnet" as ProviderModelId;
 const projectRoot = "/tmp/octant-claude-project";
+const HELPER_TOKEN = "helper-token-sentinel-0123456789";
 const observedAt = "2026-07-16T12:00:00.000Z";
 const readyCapabilities = {
   streaming: "supported",
@@ -222,17 +228,32 @@ function harness(
     has: vi.fn(async () => true),
     resolve: vi.fn(async () => "api-key-secret-sentinel"),
   };
+  // Confined subscription launches sign in with the connected helper token;
+  // most cases here are about something else, so it starts connected.
+  const helperSignIn = {
+    read: vi.fn<ClaudeHelperSignInPort["read"]>(async () => ({
+      kind: "connected",
+      token: HELPER_TOKEN,
+    })),
+    markExpired: vi.fn<ClaudeHelperSignInPort["markExpired"]>(async () => undefined),
+  };
   const releasedEnvironments: NodeJS.ProcessEnv[] = [];
   const makeEnvironmentScope = (
     mode: ClaudeAuthentication,
-    options?: { readonly apiKey?: string },
+    options?: { readonly apiKey?: string; readonly oauthToken?: string },
   ): Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope> =>
     Effect.acquireRelease(
       Effect.sync(() => ({
         environment:
           mode === "api-key"
             ? { PATH: "/usr/bin", ANTHROPIC_API_KEY: options?.apiKey }
-            : { PATH: "/usr/bin", CLAUDE_CONFIG_DIR: "/provider-native" },
+            : {
+                PATH: "/usr/bin",
+                CLAUDE_CONFIG_DIR: "/provider-native",
+                ...(options?.oauthToken === undefined
+                  ? {}
+                  : { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }),
+              },
       })),
       ({ environment }) =>
         Effect.sync(() => {
@@ -286,6 +307,7 @@ function harness(
       process,
       sdk,
       credentialResolver,
+      helperSignIn,
       runtimeRegistry,
       resumeIdentityPort,
       permissionPersistence: () => permissionPersistence,
@@ -302,6 +324,7 @@ function harness(
   const driver = makeDriver();
   return {
     credentialResolver,
+    helperSignIn,
     driver,
     makeEnvironmentScope,
     makeDriver,
@@ -3328,8 +3351,14 @@ describe("Claude session lifecycle", () => {
         }),
       ),
     ]);
-    expect(first.resumeCursor).toEqual({ driverKind: "claude", value: "sdk-session-1" });
-    expect(second.resumeCursor).toEqual({ driverKind: "claude", value: "sdk-session-2" });
+    // The two opens race, so each session is matched to the query it opened.
+    const cursorFor = (policy: string) =>
+      `sdk-session-${f.opens.findIndex((open) => open.executionPolicy === policy) + 1}`;
+    expect(first.resumeCursor).toEqual({
+      driverKind: "claude",
+      value: cursorFor("approval-gated"),
+    });
+    expect(second.resumeCursor).toEqual({ driverKind: "claude", value: cursorFor("plan") });
     expect(f.opens).toHaveLength(2);
     expect(
       f.opens.map(({ projectRoot: root, model, executionPolicy }) => ({
@@ -3337,10 +3366,12 @@ describe("Claude session lifecycle", () => {
         model,
         executionPolicy,
       })),
-    ).toEqual([
-      { root: projectRoot, model: modelId, executionPolicy: "approval-gated" },
-      { root: projectRoot, model: modelId, executionPolicy: "plan" },
-    ]);
+    ).toEqual(
+      expect.arrayContaining([
+        { root: projectRoot, model: modelId, executionPolicy: "approval-gated" },
+        { root: projectRoot, model: modelId, executionPolicy: "plan" },
+      ]),
+    );
     expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(2);
     await acquired.close();
     expect(f.queries.every((query) => query.close.mock.calls.length === 1)).toBe(true);
@@ -4156,5 +4187,83 @@ describe("Claude exact resume", () => {
     expect(f.resumeIdentities.has("wrong-sdk-session")).toBe(false);
     expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
     await acquired.close();
+  });
+});
+
+describe("Claude for helpers", () => {
+  it("signs a confined subscription launch in with the connected helper token and nothing else", async () => {
+    const f = harness("subscription");
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId: otherSessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+        }),
+      );
+    } finally {
+      await acquired.close();
+    }
+
+    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBe(HELPER_TOKEN);
+    // An unconfined launch keeps the runtime's own sign-in.
+    expect(f.opens[1]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    // The connected token stands in for the keychain probe it could not pass.
+    expect(f.process.probeSubscription).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a confined launch with the step that connects Claude for helpers", async () => {
+    for (const [state, message] of [
+      [{ kind: "not-connected" }, CLAUDE_HELPER_NOT_CONNECTED_MESSAGE],
+      [{ kind: "expired" }, CLAUDE_HELPER_EXPIRED_MESSAGE],
+    ] as const) {
+      const f = harness("subscription");
+      f.helperSignIn.read.mockResolvedValue(state);
+      const acquired = await acquire(f.driver, "chat");
+      try {
+        const exit = await Effect.runPromiseExit(
+          acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+        );
+        expect(String(exit)).toContain(message);
+      } finally {
+        await acquired.close();
+      }
+      expect(f.opens).toHaveLength(0);
+    }
+  });
+
+  it("retires a helper token the runtime refuses and says to reconnect", async () => {
+    const f = harness("subscription");
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      const terminalEvent = Effect.runPromise(
+        collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+      );
+      await f.queries[0]!.emit({
+        kind: "authentication",
+        sessionId: "sdk-session-1",
+        authenticating: false,
+        failed: true,
+      } as ClaudeDecodedMessage);
+      await expect(terminalEvent).resolves.toMatchObject({
+        value: {
+          kind: "failed",
+          failure: { category: "unauthenticated", message: CLAUDE_HELPER_EXPIRED_MESSAGE },
+        },
+      });
+    } finally {
+      await acquired.close();
+    }
+    expect(f.helperSignIn.markExpired).toHaveBeenCalledWith(String(instanceId), HELPER_TOKEN);
   });
 });
