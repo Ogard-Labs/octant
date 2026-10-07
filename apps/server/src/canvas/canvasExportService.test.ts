@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -80,13 +88,16 @@ afterEach(() => {
 /**
  * A real folder on this machine for the folder destination to write into, and
  * the registration that offers it. Nobody else can read it, and it is never a
- * real person's folder.
+ * real person's folder. Both it and the home it sits in are named by their real
+ * paths, as the host names them: the system temporary folder on macOS sits
+ * behind a link.
  */
 function exportFolder(options?: { readonly chosen?: boolean }): {
   readonly folder: string;
   readonly registration: CanvasExportTargetRegistration;
 } {
-  const folder = join(tmpdir(), `octant-export-${randomUUID()}`);
+  const home = realpathSync(tmpdir());
+  const folder = join(home, `octant-export-${randomUUID()}`);
   mkdirSync(folder, { mode: 0o700 });
   directories.push(folder);
   const chosen = options?.chosen !== false;
@@ -95,7 +106,7 @@ function exportFolder(options?: { readonly chosen?: boolean }): {
     registration: {
       folderFor: () => (chosen ? folder : undefined),
       files: createCanvasExportFilePort(),
-      home: tmpdir(),
+      home,
       standingOutsideApproval: false,
       newTempId: randomUUID,
     },

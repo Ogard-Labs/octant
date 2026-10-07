@@ -1213,6 +1213,59 @@ describe("WorkThreadWorkspace", () => {
     }
   });
 
+  it("stops showing a retry once the retried response arrives without text", async () => {
+    const running = workTurn({
+      status: "running",
+      response: undefined,
+      transcript: [
+        { role: "user", text: "Start" },
+        { role: "assistant", text: "", status: "running" },
+      ],
+    });
+    const cleared = deferred<void>();
+    const transcript = vi.fn(async () => ({ threadId, turns: [running], liveCursor: 0 }));
+    const list = vi.fn(async () => ({ requests: [] }));
+    const subscribe = vi.fn(async function* () {
+      yield {
+        kind: "provider-retry" as const,
+        sequence: 1,
+        threadId,
+        requestId: running.requestId,
+        attempt: 2,
+        maxAttempts: 5,
+        delayMs: 4_000,
+        reason: "unavailable" as const,
+        announcedAt: new Date().toISOString(),
+      };
+      await cleared.promise;
+      yield {
+        kind: "provider-retry-cleared" as const,
+        sequence: 2,
+        threadId,
+        requestId: running.requestId,
+      };
+      await new Promise(() => undefined);
+    });
+
+    render(
+      <WorkThreadWorkspace
+        changeRevision={0}
+        initialThread={workThread()}
+        requestClient={{ list } as never}
+        threadClient={{ execute: vi.fn() } as never}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript, subscribe } as never}
+      />,
+    );
+
+    expect(await screen.findByText(/Provider busy, retrying 2\/5/)).toBeInTheDocument();
+    await act(async () => cleared.resolve());
+    await waitFor(() =>
+      expect(screen.queryByText(/Provider busy, retrying/)).not.toBeInTheDocument(),
+    );
+  });
+
   it("retries the initial Work snapshot before opening the live stream", async () => {
     const recovered = workTurn({
       prompt: "Recovered prompt",

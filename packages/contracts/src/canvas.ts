@@ -457,12 +457,12 @@ export const CanvasTableColumnDisplay = Schema.Literal("text", "bar", "heat", "s
 export type CanvasTableColumnDisplay = typeof CanvasTableColumnDisplay.Type;
 
 // `format` and `display` are additive optional presentation fields on the
-// existing table kind: they refine how a value an older runtime already reads
-// is drawn, they never change its order or add a block kind. The repository
-// treated `format` this way when it was added to the table, metric, and chart
-// columns, so `display` follows the same ungated convention rather than
-// minting a schema version a rolled-back runtime would have to learn for a
-// field it can safely draw as plain text.
+// existing table kind: they refine how a value is drawn, they never change its
+// order or add a block kind. The repository treated `format` this way when it
+// was added to the table, metric, and chart columns, so `display` follows the
+// same ungated convention. They are the documented exception to gating new
+// fields: because the struct is strict, a runtime rolled back past them
+// refuses a document that uses them instead of drawing it as plain text.
 export const CanvasTableColumn = Schema.Struct({
   id: boundedToken("CanvasTableColumnId"),
   label: CanvasLabel,

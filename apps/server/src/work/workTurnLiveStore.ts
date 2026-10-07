@@ -10,6 +10,8 @@ import {
 interface ThreadFrames {
   nextSequence: number;
   frames: WorkTurnStreamFrame[];
+  /** Requests whose announced retry no frame has cleared yet. */
+  readonly retrying: Set<string>;
 }
 
 interface Subscriber {
@@ -77,6 +79,7 @@ export class WorkTurnLiveStore {
   ): void {
     if (this.#closed) return;
     const state = this.#state(threadId);
+    state.retrying.add(String(requestId));
     this.#publish(
       threadId,
       decodeWorkTurnStreamFrame({
@@ -89,6 +92,22 @@ export class WorkTurnLiveStore {
         delayMs: notice.delayMs,
         reason: notice.reason,
         announcedAt: notice.announcedAt,
+      }),
+    );
+  }
+
+  /** Says once that a retried request was answered; every later call is a no-op. */
+  clearRetry(threadId: WorkThreadId, requestId: WorkTurnRequestId): void {
+    if (this.#closed) return;
+    const state = this.#state(threadId);
+    if (!state.retrying.delete(String(requestId))) return;
+    this.#publish(
+      threadId,
+      decodeWorkTurnStreamFrame({
+        kind: "provider-retry-cleared",
+        sequence: state.nextSequence,
+        threadId,
+        requestId,
       }),
     );
   }
@@ -116,6 +135,7 @@ export class WorkTurnLiveStore {
   settle(threadId: WorkThreadId, turn: WorkTurnState): void {
     if (this.#closed) return;
     const state = this.#state(threadId);
+    state.retrying.delete(String(turn.requestId));
     this.#publish(
       threadId,
       decodeWorkTurnStreamFrame({
@@ -199,7 +219,7 @@ export class WorkTurnLiveStore {
   #state(threadId: WorkThreadId): ThreadFrames {
     const existing = this.#threads.get(threadId);
     if (existing !== undefined) return existing;
-    const created: ThreadFrames = { nextSequence: 1, frames: [] };
+    const created: ThreadFrames = { nextSequence: 1, frames: [], retrying: new Set() };
     this.#threads.set(threadId, created);
     return created;
   }

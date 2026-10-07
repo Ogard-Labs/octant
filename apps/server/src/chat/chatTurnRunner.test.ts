@@ -564,6 +564,83 @@ describe("ChatTurnRunner", () => {
     );
   });
 
+  it("clears the retry notice when the retried response only calls a tool", async () => {
+    const seen: string[] = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, {
+            kind: "retrying",
+            sessionId,
+            attempt: 2,
+            maxAttempts: 5,
+            delayMs: 500,
+            reason: "unavailable",
+            occurredAt: now,
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "tool-request",
+            sessionId,
+            requestId: "tool-1",
+            toolName: "octant_web_research",
+            inputJson: JSON.stringify({ query: "Octant" }),
+          } as never);
+          yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Done" } as never);
+          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.sync(() => void seen.push("tool answered")),
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "research this",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: false,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          onHarnessRetry: () => seen.push("retrying"),
+          onHarnessRetryCleared: () => seen.push("retry cleared"),
+          persistAttempt: () => Effect.void,
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+              digest: "b".repeat(64),
+              byteLength: 4,
+            }),
+        }),
+      ),
+    );
+
+    expect(seen.slice(0, 3)).toEqual(["retrying", "retry cleared", "tool answered"]);
+  });
+
   it("names a tool call that never returns as the turn's failure", async () => {
     const updates: ChatAttempt[] = [];
     const toolSignals: AbortSignal[] = [];

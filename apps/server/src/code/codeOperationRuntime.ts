@@ -1823,7 +1823,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         input.requestId,
         input.response,
       );
-      return turnState(active.state);
+      return answeredTurnState(active.state);
     }
     if (active.connection === undefined) return turnState("failed");
     active.questions.delete(input.requestId);
@@ -1834,7 +1834,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         answer: input.response,
       }),
     );
-    return turnState(active.state);
+    return answeredTurnState(active.state);
   }
 
   /**
@@ -2018,7 +2018,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       )
         return turnState("failed");
       browserApproval(input.decision === "approved" ? "approved" : "denied");
-      if (input.decision === "approved") return turnState(active.state);
+      if (input.decision === "approved") return answeredTurnState(active.state);
       return this.#countDeniedApproval(active);
     }
     if (active === undefined || providerRequestId === undefined)
@@ -2037,7 +2037,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         approved: input.decision === "approved",
       }),
     );
-    if (input.decision === "approved") return turnState(active.state);
+    if (input.decision === "approved") return answeredTurnState(active.state);
     return this.#countDeniedApproval(active);
   }
 
@@ -2045,12 +2045,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * A provider that keeps asking after repeated refusals is looping on the
    * person, so the third denial ends the turn the way a cancel does. The
    * reason rides on `interruptMessage` so the runner's settlement — not this
-   * answer — writes the single terminal frame after the change list.
+   * answer — writes the single terminal frame after the change list. The
+   * denial itself was delivered, so its result is a bare `interrupted` with no
+   * failure: every refused answer names its reason, and a surface that read
+   * this one as refused would keep a Deny the provider already acted on.
    */
   async #countDeniedApproval(active: ActiveTurn) {
     active.deniedApprovals += 1;
     if (active.deniedApprovals < 3 || (active.state !== "running" && active.state !== "waiting"))
-      return turnState(active.state);
+      return answeredTurnState(active.state);
     active.interruptMessage =
       "Stopped after 3 denied tool requests in one turn. Send a new message to continue.";
     active.state = "interrupted";
@@ -2079,7 +2082,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     thread: CodeThread,
     kind: "approval" | "input",
     requestId: string,
-  ): { state: ActiveTurn["state"] } {
+  ): ReturnType<typeof turnState> {
     const history = this.#events.historyForThread(thread.id);
     if (history.status !== "ok") return turnState("failed");
     const liveOperationId = this.#active.get(String(thread.id))?.operationId;
@@ -2113,20 +2116,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }
     }
     if (owner === undefined || !owner.unsettled) return turnState("failed");
+    const failure = {
+      category: "failed",
+      message:
+        "The provider session that asked ended when Octant stopped. Send a new message to continue.",
+    } as const;
     try {
       this.#events.append({
         threadId: thread.id,
         operationId: owner.operationId,
         expectedCursor: owner.cursor,
-        event: {
-          kind: "operation-state",
-          state: "interrupted",
-          failure: {
-            category: "failed",
-            message:
-              "The provider session that asked ended when Octant stopped. Send a new message to continue.",
-          },
-        },
+        event: { kind: "operation-state", state: "interrupted", failure },
       });
     } catch {
       return turnState("failed");
@@ -2139,7 +2139,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         state: "interrupted",
       }),
     );
-    return turnState("interrupted");
+    return turnState("interrupted", failure);
   }
 
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
@@ -2572,7 +2572,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       modelId: active.thread.modelId,
       projectId: active.thread.projectId,
     };
-    if (event.kind === "provider-content") {
+    // A retried response that only calls a tool streams no content.
+    if (event.kind === "provider-content" || event.kind === "tool-activity") {
       harness.clearRetry?.(scope);
       return;
     }
@@ -3030,6 +3031,21 @@ function sanitizeProviderEvent(
     return sanitize({ ...event, path: relativePath.split(sep).join("/") }) as ProviderRuntimeEvent;
   }
   return sanitize(event) as ProviderRuntimeEvent;
+}
+
+/**
+ * What an answer the turn took reports. A turn a cancel or an earlier stop
+ * already interrupted cannot act on the answer, so it is refused with that
+ * reason; only the denial that itself stops a turn reports a bare
+ * `interrupted`.
+ */
+function answeredTurnState(state: ActiveTurn["state"]): ReturnType<typeof turnState> {
+  return state === "interrupted"
+    ? turnState("interrupted", {
+        category: "failed",
+        message: "The turn that asked has ended. Send a new message to continue.",
+      })
+    : turnState(state);
 }
 
 function turnState(

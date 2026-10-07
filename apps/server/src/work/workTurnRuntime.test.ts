@@ -478,6 +478,83 @@ describe("WorkTurnRuntime", () => {
     );
   });
 
+  it("clears the retry notice when the retried response only calls a tool", async () => {
+    const seen: string[] = [];
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const event = {
+      instanceId: ids.provider,
+      correlationId: decodeCorrelationId(String(ids.project)),
+      occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+      sessionId: ids.session as never,
+    };
+    const connection: ProviderConnection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: () => Effect.die("unused"),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, {
+            ...event,
+            sequence: 1,
+            kind: "retrying",
+            attempt: 2,
+            maxAttempts: 5,
+            delayMs: 500,
+            reason: "unavailable",
+          });
+          yield* Queue.offer(queue, {
+            ...event,
+            sequence: 2,
+            kind: "tool-request",
+            requestId: "work-tool-1",
+            toolName: "work_tool",
+            inputJson: "{}",
+          });
+          yield* Queue.offer(queue, { ...event, sequence: 3, kind: "completed" });
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.sync(() => void seen.push("tool answered")),
+    };
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () => Effect.succeed(connection),
+    };
+    await new WorkTurnRuntime({ timeoutMs: 1_000 }).run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Use the Work tool",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      signal: new AbortController().signal,
+      appManagedTools: {
+        definitions: [{ name: "work_tool", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: { status: "ok" }, isError: false }) as const,
+      },
+      onRetrying: () => seen.push("retrying"),
+      onRetryCleared: () => seen.push("retry cleared"),
+    });
+
+    expect(seen).toEqual(["retrying", "retry cleared", "tool answered"]);
+  });
+
   it("keeps the idle window open while a provider request awaits an answer", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     let releaseRequest: (() => void) | undefined;

@@ -22,13 +22,14 @@ export type HostResourceRead =
   | { readonly status: "unavailable" };
 
 export interface HostResourceClient {
-  read(): Promise<HostResourceRead>;
+  /** `signal` cancels the request; a cancelled read answers `unavailable`. */
+  read(signal?: AbortSignal): Promise<HostResourceRead>;
 }
 
 export function createHostResourceClient(options: HostResourceClientOptions): HostResourceClient {
   const fetch = bindFetchPort(options.fetch);
   return {
-    async read() {
+    async read(signal) {
       const headers: Record<string, string> = {};
       if (options.windowCapability !== undefined && options.windowCapability.length > 0) {
         headers["x-octant-window-capability"] = options.windowCapability;
@@ -38,6 +39,7 @@ export function createHostResourceClient(options: HostResourceClientOptions): Ho
         response = await fetch(new URL("/api/host/resources", options.baseUrl).toString(), {
           method: "GET",
           headers,
+          ...(signal === undefined ? {} : { signal }),
         });
       } catch {
         return { status: "unavailable" };

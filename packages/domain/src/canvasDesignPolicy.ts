@@ -10,7 +10,13 @@
  * script can leave the design, so every link must stay inside it.
  *
  * This reads markup with a light scan and patterns, not a parser. It does not
- * need to catch every spelling of a script, because none of them run.
+ * need to catch every spelling of a script, because none of them run. A remote
+ * load is read the way a browser spells it, through character references and
+ * CSS escapes, in a `url()`, an `@import`, or an `image-set()` candidate.
+ * `url()` and `@import` are looked for across the whole markup, since a
+ * presentation attribute such as `fill` can hold a `url()` too, so prose that
+ * spells one out, even through a reference such as `&commat;import`, is refused
+ * although a browser would only draw it as text.
  */
 
 /** Elements that run code, load another document, or navigate on their own. */
@@ -68,7 +74,15 @@ export function canvasDesignMarkupRefusal(markup: string): string | undefined {
   if (ANY_OUTSIDE_LINK.test(markup)) {
     return 'has a link that leaves the design; a link may only name a frame or a section, such as href="#checkout".';
   }
-  return cssRefusal(markup);
+  const loadRefused = cssLoadRefusal(withoutCssEscapes(withoutCharacterReferences(markup)));
+  if (loadRefused !== undefined) return loadRefused;
+  // An image-set is read only inside a style element, so a quote in the prose
+  // around one cannot hide its candidates. Style attributes are read above.
+  for (const styles of styleElementContents(markup)) {
+    const refused = imageSetRefusal(withoutCharacterReferences(styles));
+    if (refused !== undefined) return refused;
+  }
+  return undefined;
 }
 
 /**
@@ -82,17 +96,138 @@ export function canvasDesignStylesheetRefusal(styles: string): string | undefine
 }
 
 function cssRefusal(raw: string): string | undefined {
-  const css = withoutCssEscapes(raw);
+  return cssLoadRefusal(withoutCssEscapes(raw)) ?? imageSetRefusal(raw);
+}
+
+function cssLoadRefusal(css: string): string | undefined {
   if (/@import\b/i.test(css)) {
     return "imports a stylesheet; put every style in the design itself.";
   }
   for (const match of css.matchAll(CSS_URL)) {
-    const target = (match[1] ?? "").toLowerCase();
-    if (!target.startsWith("data:") && !target.startsWith("#")) {
+    if (loadsAFile(match[1] ?? "")) {
       return "loads a file with url(); use a data: URL, an inline SVG, or a gradient.";
     }
   }
   return undefined;
+}
+
+function imageSetRefusal(raw: string): string | undefined {
+  // An escaped quote is a character of a string, never its end, so it is
+  // resolved to one that the scan does not read as a quote.
+  for (const address of imageSetStringCandidates(withoutCssEscapes(raw, "\ufffd"))) {
+    if (loadsAFile(address)) {
+      return "loads a file with image-set(); use a data: URL, an inline SVG, or a gradient.";
+    }
+  }
+  return undefined;
+}
+
+function loadsAFile(address: string): boolean {
+  const target = address.trim().toLowerCase();
+  return !target.startsWith("data:") && !target.startsWith("#");
+}
+
+/**
+ * The quoted candidates of every `image-set()`, which a browser loads like a
+ * `url()`: `image-set("https://x.test/a.png" 1x)`. A candidate starts an
+ * argument of the image-set itself, so a `type("image/png")` hint inside it or
+ * a quoted font family elsewhere is not one. A comment is skipped, and a string
+ * a browser never closes ends at its line break. One left-to-right pass with a
+ * stack of open parentheses, so a run of unclosed image-sets costs no more than
+ * reading it.
+ */
+function imageSetStringCandidates(css: string): ReadonlyArray<string> {
+  const candidates: Array<string> = [];
+  // For each open parenthesis, whether it opened an image-set.
+  const open: Array<boolean> = [];
+  let atCandidate = false;
+  let cursor = 0;
+  while (cursor < css.length) {
+    const char = css.charAt(cursor);
+    if (char === "/" && css.charAt(cursor + 1) === "*") {
+      const end = css.indexOf("*/", cursor + 2);
+      cursor = end === -1 ? css.length : end + 2;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      let close = cursor + 1;
+      while (
+        close < css.length &&
+        css.charAt(close) !== char &&
+        !/[\n\r\f]/.test(css.charAt(close))
+      ) {
+        close += 1;
+      }
+      if (atCandidate) candidates.push(css.slice(cursor + 1, close));
+      atCandidate = false;
+      cursor = close + 1;
+      continue;
+    }
+    if (char === "(") {
+      const opensImageSet =
+        css.slice(Math.max(0, cursor - 9), cursor).toLowerCase() === "image-set";
+      open.push(opensImageSet);
+      atCandidate = opensImageSet;
+    } else if (char === ")") {
+      open.pop();
+      atCandidate = false;
+    } else if (char === ",") {
+      atCandidate = open.at(-1) === true;
+    } else if (!/\s/.test(char)) {
+      atCandidate = false;
+    }
+    cursor += 1;
+  }
+  return candidates;
+}
+
+// A numeric character reference, which a browser resolves with or without its
+// semicolon, a named one, or `&quot`, the one legacy name in the table below
+// that a browser also resolves without its semicolon.
+const CHARACTER_REFERENCE =
+  /&#(?:[xX]([0-9a-fA-F]+)|([0-9]+));?|&([A-Za-z][A-Za-z0-9]*);|&(quot|QUOT)/g;
+// The named references for the characters the CSS checks read. No ASCII letter
+// has a name, so a name can only spell the punctuation around a load.
+const NAMED_CHARACTERS: ReadonlyMap<string, string> = new Map([
+  ["Tab", "\t"],
+  ["NewLine", "\n"],
+  ["quot", '"'],
+  ["QUOT", '"'],
+  ["apos", "'"],
+  ["lpar", "("],
+  ["rpar", ")"],
+  ["comma", ","],
+  ["colon", ":"],
+  ["num", "#"],
+  ["commat", "@"],
+  ["bsol", "\\"],
+]);
+
+/**
+ * The markup as a browser hands it to CSS. A browser resolves character
+ * references in an attribute value and in an SVG style element before it reads
+ * the CSS, so `ur&#108;(` in a style attribute is `url(`. A reference this does
+ * not know stays as written. One left-to-right pass, and a resolved reference
+ * is not read again, as `&amp;#108;` is `&#108;` to a browser.
+ */
+function withoutCharacterReferences(markup: string): string {
+  return markup.replace(
+    CHARACTER_REFERENCE,
+    (
+      reference,
+      hex: string | undefined,
+      decimal: string | undefined,
+      name: string | undefined,
+      legacy: string | undefined,
+    ) => {
+      const named = name ?? legacy;
+      if (named !== undefined) return NAMED_CHARACTERS.get(named) ?? reference;
+      const code =
+        hex === undefined ? Number.parseInt(decimal ?? "", 10) : Number.parseInt(hex, 16);
+      const valid = code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff);
+      return String.fromCodePoint(valid ? code : 0xfffd);
+    },
+  );
 }
 
 // A CSS escape: a backslash and one to six hex digits with one optional
@@ -105,15 +240,40 @@ const CSS_ESCAPE = /\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|([\s\S]))/g;
  * backslash before a line break continues a string and stands for nothing.
  * One left-to-right pass, so a long run of escapes costs no more than reading it.
  */
-function withoutCssEscapes(css: string): string {
+function withoutCssEscapes(css: string, escapedQuote?: string): string {
   return css.replace(CSS_ESCAPE, (_escape, hex: string | undefined, other: string | undefined) => {
+    let resolved: string;
     if (hex !== undefined) {
       const code = Number.parseInt(hex, 16);
       const valid = code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff);
-      return String.fromCodePoint(valid ? code : 0xfffd);
+      resolved = String.fromCodePoint(valid ? code : 0xfffd);
+    } else {
+      resolved = other === undefined || /[\n\r\f]/.test(other) ? "" : other;
     }
-    return other === undefined || /[\n\r\f]/.test(other) ? "" : other;
+    return escapedQuote !== undefined && (resolved === '"' || resolved === "'")
+      ? escapedQuote
+      : resolved;
   });
+}
+
+/**
+ * The text of each style element, found with plain searches so a run of
+ * unclosed ones costs no more than reading the markup. One left open runs to
+ * the end of the markup, as a browser reads it.
+ */
+function* styleElementContents(markup: string): Generator<string> {
+  const lower = markup.toLowerCase();
+  let cursor = 0;
+  while (cursor < markup.length) {
+    const open = lower.indexOf("<style", cursor);
+    if (open === -1) return;
+    const tagEnd = lower.indexOf(">", open);
+    if (tagEnd === -1) return;
+    const close = lower.indexOf("</style", tagEnd);
+    const end = close === -1 ? markup.length : close;
+    yield markup.slice(tagEnd + 1, end);
+    cursor = end;
+  }
 }
 
 /**
@@ -192,6 +352,12 @@ function attributeRefusal(attributes: string): string | undefined {
     }
     if (REFUSED_ATTRIBUTES.has(name)) {
       return `has a ${name} attribute; design frames send nothing anywhere.`;
+    }
+    // Read alone, a style value's own quotes are not confused with the quotes
+    // around the attributes beside it.
+    if (name === "style") {
+      const cssRefused = cssRefusal(withoutCharacterReferences(value));
+      if (cssRefused !== undefined) return cssRefused;
     }
   }
   return undefined;

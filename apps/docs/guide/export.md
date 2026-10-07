@@ -33,7 +33,9 @@ The folder always comes from Octant's own folder browser, which lists folders on
 this computer. Octant never takes a folder path typed or sent from a window.
 A folder must be inside your home folder; reaching outside it needs the standing
 access-outside-project approval, which this preview does not offer, so an outside
-folder is refused rather than assumed.
+folder is refused rather than assumed. Octant remembers the folder by where it
+really is: if the folder, or a folder above it, is later replaced by a link to
+somewhere else, the export is refused instead of following the link.
 
 Put the folder inside a folder your sync client already watches if you want the
 files on your other computers. Octant adds no cloud of its own for this.

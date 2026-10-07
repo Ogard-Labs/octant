@@ -211,8 +211,9 @@ unauthenticated caller is refused, with no figures in the refusal. The route
 also compares the device's host identity with this host's, but every paired
 device row on a host carries that host's own identity, so the comparison does
 not separate one paired device from another. The Computers card
-reads the route only while the card is on screen and the window is in front,
-about every ten seconds, and does not poll in the background.
+reads the route only while the card is on screen and the window is visible,
+about every ten seconds, at most one read per host at a time and each abandoned
+after five seconds, and does not poll in the background.
 
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
@@ -292,6 +293,14 @@ data and creates no artifact.
 `sidebar` (the default). The value is part of the definition and needs Canvas
 schema version 4. An older runtime refuses a version-4 document as a future
 version and does not report it corrupt.
+A treemap block is gated the same way at Canvas schema version 5 and a heatmap
+block at version 6, so a document that declares an earlier version and carries
+one is refused as a declared future version. The optional table column
+`display` and the chart, table, and metric `format` fields are the one ungated
+exception: they only change how a value is drawn, so they carry no schema
+version, but the strict definition schema refuses an unknown field, so a
+runtime rolled back past them refuses a document that uses them rather than
+drawing it as plain text.
 The pure `canvasInlineRefusal` policy admits `inline` only for at most 12 blocks
 with no `diagram`, `plan`, `mockup` or `design`. When an author asks for `inline` over
 that bound, the host records `sidebar` and returns the reason as
@@ -339,7 +348,7 @@ labeled non-negative slices. Stacked, grouped, and bar-and-line charts share
 categories across series; a bar-and-line series names itself as a bar or a line.
 The accessible table lists every reading. A pie or donut legend toggles at most
 24 slices; the rest stay in the picture and the table. A shared snapshot keeps
-the chart and drops no series mark.
+the chart, its number format, and every series mark.
 A treemap is a hierarchy drawn as squarified rectangles: nodes name a parent,
 one root, values sit on leaves, and a group's reading is the sum of its
 children. A leaf carries a value for every declared measure and may name a
@@ -353,7 +362,8 @@ journaled. The domain policy refuses a second root, a cycle, a dangling parent,
 a group that carries its own value or a leaf that does not, a value that is
 negative, a measure that is not declared, and a hierarchy past the depth, node,
 measure, or label budget. The accessible fallback is a hierarchical table
-sortable by each measure.
+sortable by each measure. A shared snapshot keeps the hierarchy, its measures,
+and every reading, and drops each leaf's source id.
 A heatmap is a grid coloured by value. A matrix names its rows and columns and
 carries a cell per coordinate with a value and an optional short note; a cell on
 a coordinate the block does not hold, a repeated row, column, or coordinate, and
@@ -366,7 +376,7 @@ preview SVG, and the Markdown and HTML export all draw the same cells. The perso
 can sort a matrix's rows by their total and walk the cells with the arrow keys;
 these are view state and are never journaled. The accessible fallback is a table
 of every coordinate and its total for a matrix, or of every dated reading for a
-calendar.
+calendar. A shared snapshot keeps the grid, its readings, and their notes.
 A bar list is a ranking of magnitudes (`packages/domain/src/canvasBarListLayout.ts`):
 each row is a label, a value, an optional second value, and an optional manifest
 source. Rows sort largest first with a stable tie-break by the author's order,
@@ -380,13 +390,21 @@ which the host reauthorizes. The pure, deterministic layout is shared by the
 screen, the artifact preview SVG, and the Markdown and HTML export. The domain
 policy refuses a repeated label, a negative or non-finite value, a list past the
 row budget, and a source the manifest does not hold; the accessible fallback is a
-table of every row. A metric block may carry a `format`, a `delta`, a
+table of every row. A shared snapshot keeps every row and reading and drops each
+row's source id. A metric block may carry a `format`, a `delta`, a
 `goodDirection` of `up`, `down`, or `neutral` so a delta's tone is never guessed,
 a `sparkline` of at most 256 readings, and a short `caption`; consecutive metric
 blocks are gathered into one responsive row of two to four tiles. The bar list
 and the metric's direction, sparkline, and caption arrive with Canvas schema
 version 7, so a document declaring an older version that carries any of them is
 refused as a future version; a static export carries the same metric fields.
+A share carries every block kind and field a Canvas holds except source ids
+and the design and action blocks it refuses (see the `design` block). A table
+column keeps its number format and display, and a board keeps its own layout.
+Share documents version independently of Canvas documents: a treemap, a
+heatmap, a bar list, a chart's or a table column's number format, a table
+column's display, and a board's layout arrive with share version 3, so a share
+that declares an older version and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -467,12 +485,18 @@ shows its frame through `:target`, and the renderer writes each fragment
 against the page's own address because a `srcdoc` page resolves a bare one
 against its parent. The pure `canvasDesignMarkupRefusal` policy refuses a
 script, an event handler, an embedded document, a remote image, stylesheet,
-or font, and any link that is not a fragment, naming the frame and the
+or font (in a `url()`, an `@import`, or an `image-set()` candidate, however a
+character reference or CSS escape spells it), and any link that is not a
+fragment, naming the frame and the
 construct; the event store and revise policy return that reason to the
 author rather than a generic failure. The sandbox is the boundary and the
 link rule is part of it, because a link is the one way a page with no script
-can leave. A static share refuses a design, and Markdown or HTML export writes
-frame titles, not markup. A design is always a sidebar Canvas. An authored
+can leave. A share refuses a design, and Markdown or HTML export writes
+frame titles, not markup. A share also refuses an action block, whose command
+runs only on this host. Both refusals, and any block or field the share
+contract does not carry, are checked before the snapshot is journaled and
+reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not
+a malformed request. A design is always a sidebar Canvas. An authored
 revision declares the current schema version on the version and its
 definition, so a Canvas written under an earlier version moves forward and can
 gain a design; a version append never moves a Canvas back. Agents writing
@@ -1474,8 +1498,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   unsupported: 2.0.22 serves no question routes and asks through forms, which
   are not mapped, so the written posture denies `question` and a form that
   still arrives fails the turn. Resume,
-  interruption, and tool activity are reported; a file change that no allowed
-  or approved edit preceded fails the turn; and anything not mapped fails
+  interruption, and tool activity are reported; each allowed or approved edit
+  request admits one reported change to each file it names (resolved against
+  the project root; `*` admits one change to any file), rejecting one request
+  never withdraws another's grant, and a change to a file no remaining grant
+  names fails the turn; and anything not mapped fails
   closed. The probe also asks the confined 2.x server to answer for a
   directory carrying a Git marker, made in the launch's own scratch directory
   because every launch profile denies the host temporary directory beneath
@@ -1539,7 +1566,10 @@ modelId }`, and the model picker is provider-first. Discovery can find
   Provider OAuth has two postures ([0111](decisions/0111-host-driven-provider-oauth.md)).
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
-  those tokens. **Host-driven** (`subscription-oauth`, direct HTTP drivers):
+  those tokens, except the opt-in Claude for helpers token that a confined
+  Claude launch signs in with, which the credential broker holds as the Sandbox
+  paragraph of [security and authority](#security-and-authority) states.
+  **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
   id). Direct endpoint drivers accept a `subscription-oauth` credential
@@ -1811,9 +1841,9 @@ runs: a thread ceiling counts its own runs, and a Project ceiling counts every
 run whose parent thread belongs to the Project now, whichever thread started
 it, at admission and in the Project overview. The Project a run's routing
 receipt named at delegation does not count, so a thread moved to another
-Project takes its children's spend with it. A child run is admitted against its parent thread's ceiling and
-that thread's Project ceiling; a Chat child's workspace names no Project, so its
-route's Project is used. Turns and run time come from journaled
+Project takes its children's spend with it. A child run is admitted against
+its parent thread's ceiling and that thread's Project ceiling; a Chat child's
+workspace names no Project, so its route's Project is used. Turns and run time come from journaled
 `spend.turn-recorded@1` facts, one per admitted turn or child run, charged its
 actual admitted-to-settled time; a turn still in flight counts its elapsed time,
 and a turn a host exit interrupted records nothing.
@@ -1936,7 +1966,13 @@ native harness in `apps/server/src/harness`:
   state or access.
 - **Tools.** `createNativeHarnessTools` composes the nine working tools and
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
-  closed tool catalog (`harness-*` capability ids). Every call decodes its
+  closed tool catalog (`harness-*` capability ids). `web-fetch` and
+  `web-search` are offered only where the host has them (`web-search` needs a
+  configured SearXNG endpoint). A Chat thread gets them only while its
+  research is on, because research is its grant to reach the web; Work and
+  Code need no such grant, and a child gets them only with network authority.
+  A tool that was not offered refuses as `tool-unavailable` if the model calls
+  it anyway. Every call decodes its
   arguments, wraps a `ToolActionRequest` under the thread's current authority,
   and passes `ToolCallAuthorityService.authorize` before any port runs. The
   thread's authority comes from the same resolver the browser tools use, in
@@ -1951,27 +1987,28 @@ native harness in `apps/server/src/harness`:
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
 - **Tool verification.** A routine Check connection runs no generating
-  request, so an OpenAI-compatible or Azure AI Foundry endpoint offers a model
-  Octant's tools only after a person proved that model calls one. The
-  `verify-model-tools` command sends one forced `octant_capability_echo`
-  request through the same sender a turn uses, for one model; an
-  Anthropic-compatible endpoint takes the same command and request in its own
-  wire shape. A model that calls the tool joins `verifiedToolModelIds` on the
-  observed state, which the journal persists with the catalog and a
-  configuration change clears; a model that answers in text leaves it out, and
-  a transport failure (authentication, timeout) is reported rather than
-  recorded as "unsupported". Admission, the AgentRun transport check, and the
-  Chat preflight read that set per model, so verifying one model never offers
-  tools to its siblings. A tool call in a real turn widens nothing either: the
-  provider-level `appManagedTools` flag of an OpenAI-compatible or Foundry
-  profile stays "unsupported", because a tool call proves only the model that
-  made it. The command accepts only the models the endpoint
-  lists or the profile configures, and only a Foundry profile's configured
-  deployments, because its catalogue lists base models that are not
+  request, so an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
+  endpoint offers a model Octant's tools only after a person proved that model
+  calls one. The `verify-model-tools` command sends one forced
+  `octant_capability_echo` request through the same sender a turn uses, for one
+  model; an Anthropic-compatible endpoint sends it in its own wire shape, with
+  `tool_choice` `any`. A model that calls the tool joins
+  `verifiedToolModelIds` on the observed state, which the journal persists with
+  the catalog and a configuration change clears; a model that answers in text
+  leaves it out, and a transport failure (authentication, timeout) is reported
+  rather than recorded as "unsupported". Admission, the AgentRun transport
+  check, and the Chat preflight read that set per model, so verifying one model
+  never offers tools to its siblings; the only tool an unverified model is
+  admitted with is that echo. A tool call in a real turn widens nothing either:
+  the provider-level `appManagedTools` flag of an OpenAI-compatible,
+  Anthropic-compatible, or Foundry profile stays "unsupported", because a tool
+  call proves only the model that made it. The command accepts only the models
+  the endpoint lists or the profile configures, and only a Foundry profile's
+  configured deployments, because its catalogue lists base models that are not
   deployments. Ollama has no verify action until its driver runs the tool
   loop. The model picker marks an unverified model "Chat only" with a "Verify
-  tools" action, and Settings → Octant Harness says the same for a slot's
-  chosen model.
+  tools" action (in Chat, on the selected model), and Settings → Octant
+  Harness says the same for a slot's chosen model.
 - **Goals.** A thread goal may carry up to twelve acceptance criteria
   (`ThreadGoalCriterion`), each with an optional check command; one without a
   command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
@@ -2009,8 +2046,8 @@ native harness in `apps/server/src/harness`:
   Each retry is a `retrying` runtime event emitted before its wait. The thread's
   working indicator, the terminal footer, and the phone session panel show
   "Provider busy, retrying 2/5 in 4 s" and count the wait down, in ordinary
-  text rather than a warning, until the next content arrives or the turn
-  settles; a failed or cancelled attempt keeps no retry line. The turn's
+  text rather than a warning, until the next text, reasoning, or tool call
+  arrives or the turn settles; a failed or cancelled attempt keeps no retry line. The turn's
   detail counts those same events. What a
   failed attempt billed is added to the usage of the attempts after it. A
   cancel ends a wait at once and stays `interrupted`. The stream idle limit is
@@ -2235,8 +2272,11 @@ frame rebuilt on restart. A folder must be inside the person's home unless the
 standing access-outside-project approval exists, the same rule the artifact
 mirror's global folder follows. Writes are confined to the chosen folder and are
 atomic: a temporary file is renamed into place, so a reader never sees a
-half-written export. The user guide's exporting page
-(`apps/docs/guide/export.md`) states the same rules for a person.
+half-written export. The folder is stored by its real path, and a write whose
+folder no longer resolves to that path — because it or a folder above it was
+replaced by a link after it was chosen — is refused rather than followed. The
+user guide's exporting page (`apps/docs/guide/export.md`) states the same rules
+for a person.
 
 The GitHub Gist destination ships in-tree on the same port. It reuses the GitHub
 connection Octant already resolved through the `gh` command — the host-managed
@@ -2489,14 +2529,20 @@ mechanisms are:
   The host runs that command on a host-owned pseudo-terminal outside any
   sandbox, reads the printed token from memory, and keeps it in the credential
   broker under the Claude Code instance, wrapped so it never reads as that
-  instance's API key. A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
+  instance's API key. Removing the provider stops a connect still waiting for
+  that approval, and a token that arrives after the instance was removed or
+  switched to an API key is discarded, never kept.
+  A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
   and no keychain lookup; unconfined launches keep the runtime's own sign-in.
   Without a connected token the launch refuses with "Connect Claude for helpers
   in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
   runtime never refreshes a handed-in token, so one it refuses is marked
   expired and the same reconnect step is reported. Only a local window may
-  connect or disconnect. A bound root a launch may not write is denied in
-  the profile, so a checkout under that launch's own temporary directory is not
+  connect or disconnect. Disconnecting deletes the token from the broker and
+  reports a broker it cannot reach. Removing the Claude Code provider clears
+  it best-effort: the removal completes even when the broker is unreachable and
+  the token can remain. Octant has no call that revokes it with Anthropic. A
+  bound root a launch may not write is denied in the profile, so a checkout under that launch's own temporary directory is not
   writable through it. The `--version` read every family and the discovery
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per

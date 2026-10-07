@@ -133,9 +133,13 @@ for helpers**. Octant runs Claude's own `claude setup-token` on this Mac, you
 approve once in the browser window it opens, and Octant keeps the long-lived
 token it prints in its own credential store for that Claude Code provider. You
 never copy the token. Ordinary Claude turns keep using your normal sign-in.
-**Disconnect**, or removing the provider, removes the token. If Claude later
-refuses it, Settings shows it as expired and asks you to connect again. Connect
-only from the Mac that runs Octant, because the approval opens a browser there.
+**Disconnect** removes the token from Octant, and removing the provider tries
+to; disconnect first, because removal completes even if the credential store
+cannot be reached. Neither revokes it with Anthropic. If Claude later refuses it, Settings shows it as
+expired and asks you to connect again. Connect only from the Mac that runs
+Octant, because the approval opens a browser there. The
+[privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it)
+states what is stored and who receives it.
 
 The **Update CLI** action is shown only for providers with a verified native
 update command. It runs that command against the same configured executable,

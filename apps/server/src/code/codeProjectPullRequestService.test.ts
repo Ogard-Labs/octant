@@ -55,6 +55,7 @@ function ghRow(overrides: Partial<GhActivePullRequestRow> = {}): GhActivePullReq
     review: "approved",
     reviewRequestedFrom: [],
     failingChecks: [],
+    crossRepository: false,
     ...overrides,
   };
 }
@@ -1304,6 +1305,21 @@ describe("CodeProjectPullRequestService", () => {
 
     expect(view.rows[0]?.reviewRequestedFrom).toEqual(["reviewer"]);
     expect(listActive.mock.calls.length).toBe(callsAfterRefresh);
+  });
+
+  it("says which pull request comes from a fork and leaves a same-repository row as it was", async () => {
+    const { service } = serviceFixture({
+      list: async () => ({
+        status: "ok",
+        rows: [ghRow({ crossRepository: true }), ghRow({ number: 13 })],
+      }),
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const view = await service.query(windowId, { version: 1 });
+
+    expect(view.rows.find((row) => row.number === 12)?.crossRepository).toBe(true);
+    expect(view.rows.find((row) => row.number === 13)).not.toHaveProperty("crossRepository");
   });
 
   it("keeps failing checks from the same list read and does not ask again for them", async () => {

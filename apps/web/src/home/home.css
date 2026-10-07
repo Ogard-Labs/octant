@@ -74,6 +74,11 @@
   padding-inline: var(--oct-space-1);
 }
 
+.home-card__empty-action.home-card__empty-action {
+  justify-self: start;
+  margin-inline: var(--oct-space-1);
+}
+
 /* ── Customize ─────────────────────────────────────────────────────────── */
 
 .home-customize.home-customize {
@@ -327,6 +332,10 @@
 
 .pull-requests-card__more.pull-requests-card__more {
   justify-self: start;
+  margin: var(--oct-space-1) var(--oct-space-1) 0;
+}
+
+.pull-requests-card__checked {
   margin: var(--oct-space-1) var(--oct-space-1) 0;
 }
 
