@@ -135,6 +135,60 @@ describe("Code Project pull-request contracts", () => {
     });
   });
 
+  it("keeps who was asked to review when the list recorded it, and still reads a row that did not", () => {
+    const withRequest = {
+      ...connectedView,
+      rows: [{ ...connectedView.rows[0], reviewRequestedFrom: ["reviewer"] }],
+    };
+    expect(decodeCodeProjectPullRequestView(withRequest).rows[0]?.reviewRequestedFrom).toEqual([
+      "reviewer",
+    ]);
+    expect(decodeCodeProjectPullRequestView(connectedView).rows[0]?.reviewRequestedFrom).toBe(
+      undefined,
+    );
+    expect(() =>
+      decodeCodeProjectPullRequestView({
+        ...connectedView,
+        rows: [{ ...connectedView.rows[0], reviewRequestedFrom: ["ada", "Ada"] }],
+      }),
+    ).toThrow();
+  });
+
+  it("keeps failing checks the list recorded, and still reads a row that did not", () => {
+    const withFailure = {
+      ...connectedView,
+      rows: [
+        {
+          ...connectedView.rows[0],
+          failingChecks: [
+            {
+              name: "web tests",
+              completedAt: "2026-08-22T07:40:00.000Z",
+            },
+          ],
+        },
+      ],
+    };
+    expect(decodeCodeProjectPullRequestView(withFailure).rows[0]?.failingChecks).toEqual([
+      {
+        name: "web tests",
+        completedAt: "2026-08-22T07:40:00.000Z",
+      },
+    ]);
+    expect(decodeCodeProjectPullRequestView(connectedView).rows[0]?.failingChecks).toBe(undefined);
+    expect(() =>
+      decodeCodeProjectPullRequestView({
+        ...connectedView,
+        rows: [
+          {
+            ...connectedView.rows[0],
+            failingChecks: Array.from({ length: 9 }, () => ({ name: "web tests" })),
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("labels each Project's background refresh state and refuses duplicate entries", () => {
     expect(
       decodeCodeProjectPullRequestView({

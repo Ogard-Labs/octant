@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   decodeCanvasExportApprovalCard,
   decodeCanvasExportContribution,
+  decodeCanvasExportDecideRequest,
   decodeCanvasExportReceipt,
   decodeCanvasExportRecorded,
 } from "./canvasExport";
@@ -126,5 +127,90 @@ describe("canvas export contracts", () => {
         href: "https://user:secret@example.test/copy",
       }),
     ).toThrow();
+  });
+
+  it("carries a remote id alongside a link so a gist's URL and id are one receipt", () => {
+    const receipt = decodeCanvasExportReceipt({
+      kind: "link",
+      href: "https://gist.github.com/octocat/aa11bb22cc33dd44",
+      remoteId: "aa11bb22cc33dd44",
+    });
+
+    expect(receipt).toEqual({
+      kind: "link",
+      href: "https://gist.github.com/octocat/aa11bb22cc33dd44",
+      remoteId: "aa11bb22cc33dd44",
+    });
+  });
+
+  it("names the account and the audience on an approval card for a remote destination", () => {
+    const card = {
+      schemaVersion: 1,
+      kind: "canvas-export-approval",
+      approvalId,
+      canvasId,
+      versionId,
+      sequence: 1,
+      targetId: "github-gist",
+      destinationLabel: "GitHub Gist",
+      format: "markdown",
+      title: "Launch plan",
+      destinationAccount: "octocat",
+      destinationVisibility: "secret",
+      destinationNote: "A public gist is visible to anyone on the internet.",
+      payload: "# Launch plan",
+      payloadDigest: digest,
+      byteLength: 14,
+      expiresAt: "2026-08-01T21:10:00.000Z",
+    } as const;
+
+    const decoded = decodeCanvasExportApprovalCard(card);
+
+    expect(decoded.destinationAccount).toBe("octocat");
+    expect(decoded.destinationVisibility).toBe("secret");
+    expect(decoded.destinationNote).toContain("visible to anyone");
+  });
+
+  it("refuses a card note that carries a secret", () => {
+    const card = {
+      schemaVersion: 1,
+      kind: "canvas-export-approval",
+      approvalId,
+      canvasId,
+      versionId,
+      sequence: 1,
+      targetId: "github-gist",
+      destinationLabel: "GitHub Gist",
+      format: "markdown",
+      title: "Launch plan",
+      destinationNote: "token ghp_abcdefghijklmnopqrstuvwxyz012345",
+      payload: "# Launch plan",
+      payloadDigest: digest,
+      byteLength: 14,
+      expiresAt: "2026-08-01T21:10:00.000Z",
+    } as const;
+
+    expect(() => decodeCanvasExportApprovalCard(card)).toThrow();
+  });
+
+  it("carries the audience the person chose on a decide request, and omits it when unset", () => {
+    const chosen = decodeCanvasExportDecideRequest({
+      schemaVersion: 1,
+      kind: "canvas-export-decision",
+      canvasId,
+      approvalId,
+      decision: "approved",
+      visibility: "public",
+    });
+    expect(chosen.visibility).toBe("public");
+
+    const plain = decodeCanvasExportDecideRequest({
+      schemaVersion: 1,
+      kind: "canvas-export-decision",
+      canvasId,
+      approvalId,
+      decision: "approved",
+    });
+    expect(plain.visibility).toBeUndefined();
   });
 });

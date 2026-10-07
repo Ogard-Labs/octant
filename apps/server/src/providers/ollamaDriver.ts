@@ -31,6 +31,7 @@ import {
 } from "./ollamaEndpoint";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import { MemoryOllamaHistoryStore, type OllamaHistoryStore } from "./ollamaHistoryStore";
+import { outputStopReason } from "./outputStopReason";
 
 export interface OllamaDriverOptions {
   readonly instanceId: ProviderInstanceId;
@@ -381,12 +382,7 @@ function makeConnection(
             })
               .then(async (result) => {
                 if (state.terminal) return;
-                if (result.doneReason === "length") {
-                  return finishFailure(
-                    state,
-                    failure("provider-failed", "Ollama returned an incomplete response."),
-                  );
-                }
+                const stop = outputStopReason(result.doneReason);
                 recordTurnCapabilities(result);
                 if (result.toolRequests.length > 0) {
                   return finishFailure(
@@ -414,6 +410,7 @@ function makeConnection(
                 emit(state, {
                   kind: "completed",
                   resumeCursor: { driverKind: "ollama", value: state.sessionId },
+                  ...(stop === undefined ? {} : { stopReason: stop }),
                 });
               })
               .catch((error) => finishFailure(state, sanitizeFailure(error)))

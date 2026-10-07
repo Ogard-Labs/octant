@@ -231,7 +231,7 @@ describe("sendChatCompletionsTurn tool calls (streaming)", () => {
     ]);
   });
 
-  it("fails closed when the streamed tool call arguments are not valid JSON", async () => {
+  it("surfaces streamed tool call arguments that are not valid JSON so the model can correct them", async () => {
     const fetch = vi.fn(async () =>
       stream(
         chunk(toolCallDelta(0, "call_abc", "octant_capability_echo", null)),
@@ -241,10 +241,16 @@ describe("sendChatCompletionsTurn tool calls (streaming)", () => {
       ),
     );
 
-    const failure = await failureOf(
+    const result = await Effect.runPromise(
       sendChatCompletionsTurn({ ...input(fetch), tools: [echoTool] }),
     );
-    expect(failure.category).toBe("protocol");
+    expect(result.toolCalls).toEqual<ProtocolToolCall[]>([
+      {
+        toolCallId: "call_abc",
+        toolName: "octant_capability_echo",
+        argumentsJson: "{not json}",
+      },
+    ]);
   });
 
   it("fails closed when the tool call id is missing", async () => {
@@ -383,7 +389,7 @@ describe("sendChatCompletionsTurn tool calls (non-streaming)", () => {
     expect(toolCallEvent).toBeDefined();
   });
 
-  it("fails closed when non-streaming tool call arguments are not valid JSON", async () => {
+  it("surfaces non-streaming tool call arguments that are not valid JSON so the model can correct them", async () => {
     const fetch = vi
       .fn()
       .mockResolvedValueOnce(streamUnsupportedResponse())
@@ -405,10 +411,16 @@ describe("sendChatCompletionsTurn tool calls (non-streaming)", () => {
         ),
       );
 
-    const failure = await failureOf(
+    const result = await Effect.runPromise(
       sendChatCompletionsTurn({ ...input(fetch), tools: [echoTool] }),
     );
-    expect(failure.category).toBe("protocol");
+    expect(result.toolCalls).toEqual<ProtocolToolCall[]>([
+      {
+        toolCallId: "call_abc",
+        toolName: "octant_capability_echo",
+        argumentsJson: "{not json}",
+      },
+    ]);
   });
 
   it("fails closed when a non-streaming tool call id is missing", async () => {

@@ -101,6 +101,51 @@ function anchorChoices(definition: CanvasDefinition): ReadonlyArray<AnchorChoice
         });
       }
     }
+    if (block.kind === "er") {
+      for (const entity of block.entities) {
+        choices.push({
+          id: `node:${String(block.blockId)}:${String(entity.entityId)}`,
+          label: `Entity · ${entity.label}`,
+          anchor: { kind: "node", blockId: block.blockId, nodeId: entity.entityId },
+        });
+      }
+      for (const relationship of block.relationships) {
+        choices.push({
+          id: `edge:${String(block.blockId)}:${String(relationship.relationshipId)}`,
+          label: `Relationship · ${relationship.sourceCardinality} to ${relationship.targetCardinality}`,
+          anchor: {
+            kind: "edge",
+            blockId: block.blockId,
+            edgeId: relationship.relationshipId,
+          },
+        });
+      }
+    }
+    if (block.kind === "swimlane") {
+      for (const step of block.steps) {
+        choices.push({
+          id: `node:${String(block.blockId)}:${String(step.stepId)}`,
+          label: `Step · ${step.label}`,
+          anchor: { kind: "node", blockId: block.blockId, nodeId: step.stepId },
+        });
+      }
+      for (const connection of block.connections) {
+        choices.push({
+          id: `edge:${String(block.blockId)}:${String(connection.connectionId)}`,
+          label: `Connection · ${connection.label ?? "step"}`,
+          anchor: { kind: "edge", blockId: block.blockId, edgeId: connection.connectionId },
+        });
+      }
+    }
+    if (block.kind === "mindmap") {
+      for (const node of block.nodes) {
+        choices.push({
+          id: `node:${String(block.blockId)}:${String(node.nodeId)}`,
+          label: `Topic · ${node.label}`,
+          anchor: { kind: "node", blockId: block.blockId, nodeId: node.nodeId },
+        });
+      }
+    }
   }
   return choices;
 }

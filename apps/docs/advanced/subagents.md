@@ -36,6 +36,18 @@ from recorded lifecycle blockers, provider-reported file changes, and tools the
 host actually executed. File reports are unverified; a tool return is not proof
 that tests passed. Missing and truncated evidence is shown explicitly. A completed
 child does not establish review, merge, deployment, or completion of its parent.
+A child that fails, is interrupted, or is cancelled tells its parent why, for
+example that its provider is signed out. The reason is short, and Octant
+removes private paths and secrets from it before the parent's agent sees it.
+
+A Chat subagent runs read-only, and a read-only Claude Code run cannot reach
+your keychain, where your Claude subscription sign-in is kept. Before Claude
+Code subagents can sign in, choose **Connect Claude for helpers** under
+**Settings → Providers → Claude Code** and approve once in the browser. Until
+you do, a Claude Code subagent stops and its parent is told to "Connect Claude
+for helpers in Settings › Claude Code." See [Providers](/advanced/providers).
+Claude Code with an Anthropic API key, and the other providers, need no extra
+step.
 
 For writable Code children, **Review changes** opens the host's saved comparison
 for that generation in **Review**. It includes committed changes and non-ignored
@@ -62,8 +74,13 @@ default) or off. **Settings → Octant Harness → Model slots** configures shar
 role routing for both Octant and provider harnesses; Projects can override it.
 
 A thread's subagents appear in a compact card above its composer in Chat,
-Work, and Code. It starts collapsed and remembers your choice. Its counts keep
-failed, waiting and unreviewed children visible. Expand it to preview up to
+Work, and Code, the same width as the message box. It starts collapsed and
+remembers your choice. Its head names each state the children are in, such as
+**1 working · 1 failed · 2 done**, and puts failed, waiting and unreviewed children
+first. A result counts as **to review** only while you could still act on it: once
+the host has handed a finished result to the thread's agent, the card counts it as
+done. When a Chat thread cannot reach the host the card dims and **Stop** is
+unavailable; the thread's connection notice says why. Expand it to preview up to
 three active or unresolved children with their task, status, model and last
 reported activity. **View all** opens the full **Agents** list, including finished
 children. A row opens that child's detail. **Stop** acts on one managed child;
@@ -71,12 +88,19 @@ children. A row opens that child's detail. **Stop** acts on one managed child;
 Observation-only rows have no execution controls. **Environment → Subagents**
 also lists managed children and marks results you have not reviewed **To review**.
 
+A finished subagent's result appears in the thread as a card of its own, not as
+a message from you: it names the subagent's role, its provider and model, the task
+it was given and its reply. A long reply starts folded. The run ID, generation and
+provider ID sit behind **Details**. A subagent that stopped without finishing says
+so and gives the reason the host recorded.
+
 When the agent reports a task list, its separate collapsed header shows completed
 steps and failed or waiting counts. Expand it to read the steps. Task progress
 does not indicate that subagents or the parent delivery are complete.
 
 The **Agents** dock tool lists the thread's subagents under **Working** and
-**Finished** and marks results you have not reviewed with **Needs review**. On
+**Finished** and marks results you have not reviewed, and that the thread's agent
+has not already received, with **Needs review**. On
 a thread with none it says they appear when the agent hands off part of its
 work, or that subagents are turned off in Settings. Choosing a row opens its page: the task as the brief,
 then its replies, live while it runs, with a bounded saved conversation after

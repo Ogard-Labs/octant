@@ -23,7 +23,7 @@ const defaultProps = {
   projectId: "00000000-0000-0000-0000-000000000001" as ProjectId,
   projectName: "My Repo",
   projectRoot: "/home/user/repo",
-  branchName: "development",
+  baseBranch: "development",
   defaultExecutionPolicy: "approval-gated" as const,
   defaultPermissionPersistence: "current-session" as const,
   providerGroups: [],
@@ -815,6 +815,46 @@ describe("CodeComposerAdapter interactions", () => {
     expect(trigger?.textContent).not.toContain("development");
     root.unmount();
     container.remove();
+  });
+
+  it("starts a draft opened for a failing branch from that branch even when the checkout is on another", async () => {
+    const projectId = "00000000-0000-0000-0000-000000000009";
+    const onCreateThread = vi.fn();
+    const execute = vi.fn(async (command: { kind: string; projectId?: string }) => {
+      if (command.kind !== "list-code-worktree-refs") return undefined;
+      return {
+        kind: "worktree-refs-listed",
+        projectId: command.projectId,
+        refs: [
+          { name: "main", kind: "local", isCurrent: true },
+          { name: "fix/parser", kind: "local" },
+        ],
+      };
+    });
+    const user = userEvent.setup();
+    const { baseBranch: _seed, ...unseeded } = defaultProps;
+    render(
+      <CodeComposerAdapter
+        {...unseeded}
+        branchName="fix/parser"
+        execute={execute as never}
+        onCreateThread={onCreateThread}
+        projectId={projectId as never}
+      />,
+    );
+    await waitFor(() => expect(execute).toHaveBeenCalled());
+
+    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/parser");
+    await user.type(screen.getByLabelText("First message"), "Fix the failing parser check");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() =>
+      expect(onCreateThread).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspace: "managed-worktree",
+          deliveryTarget: expect.objectContaining({ proposedBaseBranch: "fix/parser" }),
+        }),
+      ),
+    );
   });
 
   it("clears stale worktree refs when the selected project changes", async () => {

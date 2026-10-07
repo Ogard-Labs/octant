@@ -1243,11 +1243,12 @@ export const ProviderObservedState = Schema.Struct({
   credentialStatus: Schema.optional(ProviderCredentialStatus),
   models: Schema.Array(ProviderModel),
   capabilities: ProviderCapabilities,
-  // Foundry-specific: deployment IDs that have been explicitly verified for
-  // tool support via the separate verify-foundry-tools path. The sender gates
-  // tool requests per-model against this set, not against the provider-level
-  // appManagedTools flag, so one verified deployment does not unlock tools
-  // for other deployments in the same profile.
+  // Models a person explicitly verified for tool support through the
+  // verify-model-tools command, on any endpoint profile (OpenAI-compatible,
+  // Anthropic-compatible, Azure AI Foundry). The sender gates tool requests
+  // per model against this set as well as the provider-level appManagedTools
+  // flag, so one verified model does not unlock tools for the other models
+  // of the same profile.
   verifiedToolModelIds: Schema.optional(Schema.Array(ProviderModelId)),
   message: Schema.optional(Schema.NonEmptyTrimmedString),
   reason: Schema.optional(ProviderRefusalReason),
@@ -1603,7 +1604,7 @@ export const ProviderRegistryCommand = Schema.Union(
     instanceId: ProviderInstanceId,
   }).annotations(strict),
   Schema.Struct({
-    kind: Schema.Literal("verify-foundry-tools"),
+    kind: Schema.Literal("verify-model-tools"),
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,
   }).annotations(strict),
@@ -1658,7 +1659,7 @@ export const ProviderRegistryCommandResult = Schema.Union(
     diagnostic: Schema.optional(ProviderProcessDiagnostic),
   }).annotations(strict),
   Schema.Struct({
-    kind: Schema.Literal("foundry-tools-verified"),
+    kind: Schema.Literal("model-tools-verified"),
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,
     appManagedTools: Schema.Literal("supported", "unsupported"),
@@ -1735,6 +1736,14 @@ export const ProviderFailure = Schema.Struct({
   usageLimit: Schema.optional(ProviderUsageLimit),
 }).annotations(strict);
 export type ProviderFailure = typeof ProviderFailure.Type;
+
+/**
+ * Why a completed reply stopped, when the runtime said so. Absent means the
+ * runtime did not say — a normal finish is not guessed into one of these.
+ * `max-tokens` is the output limit; `content-filter` is a filter stop.
+ */
+export const ProviderOutputStopReason = Schema.Literal("max-tokens", "content-filter");
+export type ProviderOutputStopReason = typeof ProviderOutputStopReason.Type;
 
 /**
  * What fills a provider-run window, by kind. A kind is the provider's own
@@ -2106,6 +2115,8 @@ export const ProviderRuntimeEvent = Schema.Union(
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("completed"),
     resumeCursor: Schema.optional(ProviderResumeCursor),
+    /** Present only when the runtime said why this reply stopped. */
+    stopReason: Schema.optional(ProviderOutputStopReason),
   }).annotations(strict),
 );
 export type ProviderRuntimeEvent = typeof ProviderRuntimeEvent.Type;

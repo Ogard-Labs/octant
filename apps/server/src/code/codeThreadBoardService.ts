@@ -83,9 +83,14 @@ export interface CodeBoardRuntimeSource {
  * different — restart reconciliation marks every non-provider work interrupted
  * because its process is gone, so only the latest provider turn can hold the
  * thread in Waiting from that state.
+ *
+ * `turnParkedOnPerson` says the latest running turn holds an approval or a
+ * question the person has not answered; it files the thread Waiting instead of
+ * In progress until the answer is taken.
  */
 export function boardRuntimeActivityFromWorks(
   works: ReadonlyArray<ProjectedCodeRuntimeWork>,
+  live: { readonly turnParkedOnPerson?: boolean } = {},
 ): CodeBoardRuntimeActivity {
   // The latest turn is the one that started last, read from the durable
   // chronology the projection assigns each record. `updatedAt` cannot answer
@@ -102,8 +107,21 @@ export function boardRuntimeActivityFromWorks(
   const contributing = works.filter(
     (entry) => entry.work.kind !== "provider-turn" || entry === latestTurn,
   );
-  const executing = contributing.some((entry) => entry.work.state === "running");
-  const asking = contributing.some((entry) => entry.work.state === "waiting");
+  // A turn waiting on an approval or a question keeps its `running` record:
+  // the provider session is still open, so the work journal cannot tell it
+  // from a turn that is thinking. The running turn's open requests can, and a
+  // parked turn is owed by the person, not executing. They are the same
+  // requests the board's pending-request read lists, so the read that sees an
+  // answer land also sees the thread leave Waiting; the live step would stay
+  // "waiting" until the provider's next event, which the board never re-reads on.
+  const parked =
+    live.turnParkedOnPerson === true &&
+    latestTurn !== undefined &&
+    latestTurn.work.state === "running";
+  const executing = contributing.some(
+    (entry) => entry.work.state === "running" && !(parked && entry === latestTurn),
+  );
+  const asking = parked || contributing.some((entry) => entry.work.state === "waiting");
   const unconfirmed = contributing.some((entry) => entry.work.state === "ambiguous");
   const awaitingInput = asking || unconfirmed;
   const interrupted = latestTurn !== undefined && latestTurn.work.state === "interrupted";

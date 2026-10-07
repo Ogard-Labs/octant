@@ -11,6 +11,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { AgentRunControlAdmissionDependencies } from "./agentRunControlAdmission";
 import {
   agentRunDelegationCapabilities,
+  agentRunStopReason,
   followUpAgentRunDelegation,
   boundedAgentRunChildren,
   collectAgentRunResult,
@@ -315,11 +316,13 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
           boundedAgentRunChildren(
             children.map((entry) => {
               const run = options.persistence.getById(entry.runId);
+              const reason = run === undefined ? undefined : agentRunStopReason(run);
               return {
                 runId: String(entry.runId),
                 role: entry.role,
                 task: entry.task,
                 lifecycleStatus: entry.lifecycleStatus,
+                ...(reason === undefined ? {} : { reason }),
                 resultAvailable: entry.result !== undefined,
                 ...(run === undefined
                   ? {}
@@ -383,11 +386,13 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
                 ? failure(collected.reason, collected.message)
                 : answer(collected);
             }
+            const reason = agentRunStopReason(run);
             return answer({
               status: run.lifecycleStatus,
               runId: String(run.id),
               version: run.version,
               generation: run.generation ?? 1,
+              ...(reason === undefined ? {} : { reason }),
             });
           }
           // A run parked on a disclosed provider limit cannot progress before

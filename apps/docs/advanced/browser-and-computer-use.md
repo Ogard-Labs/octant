@@ -157,16 +157,31 @@ see [Apple Development Workbench](/advanced/apple-workbench).
 
 ## Picture in Picture
 
-Active Work and Code threads show a compact activity preview over the main
-conversation. The Code Environment panel has a **Picture in Picture** control
-for showing or hiding that preview. Hiding it changes presentation only; it
-does not stop the browser or computer-use session.
+When an agent has a Browser open for a Work or Code thread and you cannot see
+that Browser, Octant floats a small live picture of its active page over the
+conversation. It is a preview, not a second Browser: it takes no authority over
+the page.
 
-When agent-owned Browser activity appears, Octant opens the same thread-owned
-Browser tab and keeps the compact preview over the conversation. Point at the
-preview or focus it with the keyboard to reveal its controls. Stop remains
-available, and computer-use approvals stay visible when they need a decision.
-The preview does not live inside Environment and does not open a separate OS
+- It appears only while the thread's Browser is out of sight, and it goes away
+  the moment the Browser opens, whether as a pane, a dock tab, or in the bottom
+  panel. Closing the Browser brings it back.
+- Click the preview to open the Browser. Point at it or focus it with the
+  keyboard to see the page's title or host and a close control. Closing the
+  preview hides it for that session only; the next session shows it again.
+- Before the first picture arrives it shows a blank placeholder. When the
+  session has more than one page open, it shows the active one with a count.
+- Drag it to any corner and it stays there. With the keyboard, focus the
+  preview and press an arrow key to send it to that side. Its bottom corners
+  rest above the composer, never over it.
+- Octant captures the page only while the preview is on screen, pauses while
+  the window is hidden, and looks less often while the page does not change.
+
+When agent-owned Browser activity first appears, Octant opens the same
+thread-owned Browser tab once; a preview then covers it after you close it.
+Computer use keeps its own compact card: the Code Environment panel has a
+**Picture in Picture** control for showing or hiding that card, hiding it
+changes presentation only, and approvals stay visible when they need a
+decision. Neither preview lives inside Environment or opens a separate OS
 window.
 
 ## Boundaries
