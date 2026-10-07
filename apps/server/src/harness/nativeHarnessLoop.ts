@@ -1021,7 +1021,10 @@ export function sortToolDefinitionsByName(
  * `reduceOnce` forces at least one step of the ladder even when the endpoint's
  * own size estimate says the request fits. It is used after the endpoint has
  * refused a request as too large: the estimate was wrong, so the request must
- * actually shrink before it is sent again.
+ * actually shrink before it is sent again. A step that would leave the request
+ * as it was (a result already omitted, a note already in front) is skipped,
+ * since the refused request may itself have been reduced already; resending
+ * the same bytes would only be refused again.
  */
 export function fitRequest(
   endpoint: Pick<NativeHarnessTransportSession, "fits">,
@@ -1035,6 +1038,7 @@ export function fitRequest(
   for (let index = 0; index < history.length - 1; index += 1) {
     const message = history[index];
     if (message?.toolResults === undefined) continue;
+    if (message.toolResults.every((result) => result.resultJson === OMITTED_RESULT_JSON)) continue;
     history[index] = {
       ...message,
       toolResults: message.toolResults.map((result) => ({
@@ -1053,11 +1057,13 @@ export function fitRequest(
     while (next < history.length - 1 && !isPlainUserMessage(history[next])) next += 1;
     if (next >= history.length - 1 && !isPlainUserMessage(history[next])) return undefined;
     start = next;
+    // Cutting only an earlier note and putting the same note back changes nothing.
+    const unchanged = start === 1 && history[0]?.text === OMITTED_HISTORY_NOTE;
     const candidate = [
       { role: "user" as const, text: OMITTED_HISTORY_NOTE },
       ...history.slice(start),
     ];
-    if (fits(candidate)) return { ...request, history: candidate };
+    if (!unchanged && fits(candidate)) return { ...request, history: candidate };
     if (start >= history.length - 1) return undefined;
   }
 }

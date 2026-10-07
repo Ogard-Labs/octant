@@ -734,6 +734,31 @@ describe("fitting a request to the endpoint", () => {
     expect(fitRequest(fitsUnder(10), base)).toBeUndefined();
   });
 
+  it("cuts further when forced on a request that already left earlier messages out", () => {
+    const acceptsAll = { fits: () => true };
+    const reduced = fitRequest(fitsUnder(260), base);
+    expect(reduced).toBeDefined();
+    if (reduced === undefined) return;
+    const withMore: NativeHarnessRequest = {
+      ...reduced,
+      history: [
+        ...reduced.history,
+        { role: "assistant", text: "another answer" },
+        { role: "user", text: "newest question" },
+      ],
+    };
+
+    const forced = fitRequest(acceptsAll, withMore, { reduceOnce: true });
+
+    expect(forced?.history).not.toEqual(withMore.history);
+    expect(forced?.history.at(-1)).toEqual({ role: "user", text: "newest question" });
+    expect(forced?.history.some((message) => message.text === "new question")).toBe(false);
+    expect(
+      fitRequest(acceptsAll, forced ?? withMore, { reduceOnce: true }),
+      "nothing is left to leave out",
+    ).toBeUndefined();
+  });
+
   describe("usage across the requests of one turn", () => {
     /** Runs a turn of two requests, the first calling a tool, and returns every event it produced. */
     const twoRequestTurn = (
@@ -939,15 +964,20 @@ describe("fitting a request to the endpoint", () => {
 });
 
 /** An endpoint whose `fits` always passes, so only the endpoint itself can refuse a size. */
-function endpointThatAcceptsEverySize(
+/**
+ * An endpoint whose own size estimate is `fits`, recording every request it
+ * is sent. The estimate accepting a request does not stop `send` refusing it.
+ */
+function endpointWithSizeEstimate(
   send: (request: NativeHarnessRequest) => Promise<NativeHarnessResponse>,
+  fits: (request: NativeHarnessRequest) => boolean = () => true,
 ): { readonly transport: NativeHarnessTransport; readonly requests: NativeHarnessRequest[] } {
   const requests: NativeHarnessRequest[] = [];
   return {
     requests,
     transport: {
       open: async () => ({
-        fits: () => true,
+        fits,
         send: async (request) => {
           requests.push(request);
           return await send(request);
@@ -969,39 +999,26 @@ async function whenRequested(
 }
 
 describe("recovering from a request the endpoint refuses as too large", () => {
-  it("forces one more reduction and completes after a single overflow retry", async () => {
-    const overflow: ProviderFailure = {
-      category: "provider-failed",
-      message:
-        "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (context_length_exceeded).",
-    };
-    const calls: string[] = [];
-    const scripted = endpointThatAcceptsEverySize(async () => {
-      calls.push("call");
-      if (calls.length === 1) {
-        return {
-          text: "",
-          toolCalls: [{ toolCallId: "a", toolName: "read", argumentsJson: "{}" }],
-        };
-      }
-      if (calls.length === 2) {
-        return {
-          text: "",
-          toolCalls: [{ toolCallId: "b", toolName: "grep", argumentsJson: "{}" }],
-        };
-      }
-      if (calls.length === 3) throw overflow;
-      return { text: "recovered", toolCalls: [] };
-    });
+  const overflow: ProviderFailure = {
+    category: "provider-failed",
+    message:
+      "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (context_length_exceeded).",
+  };
+  const callTool = (toolCallId: string, toolName: string): NativeHarnessResponse => ({
+    text: "",
+    toolCalls: [{ toolCallId, toolName, argumentsJson: "{}" }],
+  });
 
+  /** Runs one turn, answering each tool request in order, and returns every event. */
+  const runTurn = async (
+    transport: NativeHarnessTransport,
+    answers: ReadonlyArray<readonly [requestId: string, resultJson: string]>,
+  ): Promise<ReadonlyArray<ProviderRuntimeEvent>> => {
     const events: ProviderRuntimeEvent[] = [];
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* connect(
-            scripted.transport,
-            new MemoryNativeHarnessTranscriptStore(),
-          );
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const collected = yield* Effect.fork(
             Stream.runForEach(
@@ -1010,19 +1027,31 @@ describe("recovering from a request the endpoint refuses as too large", () => {
             ),
           );
           yield* connection.send({ sessionId, prompt: "look", attachments: [], tools });
-          for (const requestId of ["a", "b"]) {
+          for (const [requestId, resultJson] of answers) {
             yield* Effect.promise(() => whenRequested(events, requestId));
-            yield* connection.answerTool({
-              sessionId,
-              requestId,
-              resultJson: "{}",
-              isError: false,
-            });
+            yield* connection.answerTool({ sessionId, requestId, resultJson, isError: false });
           }
           yield* Fiber.join(collected);
         }),
       ),
     );
+    return events;
+  };
+
+  it("forces one more reduction and completes after a single overflow retry", async () => {
+    const calls: string[] = [];
+    const scripted = endpointWithSizeEstimate(async () => {
+      calls.push("call");
+      if (calls.length === 1) return callTool("a", "read");
+      if (calls.length === 2) return callTool("b", "grep");
+      if (calls.length === 3) throw overflow;
+      return { text: "recovered", toolCalls: [] };
+    });
+
+    const events = await runTurn(scripted.transport, [
+      ["a", "{}"],
+      ["b", "{}"],
+    ]);
 
     expect(events.at(-1)?.kind).toBe("completed");
     expect(scripted.requests).toHaveLength(4);
@@ -1032,6 +1061,40 @@ describe("recovering from a request the endpoint refuses as too large", () => {
         message.toolResults?.some((result) => result.resultJson.includes('"omitted":true')),
       ),
     ).toBe(true);
+  });
+
+  it("shrinks a request it had already reduced before the endpoint refused it", async () => {
+    const first = "a".repeat(2_000);
+    const second = "b".repeat(1_000);
+    const calls: string[] = [];
+    const scripted = endpointWithSizeEstimate(
+      async (request) => {
+        calls.push("call");
+        if (calls.length === 1) return callTool("a", "read");
+        if (calls.length === 2) return callTool("b", "grep");
+        if (calls.length === 3) return callTool("c", "read");
+        // The real window is smaller than the estimate: it refuses any request
+        // that still carries the second result.
+        if (JSON.stringify(request.history).includes(second)) throw overflow;
+        return { text: "recovered", toolCalls: [] };
+      },
+      // The estimate only rejects the fourth request while it carries the first result.
+      (request) => request.history.length < 7 || !JSON.stringify(request.history).includes(first),
+    );
+
+    const events = await runTurn(scripted.transport, [
+      ["a", JSON.stringify(first)],
+      ["b", JSON.stringify(second)],
+      ["c", "{}"],
+    ]);
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(scripted.requests).toHaveLength(5);
+    const refused = scripted.requests[3];
+    const retried = scripted.requests[4];
+    expect(JSON.stringify(refused?.history)).not.toContain(first);
+    expect(retried?.history).not.toEqual(refused?.history);
+    expect(JSON.stringify(retried?.history)).not.toContain(second);
   });
 });
 
