@@ -289,7 +289,9 @@ export function ThreadBoardBody<
       {...held.pointerHandlers}
     >
       {refreshNotice}
-      {cards.length === 0 ? (
+      {/* A held placement can keep a card the host no longer lists, so the
+          board is empty only when nothing is drawn, not when the read is. */}
+      {held.columns.every((column) => column.cards.length === 0) ? (
         <SurfaceEmpty {...emptyProps} {...(empty ? {} : { detail: props.activeFilterSummary })} />
       ) : null}
       {props.isNarrow ? (

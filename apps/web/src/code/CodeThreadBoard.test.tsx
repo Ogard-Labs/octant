@@ -1011,6 +1011,35 @@ describe("CodeThreadBoard waiting cards", () => {
     expect(screen.getByRole("region", { name: "In progress (1)" })).toBeVisible();
   });
 
+  it("does not call a board empty while the pointer still holds its last card", async () => {
+    const loadBoard = vi
+      .fn()
+      .mockResolvedValueOnce(
+        view([card({ id: "01", status: "waiting", title: "Fix the flaky build" })]),
+      )
+      .mockResolvedValue(view([]));
+    render(
+      <CodeThreadBoard
+        loadBoard={loadBoard}
+        onOpenThread={vi.fn()}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+    await screen.findByRole("region", { name: "Waiting (1)" });
+    const body = document.querySelector(".code-board__body") as HTMLElement;
+    fireEvent.pointerEnter(body, { pointerType: "mouse" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh board" }));
+    await waitFor(() => expect(loadBoard).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText("Refreshing local board state.")).toBeNull());
+    expect(screen.getByRole("region", { name: "Waiting (1)" })).toBeVisible();
+    expect(screen.queryByText("No Code threads yet")).toBeNull();
+
+    fireEvent.pointerLeave(body, { pointerType: "mouse" });
+    expect(await screen.findByText("No Code threads yet")).toBeVisible();
+  });
+
   it("gives the list layout the same answer buttons", async () => {
     renderBoard(
       [card({ id: "01", status: "waiting", title: "Fix the flaky build" })],
