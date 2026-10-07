@@ -315,6 +315,7 @@ describe("WorkspaceView Code tab registration", () => {
     const base = propsFor(codeTab("code-overview", "Browser owner"));
     const onRevealBrowserActivity = vi.fn();
     const onOpenSurface = vi.fn();
+    const onOpenThreadBrowser = vi.fn();
     const browserAutomationClient = {
       inspectThread: vi.fn(async () => ({
         status: "running",
@@ -339,11 +340,12 @@ describe("WorkspaceView Code tab registration", () => {
         {...base}
         browserAutomationClient={browserAutomationClient}
         onOpenSurface={onOpenSurface}
+        onOpenThreadBrowser={onOpenThreadBrowser}
         onRevealBrowserActivity={onRevealBrowserActivity}
       />,
     );
 
-    const preview = await screen.findByRole("img", { name: "Preview page browser activity" });
+    const preview = await screen.findByRole("button", { name: "Open Browser: Preview page" });
     expect(preview).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open Browser tab" })).toBeNull();
     await waitFor(() =>
@@ -356,6 +358,12 @@ describe("WorkspaceView Code tab registration", () => {
     expect(onRevealBrowserActivity).toHaveBeenCalledOnce();
     expect(onOpenSurface).not.toHaveBeenCalled();
     fireEvent.click(preview);
+    // Opening the preview is the person's own request, not an offer the shell
+    // may remember away.
+    expect(onOpenThreadBrowser).toHaveBeenCalledWith({
+      paneId: ids.pane,
+      threadId: String(codeIds.thread),
+    });
     expect(onRevealBrowserActivity).toHaveBeenCalledOnce();
     expect(onOpenSurface).not.toHaveBeenCalled();
 
@@ -368,9 +376,45 @@ describe("WorkspaceView Code tab registration", () => {
         onRevealBrowserActivity={onRevealBrowserActivity}
       />,
     );
-    expect(await screen.findByRole("img", { name: "Preview page browser activity" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Open Browser: Preview page" })).toBeVisible();
     await waitFor(() => expect(onRevealBrowserActivity).toHaveBeenCalledTimes(2));
     expect(onOpenSurface).not.toHaveBeenCalled();
+  });
+
+  it("draws no Browser preview while the dock or bottom panel shows this thread's Browser", async () => {
+    const base = propsFor(codeTab("code-overview", "Browser owner"));
+    const inspectThread = vi.fn(async () => ({
+      status: "running",
+      threadId: codeIds.thread,
+      context: {
+        contextId: "30000000-0000-4000-8000-000000000002",
+        threadId: codeIds.thread,
+        state: "active",
+      },
+      observation: {
+        title: "Preview page",
+        url: "https://example.com",
+        screenshotDataUrl: "data:image/jpeg;base64,AQID",
+        stale: false,
+      },
+      evidence: [],
+    }));
+
+    render(
+      <WorkspaceView
+        {...base}
+        browserAutomationClient={{ inspectThread } as never}
+        browserToolThreadId={String(codeIds.thread)}
+        onRevealBrowserActivity={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(inspectThread).toHaveBeenCalled());
+    expect(inspectThread).toHaveBeenCalledWith(
+      { threadId: codeIds.thread, freshPicture: false },
+      expect.any(AbortSignal),
+    );
+    expect(screen.queryByRole("group", { name: "Browser preview" })).toBeNull();
   });
 
   it("keeps Code auxiliary probes off when conversation history is unavailable", async () => {

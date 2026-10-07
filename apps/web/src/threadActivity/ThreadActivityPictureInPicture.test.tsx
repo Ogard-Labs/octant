@@ -3,10 +3,8 @@ import type { ComputerUseClient } from "@octant/client-runtime/computer-use-clie
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import type { ComputerUseSessionView } from "@octant/contracts/computer-use";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadActivityEnvironment } from "./ThreadActivityEnvironment";
 import { within } from "@testing-library/react";
 import { ThreadActivityPictureInPicture } from "./ThreadActivityPictureInPicture";
@@ -89,20 +87,6 @@ describe("ThreadActivityPictureInPicture", () => {
     );
   });
 
-  it("keeps the Computer Use selector available in the compact Browser and Computer Use layout", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
-    const compactStart = styles.indexOf("@media (max-width: 720px)");
-    const compactEnd = styles.indexOf("@media (prefers-reduced-motion: reduce)");
-    expect(compactStart).toBeGreaterThanOrEqual(0);
-    expect(compactEnd).toBeGreaterThan(compactStart);
-    const compactStyles = styles.slice(compactStart, compactEnd);
-
-    expect(compactStyles).not.toContain(".thread-activity-pip__sources");
-    expect(compactStyles).toContain(
-      '.thread-activity-pip[data-activity-kind="browser"] .thread-activity-pip__visual',
-    );
-  });
-
   it("does not report a Computer Use exclusion while polling is pending or failed", async () => {
     const firstPoll = deferred<ReadonlyArray<ComputerUseSessionView>>();
     const session = computerSession(threadId, "running");
@@ -158,15 +142,15 @@ describe("ThreadActivityPictureInPicture", () => {
     );
   });
 
-  it("lets Environment show and hide the same live preview without stopping it", async () => {
+  it("lets Environment show and hide the Computer Use preview without stopping it", async () => {
     const user = userEvent.setup();
-    const browser = {
-      inspectThread: vi.fn(async () => browserSnapshot()),
+    const computerUse = {
+      list: vi.fn(async () => [computerSession(threadId, "running")]),
       stop: vi.fn(),
-    } as unknown as BrowserAutomationClient;
+    } as unknown as ComputerUseClient;
     render(
       <ThreadActivityPictureInPicture
-        browserClient={browser}
+        computerUseClient={computerUse}
         pollIntervalMs={60_000}
         threadId={threadId as never}
       >
@@ -176,15 +160,18 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
     const environment = screen.getByRole("region", { name: "Environment" });
-    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
     expect(
-      within(environment).queryByRole("complementary", { name: "Thread activity preview" }),
-    ).not.toBeInTheDocument();
+      await screen.findByRole("complementary", { name: "Thread activity preview" }),
+    ).toBeVisible();
     await user.click(within(environment).getByRole("button", { name: "Hide Picture in Picture" }));
-    expect(screen.queryByRole("img", { name: /browser activity/ })).not.toBeInTheDocument();
-    expect(browser.stop).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("complementary", { name: "Thread activity preview" }),
+    ).not.toBeInTheDocument();
+    expect(computerUse.stop).not.toHaveBeenCalled();
     await user.click(within(environment).getByRole("button", { name: "Show Picture in Picture" }));
-    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    expect(
+      await screen.findByRole("complementary", { name: "Thread activity preview" }),
+    ).toBeVisible();
   });
 
   it("opens the Browser surface once when Browser activity first appears", async () => {
@@ -204,7 +191,7 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
-    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
     expect(onOpenBrowser).toHaveBeenCalledWith({ sessionIds: [contextId] });
   });
@@ -226,7 +213,7 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
-    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
     await waitFor(() =>
       expect(vi.mocked(browser.inspectThread).mock.calls.length).toBeGreaterThanOrEqual(2),
@@ -252,12 +239,12 @@ describe("ThreadActivityPictureInPicture", () => {
     );
 
     const { unmount } = render(ui);
-    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
     unmount();
 
     render(ui);
-    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledTimes(2));
     expect(onOpenBrowser).toHaveBeenNthCalledWith(2, { sessionIds: [contextId] });
   });
@@ -297,7 +284,7 @@ describe("ThreadActivityPictureInPicture", () => {
       first.resolve(browserSnapshot());
       await first.promise;
     });
-    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
 
     await waitFor(() => expect(inspectThread.mock.calls.length).toBeGreaterThanOrEqual(2));
@@ -306,9 +293,7 @@ describe("ThreadActivityPictureInPicture", () => {
       await idle.promise;
     });
     await waitFor(() =>
-      expect(
-        screen.queryByRole("complementary", { name: "Thread activity preview" }),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument(),
     );
 
     await waitFor(() => expect(inspectThread.mock.calls.length).toBeGreaterThanOrEqual(3));
@@ -316,7 +301,7 @@ describe("ThreadActivityPictureInPicture", () => {
       later.resolve(nextSession);
       await later.promise;
     });
-    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledTimes(2));
     expect(onOpenBrowser).toHaveBeenNthCalledWith(1, { sessionIds: [contextId] });
     expect(onOpenBrowser).toHaveBeenNthCalledWith(2, { sessionIds: [nextContextId] });
@@ -362,54 +347,40 @@ describe("ThreadActivityPictureInPicture", () => {
     expect(onOpenSecond).toHaveBeenCalledOnce();
   });
 
-  it("shows, hides, restores, and stops the exact thread Browser preview", async () => {
+  it("hides the Browser preview for a session and keeps it hidden after the pane remounts", async () => {
     const user = userEvent.setup();
-    const running = browserSnapshot();
-    const ready = {
-      status: "ready",
-      threadId,
-      evidence: [],
-    } as unknown as BrowserAutomationSnapshot;
+    const hiddenSession = "33000000-0000-4000-8000-000000000009";
     const browser = {
-      inspectThread: vi.fn(async () => running),
-      stop: vi.fn(async () => ready),
+      inspectThread: vi.fn(async () => browserSnapshot(threadId, hiddenSession)),
     } as unknown as BrowserAutomationClient;
-
-    render(
+    const ui = (
       <ThreadActivityPictureInPicture
         browserClient={browser}
         pollIntervalMs={60_000}
         threadId={threadId as never}
       >
         <div>Conversation</div>
-      </ThreadActivityPictureInPicture>,
+      </ThreadActivityPictureInPicture>
     );
 
-    const preview = await screen.findByRole("complementary", {
-      name: "Thread activity preview",
-    });
-    expect(preview).toBeVisible();
-    expect(screen.getByRole("img", { name: "Example browser activity" })).toHaveAttribute(
-      "src",
-      "data:image/jpeg;base64,AQID",
-    );
+    const { unmount } = render(ui);
+    const preview = await screen.findByRole("group", { name: "Browser preview" });
+    expect(preview.querySelector("img")).toHaveAttribute("src", "data:image/jpeg;base64,AQID");
     expect(browser.inspectThread).toHaveBeenCalledWith({ threadId }, expect.any(AbortSignal));
 
-    await user.click(screen.getByRole("button", { name: "Hide activity preview" }));
-    expect(screen.queryByRole("img", { name: "Example browser activity" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Show Browser activity preview" }));
-    expect(screen.getByRole("img", { name: "Example browser activity" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Hide Browser preview" }));
+    expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument();
+    unmount();
 
-    await user.click(screen.getByRole("button", { name: "Stop Browser" }));
-    await waitFor(() => expect(browser.stop).toHaveBeenCalledOnce());
-    expect(browser.stop).toHaveBeenCalledWith({ contextId, threadId });
+    render(ui);
+    // Once the session is known to be one the person hid, no picture is asked for.
     await waitFor(() =>
-      expect(
-        screen.queryByRole("complementary", {
-          name: "Thread activity preview",
-        }),
-      ).not.toBeInTheDocument(),
+      expect(browser.inspectThread).toHaveBeenLastCalledWith(
+        { threadId, freshPicture: false },
+        expect.any(AbortSignal),
+      ),
     );
+    expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument();
   });
 
   it("filters Computer Use to the exact thread and keeps approval and stop visible", async () => {
@@ -546,9 +517,7 @@ describe("ThreadActivityPictureInPicture", () => {
     );
 
     await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledOnce());
-    expect(
-      screen.queryByRole("complementary", { name: "Thread activity preview" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument();
 
     rerender(
       <ThreadActivityPictureInPicture
@@ -559,8 +528,9 @@ describe("ThreadActivityPictureInPicture", () => {
         <div>Conversation</div>
       </ThreadActivityPictureInPicture>,
     );
-    expect(await screen.findByText(/Preview is stale/)).toBeVisible();
-    expect(screen.queryByRole("img", { name: /browser activity/i })).not.toBeInTheDocument();
+    const preview = await screen.findByRole("group", { name: "Browser preview" });
+    expect(preview.querySelector("img")).toBeNull();
+    expect(preview.querySelector(".skeleton")).not.toBeNull();
   });
 
   it("removes Browser pixels when a later authority poll fails", async () => {
@@ -583,54 +553,11 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
-    expect(await screen.findByRole("img", { name: "Example browser activity" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Browser preview" })).toBeVisible();
     await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledTimes(2));
     failedPoll.reject(new Error("host disconnected"));
     await waitFor(() =>
-      expect(
-        screen.queryByRole("img", { name: "Example browser activity" }),
-      ).not.toBeInTheDocument(),
-    );
-  });
-
-  it("does not restore stopped Browser activity from an older in-flight poll", async () => {
-    const user = userEvent.setup();
-    const oldPoll = deferred<BrowserAutomationSnapshot>();
-    const ready = {
-      status: "ready",
-      threadId,
-      evidence: [],
-    } as unknown as BrowserAutomationSnapshot;
-    const browser = {
-      inspectThread: vi
-        .fn()
-        .mockResolvedValueOnce(browserSnapshot())
-        .mockImplementationOnce(() => oldPoll.promise)
-        .mockResolvedValue(ready),
-      stop: vi.fn(async () => ready),
-    } as unknown as BrowserAutomationClient;
-
-    render(
-      <ThreadActivityPictureInPicture
-        browserClient={browser}
-        pollIntervalMs={10}
-        threadId={threadId as never}
-      >
-        <div>Conversation</div>
-      </ThreadActivityPictureInPicture>,
-    );
-
-    expect(await screen.findByRole("img", { name: "Example browser activity" })).toBeVisible();
-    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledTimes(2));
-    await user.click(screen.getByRole("button", { name: "Stop Browser" }));
-    await waitFor(() => expect(browser.stop).toHaveBeenCalledOnce());
-    oldPoll.resolve(browserSnapshot());
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("complementary", {
-          name: "Thread activity preview",
-        }),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument(),
     );
   });
 
@@ -652,7 +579,7 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
-    expect(await screen.findByRole("img", { name: "Example browser activity" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Browser preview" })).toBeVisible();
     rerender(
       <ThreadActivityPictureInPicture
         browserClient={browser}
@@ -663,9 +590,229 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
-    expect(
-      screen.queryByRole("complementary", { name: "Thread activity preview" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Browser preview", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    try {
+      window.localStorage.clear();
+    } catch {
+      // Storage may be unavailable.
+    }
+  });
+
+  function renderPreview(
+    browser: BrowserAutomationClient,
+    extra: Partial<React.ComponentProps<typeof ThreadActivityPictureInPicture>> = {},
+  ) {
+    return render(
+      <ThreadActivityPictureInPicture
+        browserClient={browser}
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+        {...extra}
+      >
+        <div>Conversation</div>
+      </ThreadActivityPictureInPicture>,
+    );
+  }
+
+  function liveBrowser(sessionId: string) {
+    return {
+      inspectThread: vi.fn(async () => browserSnapshot(threadId, sessionId)),
+    } as unknown as BrowserAutomationClient;
+  }
+
+  it("stays out of the way while the Browser is on screen and asks for no picture", async () => {
+    const browser = liveBrowser("34000000-0000-4000-8000-000000000001");
+    renderPreview(browser, { browserVisible: true });
+
+    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalled());
+    expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument();
+    expect(browser.inspectThread).toHaveBeenCalledWith(
+      { threadId, freshPicture: false },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("appears when the Browser is closed and a session is live, then opens the Browser on click", async () => {
+    const user = userEvent.setup();
+    const onShowBrowser = vi.fn();
+    const browser = liveBrowser("34000000-0000-4000-8000-000000000002");
+    renderPreview(browser, { onShowBrowser });
+
+    const open = await screen.findByRole("button", { name: "Open Browser: Example" });
+    await user.click(open);
+    expect(onShowBrowser).toHaveBeenCalledOnce();
+  });
+
+  it("goes away as soon as the Browser becomes visible and asks for a picture again when it closes", async () => {
+    const browser = liveBrowser("34000000-0000-4000-8000-000000000003");
+    const ui = (visible: boolean) => (
+      <ThreadActivityPictureInPicture
+        browserClient={browser}
+        browserVisible={visible}
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+      >
+        <div>Conversation</div>
+      </ThreadActivityPictureInPicture>
+    );
+    const { rerender } = render(ui(false));
+    expect(await screen.findByRole("group", { name: "Browser preview" })).toBeVisible();
+
+    rerender(ui(true));
+    expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(browser.inspectThread).toHaveBeenLastCalledWith(
+        { threadId, freshPicture: false },
+        expect.any(AbortSignal),
+      ),
+    );
+
+    rerender(ui(false));
+    expect(await screen.findByRole("group", { name: "Browser preview" })).toBeVisible();
+    await waitFor(() =>
+      expect(browser.inspectThread).toHaveBeenLastCalledWith({ threadId }, expect.any(AbortSignal)),
+    );
+  });
+
+  it("holds a neutral skeleton, with no status words, until the first picture arrives", async () => {
+    const waiting = browserSnapshot(threadId, "34000000-0000-4000-8000-000000000004");
+    const { screenshotDataUrl: _picture, ...bare } = waiting.observation!;
+    const browser = {
+      inspectThread: vi.fn(async () => ({ ...waiting, observation: bare })),
+    } as unknown as BrowserAutomationClient;
+    renderPreview(browser);
+
+    const preview = await screen.findByRole("group", { name: "Browser preview" });
+    expect(preview.querySelector(".skeleton")).not.toBeNull();
+    expect(preview.querySelector("img")).toBeNull();
+    expect(screen.queryByText(/waiting|snapshot|stale/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the active page and counts the pages the session has open", async () => {
+    const first = browserSnapshot(threadId, "34000000-0000-4000-8000-000000000005");
+    const other = browserSnapshot(threadId, "34000000-0000-4000-8000-000000000006");
+    const browser = {
+      inspectThread: vi.fn(async () => ({
+        ...first,
+        contexts: [
+          { context: first.context!, observation: first.observation! },
+          { context: other.context!, observation: other.observation! },
+        ],
+      })),
+    } as unknown as BrowserAutomationClient;
+    renderPreview(browser);
+
+    const preview = await screen.findByRole("group", { name: "Browser preview" });
+    expect(preview.querySelectorAll("img")).toHaveLength(1);
+    expect(within(preview).getByText("2")).toBeVisible();
+  });
+
+  it("asks for pictures less often while the page does not change", async () => {
+    const browser = liveBrowser("34000000-0000-4000-8000-000000000007");
+    renderPreview(browser, { pollIntervalMs: 20 });
+
+    await screen.findByRole("group", { name: "Browser preview" });
+    await new Promise((done) => setTimeout(done, 400));
+    // Without a backoff a 20 ms cadence would read about twenty times.
+    expect(vi.mocked(browser.inspectThread).mock.calls.length).toBeLessThan(10);
+    expect(vi.mocked(browser.inspectThread).mock.calls.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("takes no picture while the window is hidden", async () => {
+    const hidden = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const browser = liveBrowser("34000000-0000-4000-8000-000000000008");
+    renderPreview(browser, { pollIntervalMs: 10 });
+
+    await new Promise((done) => setTimeout(done, 80));
+    expect(browser.inspectThread).not.toHaveBeenCalled();
+
+    hidden.mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalled());
+  });
+
+  it("remembers the corner it was moved to, with the arrow keys as the keyboard route", async () => {
+    const user = userEvent.setup();
+    const browser = liveBrowser("34000000-0000-4000-8000-000000000010");
+    const { unmount } = renderPreview(browser);
+
+    const open = await screen.findByRole("button", { name: /Open Browser/ });
+    expect(screen.getByRole("group", { name: "Browser preview" })).toHaveAttribute(
+      "data-corner",
+      "top-right",
+    );
+    open.focus();
+    await user.keyboard("{ArrowDown}{ArrowLeft}");
+    expect(screen.getByRole("group", { name: "Browser preview" })).toHaveAttribute(
+      "data-corner",
+      "bottom-left",
+    );
+    unmount();
+
+    renderPreview(browser);
+    expect(await screen.findByRole("group", { name: "Browser preview" })).toHaveAttribute(
+      "data-corner",
+      "bottom-left",
+    );
+  });
+
+  it("settles into the nearest corner after a drag and does not open the Browser", async () => {
+    const onShowBrowser = vi.fn();
+    const browser = liveBrowser("34000000-0000-4000-8000-000000000011");
+    renderPreview(browser, { onShowBrowser });
+    const preview = await screen.findByRole("group", { name: "Browser preview" });
+    const open = screen.getByRole("button", { name: /Open Browser/ });
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element) {
+        // The frame is 800 by 600; the dragged preview ends low and to the left.
+        return (
+          this === preview
+            ? { left: 20, top: 400, width: 264, height: 165, right: 284, bottom: 565 }
+            : { left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600 }
+        ) as DOMRect;
+      },
+    );
+
+    fireEvent.pointerDown(open, { button: 0, clientX: 600, clientY: 40, pointerId: 1 });
+    fireEvent.pointerMove(open, { clientX: 100, clientY: 400, pointerId: 1 });
+    fireEvent.pointerUp(open, { clientX: 100, clientY: 400, pointerId: 1 });
+    fireEvent.click(open);
+
+    expect(preview).toHaveAttribute("data-corner", "bottom-left");
+    expect(window.localStorage.getItem("octant.browserPreview.corner")).toBe("bottom-left");
+    expect(onShowBrowser).not.toHaveBeenCalled();
+  });
+
+  it("rests a bottom corner above the composer instead of over it", async () => {
+    const browser = liveBrowser("34000000-0000-4000-8000-000000000012");
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element) {
+        return (
+          this.classList.contains("thread-composer")
+            ? { left: 0, top: 480, width: 800, height: 120, right: 800, bottom: 600 }
+            : { left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600 }
+        ) as DOMRect;
+      },
+    );
+    render(
+      <ThreadActivityPictureInPicture
+        browserClient={browser}
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+      >
+        <div className="thread-composer">Composer</div>
+      </ThreadActivityPictureInPicture>,
+    );
+
+    const preview = await screen.findByRole("group", { name: "Browser preview" });
+    // 600 - 480 of composer, plus the clearance kept above it.
+    expect(preview.style.getPropertyValue("--browser-pip-bottom")).toBe("132px");
   });
 });
 
@@ -730,47 +877,6 @@ function browserSnapshot(
     evidence: [],
   };
 }
-
-it("renders multiple Browser windows as an offset, slanted stack", async () => {
-  const first = browserSnapshot();
-  const second = {
-    ...browserSnapshot(),
-    context: {
-      ...browserSnapshot().context,
-      contextId: "31000000-0000-4000-8000-000000000002",
-    },
-    observation: {
-      ...browserSnapshot().observation,
-      contextId: "31000000-0000-4000-8000-000000000002",
-      title: "Second",
-      screenshotDataUrl: "data:image/jpeg;base64,BBBB",
-    },
-  };
-  const stacked = {
-    ...first,
-    contexts: [
-      { context: first.context, observation: first.observation },
-      { context: second.context, observation: second.observation },
-    ],
-  };
-  const browser = {
-    inspectThread: vi.fn(async () => stacked),
-    stop: vi.fn(),
-  } as unknown as BrowserAutomationClient;
-  render(
-    <ThreadActivityPictureInPicture
-      browserClient={browser}
-      pollIntervalMs={60_000}
-      threadId={threadId as never}
-    >
-      <div>Conversation</div>
-    </ThreadActivityPictureInPicture>,
-  );
-
-  expect(await screen.findByLabelText("Browser windows")).toBeVisible();
-  const images = screen.getAllByRole("img", { name: /browser activity/ });
-  expect(images).toHaveLength(2);
-});
 
 function computerSession(
   ownedThreadId: string,

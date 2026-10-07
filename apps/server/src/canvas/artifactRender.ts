@@ -6,6 +6,10 @@ import {
 import { MAX_ARTIFACT_PREVIEW_CHARACTERS } from "@octant/contracts/artifact-library";
 import { CHART_BAR_RADIUS, CHART_LINE_WIDTH } from "@octant/theme";
 import { layoutCanvasTreemap } from "@octant/domain/canvas-treemap-layout";
+import {
+  layoutCanvasHeatmapCalendar,
+  layoutCanvasHeatmapMatrix,
+} from "@octant/domain/canvas-heatmap-layout";
 
 /**
  * Drawing an artifact, once.
@@ -41,6 +45,7 @@ const DRAWN_KINDS = new Set<CanvasBlock["kind"]>([
   "state",
   "mockup",
   "treemap",
+  "heatmap",
   "design",
   "code-excerpt",
   "pseudocode",
@@ -206,6 +211,8 @@ function drawBlock(
       return { markup: mockupFrame(block, y, width, palette), height: 52 };
     case "treemap":
       return { markup: treemap(block, y, width, palette), height: CHART_HEIGHT };
+    case "heatmap":
+      return { markup: heatmap(block, y, width, palette), height: CHART_HEIGHT };
     case "design":
       return { markup: designFrames(block, y, width, palette), height: 52 };
     case "code-excerpt":
@@ -658,6 +665,77 @@ function treemap(
       `<rect x="${String(round(PADDING + rect.x))}" y="${String(round(y + rect.y))}" width="${String(Math.max(1, round(rect.width)))}" height="${String(Math.max(1, round(rect.height)))}" fill="${palette.accent}" opacity="${opacityFor(0.25 + 0.6 * (rect.value / peak))}"/>`,
   );
   return frames.join("") + cells.join("");
+}
+
+/**
+ * A heatmap drawn from the shared layout: one cell per coordinate, scaled to
+ * the picture area. A missing coordinate keeps its place as an empty cell, so
+ * a gap in the data reads as a gap rather than as a zero. The export starts a
+ * calendar on Monday and lays a matrix over the whole block, so the picture is
+ * deterministic and does not depend on the reader's locale.
+ */
+function heatmap(
+  block: Extract<CanvasBlock, { readonly kind: "heatmap" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  if (block.layout === "matrix") {
+    const layout = layoutCanvasHeatmapMatrix(block, { width, height: CHART_HEIGHT });
+    return layout.cells
+      .map((cell) =>
+        heatCell(
+          PADDING + cell.x,
+          y + cell.y,
+          cell.width,
+          cell.height,
+          cell.value,
+          layout.domain.min,
+          layout.domain.max,
+          palette,
+        ),
+      )
+      .join("");
+  }
+  const layout = layoutCanvasHeatmapCalendar(block, { weekStartsOn: 1 });
+  const scaleX = width / Math.max(1, layout.width);
+  const scaleY = CHART_HEIGHT / Math.max(1, layout.height);
+  return layout.days
+    .map((day) =>
+      heatCell(
+        PADDING + day.x * scaleX,
+        y + day.y * scaleY,
+        day.width * scaleX,
+        day.height * scaleY,
+        day.value,
+        layout.domain.min,
+        layout.domain.max,
+        palette,
+      ),
+    )
+    .join("");
+}
+
+function heatCell(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  value: number | undefined,
+  min: number,
+  max: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const left = String(round(x));
+  const top = String(round(y));
+  const boxWidth = String(Math.max(1, round(width - 1)));
+  const boxHeight = String(Math.max(1, round(height - 1)));
+  if (value === undefined) {
+    return `<rect x="${left}" y="${top}" width="${boxWidth}" height="${boxHeight}" fill="none" stroke="${palette.muted}" stroke-dasharray="2 2"/>`;
+  }
+  const span = max - min;
+  const ratio = span > 0 ? (value - min) / span : 0.5;
+  return `<rect x="${left}" y="${top}" width="${boxWidth}" height="${boxHeight}" fill="${palette.accent}" opacity="${opacityFor(0.2 + 0.65 * clampUnit(ratio))}"/>`;
 }
 
 /** A row of frame outlines in the design's own proportions, as many as fit. */

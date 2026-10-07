@@ -10,6 +10,7 @@ import { MockupBlock } from "./MockupBlock";
 import { StructuredBlocks } from "./StructuredBlocks";
 import { TextBlocks } from "./TextBlocks";
 import { TreemapBlock } from "./TreemapBlock";
+import { HeatmapBlock } from "./HeatmapBlock";
 import type { CanvasActionRuntime } from "../canvasActionRuntime";
 
 export function CanvasBlockRenderer({
@@ -62,6 +63,8 @@ export function CanvasBlockRenderer({
       return (
         <TreemapBlock block={block} {...(actionRuntime === undefined ? {} : { actionRuntime })} />
       );
+    case "heatmap":
+      return <HeatmapBlock block={block} />;
     case "design":
       return <DesignBlock block={block} />;
     case "code-excerpt":

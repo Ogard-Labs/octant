@@ -27,6 +27,7 @@ import {
   onboardingFlowExample,
   launchDeckExample,
   treemapExamples,
+  heatmapExamples,
   CANVAS_INLINE_MAX_BLOCKS,
   canvasInlineRefusal,
   effectiveCanvasPresentation,
@@ -60,7 +61,9 @@ function memberKind(member: (typeof CanvasBlock.members)[number]): string {
   return kind;
 }
 
-const blockKinds = CanvasBlock.members.map(memberKind);
+// The kind catalogue derives one entry per union member; a heatmap has one
+// member per layout, so the catalogue is deduped to keep the enum unique.
+const blockKinds = [...new Set(CanvasBlock.members.map(memberKind))];
 
 const canvasDefinitionSchema = {
   type: "object",
@@ -196,6 +199,7 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
     if (kind === "mockup") examples.push(settingsScreenExample);
     if (kind === "design") examples.push(onboardingFlowExample, launchDeckExample);
     if (kind === "treemap") examples.push(...treemapExamples);
+    if (kind === "heatmap") examples.push(...heatmapExamples);
   }
   return examples;
 }
@@ -291,6 +295,7 @@ function toolDescription(
     "A share of a whole is a pie or a donut: one series of labeled slices whose values are not negative. Comparing series across the same categories is a stacked-bar or a grouped-bar; every series lists those categories in the same order, and a stacked bar's values are not negative. A bar-line pairs bar series and line series on those categories, and each series names its mark. Describe chart to get an example of each.",
     "A quick wireframe of one screen is a mockup: a device of desktop, tablet, or phone, and a tree of window, header, sidebar, list, list row, form field, button, toggle, tabs, card, image placeholder, and text. Nodes name a parent rather than nesting. The controls are drawn, not live. Describe mockup to get a settings screen.",
     "A hierarchy is a treemap: nodes that name a parent (one root, no cycles), a list of measures with ids, labels, and optional number formats, a default sizeBy and colorBy, and a colour scale of sequential, diverging, or categorical by top-level group. Values sit on leaves; a group sums its children, so give values only to leaves and never to a group. A leaf may name a manifest source id, which offers Open file through the allowlisted open-source action. The person can switch size and colour and zoom into a group without revising the Canvas; use startNodeId to open a static export at a chosen node. Describe treemap to get a repository map sized by lines of code and coloured by recent edits.",
+    "A grid coloured by value is a heatmap with a layout of matrix or calendar. A matrix names its rows and columns and carries a cell per coordinate with a value and an optional short note; a coordinate you do not list reads as missing, not as zero, and the person can sort the rows by their total without revising the Canvas. A calendar carries one reading per date and reads as a week grid. Both take an optional format and a scale of sequential or diverging. Describe heatmap to get commits by weekday and hour, and test failures per day.",
     'A finished-looking design is a design block: app screens, a website or landing page, or a slide deck. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, or slide 1920x1080), put shared CSS in styles, and write each screen or slide as a frame of static HTML. The person clicks through it, so link frames with href="#frameId"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs, and use system fonts. Make it look finished: real copy, a clear type scale, and a deliberate palette. Describe design to get a phone flow and a deck.',
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     `Choose where the thread shows it. Use presentation inline for one small visual that answers the question, such as a chart, a few metrics, a short table, or a sequence or state diagram; it is drawn in the conversation just below your reply to this turn, so refer to it as below, and the user can still open it in the sidebar. Leave presentation out (sidebar) for reports, plans, boards, mockups, designs, and anything the user will keep working on. Inline holds at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks; when the host shows a card instead, the result says so in presentationNote.`,

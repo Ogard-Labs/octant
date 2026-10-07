@@ -11,6 +11,7 @@ import {
   treemapRootId,
   treemapTotals,
 } from "@octant/domain/canvas-treemap-layout";
+import { heatmapRowTotals } from "@octant/domain/canvas-heatmap-layout";
 import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
 
 /**
@@ -306,6 +307,48 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           kind: "table",
           headers: ["Item", ...block.measures.map((measure) => reading(measure.label))],
           rows,
+        },
+      ];
+    }
+    case "heatmap": {
+      // The grid as a table: a row per declared row and a column per declared
+      // column, so a coordinate the block does not list reads as an empty cell
+      // rather than as a zero.
+      if (block.layout === "matrix") {
+        const totals = heatmapRowTotals(block);
+        const byCoordinate = new Map(
+          block.cells.map((cell) => [
+            `${String(cell.rowId)}\u0000${String(cell.columnId)}`,
+            cell.value,
+          ]),
+        );
+        return [
+          {
+            kind: "table",
+            headers: ["Row", ...block.columns.map((column) => reading(column.label)), "Total"],
+            rows: block.rows.map((row) => {
+              const rowId = String(row.rowId);
+              return [
+                reading(row.label),
+                ...block.columns.map((column) => {
+                  const value = byCoordinate.get(`${rowId}\u0000${String(column.columnId)}`);
+                  return value === undefined ? "" : scalar(value, block.format);
+                }),
+                scalar(totals.get(rowId) ?? 0, block.format),
+              ];
+            }),
+          },
+        ];
+      }
+      return [
+        {
+          kind: "table",
+          headers: ["Date", reading(block.valueLabel ?? "Value"), "Note"],
+          rows: block.days.map((day) => [
+            day.date,
+            scalar(day.value, block.format),
+            day.note === undefined ? "" : reading(day.note),
+          ]),
         },
       ];
     }

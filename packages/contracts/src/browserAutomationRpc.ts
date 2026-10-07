@@ -93,6 +93,17 @@ export const BrowserThreadContextCommand = Schema.Struct({
 }).annotations(strict);
 export type BrowserThreadContextCommand = typeof BrowserThreadContextCommand.Type;
 
+/**
+ * A read of the thread's current Browser. The host takes a fresh picture of a
+ * live page for it unless `freshPicture` is `false`; a preview that is not on
+ * screen asks only whether the session still lives and spends no capture.
+ */
+export const BrowserThreadInspectCommand = Schema.Struct({
+  threadId: BrowserThreadId,
+  freshPicture: Schema.optional(Schema.Boolean),
+}).annotations(strict);
+export type BrowserThreadInspectCommand = typeof BrowserThreadInspectCommand.Type;
+
 export const BrowserActionCommand = BrowserActionRequest;
 export type BrowserActionCommand = typeof BrowserActionCommand.Type;
 
@@ -143,6 +154,9 @@ export const decodeBrowserContextInspectCommand = Schema.decodeUnknownSync(
 );
 export const decodeBrowserThreadContextCommand = Schema.decodeUnknownSync(
   BrowserThreadContextCommand,
+);
+export const decodeBrowserThreadInspectCommand = Schema.decodeUnknownSync(
+  BrowserThreadInspectCommand,
 );
 export const decodeBrowserActionCommand = Schema.decodeUnknownSync(BrowserActionCommand);
 export const decodeBrowserContextCancelCommand = Schema.decodeUnknownSync(

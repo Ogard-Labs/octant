@@ -776,6 +776,21 @@ or categorical by top-level group, and reads through the shared scale roles.
 Cell labels are drawn only where they fit, and the disclosed table is the
 accessible reading, sortable by each measure.
 
+**Heatmap.** A grid is coloured by value
+(`packages/domain/src/canvasHeatmapLayout.ts`). A `matrix` names its rows and
+columns and carries a cell per coordinate with a value and an optional short
+note; a `calendar` carries one reading per date and lays the days out on a week
+grid whose first day comes from the locale, drawn at its own size and scaled
+down only to fit a narrower Canvas. A matrix row label longer than its gutter
+is shortened with an ellipsis; the table carries it in full. Both read a value through one of the
+same two scale roles — sequential or diverging — with a legend that shows a
+scale bar and its bounds. A coordinate the block does not list is drawn as an
+empty dashed cell, apart from a zero reading. The screen renderer and the static
+SVG export draw the same deterministic layout. A matrix's rows can be sorted by
+their total and the cells can be walked with the arrow keys; these are view
+state and revise nothing. The disclosed table is the accessible reading, and it
+shows a missing coordinate as an empty cell rather than a zero.
+
 **Motion.** A chart transitions only on a state change — a legend toggle, a zoom
 — never on entrance. A transition lasts at most 200ms and is off under
 `prefers-reduced-motion: reduce` and when the workspace sets
@@ -994,7 +1009,9 @@ edge: the overlay shadow carries it for menus and popovers, and the shared
 dialog draws it as a border. A feature stylesheet sizes and places a popup and
 never sets its fill, border, or shadow. Environment's cards on the dock and a Settings section on the page are
 hairline-ringed cards, not floating objects. Frosted material is limited to native/optional sidebar
-translucency and the floating activity picture-in-picture; reduced
+translucency and the floating activity picture-in-picture (the Browser's live
+preview shows the page itself and frosts only its caption, count, and close
+control, over the glass tokens, never over the page); reduced
 transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
@@ -1325,10 +1342,12 @@ wraps under it when the dock is narrow rather than squeezing the pill). Rows are
 rather than taking a fill, and an open row's content starts under its name.
 Other servers stay behind a nested disclosure; none are stopped or removed by
 hiding them. The cards sit one step above the dock's own background. Sources list the current thread's journaled image attachments when present.
-Computer use offers Picture in Picture show/hide for the same live activity
-preview that floats over the main conversation. The preview never occupies
-Environment, and hiding it never stops its session. Browser stop and computer-use
-approval controls stay with the preview. It does not duplicate the Agents dock. Missing checkout context
+Computer use offers Picture in Picture show/hide for its live activity card
+that floats over the main conversation. The Browser's live preview is separate:
+it follows the thread's Browser, not this control (see
+[Workspace](docs/design/workspace.md#tool-lifecycles)). Neither preview occupies
+Environment, and hiding one never stops its session. Computer-use approval and
+stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
 
 The Board is an operational reading surface with four fixed,

@@ -55,7 +55,10 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { markInteraction, markInteractionAfterPaint } from "../polling/interactionTrace";
 import type { ProjectWindowTarget } from "./hostBridge";
 import { SHELL_SETTINGS_WRITTEN } from "./shellSettingsNotifications";
-import { createBrowserActivityAnnouncementStore } from "./browserActivityReveal";
+import {
+  createBrowserActivityAnnouncementStore,
+  threadHasBrowserSurface,
+} from "./browserActivityReveal";
 import { createTabActivationRegistry, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDropDestination } from "./workspaceTabDragGeometry";
 
@@ -761,6 +764,15 @@ export function useShellController(options: ShellControllerOptions) {
     if (browserActivityAnnouncements.remember(input.threadId, input.sessionIds) === "ignore") {
       return;
     }
+    openThreadBrowser(input);
+  }
+
+  /**
+   * Show this thread's Browser: where it already is, else in the dock when the
+   * thread is the dock's subject, else in the pane the request came from.
+   * Unlike an offer, a request the person made is never remembered away.
+   */
+  function openThreadBrowser(input: { readonly paneId?: PaneId; readonly threadId: string }): void {
     const latest = committedShell.current;
     if (latest !== undefined && threadHasBrowserSurface(latest.workspace, input.threadId)) {
       return;
@@ -1127,6 +1139,7 @@ export function useShellController(options: ShellControllerOptions) {
     openSurface,
     openSurfaceInSplit,
     revealBrowserActivity,
+    openThreadBrowser,
     pendingSettingsDeepLink,
     presentedLayout,
     previewSplitResize,
@@ -1886,26 +1899,6 @@ function committedBrowserContextSurface(
   if (shell === undefined) return false;
   return Object.values(shell.workspace.layouts).some((layout) =>
     layoutHasBrowserContext(layout, contextId),
-  );
-}
-
-function threadHasBrowserSurface(workspace: WindowWorkspace, threadId: string): boolean {
-  return (["chat", "work", "code"] as const).some((mode) =>
-    layoutHasThreadBrowser(workspace.layouts[mode], threadId),
-  );
-}
-
-function layoutHasThreadBrowser(layout: WorkspaceLayoutNode, threadId: string): boolean {
-  if (layout.kind === "pane") {
-    return (
-      layout.surface.kind === "browser" &&
-      layout.surface.threadId !== undefined &&
-      String(layout.surface.threadId) === String(threadId)
-    );
-  }
-  return (
-    layoutHasThreadBrowser(layout.first, threadId) ||
-    layoutHasThreadBrowser(layout.second, threadId)
   );
 }
 
