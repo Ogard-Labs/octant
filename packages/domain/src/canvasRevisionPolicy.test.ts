@@ -117,7 +117,10 @@ describe("canvasRevisionPolicy", () => {
   });
 
   it("lets an author turn a document from an older version into a design, and says why a bad frame is refused", () => {
+    // A head written by an earlier runtime declares that version on its
+    // envelope as well as its definition.
     const older = version({
+      schemaVersion: 4,
       definition: {
         ...definition,
         schemaVersion: 4,
@@ -142,9 +145,9 @@ describe("canvasRevisionPolicy", () => {
         blocks: [design(html)] as never,
       });
 
-    expect(admit("<h1>Home</h1>").next.definition).toMatchObject({
+    expect(admit("<h1>Home</h1>").next).toMatchObject({
       schemaVersion: CANVAS_SCHEMA_VERSION,
-      blocks: [{ kind: "design" }],
+      definition: { schemaVersion: CANVAS_SCHEMA_VERSION, blocks: [{ kind: "design" }] },
     });
     expect(() => admit("<script>go()</script>")).toThrow(
       expect.objectContaining({

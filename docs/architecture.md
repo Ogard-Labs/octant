@@ -384,8 +384,11 @@ construct; the event store and revise policy return that reason to the
 author rather than a generic failure. The sandbox is the boundary and the
 link rule is part of it, because a link is the one way a page with no script
 can leave. A static share refuses a design, and Markdown or HTML export writes
-frame titles, not markup. A design is always a sidebar Canvas. Agents writing
-one can be silent for minutes while composing the tool call, so Chat and Work
+frame titles, not markup. A design is always a sidebar Canvas. An authored
+revision declares the current schema version on the version and its
+definition, so a Canvas written under an earlier version moves forward and can
+gain a design; a version append never moves a Canvas back. Agents writing
+a design can be silent for minutes while composing the tool call, so Chat and Work
 wait five minutes for a provider event before cutting a turn off, as Code does
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
 
