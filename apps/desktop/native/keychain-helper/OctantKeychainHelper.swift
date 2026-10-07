@@ -12,6 +12,11 @@ private let hostIdentityService = "app.octant.host-identity.v1"
 // replace, or delete one.
 private let replicaDeviceKeyService = "app.octant.replica-device-keys.v1"
 private let replicaDeviceKeyNamespace = "replica-device-key"
+// Sync buckets' access key pairs live in a service of their own as well, keyed
+// by the settings' credential reference. Unlike a device key, one is replaced
+// when a person enters a new key pair.
+private let replicaStoreCredentialService = "app.octant.replica-store-credentials.v1"
+private let replicaStoreCredentialNamespace = "replica-store-credential"
 private let hostIdentityNamespace = "app.octant.host-identity.v1"
 private let hostIdentityKeyId = "host-identity"
 private let maximumPurgeProviderInstances = 128
@@ -40,7 +45,33 @@ private enum StableError: String, Error {
 // host-derived store scope in `kSecAttrGeneric`; a purge matches that exact
 // scope as well as these service strings, so a selected local store can never
 // enumerate or delete credentials belonging to another store.
-private let octantOwnedServices = [providerService, hostIdentityService, replicaDeviceKeyService]
+private let octantOwnedServices = [
+    providerService,
+    hostIdentityService,
+    replicaDeviceKeyService,
+    replicaStoreCredentialService,
+]
+
+// A credential namespace of its own: the Keychain service it reaches, the
+// request field that names an item, and whether a set may replace an item.
+private struct SeparateNamespace {
+    let service: String
+    let idField: String
+    let replaceable: Bool
+}
+
+private let separateNamespaces: [String: SeparateNamespace] = [
+    replicaDeviceKeyNamespace: SeparateNamespace(
+        service: replicaDeviceKeyService,
+        idField: "instanceId",
+        replaceable: false
+    ),
+    replicaStoreCredentialNamespace: SeparateNamespace(
+        service: replicaStoreCredentialService,
+        idField: "credentialRef",
+        replaceable: true
+    ),
+]
 
 private struct OwnedCredential {
     let service: String
@@ -598,7 +629,7 @@ else {
 }
 
 // Host-identity namespace path
-if let namespace = request["namespace"] as? String, namespace != replicaDeviceKeyNamespace {
+if let namespace = request["namespace"] as? String, separateNamespaces[namespace] == nil {
     guard namespace == hostIdentityNamespace,
           let keyId = request["keyId"] as? String,
           keyId == hostIdentityKeyId,
@@ -778,24 +809,25 @@ if operation == "purge" {
     ])
 }
 
-// Replica device-key path. It has no legacy records to migrate, and a request
-// that names the namespace never falls through to the provider service.
+// Replica device-key and sync bucket key paths. Neither has legacy records to
+// migrate, and a request that names a namespace never falls through to the
+// provider service.
 if request["namespace"] != nil {
-    guard let namespace = request["namespace"] as? String,
-          namespace == replicaDeviceKeyNamespace,
-          let instanceId = request["instanceId"] as? String,
-          validProviderInstanceId(instanceId),
+    guard let namespaceName = request["namespace"] as? String,
+          let namespace = separateNamespaces[namespaceName],
+          let itemId = request[namespace.idField] as? String,
+          validProviderInstanceId(itemId),
           let storeScope = request["storeScope"] as? String,
           validStoreScope(storeScope)
     else {
         fail(.failed)
     }
-    let commonKeys: Set<String> = ["version", "operation", "namespace", "instanceId", "storeScope"]
+    let commonKeys: Set<String> = ["version", "operation", "namespace", namespace.idField, "storeScope"]
     let allowedKeys = operation == "set" ? commonKeys.union(["credential"]) : commonKeys
     guard Set(request.keys) == allowedKeys else {
         fail(.failed)
     }
-    let deviceAccount = providerCredentialAccount(providerInstanceId: instanceId, storeScope: storeScope)
+    let itemAccount = providerCredentialAccount(providerInstanceId: itemId, storeScope: storeScope)
     switch operation {
     case "set":
         guard let credential = request["credential"] as? String,
@@ -804,20 +836,39 @@ if request["namespace"] != nil {
         else {
             fail(.failed)
         }
-        var addQuery = baseQuery(service: replicaDeviceKeyService, account: deviceAccount, storeScope: storeScope)
+        var addQuery = baseQuery(service: namespace.service, account: itemAccount, storeScope: storeScope)
         addQuery[kSecValueData as String] = credentialData
-        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        var addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        // A device key is written once: replacing one would strand every
+        // signature its public half already vouches for. A bucket key pair is
+        // replaced the way a provider credential is, including an item an
+        // earlier helper build wrote and this one cannot read back.
+        if namespace.replaceable, addStatus == errSecDuplicateItem {
+            if !itemReadable(service: namespace.service, account: itemAccount, storeScope: storeScope) {
+                let deleteStatus = deleteItem(service: namespace.service, account: itemAccount, storeScope: storeScope)
+                guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+                    addQuery.removeValue(forKey: kSecValueData as String)
+                    credentialData.resetBytes(in: 0..<credentialData.count)
+                    fail(mapStatus(deleteStatus))
+                }
+                addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+            }
+            if addStatus == errSecDuplicateItem {
+                addStatus = SecItemUpdate(
+                    baseQuery(service: namespace.service, account: itemAccount, storeScope: storeScope) as CFDictionary,
+                    [kSecValueData as String: credentialData] as CFDictionary
+                )
+            }
+        }
         addQuery.removeValue(forKey: kSecValueData as String)
         credentialData.resetBytes(in: 0..<credentialData.count)
-        // A device key is written once. Replacing one would strand every
-        // signature its public half already vouches for.
         guard addStatus == errSecSuccess else { fail(mapStatus(addStatus)) }
-        guard itemReadable(service: replicaDeviceKeyService, account: deviceAccount, storeScope: storeScope) else {
+        guard itemReadable(service: namespace.service, account: itemAccount, storeScope: storeScope) else {
             fail(.unavailable)
         }
         emit(["version": protocolVersion, "ok": true])
     case "has":
-        var query = baseQuery(service: replicaDeviceKeyService, account: deviceAccount, storeScope: storeScope)
+        var query = baseQuery(service: namespace.service, account: itemAccount, storeScope: storeScope)
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         let status = SecItemCopyMatching(query as CFDictionary, nil)
         if status == errSecItemNotFound {
@@ -826,7 +877,7 @@ if request["namespace"] != nil {
         guard status == errSecSuccess else { fail(mapStatus(status)) }
         emit(["version": protocolVersion, "ok": true, "present": true])
     case "resolve":
-        var query = baseQuery(service: replicaDeviceKeyService, account: deviceAccount, storeScope: storeScope)
+        var query = baseQuery(service: namespace.service, account: itemAccount, storeScope: storeScope)
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         query[kSecReturnData as String] = true
         var result: CFTypeRef?
@@ -841,7 +892,7 @@ if request["namespace"] != nil {
         credentialData.resetBytes(in: 0..<credentialData.count)
         emit(["version": protocolVersion, "ok": true, "credential": credential])
     case "delete":
-        let status = deleteItem(service: replicaDeviceKeyService, account: deviceAccount, storeScope: storeScope)
+        let status = deleteItem(service: namespace.service, account: itemAccount, storeScope: storeScope)
         guard status == errSecSuccess || status == errSecItemNotFound else { fail(mapStatus(status)) }
         emit(["version": protocolVersion, "ok": true])
     default:

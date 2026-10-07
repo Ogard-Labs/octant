@@ -31,11 +31,18 @@ const ROUTES = new Set([
   "/v1/replica-device-keys/resolve",
   "/v1/replica-device-keys/set",
   "/v1/replica-device-keys/delete",
+  "/v1/replica-store-credentials/has",
+  "/v1/replica-store-credentials/resolve",
+  "/v1/replica-store-credentials/set",
+  "/v1/replica-store-credentials/delete",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
   "/v1/oauth/access",
 ]);
+const REPLICA_DEVICE_KEY_PREFIX = "/v1/replica-device-keys/";
+const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
+type NamespacedIdField = "instanceId" | "credentialRef";
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {
   locked: 423,
@@ -67,6 +74,14 @@ export async function startCredentialBroker(
    * read, replace, or delete one.
    */
   replicaDeviceKeys?: CredentialStore,
+  /**
+   * The access key pairs of sync buckets, in a credential namespace of their
+   * own. They are served only on `/v1/replica-store-credentials/*`, keyed by
+   * the settings' credential reference, so neither a provider instance nor a
+   * replica device key with the same UUID can reach one. Unlike a device key,
+   * a key pair can be replaced when a person enters a new one.
+   */
+  replicaStoreCredentials?: CredentialStore,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -86,6 +101,7 @@ export async function startCredentialBroker(
       purgeStore,
       runtime,
       replicaDeviceKeys,
+      replicaStoreCredentials,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -154,6 +170,7 @@ export async function startCredentialBroker(
         purgeStore,
         runtime,
         replicaDeviceKeys,
+        replicaStoreCredentials,
       ),
   });
 }
@@ -166,6 +183,7 @@ async function handleIncoming(
   purgeStore: CredentialPurgeStore | undefined,
   runtime: HostOAuthRuntime,
   replicaDeviceKeys: CredentialStore | undefined,
+  replicaStoreCredentials: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -196,6 +214,7 @@ async function handleIncoming(
         purgeStore,
         runtime,
         replicaDeviceKeys,
+        replicaStoreCredentials,
       ),
     ),
   };
@@ -209,6 +228,7 @@ async function handleBrokerRequest(
   purgeStore: CredentialPurgeStore | undefined,
   runtime: HostOAuthRuntime,
   replicaDeviceKeys: CredentialStore | undefined,
+  replicaStoreCredentials: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -228,9 +248,24 @@ async function handleBrokerRequest(
     return handleHostOAuthBrokerRoute(url.pathname, request, runtime);
   }
 
-  if (url.pathname.startsWith("/v1/replica-device-keys/")) {
+  if (url.pathname.startsWith(REPLICA_DEVICE_KEY_PREFIX)) {
     if (replicaDeviceKeys === undefined) return failure("not-found", 404);
-    return handleReplicaDeviceKeyRoute(url.pathname, request, replicaDeviceKeys);
+    return handleNamespacedRoute(
+      url.pathname.slice(REPLICA_DEVICE_KEY_PREFIX.length),
+      "instanceId",
+      request,
+      replicaDeviceKeys,
+    );
+  }
+
+  if (url.pathname.startsWith(REPLICA_STORE_CREDENTIAL_PREFIX)) {
+    if (replicaStoreCredentials === undefined) return failure("not-found", 404);
+    return handleNamespacedRoute(
+      url.pathname.slice(REPLICA_STORE_CREDENTIAL_PREFIX.length),
+      "credentialRef",
+      request,
+      replicaStoreCredentials,
+    );
   }
 
   if (url.pathname === "/v1/credentials/purge") {
@@ -288,16 +323,18 @@ async function handleBrokerRequest(
 }
 
 /**
- * The device-key routes reach only the device-key store and name the replica
- * instance, never a provider instance.
+ * A namespaced route reaches only its own store and names its own id field —
+ * the replica instance for a device key, the settings' credential reference
+ * for a sync bucket's key pair — never a provider instance.
  */
-async function handleReplicaDeviceKeyRoute(
-  pathname: string,
+async function handleNamespacedRoute(
+  operation: string,
+  field: NamespacedIdField,
   request: Request,
   store: CredentialStore,
 ): Promise<Response> {
-  if (pathname === "/v1/replica-device-keys/set") {
-    const decoded = await readSetJson(request, "instanceId");
+  if (operation === "set") {
+    const decoded = await readSetJson(request, field);
     if (decoded.kind === "too-large") return failure("too-large", 413);
     if (decoded.kind === "invalid") return failure("invalid-request", 400);
     try {
@@ -307,14 +344,14 @@ async function handleReplicaDeviceKeyRoute(
       return credentialStoreFailure(error);
     }
   }
-  const decoded = await readJson(request, "instanceId");
+  const decoded = await readJson(request, field);
   if (decoded.kind === "too-large") return failure("too-large", 413);
   if (decoded.kind === "invalid") return failure("invalid-request", 400);
   try {
-    if (pathname === "/v1/replica-device-keys/has") {
+    if (operation === "has") {
       return Response.json({ present: await store.has(decoded.id) });
     }
-    if (pathname === "/v1/replica-device-keys/delete") {
+    if (operation === "delete") {
       await store.delete(decoded.id);
       return Response.json({ deleted: true });
     }
@@ -353,7 +390,7 @@ function isLoopbackPeer(address: string): boolean {
 
 async function readSetJson(
   request: Request,
-  field: "providerInstanceId" | "instanceId" = "providerInstanceId",
+  field: "providerInstanceId" | NamespacedIdField = "providerInstanceId",
 ): Promise<
   { kind: "ok"; id: string; credential: string } | { kind: "invalid" } | { kind: "too-large" }
 > {
@@ -384,7 +421,7 @@ async function readSetJson(
 
 async function readJson(
   request: Request,
-  field: "providerInstanceId" | "instanceId" = "providerInstanceId",
+  field: "providerInstanceId" | NamespacedIdField = "providerInstanceId",
 ): Promise<{ kind: "ok"; id: string } | { kind: "invalid" } | { kind: "too-large" }> {
   const declared = request.headers.get("content-length");
   if (declared !== null && /^\d+$/.test(declared) && BigInt(declared) > BigInt(BODY_LIMIT)) {

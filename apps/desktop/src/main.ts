@@ -1442,6 +1442,7 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.purgeStore,
     undefined,
     backend.replicaDeviceKeys,
+    backend.replicaStoreCredentials,
   );
 }
 

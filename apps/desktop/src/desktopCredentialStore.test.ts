@@ -34,6 +34,7 @@ describe("resolveDesktopCredentialBackend", () => {
       kind: "secret-service",
       store: expect.any(Object),
       replicaDeviceKeys: expect.any(Object),
+      replicaStoreCredentials: expect.any(Object),
     });
     expect(backend.purgeStore).toBeUndefined();
   });

@@ -75,6 +75,7 @@ describe("composeHostDataMap", () => {
         { service: "app.octant.provider-credentials" },
         { service: "app.octant.host-identity.v1" },
         { service: "app.octant.replica-device-keys.v1" },
+        { service: "app.octant.replica-store-credentials.v1" },
       ],
     });
     expect(decoded.host.outbound.map((entry) => entry.category)).toEqual([
