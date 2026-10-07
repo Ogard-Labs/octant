@@ -161,8 +161,11 @@ describe("ProviderCreateForm presentation limits", () => {
     await user.click(screen.getByRole("button", { name: "Add provider manually" }));
 
     // fx has no provider-owned posture, so a host without credential storage
-    // can never complete the create form.
+    // can never complete the create form, and says why before it is filled in.
     expect(screen.getByRole("button", { name: "Add fx" })).toBeDisabled();
+    expect(screen.getByTestId("provider-keys-desktop-only")).toHaveTextContent(
+      "fx needs an API key, and this browser cannot store one.",
+    );
     expect(onCreateFx).not.toHaveBeenCalled();
   });
 });
