@@ -25,6 +25,17 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+The Add folder browser reads one directory at a time from the confined home root.
+Because a filesystem call on a cloud-synced or network-mounted entry can block
+indefinitely, the host checks a few entries at a time, bounds each entry's checks
+and the whole listing, and lists an entry it cannot verify within the budget as a
+plain folder. Such an entry carries only its unresolved name: binding it, or
+choosing it as an export folder, measures the path again and refuses it when that
+fails, stalls, or resolves outside the root. The client's request budget also
+covers reading the response body. A browse that fails returns an explicit
+failure the picker shows with Retry, and Retry re-issues the same folder and
+search rather than restarting at the root.
+
 The Project tree places each active thread under its listed Project or under
 **No project**, never both. No project is a collapsible folder row following
 the Projects with no horizontal divider or separate section heading. It is
