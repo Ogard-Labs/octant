@@ -137,6 +137,7 @@ function seedChildRun(
   connection: ReturnType<typeof openSqlite>,
   runId: string,
   parentThreadId: string,
+  routeProjectId?: string,
 ): void {
   connection
     .prepare(
@@ -151,7 +152,16 @@ function seedChildRun(
       crypto.randomUUID(),
       ids.provider,
       now,
-      JSON.stringify({ run: { id: runId, parentThreadId, routingReceipt: { mode: "chat" } } }),
+      JSON.stringify({
+        run: {
+          id: runId,
+          parentThreadId,
+          routingReceipt: {
+            mode: "chat",
+            ...(routeProjectId === undefined ? {} : { projectId: routeProjectId }),
+          },
+        },
+      }),
     );
 }
 
@@ -520,48 +530,36 @@ describe("SpendCeilingService", () => {
     expect(remainingOf(snapshot, "thread")).not.toHaveProperty("remainingUsdCents");
   });
 
-  it("counts a child run under another Project thread against the Project ceiling and its overview", () => {
-    const { connection, service } = openService({
-      agentRuns: {
-        // The admitted thread started no run; another thread in the Project did.
-        parentSummary: () => [],
-        projectRunIds: (projectId) =>
-          String(projectId) === ids.project ? [decodeAgentRunId(ids.child)] : [],
+  it("counts a child run in its parent thread's current Project, not the one its route named", () => {
+    const { connection, journal, service } = openService();
+    const otherProject = "73000000-0000-4000-8000-000000000021";
+    // The child was delegated while its thread was in this Project; the thread
+    // has since moved to another one.
+    seedChatThread(connection, ids.thread, otherProject);
+    seedChildRun(connection, ids.child, ids.thread, ids.project);
+    recordAgentRunTurnUsage(
+      { connection, journal, clock: () => now, uuid: () => crypto.randomUUID() },
+      {
+        runId: decodeAgentRunId(ids.child),
+        providerInstanceId: ids.provider as never,
+        modelId: "gpt-4o" as never,
+        usage: { inputTokens: 700, outputTokens: 200, costUsd: 25 },
       },
-    });
-    expect(
+    );
+    for (const projectId of [ids.project, otherProject]) {
       service.execute("local-window", {
         kind: "set-spend-ceiling",
-        scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+        scope: { kind: "project", projectId: decodeProjectId(projectId) },
         expectedVersion: decodeAggregateVersion(0),
         policy: { tokenBudget: 1_000, costBudgetUsdCents: 25_00 },
         window: { kind: "calendar", period: "month", timeZone: "UTC" },
-      }),
-    ).toMatchObject({ kind: "set" });
-    insertUsage(connection, {
-      id: "73000000-0000-4000-8000-000000000304",
-      subjectType: "agent-run",
-      subjectId: ids.child,
-      tokens: { input: 700, output: 200 },
-      sequence: 1,
-      costUsdMicros: 25_000_000,
-    });
+      });
+    }
+    const overview = (projectId: string) =>
+      remainingOf(service.snapshot({ principalKind: "local-window", projectId }), "project");
 
-    expect(
-      remainingOf(
-        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
-        "project",
-      ),
-    ).toMatchObject({ remainingTokens: 100, usedUsdCents: 25_00, remainingUsdCents: 0 });
-    expect(
-      service.admit({
-        reservationId: ids.reservationA,
-        threadId: ids.thread,
-        threadType: "work-thread",
-        projectId: ids.project,
-        turnUpperBoundTokens: 50,
-      }),
-    ).toMatchObject({ status: "refused", refusal: { kind: "exhausted", dimension: "monetary" } });
+    expect(overview(otherProject)).toMatchObject({ remainingTokens: 100, remainingUsdCents: 0 });
+    expect(overview(ids.project)).toMatchObject({ remainingTokens: 1_000, usedUsdCents: 0 });
   });
 
   it("reads remaining money in cents and raises a money ceiling that survives restart", () => {

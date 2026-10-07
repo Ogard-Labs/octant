@@ -8,7 +8,6 @@ import {
   SPEND_TURN_AGGREGATE_TYPE,
   decodeSpendCeilingReservationId,
   decodeUtcTimestamp,
-  type ProjectId,
   type SpendCeilingCommand,
   type SpendCeilingCommandResult,
   type SpendCeilingRefusal,
@@ -81,7 +80,7 @@ export interface SpendCeilingServiceOptions {
   readonly journal: Journal;
   readonly clock: () => string;
   readonly uuid: () => string;
-  readonly agentRuns?: Pick<AgentRunProjection, "parentSummary" | "projectRunIds">;
+  readonly agentRuns?: Pick<AgentRunProjection, "parentSummary">;
   readonly threadExists?: (input: {
     readonly threadType: SpendCeilingThreadType;
     readonly threadId: string;
@@ -101,7 +100,7 @@ export class SpendCeilingService {
   readonly #journal: Journal;
   readonly #clock: () => string;
   readonly #uuid: () => string;
-  readonly #agentRuns: Pick<AgentRunProjection, "parentSummary" | "projectRunIds"> | undefined;
+  readonly #agentRuns: Pick<AgentRunProjection, "parentSummary"> | undefined;
   readonly #threadExists: SpendCeilingServiceOptions["threadExists"];
   readonly #projectExists: SpendCeilingServiceOptions["projectExists"];
   readonly #reservations = new Map<string, LiveReservation>();
@@ -359,21 +358,17 @@ export class SpendCeilingService {
   #facts(ceiling: SpendCeilingState, childIds: ReadonlyArray<string>): SpendCeilingScopeFacts {
     const now = decodeUtcTimestamp(this.#clock());
     const from = spendCeilingWindowStart(ceiling.window, now);
-    const scopeChildIds =
-      ceiling.scope.kind === "project"
-        ? this.#projectChildSubjectIds(ceiling.scope.projectId, childIds)
-        : childIds;
     const committed: SpendTokenTotal =
       ceiling.policy.tokenBudget === undefined
         ? { status: "known", tokens: 0 }
-        : this.#committedSpend(ceiling.scope, scopeChildIds, from);
+        : this.#committedSpend(ceiling.scope, childIds, from);
     const needsTurns =
       ceiling.policy.turnBudget !== undefined || ceiling.policy.runTimeBudgetSeconds !== undefined;
     const used = needsTurns ? this.#turnUse(ceiling.scope, from, now) : undefined;
     const cost =
       ceiling.policy.costBudgetUsdCents === undefined
         ? undefined
-        : this.#costUse(ceiling.scope, scopeChildIds, from);
+        : this.#costUse(ceiling.scope, childIds, from);
     return {
       scopeKind: ceiling.scope.kind,
       scopeId:
@@ -521,21 +516,6 @@ export class SpendCeilingService {
     }
   }
 
-  /**
-   * A Project's child runs, not only the admitted thread's. Counting one
-   * thread's runs left the spend of runs under the Project's other threads —
-   * and of every run in the Project overview, which admits no thread —
-   * outside the Project ceiling, so it read money left after it was spent.
-   */
-  #projectChildSubjectIds(
-    projectId: ProjectId,
-    threadChildIds: ReadonlyArray<string>,
-  ): ReadonlyArray<string> {
-    const ids = new Set(threadChildIds);
-    for (const runId of this.#agentRuns?.projectRunIds(projectId) ?? []) ids.add(String(runId));
-    return [...ids];
-  }
-
   #reservedFor(scope: SpendCeilingScope): number {
     const id = scope.kind === "project" ? String(scope.projectId) : String(scope.threadId);
     let total = 0;
@@ -645,19 +625,22 @@ export class SpendCeilingService {
 }
 
 /**
- * The usage subjects a ceiling counts by identity, beside a Project's
- * predicate: a thread and its child runs, or a Project's runs by the Project
- * their routing receipt names. The Project predicate already places every run
- * whose parent thread belongs to the Project; the receipt rule also keeps a run
- * whose thread has since left it. A row both name is still counted once.
+ * The usage subjects a thread ceiling counts by identity: the thread and its
+ * child runs. A Project ceiling names none: the Project predicate places every
+ * thread of the Project and every child run by its parent thread's current
+ * Project, as the Usage dashboard does. The Project a run's route named at
+ * delegation does not count, so a thread moved to another Project takes its
+ * children's spend with it instead of charging both Projects.
  */
 function ledgerSubjects(
   scope: SpendCeilingScope,
   childIds: ReadonlyArray<string>,
 ): Array<{ readonly type: string; readonly id: string }> {
-  const children = childIds.map((id) => ({ type: "agent-run", id }));
-  if (scope.kind === "project") return children;
-  return [{ type: scope.threadType, id: String(scope.threadId) }, ...children];
+  if (scope.kind === "project") return [];
+  return [
+    { type: scope.threadType, id: String(scope.threadId) },
+    ...childIds.map((id) => ({ type: "agent-run", id })),
+  ];
 }
 
 function sumUsageTokens(
