@@ -199,7 +199,8 @@ counts as refused when the host says `operation-failed` or reports the turn
 `failed` or `interrupted`; the command palette reads Code answers the same way.
 The card reads the list when it mounts, on the navigation topics named below,
 and when the shell settings or the window workspace change (neither has a feed
-topic).
+topic). Signals that arrive while a read is in flight become one more read once
+it lands, so a streaming reply does not start a host read per delta.
 
 **Pull requests** is the next card, on by default, and only on a Code start
 screen. It is hidden — and left out of Customize — unless the Pull requests

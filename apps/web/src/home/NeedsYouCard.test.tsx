@@ -1,5 +1,5 @@
 import type { PendingRequestClient } from "@octant/client-runtime/pending-request-client";
-import type { PendingRequest } from "@octant/contracts/pending-requests";
+import type { PendingRequest, PendingRequestList } from "@octant/contracts/pending-requests";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -472,6 +472,37 @@ describe("the Needs you card", () => {
       />,
     );
     await waitFor(() => expect(screen.queryByText("Fix the flaky build")).toBeNull());
+    expect(client.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("folds change-feed signals that arrive during a read into one more read", async () => {
+    const resolvers: Array<() => void> = [];
+    const client: PendingRequestClient = {
+      list: vi.fn(
+        () =>
+          new Promise<PendingRequestList>((resolve) => {
+            resolvers.push(() => resolve({ requests: [codeApproval], truncated: false }));
+          }),
+      ),
+    };
+    const first = source({ pendingRequestClient: client });
+    const view = renderCard(createNeedsYouCard(first));
+    await waitFor(() => expect(client.list).toHaveBeenCalledTimes(1));
+    // A streaming reply moves the navigation topic on every delta.
+    for (const feedRevision of [1, 2, 3, 4]) {
+      view.rerender(
+        <HomeDashboard
+          cards={[createNeedsYouCard({ ...first, feedRevision })]}
+          customization={{ order: [], visibility: [] }}
+          onCustomizationChange={vi.fn()}
+        />,
+      );
+    }
+    expect(client.list).toHaveBeenCalledTimes(1);
+    resolvers[0]?.();
+    await waitFor(() => expect(client.list).toHaveBeenCalledTimes(2));
+    resolvers[1]?.();
+    await screen.findByText("Fix the flaky build");
     expect(client.list).toHaveBeenCalledTimes(2);
   });
 
