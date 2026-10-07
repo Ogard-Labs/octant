@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { ThreadBoardStatusMark } from "./ThreadBoardCardParts";
 import { lastUsefulView, type ThreadBoardState } from "./threadBoardState";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { useHeldBoardPlacement } from "./useHeldBoardPlacement";
 
 export interface ThreadBoardCardPresentation {
   readonly layout: "list" | "card";
@@ -220,6 +221,15 @@ export function ThreadBoardBody<
   },
   TView,
 >(props: ThreadBoardBodyProps<TCard, TColumn, TView>) {
+  const view = lastUsefulView(props.board);
+  const cards = view === undefined ? [] : props.cardsOf(view);
+  const columns = view === undefined ? [] : props.groupCards(cards);
+  const visibleColumns =
+    (props.showEmptyGroups && (props.emptyGroupsInNarrowList === "kept" || !props.isNarrow)) ||
+    cards.length === 0
+      ? columns
+      : columns.filter((column) => column.cards.length > 0);
+  const held = useHeldBoardPlacement<TCard, TColumn>(visibleColumns);
   if (props.board.status === "loading") {
     return (
       <div className="code-board__body">
@@ -232,7 +242,6 @@ export function ThreadBoardBody<
       </div>
     );
   }
-  const view = lastUsefulView(props.board);
   if (view === undefined) {
     return (
       <div className="code-board__body">
@@ -258,7 +267,6 @@ export function ThreadBoardBody<
         {props.board.message} Showing the last useful view.
       </OctantAlert>
     ) : null;
-  const cards = props.cardsOf(view);
   const empty = props.activeFilterSummary === undefined;
   const emptyProps = empty
     ? {
@@ -273,23 +281,22 @@ export function ThreadBoardBody<
           </OctantButton>
         ),
       };
-  const columns = props.groupCards(cards);
-  const visibleColumns =
-    (props.showEmptyGroups && (props.emptyGroupsInNarrowList === "kept" || !props.isNarrow)) ||
-    cards.length === 0
-      ? columns
-      : columns.filter((column) => column.cards.length > 0);
   return (
-    <div className="code-board__body" data-grouping={props.grouping} data-layout={props.layout}>
+    <div
+      className="code-board__body"
+      data-grouping={props.grouping}
+      data-layout={props.layout}
+      {...held.pointerHandlers}
+    >
       {refreshNotice}
       {cards.length === 0 ? (
         <SurfaceEmpty {...emptyProps} {...(empty ? {} : { detail: props.activeFilterSummary })} />
       ) : null}
       {props.isNarrow ? (
-        <ThreadBoardListView columns={visibleColumns} renderCard={props.renderCard} />
+        <ThreadBoardListView columns={held.columns} renderCard={props.renderCard} />
       ) : (
         <div className="board" data-grouping={props.grouping}>
-          {visibleColumns.map((column) => (
+          {held.columns.map((column) => (
             <ThreadBoardColumnView column={column} key={column.key} renderCard={props.renderCard} />
           ))}
         </div>

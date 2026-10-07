@@ -974,6 +974,43 @@ describe("CodeThreadBoard waiting cards", () => {
     ).toEqual(["Pick a database", "Fix the flaky build"]);
   });
 
+  it("holds each card's column while the pointer is on the board and applies the host's placement on leaving", async () => {
+    const loadBoard = vi
+      .fn()
+      .mockResolvedValueOnce(
+        view([
+          card({ id: "01", status: "waiting", title: "Fix the flaky build" }),
+          card({ id: "02", status: "waiting", title: "Pick a database" }),
+        ]),
+      )
+      .mockResolvedValue(
+        view([
+          card({ id: "01", status: "in-progress", title: "Fix the flaky build" }),
+          card({ id: "02", status: "waiting", title: "Pick a database" }),
+        ]),
+      );
+    render(
+      <CodeThreadBoard
+        loadBoard={loadBoard}
+        onOpenThread={vi.fn()}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+    await screen.findByRole("region", { name: "Waiting (2)" });
+    const body = document.querySelector(".code-board__body") as HTMLElement;
+    fireEvent.pointerEnter(body, { pointerType: "mouse" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh board" }));
+    await waitFor(() => expect(loadBoard).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText("Refreshing local board state.")).toBeNull());
+    expect(screen.getByRole("region", { name: "Waiting (2)" })).toBeVisible();
+
+    fireEvent.pointerLeave(body, { pointerType: "mouse" });
+    expect(await screen.findByRole("region", { name: "Waiting (1)" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "In progress (1)" })).toBeVisible();
+  });
+
   it("gives the list layout the same answer buttons", async () => {
     renderBoard(
       [card({ id: "01", status: "waiting", title: "Fix the flaky build" })],
