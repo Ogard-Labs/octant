@@ -1516,7 +1516,7 @@ describe("OpenCode driver", () => {
     expect(events.some((event) => event.kind === "failed")).toBe(false);
   });
 
-  it("fails a 2.x turn when a file changes beyond what the approved edit named", async () => {
+  it("fails a 2.x turn when a file the approved edit did not name changes, even while grants remain", async () => {
     const fixture = betaDriver({
       events: [
         {
@@ -1525,7 +1525,7 @@ describe("OpenCode driver", () => {
             id: "perm-edit",
             sessionID: "provider-session",
             action: "edit",
-            resources: ["/tmp/project/a.ts", "/tmp/project/b.ts"],
+            resources: ["/tmp/project/a.ts", "b.ts"],
           },
         } as unknown as Event,
       ],
@@ -1540,11 +1540,11 @@ describe("OpenCode driver", () => {
         } as unknown as Event,
         {
           type: "file.edited",
-          properties: { sessionID: "provider-session", file: "/tmp/project/b.ts" },
+          properties: { sessionID: "provider-session", file: "/tmp/project/c.ts" },
         } as unknown as Event,
         {
           type: "file.edited",
-          properties: { sessionID: "provider-session", file: "/tmp/project/c.ts" },
+          properties: { sessionID: "provider-session", file: "/tmp/project/b.ts" },
         } as unknown as Event,
         { type: "session.idle", properties: { sessionID: "provider-session" } } as unknown as Event,
       ],
@@ -1580,7 +1580,6 @@ describe("OpenCode driver", () => {
     const events = Array.from(output);
     expect(events.flatMap((event) => (event.kind === "file-change" ? [event.path] : []))).toEqual([
       "/tmp/project/a.ts",
-      "/tmp/project/b.ts",
     ]);
     expect(events.at(-1)).toMatchObject({
       kind: "failed",

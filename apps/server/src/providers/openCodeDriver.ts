@@ -115,14 +115,16 @@ interface SessionState {
   sourceId: string | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvals: Set<string>;
-  /** File changes each pending 2.x edit request would admit if the user approves it. */
-  readonly pendingEditGrants: Map<string, number>;
+  /** Files each pending 2.x edit request would let change if the user approves it. */
+  readonly pendingEditGrants: Map<string, ReadonlyArray<string>>;
   /**
-   * File changes that allowed or approved 2.x edit requests may still report.
-   * Each reported change spends one, so an approval never admits a later,
-   * unapproved write, and rejecting one request never withdraws another's.
+   * Files that allowed or approved 2.x edit requests may still report as
+   * changed, as resolved paths (or `*` for a request that named any file).
+   * Each reported change spends the grant for its own path, so an approval
+   * never admits a write to another file, and rejecting one request never
+   * withdraws another's.
    */
-  unreportedEditGrants: number;
+  readonly unreportedEditGrants: string[];
   readonly questions: Map<
     string,
     {
@@ -1115,6 +1117,7 @@ function makeConnection(
         ? undefined
         : {
             mode,
+            projectRoot,
             reply: (requestId: string, reply: "once" | "reject") => {
               const active = client;
               const source = state.sourceId;
@@ -1821,9 +1824,9 @@ function makeConnection(
                       // its event stream, which can arrive before this reply's
                       // response. A failed reply takes the grant back.
                       const grant = input.approved
-                        ? (state.pendingEditGrants.get(input.requestId) ?? 0)
-                        : 0;
-                      state.unreportedEditGrants += grant;
+                        ? (state.pendingEditGrants.get(input.requestId) ?? [])
+                        : [];
+                      state.unreportedEditGrants.push(...grant);
                       return request(() =>
                         activeClient.replyPermission(
                           source,
@@ -1844,10 +1847,7 @@ function makeConnection(
                       ).pipe(
                         Effect.tapError(() =>
                           Effect.sync(() => {
-                            state.unreportedEditGrants = Math.max(
-                              0,
-                              state.unreportedEditGrants - grant,
-                            );
+                            for (const file of grant) spendEditGrant(state, file);
                           }),
                         ),
                         Effect.tap(() =>
@@ -1954,7 +1954,7 @@ function newSessionState(
     executionPolicy,
     approvals: new Set(),
     pendingEditGrants: new Map(),
-    unreportedEditGrants: 0,
+    unreportedEditGrants: [],
     questions: new Map(),
     questionAnswers: new Map(),
     toolNames: new Set(tools.map((tool) => tool.name)),
@@ -2004,6 +2004,7 @@ function failClosedBetaEvent(
   event: ProviderRuntimeEvent,
   state: SessionState,
   mode: "chat" | "work" | "code",
+  projectRoot: string,
 ): ProviderRuntimeEvent {
   if (event.kind === "user-input-request") {
     return {
@@ -2023,8 +2024,7 @@ function failClosedBetaEvent(
   // An edit the posture allows, or one the user already approved, may be
   // reported. Any other file change ran without a grant, so the turn fails.
   if (edit === "allow") return event;
-  if (state.unreportedEditGrants > 0) {
-    state.unreportedEditGrants -= 1;
+  if (spendEditGrant(state, resolve(projectRoot, event.path)) || spendEditGrant(state, "*")) {
     return event;
   }
   return {
@@ -2050,6 +2050,7 @@ function mapAndOffer(
   retire: (state: SessionState) => void,
   beta?: {
     readonly mode: "chat" | "work" | "code";
+    readonly projectRoot: string;
     readonly reply: (requestId: string, reply: "once" | "reject") => void;
   },
 ): void {
@@ -2101,11 +2102,15 @@ function mapAndOffer(
       return;
     }
     if (effect === "allow") {
-      if (action === "edit") state.unreportedEditGrants += editGrantSize(event.properties);
+      if (action === "edit") {
+        state.unreportedEditGrants.push(...editGrantFiles(event.properties, beta.projectRoot));
+      }
       beta.reply(requestId, "once");
       return;
     }
-    if (action === "edit") state.pendingEditGrants.set(requestId, editGrantSize(event.properties));
+    if (action === "edit") {
+      state.pendingEditGrants.set(requestId, editGrantFiles(event.properties, beta.projectRoot));
+    }
   }
   let mapped: ReadonlyArray<ProviderRuntimeEvent>;
   try {
@@ -2135,7 +2140,8 @@ function mapAndOffer(
       taskOccurrences.set(original.summary, occurrence + 1);
     }
     let normalized = stableTaskIdentity(state, original, occurrence);
-    if (beta !== undefined) normalized = failClosedBetaEvent(normalized, state, beta.mode);
+    if (beta !== undefined)
+      normalized = failClosedBetaEvent(normalized, state, beta.mode, beta.projectRoot);
     // OpenCode settles usage once per model step. Consumers keep the latest
     // report as the logical turn's figure, so make each report cumulative
     // across the prompt's tool loop while keeping the same provider session.
@@ -2346,13 +2352,27 @@ function betaActionMatches(pattern: string, action: string): boolean {
 }
 
 /**
- * File changes one 2.x edit request admits: one per file it names, at least
- * one, so a request that names several files admits each of their changes.
+ * The files one 2.x edit request names, resolved against the project root so
+ * a relative resource and an absolute reported path compare equal. `*` stays
+ * as is and admits one change to any file. A request naming nothing grants
+ * nothing, so a change it would have covered fails closed.
  */
-function editGrantSize(properties: unknown): number {
-  if (typeof properties !== "object" || properties === null) return 1;
+function editGrantFiles(properties: unknown, projectRoot: string): ReadonlyArray<string> {
+  if (typeof properties !== "object" || properties === null) return [];
   const resources: unknown = Reflect.get(properties, "resources");
-  return Array.isArray(resources) ? Math.max(1, resources.length) : 1;
+  if (!Array.isArray(resources)) return [];
+  return resources.flatMap((resource: unknown) => {
+    if (typeof resource !== "string" || resource.trim() === "") return [];
+    return [resource === "*" ? "*" : resolve(projectRoot, resource)];
+  });
+}
+
+/** Spends one grant for exactly this file; false when none is left. */
+function spendEditGrant(state: SessionState, file: string): boolean {
+  const at = state.unreportedEditGrants.indexOf(file);
+  if (at === -1) return false;
+  state.unreportedEditGrants.splice(at, 1);
+  return true;
 }
 
 function textProperty(value: unknown, key: string): string {
