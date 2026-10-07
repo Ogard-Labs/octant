@@ -1,5 +1,5 @@
 import { accessSync, constants, existsSync, statSync } from "node:fs";
-import { mkdir, realpath, rename, writeFile } from "node:fs/promises";
+import { realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 /**
@@ -43,17 +43,27 @@ export function createCanvasExportFilePort(): CanvasExportFilePort {
       if (dirname(target) !== root) {
         throw new Error("Refusing to write outside the export folder.");
       }
-      await mkdir(root, { recursive: true });
       // The folder was stored by its real path when the person chose it — the
       // host's folder browser hands out nothing else — so a folder that no
       // longer resolves to that path has had it, or a folder above it, replaced
       // by a link since. Writing would follow that link somewhere the person
-      // never approved.
-      if ((await realpath(root)) !== root) {
-        throw new Error("Refusing to write through a link out of the export folder.");
-      }
+      // never approved. The check comes before anything is created: a folder
+      // that has gone is refused rather than recreated, because recreating it
+      // through a swapped parent would already be a write outside.
+      await assertStillChosenFolder(root);
       const temporary = join(root, `.${fileName}.${tempId}.tmp`);
-      await writeFile(temporary, contents, "utf8");
+      // `wx` creates the temporary file or fails; it never writes through a
+      // link planted at that name.
+      await writeFile(temporary, contents, { encoding: "utf8", flag: "wx" });
+      // Node offers no directory-handle writes, so the folder is measured again
+      // before the rename publishes the file. A swap between this check and the
+      // rename remains possible and is narrowed, not closed.
+      try {
+        await assertStillChosenFolder(root);
+      } catch (error) {
+        await rm(temporary, { force: true });
+        throw error;
+      }
       await rename(temporary, target);
     },
 
@@ -72,4 +82,10 @@ export function createCanvasExportFilePort(): CanvasExportFilePort {
       }
     },
   };
+}
+
+async function assertStillChosenFolder(root: string): Promise<void> {
+  if ((await realpath(root)) !== root) {
+    throw new Error("Refusing to write through a link out of the export folder.");
+  }
 }
