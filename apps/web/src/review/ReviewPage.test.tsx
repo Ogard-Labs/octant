@@ -1,5 +1,5 @@
 import { resolveSnoozePresets } from "@octant/domain";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { parseUnifiedDiff } from "../code/unifiedDiff";
@@ -161,6 +161,48 @@ describe("ReviewPage", () => {
     expect(page.onOpen).toHaveBeenCalledWith(second);
     await user.keyboard("e");
     expect(page.onMarkSeen).toHaveBeenCalledWith(second);
+  });
+
+  it("leaves its keys alone while focus is elsewhere in the window", async () => {
+    const user = userEvent.setup();
+    const page = props();
+    render(
+      <>
+        <button type="button">Sidebar row</button>
+        <ReviewPage {...page} />
+      </>,
+    );
+    await waitFor(() => expect(screen.getByText("Reply for Fix the sidebar clip")).toBeVisible());
+
+    screen.getByRole("button", { name: "Sidebar row" }).focus();
+    await user.keyboard("jce");
+
+    expect(within(current()).getByRole("heading", { name: "Fix the sidebar clip" })).toBeVisible();
+    expect(page.onComplete).not.toHaveBeenCalled();
+    expect(page.onMarkSeen).not.toHaveBeenCalled();
+
+    // Focus that fell out of the page when a control it held went away still counts as the page.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    await user.keyboard("c");
+    expect(page.onComplete).toHaveBeenCalledWith(first);
+  });
+
+  it("acts on the row that has focus, and moves that focus with J and K", async () => {
+    const user = userEvent.setup();
+    const page = props();
+    render(<ReviewPage {...page} />);
+    const rows = () =>
+      within(screen.getByRole("navigation", { name: "Finished threads" })).getAllByRole("button");
+
+    act(() => rows()[1]?.focus());
+    expect(within(current()).getByRole("heading", { name: "Add the export route" })).toBeVisible();
+    await user.keyboard("{Enter}");
+    expect(page.onOpen).toHaveBeenLastCalledWith(second);
+
+    await user.keyboard("j");
+    expect(rows()[2]).toHaveFocus();
+    await user.keyboard("c");
+    expect(page.onComplete).toHaveBeenCalledWith(third);
   });
 
   it("completes the selected thread with C and shows a host refusal in the host's words", async () => {

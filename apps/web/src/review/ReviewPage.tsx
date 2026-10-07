@@ -307,6 +307,17 @@ export function ReviewPage(props: ReviewPageProps) {
       if (apple && event.ctrlKey) return;
       const target = event.target;
       if (isTypingTarget(target)) return;
+      // Bare keys are safe only because the page owns them while it has focus:
+      // a C pressed on a sidebar row must not complete the thread selected
+      // here. Focus that fell to the body, because the control holding it left
+      // with the thread it belonged to, still counts as the page.
+      const page = rootRef.current?.closest(".review-page");
+      if (
+        target !== document.body &&
+        !(target instanceof Node && page?.contains(target) === true)
+      ) {
+        return;
+      }
       // A menu, popover, or dialog owns its own keys while it is open.
       if (
         target instanceof HTMLElement &&
@@ -338,9 +349,19 @@ export function ReviewPage(props: ReviewPageProps) {
     const row = [...(rootRef.current?.querySelectorAll("[data-review-row]") ?? [])].find(
       (candidate) => candidate.getAttribute("data-review-row") === selectedEntryKey,
     );
-    if (row instanceof HTMLElement && typeof row.scrollIntoView === "function") {
-      row.scrollIntoView({ block: "nearest" });
+    if (!(row instanceof HTMLElement)) return;
+    // A focused row is the one the keys act on, so focus moves with J and K
+    // rather than staying on a row that is no longer selected.
+    const focused = document.activeElement;
+    if (
+      focused instanceof HTMLElement &&
+      focused !== row &&
+      focused.hasAttribute("data-review-row") &&
+      rootRef.current?.contains(focused) === true
+    ) {
+      row.focus({ preventScroll: true });
     }
+    if (typeof row.scrollIntoView === "function") row.scrollIntoView({ block: "nearest" });
   }, [selectedEntryKey]);
 
   const count = props.entries.length;
@@ -400,6 +421,7 @@ export function ReviewPage(props: ReviewPageProps) {
                         className="review-row"
                         data-review-row={key}
                         onClick={() => setSelectedKey(key)}
+                        onFocus={() => setSelectedKey(key)}
                         type="button"
                         variant="bare"
                       >
