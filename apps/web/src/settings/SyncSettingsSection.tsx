@@ -477,7 +477,7 @@ function BucketForm(props: {
       </label>
       {props.credentialStoreAvailable ? null : (
         <p className="provider-settings__field-guidance">
-          This host has no credential store, so a bucket&apos;s key cannot be saved here.
+          This host cannot keep a bucket&apos;s access key yet, so a bucket cannot be saved here.
         </p>
       )}
       {problem === undefined ? null : (
