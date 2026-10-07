@@ -2358,6 +2358,61 @@ describe("provider runtime contracts", () => {
     },
   );
 
+  it("carries what fills the window on a usage event, with how exact each part is", () => {
+    const event = {
+      ...common,
+      kind: "usage",
+      inputTokens: 10,
+      outputTokens: 4,
+      contextTokens: 36_000,
+      contextBreakdown: {
+        parts: [
+          { kind: "system-prompt", tokens: 142, accuracy: "provider-reported" },
+          { kind: "mcp-tools", tokens: 900, accuracy: "provider-reported", count: 12 },
+          { kind: "octant-tools", tokens: 410, accuracy: "conservative-heuristic", count: 5 },
+        ],
+        deferred: [{ kind: "system-tools", count: 14 }, { kind: "mcp-tools" }],
+      },
+    } as const;
+    expect(decodeProviderRuntimeEvent(event)).toMatchObject({
+      contextBreakdown: event.contextBreakdown,
+    });
+  });
+
+  it.each([
+    ["a kind no surface names", { kind: "dreams", tokens: 1, accuracy: "provider-reported" }],
+    ["a fractional token count", { kind: "skills", tokens: 1.5, accuracy: "provider-reported" }],
+    ["a negative token count", { kind: "skills", tokens: -1, accuracy: "provider-reported" }],
+    ["an accuracy nobody defined", { kind: "skills", tokens: 1, accuracy: "guess" }],
+    ["a part without its accuracy", { kind: "skills", tokens: 1 }],
+    [
+      "a field the contract does not know",
+      { kind: "skills", tokens: 1, accuracy: "provider-reported", path: "/x" },
+    ],
+  ])("refuses a context breakdown with %s", (_name, part) => {
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...common,
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 4,
+        contextBreakdown: { parts: [part] },
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a deferred part that claims a share of the window", () => {
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...common,
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 4,
+        contextBreakdown: { parts: [], deferred: [{ kind: "mcp-tools", count: 3, tokens: 900 }] },
+      }),
+    ).toThrow();
+  });
+
   it("refuses a rate-limit bucket whose remaining count exceeds its limit", () => {
     expect(() =>
       decodeProviderRuntimeEvent({

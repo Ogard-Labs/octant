@@ -39,6 +39,7 @@ import {
   ProviderInstanceId,
   ProviderModelId,
   ProviderSessionId,
+  ProviderContextBreakdown,
   ProviderResumeCursor,
 } from "./providers";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
@@ -268,6 +269,8 @@ export const CodeReviewFindingUpdated = Schema.Struct({
 export type CodeReviewFindingUpdated = typeof CodeReviewFindingUpdated.Type;
 
 const ProviderRequestId = boundedNonEmptyText(255);
+/** A provider's question identity as the journal and `answer-provider-input` carry it. */
+export const CodeProviderRequestId = ProviderRequestId;
 export const MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES = 8 * 1024;
 export const CodeOperationFailure = CodeFailure.pipe(
   Schema.filter(
@@ -1186,6 +1189,15 @@ const ToolEvent = Schema.Struct({
   state: Schema.Literal("started", "running", "completed", "failed"),
   summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
 }).annotations(strict);
+/**
+ * The bounds a Code approval or question is journaled under. Exported so a
+ * read that shows a pending request outside its operation stream carries the
+ * text under exactly these bounds, never looser ones.
+ */
+export const CodeApprovalSummaryText = boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES);
+export const CodeQuestionPromptText = boundedNonEmptyText(8 * 1024);
+export const CodeQuestionOptionText = boundedNonEmptyText(1_024);
+export const MAX_CODE_QUESTION_OPTIONS = 32;
 const ApprovalEvent = Schema.Struct({
   kind: Schema.Literal("approval-requested"),
   approvalId: CodeApprovalId,
@@ -1199,14 +1211,14 @@ const ApprovalEvent = Schema.Struct({
     "pull-request-create",
     "provider-tool",
   ),
-  summary: boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES),
+  summary: CodeApprovalSummaryText,
 }).annotations(strict);
 const QuestionEvent = Schema.Struct({
   kind: Schema.Literal("input-requested"),
   requestId: ProviderRequestId,
-  prompt: boundedNonEmptyText(8 * 1024),
-  options: Schema.Array(boundedNonEmptyText(1_024)).pipe(
-    Schema.filter((options) => options.length <= 32),
+  prompt: CodeQuestionPromptText,
+  options: Schema.Array(CodeQuestionOptionText).pipe(
+    Schema.filter((options) => options.length <= MAX_CODE_QUESTION_OPTIONS),
   ),
 }).annotations(strict);
 /**
@@ -1265,6 +1277,11 @@ const UsageEvent = Schema.Struct({
    * no reader may infer a figure from the model's window.
    */
   autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  /**
+   * What the window held after this report: the runtime's own categories, or
+   * the parts Octant counted when it reported none. Absent means neither.
+   */
+  contextBreakdown: Schema.optional(ProviderContextBreakdown),
 }).annotations(strict);
 /**
  * How much of a provider usage window this account has spent, as the provider
@@ -1394,6 +1411,11 @@ export const CodeConversationTurnUsage = Schema.Struct({
    * no reader may infer a figure from the model's window.
    */
   autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  /**
+   * What the window held after this report: the runtime's own categories, or
+   * the parts Octant counted when it reported none. Absent means neither.
+   */
+  contextBreakdown: Schema.optional(ProviderContextBreakdown),
 }).annotations(strict);
 export type CodeConversationTurnUsage = typeof CodeConversationTurnUsage.Type;
 

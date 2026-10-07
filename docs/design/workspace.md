@@ -126,9 +126,11 @@ than its composer, stay pane and attachment behaviour.
 
 ## Start-screen cards
 
-Under the composer, the Work and Code start screens carry a card area: a
-**Customize** control on the right, then cards in a grid (two columns, one at
-phone width). The composer paints first; the area mounts on the frame after the
+Under the composer, every start screen carries a card area: Chat, Work, and
+Code, in each variant a mode has, including the Chat screen that also lists the
+threads to continue. It is the same area with the same stored setting on all of
+them; Chat has no folder tiles. The area is a **Customize** control on the
+right, then cards in a grid (two columns, one at phone width). The composer paints first; the area mounts on the frame after the
 first commit, and each card begins its reads only then, so a start screen never
 waits on a card. A card that is off or unavailable is never mounted and reads
 nothing.
@@ -160,18 +162,69 @@ the sidebar's Running rule, so a snoozed or completed row is never listed) and
 the agent runs in progress from the AgentRun projection, most recently moved
 first. Work lists its Chat and Work threads together and Code its Code threads,
 as the sidebar's Running count does. A row shows the provider mark, the title, a
-step line in monospace (the host's latest line: on Code the board's activity
-line, otherwise the task of the agent run working in the thread, or the Project
-name when the host said nothing), and a time. A run says how long it has run
-("Running 12m"); a thread says when it last moved ("Active 4m ago"), because the
-host keeps no start time for a turn. A host name appears only when the window is
+step line, and a time. The step line is the most live thing the host knows, in
+this order: the running turn's own step (`Command: bun run test`, in monospace,
+or "Waiting for approval" / "Waiting for your answer" in plain text), the
+board's activity line on Code, the task of the agent run working in the thread,
+how far its plan has come, or the Project name when the host said nothing. A
+turn the host reports a start time for says how long it has run ("Running
+12m"), as does an agent run; a thread whose host reports none (an older host)
+says when it last moved ("Active 4m ago"). The time is read at minute
+resolution from the shell's once-a-minute clock. A host name appears only when the window is
 reading a host that is not this computer. A run reports under the running thread
 it belongs to rather than as a second row, and is its own row only when its
 thread is resting. At most five rows show, then **+N more**, which opens the
 Running view (the Board; Chat's Running tile opens Activity). A row opens its
 thread. The card reads what the window's controllers already hold; the run list
 is one read when the card mounts and again when the thread lists change, so it
-adds no timer, and a window sees only what its own authority returns.
+adds no timer, and a window sees only what its own authority returns. The turn
+start and step ride on the same navigation rows as the executing flag (see
+[Architecture: persistence](../architecture.md#persistence), fast thread
+reads), so a remote window sees them for exactly the threads it can already
+list.
+
+**Pull requests** is the next card, on by default, and only on a Code start
+screen. It is hidden — and left out of Customize — unless the Pull requests
+destination is offered and its read is allowed: no connection, insecure token
+storage, or a missing pull-request capability hides it, the same gate that
+refuses that destination's read. It lists open pull requests across every Code
+Project the window can access, from the cached Project pull-request snapshot.
+Opening the card reads that cached snapshot and does not poll; the existing
+per-Project refresh cadence, and an explicit refresh on the Pull requests
+workspace, are what move the list. Two groups: **Waiting on your review**
+(a review was requested from the signed-in person) and **Yours** (authored by
+that person). A pull request that is both is listed once, under waiting.
+Anything that is neither is left out. A row shows the title, a short
+repository and number (`repo#12`), and the words for checks (passed, failed,
+running, none) and review (approved, changes requested, in review, draft). A
+draft says draft rather than a decision. At most six rows show, then **+N
+more**, which opens Pull requests. A row opens that pull request's existing
+review for its Project. The read is one query of the window's authorized
+snapshot, so a remote window sees only the Projects it was granted.
+
+**Needs you** surfaces (a start-screen card, answering from Board cards, the
+command palette) read one host list of the approvals and
+questions this window can answer, across Chat, Work, and Code and across
+Projects, oldest waiting first. Each item names its mode, Project, thread and
+title, kind, text, options where the mode has them, and when it was asked, and
+carries the handle that mode's own answer command takes, so a surface answers
+in place through the commands the open thread already uses. The list is re-read
+on the Machine change feed's Chat, Work, and Code navigation topics and never
+on a timer; an answered or ended request is gone from the next read. It is read
+at a local window only, so a remote window has no Needs you source. What it
+includes and leaves out is in
+[Architecture: pending requests across modes](../architecture.md#security-and-authority).
+
+The command palette opens on a **Needs you** group when this window can read
+that list. It has one row per waiting thread, titled with the thread and
+detailed with its mode, what it waits on, and how long, and Enter opens the
+thread. Each approval also gets **Approve** and **Deny** commands, so typing
+"approve" finds them; they answer through the mode's own command
+(`resolve-work-request`, `answer-provider-approval`) without opening the thread,
+and a refusal shows as a notice. A question's choices are not listed, so its row
+opens the thread. The palette reads the list each time it opens and never on a
+timer. With nothing waiting, or at a remote window, the group is absent, and the
+composer `/` list never carries it.
 
 ## Tool lifecycles
 
@@ -370,15 +423,21 @@ Under the composer of every thread, in Chat, Work, and Code and for every provid
 quiet stats line states what the thread used: input and output tokens, the cache
 hit, output speed, time to first token, and cost. It reads the host's recorded
 turns and is worded by one shared module in `packages/domain`
-(`turnMetricsDisplay.ts`), which the composer, the Octant Harness session card, the
-terminal footer, and the phone's session panel all call, so the rules cannot
-drift. A figure the provider did not report, or whose denominator is zero, is
+(`turnMetricsDisplay.ts`), which the composer, the usage page, the Octant Harness
+session card, the terminal footer, and the phone's session panel all call, so
+the rules cannot drift. A figure the provider did not report, or whose denominator is zero, is
 absent; a provider that reported no usage shows no line. A cache hit is never
 rounded up to a whole; an approximate speed carries a tilde and a tooltip that it
 is per turn and includes some tool time; a cost says "est." unless the provider
 reported it and is absent when the model has no price. Clicking the line, or
 **Turn details** in the context meter's popover, opens one turn at a time (tokens,
-timing, retries, cost). The line is on by default; `showThreadStats` in the shell
+timing, retries, cost). The usage page's per-thread rows and the turn drill-in
+under each row call this same module, so a thread shows the same cache, speed,
+first-token, and cost figures there as under its composer. Those columns are
+left out when no row can state them. The rows read `turnMetrics` on the existing
+usage query; they do not add a second accounting path. A reading of one thread
+uses that thread's totals. A reading that mixes threads and has scrolled past
+the latest turns says those rows cover only the turns still listed. The line is on by default; `showThreadStats` in the shell
 settings is the one shared preference, set from the eye button on the line, the
 switch in the context meter's popover, and Settings › Appearance › Reading. Off hides
 only the line; the details stay reachable.

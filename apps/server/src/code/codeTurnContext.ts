@@ -4,6 +4,8 @@ import {
   type CodeThread,
   type ContextEntry,
   type ProviderContextBlock,
+  type ProviderContextBreakdown,
+  type ProviderToolDefinition,
 } from "@octant/contracts";
 import {
   attributeProfileInstructions,
@@ -86,4 +88,33 @@ export function composeCodeProfileContext(input: {
     blocks.push({ kind: "instructions", text: attribution.text });
   }
   return { entries, blocks };
+}
+
+/**
+ * The tool definitions Octant registers with a provider-run session, counted as
+ * a part of that session's window. A tool definition travels with every request,
+ * so it holds a place in the window however long the thread runs; this is the
+ * one thing a runtime that reports no categories lets Octant count as it was
+ * sent. The size is still an estimate: it takes the serialized definition at four
+ * characters to a token, with the same floor per tool as Work's planned input,
+ * and says so as a conservative heuristic.
+ */
+export function estimateOctantToolsPart(
+  definitions: ReadonlyArray<ProviderToolDefinition>,
+): ProviderContextBreakdown | undefined {
+  if (definitions.length === 0) return undefined;
+  const tokens = definitions.reduce(
+    (sum, tool) => sum + Math.max(16, Math.ceil(JSON.stringify(tool).length / 4)),
+    0,
+  );
+  return {
+    parts: [
+      {
+        kind: "octant-tools",
+        tokens,
+        accuracy: "conservative-heuristic",
+        count: definitions.length,
+      },
+    ],
+  };
 }

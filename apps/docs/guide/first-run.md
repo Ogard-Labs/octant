@@ -9,7 +9,9 @@ who you are, how the workspace looks, which providers this Mac can reach, a
 default Chat model, and whether Navigator is on. Every step is optional,
 including your name. **Skip setup** is available from the first step and keeps
 answers that have already been saved. Quitting without completing or skipping
-leaves first run pending. You can edit your name, avatar, and other identity
+leaves first run pending. If Octant could not save one of your answers it
+tells you, and pressing Skip setup or the primary action again continues without
+that answer. You can edit your name, avatar, and other identity
 details later in **Settings → Profile**.
 
 The last screen is a readiness view. It reports three facts separately:
