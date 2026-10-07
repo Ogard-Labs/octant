@@ -411,6 +411,77 @@ describe("SpendCeilingService", () => {
     });
   });
 
+  it("reads remaining money in cents and raises a money ceiling that survives restart", () => {
+    const { connection, journal, service } = openService();
+    const scope = {
+      kind: "thread" as const,
+      threadType: "chat-thread" as const,
+      threadId: ids.thread,
+    };
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope,
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 25_00 },
+      window: { kind: "lifetime" },
+    });
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000303",
+      subjectType: "chat-thread",
+      subjectId: ids.thread,
+      tokens: { input: 100, output: 0 },
+      sequence: 1,
+      costUsdMicros: 10_404_999,
+      costKind: "api-estimate",
+    });
+    const before = service.snapshot({
+      principalKind: "local-window",
+      threadId: ids.thread,
+      threadType: "chat-thread",
+    });
+    expect(before).toMatchObject({
+      threadRemaining: { ceilingUsdCents: 25_00, usedUsdCents: 10_40, remainingUsdCents: 14_60 },
+    });
+
+    expect(
+      service.execute("local-window", {
+        kind: "raise-spend-ceiling",
+        scope,
+        expectedVersion: decodeAggregateVersion(1),
+        costBudgetUsdCents: 10_00,
+      }),
+    ).toMatchObject({ kind: "refused", refusal: { kind: "not-a-raise" } });
+    expect(
+      service.execute("local-window", {
+        kind: "raise-spend-ceiling",
+        scope,
+        expectedVersion: decodeAggregateVersion(1),
+        costBudgetUsdCents: 40_00,
+      }),
+    ).toMatchObject({
+      kind: "raised",
+      ceiling: { policy: { costBudgetUsdCents: 40_00 } },
+      previousCostBudgetUsdCents: 25_00,
+    });
+
+    const restarted = new SpendCeilingService({
+      connection,
+      journal,
+      clock: () => now,
+      uuid: () => crypto.randomUUID(),
+    });
+    expect(
+      restarted.snapshot({
+        principalKind: "local-window",
+        threadId: ids.thread,
+        threadType: "chat-thread",
+      }),
+    ).toMatchObject({
+      thread: { policy: { costBudgetUsdCents: 40_00 } },
+      threadRemaining: { ceilingUsdCents: 40_00, usedUsdCents: 10_40, remainingUsdCents: 29_60 },
+    });
+  });
+
   it("counts only scoped usage inside the calendar window", () => {
     const { connection, service } = openService();
     expect(

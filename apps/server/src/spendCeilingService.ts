@@ -205,6 +205,9 @@ export class SpendCeilingService {
       ...(decision.previousRunTimeBudgetSeconds === undefined
         ? {}
         : { previousRunTimeBudgetSeconds: decision.previousRunTimeBudgetSeconds }),
+      ...(decision.previousCostBudgetUsdCents === undefined
+        ? {}
+        : { previousCostBudgetUsdCents: decision.previousCostBudgetUsdCents }),
     };
     this.#append(command.scope, aggregateVersion, eventName, {
       ceiling: decision.next,
@@ -296,7 +299,7 @@ export class SpendCeilingService {
   }
 
   #remaining(ceiling: SpendCeilingState, facts: SpendCeilingScopeFacts): SpendCeilingRemaining {
-    const { tokenBudget, turnBudget, runTimeBudgetSeconds } = ceiling.policy;
+    const { tokenBudget, turnBudget, runTimeBudgetSeconds, costBudgetUsdCents } = ceiling.policy;
     const tokens =
       tokenBudget === undefined || facts.committed.status !== "known"
         ? {}
@@ -328,10 +331,19 @@ export class SpendCeilingService {
             usedRunTimeSeconds: usedSeconds,
             remainingRunTimeSeconds: Math.max(0, runTimeBudgetSeconds - usedSeconds),
           };
+    const money =
+      costBudgetUsdCents === undefined || facts.usedCostUsdCents === undefined
+        ? {}
+        : {
+            ceilingUsdCents: costBudgetUsdCents,
+            usedUsdCents: facts.usedCostUsdCents,
+            remainingUsdCents: Math.max(0, costBudgetUsdCents - facts.usedCostUsdCents),
+          };
     return {
       ...tokens,
       ...turns,
       ...runTime,
+      ...money,
       window: ceiling.window,
       ...(ceiling.overrun === undefined ? {} : { overrun: ceiling.overrun }),
       version: ceiling.version,

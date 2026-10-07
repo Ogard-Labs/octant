@@ -73,8 +73,10 @@ export type SpendCeilingWindow = typeof SpendCeilingWindow.Type;
 /**
  * Optional host ceiling over one window. Each budget is its own dimension and
  * a turn must fit every configured one: tokens from the usage ledger, provider
- * turns started, and total agent run time (seconds summed across settled and
- * in-flight turns). Monetary budgets stay off until pricing is configured.
+ * turns started, total agent run time (seconds summed across settled and
+ * in-flight turns), and US cents of settled, priced usage. Money is only known
+ * once a provider reports a turn, so it is checked between turns; any unpriced
+ * usage in the window refuses rather than counting as free.
  */
 export const SpendCeilingPolicy = Schema.Struct({
   tokenBudget: Schema.optional(PositiveInt),
@@ -85,7 +87,7 @@ export const SpendCeilingPolicy = Schema.Struct({
   maxTokensPerTurn: Schema.optional(PositiveInt),
   turnBudget: Schema.optional(PositiveInt),
   runTimeBudgetSeconds: Schema.optional(PositiveInt),
-  /** Spend ceiling over provider-reported or estimated US dollars. */
+  /** Settled spend from provider-recorded costs or standard-rate API estimates. */
   costBudgetUsdCents: Schema.optional(PositiveUsdCents),
 })
   .annotations(strict)
@@ -96,7 +98,7 @@ export const SpendCeilingPolicy = Schema.Struct({
         policy.turnBudget !== undefined ||
         policy.runTimeBudgetSeconds !== undefined ||
         policy.costBudgetUsdCents !== undefined ||
-        "A spend ceiling needs a token, turn, or run-time budget.",
+        "A spend ceiling needs a token, turn, run-time, or money budget.",
     ),
   );
 export type SpendCeilingPolicy = typeof SpendCeilingPolicy.Type;
@@ -148,7 +150,7 @@ export const RaiseSpendCeilingCommand = Schema.Struct({
         command.turnBudget !== undefined ||
         command.runTimeBudgetSeconds !== undefined ||
         command.costBudgetUsdCents !== undefined ||
-        "Raising a spend ceiling needs a new token, turn, or run-time budget.",
+        "Raising a spend ceiling needs a new token, turn, run-time, or money budget.",
     ),
   );
 export type RaiseSpendCeilingCommand = typeof RaiseSpendCeilingCommand.Type;
@@ -176,6 +178,7 @@ export const SpendCeilingRaised = Schema.Struct({
   previousTokenBudget: Schema.optional(PositiveInt),
   previousTurnBudget: Schema.optional(PositiveInt),
   previousRunTimeBudgetSeconds: Schema.optional(PositiveInt),
+  previousCostBudgetUsdCents: Schema.optional(PositiveUsdCents),
 }).annotations(strict);
 export type SpendCeilingRaised = typeof SpendCeilingRaised.Type;
 
@@ -319,6 +322,7 @@ export const SpendCeilingCommandResult = Schema.Union(
     previousTokenBudget: Schema.optional(PositiveInt),
     previousTurnBudget: Schema.optional(PositiveInt),
     previousRunTimeBudgetSeconds: Schema.optional(PositiveInt),
+    previousCostBudgetUsdCents: Schema.optional(PositiveUsdCents),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("cleared"),

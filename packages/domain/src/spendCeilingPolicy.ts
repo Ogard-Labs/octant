@@ -68,6 +68,7 @@ export type SpendCeilingCommandDecision =
       readonly previousTokenBudget?: number;
       readonly previousTurnBudget?: number;
       readonly previousRunTimeBudgetSeconds?: number;
+      readonly previousCostBudgetUsdCents?: number;
     }
   | { readonly status: "cleared"; readonly scope: SpendCeilingScope }
   | { readonly status: "refused"; readonly refusal: SpendCeilingCommandRefusal };
@@ -141,7 +142,7 @@ function refusalMessage(input: RefusalInput): string {
   }
   if (input.dimension === "monetary") {
     if (input.kind === "unknown-spend") {
-      return `This ${who}'s money ceiling cannot be measured because its spend cannot be priced. ${recovery}`;
+      return `This ${who}'s money ceiling cannot be checked because some of its usage in this window has no price: the provider reported no cost and Octant has no rate for the model, or the provider reported no usage. ${recovery}`;
     }
     return `This ${who}'s money ceiling of ${formatSpendCeilingUsd(input.ceilingUsdCents ?? 0)} is used up for this window. ${recovery}`;
   }
@@ -611,6 +612,7 @@ export function decideSpendCeilingCommand(input: {
       ["token", input.command.tokenBudget, current.tokenBudget],
       ["turn", input.command.turnBudget, current.turnBudget],
       ["run-time", input.command.runTimeBudgetSeconds, current.runTimeBudgetSeconds],
+      ["money", input.command.costBudgetUsdCents, current.costBudgetUsdCents],
     ] as const;
     for (const [dimension, next, previous] of raises) {
       if (next === undefined) continue;
@@ -645,6 +647,9 @@ export function decideSpendCeilingCommand(input: {
       current.runTimeBudgetSeconds === undefined
         ? {}
         : { previousRunTimeBudgetSeconds: current.runTimeBudgetSeconds }),
+      ...(input.command.costBudgetUsdCents === undefined || current.costBudgetUsdCents === undefined
+        ? {}
+        : { previousCostBudgetUsdCents: current.costBudgetUsdCents }),
       next: {
         ...base,
         policy: {
@@ -658,6 +663,9 @@ export function decideSpendCeilingCommand(input: {
           ...(input.command.runTimeBudgetSeconds === undefined
             ? {}
             : { runTimeBudgetSeconds: input.command.runTimeBudgetSeconds }),
+          ...(input.command.costBudgetUsdCents === undefined
+            ? {}
+            : { costBudgetUsdCents: input.command.costBudgetUsdCents }),
         },
         version: nextVersion,
         setAt: input.now,
