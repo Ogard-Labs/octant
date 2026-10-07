@@ -1846,7 +1846,9 @@ ledger row however it ended — completed, failed, cancelled, or interrupted —
 and Work keeps usage the provider reports after a cancel. A turn that reached
 the provider and reported nothing (an ACP agent in Code reports no usage) is
 recorded as unreported and unpriced, so token and money ceilings refuse after
-it; a turn refused before the provider leaves no row. Any unpriced row in the
+it; a turn refused or failed before the provider leaves no row. A Code turn
+reaches the provider once its `provider-session-ready` frame is journaled,
+just before the prompt is sent, or when it completes. Any unpriced row in the
 window — a model with no price, a provider that reports no cost or no usage,
 and usage recorded before the ledger carried cost — makes the money ceiling
 refuse `unknown-spend` rather than count that usage as free. That refusal

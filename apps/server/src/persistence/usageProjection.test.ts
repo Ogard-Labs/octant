@@ -36,6 +36,8 @@ const ids = {
   plan: "63000000-0000-4000-8000-000000000007",
   usage: "63000000-0000-4000-8000-000000000008",
   usage2: "63000000-0000-4000-8000-000000000009",
+  usage3: "63000000-0000-4000-8000-00000000000a",
+  checkout: "63000000-0000-4000-8000-00000000000b",
 } as const;
 
 afterEach(() => {
@@ -412,7 +414,7 @@ describe("UsageProjection", () => {
     connection.close();
   });
 
-  it("records a Code turn that ended without reporting usage as unreported and unpriced", () => {
+  it("records a Code turn that reached its provider and reported no usage as unreported and unpriced, and none that failed before", () => {
     const { connection, journal } = openDatabase();
     const turn = (operationId: string, events: ReadonlyArray<object>) =>
       journal.append({
@@ -435,7 +437,17 @@ describe("UsageProjection", () => {
       sessionId: ids.entry,
       prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
     };
-    turn(ids.usage, [started, { kind: "operation-state", state: "failed" }]);
+    const sessionReady = {
+      kind: "provider-session-ready",
+      sessionId: ids.entry,
+      providerInstanceId: ids.provider,
+      modelId: "acp-agent",
+      checkoutId: ids.checkout,
+    };
+    turn(ids.usage, [started, sessionReady, { kind: "operation-state", state: "failed" }]);
+    // Failed before its provider session was ready for the prompt: nothing
+    // was sent, so nothing is owed and no row may make a ceiling refuse.
+    turn(ids.usage3, [started, { kind: "operation-state", state: "failed" }]);
     turn(ids.usage2, [
       started,
       {

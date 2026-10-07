@@ -222,14 +222,14 @@ export class CodeUsageProjection implements Projection {
     assertProjection(String(frame.operationId) === String(event.aggregateId));
     const start = connection
       .prepare(`
-      SELECT payload_json FROM event_journal
+      SELECT payload_json, global_sequence FROM event_journal
       WHERE aggregate_type = 'code-operation' AND aggregate_id = ?
         AND event_name = 'code.operation-event-recorded@1' AND global_sequence < ?
         AND json_extract(payload_json, '$.event.kind') = 'conversation-turn-started'
       ORDER BY global_sequence DESC LIMIT 1
     `)
       .get(String(frame.operationId), event.globalSequence) as
-      | { readonly payload_json: string }
+      | { readonly payload_json: string; readonly global_sequence: number }
       | undefined;
     if (start === undefined) return;
     const started = decodeProjection(() =>
@@ -242,6 +242,11 @@ export class CodeUsageProjection implements Projection {
       // — still ran on the provider. Recording it as unreported and unpriced
       // keeps it out of "free": a spend ceiling refuses instead of counting
       // it as nothing. A turn that did report keeps its row untouched.
+      // The turn starts before its provider is acquired, so one that failed
+      // or was cancelled before its session was ready sent nothing; a row
+      // would make a money ceiling refuse over spend that never happened.
+      const completed = frame.event.kind === "operation-state" && frame.event.state === "completed";
+      if (!completed && !providerSessionReady(connection, frame.operationId, start, event)) return;
       connection
         .prepare(`
         INSERT INTO usage_record_projection (
@@ -305,6 +310,27 @@ export class CodeUsageProjection implements Projection {
         String(event.hostId),
       );
   }
+}
+
+/** Whether the turn's provider session was ready for its prompt before it ended. */
+function providerSessionReady(
+  connection: SqliteConnection,
+  operationId: string,
+  start: { readonly global_sequence: number },
+  ended: EventEnvelope,
+): boolean {
+  return (
+    connection
+      .prepare(`
+      SELECT 1 AS present FROM event_journal
+      WHERE aggregate_type = 'code-operation' AND aggregate_id = ?
+        AND event_name = 'code.operation-event-recorded@1'
+        AND global_sequence > ? AND global_sequence < ?
+        AND json_extract(payload_json, '$.event.kind') = 'provider-session-ready'
+      LIMIT 1
+    `)
+      .get(operationId, start.global_sequence, ended.globalSequence) !== undefined
+  );
 }
 
 function rawUsageRecord(
