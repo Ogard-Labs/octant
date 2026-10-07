@@ -3,6 +3,11 @@
   font-size: var(--oct-text-xs);
   color: var(--octant-text-secondary);
 }
+/* The thread's connection notice speaks for the lost connection; the queue only
+   steps back while its controls cannot act. */
+.thread-message-queue[data-connection="lost"] {
+  opacity: 0.6;
+}
 .thread-message-queue__heading,
 .thread-message-queue__actions {
   display: flex;

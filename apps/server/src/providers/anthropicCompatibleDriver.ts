@@ -361,6 +361,9 @@ function anthropicCompatibleTransport(
                 ...(result.rateLimitBuckets === undefined
                   ? {}
                   : { rateLimitBuckets: result.rateLimitBuckets }),
+                ...(result.outputStopReason === undefined
+                  ? {}
+                  : { outputStopReason: result.outputStopReason }),
               };
             },
           });

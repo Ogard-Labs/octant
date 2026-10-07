@@ -234,6 +234,28 @@
   margin: var(--oct-space-1) var(--oct-space-1) 0;
 }
 
+/* ── Needs you ────────────────────────────────────────────────────────── */
+
+.needs-you__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.needs-you__list > li {
+  min-width: 0;
+}
+
+.needs-you__list > li + li {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.needs-you__more.needs-you__more {
+  justify-self: start;
+  margin: var(--oct-space-1) var(--oct-space-1) 0;
+}
+
 /* ── Pull requests ────────────────────────────────────────────────────── */
 
 .pull-requests-card__group {

@@ -1518,7 +1518,10 @@ protocol that reports uncached input, cache reads, and cache writes as disjoint 
 absent rather than zero, a turn of several requests reports the sum of the figures its
 requests reported, and a report whose cache or reasoning figure exceeds its total is
 refused as invalid usage. Unknown fields in a response are ignored; a known field of
-the wrong type still fails the turn. ACP and Pi resume cursors carry a durable
+the wrong type still fails the turn. The input tokens a request reports also
+calibrate the native harness's next size estimate: a model's real bytes-per-token,
+measured from the last call, is preferred over a flat four-bytes-per-token guess, so
+a filled window is caught before the endpoint has to refuse the request. ACP and Pi resume cursors carry a durable
 task binding, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
 follow-ups; Chat retries retain that identity and native scratch files. Native
@@ -1583,6 +1586,32 @@ session's `usage` and `metrics` totals fold them, so a Code turn on a direct
 endpoint no longer records zero tokens. Chat, Work and Code on every provider
 journal the frame; the harness additionally keeps its own record.
 
+### Stop reasons
+
+A completed runtime event may carry an optional stop reason. `max-tokens` means
+the reply was cut off because the output limit was reached. `content-filter`
+means the provider stopped the reply on a content filter. The field is absent
+when the runtime did not say why the turn ended; absence is not a normal
+finish guessed into a reason.
+
+Chat Completions maps `finish_reason` `length` to `max-tokens` and
+`content_filter` to `content-filter`. The Responses protocol maps
+`incomplete_details.reason` `max_output_tokens` and `content_filter` the same
+way. The Messages protocol maps `stop_reason` `max_tokens`, and `refusal`
+(its safety classifier stopping the reply) to `content-filter`; an ACP prompt
+result's `refusal` names the agent declining to continue, not a filter, so it
+leaves the field absent. Claude's result
+`stop_reason`, Pi's assistant `stopReason` of `length`, OpenCode's step
+`finish` of `length`, and an ACP prompt result that names one of those
+strings, map when the protocol reports them. A local runtime's `done_reason`
+of `length` maps the same way. Codex's turn status does not say the output
+was cut off, so its completed event leaves the field absent.
+
+A turn record's stop reason is `max-tokens` when the completed event carried
+that reason. The per-turn detail says "Cut off at the output limit". The
+transcript shows a quiet note with Continue, which drafts a follow-up into
+the composer and sends nothing until the person does.
+
 The ACP and RPC mappers (Devin, Kimi, Grok, Copilot, Mistral Vibe, Oh My Pi)
 report no usage today: the prompt result is read only for its stop reason, and
 the capability is declared `unavailable`, so their turns are `unavailable` and
@@ -1640,7 +1669,24 @@ native harness in `apps/server/src/harness`:
   results return in one message in call order. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
-  alone does not fit.
+  alone does not fit. When the endpoint still rejects a request as too large,
+  the loop recognises the refusal as a filled context window (OpenAI's
+  `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
+  413 shape from an OpenAI-compatible host), shrinks it one further ladder
+  step, and sends it once more; a second refusal stands. That step always
+  changes the refused request, which may itself have been reduced already: a
+  result already omitted or a note already in front is skipped, and when
+  nothing is left to leave out the refusal stands. The size estimate
+  prefers the input tokens the last call reported over a flat
+  four-bytes-per-token guess. A tool call that names no offered tool, reuses a
+  call id, or carries arguments that are not JSON is answered with an error
+  result instead of failing the turn, so the model can correct itself; the
+  arguments the model sent are never replaced by an empty object. A handful of
+  such correction steps is the most a turn takes, so a model that will not
+  correct itself fails rather than loop; the well-formed calls of that last
+  step are answered as not run, so the conversation stays valid for the next
+  send. An unknown stream event type is
+  ignored and logged, never fatal.
 - **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
   each step as it happens (`native-harness-transcript`, one aggregate per
   session): the user message once the request is known to fit, each reply,
@@ -1651,7 +1697,12 @@ native harness in `apps/server/src/harness`:
   stopped in the middle of with a journaled interrupted result that says
   whether the tool only reads (`replay: "safe"`, call it again) or may have
   taken effect (`replay: "unsafe"`, check before repeating); nothing is
-  silently re-run. Chat and Work still rebuild their history on the host and
+  silently re-run. A cancel (`interrupt`) ends only the turn in flight: the
+  session and its conversation stay live, so the next `send` continues it
+  without a resume or a journal rebuild, and a cancel during a tool step first
+  closes the calls its runner never answered with the same interrupted results
+  a resume would write. Only `stop` releases the session. Chat and Work still
+  rebuild their history on the host and
   start a fresh session each turn.
 - **Forks.** A Code fork on a harness model starts its first session from a
   copy of the source's transcript through the fork point
@@ -1742,12 +1793,21 @@ native harness in `apps/server/src/harness`:
   jitter; `Retry-After` replaces the wait, capped at a minute. A request is
   retried only while nothing of it has streamed (text or reasoning); tool calls
   reach the loop only with the settled response, so they never count as output.
-  Each retry is a `retrying` runtime event emitted before its wait, and what a
+  Each retry is a `retrying` runtime event emitted before its wait. The thread's
+  working indicator, the terminal footer, and the phone session panel show
+  "Provider busy, retrying 2/5 in 4 s" and count the wait down, in ordinary
+  text rather than a warning, until the next content arrives or the turn
+  settles; a failed or cancelled attempt keeps no retry line. The turn's
+  detail counts those same events. What a
   failed attempt billed is added to the usage of the attempts after it. A
   cancel ends a wait at once and stays `interrupted`. The stream idle limit is
   120 s and restarts on any byte, so keep-alive comments and reasoning deltas
   count. A spent allowance (`usageLimit` other than `temporary`), a rejected
-  credential, and a malformed event are never retried. Transports reject with
+  credential, and a malformed event are never retried. A refusal that names a
+  filled context window (OpenAI's `context_length_exceeded`, Anthropic's
+  "prompt is too long", or a 400 or 413 shape) is classified as context
+  overflow, which the retry policy never sends again as-is: the loop shrinks
+  the request and retries it once (above). Transports reject with
   the typed `ProviderFailure` (`runProviderEffect`), not the Effect runtime's
   wrapper, because the category is what these rules decide on.
 - **Lead fallback.** When a request's retries are spent, the loop asks its
@@ -1964,6 +2024,28 @@ mirror's global folder follows. Writes are confined to the chosen folder and are
 atomic: a temporary file is renamed into place, so a reader never sees a
 half-written export. The user guide's exporting page
 (`apps/docs/guide/export.md`) states the same rules for a person.
+
+The GitHub Gist destination ships in-tree on the same port. It reuses the GitHub
+connection Octant already resolved through the `gh` command — the host-managed
+credential, never a token read by this code — so a host with no usable
+connection reports `not-connected` and one whose credential is stored in plain
+text reports `refused`, the same states the other GitHub capabilities report.
+The connection state is read on demand, when an export lists or prepares its
+destinations, and kept until Octant's own GitHub commands report a change; a
+state that cannot offer the gist is read again on the next listing. No GitHub
+call happens at host start. A GitHub refusal other than a rejected credential
+(for example a connection without the `gist` scope) is reported as declined, not
+as GitHub being unreachable. A remote destination can describe more than a file:
+`describeDestination` names the account the export acts as and the audience the
+result will have, and a destination's own note, which the approval card shows
+verbatim. The person chooses `secret` or `public` on the card, the choice
+travels back through the `canvas-export-decision` request into `exportDocument`,
+and the card states plainly that a public result is visible to anyone. A gist is
+Markdown only and one file named from the Canvas title with a `.md` extension;
+the rendered document passes the same secret-and-path filter every exported
+document does, and one that fails it is refused rather than published. The
+receipt is the gist URL and its id, journaled in `canvas.export@1` like any
+other destination's.
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured

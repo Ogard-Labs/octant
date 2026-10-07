@@ -25,6 +25,7 @@ export type {
   ProviderToolDefinition,
   ProviderTurnInput,
 } from "@octant/contracts";
+export { ProviderOutputStopReason } from "@octant/contracts";
 
 export interface ProviderProbeInput {
   readonly instanceId: ProviderInstanceId;

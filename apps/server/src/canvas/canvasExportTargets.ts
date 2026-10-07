@@ -8,6 +8,11 @@ import type { CanvasExportFilePort } from "./canvasExportFilePort";
 import type { CanvasExportTargetBinding } from "./canvasExportService";
 import { isInsideHomeDirectory } from "./artifactMirrorFilePort";
 import { createFolderExportTarget, type FolderExportAvailability } from "./folderExportTarget";
+import {
+  createGistExportTarget,
+  type GistExportAvailability,
+  type GistExportTargetDependencies,
+} from "./gistExportTarget";
 
 /**
  * In-tree export destinations.
@@ -30,6 +35,12 @@ export interface CanvasExportTargetRegistration {
    */
   readonly standingOutsideApproval: boolean;
   readonly newTempId: () => string;
+  /**
+   * The GitHub Gist destination, absent when this host has no GitHub export at
+   * all. Its availability is read per Canvas, because whether GitHub is
+   * connected can change while the host runs.
+   */
+  readonly gist?: GistExportTargetDependencies;
 }
 
 export function canvasExportTargetBindings(
@@ -37,12 +48,20 @@ export function canvasExportTargetBindings(
   canvasId: CanvasId,
 ): ReadonlyArray<CanvasExportTargetBinding> {
   const availability = () => folderAvailability(registration, registration.folderFor(canvasId));
-  const target = createFolderExportTarget({
-    availability,
-    files: registration.files,
-    newTempId: registration.newTempId,
-  });
-  return [{ facts: activationFacts(availability()), target }];
+  const folder: CanvasExportTargetBinding = {
+    facts: activationFacts(availability()),
+    target: createFolderExportTarget({
+      availability,
+      files: registration.files,
+      newTempId: registration.newTempId,
+    }),
+  };
+  const gist = registration.gist;
+  if (gist === undefined) return [folder];
+  return [
+    folder,
+    { facts: gistActivationFacts(gist.availability()), target: createGistExportTarget(gist) },
+  ];
 }
 
 /** The offered list for one Canvas, through the same policy every destination passes. */
@@ -88,6 +107,27 @@ export function activationFacts(
     desiredEnabled: true,
     effectiveState: { kind: "effective" },
     connected: availability.kind !== "not-chosen",
+  };
+  return availability.kind === "refused"
+    ? { ...facts, standingRefusal: availability.reason }
+    : facts;
+}
+
+/**
+ * The gist destination's activation facts. A host with no GitHub connection is
+ * `connected: false` — offered honestly as not-connected rather than hidden —
+ * and an insecure credential store is a standing refusal, the same state the
+ * other GitHub capabilities report.
+ */
+export function gistActivationFacts(
+  availability: GistExportAvailability,
+): CanvasExportActivationFacts {
+  const facts: CanvasExportActivationFacts = {
+    installed: true,
+    trusted: true,
+    desiredEnabled: true,
+    effectiveState: { kind: "effective" },
+    connected: availability.kind !== "not-connected",
   };
   return availability.kind === "refused"
     ? { ...facts, standingRefusal: availability.reason }

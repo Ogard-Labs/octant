@@ -5,6 +5,7 @@ import {
   decodeNativeHarnessTurnRecord,
   decodeProviderSessionId,
   decodeUtcTimestamp,
+  type HarnessRetryNotice,
   type ContextSubjectRef,
   type NativeHarnessSlotCandidate,
   type NativeHarnessTurnStopReason,
@@ -135,15 +136,21 @@ export class NativeHarnessTurnObserver {
   }
 
   /**
-   * Every turn ends here, whatever its outcome. A completed turn is already
-   * closed by its record. One that failed or was stopped is recorded here with
+   * Every turn ends here, whatever its outcome. A completed turn, including one
+   * cut off at the output limit, is already closed by its record from
+   * `turnCompleted`; recording it again would fold its usage into the session
+   * twice. One that failed or was stopped is recorded here with
    * how it really stopped and what it had cost by then, so the session's
    * totals count it, a pause waiting for it knows it is done, and a restart
    * does not mistake it for one it cut off.
    */
   turnEnded(scope: NativeHarnessTurnScope, turn?: TurnEndSummary): void {
     if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return;
-    if (turn !== undefined && turn.stopReason !== "end-of-turn") {
+    if (
+      turn !== undefined &&
+      turn.stopReason !== "end-of-turn" &&
+      turn.stopReason !== "max-tokens"
+    ) {
       this.#recordTurn(scope, {
         turnId: decodeNativeHarnessTurnId(this.#options.uuid()),
         stopReason: harnessStopReason(turn.stopReason),
@@ -151,6 +158,7 @@ export class NativeHarnessTurnObserver {
       });
     }
     this.#options.sessions.settleTurn(scope.threadId);
+    this.#options.sessions.clearRetry(scope.threadId);
   }
 
   turnStarted(scope: NativeHarnessTurnScope): void {
@@ -163,6 +171,17 @@ export class NativeHarnessTurnObserver {
       lead: this.#lead(scope),
     });
     this.#options.sessions.markRunning(scope.threadId);
+    this.#options.sessions.clearRetry(scope.threadId);
+  }
+
+  noteRetry(scope: NativeHarnessTurnScope, notice: HarnessRetryNotice): void {
+    if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return;
+    this.#options.sessions.noteRetry(scope.threadId, notice);
+  }
+
+  clearRetry(scope: NativeHarnessTurnScope): void {
+    if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return;
+    this.#options.sessions.clearRetry(scope.threadId);
   }
 
   async turnCompleted(
@@ -180,7 +199,7 @@ export class NativeHarnessTurnObserver {
     this.#options.sessions.clearSteering(input.threadId, "delivered");
     this.#recordTurn(input, {
       turnId,
-      stopReason: "end-of-turn",
+      stopReason: input.turn?.stopReason === "max-tokens" ? "max-tokens" : "end-of-turn",
       toolCalls: input.toolCalls,
       ...(input.turn === undefined ? {} : { turn: input.turn }),
     });
