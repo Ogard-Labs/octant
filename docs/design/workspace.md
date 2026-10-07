@@ -230,8 +230,9 @@ for a row that is only a run). Chat and Work first read the thread's running
 turn and send nothing when there is none. Code has no turn to name: its host
 cancels only the turn it is running for that thread and answers a cancel it had
 no turn for with a failed turn state and no reason, which counts as nothing
-running. It asks first, in the row: "Stop this turn?" with **Stop** and **Keep
-running**, the safe answer holding the focus. In every mode a turn that finished
+running. It asks first, in the row: "Stop this turn?" ("Stop this agent run?"
+on a row that is only a run) with **Stop** and **Keep running**, the safe
+answer holding the focus. In every mode a turn that finished
 meanwhile is reported ("Already finished.") and never cancelled twice, and a
 host refusal shows in the row in the host's words. The tabs and list add no persisted state or authority.
 
