@@ -2251,9 +2251,20 @@ mechanisms are:
   reads its subscription sign-in by running `/usr/bin/security`, which would
   return any keychain item that trusts that tool, including other command-line
   programs' tokens, so the profile runs neither the tool nor reads the keychain
-  file. Measured on macOS 27, the security-server lookup alone therefore leaves
-  a Claude Plan launch on subscription sign-in, Chat children included,
-  reporting itself signed out. A bound root a launch may not write is denied in
+  file. Measured on macOS 27, the security-server lookup alone leaves such a
+  launch signed out, so a confined Claude launch on subscription sign-in, Chat
+  children included, signs in with "Claude for helpers" instead: a long-lived
+  token the runtime's own `claude setup-token` mints after one browser approval.
+  The host runs that command on a host-owned pseudo-terminal outside any
+  sandbox, reads the printed token from memory, and keeps it in the credential
+  broker under the Claude Code instance, wrapped so it never reads as that
+  instance's API key. A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
+  and no keychain lookup; unconfined launches keep the runtime's own sign-in.
+  Without a connected token the launch refuses with "Connect Claude for helpers
+  in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
+  runtime never refreshes a handed-in token, so one it refuses is marked
+  expired and the same reconnect step is reported. Only a local window may
+  connect or disconnect. A bound root a launch may not write is denied in
   the profile, so a checkout under that launch's own temporary directory is not
   writable through it. The `--version` read every family and the discovery
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
