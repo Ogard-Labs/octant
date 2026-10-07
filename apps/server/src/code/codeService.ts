@@ -110,6 +110,7 @@ import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalE
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
+import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
   joinCodeThreadBoardPullRequests,
   type ThreadBoardPullRequestSnapshot,
@@ -547,6 +548,8 @@ export interface CodeRepositoryTestDiscoveryPort {
 }
 
 export interface CodeServiceOptions {
+  /** Where a running turn's start time and latest step are kept for the navigation read. */
+  readonly liveTurns?: LiveTurnRegistry;
   readonly gitHistory?: Pick<GitHistoryPort, "read">;
   readonly persistence: CodePersistencePort;
   readonly access: CodeWindowAccessPort;
@@ -793,6 +796,7 @@ export class CodeService {
   readonly #onWorkingDirectoryChanged: CodeServiceOptions["onWorkingDirectoryChanged"];
   readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
   readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
+  readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #issueContext?: GithubIssueContextPort;
   readonly #linearIssueContext?: LinearIssueContextPort;
   /**
@@ -839,6 +843,7 @@ export class CodeService {
     this.#onWorkingDirectoryChanged = options.onWorkingDirectoryChanged;
     this.#waitForThreadChange = options.waitForThreadChange;
     this.#pullRequests = options.pullRequests;
+    this.#liveTurns = options.liveTurns;
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
     }
@@ -1022,7 +1027,8 @@ export class CodeService {
    * Per-thread executing flag and optional checkout chip for the sidebar.
    * Uses the same runtime-work fold as the Code board, and only the persisted
    * checkout identity — never a filesystem probe — so a navigation tick stays
-   * cheap. The chip appears only for a thread's own managed worktree.
+   * cheap. The chip appears only for a thread's own managed worktree. A running
+   * turn also carries its start time and latest step, read from memory.
    */
   #visibleRuntime(
     threads: ReadonlyArray<CodeThread>,
@@ -1046,6 +1052,10 @@ export class CodeService {
         executing: activity.executing,
         ...(checkoutChip === undefined ? {} : { checkoutChip }),
         ...(hasPullRequests ? { pullRequestSummaries } : {}),
+        // Rides on the row the caller was already allowed to see: `threads`
+        // is the authority-filtered list, so a window never learns what a
+        // thread it cannot browse is running.
+        ...this.#liveTurns?.read(String(thread.id)),
       };
     });
   }

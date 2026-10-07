@@ -51,6 +51,15 @@ import {
   type OctantMode,
   type ProjectId,
 } from "@octant/contracts";
+import {
+  decodeCanvasExportFolderResult,
+  decodeCanvasExportFolderView,
+  type CanvasExportFolderCommand,
+  type CanvasExportFolderResult,
+  type CanvasExportFolderView,
+} from "@octant/contracts/canvas-export-folder";
+import type { FolderBrowseRequest, FolderBrowseResult } from "@octant/contracts/folder-browse";
+import { createFolderBrowseClient } from "./folderBrowseClient";
 
 export interface CanvasClientOptions {
   readonly baseUrl: string;
@@ -100,6 +109,19 @@ export interface CanvasClient {
   exportOffers?(canvasId: CanvasId): Promise<CanvasExportOfferList>;
   prepareExport?(request: CanvasExportPrepareRequest): Promise<CanvasExportPrepareResult>;
   decideExport?(request: CanvasExportDecideRequest): Promise<CanvasExportDecideResult>;
+  /**
+   * The folder a Canvas exports to, and the host identity and browse mode a
+   * person chooses one with. A host without the route offers no folder
+   * chooser; the folder destination then stays `not-connected`.
+   */
+  exportFolder?(canvasId: CanvasId): Promise<CanvasExportFolderView>;
+  /** Record the folder a person picked in the host's own browser. */
+  chooseExportFolder?(command: CanvasExportFolderCommand): Promise<CanvasExportFolderResult>;
+  /**
+   * The host's folder browser, reached through this client so a renderer sends
+   * the browser's candidate id and never a path of its own.
+   */
+  browseFolders?(request: FolderBrowseRequest): Promise<FolderBrowseResult>;
   create(request: CanvasCreateRequest): Promise<CanvasCreateResult>;
   threadReferenceCards(input: {
     readonly mode: OctantMode;
@@ -340,6 +362,35 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         },
         decodeCanvasExportDecideResult,
       );
+    },
+    exportFolder(canvasId) {
+      const url = new URL("/api/canvas/export-folder", options.baseUrl);
+      url.searchParams.set("canvasId", String(canvasId));
+      return request(
+        options.fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeCanvasExportFolderView,
+      );
+    },
+    chooseExportFolder(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/export-folder", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeCanvasExportFolderResult,
+      );
+    },
+    browseFolders(body) {
+      return createFolderBrowseClient({
+        baseUrl: options.baseUrl,
+        fetch: options.fetch,
+        windowCapability: options.windowCapability,
+      }).browse(body);
     },
     create(body) {
       return request(

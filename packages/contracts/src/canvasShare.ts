@@ -1,8 +1,11 @@
 import { Schema } from "effect";
 import {
+  CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CanvasActor,
   CanvasBlock,
   CanvasId,
+  CanvasMetricDirection,
+  CanvasNumberFormat,
   CanvasSchemaVersion,
   CanvasVersionId,
   canvasChartSeriesIssue,
@@ -129,8 +132,21 @@ function extractCandidateUrls(value: string): string[] {
   return [...candidates];
 }
 
+/**
+ * Whether `value` carries no credential-shaped text.
+ *
+ * The path half of `isCanvasShareSafeText` is deliberately left out: a local
+ * destination's entire job is to tell the person which file it wrote or will
+ * write, and that filter refuses any absolute path so a path can never leave
+ * the host. Callers of this still bound the value themselves; what they gain
+ * is the same secret scan every other exported string gets.
+ */
+export function isExportCredentialFreeText(value: string): boolean {
+  return !EXPORT_SECRET_VALUE_PATTERN.test(value);
+}
+
 export function isCanvasShareSafeText(value: string): boolean {
-  if (EXPORT_SECRET_VALUE_PATTERN.test(value)) return false;
+  if (!isExportCredentialFreeText(value)) return false;
   if (EXPORT_FILE_PATH_PATTERN.test(value)) return false;
   for (const candidate of extractCandidateUrls(value)) {
     try {
@@ -250,6 +266,14 @@ export const CanvasStaticExportBlock = Schema.Union(
     value: ExportScalar,
     unit: Schema.optional(ExportLabel),
     delta: Schema.optional(Schema.Number),
+    // The reading fields a metric gained after the share contract was first
+    // written; without them a shared metric that names any of them was refused.
+    format: Schema.optional(CanvasNumberFormat),
+    sparkline: Schema.optional(
+      Schema.Array(Schema.Number).pipe(Schema.maxItems(CANVAS_MAX_METRIC_SPARKLINE_POINTS)),
+    ),
+    goodDirection: Schema.optional(CanvasMetricDirection),
+    caption: Schema.optional(ExportText),
   }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,

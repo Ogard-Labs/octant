@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { CodeBoardCard, CodeBoardQuery, CodeBoardView } from "@octant/contracts";
 
 const CONTINUE_LIMIT = 6;
-const RUNNING_LIMIT = 4;
+const RUNNING_LIMIT = 5;
 
 export type ContinueCards =
   | { readonly kind: "idle" }

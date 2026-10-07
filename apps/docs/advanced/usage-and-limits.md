@@ -64,6 +64,53 @@ The rate is unavailable if any recorded request lacks cache-read measurements,
 if input is zero, or if the counts contradict each other. Source coverage still
 applies: a partial import describes only the records read so far.
 
+## The stats line under every thread
+
+Under the composer of every Chat, Work, and Code thread, on every provider, a
+quiet line states what the thread has used so far:
+
+`↑ 48k in · ↓ 3.1k out · cache 92% · 41 tok/s · 0.9 s first token · $0.03 est.`
+
+- **in** is all input, cached or not. **out** is all output, reasoning included.
+- **cache** is the share of input served from the prompt cache. A hit that was
+  not total never reads as 100%: it gains decimals instead (99.5%, then 99.95%).
+- **tok/s** is output tokens per second over the time the model spent
+  generating, with tool time taken out. It is a whole number from 10 up and has
+  one decimal below that. A leading `~` means the provider reported one figure
+  for a turn that also ran tools, so some tool time may be inside it; hover for
+  the explanation.
+- **first token** is the wait from sending the prompt to the first streamed
+  word, averaged over the turns that were measured.
+- **cost** says **est.** because Octant prices tokens at the standard API rates
+  for the model. A cost the provider reported itself drops the **est.**.
+
+A figure the provider did not report, and one that cannot be measured, is left
+out: Octant never shows a zero it did not see. A provider that reports no usage
+shows no line at all. A thread with more than 50 turns prices its latest 50, and
+the cost tooltip says so.
+
+Click the line, or choose **Turn details** in the context meter's popover, to
+open one turn at a time: input, cache read, cache write, output, and reasoning
+tokens; first token, speed, model time, tool time, requests, and retries; and
+the turn's cost. Use the arrows to step between turns. The details are
+available whether or not the line is shown.
+
+Hide the line with the eye button at its end, with **Stats line under the
+composer** in the context meter's popover, or in **Settings › Appearance ›
+Reading**. It is on by default, and the choice is saved for this installation.
+The same figures appear on the Octant Harness session card, in the terminal
+footer, and on the phone's session panel.
+
+## Threads on the usage page
+
+Octant records, on the Usage page and in Settings, list each thread with those
+same figures. Cache, speed, and first token are columns, and a column is left
+out when no thread in the reading can state it. Open a row to see one turn at
+a time, worded the same way. A partial cache hit is never rounded up to 100%.
+An approximate speed keeps its tilde, and an estimated cost keeps **est.** A
+reading that still has older turns outside the list says so, and does not
+present that partial list as the thread's full total.
+
 ## Remaining capacity
 
 Provider limits show the percentage left and the time until a reset. Absolute

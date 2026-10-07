@@ -163,6 +163,8 @@ describe("shell settings policy", () => {
       transcriptTextSize: "small",
       transcriptWidth: "narrow",
       showThreadProviderIcons: true,
+      showThreadStats: true,
+      homeCards: { order: [], visibility: [] },
       // Each view starts showing exactly what its rows already carried; the
       // Appearance switches only take facts away when someone asks.
       sidebarRowProperties: {

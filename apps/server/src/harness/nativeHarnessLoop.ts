@@ -462,10 +462,11 @@ export function createNativeHarnessConnection(
 
     const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
       fitRequest(state.endpoint, {
+        sessionId: state.sessionId,
         modelId: state.modelId,
         system: state.system,
         history,
-        tools: state.tools,
+        tools: sortToolDefinitionsByName(state.tools),
       });
 
     return {
@@ -824,6 +825,23 @@ function interruptedResults(
           },
     ),
   }));
+}
+
+/**
+ * The tool definitions in one fixed order, by name. The order a provider sees
+ * is part of the request prefix its cache keys on, so the order a turn happens
+ * to compose tools in (the harness set plus whatever else it offers) must
+ * never reach the wire: two turns that offer the same tools then send the same
+ * bytes, and a step reads the earlier steps from cache.
+ */
+export function sortToolDefinitionsByName(
+  tools: ReadonlyArray<ProviderToolDefinition>,
+): ReadonlyArray<ProviderToolDefinition> {
+  return [...tools].sort((left, right) => {
+    const leftName = String(left.name);
+    const rightName = String(right.name);
+    return leftName < rightName ? -1 : leftName > rightName ? 1 : 0;
+  });
 }
 
 /**

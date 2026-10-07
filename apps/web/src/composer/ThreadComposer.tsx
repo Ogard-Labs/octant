@@ -4,6 +4,7 @@ import { ComposerSubagents } from "./ComposerSubagents";
 import type { ReactNode } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
+import { ThreadStats } from "../threadStats/ThreadStats";
 import { OctantButton } from "../ui/base/OctantButton";
 
 /**
@@ -155,12 +156,14 @@ export function ThreadComposer(props: ThreadComposerProps) {
       {props.context === undefined ? null : (
         <div className="thread-composer__context">{props.context}</div>
       )}
+      <ThreadStats />
     </>
   ) : (
     <>
       {message}
       {controls}
       {props.footer}
+      <ThreadStats />
     </>
   );
   const frame =

@@ -1,11 +1,13 @@
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
+  NATIVE_HARNESS_TOOL_DEFINITIONS,
   type OpenAiCompatibleProviderConfiguration,
   type ProviderModelId,
   type ProviderRuntimeEvent,
+  type ProviderToolDefinition,
 } from "@octant/contracts";
-import { NATIVE_HARNESS_TOOL_DEFINITIONS } from "@octant/contracts";
+import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
@@ -68,89 +70,10 @@ function chatStream(text: string): Response {
 describe("native harness request prefix stability", () => {
   it("sends the first turn's tools and history unchanged at the front of the second turn", async () => {
     const bodies: string[] = [];
-    const runtimeRegistry = new ProviderRuntimeRegistry();
-    runtimeRegistry.setObservedState({
-      instanceId,
-      readiness: "ready",
-      processState: "stopped",
-      models: [
-        {
-          id: modelId,
-          displayName: "manual",
-          source: "manual",
-          verification: "unverified",
-          reasoning: "unavailable",
-          inputModalities: ["text"],
-          options: [],
-        },
-      ],
-      capabilities: {
-        streaming: "supported",
-        resume: "unsupported",
-        interruption: "supported",
-        approvals: "unsupported",
-        userQuestions: "unsupported",
-        reasoning: "unavailable",
-        usage: "supported",
-        toolActivity: "unsupported",
-        fileChanges: "unsupported",
-        diffs: "unsupported",
-        taskProgress: "unsupported",
-        nativeChildAgents: "unsupported",
-        harnessAutoReview: "unsupported",
-        nativeAttachments: "unsupported",
-        nativeWebResearch: "unsupported",
-        appManagedTools: "supported",
-        citations: "unsupported",
-      },
-      observedAt: "2026-09-05T12:00:00.000Z",
-    } as never);
-    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-      if (String(url).endsWith("/models")) return new Response(null, { status: 404 });
-      bodies.push(String(init?.body));
-      return chatStream(bodies.length === 1 ? "first answer" : "second answer");
-    });
-    const driver = makeOpenAiCompatibleDriver({
-      instanceId,
-      configuration,
-      credentialResolver: { has: async () => true, resolve: async () => "private-key" },
-      fetch: fetch as never,
-      runtimeRegistry,
-      clock: () => "2026-09-05T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000603",
-    });
-    const tools = [...NATIVE_HARNESS_TOOL_DEFINITIONS];
-    const instructions = [{ kind: "instructions" as const, text: "Stable harness instructions." }];
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
-          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          for (const prompt of ["first", "second"]) {
-            const events = yield* Effect.fork(
-              Stream.runCollect(
-                (yield* connection.subscribe).pipe(
-                  Stream.filter((event: ProviderRuntimeEvent) => event.sessionId === sessionId),
-                  Stream.takeUntil(
-                    (event) => event.kind === "completed" || event.kind === "failed",
-                  ),
-                ),
-              ),
-            );
-            yield* connection.send({
-              sessionId,
-              prompt,
-              context: instructions,
-              attachments: [],
-              tools,
-            });
-            const collected = Array.from(yield* Fiber.join(events));
-            const last = collected.at(-1);
-            if (last?.kind !== "completed") throw new Error(`terminal: ${JSON.stringify(last)}`);
-          }
-          yield* connection.stop(sessionId);
-        }),
-      ),
+    await runTurns(
+      harnessDriver(bodies),
+      ["first", "second"],
+      [...NATIVE_HARNESS_TOOL_DEFINITIONS],
     );
     expect(bodies).toHaveLength(2);
     const first = JSON.parse(bodies[0]!) as { messages: unknown[]; tools: unknown[] };
@@ -161,4 +84,116 @@ describe("native harness request prefix stability", () => {
     );
     expect(second.messages.length).toBe(first.messages.length + 2);
   });
+
+  it("sends the tool definitions in one name order however the turn composed them", async () => {
+    const forward: string[] = [];
+    const reversed: string[] = [];
+    await runTurns(harnessDriver(forward), ["hello"], [...NATIVE_HARNESS_TOOL_DEFINITIONS]);
+    await runTurns(
+      harnessDriver(reversed),
+      ["hello"],
+      [...NATIVE_HARNESS_TOOL_DEFINITIONS].reverse(),
+    );
+
+    const forwardTools = (JSON.parse(forward[0]!) as { tools: EncodedTool[] }).tools;
+    const reversedTools = (JSON.parse(reversed[0]!) as { tools: EncodedTool[] }).tools;
+    expect(reversedTools).toEqual(forwardTools);
+    const names = forwardTools.map((tool) => tool.function.name);
+    expect(names).toEqual([...names].sort());
+  });
 });
+
+interface EncodedTool {
+  readonly function: { readonly name: string };
+}
+
+function harnessDriver(bodies: string[]): ProviderDriver {
+  const runtimeRegistry = new ProviderRuntimeRegistry();
+  runtimeRegistry.setObservedState({
+    instanceId,
+    readiness: "ready",
+    processState: "stopped",
+    models: [
+      {
+        id: modelId,
+        displayName: "manual",
+        source: "manual",
+        verification: "unverified",
+        reasoning: "unavailable",
+        inputModalities: ["text"],
+        options: [],
+      },
+    ],
+    capabilities: {
+      streaming: "supported",
+      resume: "unsupported",
+      interruption: "supported",
+      approvals: "unsupported",
+      userQuestions: "unsupported",
+      reasoning: "unavailable",
+      usage: "supported",
+      toolActivity: "unsupported",
+      fileChanges: "unsupported",
+      diffs: "unsupported",
+      taskProgress: "unsupported",
+      nativeChildAgents: "unsupported",
+      harnessAutoReview: "unsupported",
+      nativeAttachments: "unsupported",
+      nativeWebResearch: "unsupported",
+      appManagedTools: "unsupported",
+      citations: "unsupported",
+    },
+    verifiedToolModelIds: [modelId],
+    observedAt: "2026-09-05T12:00:00.000Z",
+  } as never);
+  const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith("/models")) return new Response(null, { status: 404 });
+    bodies.push(String(init?.body));
+    return chatStream(bodies.length === 1 ? "first answer" : "second answer");
+  });
+  return makeOpenAiCompatibleDriver({
+    instanceId,
+    configuration,
+    credentialResolver: { has: async () => true, resolve: async () => "private-key" },
+    fetch: fetch as never,
+    runtimeRegistry,
+    clock: () => "2026-09-05T12:00:00.000Z",
+    correlationId: () => "80000000-0000-4000-8000-000000000603",
+  });
+}
+
+async function runTurns(
+  driver: ProviderDriver,
+  prompts: readonly string[],
+  tools: readonly ProviderToolDefinition[],
+): Promise<void> {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+        yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        for (const prompt of prompts) {
+          const events = yield* Effect.fork(
+            Stream.runCollect(
+              (yield* connection.subscribe).pipe(
+                Stream.filter((event: ProviderRuntimeEvent) => event.sessionId === sessionId),
+                Stream.takeUntil((event) => event.kind === "completed" || event.kind === "failed"),
+              ),
+            ),
+          );
+          yield* connection.send({
+            sessionId,
+            prompt,
+            context: [{ kind: "instructions" as const, text: "Stable harness instructions." }],
+            attachments: [],
+            tools,
+          });
+          const collected = Array.from(yield* Fiber.join(events));
+          const last = collected.at(-1);
+          if (last?.kind !== "completed") throw new Error(`terminal: ${JSON.stringify(last)}`);
+        }
+        yield* connection.stop(sessionId);
+      }),
+    ),
+  );
+}

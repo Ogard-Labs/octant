@@ -10,6 +10,7 @@ import {
   decodeWorkThreadCommand,
   DEFAULT_WORK_ACCESS,
   WorkSettings as WorkSettingsSchema,
+  type ThreadLiveStep,
   type AggregateVersion,
   type WorkSettings,
   type WorkThread,
@@ -254,6 +255,7 @@ export class WorkThreadService {
             // Carried only when true, so an idle row's payload stays as it was.
             ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),
             ...(activity.awaitingKind === undefined ? {} : { awaitingKind: activity.awaitingKind }),
+            ...liveTurnFacts(activity),
             ...(due === undefined ? {} : { followUpDue: due }),
           });
         }
@@ -314,6 +316,7 @@ export class WorkThreadService {
           // Carried only when true, so an idle row's payload stays as it was.
           ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),
           ...(activity.awaitingKind === undefined ? {} : { awaitingKind: activity.awaitingKind }),
+          ...liveTurnFacts(activity),
           ...(due === undefined ? {} : { followUpDue: due }),
         });
       }
@@ -1113,6 +1116,16 @@ export interface WorkThreadRuntimeActivity {
   readonly executing: boolean;
   readonly awaitingInput?: boolean;
   readonly awaitingKind?: "approval" | "user-input";
+  /** Present while a turn runs: its start and latest step, already redacted. */
+  readonly turnStartedAt?: string;
+  readonly liveStep?: ThreadLiveStep;
+}
+
+function liveTurnFacts(activity: WorkThreadRuntimeActivity) {
+  return {
+    ...(activity.turnStartedAt === undefined ? {} : { turnStartedAt: activity.turnStartedAt }),
+    ...(activity.liveStep === undefined ? {} : { liveStep: activity.liveStep }),
+  };
 }
 
 const WORK_COMPLETE_REFUSALS = {

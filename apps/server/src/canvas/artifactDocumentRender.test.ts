@@ -1,4 +1,8 @@
-import type { CanvasBlock } from "@octant/contracts/canvas";
+import {
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasBlock,
+  type CanvasBlock,
+} from "@octant/contracts/canvas";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { describe, expect, it } from "vitest";
 import { renderArtifactHtml, renderArtifactMarkdown } from "./artifactDocumentRender";
@@ -126,9 +130,9 @@ describe("rendering a canvas as a document", () => {
   });
 
   it("writes a treemap as an indented table of every measure", () => {
-    const treemap = {
+    const treemap = decodeCanvasBlock({
       blockId: "map-1",
-      schemaVersion: 4,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
       kind: "treemap",
       measures: [
         { measureId: "loc", label: "Lines of code" },
@@ -141,7 +145,7 @@ describe("rendering a canvas as a document", () => {
         { nodeId: "a", label: "A", parentId: "root", values: { loc: 10, edits: 2 } },
         { nodeId: "b", label: "B", parentId: "root", values: { loc: 30, edits: 5 } },
       ],
-    } as unknown as CanvasBlock;
+    });
 
     const rendered = renderArtifactMarkdown(definition([treemap]));
 
@@ -207,27 +211,30 @@ describe("rendering a canvas as a document", () => {
   });
 
   it("writes a bar list as a ranked table with an optional second reading", () => {
-    const barList = {
+    const barList = decodeCanvasBlock({
       blockId: "hottest-files",
-      schemaVersion: 6,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
       kind: "bar-list",
       valueLabel: "Edits",
       secondaryLabel: "Lines",
       rows: [
-        { label: "apps/web", value: 41, secondaryValue: 1189 },
         { label: "packages/domain", value: 33 },
+        { label: "apps/web", value: 41, secondaryValue: 1189 },
       ],
-    } as unknown as CanvasBlock;
+    });
 
     const rendered = renderArtifactMarkdown(definition([barList]));
 
     expect(rendered.kind).toBe("rendered");
     if (rendered.kind !== "rendered") return;
     expect(rendered.body).toContain("| Item | Edits | Lines |");
-    // The author's declared order is kept; a row without a second reading leaves
-    // an empty cell rather than a zero.
-    expect(rendered.body).toContain(`| apps/web | 41 | ${formatCanvasNumber(1189)} |`);
-    expect(rendered.body).toContain("| packages/domain | 33 |  |");
+    // A row without a second reading leaves an empty cell rather than a zero.
+    const largest = `| apps/web | 41 | ${formatCanvasNumber(1189)} |`;
+    const smaller = "| packages/domain | 33 |  |";
+    expect(rendered.body).toContain(largest);
+    expect(rendered.body).toContain(smaller);
+    // The export ranks largest first, as the screen and the preview do.
+    expect(rendered.body.indexOf(largest)).toBeLessThan(rendered.body.indexOf(smaller));
   });
 
   it("carries a metric caption into its reading", () => {

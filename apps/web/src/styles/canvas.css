@@ -767,6 +767,18 @@
 
 .canvas-block__heatmap-plot {
   position: relative;
+  /* The tooltip is placed by fractions of the plot, so the plot is exactly as
+     wide as the drawing. */
+  max-width: 480px;
+}
+
+/* A calendar's day cells and labels are sized in pixels, so it draws at its
+   own width and only scales down to fit a narrower Canvas. Stretching to a
+   fixed width blew a few days up into huge squares and shrank a year's labels
+   to about 7px. */
+.canvas-block__heatmap[data-layout="calendar"] .canvas-block__heatmap-plot {
+  width: fit-content;
+  max-width: 100%;
 }
 
 .canvas-block__heatmap-plot:focus-visible {
@@ -778,7 +790,11 @@
   display: block;
   width: 100%;
   height: auto;
-  max-width: 480px;
+}
+
+.canvas-block__heatmap-svg--calendar {
+  width: auto;
+  max-width: 100%;
 }
 
 .canvas-block__heatmap-axis {
@@ -929,6 +945,13 @@
 .canvas-block__bar-list {
   min-width: 0;
   max-width: 100%;
+}
+
+.canvas-block__bar-list-header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-bottom: var(--oct-space-2);
 }
 
 .canvas-block__bar-list-rows {
@@ -2606,6 +2629,36 @@
   overflow: auto;
   white-space: pre-wrap;
   font-size: var(--oct-text-xs);
+}
+
+/* The folder, the file, and where it goes: the person is approving a place, so
+   the path is a row of the surface rather than fine print. */
+.canvas-export__folder {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.canvas-export__folder-label {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.canvas-export__folder-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-export__destination {
+  margin: var(--oct-space-2) 0 0;
+  overflow-wrap: anywhere;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
 }
 
 .octant-dialog__popup:has(> .canvas-export) {
