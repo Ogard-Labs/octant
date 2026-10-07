@@ -46,6 +46,7 @@ const ids = {
   north: "11111111-1111-4111-8111-111111111111" as ReplicaInstanceId,
   south: "22222222-2222-4222-8222-222222222222" as ReplicaInstanceId,
   east: "33333333-3333-4333-8333-333333333333" as ReplicaInstanceId,
+  southAgain: "44444444-4444-4444-8444-444444444444" as ReplicaInstanceId,
 } as const;
 
 const directories: string[] = [];
@@ -127,8 +128,11 @@ function memoryStore(): MemoryStore {
 function computer(options: {
   readonly store: ReplicaStoreSelection;
   readonly instanceId: ReplicaInstanceId;
+  /** Identities this computer takes after its first, in order. */
+  readonly laterInstanceIds?: ReadonlyArray<ReplicaInstanceId>;
   readonly now?: () => number;
 }) {
+  const instanceIds = [options.instanceId, ...(options.laterInstanceIds ?? [])];
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "octant-replica-membership-")));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -159,7 +163,7 @@ function computer(options: {
     state: () => projection.state(),
     localHostId: LOCAL_HOST_ID,
     clock: options.now ?? (() => NOW),
-    newInstanceId: () => options.instanceId,
+    newInstanceId: () => instanceIds.shift() ?? options.instanceId,
   });
   const events = () =>
     journal
@@ -332,6 +336,95 @@ describe("replica membership service", () => {
     const southSecondPull = expectKind(await south.service.execute({ kind: "pull" }), "pulled");
     expect(southSecondPull.applied).toBe(1);
     expect(south.projection.state().revocations).toEqual([ids.south]);
+  });
+
+  it("starts a new identity with its own sequence when a revoked computer asks to join again", async () => {
+    const store = memoryStore();
+    const north = computer({ store: selected(store), instanceId: ids.north });
+    const south = computer({
+      store: selected(store),
+      instanceId: ids.south,
+      laterInstanceIds: [ids.southAgain],
+    });
+    await north.service.execute({ kind: "create-replica", displayName: "MacBook" });
+    await south.service.execute({ kind: "write-join-request", displayName: "Mac mini" });
+    // South asks again under the same identity: its sequence 2.
+    const refreshed = expectKind(
+      await south.service.execute({ kind: "write-join-request", displayName: "Mac mini" }),
+      "join-requested",
+    );
+    expect(refreshed.entry.origin.sequence).toBe(2);
+    await north.service.execute({ kind: "pull" });
+    const code = deriveReplicaJoinMatchingCode({
+      joinRequest: refreshed.entry,
+      approverInstanceId: ids.north,
+    });
+    expectKind(
+      await north.service.execute({
+        kind: "approve-join",
+        joinRequest: refreshed.entry,
+        confirmationCode: code,
+      }),
+      "join-approved",
+    );
+    expectKind(
+      await south.service.execute({
+        kind: "confirm-join",
+        approver: ids.north,
+        confirmationCode: code,
+      }),
+      "join-confirmed",
+    );
+    await north.service.execute({ kind: "revoke", subject: ids.south });
+    await south.service.execute({ kind: "pull" });
+    expect(south.projection.state().revocations).toEqual([ids.south]);
+
+    const again = expectKind(
+      await south.service.execute({ kind: "write-join-request", displayName: "Mac mini" }),
+      "join-requested",
+    );
+    expect(again.instanceId).toBe(ids.southAgain);
+    expect(again.entry.origin.sequence).toBe(1);
+    // The new identity's next entry follows its own first one, not the old
+    // identity's sequence.
+    expect(south.projection.state().localSequence).toBe(1);
+    const pulled = expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    expect(pulled.refused).toEqual([]);
+    expect(pulled.joinRequests.map((entry) => entry.subject)).toEqual([ids.southAgain]);
+  });
+
+  it("refuses a pull whose store listing does not end inside the bound", async () => {
+    const store = memoryStore();
+    const north = computer({ store: selected(store), instanceId: ids.north });
+    await north.service.execute({ kind: "create-replica", displayName: "MacBook" });
+    const endless: ReplicaStore = {
+      ...store,
+      async list() {
+        return { status: "ready", entries: [], reports: [], nextCursor: "more" };
+      },
+    };
+    const reader = new ReplicaMembershipService({
+      store: () => selected(endless),
+      credentials: {
+        ensure: () => Promise.reject(new Error("unused")),
+        sign: () => Promise.reject(new Error("unused")),
+      },
+      journal: createReplicaMembershipJournal({
+        journal: north.journal,
+        uuid: () => crypto.randomUUID(),
+        clock: () => NOW_ISO,
+        actor: { kind: "local-user", actorId: "77777777-7777-4777-8777-777777777777" },
+      }),
+      state: () => north.projection.state(),
+      localHostId: LOCAL_HOST_ID,
+      clock: () => NOW,
+    });
+    const outcome = await reader.execute({ kind: "pull" });
+    expect(outcome).toMatchObject({ kind: "refused", reason: "store-unavailable" });
+    const failure = north
+      .events()
+      .find((e) => e.eventName === REPLICA_MEMBERSHIP_EVENT_NAMES.storeFailure);
+    expect(failure?.payload).toMatchObject({ phase: "list", reason: "truncated" });
   });
 
   it("refuses an entry whose bytes were changed after it was signed, and applies nothing past it", async () => {

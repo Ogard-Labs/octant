@@ -133,7 +133,7 @@ export const ReplicaMembershipCommandRefused = Schema.Struct({
 
 export const ReplicaMembershipStoreFailure = Schema.Struct({
   phase: Schema.Literal("entry", "signature", "read", "list"),
-  reason: Schema.Literal("not-connected", "refused", "slot-occupied"),
+  reason: Schema.Literal("not-connected", "refused", "slot-occupied", "truncated"),
   instanceId: Schema.optional(ReplicaInstanceId),
   sequence: Schema.optional(Sequence),
 }).annotations(strict);
@@ -225,6 +225,7 @@ export class ReplicaMembershipProjection implements Projection {
     switch (event.eventName) {
       case names.replicaCreated: {
         const created = decodeCreated(event.payload);
+        this.#startIdentity(created.instanceId);
         this.#local = {
           instanceId: created.instanceId,
           displayName: created.displayName,
@@ -236,6 +237,7 @@ export class ReplicaMembershipProjection implements Projection {
       }
       case names.joinRequested: {
         const requested = decodeRequested(event.payload);
+        this.#startIdentity(requested.instanceId);
         this.#local = {
           instanceId: requested.instanceId,
           displayName: requested.displayName,
@@ -344,6 +346,17 @@ export class ReplicaMembershipProjection implements Projection {
       this.#revocations.push(instanceId);
     }
     this.#joinRequests.delete(String(instanceId));
+  }
+
+  /**
+   * A new local identity - after a revocation, re-joining is one - starts its
+   * own sequence. Carrying the old identity's sequence over would open a gap
+   * every reader refuses.
+   */
+  #startIdentity(instanceId: ReplicaInstanceId): void {
+    if (this.#local !== undefined && same(this.#local.instanceId, instanceId)) return;
+    this.#localSequence = 0;
+    this.#pending = undefined;
   }
 
   #published(sequence: number): void {

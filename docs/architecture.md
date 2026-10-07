@@ -1315,9 +1315,12 @@ flowchart LR
   signature, an unknown or revoked origin, a body whose origin is not its path,
   an unreadable file, a gap, or a rewritten sequence is refused and journaled
   before anything from that entry is applied, and the walk for that instance
-  stops there. A refusal is journaled once, not on every pull. An entry
-  counts as signed after a revocation once the reading computer has applied
-  that revocation; there is no clock shared between computers. Device signing
+  stops there. A refusal is journaled once, not on every pull. Once a computer
+  has applied a revocation, it refuses every entry from the revoked instance
+  it has not already applied. Computers share no clock, so a reader cannot
+  tell whether such an entry was signed before or after the revocation; entries
+  it applied earlier stay applied. A revoked computer that joins again does so
+  as a new instance with its own sequence. Device signing
   keys live per replica instance in the host credential store, reached through
   the credential broker. Three things are not wired: no host setting selects a
   store yet, so every command answers a typed `not-configured` refusal and

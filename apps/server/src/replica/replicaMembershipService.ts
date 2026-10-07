@@ -216,7 +216,9 @@ export class ReplicaMembershipService {
     store: ReplicaStore,
     displayName: string,
   ): Promise<ReplicaMembershipOutcome> {
-    if (this.#ports.state().local !== undefined) {
+    const state = this.#ports.state();
+    // A revoked identity is finished; starting over is a new identity.
+    if (state.local !== undefined && !isRevoked(state, state.local.instanceId)) {
       return this.#refuse(
         "create-replica",
         "already-member",
@@ -253,14 +255,9 @@ export class ReplicaMembershipService {
   ): Promise<ReplicaMembershipOutcome> {
     const state = this.#ports.state();
     const local = state.local;
-    if (local !== undefined) {
-      if (isRevoked(state, local.instanceId)) {
-        return this.#refuse(
-          "write-join-request",
-          "revoked-instance",
-          "This instance was revoked and cannot rejoin.",
-        );
-      }
+    // Re-joining after a revocation is a new identity, not the old one back,
+    // so a revoked computer falls through to a fresh instance below.
+    if (local !== undefined && !isRevoked(state, local.instanceId)) {
       if (isMember(state, local.instanceId)) {
         return this.#refuse(
           "write-join-request",
@@ -792,7 +789,11 @@ export class ReplicaMembershipService {
       if (listed.nextCursor === undefined) return instances;
       cursor = listed.nextCursor;
     }
-    return instances;
+    // A listing that does not end inside the bound is refused, not read in
+    // part: a partial view would skip whole instances - their revocations
+    // too - without saying so.
+    this.#storeFailure({ phase: "list", reason: "truncated" });
+    return undefined;
   }
 
   async #readSigned(
@@ -992,7 +993,7 @@ export class ReplicaMembershipService {
 
   #storeFailure(input: {
     readonly phase: "entry" | "signature" | "read" | "list";
-    readonly reason: "not-connected" | "refused" | "slot-occupied";
+    readonly reason: "not-connected" | "refused" | "slot-occupied" | "truncated";
     readonly instanceId?: ReplicaInstanceId;
     readonly sequence?: number;
   }): void {
