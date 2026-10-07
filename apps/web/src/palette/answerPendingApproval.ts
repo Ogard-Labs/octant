@@ -4,7 +4,7 @@ import {
   type WorkRequestClient,
 } from "@octant/client-runtime/work-request-client";
 import { decodeCodeOperationId } from "@octant/contracts";
-import { codeFailure } from "../code/codeControllerState";
+import { codeFailure, providerAnswerOutcome } from "../code/codeControllerState";
 import type { ApprovalDecision, ApprovalPendingRequest } from "./needsYouCommands";
 
 export type PendingApprovalOutcome =
@@ -44,9 +44,7 @@ export async function answerPendingApproval(input: {
       approvalId: request.answer.approvalId,
       decision,
     });
-    return result.kind === "operation-failed"
-      ? { status: "refused", message: result.failure.message }
-      : { status: "answered" };
+    return providerAnswerOutcome(result);
   } catch (error) {
     return {
       status: "refused",
