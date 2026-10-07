@@ -188,6 +188,14 @@ profiles:
   `/openai/v1/`; API-key only)
 - **Ollama** local HTTP (loopback origin only)
 
+API keys are stored only by the Octant desktop app. In a browser, the add form
+says so before you fill it in and keeps the key field off; you can still add an
+endpoint that needs no key (for example a server on this computer). If a
+configured endpoint lists far more models than you set up, such as an Azure
+resource that lists every base model, **Settings → Octant Harness** shows the
+models you configured first and the rest under **Discovered on the endpoint**;
+an Azure AI Foundry provider offers only its configured deployments.
+
 Image generation profiles are also provider instances. Open **Settings → Image
 generation → Add image provider** to choose a provider, enter its API key, and
 set its model allowlist. The same profiles are available from the manual form

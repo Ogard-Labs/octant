@@ -79,7 +79,7 @@ function loopbackUrl(baseUrl: string): string {
     const url = new URL(baseUrl);
     if (
       url.protocol === "http:" &&
-      (url.hostname === "127.0.0.1" || url.hostname === "localhost")
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]")
     ) {
       return new URL("/api/pending-requests", url).toString();
     }

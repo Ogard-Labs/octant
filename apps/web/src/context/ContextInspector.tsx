@@ -1,5 +1,6 @@
 import type { ContextEntryId, ContextRemedy, ServiceLimitBucket } from "@octant/contracts/context";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
+import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import type { RefObject } from "react";
 import {
   contextCategoryLabel,
@@ -95,7 +96,14 @@ export function ContextInspector(props: ContextInspectorProps) {
                 }[snapshot.modelLimits.source]
               }
             />
-            <Fact label="Context window" value={formatNumber(snapshot.modelLimits.contextWindow)} />
+            <Fact
+              label="Context window"
+              value={
+                hasKnownContextWindow(snapshot.modelLimits)
+                  ? formatNumber(snapshot.modelLimits.contextWindow)
+                  : `Unknown, planning with ${formatNumber(snapshot.modelLimits.contextWindow)} as an estimate`
+              }
+            />
             <Fact
               label="Maximum output"
               value={

@@ -1,5 +1,5 @@
 import type { PendingRequestClient } from "@octant/client-runtime/pending-request-client";
-import type { PendingRequest } from "@octant/contracts/pending-requests";
+import type { PendingRequest, PendingRequestList } from "@octant/contracts/pending-requests";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -337,6 +337,57 @@ describe("the Needs you card", () => {
     expect(within(row).getByRole("button", { name: "Approve" })).toBeEnabled();
   });
 
+  it("says why a Code approval the turn refuses was not delivered and offers it again", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    // The runtime refuses an answer it cannot hand the provider (Plan posture,
+    // changed permission persistence, a lost connection) as a failed turn
+    // state, not as operation-failed.
+    answerClients.codeClient.executeOperation.mockResolvedValueOnce({
+      kind: "provider-turn-state",
+      operationId: "operation-1",
+      state: "failed",
+    } as never);
+    const client = reader([codeApproval]);
+    renderCard(
+      createNeedsYouCard(
+        source({ answerClients: answerClients as never, pendingRequestClient: client }),
+      ),
+    );
+    const row = await screen.findByRole("group", {
+      name: "Fix the flaky build is waiting for you",
+    });
+    await user.click(within(row).getByRole("button", { name: "Approve" }));
+    expect(await within(row).findByRole("status")).toHaveTextContent(
+      "The answer was not delivered. The turn changed since it asked.",
+    );
+    await waitFor(() => expect(client.list).toHaveBeenCalledTimes(2));
+    expect(within(row).getByRole("button", { name: "Approve" })).toBeEnabled();
+  });
+
+  it("says a Code question's turn ended when the answer finds it interrupted", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    answerClients.codeClient.executeOperation.mockResolvedValueOnce({
+      kind: "provider-turn-state",
+      operationId: "operation-1",
+      state: "interrupted",
+    } as never);
+    renderCard(
+      createNeedsYouCard(
+        source({
+          answerClients: answerClients as never,
+          pendingRequestClient: reader([codeQuestion]),
+        }),
+      ),
+    );
+    const row = await screen.findByRole("group", { name: "Pick a database is waiting for you" });
+    await user.click(within(row).getByRole("button", { name: /SQLite/ }));
+    expect(await within(row).findByRole("status")).toHaveTextContent(
+      "The turn that asked has ended. Send a new message to continue.",
+    );
+  });
+
   it("keeps a refused row's line for one more read when the host no longer lists the request", async () => {
     const user = userEvent.setup();
     const answerClients = clients();
@@ -359,6 +410,36 @@ describe("the Needs you card", () => {
     expect(within(row).queryByRole("button", { name: "Approve" })).toBeNull();
     expect(row).toBeVisible();
     view.unmount();
+  });
+
+  it("lets a refused row the host no longer lists go at the next minute on a quiet host", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    answerClients.codeClient.executeOperation.mockResolvedValueOnce({
+      kind: "operation-failed",
+    } as never);
+    const client = reader([codeApproval], []);
+    const first = source({ answerClients: answerClients as never, pendingRequestClient: client });
+    const view = renderCard(createNeedsYouCard(first));
+    const row = await screen.findByRole("group", {
+      name: "Fix the flaky build is waiting for you",
+    });
+    await user.click(within(row).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(client.list).toHaveBeenCalledTimes(2));
+    expect(await within(row).findByRole("status")).toBeVisible();
+    view.rerender(
+      <HomeDashboard
+        cards={[createNeedsYouCard({ ...first, now: NOW + 60_000 })]}
+        customization={{ order: [], visibility: [] }}
+        onCustomizationChange={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("group", { name: "Fix the flaky build is waiting for you" }),
+      ).toBeNull(),
+    );
+    expect(client.list).toHaveBeenCalledTimes(2);
   });
 
   it("shows five rows, counts them all, and opens the Inbox from +N more", async () => {
@@ -421,6 +502,37 @@ describe("the Needs you card", () => {
       />,
     );
     await waitFor(() => expect(screen.queryByText("Fix the flaky build")).toBeNull());
+    expect(client.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("folds change-feed signals that arrive during a read into one more read", async () => {
+    const resolvers: Array<() => void> = [];
+    const client: PendingRequestClient = {
+      list: vi.fn(
+        () =>
+          new Promise<PendingRequestList>((resolve) => {
+            resolvers.push(() => resolve({ requests: [codeApproval], truncated: false }));
+          }),
+      ),
+    };
+    const first = source({ pendingRequestClient: client });
+    const view = renderCard(createNeedsYouCard(first));
+    await waitFor(() => expect(client.list).toHaveBeenCalledTimes(1));
+    // A streaming reply moves the navigation topic on every delta.
+    for (const feedRevision of [1, 2, 3, 4]) {
+      view.rerender(
+        <HomeDashboard
+          cards={[createNeedsYouCard({ ...first, feedRevision })]}
+          customization={{ order: [], visibility: [] }}
+          onCustomizationChange={vi.fn()}
+        />,
+      );
+    }
+    expect(client.list).toHaveBeenCalledTimes(1);
+    resolvers[0]?.();
+    await waitFor(() => expect(client.list).toHaveBeenCalledTimes(2));
+    resolvers[1]?.();
+    await screen.findByText("Fix the flaky build");
     expect(client.list).toHaveBeenCalledTimes(2);
   });
 

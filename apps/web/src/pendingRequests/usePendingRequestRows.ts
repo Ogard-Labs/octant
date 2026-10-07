@@ -4,6 +4,7 @@ import type { PendingRequest } from "@octant/contracts/pending-requests";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   answerPendingRequest,
+  NOT_DELIVERED,
   pendingRequestKey,
   pendingRequestsForModes,
   type PendingRequestAnswerClients,
@@ -19,12 +20,15 @@ export interface PendingRequestRowsSource extends PendingRequestFreshness {
   /** The clients each thread view already answers through; a surface adds no route. */
   readonly answerClients: PendingRequestAnswerClients;
   readonly modes: ReadonlyArray<OctantMode>;
+  /** The clock the waits read, advanced once a minute by the shell. */
+  readonly now: number;
 }
 
 /**
  * One request to draw. `unlisted` marks a request whose answer was refused and
- * which the host has since stopped listing: it stays for one more read so its
- * refusal line can be read, offers no answer, and then goes.
+ * which the host has since stopped listing: it stays so its refusal line can be
+ * read and offers no answer, until the next read or the shell's next minute
+ * tick, whichever comes first; a quiet host may send no next read.
  */
 export interface PendingRequestRowEntry {
   readonly request: PendingRequest;
@@ -57,6 +61,7 @@ export function usePendingRequestRows(source: PendingRequestRowsSource | undefin
   const [refused, setRefused] = useState<ReadonlyMap<string, PendingRequestRowEntry>>(new Map());
   const modes = source?.modes;
   const answerClients = source?.answerClients;
+  const now = source?.now;
   const listed = useMemo(
     () =>
       read.status === "ready" && modes !== undefined
@@ -80,12 +85,19 @@ export function usePendingRequestRows(source: PendingRequestRowsSource | undefin
     });
   }, [listed]);
 
+  useEffect(() => {
+    setRefused((current) => {
+      if (![...current.values()].some((entry) => entry.unlisted)) return current;
+      return new Map([...current].filter(([, entry]) => !entry.unlisted));
+    });
+  }, [now]);
+
   const answer = useCallback(
     async (
       request: PendingRequest,
       response: PendingRequestResponse,
     ): Promise<PendingRequestAnswerResult> => {
-      if (answerClients === undefined) return { status: "refused" };
+      if (answerClients === undefined) return NOT_DELIVERED;
       const key = pendingRequestKey(request);
       setRefused((current) => {
         const next = new Map(current);

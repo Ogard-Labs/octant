@@ -271,7 +271,87 @@ describe("Anthropic-compatible provider conformance", () => {
     });
     expect(usage).not.toHaveProperty("reasoningTokens");
   });
+
+  it("verifies tool use on demand with one forced tool request", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const driver = makeAnthropicCompatibleDriver({
+      instanceId,
+      configuration: configuration("messages"),
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return toolUseStream();
+      },
+      clock: () => "2026-07-15T12:00:00.000Z",
+    });
+
+    const result = await Effect.runPromise(
+      Effect.scoped(driver.verifyToolCapability!({ instanceId, modelId })),
+    );
+
+    expect(result).toMatchObject({ modelId, appManagedTools: "supported" });
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ tool_choice: { type: "any" } });
+  });
+
+  it("reports a model that answers in text as unsupported and keeps a verification across a probe", async () => {
+    const registry = new ProviderRuntimeRegistry();
+    const driver = makeAnthropicCompatibleDriver({
+      instanceId,
+      configuration: configuration("messages"),
+      runtimeRegistry: registry,
+      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+      fetch: async (url) =>
+        String(url).endsWith("/models") ? models() : messagesStream("plain text"),
+      clock: () => "2026-07-15T12:00:00.000Z",
+    });
+
+    const result = await Effect.runPromise(
+      Effect.scoped(driver.verifyToolCapability!({ instanceId, modelId })),
+    );
+    expect(result.appManagedTools).toBe("unsupported");
+
+    const probed = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    registry.setObservedState({ ...probed, verifiedToolModelIds: [modelId] });
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(registry.observedState(instanceId)?.verifiedToolModelIds).toEqual([modelId]);
+  });
 });
+
+function toolUseStream(): Response {
+  const events = [
+    {
+      type: "message_start",
+      message: {
+        id: "msg_fixture",
+        type: "message",
+        role: "assistant",
+        content: [],
+        model: "fixture-model",
+        stop_reason: null,
+        usage: { input_tokens: 2, output_tokens: 0 },
+      },
+    },
+    {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "tool_use", id: "toolu_1", name: "octant_capability_echo", input: {} },
+    },
+    {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "input_json_delta", partial_json: '{"echo":"ready"}' },
+    },
+    { type: "content_block_stop", index: 0 },
+    { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 2 } },
+    { type: "message_stop" },
+  ];
+  return new Response(
+    events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
 
 function configuration(protocol: AnthropicCompatibleProtocol) {
   return {

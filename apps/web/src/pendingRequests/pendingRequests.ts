@@ -3,6 +3,7 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import { decodeCodeOperationId, type OctantMode } from "@octant/contracts";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
+import { providerAnswerOutcome } from "../code/codeControllerState";
 
 /** Rows the Needs you card lists before it says "+N more". */
 export const NEEDS_YOU_ROW_LIMIT = 5;
@@ -17,10 +18,19 @@ export type PendingRequestResponse =
   | { readonly kind: "deny" }
   | { readonly kind: "choice"; readonly label: string };
 
-/** `refused` covers every way the host did not take the answer: stale, ended, unreachable. */
+/**
+ * `refused` covers every way the host did not take the answer: stale, ended,
+ * unreachable. Its message is the one quiet line the row shows.
+ */
 export type PendingRequestAnswerResult =
   | { readonly status: "answered" }
-  | { readonly status: "refused" };
+  | { readonly status: "refused"; readonly message: string };
+
+/** The line a row shows when the host gave no reason of its own. */
+export const NOT_DELIVERED: PendingRequestAnswerResult = {
+  status: "refused",
+  message: "The answer was not delivered. The request may have changed.",
+};
 
 /** The clients each thread view already answers through; the card adds no route. */
 export interface PendingRequestAnswerClients {
@@ -63,7 +73,7 @@ export async function answerPendingRequest(
 ): Promise<PendingRequestAnswerResult> {
   try {
     if (request.kind === "approval") {
-      if (response.kind === "choice") return { status: "refused" };
+      if (response.kind === "choice") return NOT_DELIVERED;
       const approved = response.kind === "approve";
       if (request.mode === "work") {
         await clients.workRequestClient.execute({
@@ -83,11 +93,11 @@ export async function answerPendingRequest(
           approvalId: request.answer.approvalId,
           decision: approved ? "approved" : "denied",
         });
-        return result.kind === "operation-failed" ? { status: "refused" } : { status: "answered" };
+        return providerAnswerOutcome(result);
       }
-      return { status: "refused" };
+      return NOT_DELIVERED;
     }
-    if (response.kind !== "choice") return { status: "refused" };
+    if (response.kind !== "choice") return NOT_DELIVERED;
     if (request.mode === "work") {
       await clients.workRequestClient.execute({
         kind: "resolve-work-request",
@@ -106,7 +116,7 @@ export async function answerPendingRequest(
         requestId: request.answer.requestId,
         response: await clients.codeClient.putEvidence(request.answer.threadId, response.label),
       });
-      return result.kind === "operation-failed" ? { status: "refused" } : { status: "answered" };
+      return providerAnswerOutcome(result);
     }
     await clients.chatClient.execute({
       kind: "answer-chat-turn-question",
@@ -119,6 +129,6 @@ export async function answerPendingRequest(
     });
     return { status: "answered" };
   } catch {
-    return { status: "refused" };
+    return NOT_DELIVERED;
   }
 }

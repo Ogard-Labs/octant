@@ -138,6 +138,8 @@ export interface GhActivePullRequestRow {
   readonly url: string;
   readonly checks: "unknown" | "pending" | "passing" | "failing";
   readonly review: "unknown" | "none" | "pending" | "approved" | "changes-requested";
+  /** Logins asked to review. A team request has no login and is not listed. */
+  readonly reviewRequestedFrom: ReadonlyArray<string>;
 }
 
 export type GhActivePullRequestListResult =
@@ -164,6 +166,7 @@ const ACTIVE_PR_LIST_FIELDS = [
   "headRefName",
   "statusCheckRollup",
   "reviewDecision",
+  "reviewRequests",
 ].join(",");
 
 const MAX_PR_REVIEW_ITEMS = 500;
@@ -899,6 +902,7 @@ function decodeActivePullRequests(
       url,
       checks: summarizeChecks(item.statusCheckRollup),
       review: summarizeReview(item.reviewDecision),
+      reviewRequestedFrom: reviewRequestLogins(item.reviewRequests),
     });
   }
   return rows;
@@ -942,6 +946,30 @@ function summarizeReview(value: unknown): GhActivePullRequestRow["review"] {
   if (decision === "REVIEW_REQUIRED") return "pending";
   if (decision === "") return "none";
   return "unknown";
+}
+
+const MAX_REVIEW_REQUEST_LOGINS = 32;
+const GITHUB_LOGIN = /^[A-Za-z0-9-]{1,128}$/;
+
+/**
+ * User logins asked to review. A missing field is no request, not a malformed
+ * list: an older read simply did not carry the fact. A team has no login.
+ */
+function reviewRequestLogins(value: unknown): ReadonlyArray<string> {
+  if (!Array.isArray(value)) return [];
+  const logins: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.login !== "string") continue;
+    const login = entry.login.trim();
+    if (!GITHUB_LOGIN.test(login)) continue;
+    const key = login.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    logins.push(login);
+    if (logins.length >= MAX_REVIEW_REQUEST_LOGINS) break;
+  }
+  return logins;
 }
 
 function decodeCommits(value: unknown): GhPullRequestReviewDetail["commits"] {
