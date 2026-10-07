@@ -78,9 +78,10 @@ export interface CanvasRouteDependencies {
   /**
    * The canonical path behind a folder-browser candidate. The renderer sends a
    * candidate id and this resolves it host-side, so a renderer never names a
-   * path itself. Throws when the candidate is expired, foreign, or off-mode.
+   * path itself. Rejects when the candidate is expired, foreign, or off-mode,
+   * or when its path no longer resolves inside the authorized root.
    */
-  readonly resolveFolderCandidate?: (windowId: WindowId, input: unknown) => string;
+  readonly resolveFolderCandidate?: (windowId: WindowId, input: unknown) => Promise<string>;
   /** Comment journal; a host without it serves boards without a conversation. */
   readonly canvasCommentService?: CanvasCommentService;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -1134,7 +1135,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         try {
           // The renderer sent a candidate id; the path is resolved here, from
           // the record the host made when it listed the folder.
-          folder = dependencies.resolveFolderCandidate(authenticatedWindowId, {
+          folder = await dependencies.resolveFolderCandidate(authenticatedWindowId, {
             hostId: String(entry.currentVersion.definition.provenance.hostId),
             mode: command.mode,
             candidateId: command.candidateId,

@@ -31,6 +31,7 @@ function makeService(overrides?: {
   issue?: BindingReceiptStore["issue"];
   inspectEntry?: (entryPath: string) => Promise<FolderEntryInspection>;
   entryInspectionTimeoutMs?: number;
+  listingInspectionTimeoutMs?: number;
 }) {
   const receipts: Pick<BindingReceiptStore, "issue"> = {
     issue:
@@ -54,6 +55,9 @@ function makeService(overrides?: {
     ...(overrides?.entryInspectionTimeoutMs === undefined
       ? {}
       : { entryInspectionTimeoutMs: overrides.entryInspectionTimeoutMs }),
+    ...(overrides?.listingInspectionTimeoutMs === undefined
+      ? {}
+      : { listingInspectionTimeoutMs: overrides.listingInspectionTimeoutMs }),
   });
 }
 
@@ -295,6 +299,53 @@ describe("FolderBrowseService", () => {
       expect(elapsedMs).toBeLessThan(2_000);
     });
 
+    it("answers within a few entry budgets when many entries stall", async () => {
+      const { home } = await makeTree();
+      const stalledNames = Array.from({ length: 12 }, (_, index) => `stalled-${index}`);
+      await Promise.all(stalledNames.map((name) => mkdir(join(home, name))));
+      const service = makeService({
+        homeDir: home,
+        entryInspectionTimeoutMs: 200,
+        inspectEntry: (entryPath) =>
+          basename(entryPath).startsWith("stalled-")
+            ? new Promise<FolderEntryInspection>(() => {})
+            : hostInspection(entryPath),
+      });
+
+      const startedAt = Date.now();
+      const listed = await service.browse(WINDOW_ID, HOST);
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(names(listed.candidates).sort()).toEqual(
+        ["alpha", "beta", "projects", ...stalledNames].sort(),
+      );
+      // One budget per stalled entry would take 12 × 200 ms.
+      expect(elapsedMs).toBeLessThan(1_200);
+    });
+
+    it("lists entries left uninspected as plain folders once the listing budget runs out", async () => {
+      const { home } = await makeTree();
+      const stalledNames = Array.from({ length: 20 }, (_, index) => `stalled-${index}`);
+      await Promise.all(stalledNames.map((name) => mkdir(join(home, name))));
+      const service = makeService({
+        homeDir: home,
+        entryInspectionTimeoutMs: 60_000,
+        listingInspectionTimeoutMs: 50,
+        inspectEntry: (entryPath) =>
+          basename(entryPath).startsWith("stalled-")
+            ? new Promise<FolderEntryInspection>(() => {})
+            : hostInspection(entryPath),
+      });
+
+      const startedAt = Date.now();
+      const listed = await service.browse(WINDOW_ID, HOST);
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(names(listed.candidates)).toEqual(expect.arrayContaining(stalledNames));
+      expect(listed.hasMore).toBe(false);
+      expect(elapsedMs).toBeLessThan(2_000);
+    });
+
     it("omits an entry whose inspection fails while keeping the rest of the listing", async () => {
       const { home } = await makeTree();
       const service = makeService({
@@ -405,7 +456,7 @@ describe("FolderBrowseService", () => {
       expect(beta).toBeDefined();
       if (beta === undefined) return;
 
-      const path = service.resolveCandidate(WINDOW_ID, {
+      const path = await service.resolveCandidate(WINDOW_ID, {
         ...HOST,
         candidateId: beta.candidateId,
       });
@@ -413,6 +464,53 @@ describe("FolderBrowseService", () => {
       // The host reports where the folder really is, not the path it was
       // listed by: on macOS a temporary directory is reached through a link.
       expect(path).toBe(await realpath(join(home, "beta")));
+    });
+
+    it("refuses a stalled link out of the root once its mount recovers", async () => {
+      const { home, outside } = await makeTree();
+      await symlink(outside, join(home, "escape"));
+      let stalled = true;
+      const service = makeService({
+        homeDir: home,
+        entryInspectionTimeoutMs: 25,
+        inspectEntry: (entryPath) =>
+          stalled && basename(entryPath) === "escape"
+            ? new Promise<FolderEntryInspection>(() => {})
+            : hostInspection(entryPath),
+      });
+      const listed = await service.browse(WINDOW_ID, HOST);
+      const escape = listed.candidates.find((candidate) => candidate.displayName === "escape");
+      expect(escape).toBeDefined();
+      if (escape === undefined) return;
+
+      stalled = false;
+
+      await expectRefusal(
+        service.resolveCandidate(WINDOW_ID, { ...HOST, candidateId: escape.candidateId }),
+        "unauthorized",
+      );
+    });
+
+    it("refuses a candidate whose path still stalls when it is chosen", async () => {
+      const { home } = await makeTree();
+      await mkdir(join(home, "stalled"));
+      const service = makeService({
+        homeDir: home,
+        entryInspectionTimeoutMs: 25,
+        inspectEntry: (entryPath) =>
+          basename(entryPath) === "stalled"
+            ? new Promise<FolderEntryInspection>(() => {})
+            : hostInspection(entryPath),
+      });
+      const listed = await service.browse(WINDOW_ID, HOST);
+      const stalled = listed.candidates.find((candidate) => candidate.displayName === "stalled");
+      expect(stalled).toBeDefined();
+      if (stalled === undefined) return;
+
+      await expectRefusal(
+        service.resolveCandidate(WINDOW_ID, { ...HOST, candidateId: stalled.candidateId }),
+        "unavailable",
+      );
     });
 
     it("refuses a candidate that was shown to another window", async () => {
