@@ -580,6 +580,7 @@ describe("GhPullRequestPort active list", () => {
           review: "approved",
           reviewRequestedFrom: [],
           failingChecks: [],
+          crossRepository: false,
         },
         {
           number: 13,
@@ -596,6 +597,7 @@ describe("GhPullRequestPort active list", () => {
           review: "approved",
           reviewRequestedFrom: [],
           failingChecks: [],
+          crossRepository: false,
         },
       ],
     });
@@ -609,9 +611,33 @@ describe("GhPullRequestPort active list", () => {
       "--limit",
       "100",
       "--json",
-      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,statusCheckRollup,reviewDecision,reviewRequests",
+      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests",
     ]);
     expect(vi.mocked(command.run).mock.calls.some(([args]) => args.includes("merge"))).toBe(false);
+  });
+
+  it("marks a pull request whose head branch lives in a fork", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          { ...activeRow, headRefName: "main", isCrossRepository: true },
+          { ...activeRow, number: 13, isCrossRepository: false },
+        ]),
+      },
+    ]);
+
+    const result = await port.listActive(
+      { owner: "octant", name: "octant", limit: 100 },
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({
+      status: "ok",
+      rows: [
+        { number: 12, headBranch: "main", crossRepository: true },
+        { number: 13, crossRepository: false },
+      ],
+    });
   });
 
   it("keeps the logins asked to review and ignores a team request", async () => {

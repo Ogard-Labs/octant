@@ -330,7 +330,9 @@ storage, or a missing pull-request capability hides it and leaves it out of
 Customize. It lists failing checks the pull-request refresh already recorded,
 on the signed-in person's open pull requests and on the current branches of
 Code Projects. A current branch is the branch of an active thread's available
-checkout; the card does not observe checkouts itself. A failing check that is
+checkout; the card does not observe checkouts itself. A pull request from a fork
+(the list read's `isCrossRepository`) never matches a current branch: its head
+branch is a branch of the fork, whatever its name. A failing check that is
 neither is left out. A row shows the check name, the repository and number
 when the pull request is the person's (`repo#12`) or the branch when it is
 only a current checkout, and how long ago the check finished failing. The
@@ -345,7 +347,8 @@ and repository are already written in; the rollup carries no failure text, so
 the draft quotes none. Sending, switching the draft's Project, or starting a
 new draft lets go of that branch, wherever the new draft is started: the
 sidebar's New task, the command palette, thread search, or the menu bar's Start
-new agent all start the same clean draft. It does not start a turn; the person sends
+new agent all start the same clean draft. A pull request from a fork offers no
+Start a fix, since its branch is not in the Project. It does not start a turn; the person sends
 it. Opening the card reads the same cached snapshot
 Pull requests reads and adds no poll.
 
