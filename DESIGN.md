@@ -290,8 +290,8 @@ working · 2 done"), attention states first, with no unexplained total. A result
 counts as to review only while a person can still act on it: one the host has
 already delivered to the parent, or the parent consumed through its own tool,
 is done, because it sits in the thread as a child-result card. A truncated list
-says earlier children are not retained. While the host cannot be reached the
-card dims and withholds Stop; the thread's connection notice says why.
+says earlier children are not retained. While a Chat thread's host cannot be
+reached the card dims and withholds Stop; the thread's connection notice says why.
 Task-plan completion is never counted as child completion. View all opens the
 full Agents list even when every child has finished. Expansion previews at most
 three active or unresolved children; longer history stays in Environment and
@@ -1484,7 +1484,7 @@ and Tooltip. Composition rules:
   panels stay anchored in the surface; `OctantDialog` would add a backdrop,
   focus trap, and portal. The recipe owners (`OctantAlert`, `OctantToast`,
   `OctantApprovalCard`, `FieldError`, and `ShellState`) set the role themselves.
-- A lost host connection is one condition with one voice. A thread shows a
+- A lost host connection is one condition with one voice. A Chat thread shows a
   single `OctantAlert` in plain words ("Can't reach the host" with Retry now),
   above its transcript in the thread's own measure; it becomes a success alert,
   "Reconnected", for a few seconds when the host answers, then goes quiet. The
@@ -1492,7 +1492,8 @@ and Tooltip. Composition rules:
   status line) never repeat the loss: they dim and disable their controls. Use
   no other wording for it, and never show internal vocabulary such as "the
   authoritative transcript". A failure unrelated to the connection keeps its own
-  alert.
+  alert. Work and Code threads keep their own connection messages until they
+  adopt this notice.
 - Product notices use `OctantToast`: a semantic icon, short title, supporting
   detail, and an explicit Dismiss button. An optional inline action can open the
   relevant destination without implicitly dismissing the notice. Success and

@@ -276,7 +276,7 @@ other AgentRun control stay. A compact, collapsible Subagents card sits above
 the composer in normal layout, as wide as the message surface. Its head counts each
 state (failed, waiting, to review, working, done) and keeps failures, waits and
 unreviewed results first while collapsed; a result the parent already received is
-done, not to review. While the thread's host connection is lost it dims and
+done, not to review. While a Chat thread's host connection is lost it dims and
 withholds Stop without repeating the connection notice; expansion previews up to three active or
 unresolved children. Rows open the corresponding detail in Agents, and View all
 keeps completed history reachable. Provider-observed children carry an explicit

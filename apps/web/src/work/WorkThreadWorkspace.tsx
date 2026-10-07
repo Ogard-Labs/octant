@@ -1446,9 +1446,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             if (row.entry.role === "user") {
               if (row.delivered === true) {
                 return (
-                  <div className="turn-child-result">
+                  <article aria-label="Subagent results" className="turn-child-result">
                     <ChildResultCards providerGroups={props.providerGroups} text={row.entry.text} />
-                  </div>
+                  </article>
                 );
               }
               return (

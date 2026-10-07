@@ -76,8 +76,8 @@ remembers your choice. Its head names each state the children are in, such as
 **1 working · 1 failed · 2 done**, and puts failed, waiting and unreviewed children
 first. A result counts as **to review** only while you could still act on it: once
 the host has handed a finished result to the thread's agent, the card counts it as
-done. When the host cannot be reached the card dims and **Stop** is unavailable;
-the thread's connection notice says why. Expand it to preview up to
+done. When a Chat thread cannot reach the host the card dims and **Stop** is
+unavailable; the thread's connection notice says why. Expand it to preview up to
 three active or unresolved children with their task, status, model and last
 reported activity. **View all** opens the full **Agents** list, including finished
 children. A row opens that child's detail. **Stop** acts on one managed child;
