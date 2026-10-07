@@ -46,21 +46,6 @@ export function subagentRoleWord(role: string): string {
   return ROLE_WORDS[role] ?? role;
 }
 
-/**
- * A finished result only the person can still take in: they have not marked it
- * reviewed, and the host has not already put it in the parent's hands. A result
- * the parent received sits in the thread as a child-result card, so flagging it
- * as awaiting review asks for nothing anyone can act on.
- */
-export function subagentNeedsReview(entry: AgentHierarchyInputEntry): boolean {
-  return (
-    entry.resultAcknowledgement.required &&
-    !entry.resultAcknowledgement.acknowledged &&
-    entry.resultDeliveryOutcome !== "delivered" &&
-    entry.resultDeliveryOutcome !== "consumed"
-  );
-}
-
 /** The model the host actually ran, when it reported a route. */
 export function subagentModel(entry: AgentHierarchyInputEntry): string | undefined {
   return entry.route?.executionModelId;

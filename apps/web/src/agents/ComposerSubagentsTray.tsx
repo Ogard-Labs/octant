@@ -8,13 +8,13 @@ import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import {
   isActiveAgentHierarchyStatus,
+  subagentNeedsReview,
   type AgentHierarchyInputEntry,
 } from "./buildAgentHierarchyModel";
 import {
   SubagentStatusIcon,
   subagentElapsedLabel,
   subagentModel,
-  subagentNeedsReview,
   subagentStatusWord,
 } from "./subagentStatus";
 import { AgentResultPreview, latestResultPacket } from "./AgentRunResults";
