@@ -92,7 +92,9 @@ The design rests on a small set of invariants that every package obeys:
 
 - **Local-first.** No Octant cloud account, relay, or telemetry is required.
   Artifact sync, when the person turns it on, uses a store that person owns.
-  Octant operates none of it. Remote access is host-to-device over the user's
+  Octant operates none of it; an S3-compatible store is contacted only at the
+  endpoint the person configured and only while the Settings › Sync switch is
+  on. Remote access is host-to-device over the user's
   own network. Three host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
   device-tool update checks against the npm registry, and server marketplace
@@ -1279,7 +1281,10 @@ flowchart LR
   file the sync client has not downloaded, and a conflict copy the sync client
   left behind, are reported instead of being treated as entries. A folder
   outside the user's home is refused unless the standing access-outside-project
-  approval exists — the same rule as the artifact mirror's global folder. The
+  approval exists — the same rule as the artifact mirror's global folder. Its
+  Test connection writes one empty probe under `Octant Sync/.octant-probe/`
+  through the same confined write-once path, deletes nothing, and `list` skips
+  that directory. The
   in-tree S3-compatible store sends every request to the configured endpoint and
   only while sync is on. Its settings are the endpoint URL, region, bucket,
   optional key prefix, and path-style or virtual-host addressing. The access key
@@ -1322,12 +1327,31 @@ flowchart LR
   it applied earlier stay applied. A revoked computer that joins again does so
   as a new instance with its own sequence. Device signing
   keys live per replica instance in the host credential store, reached through
-  the credential broker. Three things are not wired: no host setting selects a
-  store yet, so every command answers a typed `not-configured` refusal and
-  makes no store call; there is no Settings surface for sync; and artifact
+  the credential broker. The membership service asks Settings › Sync's store
+  selection for its store on every command. Two things are not wired: artifact
   versions are neither published nor imported — a pull stops at a verified
-  artifact entry and reads it again later, rather than marking it applied. A
-  person cannot turn sync on or join another computer yet.
+  artifact entry and reads it again later, rather than marking it applied — and
+  no surface creates a replica, joins, or revokes. A person can choose a store
+  and turn sync on, but cannot yet join another computer or copy a version.
+- **Artifact replica store selection.** Settings › Sync chooses this host's
+  store: a synced folder, an S3-compatible bucket, or none, with a sync switch
+  that starts off. It is served on the host-only `/api/replica-store` routes,
+  which answer only a loopback host name and a local window, sit on the
+  loopback chain outside the shared product dispatch, and are a remote
+  local-only prefix, so a paired client can neither read nor change them. A
+  folder arrives as a candidate from the host's folder browser, which the host
+  resolves and judges inside home, never as a path. A bucket's settings carry
+  no secret: the access key and secret travel once, in the command that saves
+  them, into the host credential store through the credential broker, and the
+  settings hold only an opaque reference to that entry, which is removed when
+  another store is chosen. The choice is journaled whole as one host settings
+  aggregate, rebuilt on every start, and versioned, so two windows cannot
+  overwrite each other. Choosing or changing the store turns sync off, so the
+  person reads Settings' statement that the provider can read the files again
+  before turning it back on. With sync off or no store, the selection is
+  `not-configured` and no store is opened or called; with sync on, the in-tree
+  folder or bucket store is opened as installed and enabled by the switch.
+  Test connection writes one probe file only while sync is on.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a

@@ -839,6 +839,8 @@ import {
   type HostControlServicePolicyPort,
 } from "./hostControlRoutes";
 import { createReplicaMembershipRouteHandler } from "./replica/replicaMembershipRoutes";
+import { createReplicaStoreSettingsRouteHandler } from "./replica/replicaStoreSettingsRoutes";
+import { ReplicaStoreSettingsService } from "./replica/replicaStoreSettingsService";
 import { ReplicaMembershipService } from "./replica/replicaMembershipService";
 import { createReplicaMembershipJournal } from "./replica/replicaMembershipProjection";
 import { ensureReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
@@ -9946,27 +9948,45 @@ export function startOctantServer(
       }),
     });
     // Replica membership reads its facts from the journal and keeps device
-    // signing keys in the host credential store (Keychain on macOS, Secret
-    // Service on Linux) through the credential broker. Which store a host
-    // writes to is not configurable yet, so every command answers
-    // `not-configured` and makes no store call until that setting exists.
-    const replicaDeviceKeys =
+    // signing keys - and a bucket's access key pair - in the host credential
+    // store (Keychain on macOS, Secret Service on Linux) through the
+    // credential broker. Settings › Sync chooses the store; with sync off or
+    // no store chosen, every command answers `not-configured` and makes no
+    // store call.
+    const replicaCredentials =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
         : makeCredentialBrokerClient({
             url: options.credentialBrokerUrl,
             token: options.credentialBrokerToken,
           });
+    const replicaStoreSettingsService = new ReplicaStoreSettingsService({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString() as never,
+      home: homedir(),
+      // The access-outside-project grant has no surface yet, so a sync folder
+      // outside home fails closed, the same as the artifact mirror's folder.
+      standingOutsideApproval: false,
+      credentials: replicaCredentials,
+    });
+    const replicaStoreSettingsRoutes = createReplicaStoreSettingsRouteHandler({
+      service: replicaStoreSettingsService,
+      windowAuthorityStore,
+      resolveFolderCandidate: (windowId, input) =>
+        folderBrowseService.resolveCandidate(windowId, input),
+    });
     const replicaMembershipService = new ReplicaMembershipService({
-      store: () => ({ status: "not-configured" }),
+      store: () => replicaStoreSettingsService.selection(),
       credentials: {
         ensure: async (instanceId) => {
-          if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
-          return ensureReplicaDeviceKey(replicaDeviceKeys, instanceId);
+          if (replicaCredentials === undefined) throw new Error("credential store unavailable");
+          return ensureReplicaDeviceKey(replicaCredentials, instanceId);
         },
         sign: async (instanceId, payload) => {
-          if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
-          return makeReplicaDeviceSigner(replicaDeviceKeys, instanceId).sign(payload);
+          if (replicaCredentials === undefined) throw new Error("credential store unavailable");
+          return makeReplicaDeviceSigner(replicaCredentials, instanceId).sign(payload);
         },
       },
       journal: createReplicaMembershipJournal({
@@ -10015,6 +10035,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
+                (await replicaStoreSettingsRoutes(request)) ??
                 (await replicaMembershipRoutes(request)) ??
                 (await dispatchMeasuredProductRoutes(request)) ??
                 (await webAssets(request)) ??

@@ -202,7 +202,7 @@ navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. The groups are Personal (how Octant looks and
 behaves for you), Modes (each mode's defaults), Models (which provider or model
 answers each job), Agents (what a running agent may do), Integrations, and
-System (the running host, its data, remote access, and usage). A setting lives
+System (the running host, its data, sync, remote access, and usage). A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
 to its old page. Personal holds Appearance (theme, window glass, background,
 text, accessibility) and a separate Sidebar page (layout, destinations, sidebar
@@ -245,7 +245,12 @@ Every Settings page is built from one kit, in `settings/primitives.tsx`:
   a change resolves (a shell setting or a theme write), and holds its place
   when empty so nothing shifts. A host that refuses a change shows nothing.
   A Save button exists only for compound forms: a provider's connection
-  details and the harness model slots.
+  details, a sync bucket's connection details, and the harness model slots.
+- **Said before the switch.** A switch that sends something off this
+  computer carries the fact a person must know as its section's description,
+  above the switch and named as its description, and stays disabled until it
+  has something to send to. Sync is the case: it says the storage provider can
+  read the files, which are signed but not encrypted.
 - **Destructive.** A page's destructive group (logging out of GitHub,
   disconnecting Linear, purging thread history, revoking paired devices) is
   its own section, last on the page, whose card holds the destructive row

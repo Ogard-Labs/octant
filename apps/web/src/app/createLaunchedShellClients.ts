@@ -44,6 +44,10 @@ import {
   type ExtensionClient,
 } from "@octant/client-runtime/extension-client";
 import { createFolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
+import {
+  createReplicaStoreSettingsClient,
+  type ReplicaStoreSettingsClient,
+} from "@octant/client-runtime/replica-store-settings-client";
 import { createGithubClient } from "@octant/client-runtime/github-client";
 import { createGithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import { createGoalClient } from "@octant/client-runtime/goal-client";
@@ -158,6 +162,8 @@ export interface LaunchedShellClients {
   readonly providerUsageLimitsClient:
     | ReturnType<typeof createProviderUsageLimitsClient>
     | undefined;
+  /** Absent off a local host: choosing a sync store is host authority. */
+  readonly replicaStoreSettingsClient: ReplicaStoreSettingsClient | undefined;
   readonly shipClient: ShipClient;
   readonly usageClient: ReturnType<typeof createUsageClient>;
   readonly localUsageHistoryClient: ReturnType<typeof createLocalUsageHistoryClient> | undefined;
@@ -215,6 +221,15 @@ export function createLaunchedShellClients(
     pendingRequestClient = undefined;
   }
 
+  let replicaStoreSettingsClient: ReplicaStoreSettingsClient | undefined;
+  try {
+    replicaStoreSettingsClient = createReplicaStoreSettingsClient(port);
+  } catch {
+    // Choosing where artifact versions sync to is host authority; a client on
+    // any other host leaves Settings › Sync saying so.
+    replicaStoreSettingsClient = undefined;
+  }
+
   return {
     agentProfileClient: options.agentProfileClient ?? createAgentProfileClient(port),
     agentRunClient: options.agentRunClient ?? createAgentRunClient(port),
@@ -258,6 +273,7 @@ export function createLaunchedShellClients(
     planClient: options.planClient ?? createPlanClient(port),
     previewClient: createPreviewClient(port),
     providerUsageLimitsClient,
+    replicaStoreSettingsClient,
     shipClient: options.shipClient ?? createShipClient(port),
     usageClient: createUsageClient(port),
     usageDashboardClient: createUsageDashboardClient(port),

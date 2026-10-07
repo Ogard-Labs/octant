@@ -70,6 +70,7 @@
     "./preview-client": "./src/previewClient.ts",
     "./project-client": "./src/projectClient.ts",
     "./folder-browse-client": "./src/folderBrowseClient.ts",
+    "./replica-store-settings-client": "./src/replicaStoreSettingsClient.ts",
     "./provider-client": "./src/providerClient.ts",
     "./provider-usage-limits-client": "./src/providerUsageLimitsClient.ts",
     "./provider-usage-history-client": "./src/providerUsageHistoryClient.ts",

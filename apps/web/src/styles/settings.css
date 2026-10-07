@@ -777,13 +777,15 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    one stays as the Background change left it. */
 .setrow[data-setting-id="sidebar-destinations"],
 .setrow[data-setting-id="remote-listener"],
-.setrow[data-setting-id="remote-pairing"] {
+.setrow[data-setting-id="remote-pairing"],
+.setrow[data-setting-id="sync-bucket"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
 .setrow[data-setting-id="sidebar-destinations"] > .setrow-control,
 .setrow[data-setting-id="remote-listener"] > .setrow-control,
-.setrow[data-setting-id="remote-pairing"] > .setrow-control {
+.setrow[data-setting-id="remote-pairing"] > .setrow-control,
+.setrow[data-setting-id="sync-bucket"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;
@@ -2370,6 +2372,26 @@ textarea.settings-view__text-input {
   flex-basis: 100%;
   margin: 0;
   text-align: right;
+  font-size: var(--oct-text-detail);
+  color: var(--oct-muted);
+}
+
+/* A sync folder reads like the default folder: the path, quiet and
+   home-relative, beside the action that changes it. */
+.sync-settings__folder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.sync-settings__path {
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--oct-text-detail);
   color: var(--oct-muted);
 }
