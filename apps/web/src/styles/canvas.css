@@ -9,6 +9,12 @@
   padding: var(--oct-space-6);
 }
 
+/* The page an agent's preview is screenshotted from: the workspace backdrop
+   the thread draws a Canvas on, and nothing else. */
+.canvas-preview-page {
+  background: var(--oct-bg);
+}
+
 .canvas-view__header h1 {
   margin: 0 0 var(--oct-space-5);
   font-size: var(--oct-text-xl);

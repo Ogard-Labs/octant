@@ -289,19 +289,27 @@ layout warnings are computed from the document and the target width alone and
 are typed values — a clipped label, a legend over its row, an empty series, an
 inline document past the block cap, and ink below its contrast target — so a
 build reports them whether or not a browser rendered the picture. The picture is
-rasterised by the host's own headless Chromium, found through the same
-executable list the browser runtime and the Canvas browser smokes use, from a
-page the host builds out of its own renderer: no script, no remote reference,
-and every request aborted, so the network is off. The operation is bounded: one
-preview in flight per thread, a small allowance per minute, and an image no
-wider than 1,600 px. When no Chromium is present, or the model driving the turn
-does not accept images in a tool result, the warnings still return and the
-result says which was missing; the capability is reported per provider from the
-model's own input modalities.
+a screenshot of the web app's own Canvas renderer: the host's headless Chromium,
+found through the same executable list the browser runtime and the Canvas
+browser smokes use, loads the Canvas preview page built with the web assets
+(`apps/web/canvas-preview.html`, built into `dist/canvas-preview/`), which draws
+the version with the same blocks and stylesheet the thread uses, in the chosen
+theme and at the chosen width. The host writes the document into that page as
+inert JSON and answers only the page's own built files from disk; every other
+request is aborted, and the page's content security policy forbids connections,
+so the network is off and the page holds no server address or credential. The
+operation is bounded: one preview in flight per thread, a small allowance per
+minute, and an image no wider than 1,600 px and no taller than 4,096 px. When no
+Chromium is present, the build carries no preview page, the page fails to
+settle, or the model driving the turn does not accept images in a tool result,
+the warnings still return and the result names which (`no-browser`,
+`no-renderer`, `render-failed`, `provider-cannot-take-images`). Whether a model
+accepts images is read from its own input modalities, the same signal the
+computer-use screenshots use; there is no separate provider capability for
+images in a tool result.
 The signed desktop app bundles the `playwright-core` driver but no browser
 binary, so it resolves Chromium from the host's installed browsers. On a host
-with none, `preview` is warnings-only; that gap is named in the release notes
-rather than hidden.
+with none, `preview` is warnings-only, and the user guide says so.
 A thread reference card reports the effective presentation and the first
 version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
 revision or a person's edit, is listed as `sidebar`.

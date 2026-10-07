@@ -1,4 +1,3 @@
-import type { CanvasBlock } from "@octant/contracts/canvas";
 import { decodeCanvasId } from "@octant/contracts/canvas";
 import type { ProviderToolImage } from "@octant/contracts";
 import { effectiveCanvasPresentation } from "@octant/domain";
@@ -52,18 +51,31 @@ export interface CanvasPreviewRequest {
 
 export type CanvasPreviewWidth = "inline" | "sidebar" | number;
 
+/**
+ * `no-browser`: no Chromium on this host. `no-renderer`: this build carries no
+ * Canvas preview page. `render-failed`: the page did not settle or the
+ * screenshot failed. `provider-cannot-take-images`: the model driving the turn
+ * is not shown images in a tool result.
+ */
+export type CanvasPreviewImageOmitted =
+  | "no-browser"
+  | "no-renderer"
+  | "render-failed"
+  | "provider-cannot-take-images";
+
 export type CanvasPreviewOutcome =
   | {
       readonly kind: "preview";
       readonly canvasId: string;
       readonly sequence: number;
       readonly width: number;
-      readonly height: number;
       readonly warnings: ReadonlyArray<CanvasPreviewWarning>;
       /** Present only when the picture could be taken this time. */
       readonly image?: ProviderToolImage;
+      /** The picture's drawn height in CSS pixels; present with the picture. */
+      readonly height?: number;
       /** Why no picture accompanies the warnings, when one does not. */
-      readonly imageOmitted?: "no-browser" | "provider-cannot-take-images";
+      readonly imageOmitted?: CanvasPreviewImageOmitted;
     }
   | { readonly kind: "unavailable"; readonly message: string }
   | { readonly kind: "busy" }
@@ -75,10 +87,6 @@ const SIDEBAR_WIDTH = 720;
 /** A preview is at least a phone and never wider than the image ceiling allows. */
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 1_200;
-/** The smallest and largest picture; content decides the height in between. */
-const MIN_HEIGHT = 360;
-const MAX_HEIGHT = 2_400;
-const PER_BLOCK_HEIGHT = 96;
 const PREVIEWS_PER_WINDOW = 6;
 const PREVIEW_WINDOW_MS = 60_000;
 
@@ -145,13 +153,11 @@ export function createCanvasPreviewService(
           request.width === "inline" ? "inline" : effectiveCanvasPresentation(definition);
         const palette = canvasPreviewPalette(request.theme);
         const warnings = canvasPreviewWarnings({ definition, presentation, width, palette });
-        const height = previewHeight(definition.blocks);
         const base = {
           kind: "preview",
           canvasId: String(version.version.canvasId),
           sequence: version.version.sequence,
           width,
-          height,
           warnings,
         } as const;
         if (!request.imagesInToolResults) {
@@ -163,19 +169,23 @@ export function createCanvasPreviewService(
         const rendered = await options.renderer.render({
           definition,
           width,
-          height,
-          palette: {
-            background: palette.workspace,
-            ink: palette.ink,
-            muted: palette.muted,
-            accent: palette.accent,
-          },
+          theme: request.theme,
+          placement: presentation === "inline" ? "thread" : "document",
         });
         if (rendered.kind !== "rendered") {
-          return { ...base, imageOmitted: "no-browser" };
+          return {
+            ...base,
+            imageOmitted:
+              rendered.reason === "no-browser"
+                ? "no-browser"
+                : rendered.reason === "no-renderer"
+                  ? "no-renderer"
+                  : "render-failed",
+          };
         }
         return {
           ...base,
+          height: rendered.height,
           image: { mimeType: "image/png", data: Buffer.from(rendered.png).toString("base64") },
         };
       } finally {
@@ -229,10 +239,6 @@ type CanvasServiceVersion = Extract<
   ReturnType<CanvasService["get"]>,
   { readonly kind: "ready" }
 >["version"];
-
-function previewHeight(blocks: ReadonlyArray<CanvasBlock>): number {
-  return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, blocks.length * PER_BLOCK_HEIGHT));
-}
 
 function exceedsRateLimit(
   recent: Map<string, number[]>,

@@ -8681,7 +8681,7 @@ export function startOctantServer(
       canvas: canvasService,
       preview: createCanvasPreviewService({
         canvas: canvasService,
-        renderer: createPlaywrightCanvasPreviewRenderer(),
+        renderer: createPlaywrightCanvasPreviewRenderer({ webAssetsPath: resolveWebAssetsPath() }),
       }),
       imagesInToolResults: ({ providerInstanceId, modelId }) => {
         const model = providerRuntimeRegistry
