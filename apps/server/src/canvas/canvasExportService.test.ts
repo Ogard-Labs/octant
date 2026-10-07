@@ -40,6 +40,8 @@ import {
   type CanvasExportTargetRegistration,
 } from "./canvasExportTargets";
 import { FOLDER_EXPORT_TARGET_ID } from "./folderExportTarget";
+import { GIST_EXPORT_TARGET_ID, type GistExportAvailability } from "./gistExportTarget";
+import type { GistCreationRequest, GistCreationResult } from "../github/gistCreationPort";
 
 const directories: string[] = [];
 const start = Date.parse("2026-08-01T21:00:00.000Z");
@@ -115,6 +117,38 @@ function document(text = "Scope"): CanvasExportDocument {
         text,
       },
     ] as unknown as ReadonlyArray<CanvasBlock>,
+  };
+}
+
+/**
+ * The folder registration plus a fake GitHub client, so a gist export runs
+ * through the same service and journal a real one would.
+ */
+function gistRegistration(availability: GistExportAvailability): {
+  readonly registration: CanvasExportTargetRegistration;
+  readonly requests: GistCreationRequest[];
+} {
+  const requests: GistCreationRequest[] = [];
+  return {
+    requests,
+    registration: {
+      ...exportFolder().registration,
+      gist: {
+        availability: () => availability,
+        gists: {
+          create: async (input): Promise<GistCreationResult> => {
+            requests.push(input);
+            return {
+              kind: "created",
+              gist: {
+                id: "aa11bb22cc33dd44",
+                url: "https://gist.github.com/octocat/aa11bb22cc33dd44",
+              },
+            };
+          },
+        },
+      },
+    },
   };
 }
 
@@ -646,6 +680,161 @@ describe("canvas export service", () => {
 
     expect(offer?.status).toBe("refused");
     expect(offer?.message).toContain("could not be read");
+    connection.close();
+  });
+
+  it("offers the gist destination as not connected until GitHub is connected", () => {
+    const { registration } = gistRegistration({ kind: "not-connected" });
+    const { service, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+
+    const offer = service
+      .offers(canvasId)
+      ?.targets.find((candidate) => String(candidate.targetId) === GIST_EXPORT_TARGET_ID);
+
+    expect(offer?.status).toBe("not-connected");
+    expect(offer?.formats).toEqual(["markdown"]);
+    connection.close();
+  });
+
+  it("shows the account, the audience, and the public note on the card, and posts nothing until approved", async () => {
+    const { registration, requests } = gistRegistration({ kind: "ready", account: "octocat" });
+    const { service, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+
+    const prepared = service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
+    expect(prepared.kind).toBe("approval");
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+    expect(prepared.card.destinationAccount).toBe("octocat");
+    expect(prepared.card.destinationVisibility).toBe("secret");
+    expect(prepared.card.destinationNote).toContain("visible to anyone");
+    // The gist has no URL until it exists, so the card names no path.
+    expect(prepared.card.destinationPath).toBeUndefined();
+    expect(requests).toHaveLength(0);
+
+    const exported = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(exported.kind).toBe("exported");
+    expect(requests).toHaveLength(1);
+    connection.close();
+  });
+
+  it("posts a public gist when the person chose public on the card, and journals the URL", async () => {
+    const { registration, requests } = gistRegistration({ kind: "ready", account: "octocat" });
+    const { service, eventStore, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+    const prepared = service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+
+    await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+      visibility: "public",
+    });
+
+    expect(requests[0]?.visibility).toBe("public");
+    expect(eventStore.replay()[0]?.outcome).toEqual({
+      kind: "receipt",
+      receipt: {
+        kind: "link",
+        href: "https://gist.github.com/octocat/aa11bb22cc33dd44",
+        remoteId: "aa11bb22cc33dd44",
+      },
+    });
+    connection.close();
+  });
+
+  it("does not pass a client's audience choice to a destination that offered none", async () => {
+    // A destination that describes nothing — no path, no account, no audience —
+    // is the shape a third-party target with no card facts has. The route
+    // forwards whatever visibility the client sent, so the service is what must
+    // keep that choice from arriving as a confirmed audience.
+    const seen: Array<{ readonly path?: string; readonly visibility?: string }> = [];
+    const silent: CanvasExportTargetBinding = {
+      facts: {
+        installed: true,
+        trusted: true,
+        desiredEnabled: true,
+        effectiveState: { kind: "effective" },
+        connected: true,
+      },
+      target: {
+        contribution: decodeCanvasExportContribution({
+          schemaVersion: 1,
+          kind: "canvas-export-contribution",
+          targetId: "silent-destination",
+          label: "Silent destination",
+          formats: ["markdown"],
+        }),
+        exportDocument: async (output, confirmed) => {
+          seen.push({ ...(confirmed === undefined ? {} : confirmed) });
+          return { kind: "receipt", receipt: { kind: "remote-id", remoteId: "copy-1" } };
+        },
+      },
+    };
+    const { service, connection } = harness(() => [silent]);
+    const prepared = service.prepare(prepareRequest("silent-destination"), true);
+    expect(prepared.kind).toBe("approval");
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+
+    const exported = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+      visibility: "public",
+    });
+
+    expect(exported.kind).toBe("exported");
+    expect(seen).toEqual([{}]);
+    connection.close();
+  });
+
+  it("keeps the destination's own audience when no choice arrives", async () => {
+    // The gist card offered an audience, so its destination hears the choice
+    // only as a change to that audience — and with no choice at all, the
+    // description the card showed stands.
+    const { registration, requests } = gistRegistration({ kind: "ready", account: "octocat" });
+    const { service, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+    const prepared = service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+
+    await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(requests[0]?.visibility).toBe("secret");
     connection.close();
   });
 });

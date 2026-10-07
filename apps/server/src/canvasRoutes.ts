@@ -70,6 +70,13 @@ export interface CanvasRouteDependencies {
   /** Destination export. Absent when the host cannot journal an export. */
   readonly canvasExportService?: CanvasExportService;
   /**
+   * Brings the export destinations' connection state current before they are
+   * listed or prepared. The offer list itself is synchronous, so a destination
+   * whose state needs an external read (the gist's GitHub connection) is read
+   * here, on demand, rather than when the host starts.
+   */
+  readonly refreshCanvasExportTargets?: () => Promise<void>;
+  /**
    * Which folder a Project's exports are written to. Absent when the host
    * cannot journal the choice, which also leaves the folder destination
    * `not-connected`.
@@ -932,6 +939,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             origin,
           );
         }
+        await dependencies.refreshCanvasExportTargets?.();
         const offers = exportService.offers(canvasId);
         if (offers === undefined) {
           return failureResponse("Canvas export is not available for this canvas.", 404, origin);
@@ -986,6 +994,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             authenticatedWindowId,
             requestBody.canvasId,
           );
+          if (context.kind === "ok") await dependencies.refreshCanvasExportTargets?.();
           return jsonResponse(
             decodeCanvasExportPrepareResult(
               exportService.prepare(requestBody, context.kind === "ok"),
@@ -1012,6 +1021,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               approvalId: requestBody.approvalId,
               decision: requestBody.decision,
               permitted: context.kind === "ok",
+              ...(requestBody.visibility === undefined
+                ? {}
+                : { visibility: requestBody.visibility }),
               // The envelope names the transport principal this host
               // authenticated for the approval, never a fixed local user.
               actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
