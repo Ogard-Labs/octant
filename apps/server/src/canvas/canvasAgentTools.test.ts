@@ -320,6 +320,51 @@ describe("createCanvasAgentTools", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  it("lets an agent create a repository map from the treemap example describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["treemap"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+      blockSchema?: {
+        properties?: { colorScale?: { anyOf?: ReadonlyArray<{ const?: string }> } };
+      };
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.blockId)).toContain("repository-map");
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks.every((block) => block.kind === "treemap")).toBe(true);
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Repository map",
+        blocks: examples,
+      }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Repository map" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+
+    const repositoryMap = examples.find((example) => example.blockId === "repository-map");
+    expect(repositoryMap).toMatchObject({
+      kind: "treemap",
+      sizeBy: "loc",
+      colorBy: "edits60",
+      colorScale: "sequential",
+    });
+  });
+
   it("lets an agent create and then revise a settings screen mockup from the example describe returns", async () => {
     const { create, revise, set } = tools();
     const described = await set.execute({

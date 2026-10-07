@@ -543,14 +543,16 @@ function confineClaudeLaunch(
       allowProcessExec: false,
       allowProcessFork: false,
       allowFileReadStar: true,
-      // Subscription authentication keeps its credential in the platform secret
-      // store rather than in the provider home, so a launch without this reports
-      // itself signed out and the turn never starts. The store's files stay
-      // denied; only the lookup opens (0145). An API-key launch already carries
-      // its credential and never resolves one from the store, and the same
-      // binary may be trusted for a stored subscription item it has no use for,
-      // so the lookup stays closed there.
-      allowProviderCredentialLookup: spawnOptions.env.ANTHROPIC_API_KEY === undefined,
+      // The store's files stay denied either way; only the lookup opens (0145),
+      // and the lookup alone does not sign the runtime in, because it reads its
+      // sign-in by running `/usr/bin/security`, which this profile never runs.
+      // A launch that carries its credential, an API key or the connected
+      // helper token, resolves nothing from the store, and the same binary may
+      // be trusted for a stored subscription item it has no use for, so the
+      // lookup stays closed there.
+      allowProviderCredentialLookup:
+        spawnOptions.env.ANTHROPIC_API_KEY === undefined &&
+        spawnOptions.env.CLAUDE_CODE_OAUTH_TOKEN === undefined,
     });
     return {
       spawnOptions: {

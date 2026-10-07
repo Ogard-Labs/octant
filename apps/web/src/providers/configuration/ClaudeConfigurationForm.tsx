@@ -14,6 +14,7 @@ import {
   type CredentialStatusController,
 } from "../ProviderSettingsCredentials";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
+import { ClaudeHelperSignIn, type RunClaudeHelperCommand } from "../ClaudeHelperSignIn";
 
 interface ClaudeConfigurationFormProps {
   readonly instance: Extract<ProviderInstance, { driverKind: "claude" }>;
@@ -21,6 +22,7 @@ interface ClaudeConfigurationFormProps {
   readonly credentialManagementAvailable: boolean;
   readonly credential: CredentialStatusController;
   readonly onChange: ProviderSettingsViewProps["onChangeClaudeConfiguration"];
+  readonly onClaudeHelpers?: RunClaudeHelperCommand;
 }
 
 export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
@@ -118,6 +120,16 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
             type="password"
           />
         </SettingRow>
+      ) : null}
+      {props.onClaudeHelpers !== undefined &&
+      authentication === "subscription" &&
+      props.instance.configuration.authentication === "subscription" ? (
+        <ClaudeHelperSignIn
+          disabled={props.disabled}
+          displayName={props.instance.displayName}
+          instanceId={props.instance.id}
+          run={props.onClaudeHelpers}
+        />
       ) : null}
       <div className="provider-card__edit-actions">
         <OctantButton

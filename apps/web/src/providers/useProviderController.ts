@@ -44,6 +44,8 @@ import {
   type ProviderClient,
 } from "@octant/client-runtime/provider-client";
 import { runProviderOAuthCommand } from "./providerOAuthClient";
+import { runClaudeHelperCommand } from "./claudeHelperSignInClient";
+import type { ClaudeHelperCommand } from "./ClaudeHelperSignIn";
 import type { ProviderOAuthCommand } from "./ProviderOAuthSignIn";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
@@ -3154,6 +3156,16 @@ export function useProviderController(options: ProviderControllerOptions) {
         return Promise.resolve(undefined);
       }
       return runProviderOAuthCommand({
+        baseUrl: options.serverUrl,
+        windowCapability: options.windowCapability,
+        command,
+      }).catch(() => undefined);
+    },
+    claudeHelpers: (command: ClaudeHelperCommand) => {
+      if (options.serverUrl === undefined || options.windowCapability === undefined) {
+        return Promise.resolve(undefined);
+      }
+      return runClaudeHelperCommand({
         baseUrl: options.serverUrl,
         windowCapability: options.windowCapability,
         command,

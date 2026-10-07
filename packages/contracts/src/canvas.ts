@@ -25,9 +25,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // Canvas wire contracts are deliberately versioned independently from event
 // envelopes. A decoder must reject a future version until its renderer and
 // policy have been reviewed together. The current schema version is declared
-// in `canvasIdentity.ts`: version 3 added the mockup block and version 4 the
-// thread presentation, which the definition filters below admit only under
-// those declared versions.
+// in `canvasIdentity.ts`: version 3 added the mockup block, version 4 the
+// thread presentation, and version 5 the treemap block, which the definition
+// filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -57,6 +57,17 @@ export const CANVAS_MAX_PLAN_TASK_SOURCES = 8;
 export const CANVAS_MAX_MOCKUP_DEPTH = 6;
 export const CANVAS_MAX_MOCKUP_NODES = 64;
 export const CANVAS_MAX_MOCKUP_TEXT_LENGTH = 120;
+export const CANVAS_MAX_TREEMAP_LEAVES = 4_096;
+export const CANVAS_MAX_TREEMAP_DEPTH = 8;
+export const CANVAS_MAX_TREEMAP_MEASURES = 8;
+export const CANVAS_MAX_TREEMAP_LABEL_LENGTH = 120;
+
+// The schema version that introduced each version-gated block kind or hint. A
+// document carrying one below the version that introduced it is a declared
+// future version, not a corrupt one, so a rolled-back runtime refuses it cleanly.
+export const CANVAS_MOCKUP_SCHEMA_VERSION = 3;
+export const CANVAS_PRESENTATION_SCHEMA_VERSION = 4;
+export const CANVAS_TREEMAP_SCHEMA_VERSION = 5;
 
 // Descriptive aliases keep budget names discoverable without creating a
 // second source of truth.
@@ -228,6 +239,7 @@ export const CanvasBlockKind = Schema.Literal(
   "image",
   "plan",
   "mockup",
+  "treemap",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -518,6 +530,63 @@ export const CanvasChartBlock = Schema.Struct({
     }),
   );
 export type CanvasChartBlock = typeof CanvasChartBlock.Type;
+
+/**
+ * How a treemap colours its cells.
+ *
+ * `categorical` assigns a hue per top-level group; `sequential` and
+ * `diverging` read the colour measure as an ordered value. Diverging centres
+ * on the mid-point of the colour domain, so a reading above the middle takes
+ * the positive family and one below it the negative family.
+ */
+export const CanvasTreemapScale = Schema.Literal("sequential", "diverging", "categorical");
+export type CanvasTreemapScale = typeof CanvasTreemapScale.Type;
+
+export const CanvasTreemapMeasureId = boundedToken("CanvasTreemapMeasureId");
+export type CanvasTreemapMeasureId = typeof CanvasTreemapMeasureId.Type;
+
+export const CanvasTreemapMeasure = Schema.Struct({
+  measureId: CanvasTreemapMeasureId,
+  label: CanvasLabel,
+  format: Schema.optional(CanvasNumberFormat),
+}).annotations(strict);
+export type CanvasTreemapMeasure = typeof CanvasTreemapMeasure.Type;
+
+/**
+ * One node of a treemap hierarchy.
+ *
+ * A node names its parent rather than nesting its children: a nested tree at
+ * the leaf budget would land past the Canvas depth budget before a repository
+ * has named its packages. Values sit on leaves; a group's reading is the sum
+ * of its children, so the picture never states a total the leaves do not.
+ */
+export const CanvasTreemapNode = Schema.Struct({
+  nodeId: CanvasNodeId,
+  parentId: Schema.optional(CanvasNodeId),
+  label: boundedNonEmptyText(CANVAS_MAX_TREEMAP_LABEL_LENGTH),
+  /** A leaf may name a manifest source; the host reauthorizes opening it. */
+  sourceId: Schema.optional(CanvasSourceId),
+  /** The leaf's value for each declared measure. Groups carry none. */
+  values: Schema.optional(Schema.Record({ key: CanvasTreemapMeasureId, value: FiniteNumber })),
+}).annotations(strict);
+export type CanvasTreemapNode = typeof CanvasTreemapNode.Type;
+
+export const CanvasTreemapBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("treemap"),
+  nodes: Schema.Array(CanvasTreemapNode).pipe(Schema.maxItems(CANVAS_MAX_TREEMAP_LEAVES)),
+  measures: Schema.NonEmptyArray(CanvasTreemapMeasure).pipe(
+    Schema.maxItems(CANVAS_MAX_TREEMAP_MEASURES),
+  ),
+  /** The measure rectangles are sized by when the block first draws. */
+  sizeBy: CanvasTreemapMeasureId,
+  /** The measure cells are coloured by when the block first draws. */
+  colorBy: CanvasTreemapMeasureId,
+  colorScale: Schema.optional(CanvasTreemapScale),
+  /** The node a static export starts from; absent draws the whole hierarchy. */
+  startNodeId: Schema.optional(CanvasNodeId),
+}).annotations(strict);
+export type CanvasTreemapBlock = typeof CanvasTreemapBlock.Type;
 
 export const CanvasTimelineItem = Schema.Struct({
   itemId: boundedToken("CanvasTimelineItemId"),
@@ -945,6 +1014,7 @@ export const CanvasBlock = Schema.Union(
   CanvasImageBlock,
   CanvasMockupBlock,
   CanvasPlanBlock,
+  CanvasTreemapBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
   // effect, so union membership never makes a definition executable.
@@ -975,21 +1045,36 @@ export const CanvasDefinition = Schema.Struct({
 })
   .annotations(strict)
   .pipe(
-    // Version-gated blocks: a mockup is declared only under version 3. An older
-    // runtime that never learned the kind must see a mockup-carrying document as
-    // a declared future version, not as a v2 document that failed to decode.
+    // Version-gated blocks and hints: a mockup is admitted from version 3, the
+    // thread presentation from version 4, and a treemap from version 5. A
+    // rolled-back runtime that never learned a kind or hint must see a document
+    // carrying it as a declared future version, not as a document that failed
+    // to decode. Each keeps its own floor so an earlier document stays valid.
     Schema.filter(
       (definition) =>
-        definition.schemaVersion >= 3 ||
+        definition.schemaVersion >= CANVAS_MOCKUP_SCHEMA_VERSION ||
         !definition.blocks.some((block) => block.kind === "mockup"),
       {
-        message: () => "Mockup blocks require Canvas schema version 3.",
+        message: () =>
+          `Mockup blocks require Canvas schema version ${String(CANVAS_MOCKUP_SCHEMA_VERSION)} or newer.`,
       },
     ),
     Schema.filter(
-      (definition) => definition.schemaVersion >= 4 || definition.presentation === undefined,
+      (definition) =>
+        definition.schemaVersion >= CANVAS_PRESENTATION_SCHEMA_VERSION ||
+        definition.presentation === undefined,
       {
-        message: () => "A thread presentation requires Canvas schema version 4.",
+        message: () =>
+          `A thread presentation requires Canvas schema version ${String(CANVAS_PRESENTATION_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_TREEMAP_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "treemap"),
+      {
+        message: () =>
+          `Treemap blocks require Canvas schema version ${String(CANVAS_TREEMAP_SCHEMA_VERSION)}.`,
       },
     ),
   );
