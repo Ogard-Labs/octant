@@ -324,6 +324,26 @@ can sort a matrix's rows by their total and walk the cells with the arrow keys;
 these are view state and are never journaled. The accessible fallback is a table
 of every coordinate and its total for a matrix, or of every dated reading for a
 calendar.
+A bar list is a ranking of magnitudes (`packages/domain/src/canvasBarListLayout.ts`):
+each row is a label, a value, an optional second value, and an optional manifest
+source. Rows sort largest first with a stable tie-break by the author's order,
+a reader can flip the ranking to smallest first, and the list shows a top N with
+Show all; both are view state and are never journaled. A bar's length is its
+share of the largest value, drawn in neutral ink or through the shared
+sequential scale. A path-like label uses the shared
+path style (directory dimmed, file name at full ink), and a row that names a
+manifest source offers Open file through the allowlisted open-source action,
+which the host reauthorizes. The pure, deterministic layout is shared by the
+screen, the artifact preview SVG, and the Markdown and HTML export. The domain
+policy refuses a repeated label, a negative or non-finite value, a list past the
+row budget, and a source the manifest does not hold; the accessible fallback is a
+table of every row. A metric block may carry a `format`, a `delta`, a
+`goodDirection` of `up`, `down`, or `neutral` so a delta's tone is never guessed,
+a `sparkline` of at most 256 readings, and a short `caption`; consecutive metric
+blocks are gathered into one responsive row of two to four tiles. The bar list
+and the metric's direction, sparkline, and caption arrive with Canvas schema
+version 7, so a document declaring an older version that carries any of them is
+refused as a future version; a static export carries the same metric fields.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -1367,9 +1387,10 @@ modelId }`, and the model picker is provider-first. Discovery can find
   through the file-change check, after the write; a shell command allowed
   this way runs without an approval card. Clearing the saved grants in
   OpenCode restores the prompts. A 2.x reject settles every pending request
-  in the session, so each settled request is forgotten. Questions are unsupported: 2.0.22 serves no question routes and
-  asks through forms, which are not mapped, so the written posture denies
-  `question` and a form that still arrives fails the turn. Resume,
+  in the session, so each settled request is forgotten. Questions are
+  unsupported: 2.0.22 serves no question routes and asks through forms, which
+  are not mapped, so the written posture denies `question` and a form that
+  still arrives fails the turn. Resume,
   interruption, and tool activity are reported; a file change that no allowed
   or approved edit preceded fails the turn; and anything not mapped fails
   closed. The probe also asks the confined 2.x server to answer for a

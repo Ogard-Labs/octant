@@ -394,6 +394,16 @@ Zen, the only place one lives. Work offers the same tiles without a terminal,
 because Work has no shell. Review opens the Review page. The tiles leave when they
 have nothing to show.
 
+Above the composer, the two start-screen tabs (**New task**, **Running** with
+the sidebar's count as tabular meta text) use the plain-text underline tabs
+(`surface-tabs`) on the composer's top-left edge. They never wrap, and the
+selected tab is carried by ink and the underline, with no fill or hue. The
+Running tab's body is one hairline-ringed list on the card fill: each row is the
+Working now row face with **Open** and **Stop** ghost buttons at the extra-small
+step, and the stop question takes its own line under the row with a destructive
+**Stop** and a ghost **Keep running**. See
+[Workspace](docs/design/workspace.md#start-screen-cards) for behavior.
+
 The card area is a ghost **Customize** button right-aligned under the tiles
 (icon at the 14px step and the label), then a grid of cards, two columns and one
 under 560px. A card uses the card recipe (`OctantCard`: hairline ring, no
@@ -790,6 +800,46 @@ SVG export draw the same deterministic layout. A matrix's rows can be sorted by
 their total and the cells can be walked with the arrow keys; these are view
 state and revise nothing. The disclosed table is the accessible reading, and it
 shows a missing coordinate as an empty cell rather than a zero.
+
+**Bar list.** A ranking of magnitudes — the "hottest files" or "slowest tests"
+panel (`packages/domain/src/canvasBarListLayout.ts`). Each row is a label, a
+value, an optional second value, and an optional manifest source. Rows sort
+largest first by default and a reader can flip the ranking to smallest first; a
+tie keeps the author's order. The list shows a top N with Show all up to the row
+budget, and both the order and the number shown are view state. A bar's length is its share of the largest value — the reading is
+the length, so bars use the neutral ink, or the sequential scale when the
+magnitude is the subject; a value is never negative. A label that reads as a
+path uses the shared path style: the directory is dimmed and the file name keeps
+full ink in the code font. A row that names a manifest source offers Open file
+through the allowlisted open-source action, which the host reauthorizes. The
+screen renderer, the static SVG export, and the Markdown and HTML export rank
+the same list. The disclosed
+table is the accessible reading of every row, including the rows Show all holds
+back.
+
+**Metric tiles.** Consecutive metric blocks are gathered into one responsive
+row of two to four tiles, and a metric's value is set large in tabular numerals
+so a row of numbers aligns. A metric may name how its value reads (`format`), a
+unit, a `delta`, and a `goodDirection` of `up`, `down`, or `neutral` so a
+delta's tone is never guessed: a direction that agrees with the change reads in
+`--oct-success`, one that disagrees in `--oct-danger`, and an absent or
+`neutral` direction keeps the neutral ink so the arrow and the signed value
+carry the reading. It may also carry a `sparkline` of at most 256 recent
+readings, drawn as a glance with no axis, and a short `caption`. The value, the
+delta, and the caption are the accessible numbers; the sparkline is decorative.
+
+**Tables.** A table is columns of a declared type and rows in the order the
+author wrote. A column may name a `format` and a `display` of `text` (the plain
+reading, the default), `bar` (an in-cell bar whose length is the value's share
+of the column's largest reading), `heat` (a tint on the shared sequential
+scale), or `status` (the value drawn as a badge). The value is always drawn with
+the mark, never instead of it, so a bar and a tint are scan aids: under forced
+colours they fall to system ink and the plain value remains the reading. A text
+column whose values read as a path uses the shared path style, and a number
+column is right-aligned in tabular numerals. Sorting (each sorted header
+announces its direction with `aria-sort`; hiding the sorted column drops the
+sort), a text filter, and hidden columns are view state and revise nothing, so the exported and static forms keep the order
+the author wrote. The header sticks through a scrolling table.
 
 **Motion.** A chart transitions only on a state change — a legend toggle, a zoom
 — never on entrance. A transition lasts at most 200ms and is off under

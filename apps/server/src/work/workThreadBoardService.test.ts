@@ -420,10 +420,37 @@ describe("boardRuntimeActivityFromTurnsAndSignals", () => {
       childWaiting: 0,
     });
     expect(activity).toMatchObject({
-      executing: true,
+      executing: false,
       awaitingInput: true,
       awaitingKind: "approval",
     });
+  });
+
+  it("files a running turn parked on a request as waiting, and executing again once answered", () => {
+    const parked = boardRuntimeActivityFromTurnsAndSignals({
+      turns: [turn("running")],
+      pendingRequest: true,
+      childActive: 0,
+      childWaiting: 0,
+    });
+    expect(parked).toMatchObject({ executing: false, awaitingInput: true });
+    const answered = boardRuntimeActivityFromTurnsAndSignals({
+      turns: [turn("running")],
+      pendingRequest: false,
+      childActive: 0,
+      childWaiting: 0,
+    });
+    expect(answered).toMatchObject({ executing: true, awaitingInput: false });
+  });
+
+  it("keeps a thread in progress while a child run works beside a parked turn", () => {
+    const activity = boardRuntimeActivityFromTurnsAndSignals({
+      turns: [turn("running")],
+      pendingRequest: true,
+      childActive: 1,
+      childWaiting: 0,
+    });
+    expect(activity).toMatchObject({ executing: true, awaitingInput: true });
   });
 
   it("holds Waiting from an interrupted latest turn", () => {

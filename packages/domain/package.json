@@ -28,6 +28,7 @@
     "./canvas-policy": "./src/canvasPolicy.ts",
     "./canvas-treemap-layout": "./src/canvasTreemapLayout.ts",
     "./canvas-heatmap-layout": "./src/canvasHeatmapLayout.ts",
+    "./canvas-bar-list-layout": "./src/canvasBarListLayout.ts",
     "./canvas-number-format": "./src/canvasNumberFormat.ts",
     "./canvas-presentation-policy": "./src/canvasPresentationPolicy.ts",
     "./canvas-action-policy": "./src/canvasActionPolicy.ts",

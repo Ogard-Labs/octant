@@ -254,6 +254,7 @@ describe("the work in progress a start screen lists", () => {
     expect(rows).toEqual([
       {
         key: "run:run-1",
+        runId: "run-1",
         mode: "code",
         threadId: "child-1",
         title: "Wire the board",

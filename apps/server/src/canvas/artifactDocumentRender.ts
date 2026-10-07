@@ -12,6 +12,7 @@ import {
   treemapTotals,
 } from "@octant/domain/canvas-treemap-layout";
 import { heatmapRowTotals } from "@octant/domain/canvas-heatmap-layout";
+import { layoutCanvasBarList } from "@octant/domain/canvas-bar-list-layout";
 import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
 
 /**
@@ -115,10 +116,12 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           .filter((part) => part.length > 0)
           .join(": "),
       );
-    case "metric":
+    case "metric": {
+      const value = `${reading(block.label)}: ${scalar(block.value, block.format)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`;
       return paragraph(
-        `${reading(block.label)}: ${scalar(block.value, block.format)}${block.unit === undefined ? "" : ` ${reading(block.unit)}`}`,
+        block.caption === undefined ? value : `${value} — ${reading(block.caption)}`,
       );
+    }
     case "progress":
       return paragraph(
         `${reading(block.label)}: ${String(Math.round(block.value * 100))}%${block.detail === undefined ? "" : ` — ${reading(block.detail)}`}`,
@@ -348,6 +351,34 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
             day.date,
             scalar(day.value, block.format),
             day.note === undefined ? "" : reading(day.note),
+          ]),
+        },
+      ];
+    }
+    case "bar-list": {
+      // The ranking as a table in the order the screen and the preview draw
+      // it, largest first through the shared layout, carrying every row the
+      // block declares rather than only the top rows.
+      const hasSecondary = block.rows.some((row) => row.secondaryValue !== undefined);
+      const ranked = layoutCanvasBarList(block).rows;
+      return [
+        {
+          kind: "table",
+          headers: [
+            "Item",
+            reading(block.valueLabel ?? "Value"),
+            ...(hasSecondary ? [reading(block.secondaryLabel ?? "Second")] : []),
+          ],
+          rows: ranked.map((row) => [
+            reading(row.label),
+            scalar(row.value, block.format),
+            ...(hasSecondary
+              ? [
+                  row.secondaryValue === undefined
+                    ? ""
+                    : scalar(row.secondaryValue, block.secondaryFormat ?? block.format),
+                ]
+              : []),
           ]),
         },
       ];

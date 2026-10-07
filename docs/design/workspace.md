@@ -243,6 +243,32 @@ the host cannot scan, the card says it could not check rather than that nothing
 is running, and a refused refresh keeps the last listing. A window with no Code
 Project sees an empty card.
 
+Above the composer the same screens carry two tabs on its top-left edge,
+**New task** and **Running**. New task is selected first and is the composer as
+it was: the Running tab never takes the focus the composer takes on arrival. The
+Running label carries the sidebar's own Running count for the current mode, read
+from the same place as the tile (nothing is added at zero), so the two cannot
+disagree; the list can run longer by an agent run whose thread is resting, which
+the sidebar does not count either. The tabs are a tablist: Arrow keys move
+between them, Enter or Space chooses, and Tab goes on to the composer. Choosing
+Running hides the composer without unmounting it, so the draft, the chosen
+Project, model, and attachments are all there when New task comes back; the list
+mounts, and reads, only while it is open. It shows the Working now rows
+without the five-row limit, compact, each with **Open** (the thread, as a Working
+now row does) and **Stop**. A start screen has no thread open, and the
+navigation rows carry no turn or attempt identity, so Stop sends the command its
+mode already uses for the Stop control inside the thread (interrupt a Chat
+attempt, cancel a Work turn, cancel a Code provider turn, or cancel an agent run
+for a row that is only a run). Chat and Work first read the thread's running
+turn and send nothing when there is none. Code has no turn to name: its host
+cancels only the turn it is running for that thread and answers a cancel it had
+no turn for with a failed turn state and no reason, which counts as nothing
+running. It asks first, in the row: "Stop this turn?" ("Stop this agent run?"
+on a row that is only a run) with **Stop** and **Keep running**, the safe
+answer holding the focus. In every mode a turn that finished
+meanwhile is reported ("Already finished.") and never cancelled twice, and a
+host refusal shows in the row in the host's words. The tabs and list add no persisted state or authority.
+
 **Needs you** is the card before Working now, on by default. It lists the
 approvals and questions a provider is waiting on, from one host list of every
 approval and question this window can answer across Chat, Work, and Code and
@@ -474,10 +500,15 @@ keeps the wait, the text clamped to two lines, and the answers): **Approve** and
 The board reads the same host list as the Needs you card (the `pendingRequests`
 read) once for the whole board, only while the board is mounted, on the same
 change-feed, settings, and workspace signals, and never on a timer. A card is
-matched to its request by thread and mode, whichever column the board files it
-in: a Code thread parked on a tool approval still counts as executing while its
-turn runs, so its card sits in In progress, and it carries the request all the
-same. A card with no listed request is drawn as before. A thread with several requests shows the oldest and **+N more
+matched to its request by thread and mode. A thread whose live turn waits on an
+approval or a question files under Waiting with the awaiting-input reason, not
+In progress: the provider session stays open while it waits, so the host
+reads the wait from the running turn's open approvals and questions (Code) or
+the open request (Work) rather than from the turn's running record. Those are
+the requests the `pendingRequests` read lists, so the board read that follows an
+answer already files the thread back under In progress. Other work still running beside a parked turn (a
+terminal, a child run) keeps the thread In progress. A card with no listed
+request is drawn as before. A thread with several requests shows the oldest and **+N more
 waiting**, which opens the thread. Answers use each mode's existing command
 through the listed handle and hold no new authority. A refused answer shows one
 line on the card, and the card does not move: it changes column only when the
@@ -487,6 +518,13 @@ grouping the Waiting column lists the oldest waiting request first, then cards
 with no listed request in their usual order. The list layout (narrow width, or
 Code's List view) carries the same actions in its rows. A window with no
 pending-request reader (a remote window) draws cards exactly as before.
+
+While a pointer rests on the board, every card keeps the column and slot it had
+when the pointer arrived, so answering one card cannot slide the next card
+under the cursor. Only placement is held: each held slot shows the card's newest
+content, a card the host no longer lists keeps its slot with its last content,
+and a newly listed card joins the end of its column. Leaving the board applies
+the host's placement. Touch and keyboard use never hold, because neither hovers.
 
 **GitHub issue browser.** The first-party GitHub plugin contributes a second
 `sidebar.destination` (`github-issues`) that opens a host-scoped, read-only
