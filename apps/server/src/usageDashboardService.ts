@@ -64,7 +64,10 @@ export function readUsageDashboard(
       unreadableRecordCount += 1;
       continue;
     }
-    const mode = deriveModeFromSubjectType(row.subject_type);
+    const mode =
+      row.subject_type === "agent-run" && row.subject_id !== null
+        ? readChildRunParent(connection, row.subject_id)?.mode
+        : deriveModeFromSubjectType(row.subject_type);
     const projectId =
       row.subject_id === null
         ? undefined
@@ -290,7 +293,20 @@ function resolveChildRunProjectId(
   runId: string,
   cacheStats: CacheStatsRecorder | undefined,
 ): string | undefined {
-  const parent = connection
+  const parent = readChildRunParent(connection, runId);
+  if (parent === undefined) return undefined;
+  return resolveProjectId(connection, cache, `${parent.mode}-thread`, parent.threadId, cacheStats);
+}
+
+/**
+ * The parent thread and mode a child run's request records, which place the
+ * run's usage exactly where its parent thread's own usage is placed.
+ */
+function readChildRunParent(
+  connection: SqliteConnection,
+  runId: string,
+): { readonly mode: "chat" | "work" | "code"; readonly threadId: string } | undefined {
+  const row = connection
     .prepare(
       `SELECT json_extract(payload_json, '$.run.routingReceipt.mode') AS mode,
          json_extract(payload_json, '$.run.parentThreadId') AS parent_thread_id
@@ -302,15 +318,9 @@ function resolveChildRunProjectId(
     .get(runId) as
     | { readonly mode: string | null; readonly parent_thread_id: string | null }
     | undefined;
-  if (parent === undefined || parent.parent_thread_id === null) return undefined;
-  if (parent.mode !== "chat" && parent.mode !== "work" && parent.mode !== "code") return undefined;
-  return resolveProjectId(
-    connection,
-    cache,
-    `${parent.mode}-thread`,
-    parent.parent_thread_id,
-    cacheStats,
-  );
+  if (row === undefined || row.parent_thread_id === null) return undefined;
+  if (row.mode !== "chat" && row.mode !== "work" && row.mode !== "code") return undefined;
+  return { mode: row.mode, threadId: row.parent_thread_id };
 }
 
 function assertTimeZone(timeZone: string): void {

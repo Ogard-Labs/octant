@@ -1687,7 +1687,9 @@ reported nothing is recorded as unreported. A child run belongs to its parent
 thread's Project: every Project-scoped usage read (the Usage dashboard, the
 Project overview, and Project spend ceilings) resolves it through the parent
 and mode on its `agent.run-requested@1` event and the parent thread's current
-Project, the same records that place the thread's own rows.
+Project, the same records that place the thread's own rows. The same event
+gives the run its parent's mode, so a mode filter or breakdown counts child
+usage with its parent thread's.
 
 **Turn speed and full usage, for every provider.** Every runner that watches a
 provider's events (Chat, Work, Code) feeds each normalized runtime event to one

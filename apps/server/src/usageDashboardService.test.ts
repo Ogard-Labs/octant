@@ -254,10 +254,14 @@ describe("readUsageDashboard", () => {
       );
     seedUsageRow(connection, { subjectType: "agent-run", subjectId: ids.childRun });
 
-    // The Project-scoped read admits the row, so it must also name the Project.
-    const dashboard = read(connection, {}, { kind: "projects", projectIds: [ids.project] });
-    expect(dashboard.detail[0]?.projectId).toBe(ids.project);
+    // The Project-scoped read admits the row, so it must also name the Project,
+    // and it is in its parent's mode, so a mode's total still adds up.
+    const scope = { kind: "projects", projectIds: [ids.project] } as const;
+    const dashboard = read(connection, {}, scope);
+    expect(dashboard.detail[0]).toMatchObject({ projectId: ids.project, mode: "work" });
     expect(read(connection).detail).toEqual([]);
+    expect(read(connection, { filter: { mode: "work" } }, scope).detail).toHaveLength(1);
+    expect(read(connection, { filter: { mode: "chat" } }, scope).detail).toEqual([]);
   });
 
   it("filters Chat and Code thread usage by the durable Project", () => {

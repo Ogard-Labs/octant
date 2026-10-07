@@ -568,15 +568,19 @@ export function queryUsageRecords(
 export function usageModeCondition(
   mode: string,
 ): { readonly sql: string; readonly params: ReadonlyArray<string> } | undefined {
-  switch (mode) {
-    case "chat":
-      return { sql: "subject_type = ?", params: ["chat-thread"] };
-    case "work":
-    case "code":
-      return { sql: "subject_type = ?", params: [`${mode}-thread`] };
-    default:
-      return undefined;
-  }
+  if (mode !== "chat" && mode !== "work" && mode !== "code") return undefined;
+  // A child run is in its parent thread's mode, the one its request records,
+  // so a mode's total still adds up to the unfiltered one.
+  return {
+    sql: `(subject_type = ?
+    OR (subject_type = 'agent-run' AND subject_id IN (
+      SELECT aggregate_id FROM event_journal
+      WHERE aggregate_type = 'agent-run'
+        AND event_name = 'agent.run-requested@1'
+        AND json_extract(payload_json, '$.run.routingReceipt.mode') = ?
+    )))`,
+    params: [`${mode}-thread`, mode],
+  };
 }
 
 export function readAllUsageRecords(connection: SqliteConnection): ReadonlyArray<UsageRecord> {
