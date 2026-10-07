@@ -223,7 +223,7 @@ function ResultPacket(props: {
   );
 }
 
-function ResultDisclosure(props: { readonly label: string; readonly children: ReactNode }) {
+export function ResultDisclosure(props: { readonly label: string; readonly children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   return (

@@ -71,6 +71,8 @@ export function harnessStopReason(reason: TurnStopReason): NativeHarnessTurnStop
   switch (reason) {
     case "end-of-turn":
       return "end-of-turn";
+    case "max-tokens":
+      return "max-tokens";
     case "cancelled":
       return "user-interrupt";
     case "failed":

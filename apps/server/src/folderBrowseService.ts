@@ -25,7 +25,29 @@ const MAX_DEPTH = 20;
 const HIDDEN_PREFIX = ".";
 const CANDIDATE_TTL_MS = 120_000;
 
+// A cloud-synced or network-mounted entry can block its filesystem call
+// indefinitely. Each entry's checks are bounded so one stalled entry delays the
+// listing by at most this budget instead of stalling the whole request.
+const ENTRY_INSPECTION_TIMEOUT_MS = 2_000;
+// The Git probe spawns a process; bound it so a hung checkout cannot outlive the
+// per-entry budget as an orphaned process.
+const GIT_REV_PARSE_TIMEOUT_MS = 1_500;
+// Entries are inspected a few at a time so a folder full of stalled entries
+// costs a handful of budgets rather than one per entry.
+const ENTRY_INSPECTION_CONCURRENCY = 8;
+// The whole listing answers within this budget, well inside the client's 20 s
+// request abort; entries not inspected by then are listed as plain folders.
+const LISTING_INSPECTION_TIMEOUT_MS = 8_000;
+
 const execFileAsync = promisify(nodeExecFile);
+
+/**
+ * The outcome of inspecting one directory entry. A folder carries its canonical
+ * path and whether it is a Git repository root; every other case is skipped.
+ */
+export type FolderEntryInspection =
+  | { readonly kind: "folder"; readonly canonicalPath: string; readonly isGitRepository: boolean }
+  | { readonly kind: "skipped" };
 
 export interface FolderBrowseServiceOptions {
   readonly bindingReceiptStore: Pick<BindingReceiptStorePort, "issue">;
@@ -33,6 +55,16 @@ export interface FolderBrowseServiceOptions {
   readonly homeDir: string;
   readonly clock?: () => string;
   readonly now?: () => number;
+  /**
+   * Resolves one directory entry to a folder or a skip. Defaults to the host
+   * filesystem. Substituting an entry that never resolves exercises the
+   * per-entry budget.
+   */
+  readonly inspectEntry?: (entryPath: string) => Promise<FolderEntryInspection>;
+  /** Overrides the per-entry budget, in milliseconds. */
+  readonly entryInspectionTimeoutMs?: number;
+  /** Overrides the whole listing's inspection budget, in milliseconds. */
+  readonly listingInspectionTimeoutMs?: number;
 }
 
 export class FolderBrowseServiceError extends Error {
@@ -58,6 +90,9 @@ export class FolderBrowseService {
   readonly #homeDir: string;
   readonly #clock: () => string;
   readonly #now: () => number;
+  readonly #inspectEntry: (entryPath: string) => Promise<FolderEntryInspection>;
+  readonly #entryInspectionTimeoutMs: number;
+  readonly #listingInspectionTimeoutMs: number;
   readonly #candidates = new Map<string, CandidateRecord>();
 
   constructor(options: FolderBrowseServiceOptions) {
@@ -66,6 +101,11 @@ export class FolderBrowseService {
     this.#homeDir = options.homeDir;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#now = options.now ?? Date.now;
+    this.#inspectEntry = options.inspectEntry ?? ((entryPath) => this.#inspectHostEntry(entryPath));
+    this.#entryInspectionTimeoutMs =
+      options.entryInspectionTimeoutMs ?? ENTRY_INSPECTION_TIMEOUT_MS;
+    this.#listingInspectionTimeoutMs =
+      options.listingInspectionTimeoutMs ?? LISTING_INSPECTION_TIMEOUT_MS;
   }
 
   async browse(authenticatedWindowId: WindowId, input: unknown): Promise<FolderBrowseResult> {
@@ -115,36 +155,33 @@ export class FolderBrowseService {
     const search = request.search?.toLocaleLowerCase();
     let truncated = false;
 
-    for (const entry of entries) {
+    const visible = entries.filter(
+      (entry) =>
+        !entry.startsWith(HIDDEN_PREFIX) &&
+        (search === undefined || entry.toLocaleLowerCase().includes(search)),
+    );
+    const inspected = await this.#inspectListing(
+      visible.map((entry) => join(canonicalParent, entry)),
+    );
+
+    for (const [index, entry] of visible.entries()) {
+      const fullPath = join(canonicalParent, entry);
+      const inspection = inspected.inspections[index] ?? unverifiedFolder(inspected, fullPath);
+      if (inspection === undefined) {
+        truncated = true;
+        break;
+      }
+      if (inspection.kind === "skipped") continue;
       if (candidates.length >= MAX_CANDIDATES) {
         truncated = true;
         break;
       }
-      if (entry.startsWith(HIDDEN_PREFIX)) continue;
-      if (search !== undefined && !entry.toLocaleLowerCase().includes(search)) continue;
+      if (!isWithinAuthorizedRoot(canonicalRoot, inspection.canonicalPath)) continue;
 
-      const fullPath = join(canonicalParent, entry);
-      let entryStat;
-      try {
-        entryStat = await stat(fullPath);
-      } catch {
-        continue;
-      }
-      if (!entryStat.isDirectory()) continue;
-
-      let canonicalEntry: string;
-      try {
-        canonicalEntry = await realpath(fullPath);
-      } catch {
-        continue;
-      }
-      if (!isWithinAuthorizedRoot(canonicalRoot, canonicalEntry)) continue;
-
-      const isGitRepo = await this.#checkGitRepository(canonicalEntry);
       const candidateId = this.#issueCandidate({
-        canonicalPath: canonicalEntry,
+        canonicalPath: inspection.canonicalPath,
         displayName: entry,
-        isGitRepository: isGitRepo,
+        isGitRepository: inspection.isGitRepository,
         expiresAt,
         windowId: authenticatedWindowId,
         mode: request.mode,
@@ -153,7 +190,7 @@ export class FolderBrowseService {
       candidates.push({
         candidateId,
         displayName: entry,
-        isGitRepository: isGitRepo,
+        isGitRepository: inspection.isGitRepository,
         // Both Work and Code bind any directory; Git status is informational.
         isSelectable: true,
       });
@@ -186,8 +223,14 @@ export class FolderBrowseService {
    * window's, or off-mode candidate is refused by the same record check a
    * binding selection uses, so a candidate cannot be replayed into another
    * window or another mode.
+   *
+   * The path is measured again before it is handed out: an entry whose
+   * inspection outlived its budget was listed by its unresolved name, and a
+   * stalled link out of the authorized root would otherwise reach the caller
+   * as a path inside it once the mount recovers. A re-measurement that fails,
+   * stalls, or lands outside the root is refused.
    */
-  resolveCandidate(windowId: WindowId, input: unknown): string {
+  async resolveCandidate(windowId: WindowId, input: unknown): Promise<string> {
     let request: FolderSelectionRequest;
     try {
       request = decodeFolderSelectionRequest(input);
@@ -199,7 +242,22 @@ export class FolderBrowseService {
     }
     this.#purgeExpired();
     const record = this.#requireRecord(request.candidateId, windowId, request.mode);
-    return record.canonicalPath;
+    const canonicalRoot = await this.#canonicalDirectory(
+      this.#homeDir,
+      "Authorized folder root is not accessible.",
+    );
+    const outcome = await withinBudget(
+      this.#inspectEntry(record.canonicalPath),
+      this.#entryInspectionTimeoutMs,
+    );
+    if (outcome.kind !== "resolved" || outcome.value.kind !== "folder") {
+      throw new FolderBrowseServiceError({
+        category: "unavailable",
+        message: "Folder candidate is not accessible.",
+      });
+    }
+    this.#assertWithinRoot(canonicalRoot, outcome.value.canonicalPath);
+    return outcome.value.canonicalPath;
   }
 
   async select(authenticatedWindowId: WindowId, input: unknown): Promise<FolderSelectionResult> {
@@ -306,6 +364,71 @@ export class FolderBrowseService {
     }
   }
 
+  /**
+   * Inspects the entries a few at a time, each within its own budget, and the
+   * whole set within the listing budget. Once enough folders are found no new
+   * entry is started; an entry left uninspected for that reason is `undefined`
+   * and `expired` is false. When the listing budget runs out first, `expired`
+   * is true and every uninspected entry is listed as a plain folder.
+   */
+  async #inspectListing(entryPaths: ReadonlyArray<string>): Promise<ListingInspection> {
+    const inspections: Array<FolderEntryInspection | undefined> = [];
+    let nextIndex = 0;
+    let folders = 0;
+    let finished = false;
+    const inspectNext = async (): Promise<void> => {
+      while (!finished && folders < MAX_CANDIDATES) {
+        const index = nextIndex;
+        const entryPath = entryPaths[index];
+        if (entryPath === undefined) return;
+        nextIndex += 1;
+        const inspection = await this.#inspectWithinBudget(entryPath);
+        if (finished) return;
+        inspections[index] = inspection;
+        if (inspection.kind === "folder") folders += 1;
+      }
+    };
+    const workers = Array.from(
+      { length: Math.min(ENTRY_INSPECTION_CONCURRENCY, entryPaths.length) },
+      inspectNext,
+    );
+    const outcome = await withinBudget(Promise.all(workers), this.#listingInspectionTimeoutMs);
+    finished = true;
+    return { inspections, expired: outcome.kind === "expired" };
+  }
+
+  async #inspectWithinBudget(entryPath: string): Promise<FolderEntryInspection> {
+    const outcome = await withinBudget(
+      this.#inspectEntry(entryPath),
+      this.#entryInspectionTimeoutMs,
+    );
+    if (outcome.kind === "resolved") return outcome.value;
+    if (outcome.kind === "failed") return { kind: "skipped" };
+    // A blocked entry is listed as a plain folder rather than stalling the rest
+    // of the listing; selection and resolution re-measure its path.
+    return { kind: "folder", canonicalPath: entryPath, isGitRepository: false };
+  }
+
+  async #inspectHostEntry(entryPath: string): Promise<FolderEntryInspection> {
+    let entryStat;
+    try {
+      entryStat = await stat(entryPath);
+    } catch {
+      return { kind: "skipped" };
+    }
+    if (!entryStat.isDirectory()) return { kind: "skipped" };
+
+    let canonicalEntry: string;
+    try {
+      canonicalEntry = await realpath(entryPath);
+    } catch {
+      return { kind: "skipped" };
+    }
+
+    const isGitRepository = await this.#checkGitRepository(canonicalEntry);
+    return { kind: "folder", canonicalPath: canonicalEntry, isGitRepository };
+  }
+
   async #checkGitRepository(path: string): Promise<boolean> {
     // Fast path: check for .git before spawning git process
     const gitDir = join(path, ".git");
@@ -320,6 +443,7 @@ export class FolderBrowseService {
         encoding: "utf8",
         env: childProcessEnvironment(process.env),
         shell: false,
+        timeout: GIT_REV_PARSE_TIMEOUT_MS,
       });
       const reportedRoot = await realpath(result.stdout.trim());
       const canonicalPath = await realpath(path);
@@ -422,6 +546,50 @@ export class FolderBrowseService {
 function isWithinAuthorizedRoot(root: string, candidate: string): boolean {
   const pathFromRoot = relative(root, candidate);
   return pathFromRoot === "" || (pathFromRoot !== ".." && !pathFromRoot.startsWith(`..${sep}`));
+}
+
+interface ListingInspection {
+  readonly inspections: ReadonlyArray<FolderEntryInspection | undefined>;
+  readonly expired: boolean;
+}
+
+/**
+ * An entry the listing budget ran out on is listed by its unresolved name,
+ * like an entry whose own budget expired; selection and resolution re-measure
+ * it. Without an expired budget an uninspected entry was left out on purpose.
+ */
+function unverifiedFolder(
+  listing: ListingInspection,
+  entryPath: string,
+): FolderEntryInspection | undefined {
+  if (!listing.expired) return undefined;
+  return { kind: "folder", canonicalPath: entryPath, isGitRepository: false };
+}
+
+type BudgetOutcome<T> =
+  | { readonly kind: "resolved"; readonly value: T }
+  | { readonly kind: "expired" }
+  | { readonly kind: "failed" };
+
+/**
+ * Resolves with the work's value, or reports that its budget expired. The timer
+ * is always cleared, and the work's rejection is handled here, so a stalled or
+ * failing entry leaves no pending timer or unhandled rejection behind.
+ */
+async function withinBudget<T>(work: Promise<T>, budgetMs: number): Promise<BudgetOutcome<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const expired = new Promise<BudgetOutcome<T>>((resolve) => {
+      timer = setTimeout(() => resolve({ kind: "expired" }), budgetMs);
+    });
+    const settled = work.then(
+      (value): BudgetOutcome<T> => ({ kind: "resolved", value }),
+      (): BudgetOutcome<T> => ({ kind: "failed" }),
+    );
+    return await Promise.race([settled, expired]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function folderLabel(canonicalPath: string): string {

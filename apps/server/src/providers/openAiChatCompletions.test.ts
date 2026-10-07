@@ -154,14 +154,39 @@ describe("sendChatCompletionsTurn", () => {
   });
 
   it.each([
-    ["length", "provider-failed"],
-    ["content_filter", "provider-failed"],
     ["tool_calls", "protocol"],
     ["function_call", "unsupported"],
   ])("maps finish reason %s to a typed failure", async (finishReason, category) => {
     const fetch = vi.fn(async () => stream(chunk({}, finishReason), "[DONE]"));
 
     expect(await failureOf(sendChatCompletionsTurn(input(fetch)))).toMatchObject({ category });
+  });
+
+  it.each([
+    ["length", "max-tokens"],
+    ["content_filter", "content-filter"],
+  ] as const)(
+    "keeps a partial reply when finish reason %s means %s",
+    async (finishReason, stopReason) => {
+      const fetch = vi.fn(async () =>
+        stream(chunk({ content: "partial" }), chunk({}, finishReason), "[DONE]"),
+      );
+
+      const result = await Effect.runPromise(sendChatCompletionsTurn(input(fetch)));
+
+      expect(result.text).toBe("partial");
+      expect(result.outputStopReason).toBe(stopReason);
+    },
+  );
+
+  it("leaves the stop reason off a reply that finished on its own", async () => {
+    const fetch = vi.fn(async () =>
+      stream(chunk({ content: "done" }), chunk({}, "stop"), "[DONE]"),
+    );
+
+    const result = await Effect.runPromise(sendChatCompletionsTurn(input(fetch)));
+
+    expect(result.outputStopReason).toBeUndefined();
   });
 
   it("rejects nonstandard reasoning and extension fields", async () => {

@@ -206,6 +206,7 @@ export class CodeTurnRunner {
         }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
       );
       let outcome: CodeTurnOutcome | undefined;
+      let outputLimited = false;
       const clock = input.clock ?? (() => new Date().toISOString());
       const turnStartedAt = clock();
       // Re-based when the prompt is sent, so the wait for a first token never
@@ -223,7 +224,11 @@ export class CodeTurnRunner {
         Effect.sync(() => {
           input.liveTurn?.end();
           try {
-            input.onTurnEnded?.(endOfTurn(stopReasonOf(outcome)));
+            input.onTurnEnded?.(
+              endOfTurn(
+                outcome === "completed" && outputLimited ? "max-tokens" : stopReasonOf(outcome),
+              ),
+            );
           } catch {
             // Measuring a turn never decides how it ends.
           }
@@ -395,6 +400,7 @@ export class CodeTurnRunner {
                       "Provider completed with unresolved checkout reconciliation.",
                     );
                   }
+                  if (sanitizedEvent.stopReason === "max-tokens") outputLimited = true;
                   yield* input.persistEvent(normalized);
                   providerCompleted = true;
                   if (input.onTurnCompleted !== undefined) {
@@ -402,7 +408,7 @@ export class CodeTurnRunner {
                       input.onTurnCompleted!({
                         text: responseText,
                         toolCalls: answeredToolRequestIds.size,
-                        turn: endOfTurn("end-of-turn"),
+                        turn: endOfTurn(outputLimited ? "max-tokens" : "end-of-turn"),
                       }).catch(() => undefined),
                     );
                   }

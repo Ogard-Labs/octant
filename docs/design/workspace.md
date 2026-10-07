@@ -25,6 +25,17 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+The Add folder browser reads one directory at a time from the confined home root.
+Because a filesystem call on a cloud-synced or network-mounted entry can block
+indefinitely, the host checks a few entries at a time, bounds each entry's checks
+and the whole listing, and lists an entry it cannot verify within the budget as a
+plain folder. Such an entry carries only its unresolved name: binding it, or
+choosing it as an export folder, measures the path again and refuses it when that
+fails, stalls, or resolves outside the root. The client's request budget also
+covers reading the response body. A browse that fails returns an explicit
+failure the picker shows with Retry, and Retry re-issues the same folder and
+search rather than restarting at the root.
+
 The Project tree places each active thread under its listed Project or under
 **No project**, never both. No project is a collapsible folder row following
 the Projects with no horizontal divider or separate section heading. It is
@@ -159,7 +170,7 @@ so a card shipped later arrives with its own default). Ids are an open
 vocabulary: an id the registry does not know is ignored, and adding a card never
 changes the contract. A store from before the cards decodes to the defaults.
 
-**Working now** is the first card, on by default, never unavailable. It lists
+**Working now** follows Needs you, on by default, never unavailable. It lists
 the threads executing now (the navigation rows the host projects as `working`,
 the sidebar's Running rule, so a snoozed or completed row is never listed) and
 the agent runs in progress from the AgentRun projection, most recently moved
@@ -185,6 +196,38 @@ start and step ride on the same navigation rows as the executing flag (see
 [Architecture: persistence](../architecture.md#persistence), fast thread
 reads), so a remote window sees them for exactly the threads it can already
 list.
+
+**Needs you** is the card before Working now, on by default. It lists the
+approvals and questions a provider is waiting on, from one host list of every
+approval and question this window can answer across Chat, Work, and Code and
+across Projects, oldest waiting first. Work's start screen shows Chat and Work
+requests, Code's shows Code's. A row (`PendingRequestRow`, reused by other
+surfaces) shows the provider mark when the shell knows the thread's provider and
+its mode's glyph when it does not, the thread title (which opens the thread),
+the Project, how long it has waited (minute resolution from the shell's
+once-a-minute clock), and the text clamped to two lines. An approval offers
+**Approve** and **Deny**. A question offers one numbered button per choice (the
+matching number key picks it while the row has focus) and **Reply…**, which
+opens the thread so the answer is typed in its composer; a question without
+choices offers Reply… alone. At most five rows show, then **+N more**, which
+opens the Inbox. The card is hidden while nothing waits, and unavailable where
+this window has no reader (a remote window).
+
+The card holds no authority. An answer goes through the mode's own command with
+the handle the host listed: `resolve-work-request`, `answer-provider-approval`,
+`answer-provider-input` (the response is kept as evidence first, with a fresh
+operation id), or `answer-chat-turn-question`, the same calls the open thread
+makes. After an answer the card re-reads and the row leaves with the next read.
+A refused answer (a stale version, a turn that ended, a turn that cannot take
+it, such as one in Plan mode, an unreachable host) shows one quiet line in the
+row saying why, and then the card re-reads; a row the host no longer lists stays
+until the next read or the next minute so the line can be seen. A Code answer
+counts as refused when the host says `operation-failed` or reports the turn
+`failed` or `interrupted`; the command palette reads Code answers the same way.
+The card reads the list when it mounts, on the navigation topics named below,
+and when the shell settings or the window workspace change (neither has a feed
+topic). Signals that arrive while a read is in flight become one more read once
+it lands, so a streaming reply does not start a host read per delta.
 
 **Pull requests** is the next card, on by default, and only on a Code start
 screen. It is hidden — and left out of Customize — unless the Pull requests
@@ -289,8 +332,11 @@ Subagents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every
 other AgentRun control stay. A compact, collapsible Subagents card sits above
-the composer in normal layout. Its counts keep failures, waits and unreviewed
-results visible while collapsed; expansion previews up to three active or
+the composer in normal layout, as wide as the message surface. Its head counts each
+state (failed, waiting, to review, working, done) and keeps failures, waits and
+unreviewed results first while collapsed; a result the parent already received is
+done, not to review. While a Chat thread's host connection is lost it dims and
+withholds Stop without repeating the connection notice; expansion previews up to three active or
 unresolved children. Rows open the corresponding detail in Agents, and View all
 keeps completed history reachable. Provider-observed children carry an explicit
 observation-only label and no managed controls. Task-plan progress remains a
@@ -301,7 +347,8 @@ without starting them: only the thread's agent starts one, through the Octant
 Harness `delegate` tool, and collects its result. The list has one title, then
 Working and Finished sections of one-button rows —
 status icon, task, and state, role, model, and age in words — with finished
-rows newest first and an unreviewed result marked "Needs review". A row opens
+rows newest first and an unreviewed result marked "Needs review" unless the
+parent already received it. A row opens
 that subagent's page in place of the list, with a back control: its task as
 the title, a status line, and a small transcript that starts with the task as
 the brief, then the replies as rendered Markdown and status events as quiet

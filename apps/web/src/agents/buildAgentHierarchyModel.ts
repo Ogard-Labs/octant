@@ -27,6 +27,8 @@ export interface AgentHierarchyInputEntry {
   };
   readonly route?: AgentHierarchyInputRoute;
   readonly recoveryReason?: string;
+  /** How the host settled delivering this result to the parent; absent while owed. */
+  readonly resultDeliveryOutcome?: "delivered" | "consumed" | "invalidated" | "failed";
   /** The normalized limit fact the host journaled when the run last waited. */
   readonly usageLimit?: {
     readonly kind: "temporary" | "exhausted" | "billing";
@@ -59,6 +61,9 @@ export interface AgentHierarchyRow {
   readonly executionKind: string;
   readonly usageQuality: string;
   readonly bucket: "active" | "history";
+  /** Still asks the person to look: unreviewed and not yet handed to the parent. */
+  readonly needsReview: boolean;
+  /** The host still records the result as unreviewed, so Mark reviewed applies. */
   readonly needsAcknowledgement: boolean;
   readonly followUpReason?: string;
   readonly recoveryReason?: string;
@@ -87,6 +92,21 @@ const ACTIVE = new Set(["queued", "starting", "running", "waiting"]);
 
 export function isActiveAgentHierarchyStatus(lifecycleStatus: string): boolean {
   return ACTIVE.has(lifecycleStatus);
+}
+
+/**
+ * A finished result only the person can still take in: they have not marked it
+ * reviewed, and the host has not already put it in the parent's hands. A result
+ * the parent received sits in the thread as a child-result card, so flagging it
+ * as awaiting review asks for nothing anyone can act on.
+ */
+export function subagentNeedsReview(entry: AgentHierarchyInputEntry): boolean {
+  return (
+    entry.resultAcknowledgement.required &&
+    !entry.resultAcknowledgement.acknowledged &&
+    entry.resultDeliveryOutcome !== "delivered" &&
+    entry.resultDeliveryOutcome !== "consumed"
+  );
 }
 
 /**
@@ -138,6 +158,7 @@ function toRow(entry: AgentHierarchyInputEntry, depth: number): AgentHierarchyRo
     executionKind: entry.executionKind,
     usageQuality: entry.usageQuality,
     bucket,
+    needsReview: subagentNeedsReview(entry),
     needsAcknowledgement:
       entry.resultAcknowledgement.required && !entry.resultAcknowledgement.acknowledged,
     ...(entry.resultAcknowledgement.followUpReason === undefined

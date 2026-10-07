@@ -1,6 +1,7 @@
 import {
   decodeProviderFailure,
   type ProviderFailure,
+  type ProviderOutputStopReason,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderToolImage,
@@ -12,6 +13,7 @@ import {
 } from "./anthropicCompatibleEndpoint";
 import { decodeSse } from "./openAiCompatibleSse";
 import { readAnthropicRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
+import { outputStopReason } from "./outputStopReason";
 
 export interface AnthropicToolCall {
   readonly toolCallId: string;
@@ -82,6 +84,8 @@ export interface AnthropicTurnResult {
   readonly verifiedManualModelId?: string;
   /** Quota buckets from the response headers. Absent when the endpoint sent none. */
   readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
+  /** Present when the endpoint said this reply stopped on a known limit or filter. */
+  readonly outputStopReason?: ProviderOutputStopReason;
 }
 
 export interface AnthropicMessagesTurnInput {
@@ -131,6 +135,7 @@ interface StreamState {
   readonly events: AnthropicTurnEvent[];
   readonly contentBlocks: Map<number, TrackedContentBlock>;
   readonly toolCalls: AnthropicToolCall[];
+  outputStopReason?: ProviderOutputStopReason;
 }
 
 interface TrackedContentBlock {
@@ -549,6 +554,14 @@ function normalizeMessageDelta(
     ) {
       throw protocol("The provider stream contained an unsupported stop reason.");
     }
+    // The Messages protocol's `refusal` is its streaming safety classifier
+    // stopping the reply, which is a filter stop. Only this protocol's
+    // `refusal` means that: ACP's names an agent declining to continue.
+    const stop =
+      delta.stop_reason === "refusal"
+        ? "content-filter"
+        : outputStopReason(typeof delta.stop_reason === "string" ? delta.stop_reason : undefined);
+    if (stop !== undefined) state.outputStopReason = stop;
   }
   const usage = event.usage;
   if (usage !== undefined && usage !== null) {
@@ -624,6 +637,7 @@ function result(
       ? { verifiedManualModelId: input.modelId }
       : {}),
     ...(rateLimitBuckets.length === 0 ? {} : { rateLimitBuckets }),
+    ...(state.outputStopReason === undefined ? {} : { outputStopReason: state.outputStopReason }),
   };
 }
 

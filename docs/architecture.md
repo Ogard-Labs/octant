@@ -1556,6 +1556,32 @@ session's `usage` and `metrics` totals fold them, so a Code turn on a direct
 endpoint no longer records zero tokens. Chat, Work and Code on every provider
 journal the frame; the harness additionally keeps its own record.
 
+### Stop reasons
+
+A completed runtime event may carry an optional stop reason. `max-tokens` means
+the reply was cut off because the output limit was reached. `content-filter`
+means the provider stopped the reply on a content filter. The field is absent
+when the runtime did not say why the turn ended; absence is not a normal
+finish guessed into a reason.
+
+Chat Completions maps `finish_reason` `length` to `max-tokens` and
+`content_filter` to `content-filter`. The Responses protocol maps
+`incomplete_details.reason` `max_output_tokens` and `content_filter` the same
+way. The Messages protocol maps `stop_reason` `max_tokens`, and `refusal`
+(its safety classifier stopping the reply) to `content-filter`; an ACP prompt
+result's `refusal` names the agent declining to continue, not a filter, so it
+leaves the field absent. Claude's result
+`stop_reason`, Pi's assistant `stopReason` of `length`, OpenCode's step
+`finish` of `length`, and an ACP prompt result that names one of those
+strings, map when the protocol reports them. A local runtime's `done_reason`
+of `length` maps the same way. Codex's turn status does not say the output
+was cut off, so its completed event leaves the field absent.
+
+A turn record's stop reason is `max-tokens` when the completed event carried
+that reason. The per-turn detail says "Cut off at the output limit". The
+transcript shows a quiet note with Continue, which drafts a follow-up into
+the composer and sends nothing until the person does.
+
 The ACP and RPC mappers (Devin, Kimi, Grok, Copilot, Mistral Vibe, Oh My Pi)
 report no usage today: the prompt result is read only for its stop reason, and
 the capability is declared `unavailable`, so their turns are `unavailable` and
@@ -1936,6 +1962,28 @@ mirror's global folder follows. Writes are confined to the chosen folder and are
 atomic: a temporary file is renamed into place, so a reader never sees a
 half-written export. The user guide's exporting page
 (`apps/docs/guide/export.md`) states the same rules for a person.
+
+The GitHub Gist destination ships in-tree on the same port. It reuses the GitHub
+connection Octant already resolved through the `gh` command — the host-managed
+credential, never a token read by this code — so a host with no usable
+connection reports `not-connected` and one whose credential is stored in plain
+text reports `refused`, the same states the other GitHub capabilities report.
+The connection state is read on demand, when an export lists or prepares its
+destinations, and kept until Octant's own GitHub commands report a change; a
+state that cannot offer the gist is read again on the next listing. No GitHub
+call happens at host start. A GitHub refusal other than a rejected credential
+(for example a connection without the `gist` scope) is reported as declined, not
+as GitHub being unreachable. A remote destination can describe more than a file:
+`describeDestination` names the account the export acts as and the audience the
+result will have, and a destination's own note, which the approval card shows
+verbatim. The person chooses `secret` or `public` on the card, the choice
+travels back through the `canvas-export-decision` request into `exportDocument`,
+and the card states plainly that a public result is visible to anyone. A gist is
+Markdown only and one file named from the Canvas title with a `.md` extension;
+the rendered document passes the same secret-and-path filter every exported
+document does, and one that fails it is refused rather than published. The
+receipt is the gist URL and its id, journaled in `canvas.export@1` like any
+other destination's.
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured
