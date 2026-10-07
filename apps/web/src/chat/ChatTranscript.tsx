@@ -15,6 +15,7 @@ import { activeChatTurns } from "@octant/domain/chat-policy";
 import type { PickerGroup } from "@octant/domain";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
+import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import {
   memo,
   useEffect,
@@ -35,6 +36,7 @@ import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
+import { ChildResultCards } from "../agents/ChildResultCards";
 import { ChatTurnEditor } from "./ChatTurnEditor";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -43,8 +45,6 @@ export interface ChatTranscriptProps {
   readonly view: ChatThreadView;
   /** What the thread places after a turn, such as a Canvas that turn wrote. */
   readonly afterTurn?: (turn: ChatThreadView["turns"][number]) => ReactNode;
-  /** Connection state is separate from a durable attempt outcome. */
-  readonly connectionStatus?: "connected" | "disconnected";
   /**
    * Runs an attempt again: a failed or interrupted attempt retries, and a
    * completed one regenerates. The server decides what the attempt allows.
@@ -242,11 +242,6 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   // column itself.
   const lead = (
     <>
-      {props.connectionStatus === "disconnected" ? (
-        <p aria-live="polite" className="chat-transcript__connection thread-column" role="status">
-          Disconnected — reconnecting to the authoritative transcript.
-        </p>
-      ) : null}
       {props.view.thread.handoffWarning === undefined ? null : (
         <p
           aria-label="Historical attachment warning"
@@ -330,6 +325,9 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         const userContent = resolvedContent(contentById, turn.userMessageRef, "user");
         const attachments = turn.attachmentIds.map((id) => attachmentById.get(String(id)));
         const editing = editingTurnId === String(turn.id);
+        // The host wrote a delivered turn, not the person: it is a subagent's
+        // result and reads as one, and there is no message of theirs to revise.
+        const delivery = turn.delivery !== undefined ? userContent : undefined;
         const checkpoints = props.checkpoints;
         const marked = checkpoints?.byTurnId.get(String(turn.id));
         const routeDecision = routeDecisionByTurn.get(String(turn.id));
@@ -357,7 +355,10 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           ? []
           : chatTurnActions({
               busy: props.busy === true,
-              canEdit: userContent !== undefined && props.onEditTurn !== undefined,
+              canEdit:
+                userContent !== undefined &&
+                delivery === undefined &&
+                props.onEditTurn !== undefined,
               canBranch: props.onBranchTurn !== undefined,
               canCopyMarkdown: assistantBodies.some((body) => body.trim().length > 0),
               checkpointsAvailable: checkpoints !== undefined,
@@ -399,8 +400,13 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 }
               }}
             >
-              <article aria-label="Your message" className="turn-user">
-                {editing && userContent !== undefined && props.onEditTurn !== undefined ? (
+              <article
+                aria-label={delivery === undefined ? "Your message" : "Subagent results"}
+                className={delivery === undefined ? "turn-user" : "turn-child-result"}
+              >
+                {delivery !== undefined ? (
+                  <ChildResultCards providerGroups={props.providerGroups} text={delivery.body} />
+                ) : editing && userContent !== undefined && props.onEditTurn !== undefined ? (
                   <>
                     <ChatTurnEditor
                       busy={props.busy === true}
@@ -676,6 +682,24 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             );
             return workedFor === undefined ? {} : { workedFor };
           })()}
+        />
+        <HarnessRetryStatus
+          events={
+            // Only a running attempt can still be waiting to send again.
+            props.attempt.harnessRetry === undefined ||
+            (props.attempt.outcome !== "queued" && props.attempt.outcome !== "streaming")
+              ? []
+              : [
+                  {
+                    kind: "retrying",
+                    attempt: props.attempt.harnessRetry.attempt,
+                    maxAttempts: props.attempt.harnessRetry.maxAttempts,
+                    delayMs: props.attempt.harnessRetry.delayMs,
+                    reason: props.attempt.harnessRetry.reason,
+                    announcedAt: props.attempt.harnessRetry.announcedAt,
+                  },
+                ]
+          }
         />
         {props.attempt.tasks === undefined || props.attempt.tasks.length === 0 ? null : (
           <ThreadTasksPanel

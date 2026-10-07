@@ -324,6 +324,7 @@ import { GhRepositoryCataloguePort } from "./github/ghRepositoryCataloguePort";
 import { GhRepositoryObservationPort } from "./github/ghRepositoryObservationPort";
 import { GithubCapabilityService } from "./github/githubCapabilityService";
 import { GithubCatalogueService } from "./github/githubCatalogueService";
+import { createGhGistCreationPort } from "./github/gistCreationPort";
 import { GithubIssueContextService } from "./github/githubIssueContextService";
 import { LinearIssueContextService } from "./plugins/linear/linearIssueContextService";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
@@ -473,6 +474,15 @@ import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
 import { createProviderOAuthRouteHandler } from "./providers/oauth/providerOAuthRoutes";
+import {
+  claudeHelperSignInFromBroker,
+  type ClaudeHelperSignInPort,
+} from "./providers/claudeHelperSignIn";
+import {
+  createClaudeHelperSignInRouteHandler,
+  createClaudeHelperSignInService,
+} from "./providers/claudeHelperSignInRoutes";
+import { runInstalledClaudeSetupToken } from "./providers/claudeSetupToken";
 import { subscriptionOAuthHostFromBroker } from "./providers/oauth/subscriptionOAuthHost";
 import type { CompatibleFetch } from "./providers/openAiCompatibleEndpoint";
 import { makeClaudeAgentSdkPort, type ClaudeAgentSdkPort } from "./providers/claudeAgentSdkPort";
@@ -568,6 +578,7 @@ import {
   createLiveLocalServerStopPort,
 } from "./localServers/localServerHostPorts";
 import { createCodeThreadLocalServerScopeResolver } from "./localServers/localServerScopeResolver";
+import { createRunningServiceScopeResolver } from "./localServers/runningServiceScopeResolver";
 import { LocalServerService } from "./localServers/localServerService";
 import { createDiagnosticsExportRouteHandler } from "./diagnosticsExportRoutes";
 import {
@@ -637,6 +648,7 @@ import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
 } from "./canvas/canvasExportTargets";
+import { GistConnection } from "./canvas/gistExportTarget";
 import { createDefaultCodexPluginPackageSources } from "./extensions/curatedBuildIosAppsCatalog";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "./scaffold/curatedScaffoldCatalog";
 import { resolveAvailableTools } from "./scaffold/scaffoldFilesystem";
@@ -928,6 +940,7 @@ interface ConfiguredProviderDriverOptions {
   readonly claudeProcess?: ClaudeProcessPort;
   readonly claudeSdk?: ClaudeAgentSdkPort;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
+  readonly claudeHelperSignIn?: ClaudeHelperSignInPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly permissionPersistence: () => PermissionPersistence;
@@ -1026,6 +1039,9 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeResumeIdentityPort === undefined
         ? {}
         : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
+      ...(options.claudeHelperSignIn === undefined
+        ? {}
+        : { claudeHelperSignIn: options.claudeHelperSignIn }),
       ...(options.isProjectConfinedPath === undefined
         ? {}
         : { isProjectConfinedPath: options.isProjectConfinedPath }),
@@ -2723,9 +2739,14 @@ export function startOctantServer(
       options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable },
     );
     let revokeProjectPullRequests: (() => void) | undefined;
+    // The gist export destination's GitHub state. It is read on demand when an
+    // export lists or prepares destinations, never at startup; see
+    // `GistConnection`.
+    const gistConnection = new GistConnection((signal) => githubCapabilityService.snapshot(signal));
     const githubCapabilityService = new GithubCapabilityService(githubAuthenticationPort, {
       probes: githubCataloguePort,
       onAuthenticationChanged: (snapshot) => {
+        gistConnection.changed(snapshot);
         const readable = snapshot.capabilities.some(
           (capability) => capability.kind === "pull-requests-read" && capability.available,
         );
@@ -4141,6 +4162,10 @@ export function startOctantServer(
             url: options.credentialBrokerUrl,
             token: options.credentialBrokerToken,
           });
+    const claudeHelperSignIn =
+      credentialResolver === undefined
+        ? undefined
+        : claudeHelperSignInFromBroker(credentialResolver);
     const oauthBroker =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
@@ -4184,6 +4209,11 @@ export function startOctantServer(
           agentRunSessionStore.removeProviderIdentities(instanceId, signal),
         ]);
       },
+      // The provider is already gone; a store that cannot be reached leaves the
+      // token behind rather than reporting the removal as failed.
+      clearClaudeHelperSignIn: async (instanceId) => {
+        await claudeHelperSignIn?.disconnect(String(instanceId)).catch(() => undefined);
+      },
       clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
       driver: (instance) =>
         attachWorkRequestRuntime(
@@ -4207,6 +4237,7 @@ export function startOctantServer(
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
             onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
+            ...(claudeHelperSignIn === undefined ? {} : { claudeHelperSignIn }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
           }),
           () => workRequestRuntime,
@@ -4229,6 +4260,27 @@ export function startOctantServer(
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
+    });
+    // A host without the credential broker has nowhere safe to keep the token,
+    // so Settings is told that instead of a Connect button that cannot work.
+    const brokerMissing = async () =>
+      ({
+        kind: "refused",
+        reason: "Claude for helpers needs Octant's credential store, which this host does not run.",
+      }) as const;
+    const claudeHelperSignInRoutes = createClaudeHelperSignInRouteHandler({
+      service:
+        claudeHelperSignIn === undefined
+          ? { status: brokerMissing, connect: brokerMissing, disconnect: brokerMissing }
+          : createClaudeHelperSignInService({
+              store: claudeHelperSignIn,
+              readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+              runSetupToken: runInstalledClaudeSetupToken,
+            }),
+      windowAuthorityStore,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
     const providerOAuthRoutes =
       hostOAuth === undefined
@@ -4322,6 +4374,7 @@ export function startOctantServer(
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
+      ...(claudeHelperSignIn === undefined ? {} : { claudeHelperSignIn }),
       ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
       localUsageHistorySourceForInstance: (instance) =>
         createLocalUsageHistorySourceForDriver({
@@ -5172,7 +5225,10 @@ export function startOctantServer(
           metadata: codeThreadMetadataService,
           runtime: {
             observe: (threadId) =>
-              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId)),
+              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
+                turnParkedOnPerson:
+                  codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true,
+              }),
           },
           pullRequests: {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
@@ -5618,6 +5674,31 @@ export function startOctantServer(
             resolveCheckoutRoot: async (windowId, thread, checkout) =>
               (await roots.resolve(windowId, thread, checkout, codeWorkingDirectoryProbePath))
                 ?.rootPath,
+            ownedPids: () => new Set<number>(),
+          },
+        }),
+        hostScopes: createRunningServiceScopeResolver({
+          projects: projectService,
+          source: {
+            readThreads: persistence.readCodeThreads,
+            readCheckout: persistence.readCodeCheckout,
+            // Only the ownership receipt the host wrote for this thread's own
+            // worktree vouches for the folder; the same fields the Code file
+            // root authority demands, without its Git observation, because this
+            // only names where a listener came from and authorizes nothing.
+            managedWorktreeRoot: async (thread, checkout, repositoryRoot) => {
+              const receipt = await managedWorktreeReceipts.load(checkout.ownershipReceiptId);
+              return receipt !== undefined &&
+                receipt.state === "ready" &&
+                receipt.receiptId === checkout.ownershipReceiptId &&
+                receipt.threadId === thread.id &&
+                receipt.checkoutId === checkout.id &&
+                receipt.repositoryId === thread.repositoryId &&
+                receipt.repositoryId === checkout.repositoryId &&
+                receipt.canonicalRepositoryPath === repositoryRoot
+                ? receipt.canonicalWorktreePath
+                : undefined;
+            },
             ownedPids: () => new Set<number>(),
           },
         }),
@@ -8681,7 +8762,12 @@ export function startOctantServer(
       canvas: canvasService,
       preview: createCanvasPreviewService({
         canvas: canvasService,
-        renderer: createPlaywrightCanvasPreviewRenderer({ webAssetsPath: resolveWebAssetsPath() }),
+        renderer: createPlaywrightCanvasPreviewRenderer({
+          // The preview page ships beside the web build, so it follows the
+          // same folder a host injects for the app; otherwise every preview
+          // would report no renderer on that host.
+          webAssetsPath: options.webAssetsPath ?? resolveWebAssetsPath(),
+        }),
       }),
       imagesInToolResults: ({ providerInstanceId, modelId }) => {
         const model = providerRuntimeRegistry
@@ -8742,6 +8828,13 @@ export function startOctantServer(
       home: homedir(),
       standingOutsideApproval: false,
       newTempId: randomUUID,
+      // The gist destination reuses the GitHub connection Octant already has:
+      // the same host-managed credential `gh` resolves, and the snapshot the
+      // host keeps current. It reads that credential nowhere here.
+      gist: {
+        availability: () => gistConnection.availability(),
+        gists: createGhGistCreationPort(options.ghExecutable),
+      },
     };
     // Destinations arrive through the export contribution and are offered
     // through the same activation policy a plugin's contribution passes. The
@@ -8936,6 +9029,11 @@ export function startOctantServer(
       canvasService,
       canvasShareService,
       canvasExportService,
+      // A host with no usable `gh` has no GitHub state to read; the gist
+      // destination then stays not-connected without spawning anything.
+      ...(options.ghExecutable === undefined
+        ? {}
+        : { refreshCanvasExportTargets: () => gistConnection.refresh() }),
       canvasExportFolderService,
       resolveFolderCandidate: (windowId, input) =>
         folderBrowseService.resolveCandidate(windowId, input),
@@ -9528,6 +9626,7 @@ export function startOctantServer(
       (await androidToolchainRoutes(request)) ??
       (await providerRoutes(request)) ??
       (await providerOAuthRoutes(request)) ??
+      (await claudeHelperSignInRoutes(request)) ??
       (await providerUsageLimitsRoutes(request)) ??
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??

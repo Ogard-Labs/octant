@@ -1,3 +1,4 @@
+import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildActivityEvent } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark } from "./agentRun";
@@ -1302,6 +1303,9 @@ const ChildActivityEvent = Schema.Struct({
   state: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
   summary: boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES),
 }).annotations(strict);
+const ProviderRetryEvent = Schema.Struct(HarnessRetryEventFields)
+  .annotations(strict)
+  .pipe(Schema.filter((event) => event.attempt <= event.maxAttempts));
 const ResultEvent = Schema.Struct({
   kind: Schema.Literal("operation-result"),
   result: CodeOperationResult,
@@ -1333,6 +1337,7 @@ export const CodeOperationEvent = Schema.Union(
   UsageEvent,
   ProviderLimitEvent,
   ChildActivityEvent,
+  ProviderRetryEvent,
   ResultEvent,
 );
 export type CodeOperationEvent = typeof CodeOperationEvent.Type;

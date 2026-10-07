@@ -70,7 +70,10 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
       return;
     }
     const candidate = formatChord(chordFromEvent(event, apple));
-    const parsed = parseChord(candidate);
+    // A page's own commands may be a bare key; every other chord must hold Mod
+    // or Alt, which parseChord enforces.
+    const page = OCTANT_KEYBINDING_ACTIONS.find((action) => action.id === actionId)?.page;
+    const parsed = parseChord(candidate, { page: page !== undefined });
     if (parsed.status !== "ok") {
       setRecordError(parsed.reason);
       return;

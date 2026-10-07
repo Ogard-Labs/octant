@@ -12,11 +12,14 @@ export interface ClaudeEnvironmentScope {
 
 export interface ClaudeEnvironmentScopeOptions {
   readonly apiKey?: string;
+  /** The connected helper token a confined subscription launch signs in with. */
+  readonly oauthToken?: string;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
 }
 
 interface ClaudeEnvironmentOverrides {
   readonly apiKey?: string;
+  readonly oauthToken?: string;
   readonly configDirectory?: string;
 }
 
@@ -104,6 +107,9 @@ export function sanitizeClaudeEnvironment(
     if (hostEnvironment.CLAUDE_SECURESTORAGE_CONFIG_DIR !== undefined) {
       environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = hostEnvironment.CLAUDE_SECURESTORAGE_CONFIG_DIR;
     }
+    if (overrides.oauthToken !== undefined) {
+      environment.CLAUDE_CODE_OAUTH_TOKEN = overrides.oauthToken;
+    }
   } else {
     if (overrides.configDirectory !== undefined) {
       environment.CLAUDE_CONFIG_DIR = overrides.configDirectory;
@@ -121,9 +127,23 @@ export function makeClaudeEnvironmentScope(
   const hostEnvironment = options.hostEnvironment ?? process.env;
 
   if (authentication === "subscription") {
-    return Effect.succeed({
-      environment: sanitizeClaudeEnvironment(authentication, hostEnvironment),
-    });
+    const oauthToken = options.oauthToken;
+    if (oauthToken === undefined) {
+      return Effect.succeed({
+        environment: sanitizeClaudeEnvironment(authentication, hostEnvironment),
+      });
+    }
+    // The token lives in this launch's environment only while the launch
+    // does, as an API key does below.
+    return Effect.acquireRelease(
+      Effect.sync(() => ({
+        environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, { oauthToken }),
+      })),
+      ({ environment }) =>
+        Effect.sync(() => {
+          delete environment.CLAUDE_CODE_OAUTH_TOKEN;
+        }),
+    );
   }
 
   if (options.apiKey === undefined || options.apiKey.trim().length === 0) {

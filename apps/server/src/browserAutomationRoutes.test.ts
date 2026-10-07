@@ -143,6 +143,35 @@ describe("browser automation routes", () => {
     expect(await response?.json()).toEqual({ threadId, authority });
   });
 
+  it("takes a fresh picture of the thread's page unless the read opts out of one", async () => {
+    const peekThread = vi.fn(async () => snapshot);
+    const peeking = createBrowserAutomationRouteHandler({
+      service: { ...service, peekThread } as any,
+      authority: { canAccessWindow: () => true, resolve: () => authority },
+      windowAuthorityStore: store,
+      maxRequestBodySize: 64_000,
+    });
+    const read = (payload: object) =>
+      peeking(
+        new Request("http://127.0.0.1/api/browser/contexts/current", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": capability,
+          },
+          body: JSON.stringify(payload),
+        }),
+      );
+
+    expect((await read({ threadId }))?.status).toBe(200);
+    expect(peekThread).toHaveBeenCalledOnce();
+    expect(service.inspectThread).not.toHaveBeenCalled();
+
+    expect((await read({ threadId, freshPicture: false }))?.status).toBe(200);
+    expect(peekThread).toHaveBeenCalledOnce();
+    expect(service.inspectThread).toHaveBeenCalledOnce();
+  });
+
   it("lists and decides a browser origin approval under the authenticated window", async () => {
     const approvals = {
       list: vi.fn(

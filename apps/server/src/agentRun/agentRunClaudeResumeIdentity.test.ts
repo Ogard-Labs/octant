@@ -376,6 +376,11 @@ async function driverFixture(port: ReturnType<typeof createAgentRunClaudeResumeI
       },
     },
     sdk: { openQuery, findSession },
+    // A Chat child runs confined, so it signs in with Claude for helpers.
+    helperSignIn: {
+      read: async () => ({ kind: "connected", token: "helper-token-fixture-0123456789" }),
+      markExpired: async () => undefined,
+    },
     runtimeRegistry: new ProviderRuntimeRegistry(),
     resumeIdentityPort: port,
     makeEnvironmentScope: () => Effect.succeed({ environment: { PATH: "/usr/bin" } }),

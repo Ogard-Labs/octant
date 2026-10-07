@@ -280,6 +280,8 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
   ) => Promise<ProviderCredentialStatus>;
   readonly onClearProviderCredential: (instanceId: ProviderInstanceId) => Promise<boolean>;
+  /** "Connect Claude for helpers" on a Claude Code subscription instance. */
+  readonly onClaudeHelpers?: import("./ClaudeHelperSignIn").RunClaudeHelperCommand;
   readonly onProviderOAuth?: (
     command: import("./ProviderOAuthSignIn").ProviderOAuthCommand,
   ) => Promise<import("./ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
@@ -456,6 +458,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangePiConfiguration={props.onChangePiConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
         {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
+        {...(props.onClaudeHelpers === undefined ? {} : { onClaudeHelpers: props.onClaudeHelpers })}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
         {...(props.onUpdateProviderCli === undefined
           ? {}

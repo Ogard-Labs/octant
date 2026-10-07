@@ -1,0 +1,276 @@
+/* The Review page: every finished thread the person has not looked at, with
+   the selected one's reply, checks, and changes beside the list. The shell,
+   header, and type roles come from the surface language; this sheet only lays
+   out the two columns and the rows' own faces. Glyphs and words carry state,
+   never hue, and the selected row is raised rather than tinted. */
+
+.review-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: auto;
+  background: var(--oct-bg);
+}
+
+.shell--app-backdrop.shell-frame .review-layer {
+  background: transparent;
+}
+
+.review-page {
+  container: review / inline-size;
+}
+
+.review-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.review-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  white-space: nowrap;
+}
+
+.review-page kbd {
+  display: inline-block;
+  padding: 0 var(--oct-space-1);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+}
+
+.review-page__body {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--oct-space-6);
+  outline: none;
+}
+
+/* ── The list ── */
+
+.review-list {
+  position: sticky;
+  top: var(--oct-space-4);
+  max-height: calc(100vh - var(--oct-space-12));
+  overflow: auto;
+}
+
+.review-list > ul,
+.review-files {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-list > ul {
+  gap: var(--oct-space-1);
+}
+
+.review-row.review-row,
+.review-file.review-file {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  text-align: start;
+  white-space: normal;
+}
+
+.review-row__face {
+  display: grid;
+  box-sizing: border-box;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+}
+
+.review-row:hover .review-row__face,
+.review-row:focus-visible .review-row__face {
+  background: color-mix(in oklab, var(--oct-fg) 5%, transparent);
+}
+
+.review-row[aria-current="true"] .review-row__face {
+  background: var(--oct-surface);
+  box-shadow: var(--oct-elev-subtle);
+}
+
+.review-row__title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.review-row__meta,
+.review-row__state {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.review-check__glyph {
+  flex: none;
+}
+
+/* ── The selected thread ── */
+
+.review-detail {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-5);
+}
+
+.review-detail__head {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+/* The page title above already uses the title role; the thread's own name is a
+   step down from it so the two do not compete. */
+.review-detail__title {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--oct-text-xl);
+}
+
+.review-detail__where {
+  margin: 0;
+}
+
+.review-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.review-detail__actions kbd {
+  margin-inline-start: var(--oct-space-1);
+}
+
+.review-detail__follow-up {
+  width: 100%;
+}
+
+.review-detail__notice {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+}
+
+.review-section {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+}
+
+.review-section > p {
+  margin: 0;
+}
+
+/* The Open Project action keeps its own width instead of the grid's full row. */
+.review-section--closed {
+  justify-items: start;
+}
+
+.review-reply {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-reply[data-expanded="false"] {
+  max-height: 10.5em;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black calc(100% - 2em), transparent);
+}
+
+.review-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1) var(--oct-space-4);
+  margin: 0;
+  font-size: var(--oct-text-detail);
+}
+
+.review-file__face {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.review-file:hover .review-file__face,
+.review-file:focus-visible .review-file__face {
+  background: color-mix(in oklab, var(--oct-fg) 5%, transparent);
+}
+
+.review-file[aria-current="true"] .review-file__face {
+  background: var(--oct-surface);
+  box-shadow: var(--oct-elev-subtle);
+}
+
+.review-file__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-file__counts {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.review-snooze {
+  min-width: 14rem;
+}
+
+.review-snooze__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-snooze__choice.review-snooze__choice {
+  width: 100%;
+  justify-content: space-between;
+}
+
+/* List and detail stack on a phone, and the list stops being a rail. */
+@container review (max-width: 640px) {
+  .review-page__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .review-list {
+    position: static;
+    max-height: none;
+  }
+}

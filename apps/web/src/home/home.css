@@ -234,6 +234,28 @@
   margin: var(--oct-space-1) var(--oct-space-1) 0;
 }
 
+/* ── Needs you ────────────────────────────────────────────────────────── */
+
+.needs-you__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.needs-you__list > li {
+  min-width: 0;
+}
+
+.needs-you__list > li + li {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.needs-you__more.needs-you__more {
+  justify-self: start;
+  margin: var(--oct-space-1) var(--oct-space-1) 0;
+}
+
 /* ── Pull requests ────────────────────────────────────────────────────── */
 
 .pull-requests-card__group {
@@ -306,4 +328,227 @@
 .pull-requests-card__more.pull-requests-card__more {
   justify-self: start;
   margin: var(--oct-space-1) var(--oct-space-1) 0;
+}
+
+/* ── Composer tabs and the Running tab ────────────────────────────────── */
+
+.home-composer-tabs {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+}
+
+/* The tabs sit on the composer's top-left edge and never wrap: two short words
+   and a count fit a phone with room to spare. */
+.home-composer-tabs__list.home-composer-tabs__list {
+  justify-self: start;
+  max-width: 100%;
+  flex-wrap: nowrap;
+}
+
+.home-composer-tabs__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.home-composer-tabs__panel.home-composer-tabs__panel {
+  min-width: 0;
+  margin-top: 0;
+}
+
+.running-tab__quiet {
+  margin: 0;
+  padding: var(--oct-space-3);
+}
+
+.running-tab__list {
+  display: grid;
+  max-height: min(52vh, 420px);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
+  list-style: none;
+}
+
+.running-tab__row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  padding-inline-end: var(--oct-space-2);
+}
+
+.running-tab__row + .running-tab__row {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.running-tab__face {
+  min-width: 0;
+  padding-inline: var(--oct-space-3);
+}
+
+.running-tab__note {
+  min-width: 0;
+}
+
+.running-tab__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--oct-space-1);
+}
+
+/* The question takes its own line, so a phone keeps room for the title. */
+.running-tab__confirm {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+  padding-block-end: var(--oct-space-2);
+}
+
+/* On a phone the actions drop under the row, so the title keeps its width
+   instead of being cut to a few letters beside Open and Stop. */
+@media (max-width: 560px) {
+  .running-tab__actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+    padding-block-end: var(--oct-space-2);
+  }
+}
+
+/* ── Running services ─────────────────────────────────────────────────── */
+
+.running-services__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.running-services__list > li {
+  display: grid;
+  min-width: 0;
+}
+
+.running-services__row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-1);
+}
+
+.running-services__main {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 2px;
+}
+
+.running-services__head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+}
+
+.running-services__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.running-services__origin {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Health, runtime, and ownership wrap instead of truncating: "Left over from
+   Octant" is the word that says why the row is there. */
+.running-services__detail {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: var(--oct-space-1);
+}
+
+.running-services__detail > svg {
+  flex: 0 0 auto;
+  margin-top: 0.2em;
+}
+
+.running-services__detail-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.running-services__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.running-services__more {
+  margin: var(--oct-space-1) var(--oct-space-1) 0;
+}
+
+.running-services__alert {
+  margin: 0 var(--oct-space-1) var(--oct-space-1);
+}
+
+/* ── CI failures ──────────────────────────────────────────────────────── */
+
+.ci-failures-card__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ci-failures-card__list > li {
+  display: grid;
+  min-width: 0;
+}
+
+.ci-failures-card__row {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: var(--oct-space-2) var(--oct-space-1);
+}
+
+.ci-failures-card__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-failures-card__facts {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--oct-space-2);
+}
+
+.ci-failures-card__place,
+.ci-failures-card__age {
+  min-width: 0;
+}
+
+.ci-failures-card__fix.ci-failures-card__fix {
+  justify-self: start;
+  height: auto;
+  min-height: 0;
+  padding-inline: 0;
 }

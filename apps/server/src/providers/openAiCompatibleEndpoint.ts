@@ -6,6 +6,7 @@ import {
   type ProviderReadiness,
 } from "@octant/contracts";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import { CONTEXT_OVERFLOW_FAILURE_MESSAGE } from "./endpointRetry";
 import { textOnlyInputModalities } from "@octant/provider-sdk/chat-conformance";
 
 const MAX_RETRY_AFTER_MS = 3_600_000;
@@ -199,6 +200,10 @@ export function classifyCompatibleHttpFailure(
     case 405:
     case 501:
       return fail("unsupported", "The provider does not support this endpoint.");
+    // A 413 is the OpenAI-compatible "request too large" shape; a filled
+    // context window is the one that the harness can recover from by shrinking.
+    case 413:
+      return fail("provider-failed", CONTEXT_OVERFLOW_FAILURE_MESSAGE);
     case 408:
     case 504:
       return withRetryAfter(fail("unavailable", "The provider request timed out."), response, now);

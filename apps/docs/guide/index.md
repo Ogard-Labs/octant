@@ -23,7 +23,7 @@ Welcome to the Octant guide. Use these pages to install the app, configure provi
 - [Shared Memory](/guide/memory) — persist decisions, facts, and context across threads
 - [Promotions](/guide/promotions) — escalate Work work to a linked Code thread
 - [Sync artifacts across your computers](/guide/sync-artifacts) — what leaves this computer, where it goes, and how to turn sync off
-- [Export a Canvas or artifact to a folder](/guide/export) — write a readable Markdown or HTML copy into a folder you choose
+- [Export a Canvas or artifact](/guide/export) — write a readable Markdown or HTML copy into a folder you choose, or publish it as a GitHub Gist
 
 ## Concepts
 
@@ -56,6 +56,43 @@ is showing another computer's work, the row names that computer. Up to five rows
 show, then **+N more** opens Running. Choose a row to open its thread. When
 nothing is running, the card says so in one line.
 
+**Running services** lists the dev servers running in your Code Projects: the
+port, the Project and the branch or thread, what is running (`vite`, `node`,
+`bun`), and whether it is answering. A server Octant does not own is marked
+**Not owned by Octant**: it may be one left from an earlier session, or one you
+started yourself in a terminal or with another tool, and Octant cannot tell
+which. **Open** shows the page in a Browser tab for that thread, or in your own
+browser; **Stop** stops it. A server Octant owns can stop at once; one it does
+not own asks you to confirm first, and from a paired device it can only be
+stopped at the computer itself.
+A server an editor such as VS Code started is not listed, and neither is
+anything outside your Code Projects. Up to five show, then **+N more
+listening**. The card refreshes about every five seconds while the window is
+showing, and not at all when it is hidden or turned off. When the window shows
+another computer's work, the row names that computer.
+
+Above the composer, two tabs sit on its top-left edge: **New task**, which is the
+composer, and **Running**, with the number of threads running now (the same
+number the sidebar's Running tile shows). Running lists every running row, not
+just five, each with **Open** and **Stop**. Stop asks "Stop this turn?" first,
+or "Stop this agent run?" on an agent run's row; choose **Stop** to end it or
+**Keep running** to leave it. Switching tabs never
+loses what you were typing: the draft, Project, and model are kept while you
+look. The tabs work from the keyboard: arrow keys move between them, and Enter
+chooses.
+
+**Needs you** comes first and appears only while an agent is waiting on you. It
+lists every approval and question across your Projects, oldest first: the
+provider mark, the thread's title, how long it has waited, and what it asked.
+Choose **Approve** or **Deny** on an approval. A question with choices has one
+numbered button per choice (press the number while the row has focus), and
+**Reply…** opens the thread so you can type your own answer. Answering works the
+same as in the thread itself, with the same permissions. If the request changed
+before your answer arrived (it was answered elsewhere, or the turn ended), the
+row says so once and refreshes. Up to five rows show, then **+N more** opens the
+Inbox. On Work this covers Chat and Work threads; on Code, Code threads. The
+card is only available in a window on this computer.
+
 **Pull requests**, on a new Code task, lists what is waiting on you across your
 Code Projects. **Waiting on your review** is a review asked of you; **Yours**
 is one you opened. A row shows the title, a short repository and number, and
@@ -64,6 +101,15 @@ approved, changes requested, in review, or draft. Up to six rows show, then
 **+N more** opens Pull requests. Choose a row to open that pull request. The
 card is not shown at all without a connection, or when credential storage is
 insecure. It reads the list the Pull requests page already keeps, so it does
+not ask again on its own.
+
+**CI failures**, on a new Code task, lists checks that failed on pull requests
+you opened and on the branch a Code Project is on now. A row shows the check,
+the repository or the branch, and how long ago it failed. Up to five rows
+show. When nothing is failing, the card is not shown. **Start a fix** opens a
+new Code task that starts a new worktree from the failing branch, with the
+pull request and check already written in; you send it. The card is not shown without a connection, or when credential
+storage is insecure. It reads the same list Pull requests keeps, so it does
 not ask again on its own.
 
 **Customize**, on the right under the composer, turns each card on or off and

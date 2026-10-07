@@ -823,6 +823,31 @@ describe("boardRuntimeActivityFromWorks", () => {
     ).toEqual({ executing: false, awaitingInput: false, interrupted: false });
   });
 
+  it("files a running turn parked on the person as awaiting input, not executing", () => {
+    // The turn's record stays `running` while the provider waits on an
+    // approval or a question, so only the turn's open requests can say it is parked.
+    const works = [work("provider-turn", "running", 1)];
+    expect(boardRuntimeActivityFromWorks(works)).toMatchObject({
+      executing: true,
+      awaitingInput: false,
+    });
+    expect(boardRuntimeActivityFromWorks(works, { turnParkedOnPerson: true })).toEqual({
+      executing: false,
+      awaitingInput: true,
+      interrupted: false,
+      blockingReason: "Waiting for a decision or answer.",
+    });
+  });
+
+  it("keeps a thread executing while other work runs beside a parked turn", () => {
+    expect(
+      boardRuntimeActivityFromWorks(
+        [work("provider-turn", "running", 1), work("terminal", "running", 2)],
+        { turnParkedOnPerson: true },
+      ),
+    ).toMatchObject({ executing: true, awaitingInput: true });
+  });
+
   it("keeps the thread Waiting for the latest interrupted provider turn", () => {
     expect(
       boardRuntimeActivityFromWorks([

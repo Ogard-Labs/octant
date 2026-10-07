@@ -16,6 +16,7 @@
 @import "./styles/code.css";
 @import "./styles/github.css";
 @import "./styles/inbox.css";
+@import "./styles/review.css";
 @import "./styles/apple.css";
 @import "./styles/preview.css";
 @import "./styles/zen.css";
@@ -493,48 +494,6 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   cursor: default;
 }
 
-/* Multiple active Browser windows fan out so every surface stays visible,
-   with the most recent window on top of the stack. */
-.thread-activity-pip__visual--stack {
-  position: relative;
-  display: block;
-  height: 172px;
-}
-
-.thread-activity-pip__stack-card {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 148px;
-  border-radius: var(--oct-radius-md);
-  overflow: hidden;
-  transition: transform var(--oct-motion-fast) ease;
-}
-
-.thread-activity-pip__stack-card img {
-  width: 100%;
-  height: 148px;
-  object-fit: cover;
-  object-position: top center;
-}
-
-.thread-activity-pip__stack-placeholder {
-  display: grid;
-  width: 100%;
-  height: 148px;
-  place-items: center;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  background: var(--octant-surface-inset);
-}
-
-.thread-activity-pip__visual img {
-  width: 100%;
-  height: 148px;
-  object-fit: cover;
-  object-position: top center;
-}
-
 .thread-activity-pip__visual [role="status"] {
   position: absolute;
   right: 8px;
@@ -566,14 +525,6 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   line-height: 1.45;
 }
 
-.thread-activity-pip__note {
-  margin: 0;
-  padding: 0 10px 10px;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
-}
-
 .thread-activity-pip__approval {
   display: flex;
   justify-content: center;
@@ -584,6 +535,145 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
 .thread-activity-pip__approval button {
   height: 28px;
   font-size: var(--oct-text-xs);
+}
+
+/* The Browser preview: a small live picture of the page, resting in one corner
+   of the thread and shown only while the Browser itself is out of sight. It
+   ranks below the window chrome (7), and its bottom corners clear the composer
+   by the height the component measures into --browser-pip-bottom. */
+.browser-pip {
+  --browser-pip-inset: 16px;
+  --browser-pip-bottom: var(--browser-pip-inset);
+  position: absolute;
+  z-index: 6;
+  width: min(264px, calc(100% - 2 * var(--browser-pip-inset)));
+  touch-action: none;
+  animation: thread-activity-pip-enter var(--oct-motion-fast) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.browser-pip[data-corner^="top"] {
+  top: var(--browser-pip-inset);
+}
+
+.browser-pip[data-corner^="bottom"] {
+  bottom: var(--browser-pip-bottom);
+}
+
+.browser-pip[data-corner$="left"] {
+  left: var(--browser-pip-inset);
+}
+
+.browser-pip[data-corner$="right"] {
+  right: var(--browser-pip-inset);
+}
+
+.browser-pip[data-dragging] {
+  cursor: grabbing;
+  animation: none;
+}
+
+.browser-pip__open {
+  position: relative;
+  display: block;
+  width: 100%;
+  /* The button recipe fixes a control height that would clip the picture. */
+  height: auto;
+  padding: 0;
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  background: var(--octant-surface-inset);
+  border: 1px solid var(--octant-glass-border);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-glass-highlight), var(--octant-shadow-pop);
+  cursor: pointer;
+}
+
+.browser-pip[data-dragging] .browser-pip__open {
+  cursor: grabbing;
+}
+
+/* The ratio lives on this inner box, not on the button: a button ignores it. */
+.browser-pip__frame {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: var(--browser-pip-aspect, 1.6);
+}
+
+.browser-pip__picture {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  user-select: none;
+}
+
+.browser-pip__skeleton {
+  position: absolute;
+  inset: 0;
+  border-radius: 0;
+}
+
+/* Name and count ride the picture's edges; the page's title or host shows only
+   under the pointer or keyboard focus, so nothing sits over the page at rest. */
+.browser-pip__caption,
+.browser-pip__count,
+.browser-pip__close {
+  background: var(--octant-glass-bg);
+  backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
+}
+
+.browser-pip__caption {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 4px 8px;
+  overflow: hidden;
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--oct-motion-fast) ease;
+}
+
+.browser-pip__open:hover .browser-pip__caption,
+.browser-pip__open:focus-visible .browser-pip__caption {
+  opacity: 1;
+}
+
+.browser-pip__count {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 20px;
+  padding: 0 4px;
+  color: var(--octant-text-secondary);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+  text-align: center;
+}
+
+.browser-pip__close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  padding: 0;
+  border-radius: var(--oct-radius-pill);
+  opacity: 0;
+  transition: opacity var(--oct-motion-fast) ease;
+}
+
+.browser-pip:hover .browser-pip__close,
+.browser-pip:focus-within .browser-pip__close {
+  opacity: 1;
 }
 
 @keyframes thread-activity-pip-enter {
@@ -613,10 +703,6 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
     box-shadow: none;
   }
 
-  .thread-activity-pip[data-activity-kind="browser"] .thread-activity-pip__visual {
-    display: none;
-  }
-
   .thread-activity-pip__visual {
     min-height: 0;
   }
@@ -637,7 +723,8 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .thread-activity-pip {
+  .thread-activity-pip,
+  .browser-pip {
     animation: none;
   }
 }
@@ -1388,6 +1475,7 @@ html[data-octant-native-host="true"]
   .primary-workspace-layer:has(
     > .rail-placeholder,
     > .inbox-layer,
+    > .review-layer,
     > .code-board-layer,
     > .archive-layer,
     > .artifact-library-layer,

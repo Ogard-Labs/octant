@@ -1247,6 +1247,9 @@ function ProvidersSection(props: {
         {...(props.providerController.providerOAuth === undefined
           ? {}
           : { onProviderOAuth: props.providerController.providerOAuth })}
+        {...(props.providerController.claudeHelpers === undefined
+          ? {}
+          : { onClaudeHelpers: props.providerController.claudeHelpers })}
         onBeginProviderAuthentication={props.providerController.beginProviderAuthentication}
         onCompleteProviderAuthentication={props.providerController.completeProviderAuthentication}
         onUpdateProviderCli={props.providerController.updateProviderCli}

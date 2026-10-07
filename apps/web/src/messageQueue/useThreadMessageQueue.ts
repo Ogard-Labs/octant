@@ -432,9 +432,7 @@ export function useThreadMessageQueue(options: {
     available,
     busy,
     uncertain,
-    message:
-      message ??
-      (available ? undefined : "The host message queue is unavailable. Your draft stays here."),
+    message,
     enqueue,
     change,
     refresh,

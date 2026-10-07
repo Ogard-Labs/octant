@@ -4,6 +4,7 @@ import {
   decodeBrowserContextCreateCommand,
   decodeBrowserContextInspectCommand,
   decodeBrowserContextStopCommand,
+  decodeBrowserThreadInspectCommand,
   decodeBrowserThreadScope,
   decodeBrowserThreadScopeRequest,
   decodeBrowserToolApproval,
@@ -100,6 +101,16 @@ describe("browser automation RPC", () => {
     });
     expect(() => decodeBrowserContextInspectCommand({ contextId })).toThrow();
     expect(() => decodeBrowserContextStopCommand({ contextId })).toThrow();
+  });
+
+  it("lets a thread read opt out of a fresh picture and nothing else", () => {
+    const threadId = "50000000-0000-4000-8000-000000000001";
+    expect(decodeBrowserThreadInspectCommand({ threadId })).toEqual({ threadId });
+    expect(decodeBrowserThreadInspectCommand({ threadId, freshPicture: false })).toEqual({
+      threadId,
+      freshPicture: false,
+    });
+    expect(() => decodeBrowserThreadInspectCommand({ threadId, extra: true })).toThrow();
   });
 
   it("decodes all truthful renderer states without raw browser content", () => {

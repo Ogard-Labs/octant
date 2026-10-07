@@ -1,9 +1,13 @@
 import {
   decodeLocalServerCommand,
   decodeLocalServerCommandResult,
+  decodeRunningServiceCommand,
+  decodeRunningServiceCommandResult,
   type LocalServerCommand,
   type LocalServerCommandResult,
   type ProjectId,
+  type RunningServiceCommand,
+  type RunningServiceCommandResult,
   type WindowId,
 } from "@octant/contracts";
 import type { LocalServerActor } from "@octant/domain";
@@ -26,6 +30,12 @@ export interface LocalServerRouteDependencies {
       command: LocalServerCommand,
       options: { readonly actor: LocalServerActor; readonly signal?: AbortSignal },
     ): Promise<LocalServerCommandResult>;
+    /** The same surface read host-wide, for the start screen's Running services. */
+    executeRunning(
+      authenticatedWindowId: WindowId,
+      command: RunningServiceCommand,
+      options: { readonly actor: LocalServerActor; readonly signal?: AbortSignal },
+    ): Promise<RunningServiceCommandResult>;
   };
   readonly persistence: Pick<PersistenceService, "readProject">;
   readonly projects: Pick<ProjectService, "bootstrap">;
@@ -35,7 +45,12 @@ export interface LocalServerRouteDependencies {
 }
 
 /**
- * Authoritative Local servers surface for bound Code threads.
+ * Authoritative Local servers surface for bound Code threads, and the
+ * host-wide Running services read of the same service.
+ *
+ * A host-wide command names no Project, so there is no Project to check here:
+ * the service resolves the Projects this window can access itself, and a window
+ * that reaches none gets an empty answer rather than anyone else's servers.
  *
  * The service owns classification, health, and the stop policy; this route only
  * proves window authority and that the command's Project is an active Code
@@ -91,6 +106,24 @@ export function createLocalServerRouteHandler(dependencies: LocalServerRouteDepe
         : failure("Local servers request is invalid.", 400, origin);
     }
 
+    if (isRunningServiceBody(body)) {
+      let running: RunningServiceCommand;
+      try {
+        running = decodeRunningServiceCommand(body);
+      } catch {
+        return failure("Local servers command is invalid.", 400, origin);
+      }
+      try {
+        const result = await dependencies.service.executeRunning(authenticatedWindowId, running, {
+          actor: requestActor(request),
+          signal: request.signal,
+        });
+        return json(decodeRunningServiceCommandResult(result), 200, origin);
+      } catch {
+        return failure("Octant Local servers service is unavailable.", 503, origin);
+      }
+    }
+
     let command: LocalServerCommand;
     try {
       command = decodeLocalServerCommand(body);
@@ -112,6 +145,22 @@ export function createLocalServerRouteHandler(dependencies: LocalServerRouteDepe
       return failure("Octant Local servers service is unavailable.", 503, origin);
     }
   };
+}
+
+const RUNNING_SERVICE_KINDS: ReadonlySet<unknown> = new Set([
+  "list-running-services",
+  "open-running-service",
+  "stop-running-service",
+]);
+
+/** A host-wide command is told apart by its kind alone; both families share one path. */
+function isRunningServiceBody(body: unknown): boolean {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    "kind" in body &&
+    RUNNING_SERVICE_KINDS.has(body.kind)
+  );
 }
 
 /**

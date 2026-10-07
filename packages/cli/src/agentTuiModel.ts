@@ -1,7 +1,12 @@
 import type { NativeHarnessSessionView, ThreadGoal } from "@octant/contracts";
 import type { AgentThreadSnapshot } from "./agentThread";
 import { BUILT_IN_THEME_PRESET_IDS, resolveThemePresetTokens } from "@octant/theme";
-import { nativeHarnessStatusLabel, sessionStatsInputOf, threadStatsLine } from "@octant/domain";
+import {
+  nativeHarnessStatusLabel,
+  harnessRetryStatusText,
+  sessionStatsInputOf,
+  threadStatsLine,
+} from "@octant/domain";
 
 /**
  * What the terminal UI shows, computed from the same thread and harness
@@ -240,6 +245,16 @@ export function statusLineFrom(
     parts.push(`${thread.turns.length} turns`);
   }
   return parts.join(" · ");
+}
+
+/** The retry line for the footer, in the same words as the thread. Absent when the turn is not waiting. */
+export function retryFooterText(
+  session: Pick<NativeHarnessSessionView, "retrying"> | null | undefined,
+  nowMs: number,
+): string | undefined {
+  const notice = session?.retrying;
+  if (notice === undefined) return undefined;
+  return harnessRetryStatusText(notice, nowMs);
 }
 
 /** One line for the goal: its state, objective, and how many criteria an observed check met. */

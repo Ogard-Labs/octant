@@ -1839,6 +1839,48 @@ export function useCodeController(options: CodeControllerOptions) {
     [restCommand],
   );
 
+  /**
+   * Hand a finished thread one more turn without opening it. The host starts
+   * the turn under the thread's own posture and runs it whether or not this
+   * window is watching, so the person can send several threads back in a row
+   * from the Review page. Opening the thread afterwards hydrates the running
+   * turn from the journal like any other. The answer is a value: a refusal
+   * (a turn already running, a checkout still waiting) arrives in the host's
+   * words and the caller shows it where the person acted.
+   */
+  const sendBackTurn = useCallback(
+    async (threadId: CodeThreadId, prompt: string): Promise<CodeThreadRestOutcome> => {
+      const text = prompt.trim();
+      if (text.length === 0) return { status: "refused", message: "Write a follow-up first." };
+      const thread = findCodeThread(bootstrapRef.current?.threads, threadId);
+      if (thread === undefined) {
+        return { status: "refused", message: "This thread is no longer in the list." };
+      }
+      try {
+        const { started } = await beginProviderTurn({
+          threadId,
+          checkoutId: thread.checkoutId,
+          prompt: text,
+        });
+        if (started.kind === "operation-failed") {
+          return { status: "refused", message: started.failure.message };
+        }
+        if (started.kind !== "provider-turn-state" || started.state !== "running") {
+          const refusal =
+            started.kind === "provider-turn-state" ? started.failure?.message : undefined;
+          return {
+            status: "refused",
+            message: refusal ?? "The provider turn could not be started.",
+          };
+        }
+        return { status: "ok" };
+      } catch (error) {
+        return { status: "refused", message: codeFailure(error).message };
+      }
+    },
+    [beginProviderTurn],
+  );
+
   const markFollowUp = useCallback(
     async (threadId: CodeThreadId, reason?: string): Promise<boolean> => {
       const view = followUps.get(String(threadId)) ?? (await refreshFollowUp(threadId));
@@ -2317,6 +2359,7 @@ export function useCodeController(options: CodeControllerOptions) {
     reopenThread,
     snoozeThread,
     wakeThread,
+    sendBackTurn,
     bootstrap,
     client,
     conversation,

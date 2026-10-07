@@ -15,6 +15,7 @@ import {
   type CodeEvidenceContentId,
   type CodeOperationEvent,
   type CodeOperationId,
+  type CodeOperationResult,
   type CodeAttachmentReference,
   type CodeApprovalId,
   type CodeCheckpoint,
@@ -282,6 +283,42 @@ export function codeFailure(error: unknown): Pick<CodeFailure, "category" | "mes
     return { category: error.category as CodeFailure["category"], message: error.message };
   }
   return { category: "disconnected", message: "The local Octant Code service is unavailable." };
+}
+
+/** Whether the host took an answer to a provider's approval or question. */
+export type ProviderAnswerOutcome =
+  | { readonly status: "answered" }
+  | { readonly status: "refused"; readonly message: string };
+
+/**
+ * Reads the result of `answer-provider-approval` or `answer-provider-input`.
+ * The runtime refuses some answers as a turn state rather than as
+ * `operation-failed`: `failed` when the turn cannot take the answer (Plan
+ * posture, permission persistence changed since it asked, no provider
+ * connection), and `interrupted` when the turn that asked has ended (its
+ * session died with a restart, or a third denial stopped it). Neither leaves a
+ * turn waiting on this answer, so a surface that called it answered would
+ * hold a busy row for a request the provider will never act on.
+ */
+export function providerAnswerOutcome(result: CodeOperationResult): ProviderAnswerOutcome {
+  if (result.kind === "operation-failed") {
+    return { status: "refused", message: result.failure.message };
+  }
+  if (result.kind === "provider-turn-state" && result.state === "failed") {
+    return {
+      status: "refused",
+      message:
+        result.failure?.message ?? "The answer was not delivered. The turn changed since it asked.",
+    };
+  }
+  if (result.kind === "provider-turn-state" && result.state === "interrupted") {
+    return {
+      status: "refused",
+      message:
+        result.failure?.message ?? "The turn that asked has ended. Send a new message to continue.",
+    };
+  }
+  return { status: "answered" };
 }
 
 export function replaceById<T extends { readonly id: unknown }>(

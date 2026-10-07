@@ -710,6 +710,46 @@ describe("useChatController", () => {
     expect(result.current.errorMessage).toBeUndefined();
   });
 
+  it("sends a thread that is not open its next turn with the version the host holds", async () => {
+    const execute = vi.fn(async (_command: { readonly kind: string }) => {
+      const current = bootstrap().threads[0]!;
+      return { kind: "thread-updated", thread: { ...current, version: 6 } } as never;
+    });
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () =>
+        decodeChatThreadView({
+          ...threadView(1),
+          thread: { ...bootstrap().threads[0]!, version: 5 },
+        }),
+      ),
+      subscribe: vi.fn(async function* () {}),
+      execute,
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        activeThreadId: otherThreadId,
+        client,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let outcome: Awaited<ReturnType<typeof result.current.sendBackTurn>> | undefined;
+    await act(async () => {
+      outcome = await result.current.sendBackTurn(threadId, "tighten the summary");
+    });
+
+    expect(outcome).toEqual({ status: "ok" });
+    expect(execute).toHaveBeenLastCalledWith({
+      kind: "send-chat-turn",
+      threadId,
+      expectedVersion: 5,
+      prompt: "tighten the summary",
+    });
+  });
+
   it("subscribes after the authoritative snapshot cursor and refetches on stream gaps", async () => {
     let snapshotSequence = 1;
     const subscribe = vi

@@ -38,7 +38,9 @@ export function HomeCard(props: { readonly definition: HomeCardDefinition }) {
         {content.status === "loading" ? (
           <p className="oct-row-detail home-card__quiet">Looking…</p>
         ) : content.count === 0 ? (
-          <p className="oct-row-detail home-card__quiet">{definition.emptyLabel}</p>
+          <p className="oct-row-detail home-card__quiet">
+            {content.emptyLabel ?? definition.emptyLabel}
+          </p>
         ) : (
           content.body
         )}

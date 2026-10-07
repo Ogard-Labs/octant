@@ -63,6 +63,55 @@ describe("compact message queue controls", () => {
     ]);
   });
 
+  it("steps back without repeating a lost connection the thread already reported", () => {
+    const snapshot = decodeThreadMessageQueueSnapshot({
+      scope: { mode: "chat", threadId },
+      version: 1,
+      paused: false,
+      items: [
+        {
+          messageId: crypto.randomUUID(),
+          status: "queued",
+          revision: 0,
+          createdAt: "2026-10-03T10:00:00.000Z",
+          payload: { mode: "chat", prompt: "Waiting message" },
+        },
+      ],
+    });
+    const lost = {
+      snapshot,
+      available: false,
+      busy: false,
+      uncertain: false,
+      message: undefined,
+      enqueue: async () => "refused" as const,
+      change: async () => "refused" as const,
+      refresh: async () => {},
+      retry: async () => {},
+    };
+    const { rerender } = render(<ThreadMessageQueue queue={lost} showUnavailable />);
+    expect(screen.getByText(/host message queue is unavailable/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Check queue" })).toBeVisible();
+
+    rerender(<ThreadMessageQueue connectionLost queue={lost} showUnavailable />);
+    expect(screen.queryByText(/unavailable/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check queue" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pause queue" })).toBeDisabled();
+    expect(screen.getByRole("region", { name: "Message queue" })).toHaveAttribute(
+      "data-connection",
+      "lost",
+    );
+
+    rerender(
+      <ThreadMessageQueue
+        connectionLost
+        queue={{ ...lost, snapshot: { ...snapshot, items: [] } }}
+        showUnavailable
+      />,
+    );
+    expect(screen.queryByRole("region", { name: "Message queue" })).not.toBeInTheDocument();
+  });
+
   it("reorders queued messages without moving an accepted item", async () => {
     const host = queueTestHost();
     const user = userEvent.setup();
