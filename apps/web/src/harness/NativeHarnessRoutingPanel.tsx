@@ -3,10 +3,13 @@ import {
   DEFAULT_NATIVE_HARNESS_JOB_SLOTS,
   NATIVE_HARNESS_BUILT_IN_SLOT_IDS,
   NativeHarnessJob,
+  nativeHarnessSlotCandidateKey,
   type NativeHarnessRoutingConfiguration,
   type NativeHarnessRoutingSettings,
   type NativeHarnessSlot,
   type NativeHarnessSlotCandidate,
+  type ProviderInstanceId,
+  type ProviderModelId,
 } from "@octant/contracts";
 import {
   NativeHarnessClientFailure,
@@ -45,8 +48,8 @@ export interface NativeHarnessRoutingPanelProps {
   readonly onOpenProviders?: () => void;
   /** One explicit request that proves whether a model calls tools; absent hides the action. */
   readonly onVerifyTools?: (
-    providerInstanceId: string,
-    modelId: string,
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
   ) => Promise<ModelToolVerification>;
 }
 
@@ -186,12 +189,13 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
     }
   }, [props.client, settings, draft, saving, load, resetDraft]);
 
-  const verifyTools = (providerId: string, modelId: string) => {
+  const verifyTools = (candidate: NativeHarnessSlotCandidate) => {
     if (props.onVerifyTools === undefined || verifying !== undefined) return;
-    setVerifying(`${providerId}:${modelId}`);
+    const modelId = String(candidate.modelId);
+    setVerifying(nativeHarnessSlotCandidateKey(candidate));
     setMessage(undefined);
     void props
-      .onVerifyTools(providerId, modelId)
+      .onVerifyTools(candidate.providerInstanceId, candidate.modelId)
       .then((outcome) => {
         if (outcome === "supported") setMessage(`${modelId} supports Octant tools.`);
         else if (outcome === "unsupported") {
@@ -382,12 +386,12 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                           modelOptions.push({ id: modelId, label: modelId });
                         }
                       }
-                      const chosenModelId =
-                        row.kind === "chosen" ? String(row.candidate.modelId) : "";
-                      const chatOnly =
+                      const chatOnlyCandidate =
                         row.kind === "chosen" &&
-                        provider?.models.find((model) => model.id === chosenModelId)?.toolsReady ===
-                          false;
+                        provider?.models.find((model) => model.id === String(row.candidate.modelId))
+                          ?.toolsReady === false
+                          ? row.candidate
+                          : undefined;
                       return (
                         <div className="native-harness-candidate" key={`${id}-${index}`}>
                           <span className="native-harness-candidate__rank">
@@ -434,25 +438,24 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                             placeholder="Choose a model"
                             value={row.kind === "chosen" ? String(row.candidate.modelId) : ""}
                           />
-                          {chatOnly ? (
+                          {chatOnlyCandidate === undefined ? null : (
                             <span className="native-harness-candidate__tools">
                               <span className="oct-meta">Chat only: tools not verified.</span>
-                              {props.onVerifyTools === undefined ||
-                              providerId === undefined ? null : (
+                              {props.onVerifyTools === undefined ? null : (
                                 <OctantButton
                                   aria-label={`Verify tools for ${label}, model ${index + 1}`}
                                   disabled={verifying !== undefined}
-                                  onClick={() => verifyTools(providerId, chosenModelId)}
+                                  onClick={() => verifyTools(chatOnlyCandidate)}
                                   size="sm"
                                   variant="outline"
                                 >
-                                  {verifying === `${providerId}:${chosenModelId}`
+                                  {verifying === nativeHarnessSlotCandidateKey(chatOnlyCandidate)
                                     ? "Verifying…"
                                     : "Verify tools"}
                                 </OctantButton>
                               )}
                             </span>
-                          ) : null}
+                          )}
                           <OctantButton
                             aria-label={`Remove ${label}, model ${index + 1}`}
                             onClick={() =>
