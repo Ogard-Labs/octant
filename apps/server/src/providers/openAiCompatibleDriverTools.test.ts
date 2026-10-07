@@ -165,7 +165,15 @@ function responsesTextStream(text: string): Response {
         object: "response",
         status: "completed",
         usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
-        output: [],
+        output: [
+          {
+            id: "msg_1",
+            type: "message",
+            role: "assistant",
+            status: "completed",
+            content: [{ type: "output_text", text, annotations: [] }],
+          },
+        ],
       },
     },
   ];
@@ -210,7 +218,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     const fetch = routeFetch(() =>
       responsesToolCallStream("call_abc", "octant_capability_echo", '{"echo":"hi"}'),
     );
-    const { driver, runtimeRegistry } = makeDriver(fetch as CompatibleFetch);
+    const { driver } = makeDriver(fetch as CompatibleFetch);
 
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
 
@@ -246,9 +254,6 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     // No waiting terminal should be emitted for app-managed tool calls
     const waiting = collected.find((e) => e.kind === "waiting");
     expect(waiting).toBeUndefined();
-
-    const observed = runtimeRegistry.observedState(instanceId);
-    expect(observed?.capabilities.appManagedTools).toBe("supported");
   });
 
   it("completes the turn after answerTool provides the tool result", async () => {
@@ -363,7 +368,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     );
   });
 
-  it("preserves appManagedTools capability after a follow-up plain completion", async () => {
+  it("leaves the profile without provider-wide tool support after a tool loop completes", async () => {
     let callCount = 0;
     const fetch = routeFetch(() => {
       callCount += 1;
@@ -403,12 +408,13 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         }),
       ),
     );
-    // After the tool loop completes with a plain response, appManagedTools
-    // must remain "supported" (sticky), not downgraded to "unsupported".
-    // parallelTools must not appear on ProviderCapabilities (only on ProviderModel).
+    // A tool call proves only the model that made it, so the profile-wide
+    // flag stays "unsupported"; per-model support lives in
+    // verifiedToolModelIds. parallelTools must not appear on
+    // ProviderCapabilities (only on ProviderModel).
     const observed = runtimeRegistry.observedState(instanceId);
     expect(observed).toBeDefined();
-    expect(observed?.capabilities.appManagedTools).toBe("supported");
+    expect(observed?.capabilities.appManagedTools).toBe("unsupported");
     const capabilities = (observed ?? { capabilities: {} }).capabilities as Record<string, unknown>;
     expect(capabilities.parallelTools).toBeUndefined();
     expect(callCount).toBe(2);
@@ -708,5 +714,129 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     // but routeFetch handles the probe separately, so the turn responses are
     // callCount (1 tool-call + 1 continuation = 2).
     expect(callCount).toBe(2);
+  });
+});
+
+describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
+  const octantTool: ProviderToolDefinition = {
+    name: "octant_agents" as never,
+    inputSchema: { type: "object", properties: {} },
+  };
+  const otherModelId = "other-model" as ProviderModelId;
+
+  async function sendWithOctantTool(
+    driver: ReturnType<typeof makeDriver>["driver"],
+    model: ProviderModelId,
+  ) {
+    return Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          yield* connection.start({ sessionId, modelId: model, executionPolicy: "approval-gated" });
+          const outcome = yield* Effect.either(
+            connection.send({
+              sessionId,
+              prompt: "list agents",
+              attachments: [],
+              tools: [octantTool],
+              context: [],
+            }),
+          );
+          yield* connection.stop(sessionId);
+          return outcome;
+        }),
+      ),
+    );
+  }
+
+  it("refuses Octant tools for an unverified model and sends them for a verified one on the same endpoint", async () => {
+    const fetch = routeFetch(
+      () => responsesTextStream("ok"),
+      () => Response.json({ data: [{ id: "manual-model" }, { id: "other-model" }] }),
+    );
+    const { driver, runtimeRegistry } = makeDriver(fetch as CompatibleFetch);
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    const unverified = await sendWithOctantTool(driver, modelId);
+    expect(unverified._tag).toBe("Left");
+
+    // A routine probe reports tools unsupported and runs no generating request.
+    expect(runtimeRegistry.observedState(instanceId)?.capabilities.appManagedTools).toBe(
+      "unsupported",
+    );
+
+    const observed = runtimeRegistry.observedState(instanceId)!;
+    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+
+    expect((await sendWithOctantTool(driver, modelId))._tag).toBe("Right");
+    expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Left");
+  });
+
+  it("keeps Octant tools to the verified model after it calls a tool in a real turn", async () => {
+    const fetch = routeFetch(
+      () => responsesToolCallStream("call_1", "octant_agents", "{}"),
+      () => Response.json({ data: [{ id: "manual-model" }, { id: "other-model" }] }),
+    );
+    const { driver, runtimeRegistry } = makeDriver(fetch as CompatibleFetch);
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const observed = runtimeRegistry.observedState(instanceId)!;
+    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const events = yield* connection.subscribe;
+          yield* connection.send({
+            sessionId,
+            prompt: "list agents",
+            attachments: [],
+            tools: [octantTool],
+            context: [],
+          });
+          yield* Effect.promise(() => collectEvents(events, isToolRequest));
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Left");
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Left");
+    expect((await sendWithOctantTool(driver, modelId))._tag).toBe("Right");
+  });
+
+  it("keeps a verification across a routine probe", async () => {
+    const fetch = routeFetch(() => responsesTextStream("ok"));
+    const { driver, runtimeRegistry } = makeDriver(fetch as CompatibleFetch);
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const observed = runtimeRegistry.observedState(instanceId)!;
+    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    expect(runtimeRegistry.observedState(instanceId)?.verifiedToolModelIds).toEqual([modelId]);
+  });
+
+  it("verifies on demand with one forced tool request", async () => {
+    const supportedFetch = routeFetch(() =>
+      responsesToolCallStream("call_1", "octant_capability_echo", '{"echo":"ready"}'),
+    );
+    const supported = makeDriver(supportedFetch as CompatibleFetch).driver;
+    const result = await Effect.runPromise(
+      Effect.scoped(supported.verifyToolCapability!({ instanceId, modelId })),
+    );
+    expect(result.appManagedTools).toBe("supported");
+    expect(supportedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a model that answers in text as unsupported", async () => {
+    const textFetch = routeFetch(() => responsesTextStream("I cannot call tools"));
+    const textOnly = makeDriver(textFetch as CompatibleFetch).driver;
+    const refused = await Effect.runPromise(
+      Effect.scoped(textOnly.verifyToolCapability!({ instanceId, modelId })),
+    );
+    expect(refused.appManagedTools).toBe("unsupported");
   });
 });

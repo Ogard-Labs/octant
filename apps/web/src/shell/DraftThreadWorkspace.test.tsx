@@ -4,6 +4,7 @@ import {
   decodeProviderModelId,
 } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { Activity } from "lucide-react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
@@ -303,7 +304,8 @@ describe("DraftThreadWorkspace", () => {
       reviewCount: 2,
       runningCount: 3,
       onReview: vi.fn(),
-      running: [],
+      cardCustomization: { order: [], visibility: [] },
+      onCardCustomizationChange: vi.fn(),
       onOpenTerminal,
     };
     const { unmount } = render(
@@ -336,6 +338,75 @@ describe("DraftThreadWorkspace", () => {
     const workTiles = within(screen.getByRole("group", { name: "Quick actions" }));
     expect(workTiles.getByRole("button", { name: /Add a folder/ })).toBeVisible();
     expect(workTiles.queryByRole("button", { name: /Open terminal/ })).not.toBeInTheDocument();
+  });
+
+  it("paints the composer before the cards under it and keeps the composer first in the page", async () => {
+    const onCardCustomizationChange = vi.fn();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        homeStart={{
+          reviewCount: 0,
+          runningCount: 0,
+          cards: [
+            {
+              id: "fixture",
+              title: "Fixture card",
+              icon: Activity,
+              defaultOn: true,
+              available: true,
+              emptyLabel: "Nothing here.",
+              useContent: () => ({ status: "ready", count: 0, body: null }),
+            },
+          ],
+          cardCustomization: { order: [], visibility: [] },
+          onCardCustomizationChange,
+        }}
+        mode="work"
+        onAttachFolder={vi.fn()}
+        projectId={workProjectId}
+        projects={projects}
+      />,
+    );
+
+    const composer = screen.getByRole("textbox", { name: /message|prompt|describe/i });
+    expect(screen.queryByRole("region", { name: "Home cards" })).toBeNull();
+
+    const cards = await screen.findByRole("region", { name: "Home cards" });
+    expect(composer.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows the card area and its Customize control under the Chat composer while Chat threads exist", async () => {
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        homeStart={{
+          reviewCount: 0,
+          runningCount: 0,
+          cards: [
+            {
+              id: "fixture",
+              title: "Fixture card",
+              icon: Activity,
+              defaultOn: true,
+              available: true,
+              emptyLabel: "Nothing here.",
+              useContent: () => ({ status: "ready", count: 0, body: null }),
+            },
+          ],
+          cardCustomization: { order: [], visibility: [] },
+          onCardCustomizationChange: vi.fn(),
+        }}
+        recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
+      />,
+    );
+
+    const composer = screen.getByRole("textbox", { name: "First message" });
+    const cards = await screen.findByRole("region", { name: "Home cards" });
+    expect(composer.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Customize/ })).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Quick actions" })).not.toBeInTheDocument();
+    expect(screen.getByText("Latency telemetry")).toBeVisible();
   });
 
   it("renders intent cards for the active mode", () => {

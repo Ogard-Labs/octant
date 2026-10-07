@@ -24,7 +24,9 @@ import {
   type CodeEventFrame,
   type EventEnvelope,
   type CodeWorktreeRemoteFacts,
+  type ProviderRuntimeEvent,
 } from "@octant/contracts";
+import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { Schema } from "effect";
 import { DeviceId, StableHostId, RemoteSessionId } from "@octant/contracts/remote-access";
 import { CodeProjectAccess } from "../codeProjectAccess";
@@ -456,6 +458,49 @@ describe("CodeService reads", () => {
     });
     const navigation = await revoked.service.navigation(ids.window);
     expect(navigation.runtime[0]).not.toHaveProperty("pullRequestSummaries");
+  });
+
+  it("carries a running turn's start time and latest step onto its navigation row, and drops them when the turn ends", async () => {
+    const running = thread();
+    const idle = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const liveTurns = new LiveTurnRegistry();
+    const tracker = liveTurns.tracker(String(running.id), "code-navigation");
+    const fixture = serviceFixture({ threads: [running, idle], liveTurns });
+    const toolEvent = {
+      kind: "tool-start",
+      toolCallId: "call-1",
+      toolName: "Command",
+      argument: "bun run test",
+    } as unknown as ProviderRuntimeEvent;
+
+    tracker.begin(now);
+    tracker.observe(toolEvent);
+    const during = await fixture.service.navigation(ids.window);
+    expect(during.runtime[0]).toMatchObject({
+      threadId: running.id,
+      turnStartedAt: now,
+      liveStep: { kind: "tool", tool: "Command", argument: "bun run test" },
+    });
+    expect(during.runtime[1]).not.toHaveProperty("turnStartedAt");
+    expect(during.runtime[1]).not.toHaveProperty("liveStep");
+
+    tracker.end();
+    const after = await fixture.service.navigation(ids.window);
+    expect(after.runtime[0]).not.toHaveProperty("turnStartedAt");
+    expect(after.runtime[0]).not.toHaveProperty("liveStep");
+  });
+
+  it("does not report a live step for a thread whose Project the window cannot browse", async () => {
+    const hidden = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const liveTurns = new LiveTurnRegistry();
+    liveTurns.tracker(String(hidden.id), "code-navigation").begin(now);
+    const fixture = serviceFixture({ threads: [thread(), hidden], liveTurns });
+    fixture.access.canBrowseProject.mockImplementation((projectId) => projectId === ids.project);
+
+    const navigation = await fixture.service.navigation(ids.window);
+
+    expect(navigation.threads.map((entry) => entry.id)).toEqual([thread().id]);
+    expect(JSON.stringify(navigation)).not.toContain("turnStartedAt");
   });
 
   it("re-observes a shared existing checkout only once during restart bootstrap", async () => {
@@ -3923,6 +3968,7 @@ function serviceFixture(
     readonly content?: CodeContentStoreOptions;
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
     readonly gitHistory?: CodeServiceOptions["gitHistory"];
+    readonly liveTurns?: CodeServiceOptions["liveTurns"];
   } = {},
 ) {
   const threads = options.threads ?? [thread()];
@@ -3970,7 +4016,7 @@ function serviceFixture(
     },
   };
   const access = {
-    canBrowseProject: vi.fn(() => true),
+    canBrowseProject: vi.fn((_projectId: unknown) => true),
     canAccessProject: vi.fn((_windowId, projectId) => projectId === ids.project),
   };
   const roots = {
@@ -4028,6 +4074,7 @@ function serviceFixture(
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
     ...(options.gitHistory === undefined ? {} : { gitHistory: options.gitHistory }),
     ...(options.pullRequests === undefined ? {} : { pullRequests: options.pullRequests }),
+    ...(options.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
     ...(options.watcher === undefined
       ? {}
       : { watcher: options.watcher as unknown as NonNullable<CodeServiceOptions["watcher"]> }),

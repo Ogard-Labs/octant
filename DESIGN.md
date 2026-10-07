@@ -42,7 +42,8 @@ asks for it (Settings › Appearance › Style):
   for discrete objects, and selection fills. In the Default style the chrome is
   monochrome; colour names identity (a Project, a provider, a count tile under
   Vivid) and never stands in for status, which keeps its own warning, failure,
-  and diff roles.
+  and diff roles. Categorical data is the other exception: the context ring and
+  the parts of the context window keep their hues in every style.
 - Controls are familiar, compact, keyboard reachable, and honest about
   loading, stale, unavailable, permission, and error states.
 
@@ -361,8 +362,8 @@ asked up front; it is derived from the chips and shown on the thread once it
 exists.
 
 Under the composer, Work and Code start screens offer a row of action tiles and
-then a Running now strip, both on the composer's measure and ahead of Code's
-prompt suggestions, so a running thread is never under the fold. The tiles are
+then the card area (Chat's start screens carry the card area alone), both on the composer's measure and ahead of Code's prompt
+suggestions, so a running thread is never under the fold. The tiles are
 always a three-column grid, one column under 560px, so one or two tiles keep a
 tile's width instead of stretching across the row; a detail line wraps to a
 second line before it is cut. A tile is a card
@@ -373,17 +374,35 @@ and **Review N changes** (Finished threads that wait for you) when N is above
 zero, where N counts unread threads that are not running or rested, the
 sidebar's To review rule. Open terminal starts a Project terminal and pins it in
 Zen, the only place one lives. Work offers the same tiles without a terminal,
-because Work has no shell. Review opens the Inbox. Running now is a section
-label with an Open board link and up to four cards, one per executing thread:
-provider mark, title, a small spinner, how long ago the thread last moved, a
-Project chip, in Code a mono branch chip, and the host's latest activity line
-in a mono well. The host keeps no turn start time on the board or in
-navigation, so a card says "Active 4m ago" rather than an elapsed time, and a
-fact the host does not report is left out rather than invented. Running
-threads show here instead of in Continue, so one thread is not listed twice.
-Each part leaves when it has nothing to show. Under the Vivid style the tiles'
+because Work has no shell. Review opens the Inbox. The tiles leave when they
+have nothing to show.
+
+The card area is a ghost **Customize** button right-aligned under the tiles
+(icon at the 14px step and the label), then a grid of cards, two columns and one
+under 560px. A card uses the card recipe (`OctantCard`: hairline ring, no
+shadow, the card fill) at a compact 12px rhythm. Its header is an icon at the
+16px step in secondary ink, the title as a section label, and a count as
+tabular meta text; its body is rows or one quiet line in the detail step. No
+card has a hue of its own: the default theme stays monochrome, and a state is
+carried by wording and weight. A row is a bare card-shaped button whose face
+fills at 5% ink on hover and focus, the provider mark and a row label on its
+first line, and a mono meta line for what is happening. The Customize panel is a
+popover at most 340px wide: one row per card with a drag grip, the icon, the
+title, up and down icon buttons, and a switch, then **Reset to default**; a
+dragged row marks its drop target with a hairline above it. **Working now**
+lists up to five rows of threads and agent runs in progress, each with the
+provider mark, the title, a time, and a one-line step; it says "Nothing is
+running right now." when empty. A running tool is shown in mono
+(`Command: bun run test`); a turn waiting on the person is plain prose. A turn's
+time says "Running 12m" from the start time the host reports, and "Active 4m
+ago" only for a host that reports none; a fact the host does not report is left
+out rather than invented. **Pull requests** lists up to six rows on a Code
+start screen, in Waiting on your review and Yours. Each row is the title, a
+short repository and number, and the words for checks and review — never
+colour alone. It is absent when that read is not allowed. Under the Vivid
+style the tiles'
 icon squares take the blue, orange, and purple palette hues. Code's five prompt
-suggestions are one compact row of label-only chips under Running now, and
+suggestions are one compact row of label-only chips under the cards, and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
 button: hairline, resting fill, hover and focus fill); the prompt rides as the
 chip's tooltip and description and fills the composer when chosen, nothing more.
@@ -652,6 +671,84 @@ patterns live in `octant.css`.
 The original warm charcoal-and-brass `Octant` preset remains an optional
 theme. It is not the default neutral system. Custom themes may override only
 validated semantic roles; incomplete or low-contrast imports fall back safely.
+
+## Data visualisation
+
+Charts, metric blocks, tables, and timelines are one visual system, so a Canvas
+reads as one document whatever kinds it mixes. These rules own the mark, the
+ink, and the reading; a later block (treemap, heatmap, bar list) builds on them
+rather than inventing a second chart language.
+
+**Hue is for marks only.** Data colour appears on the mark — a bar, a line, a
+slice, a scale cell — never on the chrome. The Default style keeps its
+monochrome chrome, and a chart in the default theme still draws its series in
+the palette hues, because the series are the data. Every mark pairs its hue
+with a second channel: a dash pattern on a line, a label in the legend, a value
+in the disclosed table. Colour alone never carries a distinction, and under
+forced colours the marks fall to system colours while the dash pattern and the
+labels keep them apart.
+
+**Categorical series order.** Six hues, assigned in a fixed order so a series
+keeps the same colour across charts and legends: brass, teal, rose, violet,
+green, blue (`--oct-series-1..6`, each pinned per mode). A seventh series
+restarts the order, and the legend, the dash pattern, and the data table keep
+them apart. A series label is drawn in `--oct-fg-2`, never in the series hue: a
+12px label needs text contrast the mark's hue does not carry.
+
+**Scales.** Ordered data — a heatmap cell, a bar list's length — uses one of two
+scales, exposed as theme roles and derived from the palette
+(`packages/theme/src/chartScales.ts`):
+
+- `--octant-chart-sequential-1..5`, one hue from low to high, the teal family.
+- `--octant-chart-diverging-1..5`, the red family through a neutral midpoint to
+  the blue family: 1 the strongest negative, 3 the neutral, 5 the strongest
+  positive.
+
+Every step clears 3:1 against the workspace in light and dark, so a scale cell
+reads on the surface it sits on. A custom theme inherits both scales or
+overrides any step through a semantic override.
+
+**Marks.** One set of specs (`packages/theme/src/chartMarks.ts`) is shared by the
+on-screen renderer and the static SVG export:
+
+- Bars: a 2px top corner, a 2px gap between bars in one category; bars touch
+  only when a distribution's density is the subject.
+- Lines: a 2px stroke with round caps and joins.
+- Dots: a 3px radius, on a scatter point and on each line vertex.
+
+**Axis and grid ink.** The axis is `--oct-chart-axis`, a hairline that reads as
+a rule. The grid behind a cartesian chart is `--oct-chart-grid`, deliberately
+fainter than `--oct-border-soft`: it repeats four times inside one small frame
+and at border weight it reads as a table. The grid is a backdrop, never a frame;
+gridlines stop short of the plot edges.
+
+**Reading numbers.** One formatter (`formatCanvasNumber`) reads every number a
+Canvas shows, in the renderer and in the static export. A chart, a metric block,
+and a table column may name an optional `format`: `number` (the default, locale
+grouping — 1,234,567), `compact` (1.36M), `percent` (a ratio where 1 is 100%),
+`bytes` (base-1024 — 1.5 KB), and `duration` (seconds — 1h 2m 5s). Numbers use
+tabular numerals so a column of readings aligns. A label longer than its slot
+truncates with an ellipsis rather than wrapping or shrinking.
+
+**One tooltip.** Every chart mark has one hover and focus tooltip that names the
+series and its formatted value. It is placed from the mark's own plotted
+coordinates, offset above (or below near the top), so it never covers the
+pointer, and it follows keyboard focus as well as the pointer. It has no
+entrance motion.
+
+**Path labels.** A file label is read from the right: the directory is dimmed and
+the file name is at full ink, in the code font.
+
+**Motion.** A chart transitions only on a state change — a legend toggle, a zoom
+— never on entrance. A transition lasts at most 200ms and is off under
+`prefers-reduced-motion: reduce` and when the workspace sets
+`data-octant-reduced-motion="true"`.
+
+**Empty and error states.** A chart with no series, a table with no rows, and a
+timeline with no items keep their block's height and say so in `--oct-muted` text
+rather than collapsing, so a document does not jump as data arrives. A block that
+cannot be drawn fails closed to its plain reading and its disclosed data table;
+it never shows a broken mark.
 
 ## Typography
 
@@ -1078,7 +1175,10 @@ label's description. Ordering controls appear only in an explicit Reorder mode.
 Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
-input, output, and measurement quality. Reasoning, cache, execution time, and
+input, output, and measurement quality. Its thread table uses the same figures
+as the line under the composer: cache, speed, and first token are columns,
+omitted when unavailable, and opening a row lists that thread's turns. The
+table stays a hairline table, not a card. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay
 collapsed in Settings. The standalone Usage destination also exposes provider
 capacity independently of ledger loading. Each provider window leads with its
@@ -1095,7 +1195,11 @@ First run is a five-step wizard with a progress rail. Each step is pending,
 current, or completed: the current step is a filled card, completed steps show
 a check, and pending steps show their number. Mode choices on the readiness
 step use `OctantToggleGroup`. Answers still write through to the settings that
-own them.
+own them. First run records its outcome only after every answer has landed. When
+the host refused an answer, the first press of Skip setup or the primary action
+says so in a warning notice and records nothing; the next press goes on without
+that answer, so a refusing host can never leave the dialog impossible to leave.
+A refused outcome is reported the same way and the dialog stays open.
 
 The right dock follows the active pane and never leaks another pane's content.
 The dock and the bottom panel both step aside while a reader route (Board,
@@ -1237,12 +1341,51 @@ provider's limits as a name, a reset countdown or weekday, a share, and a thin
 bar each, and a footer action to the fuller surface (the context inspector, or
 Usage for a provider the host does not plan). The breakdown lists only the
 parts the data attributes: planned threads show their manifest categories,
-overhead, reserve, and free space; a provider-reported window shows used and
-free, with the thread's input and output totals kept apart because they are
-sums over turns, not parts of the window. Categories are told apart by palette
-hues (the largest share in blue) and each swatch is named; limit bars fill in
-blue. A limit near its cap is marked on its row and in its bar's value text,
+overhead, reserve, and free space; a provider-run window shows the parts its
+runtime reported (system prompt, system and MCP tools, memory files, skills,
+agents, messages), or, for a runtime that reported none, the parts Octant can
+count itself (Octant tools), and in either case one `Other (provider)` remainder
+so the parts add up to what the window holds. With no parts it shows used and
+free. The thread's input and output totals stay apart because they are sums over
+turns, not parts of the window. A part Octant counted is marked `Estimated`,
+with its accuracy (the existing exact tokenizer, model-family estimate and
+conservative estimate labels) in the part's tooltip and in a line under the key;
+the remainder after an estimate is marked the same way. Counts (tools, MCP, memory
+files, skills, agents) use the harness breakdown's row style; tools the runtime
+knows but has not loaded read `N deferred` and take no share of the bar.
+
+Categorical colour (the maintainer's decision, 2026-10-06): the parts of a
+context window are categorical data, so they carry hue in every style, Default
+included, beside the context ring as the second colour exception in that
+style. Each category has one tone, taken from the palette roles in seven hues
+and a second, darker step of each (the same hue mixed toward the ink, which only
+raises contrast against the panel in either theme), and keeps it wherever it
+appears: the popover's bar and key, and the swatch on the context inspector's
+entries. Categories are listed in one fixed order (the contract's category order
+for a planned thread, a fixed part order for a provider-run window) and the
+tones are chosen against that order, so neighbours differ clearly. A category
+that is the same thing in both kinds of window (conversation and messages, MCP
+and MCP tools, Octant tools and system tools, provider framing and system
+prompt, what nothing accounts for) shares one tone. Neighbour contrast is
+measured, not judged by eye: every tone holds at least 5.2:1 against the popover
+in light and dark, and the worst neighbouring pair is 0.134 apart in OKLab.
+Adjacent lightness ratios stay under 2:1, because seven hues that each clear 5:1
+cannot also sit 3:1 from one another; the one-pixel gap and the name beside every
+swatch carry the rest. `visualLanguageContract.test.ts` computes both numbers
+from the stylesheet. Red is left to the ring's near-full warning. **Free space and Reserved stay
+neutral**: no hue, the panel's ink mixed into its ground, with Free space drawn
+as the bar's empty track. Every part is named beside its swatch and carries its
+tokens and share, so hue never stands alone. The exception is scoped to these
+segments in `visualLanguageContract.test.ts`: in `context.css` palette colour
+may appear only on the tone rules, the ring and the limit bars. Limit bars fill
+in blue. A limit near its cap is marked on its row and in its bar's value text,
 never by ink alone. Unknown or stale data is labeled as such and never rendered as zero.
+Where a provider runtime compacts the session by itself and has said where, one
+secondary line under the window bar reads `N until auto-compact` in the bar's
+compact token format (the room between that point and the latest request's
+fill, or `At the auto-compact threshold` once none is left). The line is
+shown only for automatic compaction with a reported point, never derived from the
+window, and it leaves the ring and the bar's colours alone.
 
 The task visualizer is a compact composer-adjacent chip backed by the thread's
 journaled plan. It appears only when a real plan exists, shows proposed review

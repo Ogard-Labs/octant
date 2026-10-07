@@ -101,6 +101,16 @@ Reading**. It is on by default, and the choice is saved for this installation.
 The same figures appear on the Octant Harness session card, in the terminal
 footer, and on the phone's session panel.
 
+## Threads on the usage page
+
+Octant records, on the Usage page and in Settings, list each thread with those
+same figures. Cache, speed, and first token are columns, and a column is left
+out when no thread in the reading can state it. Open a row to see one turn at
+a time, worded the same way. A partial cache hit is never rounded up to 100%.
+An approximate speed keeps its tilde, and an estimated cost keeps **est.** A
+reading that still has older turns outside the list says so, and does not
+present that partial list as the thread's full total.
+
 ## Remaining capacity
 
 Provider limits show the percentage left and the time until a reset. Absolute

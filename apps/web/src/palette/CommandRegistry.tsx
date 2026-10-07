@@ -1,5 +1,8 @@
+import type { PendingRequest } from "@octant/contracts/pending-requests";
 import { createContext, useContext, type ReactNode } from "react";
+import type { CommandThread } from "./buildOctantCommands";
 import type { OctantCommand } from "./commandModel";
+import type { ApprovalDecision, ApprovalPendingRequest } from "./needsYouCommands";
 
 const NO_COMMANDS: ReadonlyArray<OctantCommand> = [];
 
@@ -29,4 +32,33 @@ export function OctantCommandProvider(props: {
  */
 export function useOctantCommands(): ReadonlyArray<OctantCommand> {
   return useContext(OctantCommandContext);
+}
+
+/**
+ * What the palette needs to open on the agents waiting for the person: the
+ * last read of the host's pending requests, a way to read it again, and the two
+ * callbacks a row runs. It is offered only to the palette — the `/` composer
+ * affordance has no use for rows that open a thread or answer a request — and
+ * only by a host that can read the list at all, so without a provider the
+ * palette has no Needs you group.
+ */
+export interface NeedsYouSource {
+  readonly requests: ReadonlyArray<PendingRequest>;
+  /** Read the list again. The palette calls it each time it opens; nothing polls. */
+  readonly refresh: () => void;
+  readonly onOpenThread: (thread: CommandThread) => void;
+  readonly onAnswerApproval: (request: ApprovalPendingRequest, decision: ApprovalDecision) => void;
+}
+
+const NeedsYouContext = createContext<NeedsYouSource | undefined>(undefined);
+
+export function NeedsYouProvider(props: {
+  readonly source: NeedsYouSource | undefined;
+  readonly children: ReactNode;
+}) {
+  return <NeedsYouContext.Provider value={props.source}>{props.children}</NeedsYouContext.Provider>;
+}
+
+export function useNeedsYou(): NeedsYouSource | undefined {
+  return useContext(NeedsYouContext);
 }

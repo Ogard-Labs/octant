@@ -2,14 +2,17 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
-import { OctantCommandProvider } from "./CommandRegistry";
+import { NeedsYouProvider, OctantCommandProvider, type NeedsYouSource } from "./CommandRegistry";
 import type { OctantCommand } from "./commandModel";
+import { codeApproval, codeQuestion, pendingIds } from "./pendingRequests.test-fixtures";
 
-function harness(commands: ReadonlyArray<OctantCommand>) {
+function harness(commands: ReadonlyArray<OctantCommand>, needsYou?: NeedsYouSource) {
   return render(
     <OctantCommandProvider commands={commands}>
-      <input aria-label="Opener" />
-      <CommandPalette />
+      <NeedsYouProvider source={needsYou}>
+        <input aria-label="Opener" />
+        <CommandPalette />
+      </NeedsYouProvider>
     </OctantCommandProvider>,
   );
 }
@@ -271,5 +274,73 @@ describe("CommandPalette", () => {
     await user.keyboard("{Meta>}k{/Meta}");
 
     expect(screen.queryByRole("combobox", { name: "Search commands" })).not.toBeInTheDocument();
+  });
+
+  it("opens on the threads waiting for the person and Enter opens the first one", async () => {
+    const user = userEvent.setup();
+    const onOpenThread = vi.fn();
+    const refresh = vi.fn();
+    harness(hostCommands(), {
+      requests: [codeApproval(), codeQuestion()],
+      refresh,
+      onOpenThread,
+      onAnswerApproval: vi.fn(),
+    });
+
+    await openPalette(user);
+
+    expect(refresh).toHaveBeenCalledOnce();
+    const groups = screen.getAllByRole("group").map((group) => group.getAttribute("aria-label"));
+    expect(groups).toEqual(["Needs you", "Modes", "Settings"]);
+    const row = screen.getByRole("option", { name: /^Fix the parser/ });
+    expect(row).toHaveAttribute("aria-selected", "true");
+    expect(row).toHaveTextContent("Code · waiting on approval and your answer");
+
+    await user.keyboard("{Enter}");
+
+    expect(onOpenThread).toHaveBeenCalledWith({
+      threadId: pendingIds.codeThread,
+      title: "Fix the parser",
+      mode: "code",
+      projectId: pendingIds.project,
+    });
+  });
+
+  it("finds an approval by typing approve and answers it without opening the thread", async () => {
+    const user = userEvent.setup();
+    const onOpenThread = vi.fn();
+    const onAnswerApproval = vi.fn();
+    const request = codeApproval();
+    harness(hostCommands(), {
+      requests: [request],
+      refresh: vi.fn(),
+      onOpenThread,
+      onAnswerApproval,
+    });
+
+    await openPalette(user);
+    await user.keyboard("approve{Enter}");
+
+    expect(onAnswerApproval).toHaveBeenCalledWith(request, "approved");
+    expect(onOpenThread).not.toHaveBeenCalled();
+  });
+
+  it("has no Needs you group when nothing is waiting or the host cannot list it", async () => {
+    const user = userEvent.setup();
+    const empty = harness(hostCommands(), {
+      requests: [],
+      refresh: vi.fn(),
+      onOpenThread: vi.fn(),
+      onAnswerApproval: vi.fn(),
+    });
+
+    await openPalette(user);
+    expect(screen.queryByRole("group", { name: "Needs you" })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    empty.unmount();
+
+    harness(hostCommands());
+    await openPalette(user);
+    expect(screen.queryByRole("group", { name: "Needs you" })).not.toBeInTheDocument();
   });
 });

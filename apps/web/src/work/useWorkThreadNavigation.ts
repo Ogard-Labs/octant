@@ -1,4 +1,5 @@
 import type {
+  ThreadLiveStep,
   WorkStatusDatedItem,
   WorkThread,
   WorkThreadBootstrap,
@@ -19,6 +20,8 @@ export function buildWorkThreadNavigation(
     readonly awaitingInput?: boolean | undefined;
     readonly awaitingKind?: "approval" | "user-input" | undefined;
     readonly followUpDue?: WorkStatusDatedItem | undefined;
+    readonly turnStartedAt?: string | undefined;
+    readonly liveStep?: ThreadLiveStep | undefined;
   }> = [],
 ): ReadonlyArray<ChatThreadNavigationItem> {
   const runtimeByThread = new Map(runtime.map((entry) => [String(entry.threadId), entry] as const));
@@ -38,6 +41,8 @@ export function buildWorkThreadNavigation(
         title: thread.title,
         ...(live?.awaitingKind === undefined ? {} : { awaitingKind: live.awaitingKind }),
         ...(live?.followUpDue === undefined ? {} : { followUpDue: live.followUpDue }),
+        ...(live?.turnStartedAt === undefined ? {} : { turnStartedAt: live.turnStartedAt }),
+        ...(live?.liveStep === undefined ? {} : { liveStep: live.liveStep }),
         projectId: String(thread.projectId),
         providerInstanceId: String(thread.providerInstanceId),
         updatedAt: thread.updatedAt,
