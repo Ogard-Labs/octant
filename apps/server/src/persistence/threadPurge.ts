@@ -33,7 +33,14 @@ export function erasePurgedThread(input: {
   input.connection.pragma("foreign_keys = OFF");
   try {
     purgeDerivedContent(input.connection, input.mode, threadId);
-    delinkUsageRecords(input.connection, input.mode, threadId);
+    delinkUsageRecords(
+      input.connection,
+      input.mode,
+      threadId,
+      aggregates
+        .filter((aggregate) => aggregate.aggregateType === "agent-run")
+        .map((aggregate) => aggregate.aggregateId),
+    );
     delinkProjectMemoryProvenance(input.connection, threadId);
     deleteThreadScopedProjectionRows(input.connection, threadId);
     deleteJournalEvents(input.connection, aggregates);
@@ -399,12 +406,14 @@ function harnessSessionIds(connection: SqliteConnection, threadId: string): Read
  * Usage rows are host accounting: their token and cost aggregates stay, but a
  * purged thread's identity leaves them. The row keeps its aggregate meaning
  * while spending nothing that names the person's thread (OCT-366, decision 1:
- * de-link, never retain the id, never delete the aggregates).
+ * de-link, never retain the id, never delete the aggregates). The thread's
+ * child runs are erased with it, so their rows are de-linked the same way.
  */
 function delinkUsageRecords(
   connection: SqliteConnection,
   mode: OctantMode,
   threadId: string,
+  runIds: ReadonlyArray<string>,
 ): void {
   connection
     .prepare(
@@ -413,6 +422,12 @@ function delinkUsageRecords(
        WHERE subject_id = ? AND subject_type = ?`,
     )
     .run(threadId, THREAD_AGGREGATE_BY_MODE[mode]);
+  const delinkRun = connection.prepare(
+    `UPDATE usage_record_projection
+     SET subject_id = NULL
+     WHERE subject_id = ? AND subject_type = 'agent-run'`,
+  );
+  for (const runId of runIds) delinkRun.run(runId);
 }
 
 /**

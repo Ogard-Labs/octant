@@ -1204,6 +1204,9 @@ flowchart LR
   not erased: their token and cost aggregates stay for host accounting, the
   thread's identity leaves them (`subject_id` becomes NULL, modelled as a
   `deLinked` usage subject), and replay never re-links a purged thread.
+  The thread's child runs are erased with it, so their `agent-run` rows
+  are de-linked the same way; replay treats a run whose
+  `agent.run-requested@1` event is gone as purged.
   A de-linked row belongs to no Project, so it reads as unfiled usage and
   as an "Erased threads" line in the dashboard and the host export; no
   thread or Project spend ceiling counts it. Project memory is Project
@@ -1703,6 +1706,21 @@ those recorded when the turn started, including after a later handoff. These
 turns have no Octant planning estimate or variance: APIs omit those fields and
 the request-detail table labels them unavailable.
 
+**Child runs.** A managed child run records each turn it sends in the usage
+ledger under its own `agent-run` subject. The context planner is not on the
+child path, so the turn is journaled as a planless `context.usage-reconciled@1`
+(request shape `agent-run-turn`) on a per-run `agent-run-usage` aggregate; the
+`agent-run` aggregate's versions belong to its lifecycle commands. The row has
+no planning estimate or variance, its usage is accumulated and priced exactly
+as a Chat or Work turn's is, and a child turn that reached the provider and
+reported nothing is recorded as unreported. A child run belongs to its parent
+thread's Project: every Project-scoped usage read (the Usage dashboard, the
+Project overview, and Project spend ceilings) resolves it through the parent
+and mode on its `agent.run-requested@1` event and the parent thread's current
+Project, the same records that place the thread's own rows. The same event
+gives the run its parent's mode, so a mode filter or breakdown counts child
+usage with its parent thread's.
+
 **Turn speed and full usage, for every provider.** Every runner that watches a
 provider's events (Chat, Work, Code) feeds each normalized runtime event to one
 pure policy in `@octant/domain` (`turnMetricsPolicy`); no driver measures
@@ -1820,8 +1838,12 @@ spend has reached the budget, and the composer and Environment name the
 exhausted dimension and a recovery. Token spend is the existing `UsageRecord`
 ledger, never imported provider history. Token and money spend include child
 runs: a thread ceiling counts its own runs, and a Project ceiling counts every
-run whose routing receipt names the Project, whichever thread started it, at
-admission and in the Project overview. Turns and run time come from journaled
+run whose parent thread belongs to the Project now, whichever thread started
+it, at admission and in the Project overview. The Project a run's routing
+receipt named at delegation does not count, so a thread moved to another
+Project takes its children's spend with it. A child run is admitted against
+its parent thread's ceiling and that thread's Project ceiling; a Chat child's
+workspace names no Project, so its route's Project is used. Turns and run time come from journaled
 `spend.turn-recorded@1` facts, one per admitted turn or child run, charged its
 actual admitted-to-settled time; a turn still in flight counts its elapsed time,
 and a turn a host exit interrupted records nothing.
@@ -1839,11 +1861,11 @@ table (`packages/domain/src/localUsagePricing.ts`, the same table and rule the
 composer's cost line uses) is recorded as an `api-estimate`. On a subscription
 plan both are API-rate equivalents, not the bill: Claude Code reports
 `total_cost_usd` at API rates on a Claude plan too. The cost is fixed when the
-usage is journaled: Chat and Work carry it in the usage reconciliation, and
-Code carries it in the turn's `usage` operation frame (`cost`). Projections read
-the journaled cost and never price, so a rebuild reproduces the ledger exactly:
-a later price-table revision does not re-price history, and usage journaled
-before it carried a cost stays unpriced.
+usage is journaled: Chat, Work, and child runs carry it in the usage
+reconciliation, and Code carries it in the turn's `usage` operation frame
+(`cost`). Projections read the journaled cost and never price, so a rebuild
+reproduces the ledger exactly: a later price-table revision does not re-price
+history, and usage journaled before it carried a cost stays unpriced.
 
 A turn's usage is accumulated as the runtime contract defines it
 (`accumulateTurnUsage`): reports that name their request add up, a whole-turn
@@ -1862,7 +1884,8 @@ and usage recorded before the ledger carried cost — makes the money ceiling
 refuse `unknown-spend` rather than count that usage as free. That refusal
 offers clearing the ceiling, waiting out a Project's calendar window, Usage,
 or pausing; a raise cannot price the usage, so it is not offered. Turns from
-before this behaviour that left no ledger row at all are not counted.
+before this behaviour that left no ledger row at all, including every child
+run's, are not counted.
 
 Money is checked between turns, like turns and run time, not reserved like
 tokens. A provider reports cost only when a turn settles and no per-turn price

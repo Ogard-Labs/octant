@@ -21,6 +21,7 @@ import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
 import { USAGE_PROJECTION_SCHEMA_VERSION } from "./usagePersistenceSchema";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import type { UsageProjectScope } from "../usageProjectScope";
+import { recordAgentRunTurnUsage } from "../agentRun/agentRunUsageLedger";
 
 const unfiledScope: UsageProjectScope = { kind: "unfiled" };
 const directories: Array<string> = [];
@@ -169,7 +170,69 @@ function appendFullUsageCycle(
   });
 }
 
+/** The journaled request that names a child run's parent thread and mode. */
+function seedChildRunRequest(
+  connection: SqliteConnection,
+  runId: string,
+  parentThreadId: string,
+  mode: "chat" | "work" | "code",
+): void {
+  connection
+    .prepare(`
+      INSERT INTO event_journal (
+        event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+        event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+      ) VALUES (?, 'agent-run', ?, 1, 'agent.run-requested@1', 1, ?, 'system', ?, ?, ?)
+    `)
+    .run(
+      crypto.randomUUID(),
+      runId,
+      ids.correlation,
+      ids.actor,
+      now,
+      JSON.stringify({ run: { id: runId, parentThreadId, routingReceipt: { mode } } }),
+    );
+}
+
 describe("UsageProjection", () => {
+  it("records a child run's turns under the run, priced, with no planning estimate", () => {
+    const { connection, journal } = openDatabase();
+    const runId = "63000000-0000-4000-8000-000000000030";
+    seedChildRunRequest(connection, runId, ids.aggregate, "chat");
+    const ledger = { connection, journal, clock: () => now, uuid: () => crypto.randomUUID() };
+    const turn = {
+      runId: runId as never,
+      providerInstanceId: ids.provider as never,
+      modelId: "gpt-4o" as never,
+    };
+    recordAgentRunTurnUsage(ledger, {
+      ...turn,
+      usage: { inputTokens: 40, outputTokens: 10, costUsd: 0.02 },
+    });
+    // A later turn that reached the provider and reported nothing.
+    recordAgentRunTurnUsage(ledger, turn);
+
+    const records = readAllUsageRecords(connection);
+    expect(records).toEqual([
+      expect.objectContaining({
+        subject: { aggregateType: "agent-run", aggregateId: runId },
+        requestShape: "agent-run-turn",
+        quality: "exact",
+        inputTokens: 40,
+        outputTokens: 10,
+        cost: { kind: "provider-recorded", usdMicros: 20_000 },
+      }),
+      expect.objectContaining({
+        subject: { aggregateType: "agent-run", aggregateId: runId },
+        quality: "unavailable",
+        inputTokens: 0,
+        outputTokens: 0,
+      }),
+    ]);
+    expect(records[1]?.cost).toBeUndefined();
+    expect(records.map((record) => record.plannedInputTokens)).toEqual([undefined, undefined]);
+  });
+
   it("includes reported Code turn usage once after later reports and replay", () => {
     const { connection, journal } = openDatabase();
     const events = [
@@ -845,6 +908,36 @@ describe("usage project scope", () => {
 
     expect(unfiled.filter((subject) => filed.includes(subject))).toEqual([]);
     expect([...unfiled, ...filed].sort()).toEqual([scopeIds.workThread, ids.aggregate].sort());
+  });
+
+  it("places a child run's usage in its parent thread's Project and nowhere else", () => {
+    const { connection, journal } = openDatabase();
+    const childRun = "63000000-0000-4000-8000-000000000031";
+    const unfiledChild = "63000000-0000-4000-8000-000000000032";
+    seedWorkThread(journal, scopeIds.workThread, scopeIds.project);
+    seedChildRunRequest(connection, childRun, scopeIds.workThread, "work");
+    // A child of a thread the host cannot place in any Project.
+    seedChildRunRequest(connection, unfiledChild, ids.aggregate, "chat");
+    seedUsageRow(connection, {
+      reconciliationId: "63000000-0000-4000-8000-000000000033",
+      subjectType: "agent-run",
+      subjectId: childRun,
+      sequence: 10,
+    });
+    seedUsageRow(connection, {
+      reconciliationId: "63000000-0000-4000-8000-000000000034",
+      subjectType: "agent-run",
+      subjectId: unfiledChild,
+      sequence: 11,
+    });
+
+    expect(subjectIds(connection, { kind: "projects", projectIds: [scopeIds.project] })).toEqual([
+      childRun,
+    ]);
+    expect(
+      subjectIds(connection, { kind: "projects", projectIds: [scopeIds.otherProject] }),
+    ).toEqual([]);
+    expect(subjectIds(connection, unfiledScope)).toEqual([unfiledChild]);
   });
 
   it("places a de-linked row with the unfiled usage and in no Project's usage", () => {
